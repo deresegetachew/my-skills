@@ -1,0 +1,23 @@
+body {
+  font: 13px/1.4 system-ui, sans-serif;
+  width: 280px;
+  padding: 12px;
+  color: #1a1a1a;
+}
+h1 { font-size: 14px; margin: 0 0 8px; }
+h2 { font-size: 12px; margin: 12px 0 4px; color: #555; }
+label { display: block; margin-top: 8px; font-size: 11px; color: #555; }
+input, select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.status { font-size: 12px; padding: 6px 8px; border-radius: 4px; background: #f3f4f6; }
+.status.ok { background: #dcfce7; color: #14532d; }
+.status.error { background: #fee2e2; color: #7f1d1d; }
+#review-link { display: block; margin-top: 10px; font-size: 12px; }
+#recent { list-style: none; margin: 0; padding: 0; max-height: 120px; overflow-y: auto; }
+#recent li { font-size: 11px; padding: 3px 0; border-top: 1px solid #eee; }
+#recent li.fail { color: #b91c1c; }

@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Study Notes Capture",
+  "version": "0.1.0",
+  "description": "Capture selections or full pages from the web into a study-notes site running on localhost.",
+  "permissions": ["contextMenus", "storage", "scripting", "activeTab", "alarms"],
+  "host_permissions": ["http://localhost:*/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Study Notes Capture"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

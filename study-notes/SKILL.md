@@ -27,7 +27,19 @@ chat sidebar ("Rocket 🦝") that reads the current lesson as context.
    browser and stores the user's API key in `localStorage`. Skip copying
    `AiTutor.astro` (and its `<AiTutor />` usage in `LessonLayout.astro`) if the new
    site doesn't want a chat sidebar. See `AI-TUTOR.md` before touching it.
-4. `npm install && npm run dev`.
+4. Optional capture inbox (Chrome extension for saving web snippets into a
+   module's `captures/` folder while browsing):
+   - `assets/integrations/capture-inbox.mjs` → project root, as `capture-inbox.mjs`
+     (sibling to `astro.config.mjs`, not under `src/`).
+   - Add `import captureInbox from './capture-inbox.mjs';` and
+     `integrations: [captureInbox()]` to `astro.config.mjs`.
+   - Add `captures/` to `.gitignore`.
+   - `assets/chrome-extension/` is loaded unpacked via `chrome://extensions`
+     — not copied anywhere in particular, just point Chrome at it (or copy it
+     alongside the project if the user wants their own copy to customize).
+   - Skip all of this if the site doesn't want the capture workflow. See
+     `CAPTURE.md` before touching any of it.
+5. `npm install && npm run dev`.
 
 ## Add a lesson page
 
@@ -41,6 +53,7 @@ import LessonDiagram   from '@/components/LessonDiagram.astro';
 import LessonChecklist from '@/components/LessonChecklist.astro';
 import LessonQuiz      from '@/components/LessonQuiz.astro';
 import DeepDive        from '@/components/DeepDive.astro';
+import LessonMindMap   from '@/components/LessonMindMap.astro'; // optional
 
 // Large code strings go here, NOT inline in JSX (Astro brace-count bug on nested {}).
 const myCode = `...`.trim();
@@ -60,7 +73,7 @@ const myCode = `...`.trim();
   `LessonNav`, `ThemeHead`, `ThemeToggle`, or `AiTutor` manually; the layout renders
   them.
 - Full component prop reference (CodeBlock, LessonDiagram, LessonCallout,
-  LessonChecklist, LessonQuiz, DeepDive): see `REFERENCE.md`.
+  LessonChecklist, LessonQuiz, DeepDive, LessonMindMap): see `REFERENCE.md`.
 
 ## Style exhaustion rule — follow before writing any CSS
 
@@ -95,3 +108,24 @@ See `AI-TUTOR.md` for the Gemini chat sidebar: architecture, props, localStorage
 keys, the `ai-sensei:focus` custom event for wiring new "ask AI" shortcuts, and the
 modal-visibility bug to avoid (never `hidden` attribute on `#ai-key-modal` — use the
 `.is-open` class).
+
+## Capture inbox + Chrome extension (optional)
+
+See `CAPTURE.md` for the web-capture workflow: the dev-only Vite middleware
+that receives captures, the `captures/` file layout (`inbox.jsonl` +
+`pending.jsonl` + `archive.jsonl`), and the Chrome extension itself. The
+extension has no notion of lessons/chapters — it just drops selections/pages
+into `captures/pending.jsonl` for whichever module's dev server is running.
+
+**When working in a module that has a capture inbox** (its `astro.config.mjs`
+registers `captureInbox()`), check `captures/pending.jsonl` for that module —
+proactively when starting a nontrivial authoring session there, and always
+when explicitly asked ("check the inbox", "check captures"). If it has
+entries: summarize what's pending (source, snippet) and ask where each one
+belongs before writing anything — a module's content structure (which
+chapter, which file) isn't something to guess. For whatever the user says to
+keep, draft the corresponding content using the existing component set and
+this file's conventions (curly-brace escaping, style-exhaustion rule), then
+move consumed entries to `captures/archive.jsonl` (leave discarded ones out of
+both `pending.jsonl` and `archive.jsonl` — just drop them). `inbox.jsonl` is a
+permanent log and is never edited.

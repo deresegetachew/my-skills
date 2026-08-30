@@ -137,6 +137,37 @@ Props: `sources?` (string), `tensions?` (`{a,b}[]`), `questions?` (`{q, hint?, a
 
 ---
 
+### `LessonMindMap`
+Modal mind-map overlay rendered from a markdown outline, via `markmap-autoloader`
+(CDN, already wired into `LessonLayout.astro` — no per-lesson setup needed).
+Injects a "◈ mind map" trigger button into the breadcrumb on mount.
+
+```astro
+const mindMap = `
+# Tool Design & Structured Output
+## Why It Matters
+### LLM sees only name, description, schema
+### Description = LLM contract
+## Input Schema
+### Per-property descriptions
+### enum over open string
+`.trim();
+```
+```astro
+<LessonMindMap content={mindMap} />
+```
+
+Props: `content` (string — markdown hierarchy; **first line must be `# Title`**,
+then `##`/`###` for nested levels). Define as a frontmatter `const`, same as
+`CodeBlock`'s code strings — keeps the template body free of a large inline
+literal.
+
+Place the `<LessonMindMap />` call anywhere in the template (commonly right
+before `</LessonLayout>`) — it renders as a fixed overlay, not inline content.
+One per lesson page.
+
+---
+
 ## Page structure conventions
 
 - One `<h2 class="lesson-heading">` per major section.
