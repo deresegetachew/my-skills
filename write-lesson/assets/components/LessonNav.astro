@@ -1,0 +1,21 @@
+---
+interface Props {
+  prevHref?: string;
+  prevTitle?: string;
+  nextHref?: string;
+  nextTitle?: string;
+  top?: boolean;
+}
+const { prevHref, prevTitle, nextHref, nextTitle, top = false } = Astro.props;
+---
+<nav class:list={['lesson-nav', { 'lesson-nav--top': top }]}>
+  {prevHref
+    ? <a href={prevHref}>&#8592; {prevTitle}</a>
+    : <span />
+  }
+  {!top && <p class="lesson-footer-note">Questions? Ask your teacher agent.</p>}
+  {nextHref
+    ? <a href={nextHref}>{nextTitle} &#8594;</a>
+    : <span />
+  }
+</nav>

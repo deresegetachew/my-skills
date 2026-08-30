@@ -1,0 +1,202 @@
+---
+interface Props {
+  content: string;  // markdown hierarchy — first line must be "# Title"
+}
+const { content } = Astro.props;
+---
+
+<!--
+  The modal is position:fixed with real vh/vw dimensions even at opacity:0.
+  The markmap autoloader can therefore render into .mm-container at correct
+  size on page load. Opening the modal just reveals the pre-rendered SVG and
+  calls fit() once more to correct for any timing edge-cases.
+-->
+<div class="mm-overlay" role="dialog" aria-modal="true" aria-label="Mind Map">
+  <div class="mm-panel">
+    <div class="mm-panel-header">
+      <span class="mm-panel-title">◈ Mind Map</span>
+      <button class="mm-close" aria-label="Close mind map">✕</button>
+    </div>
+    <div class="mm-container">
+      <!--
+        markmap-autoloader finds .markmap divs and renders SVG inside them.
+        JSON options block must come before the template block.
+      -->
+      <div class="markmap" style="width:100%;height:100%">
+        <script type="application/json">{"colorFreezeLevel":2,"initialExpandLevel":-1}</script>
+        <script type="text/template" set:text={content} />
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openModal(): void {
+    const overlay = document.querySelector<HTMLElement>('.mm-overlay');
+    if (!overlay) return;
+    overlay.classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+
+    // Re-fit after the scale animation gives the SVG its final dimensions
+    const el = document.querySelector<HTMLElement>('.mm-container .markmap');
+    const mm = (el as any)?.__markmap;
+    if (mm) {
+      setTimeout(() => mm.fit(), 220);   // matches transition duration
+    }
+  }
+
+  function closeModal(): void {
+    const overlay = document.querySelector<HTMLElement>('.mm-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('is-open');
+    document.body.style.overflow = '';
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // --- Inject trigger button into header breadcrumb ---
+    const breadcrumb = document.querySelector('.lesson-breadcrumb');
+    if (breadcrumb) {
+      const btn = document.createElement('a');
+      btn.className = 'breadcrumb-map-btn';
+      btn.textContent = '◈ mind map';
+      btn.href = '#';
+      btn.addEventListener('click', (e) => { e.preventDefault(); openModal(); });
+
+      const dive = breadcrumb.querySelector('.breadcrumb-dive');
+      if (dive)  dive.after(btn);
+      else       breadcrumb.appendChild(btn);
+    }
+
+    // --- Close events ---
+    document.querySelector('.mm-close')
+      ?.addEventListener('click', closeModal);
+
+    document.querySelector('.mm-overlay')
+      ?.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).classList.contains('mm-overlay')) closeModal();
+      });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeModal();
+    });
+  });
+</script>
+
+<style>
+  /* ── Overlay backdrop ──────────────────────────────────────────── */
+  .mm-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9990;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease;
+    backdrop-filter: blur(3px);
+  }
+
+  .mm-overlay.is-open {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  /* ── Panel ─────────────────────────────────────────────────────── */
+  .mm-panel {
+    width: 94vw;
+    height: 92vh;
+    background: #ffffff;
+    border-radius: 14px;
+    box-shadow: 0 28px 70px rgba(0, 0, 0, 0.35);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: scale(0.97);
+    transition: transform 0.2s ease;
+  }
+
+  .mm-overlay.is-open .mm-panel {
+    transform: scale(1);
+  }
+
+  /* ── Header bar ────────────────────────────────────────────────── */
+  .mm-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    flex-shrink: 0;
+  }
+
+  .mm-panel-title {
+    font-family: monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+  }
+
+  .mm-close {
+    background: none;
+    border: 1px solid transparent;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+
+  .mm-close:hover {
+    background: var(--bg3);
+    color: var(--ink);
+    border-color: var(--border);
+  }
+
+  /* ── Markmap render target ─────────────────────────────────────── */
+  .mm-container {
+    flex: 1;
+    min-height: 0;          /* stops flex child from overflowing */
+    position: relative;
+    background: #ffffff;
+  }
+
+  /* markmap creates its own SVG — make it fill the container */
+  :global(.mm-container .markmap svg) {
+    width: 100% !important;
+    height: 100% !important;
+    display: block;
+  }
+
+  /* ── Dark mode ─────────────────────────────────────────────────── */
+  :root.dark .mm-panel        { background: #13131f; }
+  :root.dark .mm-panel-header { background: #1a1a2e; border-color: #2e2e4e; }
+  :root.dark .mm-container    { background: #13131f; }
+
+  /* markmap node text lives inside <foreignObject><span> outside Astro scope */
+  :global(:root.dark .mm-container foreignObject span) { color: #dde1f5 !important; }
+  :global(:root.dark .mm-container svg line)           { stroke: #3a3a6a; }
+</style>
+
+<style is:global>
+  /* Button injected by JS into breadcrumb — must be global */
+  .breadcrumb-map-btn {
+    font-family: monospace;
+    font-size: .7rem;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--accent);
+    text-decoration: none;
+    cursor: pointer;
+    margin-left: .75rem;
+  }
+
+  .breadcrumb-map-btn::before { content: '' !important; }
+  .breadcrumb-map-btn:hover   { text-decoration: underline; }
+</style>

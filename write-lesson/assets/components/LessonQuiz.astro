@@ -1,0 +1,75 @@
+---
+interface Question {
+  q: string;
+  options: [string, string, string, string];
+  answer: 0 | 1 | 2 | 3;
+  explain: string;
+}
+interface Props {
+  questions: Question[];
+}
+const { questions } = Astro.props;
+---
+<div class="lesson-quiz">
+  {questions.map((q, qi) => {
+    const ctx = `Quiz Q${qi + 1}: ${q.q}\n\nOptions:\n${ q.options.map((o, i) => `${'ABCD'[i]}. ${o}`).join('\n') }\n\nLet's discuss this question and the options.`;
+    return (
+      <div class="quiz-question" data-qi={qi} data-answer={q.answer}>
+        <div class="quiz-q-row">
+          <p class="quiz-q">
+            <span class="quiz-num">{qi + 1}</span>
+            {q.q}
+          </p>
+          <button class="quiz-ai-btn" type="button" title="Discuss with Rocket" aria-label="Discuss with Rocket" data-ai-context={ctx}>🦝</button>
+        </div>
+        <div class="quiz-opts">
+          {q.options.map((opt, oi) => (
+            <div
+              class="quiz-opt"
+              data-qi={qi}
+              data-correct={oi === q.answer}
+              tabindex="0"
+              role="option"
+            >
+              <span class="quiz-opt-letter">{'ABCD'[oi]}</span>
+              <span>{opt}</span>
+            </div>
+          ))}
+        </div>
+        <div class="quiz-explain hidden">{q.explain}</div>
+      </div>
+    );
+  })}
+</div>
+
+<script is:inline>
+(function () {
+  document.querySelectorAll('.quiz-ai-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.dispatchEvent(new CustomEvent('ai-sensei:focus', {
+        detail: { text: btn.getAttribute('data-ai-context') }
+      }));
+    });
+  });
+})();
+</script>
+
+<script>
+  document.querySelectorAll<HTMLElement>('.quiz-opt').forEach(opt => {
+    const attempt = () => {
+      const qi = opt.dataset.qi!;
+      const wrap = document.querySelector<HTMLElement>(`.quiz-question[data-qi="${qi}"]`);
+      if (!wrap || wrap.classList.contains('answered')) return;
+      wrap.classList.add('answered');
+      wrap.querySelectorAll<HTMLElement>('.quiz-opt').forEach(o => {
+        if (o.dataset.correct === 'true') o.classList.add('correct');
+      });
+      if (opt.dataset.correct !== 'true') opt.classList.add('wrong');
+      wrap.querySelector('.quiz-explain')?.classList.remove('hidden');
+    };
+    opt.addEventListener('click', attempt);
+    opt.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); attempt(); }
+    });
+  });
+</script>

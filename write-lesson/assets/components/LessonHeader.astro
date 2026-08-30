@@ -1,0 +1,18 @@
+---
+interface Props {
+  num: string;
+  title: string;
+  subtitle?: string;
+}
+const { num, title, subtitle } = Astro.props;
+---
+<header class="lesson-header">
+  <div class="lesson-breadcrumb">
+    <a href="/">Study Path</a>
+    <a href="/lessons">Lessons</a>
+    <a href="#deep-dive" class="breadcrumb-dive">↓ deep dive</a>
+  </div>
+  <div class="lesson-num">{num}</div>
+  <h1>{title}</h1>
+  {subtitle && <p class="lesson-subtitle">{subtitle}</p>}
+</header>

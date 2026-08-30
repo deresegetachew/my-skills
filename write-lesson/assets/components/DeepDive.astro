@@ -1,0 +1,109 @@
+---
+interface Tension  { a: string; b: string; }
+interface Question { q: string; hint?: string; answer: string; }
+
+interface Props {
+  sources?: string;
+  tensions?:  Tension[];
+  questions?: Question[];
+  pitfalls?:  string[];
+}
+const {
+  sources   = '',
+  tensions  = [],
+  questions = [],
+  pitfalls  = [],
+} = Astro.props;
+
+const stripTags = (s: string) =>
+  s.replace(/<[^>]*>/g, '').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&#123;/g,'{').replace(/&#125;/g,'}').trim();
+
+const parts: string[] = [];
+if (tensions.length)
+  parts.push('Engineering Tensions:\n' + tensions.map((t: Tension) => `• ${t.a} vs. ${t.b}`).join('\n'));
+if (questions.length)
+  parts.push('Staff-Level Questions:\n' + questions.map((q: Question, i: number) =>
+    `${i + 1}. ${q.q}${q.hint ? `\n   Hint: ${q.hint}` : ''}`).join('\n'));
+if (pitfalls.length)
+  parts.push('Production Pitfalls:\n' + pitfalls.map((p: string) => `• ${stripTags(p)}`).join('\n'));
+
+const aiContext = `Senior & Staff Deep Dive — let's discuss.\n\n${parts.join('\n\n')}\n\nWhat should we focus on?`;
+---
+<!-- Native <details> handles open/close — no JS needed for the accordion -->
+<details id="deep-dive" class="deep-dive">
+  <summary>
+    <span class="dd-icon">▶</span>
+    <span class="dd-title">Senior &amp; Staff Deep Dive</span>
+    <span class="dd-subtitle">Tensions · Hard questions · Pitfalls</span>
+    {sources && <span class="dd-sources">{sources}</span>}
+    <button
+      class="dd-ai-btn"
+      type="button"
+      title="Discuss with Rocket"
+      aria-label="Discuss with Rocket"
+      data-ai-context={aiContext}
+    >🦝</button>
+  </summary>
+
+  <div class="dd-body">
+
+    {tensions.length > 0 && (
+      <>
+        <h3 class="dd-section-label">Engineering Tensions</h3>
+        <div class="dd-tensions">
+          {tensions.map(t => (
+            <div class="dd-tension">
+              <span class="dd-a">{t.a}</span>
+              <span class="dd-vs">vs.</span>
+              <span class="dd-b">{t.b}</span>
+            </div>
+          ))}
+        </div>
+      </>
+    )}
+
+    {questions.length > 0 && (
+      <>
+        <h3 class="dd-section-label">Staff-Level Questions</h3>
+        <div class="dd-questions">
+          {questions.map((q, i) => (
+            <div class="dd-q-block">
+              <p class="dd-q-text"><strong>{i + 1}.</strong> {q.q}</p>
+              {q.hint && <p class="dd-hint"><em>Steer:</em> {q.hint}</p>}
+              <!-- Native <details> for reveal — no JS -->
+              <details class="dd-answer">
+                <summary>Show answer</summary>
+                <div class="dd-answer-body" set:html={q.answer} />
+              </details>
+            </div>
+          ))}
+        </div>
+      </>
+    )}
+
+    {pitfalls.length > 0 && (
+      <>
+        <h3 class="dd-section-label">Production Pitfalls</h3>
+        <ul class="dd-pitfalls">
+          {pitfalls.map(p => <li set:html={p} />)}
+        </ul>
+      </>
+    )}
+
+  </div>
+</details>
+
+<script is:inline>
+(function () {
+  document.querySelectorAll('.dd-ai-btn').forEach(function (btn) {
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var details = btn.closest('details');
+      if (details) details.open = true;
+      document.dispatchEvent(new CustomEvent('ai-sensei:focus', {
+        detail: { text: btn.getAttribute('data-ai-context') }
+      }));
+    });
+  });
+})();
+</script>

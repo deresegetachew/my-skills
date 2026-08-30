@@ -1,0 +1,12 @@
+---
+interface Props {
+  variant: 'tip' | 'warn' | 'info' | 'key';
+  title?: string;
+}
+const { variant, title } = Astro.props;
+const icons = { tip: '💡', warn: '⚠️', info: 'ℹ️', key: '🔑' } as const;
+---
+<div class={`callout callout-${variant}`}>
+  {icons[variant]} {title && <strong>{title}</strong>}
+  <slot />
+</div>

@@ -1,0 +1,26 @@
+---
+interface Props {
+  /**
+   * Mermaid diagram definition. Use standard classDefs for colours:
+   *   :::step      — blue  (action/process nodes)
+   *   :::decision  — purple (branch/routing nodes)
+   *   :::done      — green  (success/terminal nodes)
+   *   :::warn      — red    (error/warning nodes)
+   *
+   * Add these at the bottom of your definition:
+   *   classDef step     fill:#dbeafe,color:#1e3a8a,stroke:#2563eb,stroke-width:2px
+   *   classDef decision fill:#ede9fe,color:#4c1d95,stroke:#7c3aed,stroke-width:2px
+   *   classDef done     fill:#dcfce7,color:#14532d,stroke:#16a34a,stroke-width:2px
+   *   classDef warn     fill:#fee2e2,color:#7f1d1d,stroke:#dc2626,stroke-width:2px
+   */
+  definition: string;
+}
+const { definition } = Astro.props;
+---
+<figure class="lesson-diagram">
+  <!--
+    set:text prevents HTML escaping issues with mermaid syntax characters.
+    Mermaid reads textContent, so entities like &lt; would break parsing.
+  -->
+  <pre class="mermaid" set:text={definition.trim()} />
+</figure>

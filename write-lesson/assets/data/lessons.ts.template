@@ -1,0 +1,11 @@
+export interface LessonEntry {
+  href:  string;
+  num:   string;
+  title: string;
+}
+
+// Ordered list drives LessonLayout's auto prev/next nav — keep in sequence.
+export const LESSONS: LessonEntry[] = [
+  { href: '/lessons/0001-first-lesson-slug', num: 'L01', title: 'First Lesson Title' },
+  // { href: '/lessons/0002-next-lesson-slug', num: 'L02', title: 'Next Lesson Title' },
+];

@@ -1,0 +1,34 @@
+---
+interface Props {
+  title?: string;
+  /** Each item can contain inline HTML e.g. '<code>get_user</code>' */
+  items: string[];
+}
+const { title, items } = Astro.props;
+---
+<div class="lesson-checklist">
+  {title && <p class="checklist-title">{title}</p>}
+  <ol class="checklist">
+    {items.map(item => (
+      <li class="checklist-item">
+        <span class="check-box" role="checkbox" aria-checked="false" tabindex="0">☐</span>
+        <span set:html={item} />
+      </li>
+    ))}
+  </ol>
+</div>
+
+<script>
+  document.querySelectorAll<HTMLElement>('.checklist-item').forEach(item => {
+    const box = item.querySelector<HTMLElement>('.check-box')!;
+    const toggle = () => {
+      const on = item.classList.toggle('checked');
+      box.textContent = on ? '☑' : '☐';
+      box.setAttribute('aria-checked', String(on));
+    };
+    box.addEventListener('click', toggle);
+    item.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+    });
+  });
+</script>

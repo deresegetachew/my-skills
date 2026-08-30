@@ -1,0 +1,11 @@
+---
+// Drop inside <head> on every page that doesn't use LessonLayout
+---
+<meta name="color-scheme" content="light dark" />
+<script is:inline>
+  (function(){
+    var saved = localStorage.getItem('ai-theme');
+    var osDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (saved === 'dark' || (!saved && osDark)) document.documentElement.classList.add('dark');
+  })();
+</script>

@@ -1,0 +1,425 @@
+---
+interface Props {
+  storageKey?:  string;
+  model?:       string;
+  maxTokens?:   number;
+  historyLimit?: number;
+  timeoutMs?:   number;
+  systemPrompt?: string;
+}
+
+const {
+  storageKey   = 'ai-tutor-key',
+  model        = 'gemini-2.0-flash',
+  maxTokens    = 1024,
+  historyLimit = 20,
+  timeoutMs    = 30000,
+  systemPrompt = 'You are a concise AI tutor helping a developer study AI agents. ' +
+    'The student is working through a self-paced course on building AI agents ' +
+    'with Node.js, NestJS, and the Anthropic Claude API.\n\n' +
+    'Topics include: what AI agents are, tool design and structured output, ' +
+    'memory and conversation state, multi-agent systems, and capstone projects.\n\n' +
+    'Be helpful, direct, and educational. Relate explanations to lesson material ' +
+    'when relevant. Give concrete examples. Keep responses focused.',
+} = Astro.props;
+---
+
+<button id="ai-toggle" aria-label="Open Rocket" aria-expanded="false">🦝</button>
+
+<div id="ai-sel-popover" hidden>
+  <button id="ai-ask-sel" type="button">Ask AI about this ↗</button>
+</div>
+
+<aside id="ai-panel" aria-label="Rocket">
+  <div class="ai-header">
+    <span class="ai-title">🦝 Rocket</span>
+    <div class="ai-header-actions">
+      <button id="ai-clear" type="button" title="Clear conversation">↺</button>
+      <button id="ai-key-btn" type="button" title="Settings">⚙</button>
+      <button id="ai-close" type="button" aria-label="Close">✕</button>
+    </div>
+  </div>
+  <div id="ai-messages" role="log" aria-live="polite" aria-label="Conversation"></div>
+  <form id="ai-form" class="ai-input-area">
+    <textarea
+      id="ai-input"
+      placeholder="Ask Rocket about this lesson… (Shift+Enter for newline)"
+      rows="3"
+      aria-label="Message"
+    ></textarea>
+    <button type="submit" id="ai-send">Send ↵</button>
+  </form>
+</aside>
+
+<div id="ai-key-overlay"></div>
+<div id="ai-key-modal" role="dialog" aria-modal="true" aria-labelledby="ai-key-heading">
+  <div class="ai-modal-inner">
+    <div class="ai-modal-header">
+      <h2 id="ai-key-heading" class="ai-modal-title">🦝 Rocket Setup</h2>
+      <button type="button" id="ai-key-close" class="ai-modal-close" aria-label="Close">✕</button>
+    </div>
+    <p class="ai-modal-desc">Enter your Google AI API key. Stored only in this browser, sent only to Google's API.</p>
+    <label class="ai-modal-label" for="ai-key-field">Google AI API Key</label>
+    <input id="ai-key-field" type="password" placeholder="AIza…" autocomplete="off" class="ai-modal-input" />
+    <p class="ai-modal-hint">Get a key at <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">aistudio.google.com</a></p>
+
+    <details class="ai-settings">
+      <summary class="ai-settings-toggle">Settings</summary>
+      <div class="ai-settings-body">
+        <label class="ai-modal-label" for="ai-cfg-model">Model</label>
+        <input id="ai-cfg-model" type="text" class="ai-modal-input" placeholder="gemini-2.0-flash" />
+
+        <div class="ai-settings-row">
+          <div>
+            <label class="ai-modal-label" for="ai-cfg-tokens">Max tokens</label>
+            <input id="ai-cfg-tokens" type="number" min="256" max="8192" class="ai-modal-input" />
+          </div>
+          <div>
+            <label class="ai-modal-label" for="ai-cfg-history">History limit</label>
+            <input id="ai-cfg-history" type="number" min="2" max="100" class="ai-modal-input" />
+          </div>
+          <div>
+            <label class="ai-modal-label" for="ai-cfg-timeout">Timeout (ms)</label>
+            <input id="ai-cfg-timeout" type="number" min="5000" max="120000" step="1000" class="ai-modal-input" />
+          </div>
+        </div>
+
+        <label class="ai-modal-label" for="ai-cfg-prompt">System prompt</label>
+        <textarea id="ai-cfg-prompt" rows="5" class="ai-modal-input ai-cfg-textarea"></textarea>
+      </div>
+    </details>
+
+    <div class="ai-modal-btns">
+      <button type="button" id="ai-key-save" class="ai-btn-primary">Save</button>
+      <button type="button" id="ai-key-cancel" class="ai-btn-ghost">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="ai-sensei-config" set:html={JSON.stringify({
+  storageKey, model, maxTokens, historyLimit, timeoutMs, systemPrompt
+})}></script>
+
+<script is:inline>
+(function () {
+  var _defaults    = JSON.parse(document.getElementById('ai-sensei-config').textContent);
+  var STORAGE_KEY  = _defaults.storageKey;
+  var CONFIG_KEY   = STORAGE_KEY + '-config';
+
+  // runtime vars — overwritten by loadConfig()
+  var MODEL, MAX_TOKENS, HISTORY_LIMIT, TIMEOUT_MS, SYSTEM_PROMPT;
+
+  function loadConfig() {
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}'); } catch (_) {}
+    MODEL         = saved.model        || _defaults.model;
+    MAX_TOKENS    = saved.maxTokens    || _defaults.maxTokens;
+    HISTORY_LIMIT = saved.historyLimit || _defaults.historyLimit;
+    TIMEOUT_MS    = saved.timeoutMs    || _defaults.timeoutMs;
+    SYSTEM_PROMPT = saved.systemPrompt || _defaults.systemPrompt;
+    lessonSystem  = null; // rebuild next send
+  }
+
+  var history      = [];
+  var streaming    = false;
+  var pendingSel   = '';
+  var keyCallback  = null;
+  var lessonSystem = null;
+  var abortCtrl    = null;
+
+  loadConfig();
+
+  function buildLessonSystem() {
+    if (lessonSystem) return;
+    var article = document.querySelector('.lesson-article');
+    var text = article ? article.innerText.trim() : '';
+    if (text.length > 8000) text = text.slice(0, 8000) + '\n[… truncated]';
+    lessonSystem = SYSTEM_PROMPT +
+      '\n\n<lesson_content title="' + document.title + '">\n' +
+      text +
+      '\n</lesson_content>';
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  var toggle    = $('ai-toggle');
+  var panel     = $('ai-panel');
+  var closeBtn  = $('ai-close');
+  var clearBtn  = $('ai-clear');
+  var keyBtn    = $('ai-key-btn');
+  var messages  = $('ai-messages');
+  var form      = $('ai-form');
+  var input     = $('ai-input');
+  var sendBtn   = $('ai-send');
+  var selPop    = $('ai-sel-popover');
+  var askSelBtn = $('ai-ask-sel');
+  var overlay   = $('ai-key-overlay');
+  var modal     = $('ai-key-modal');
+  var keyField  = $('ai-key-field');
+  var keySave   = $('ai-key-save');
+  var keyCancel = $('ai-key-cancel');
+
+  // ── Panel ──────────────────────────────────────────────────────────
+
+  function openPanel() {
+    panel.classList.add('is-open');
+    document.body.classList.add('ai-panel-open');
+    toggle.setAttribute('aria-expanded', 'true');
+    toggle.classList.add('is-hidden');
+    input.focus();
+  }
+
+  function closePanel() {
+    panel.classList.remove('is-open');
+    document.body.classList.remove('ai-panel-open');
+    toggle.setAttribute('aria-expanded', 'false');
+    toggle.classList.remove('is-hidden');
+    hidePop();
+  }
+
+  function isOpen() { return panel.classList.contains('is-open'); }
+
+  toggle.addEventListener('click', function () { isOpen() ? closePanel() : openPanel(); });
+  closeBtn.addEventListener('click', closePanel);
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && isOpen()) closePanel();
+  });
+
+  // ── Clear ──────────────────────────────────────────────────────────
+
+  clearBtn.addEventListener('click', function () { history = []; messages.innerHTML = ''; });
+
+  // ── Selection popover ──────────────────────────────────────────────
+
+  function hidePop() { selPop.hidden = true; pendingSel = ''; }
+
+  document.addEventListener('mouseup', function () {
+    var sel = window.getSelection();
+    var txt = sel ? sel.toString().trim() : '';
+    if (txt.length < 8 || panel.contains(sel.anchorNode) || modal.contains(sel.anchorNode)) {
+      hidePop();
+      return;
+    }
+    pendingSel = txt;
+    var rect = sel.getRangeAt(0).getBoundingClientRect();
+    var top  = rect.top - 44;   // fixed coords: above selection
+    var left = Math.min(Math.max(rect.left + rect.width / 2 - 90, 8), window.innerWidth - 196);
+    selPop.style.cssText = 'top:' + top + 'px;left:' + left + 'px';
+    selPop.hidden = false;
+  });
+
+  document.addEventListener('mousedown', function (e) {
+    if (!selPop.contains(e.target)) hidePop();
+  });
+
+  askSelBtn.addEventListener('click', function () {
+    var sel = pendingSel;
+    hidePop();
+    if (!sel) return;
+    input.value = '> "' + sel + '"\n\n';
+    input.setSelectionRange(input.value.length, input.value.length);
+    if (!isOpen()) openPanel();
+    input.focus();
+  });
+
+  // ── API key modal ──────────────────────────────────────────────────
+
+  function getKey() { return localStorage.getItem(STORAGE_KEY) || ''; }
+  function saveKey(k) { localStorage.setItem(STORAGE_KEY, k); }
+
+  function openKeyModal(cb) {
+    keyCallback = cb || null;
+    keyField.value = getKey();
+    $('ai-cfg-model').value   = MODEL;
+    $('ai-cfg-tokens').value  = MAX_TOKENS;
+    $('ai-cfg-history').value = HISTORY_LIMIT;
+    $('ai-cfg-timeout').value = TIMEOUT_MS;
+    $('ai-cfg-prompt').value  = SYSTEM_PROMPT;
+    overlay.classList.add('is-open');
+    modal.classList.add('is-open');
+    keyField.focus();
+  }
+
+  function closeKeyModal() {
+    overlay.classList.remove('is-open');
+    modal.classList.remove('is-open');
+    keyCallback = null;
+  }
+
+  function confirmKey() {
+    var k = keyField.value.trim();
+    if (!k) { keyField.focus(); return; }
+    saveKey(k);
+    // persist settings
+    var cfg = {
+      model:        $('ai-cfg-model').value.trim()   || _defaults.model,
+      maxTokens:    parseInt($('ai-cfg-tokens').value)  || _defaults.maxTokens,
+      historyLimit: parseInt($('ai-cfg-history').value) || _defaults.historyLimit,
+      timeoutMs:    parseInt($('ai-cfg-timeout').value) || _defaults.timeoutMs,
+      systemPrompt: $('ai-cfg-prompt').value.trim()  || _defaults.systemPrompt,
+    };
+    localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    loadConfig(); // apply immediately
+    closeKeyModal();
+    if (keyCallback) keyCallback();
+  }
+
+  keyBtn.addEventListener('click', function () { openKeyModal(null); });
+  keySave.addEventListener('click', confirmKey);
+  keyCancel.addEventListener('click', closeKeyModal);
+  $('ai-key-close').addEventListener('click', closeKeyModal);
+  // modal wrapper is above overlay in z-order, so handle backdrop click here
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeKeyModal(); });
+  keyField.addEventListener('keydown', function (e) { if (e.key === 'Enter') confirmKey(); });
+
+  // ── Messages ───────────────────────────────────────────────────────
+
+  function scrollDown() { messages.scrollTop = messages.scrollHeight; }
+
+  function addMsg(role, text) {
+    var el = document.createElement('div');
+    el.className = 'ai-msg ai-msg--' + role;
+    el.textContent = text;
+    messages.appendChild(el);
+    scrollDown();
+    return el;
+  }
+
+  // ── Send ───────────────────────────────────────────────────────────
+
+  function setLoading(on) {
+    streaming = on;
+    input.disabled = on;
+    sendBtn.disabled = on;
+  }
+
+  function send(userText) {
+    userText = userText.trim();
+    if (!userText || streaming) return;
+
+    var key = getKey();
+    if (!key) {
+      openKeyModal(function () { send(userText); });
+      return;
+    }
+
+    buildLessonSystem();
+    setLoading(true);
+    input.value = '';
+    addMsg('user', userText);
+    history.push({ role: 'user', content: userText });
+
+    var assistantEl = addMsg('assistant', '');
+    assistantEl.classList.add('ai-streaming');
+
+    var assistantText = '';
+
+    var endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+      MODEL + ':streamGenerateContent?alt=sse';
+
+    abortCtrl = new AbortController();
+    var timeoutId = setTimeout(function () { abortCtrl.abort(); }, TIMEOUT_MS);
+
+    var contents = history.map(function (m) {
+      return { role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] };
+    });
+
+    fetch(endpoint, {
+      method: 'POST',
+      signal: abortCtrl.signal,
+      headers: {
+        'x-goog-api-key': key,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: lessonSystem }] },
+        contents: contents,
+        generationConfig: { maxOutputTokens: MAX_TOKENS },
+      }),
+    })
+    .then(function (res) {
+      if (!res.ok) {
+        return res.json().catch(function () { return {}; }).then(function (j) {
+          var msg = (j && j.error && j.error.message) ? j.error.message : ('API error ' + res.status);
+          if (res.status === 400 || res.status === 403) {
+            localStorage.removeItem(STORAGE_KEY);
+            msg = 'Invalid API key — click "key" to update it.';
+          }
+          throw new Error(msg);
+        });
+      }
+
+      var reader  = res.body.getReader();
+      var decoder = new TextDecoder();
+      var buf     = '';
+
+      function pump() {
+        return reader.read().then(function (chunk) {
+          if (chunk.done) return;
+          buf += decoder.decode(chunk.value, { stream: true });
+          var lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (var i = 0; i < lines.length; i++) {
+            var line = lines[i];
+            if (!line.startsWith('data: ')) continue;
+            var raw = line.slice(6).trim();
+            try {
+              var evt = JSON.parse(raw);
+              var text = evt.candidates &&
+                         evt.candidates[0] &&
+                         evt.candidates[0].content &&
+                         evt.candidates[0].content.parts &&
+                         evt.candidates[0].content.parts[0] &&
+                         evt.candidates[0].content.parts[0].text;
+              if (text) {
+                assistantText += text;
+                assistantEl.textContent = assistantText;
+                scrollDown();
+              }
+            } catch (_) {}
+          }
+          return pump();
+        });
+      }
+
+      return pump();
+    })
+    .then(function () {
+      assistantEl.classList.remove('ai-streaming');
+      assistantEl.innerHTML = window.marked ? window.marked.parse(assistantText) : assistantEl.textContent;
+      history.push({ role: 'assistant', content: assistantText });
+      if (history.length > HISTORY_LIMIT) history = history.slice(history.length - HISTORY_LIMIT);
+    })
+    .catch(function (err) {
+      assistantEl.classList.remove('ai-streaming');
+      var msg = (err && err.name === 'AbortError')
+        ? 'Timed out — try again.'
+        : ('⚠ ' + ((err && err.message) || 'Something went wrong.'));
+      assistantEl.textContent = msg;
+      assistantEl.classList.add('ai-msg--error');
+    })
+    .finally(function () {
+      clearTimeout(timeoutId);
+      abortCtrl = null;
+      setLoading(false);
+      input.focus();
+    });
+  }
+
+  form.addEventListener('submit', function (e) { e.preventDefault(); send(input.value); });
+  input.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input.value); }
+  });
+
+  // deep dive shortcut
+  document.addEventListener('ai-sensei:focus', function (e) {
+    var text = e.detail && e.detail.text;
+    if (!text) return;
+    if (!isOpen()) openPanel();
+    input.value = text;
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.focus();
+  });
+
+})();
+</script>

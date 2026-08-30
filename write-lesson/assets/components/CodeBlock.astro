@@ -1,0 +1,40 @@
+---
+import { codeToHtml } from 'shiki';
+
+interface Props {
+  lang?: string;
+  label?: string;
+  code: string;
+}
+const { lang = 'text', label = lang, code } = Astro.props;
+
+const highlighted = await codeToHtml(code.trim(), {
+  lang,
+  theme: 'one-dark-pro',
+});
+---
+<div class="code-block">
+  <div class="code-label">
+    <div class="dots">
+      <div class="dot dot-r"></div>
+      <div class="dot dot-y"></div>
+      <div class="dot dot-g"></div>
+    </div>
+    <span>{label}</span>
+    <button class="copy-btn" type="button">copy</button>
+  </div>
+  <div class="code-body" set:html={highlighted} />
+</div>
+
+<script>
+  document.querySelectorAll<HTMLButtonElement>('.copy-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pre = btn.closest('.code-block')?.querySelector('pre');
+      if (!pre) return;
+      navigator.clipboard.writeText(pre.textContent ?? '').then(() => {
+        btn.textContent = 'copied!';
+        setTimeout(() => { btn.textContent = 'copy'; }, 1500);
+      });
+    });
+  });
+</script>
