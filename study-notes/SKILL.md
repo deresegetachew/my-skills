@@ -1,9 +1,9 @@
 ---
-name: write-lesson
+name: study-notes
 description: Bootstrap a new Astro-based study-notes/lesson site (component library, dark-mode theme, optional Gemini AI-tutor chat sidebar) and author individual lesson pages in it. Use when the user wants to start a note-taking/lesson app "like my other one", create a new study site, or add a lesson/note page to an existing one built with this system.
 ---
 
-# write-lesson
+# study-notes
 
 Bootstraps and extends a static Astro site for long-form study notes: one Astro
 component per content shape (heading, code block, callout, quiz, diagram,

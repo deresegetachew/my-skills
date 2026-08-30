@@ -11,6 +11,6 @@ ln -s /path/to/my-skills/<skill-name> ~/.claude/skills/<skill-name>
 
 ## Skills
 
-- **write-lesson** — bootstrap and author pages for an Astro-based study-notes/
+- **study-notes** — bootstrap and author pages for an Astro-based study-notes/
   lesson site (component library, dark-mode theme, optional Gemini AI-tutor chat
   sidebar).
