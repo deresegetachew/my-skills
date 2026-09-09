@@ -5,11 +5,15 @@ interface Props {
   subtitle?: string;
 }
 const { num, title, subtitle } = Astro.props;
+
+// Strip any trailing slash so `base + '/lessons'` never doubles up — matters
+// when the site is deployed under a subpath (e.g. GitHub Pages project site).
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 ---
 <header class="lesson-header">
   <div class="lesson-breadcrumb">
-    <a href="/">Study Path</a>
-    <a href="/lessons">Lessons</a>
+    <a href={base + '/'}>Study Path</a>
+    <a href={base + '/lessons'}>Lessons</a>
     <a href="#deep-dive" class="breadcrumb-dive">↓ deep dive</a>
   </div>
   <div class="lesson-num">{num}</div>

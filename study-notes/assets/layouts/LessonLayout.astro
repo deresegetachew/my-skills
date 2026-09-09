@@ -8,7 +8,13 @@ import { LESSONS } from '@/data/lessons';
 interface Props { title: string; }
 const { title } = Astro.props;
 
-const current = Astro.url.pathname.replace(/\/$/, '');
+// `lessons.ts` stores routes without the deploy subpath (e.g. '/lessons/…'),
+// so strip the configured base before comparing against Astro.url, and add
+// it back on to any href we hand to LessonNav — otherwise nav breaks under a
+// base path (e.g. a GitHub Pages project site).
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const rawPath = Astro.url.pathname.replace(/\/$/, '');
+const current = base && rawPath.startsWith(base) ? rawPath.slice(base.length) || '/' : rawPath;
 const idx  = LESSONS.findIndex(l => l.href === current);
 const prev = idx > 0                  ? LESSONS[idx - 1] : undefined;
 const next = idx < LESSONS.length - 1 ? LESSONS[idx + 1] : undefined;
@@ -28,11 +34,11 @@ const hasNav = prev || next;
   <div class="rocket-mascot" aria-hidden="true" title="Rocket — your AI study buddy">🦝</div>
   <article class="lesson-article">
     {hasNav && (
-      <LessonNav prevHref={prev?.href} prevTitle={prev?.title} nextHref={next?.href} nextTitle={next?.title} top />
+      <LessonNav prevHref={prev && base + prev.href} prevTitle={prev?.title} nextHref={next && base + next.href} nextTitle={next?.title} top />
     )}
     <slot />
     {hasNav && (
-      <LessonNav prevHref={prev?.href} prevTitle={prev?.title} nextHref={next?.href} nextTitle={next?.title} />
+      <LessonNav prevHref={prev && base + prev.href} prevTitle={prev?.title} nextHref={next && base + next.href} nextTitle={next?.title} />
     )}
   </article>
 
