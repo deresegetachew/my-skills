@@ -140,6 +140,18 @@ h3.lesson-heading { font-size: 1rem; }
 .callout-info { background: var(--accent-lt); border-color: #60a5fa; }
 .callout-key  { background: #faf5ff; border-color: #a855f7; }
 
+/* ── SourceBadge ── */
+.source-badge {
+  display: inline-block; vertical-align: middle; margin-left: .5rem;
+  font-size: .68rem; font-weight: normal; letter-spacing: .02em;
+  padding: .1rem .5rem; border-radius: 999px; border: 1px solid transparent;
+  white-space: nowrap;
+}
+p > .source-badge:only-child { margin-left: 0; }
+.source-badge--course { background: #eff6ff; border-color: #93c5fd; color: #1e3a8a; }
+.source-badge--mine   { background: #f0fdf4; border-color: #86efac; color: #14532d; }
+.source-badge--book   { background: #fffbeb; border-color: #fcd34d; color: #713f12; }
+
 /* ── LessonDiagram (Mermaid) ── */
 .lesson-diagram {
   background: var(--bg2); border: 1px solid var(--border);
@@ -560,6 +572,9 @@ body.ai-panel-open .rocket-mascot { opacity: 0; }
 :root.dark .callout-warn { background: #2b1d00; border-color: #92400e; }
 :root.dark .callout-info { background: var(--accent-lt); border-color: #3b6fd4; }
 :root.dark .callout-key  { background: #1a0d2e; border-color: #7c3aed; }
+:root.dark .source-badge--course { background: #172340; border-color: #3b6fd4; color: #93c5fd; }
+:root.dark .source-badge--mine   { background: #0d2b18; border-color: #166534; color: #86efac; }
+:root.dark .source-badge--book   { background: #2b1d00; border-color: #92400e; color: #fcd34d; }
 
 :root.dark .quiz-opt:hover   { background: var(--accent-lt); border-color: #3b6fd4; }
 :root.dark .quiz-opt.correct { background: #0d2b18; border-color: #166534; }

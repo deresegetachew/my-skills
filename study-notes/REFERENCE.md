@@ -168,9 +168,24 @@ One per lesson page.
 
 ---
 
+### `SourceBadge`
+Small pill inside a section heading marking where the content came from.
+
+```astro
+<h2 class="lesson-heading">Title <SourceBadge source="course" /></h2>
+```
+
+Props: `source` (`course | mine | book`). Labels live in `SourceBadge.astro` —
+edit per module (e.g. `'📘 Book · <title>'`). For a lesson with no headings,
+`<p><SourceBadge source="course" /></p>` at the top works too.
+
+---
+
 ## Page structure conventions
 
 - One `<h2 class="lesson-heading">` per major section.
+- Every page ends with the four required sections (checklist, quiz, DeepDive,
+  mind map) — see `SKILL.md`.
 - `<h3 class="lesson-heading">` for sub-sections.
 - Use `<p>`, `<ul>`, `<ol>` for prose — no raw `<div>` wrappers for text.
 - `<div class="lesson-table"><table>…</table></div>` for comparison tables.

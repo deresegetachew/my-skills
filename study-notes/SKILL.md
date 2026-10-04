@@ -53,19 +53,66 @@ import LessonDiagram   from '@/components/LessonDiagram.astro';
 import LessonChecklist from '@/components/LessonChecklist.astro';
 import LessonQuiz      from '@/components/LessonQuiz.astro';
 import DeepDive        from '@/components/DeepDive.astro';
-import LessonMindMap   from '@/components/LessonMindMap.astro'; // optional
+import LessonMindMap   from '@/components/LessonMindMap.astro';
+import SourceBadge     from '@/components/SourceBadge.astro'; // if the module mixes sources
 
 // Large code strings go here, NOT inline in JSX (Astro brace-count bug on nested {}).
 const myCode = `...`.trim();
+const mindMap = `
+# Title
+## Section
+### Point
+`.trim();
 ---
 
 <LessonLayout title="LN — Title">
   <LessonHeader num="LN" title="Title" subtitle="One-line hook." />
   <div class="lesson-content">
-    <!-- sections here -->
+    <!-- content sections here -->
+
+    <h2 class="lesson-heading">Checklist</h2>
+    <LessonChecklist title="..." items={[ ... ]} />
+
+    <h2 class="lesson-heading">Quick-check quiz</h2>
+    <LessonQuiz questions={[ ... ]} />
   </div>
+
+  <DeepDive sources="..." tensions={[ ... ]} questions={[ ... ]} pitfalls={[ ... ]} />
+
+  <LessonMindMap content={mindMap} />
 </LessonLayout>
 ```
+
+## Required sections — every lesson, no exceptions
+
+Every lesson page ends with all four of these, in this order, even short ones
+and even when extending an existing lesson that lacks them (add the missing
+ones while you're there):
+
+1. **`LessonChecklist`** under an `<h2>` — actionable items drawn from the lesson.
+2. **`LessonQuiz`** under `<h2 class="lesson-heading">Quick-check quiz</h2>` — 2–4
+   questions testing the lesson's own content.
+3. **`DeepDive`** — after the closing `lesson-content` div. `LessonHeader`'s
+   breadcrumb always renders a "↓ deep dive" link, so a page without one has a
+   dead link. Tensions, 1–3 hard questions with answers, and pitfalls.
+4. **`LessonMindMap`** — just before `</LessonLayout>`, built from the lesson's
+   headings.
+
+Don't copy the shape of existing lessons blindly — older pages may predate this
+rule. Check the finished page against this list before calling it done.
+
+## Source badges (modules that mix sources)
+
+When a module combines material from different places (e.g. course content and
+your own notes), mark each section with `SourceBadge` inside its heading:
+
+```astro
+<h2 class="lesson-heading">Title <SourceBadge source="course" /></h2>
+```
+
+`source` is `course` | `mine` | `book`; edit the labels in `SourceBadge.astro`
+per module (e.g. which book). Ask which source a section came from rather than
+guessing. Single-source modules can skip badges.
 
 - Save as `src/pages/lessons/NNNN-kebab-title.astro` → route `/lessons/NNNN-kebab-title`.
 - Add the new entry to `src/data/lessons.ts` (`LESSONS` array) in the right position —

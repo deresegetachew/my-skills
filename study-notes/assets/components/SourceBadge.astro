@@ -1,0 +1,14 @@
+---
+// Marks where a section's content came from. Place inside the section's heading:
+//   <h2 class="lesson-heading">Title <SourceBadge source="course" /></h2>
+interface Props {
+  source: 'course' | 'mine' | 'book';
+}
+const { source } = Astro.props;
+const labels = {
+  course: '🎓 Course',
+  mine:   '✍️ My notes',
+  book:   '📘 Book',
+} as const;
+---
+<span class={`source-badge source-badge--${source}`}>{labels[source]}</span>
