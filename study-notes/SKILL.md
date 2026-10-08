@@ -55,6 +55,7 @@ import LessonQuiz      from '@/components/LessonQuiz.astro';
 import DeepDive        from '@/components/DeepDive.astro';
 import LessonMindMap   from '@/components/LessonMindMap.astro';
 import SourceBadge     from '@/components/SourceBadge.astro'; // if the module mixes sources
+import LessonCollapsible from '@/components/LessonCollapsible.astro'; // inline optional detail
 
 // Large code strings go here, NOT inline in JSX (Astro brace-count bug on nested {}).
 const myCode = `...`.trim();
@@ -120,7 +121,8 @@ guessing. Single-source modules can skip badges.
   `LessonNav`, `ThemeHead`, `ThemeToggle`, or `AiTutor` manually; the layout renders
   them.
 - Full component prop reference (CodeBlock, LessonDiagram, LessonCallout,
-  LessonChecklist, LessonQuiz, DeepDive, LessonMindMap): see `REFERENCE.md`.
+  LessonChecklist, LessonQuiz, DeepDive, LessonMindMap, LessonCollapsible, SourceBadge):
+  see `REFERENCE.md`.
 
 ## Style exhaustion rule — follow before writing any CSS
 

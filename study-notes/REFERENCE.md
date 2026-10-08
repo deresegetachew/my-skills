@@ -168,6 +168,24 @@ One per lesson page.
 
 ---
 
+### `LessonCollapsible`
+Collapsed-by-default block for optional detail — a line-by-line code explanation,
+a derivation, a long example — so it doesn't interrupt the main flow. Native
+`<details>`, no JS. Any content (prose, `CodeBlock`, tables) goes in the slot.
+
+```astro
+<LessonCollapsible title="What does this line do?">
+  <p>…</p>
+  <CodeBlock lang="python" code={explained} />
+</LessonCollapsible>
+```
+
+Props: `title` (string), `label?` (small tag before the title, default `"Explained"`),
+`open?` (boolean, default `false`). Not a replacement for `DeepDive` (the end-of-page
+senior section) — use it inline, next to the thing it explains.
+
+---
+
 ### `SourceBadge`
 Small pill inside a section heading marking where the content came from.
 

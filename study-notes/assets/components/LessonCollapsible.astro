@@ -1,0 +1,21 @@
+---
+// Collapsed-by-default block for optional detail: a line-by-line code
+// explanation, a derivation, a long example. Native <details>, no JS.
+//   <LessonCollapsible title="What does this line do?"> …any content… </LessonCollapsible>
+interface Props {
+  title: string;
+  label?: string;   // small tag before the title
+  open?: boolean;
+}
+const { title, label = 'Explained', open = false } = Astro.props;
+---
+<details class="lesson-collapsible" open={open}>
+  <summary>
+    <span class="lc-icon">▶</span>
+    <span class="lc-label">{label}</span>
+    <span class="lc-title">{title}</span>
+  </summary>
+  <div class="lc-body">
+    <slot />
+  </div>
+</details>
