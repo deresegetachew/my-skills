@@ -101,6 +101,10 @@ Each question renders a 🦝 button. Clicking it dispatches `ai-sensei:focus` wi
 
 Props: `questions` (array). Each question: `q`, `options` (4 strings), `answer` (0–3), `explain`.
 
+**Options are shuffled at build time**, seeded by the question text (stable across
+builds, different per question), and `answer` is remapped automatically — so write
+options in any order, and never refer to an option by its letter in `q` or `explain`.
+
 **Token rule:** Do not include `{}` in the `q` string — Astro parser misreads braces in JSX string attributes. Rephrase to avoid curly braces in question text.
 
 ---
