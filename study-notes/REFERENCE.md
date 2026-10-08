@@ -190,6 +190,34 @@ senior section) — use it inline, next to the thing it explains.
 
 ---
 
+### `LessonToc`
+Inline "On this page" contents box for long lessons — place it first inside
+`.lesson-content`. Built in the browser from the page's own `h2`/`h3.lesson-heading`
+elements (badges stripped, ids added automatically), so it never drifts from the
+headings. Adds a "Deep dive" entry that opens the DeepDive.
+
+```astro
+<LessonToc />                 <!-- h2 + nested h3 -->
+<LessonToc depth={2} />       <!-- h2 only -->
+```
+
+Props: `title?` (default `"On this page"`), `depth?` (`2 | 3`, default `3`).
+
+---
+
+### `FloatingToc`
+Quick-navigation for the current page, **rendered by `LessonLayout` on every lesson**
+— don't add it to pages. Lists the h2 sections and highlights the one in view: a
+slim sidebar in the left margin on wide screens (≥1240px), a "☰ Sections" button
+bottom-left on narrow screens or while the AI panel is open. Hidden on pages with
+fewer than `minSections` (default 4) sections.
+
+Both TOC components share `toc-headings.ts` (copy it along with them) and carry
+their own styles inside the component file, so copying the files is all a module
+needs.
+
+---
+
 ### `SourceBadge`
 Small pill inside a section heading marking where the content came from.
 

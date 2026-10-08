@@ -56,6 +56,7 @@ import DeepDive        from '@/components/DeepDive.astro';
 import LessonMindMap   from '@/components/LessonMindMap.astro';
 import SourceBadge     from '@/components/SourceBadge.astro'; // if the module mixes sources
 import LessonCollapsible from '@/components/LessonCollapsible.astro'; // inline optional detail
+import LessonToc       from '@/components/LessonToc.astro';       // long lessons: contents box at the top
 
 // Large code strings go here, NOT inline in JSX (Astro brace-count bug on nested {}).
 const myCode = `...`.trim();
@@ -120,6 +121,13 @@ guessing. Single-source modules can skip badges.
   `LessonLayout` derives prev/next nav from this list automatically. Don't add
   `LessonNav`, `ThemeHead`, `ThemeToggle`, or `AiTutor` manually; the layout renders
   them.
+- Long lessons (roughly 6+ sections): put `<LessonToc />` first inside `.lesson-content`.
+  `LessonLayout` already renders the floating quick-nav (`FloatingToc`) on every page.
+- **Sharing components across modules:** each module keeps its own copy of the
+  components (copied from `assets/` when the module was created). After adding or
+  changing a component here, copy it into existing modules — in a repo with
+  `scripts/sync-components.mjs`, run `npm run sync-components` (adds missing files,
+  reports differing ones; `--force` overwrites).
 - Full component prop reference (CodeBlock, LessonDiagram, LessonCallout,
   LessonChecklist, LessonQuiz, DeepDive, LessonMindMap, LessonCollapsible, SourceBadge):
   see `REFERENCE.md`.

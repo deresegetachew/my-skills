@@ -1,0 +1,62 @@
+---
+// Inline "On this page" contents box for long lessons. Put it at the top of
+// .lesson-content:  <LessonToc />
+// Built in the browser from the page's own h2/h3.lesson-heading elements, so it
+// never drifts from the headings. Self-contained: styles live in this file.
+interface Props {
+  title?: string;
+  depth?: 2 | 3;   // 3 = also list h3 sub-sections under each h2
+}
+const { title = 'On this page', depth = 3 } = Astro.props;
+---
+<nav class="lesson-toc" aria-label={title} data-depth={depth}>
+  <div class="ltoc-title">{title}</div>
+  <ol class="ltoc-list"></ol>
+</nav>
+
+<script>
+  import { collectHeadings } from './toc-headings';
+
+  document.querySelectorAll<HTMLElement>('.lesson-toc').forEach((nav) => {
+    const depth = Number(nav.dataset.depth || 3);
+    const list = nav.querySelector('ol')!;
+    let currentSub: HTMLOListElement | null = null;
+    for (const h of collectHeadings(depth)) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = `#${h.id}`;
+      a.textContent = h.text;
+      if (h.id === 'deep-dive') a.addEventListener('click', () => document.getElementById('deep-dive')?.setAttribute('open', ''));
+      li.appendChild(a);
+      if (h.level === 2) {
+        list.appendChild(li);
+        currentSub = null;
+      } else {
+        if (!currentSub) {
+          currentSub = document.createElement('ol');
+          (list.lastElementChild ?? list).appendChild(currentSub);
+        }
+        currentSub.appendChild(li);
+      }
+    }
+    if (!list.children.length) nav.remove();
+  });
+</script>
+
+<style is:global>
+  .lesson-toc {
+    border: 1px solid var(--border); border-radius: var(--r);
+    background: var(--bg2); padding: .9rem 1.1rem;
+  }
+  .ltoc-title {
+    font-family: monospace; font-size: .68rem; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted); margin-bottom: .5rem;
+  }
+  .ltoc-list, .ltoc-list ol { margin: 0; padding-left: 1.2rem; }
+  .ltoc-list { counter-reset: none; }
+  .ltoc-list li { margin: .15rem 0; font-size: .9rem; line-height: 1.5; }
+  .ltoc-list ol li { font-size: .84rem; }
+  .ltoc-list a { color: var(--ink); text-decoration: none; }
+  .ltoc-list a:hover { color: var(--accent); text-decoration: underline; }
+  .lesson-heading { scroll-margin-top: 1.25rem; }
+</style>

@@ -3,6 +3,7 @@ import LessonNav   from '@/components/LessonNav.astro';
 import AiTutor     from '@/components/AiTutor.astro';
 import ThemeHead   from '@/components/ThemeHead.astro';
 import ThemeToggle from '@/components/ThemeToggle.astro';
+import FloatingToc from '@/components/FloatingToc.astro';
 import { LESSONS } from '@/data/lessons';
 
 interface Props { title: string; }
@@ -42,6 +43,7 @@ const hasNav = prev || next;
     )}
   </article>
 
+  <FloatingToc />
   <ThemeToggle />
   <script is:inline src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <AiTutor />

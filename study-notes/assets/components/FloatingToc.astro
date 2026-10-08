@@ -1,0 +1,119 @@
+---
+// Floating quick-navigation for the current page, rendered by LessonLayout on
+// every lesson. Lists the page's h2 sections and highlights the one you're in.
+//  - Wide screens: a slim sidebar in the empty left margin.
+//  - Narrow screens (or while the AI panel is open): a small button, bottom-left,
+//    that opens the same list as a popover.
+// Hidden on pages with fewer than `minSections` sections. Self-contained.
+interface Props { minSections?: number; }
+const { minSections = 4 } = Astro.props;
+---
+<div class="floating-toc" data-min={minSections} hidden>
+  <button class="ftoc-toggle" type="button" aria-expanded="false" aria-label="Sections on this page">☰ <span>Sections</span></button>
+  <nav class="ftoc-panel" aria-label="Sections on this page">
+    <div class="ftoc-title">On this page</div>
+    <ol class="ftoc-list"></ol>
+  </nav>
+</div>
+
+<script>
+  import { collectHeadings } from './toc-headings';
+
+  const root = document.querySelector<HTMLElement>('.floating-toc');
+  if (root) {
+    const headings = collectHeadings(2);
+    const sections = headings.filter((h) => h.id !== 'deep-dive');
+    if (sections.length >= Number(root.dataset.min || 4)) {
+      const list = root.querySelector('ol')!;
+      const toggle = root.querySelector<HTMLButtonElement>('.ftoc-toggle')!;
+      const links = headings.map((h) => {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.href = `#${h.id}`;
+        a.textContent = h.text;
+        a.addEventListener('click', () => {
+          if (h.id === 'deep-dive') h.el.setAttribute('open', '');
+          setOpen(false);
+        });
+        li.appendChild(a);
+        list.appendChild(li);
+        return a;
+      });
+
+      function setOpen(open: boolean) {
+        root!.classList.toggle('is-open', open);
+        toggle.setAttribute('aria-expanded', String(open));
+      }
+      toggle.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!root.classList.contains('is-open')); });
+      document.addEventListener('click', (e) => { if (!root.contains(e.target as Node)) setOpen(false); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') setOpen(false); });
+
+      // Highlight the section currently at the top of the viewport.
+      let ticking = false;
+      function updateActive() {
+        ticking = false;
+        let active = 0;
+        headings.forEach((h, i) => { if (h.el.getBoundingClientRect().top < 140) active = i; });
+        links.forEach((a, i) => a.classList.toggle('is-active', i === active));
+      }
+      window.addEventListener('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(updateActive); } }, { passive: true });
+      updateActive();
+      root.hidden = false;
+    }
+  }
+</script>
+
+<style is:global>
+  .floating-toc { position: fixed; z-index: 996; font-size: .8rem; }
+  .ftoc-title {
+    font-family: monospace; font-size: .64rem; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted); margin-bottom: .4rem;
+  }
+  .ftoc-list { list-style: none; margin: 0; padding: 0; }
+  .ftoc-list li { margin: 0; }
+  .ftoc-list a {
+    display: block; padding: .22rem .6rem; border-left: 2px solid var(--border);
+    color: var(--muted); text-decoration: none; line-height: 1.35;
+  }
+  .ftoc-list a:hover { color: var(--ink); }
+  .ftoc-list a.is-active { color: var(--accent); border-left-color: var(--accent); font-weight: 600; }
+
+  /* Base button style first, so the media queries below can hide it. */
+  .ftoc-toggle {
+    display: inline-flex; align-items: center; gap: .35rem;
+    background: var(--bg); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 999px; padding: .4rem .8rem; cursor: pointer; font-size: .78rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  }
+  .ftoc-toggle:hover { border-color: var(--accent); }
+
+  /* Wide screens: sidebar in the left margin (article is 700px, centred). */
+  @media (min-width: 1240px) {
+    .floating-toc { top: 6rem; left: max(1rem, calc(50vw - 350px - 15rem)); width: 13rem; }
+    .ftoc-toggle { display: none; }
+    .ftoc-panel { max-height: calc(100vh - 8rem); overflow-y: auto; }
+    /* The AI panel shifts the article left — fall back to the button. */
+    body.ai-panel-open .floating-toc { top: auto; bottom: 1.75rem; left: 1.25rem; width: auto; }
+    body.ai-panel-open .ftoc-toggle { display: inline-flex; }
+    body.ai-panel-open .floating-toc:not(.is-open) .ftoc-panel { display: none; }
+  }
+
+  /* Narrow screens: button bottom-left, popover above it. */
+  @media (max-width: 1239px) {
+    .floating-toc { bottom: 1.75rem; left: 1.25rem; }
+    .floating-toc:not(.is-open) .ftoc-panel { display: none; }
+  }
+  .floating-toc.is-open .ftoc-panel,
+  body.ai-panel-open .floating-toc.is-open .ftoc-panel {
+    position: absolute; bottom: calc(100% + .5rem); left: 0; width: min(18rem, calc(100vw - 2.5rem));
+    max-height: 60vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--r); padding: .75rem .5rem; box-shadow: 0 6px 24px rgba(0,0,0,.12);
+  }
+  @media (min-width: 1240px) {
+    body:not(.ai-panel-open) .floating-toc.is-open .ftoc-panel {
+      position: static; width: auto; max-height: calc(100vh - 8rem); box-shadow: none;
+      border: none; padding: 0; background: transparent;
+    }
+  }
+  :root.dark .ftoc-toggle { box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+</style>
