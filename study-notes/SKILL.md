@@ -139,8 +139,6 @@ code strings inside lesson pages:
 
 ```
 <module>/code/
-├── shared/llm.py          get_completion() on Colab's built-in models (no API key);
-│                          check_setup() lists models; use_model() picks one
 ├── run_notebooks.py       re-executes notebooks in place so saved outputs are real
 ├── requirements.txt       runtime + tooling (nbclient, nbmake, pytest)
 └── course-1/4.4-…/x.ipynb one notebook per topic; code cells tagged for lessons
@@ -152,12 +150,22 @@ code strings inside lesson pages:
 - **Run it:** `OpenInColab` (also built into `NotebookView` via `path`) opens the
   committed notebook in Colab, which works on phones too. Colab can't be embedded
   (`x-frame-options: DENY`), so it's always a new tab.
-- **Notebook setup cell:** load `llm.py` from `../../shared` locally; otherwise (Colab only
-  receives the one notebook file) **always** download it from the repo's raw GitHub URL and
-  `importlib.reload` it, so a long-lived Colab session never runs a stale helper.
-  Then `use_model(None)` (or a model name from the list) and `check_setup()`, which shows
-  the available models and the one in use, or says to open the notebook in Colab.
-- **Cells that call a model** carry the `needs-llm` tag. Models only exist in Colab, so
+- **Notebook setup cell** (first code cell, tags `setup` + `needs-llm`): use Colab's built-in
+  models directly, no API key and no helper file:
+  ```python
+  from google.colab import ai
+  print("Available models:", ", ".join(ai.list_models()))
+
+  MODEL = None                              # Colab's default; uncomment a line below to choose
+  # MODEL = "google/gemini-2.5-flash"
+  # MODEL = "google/gemini-2.5-pro"
+
+  def get_completion(messages):
+      prompt = "\n\n".join(f"{m['role'].upper()}:\n{m['content']}" for m in messages) + "\n\nASSISTANT:\n"
+      return ai.generate_text(prompt, model_name=MODEL) if MODEL else ai.generate_text(prompt)
+  ```
+- **Cells that need Colab** (the setup cell, and every cell that calls a model) carry the
+  `needs-llm` tag. Models only exist in Colab, so
   `run_notebooks.py` skips these cells and keeps their saved outputs: results from a Colab run
   saved back to GitHub are what the lesson shows. Everything else (models, gates, routing,
   gate tests) must run without an LLM.

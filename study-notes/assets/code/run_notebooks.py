@@ -3,10 +3,10 @@
     code/.venv/bin/python code/run_notebooks.py                 # every notebook under code/
     code/.venv/bin/python code/run_notebooks.py path/to/x.ipynb # just these
 
-Each notebook runs top to bottom in its own folder (so ../../shared/llm.py resolves).
+Each notebook runs top to bottom in its own folder.
 A failing cell stops that notebook and the script exits non-zero.
 
-Cells tagged "needs-llm" call Colab's built-in models, which only exist in Colab. They are
+Cells tagged "needs-llm" use Colab's built-in models, which only exist in Colab. They are
 skipped here and keep the outputs they already have, e.g. from a Colab run saved back to
 GitHub (File → Save a copy in GitHub).
 """
