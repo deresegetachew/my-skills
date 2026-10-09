@@ -152,8 +152,9 @@ code strings inside lesson pages:
 - **Run it:** `OpenInColab` (also built into `NotebookView` via `path`) opens the
   committed notebook in Colab, which works on phones too. Colab can't be embedded
   (`x-frame-options: DENY`), so it's always a new tab.
-- **Notebook setup cell:** load `llm.py` from `../../shared` locally, else download it
-  from the repo's raw GitHub URL (Colab only receives the one notebook file).
+- **Notebook setup cell:** load `llm.py` from `../../shared` locally; otherwise (Colab only
+  receives the one notebook file) **always** download it from the repo's raw GitHub URL and
+  `importlib.reload` it, so a long-lived Colab session never runs a stale helper.
   End it with `check_setup(require=False)`: it prints which LLM will answer (Colab's
   built-in models, or a key) or exactly why none can.
 - **Cells that call a model** start with `check_setup()` (stops with instructions when no LLM
