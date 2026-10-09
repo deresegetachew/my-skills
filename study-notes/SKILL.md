@@ -154,6 +154,13 @@ code strings inside lesson pages:
   (`x-frame-options: DENY`), so it's always a new tab.
 - **Notebook setup cell:** load `llm.py` from `../../shared` locally, else download it
   from the repo's raw GitHub URL (Colab only receives the one notebook file).
+  End it with `check_setup()`: it reports which settings were found and why any are
+  missing (env var not set / no Colab secret / secret without Notebook access). Cells that
+  need a real model start with `check_setup(require_key=True)` and carry the
+  `raises-exception` tag, so `run_notebooks.py` accepts the expected stop when no key is set.
+- **"Open in Colab" only on runnable notebook code** (`NotebookView` with `path`). Prompt
+  templates, pseudocode, partial snippets, sample outputs and shell commands stay
+  `CodeBlock` without a button: in Colab they'd be broken or meaningless.
 - **Keep outputs honest:** after editing a notebook, run
   `code/.venv/bin/python code/run_notebooks.py` before committing.
 - **`CodeBlock` stays** for short snippets that aren't meant to be run.

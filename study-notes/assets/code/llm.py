@@ -11,6 +11,9 @@ from the Secrets panel (key icon in the left sidebar):
 Without LLM_PROVIDER, the provider follows whichever key is set; with no key at all, only
 scripted replies work. Scripted replies (set_mock_replies) always take priority, so a demo
 cell that scripts specific outputs behaves the same with or without a key.
+
+Call check_setup() in a notebook's setup cell to see what was found (and why something is
+missing), and check_setup(require_key=True) at the top of cells that need a real model.
 """
 from __future__ import annotations
 
@@ -26,6 +29,7 @@ PROVIDERS = {
 }
 
 _scripted: deque[str] = deque()
+_why_missing: dict[str, str] = {}
 
 
 def setting(name: str, default: str | None = None) -> str | None:
@@ -34,14 +38,61 @@ def setting(name: str, default: str | None = None) -> str | None:
         return os.getenv(name)
     try:
         from google.colab import userdata  # only exists inside Colab
-        return userdata.get(name) or default
-    except Exception:                      # not in Colab, secret missing, or access not granted
+    except ImportError:
+        _why_missing[name] = "not set as an environment variable"
         return default
+    try:
+        return userdata.get(name) or default
+    except Exception as e:                 # Colab raises different errors for each case
+        kind = type(e).__name__
+        if "NotebookAccess" in kind:
+            _why_missing[name] = "secret exists, but Notebook access is switched off for it"
+        elif "NotFound" in kind:
+            _why_missing[name] = "no Colab secret with this name"
+        else:
+            _why_missing[name] = f"could not be read ({kind})"
+        return default
+
+
+def _source(name: str) -> str:
+    if os.getenv(name):
+        return "environment variable"
+    return "Colab secret"
+
+
+def check_setup(require_key: bool = False) -> str:
+    """Report which LLM settings were found. With require_key=True, stop with clear
+    instructions if no usable API key is configured (call it before real-model cells)."""
+    lines = []
+    for name in ("LLM_PROVIDER", "GEMINI_API_KEY", "OPENAI_API_KEY", "LLM_MODEL"):
+        value = setting(name)
+        if value:
+            shown = value if name in ("LLM_PROVIDER", "LLM_MODEL") else value[:4] + "…" + value[-2:]
+            lines.append(f"  ✓ {name:15} {shown}  ({_source(name)})")
+        else:
+            lines.append(f"  · {name:15} not found: {_why_missing.get(name, 'not set')}")
+    p = provider()
+    usable = p != "mock" and setting(PROVIDERS.get(p, {}).get("key", "")) is not None
+    status = describe() if p != "mock" else "LLM: mock (scripted replies only)"
+    report = status + "\n" + "\n".join(lines)
+    print(report)
+
+    if require_key and not usable:
+        raise RuntimeError(
+            "This cell needs a real LLM, but no usable API key was found.\n"
+            "In Colab: click the key icon (Secrets) in the left sidebar, add GEMINI_API_KEY or\n"
+            "OPENAI_API_KEY, switch on 'Notebook access' for it, then re-run the setup cell.\n"
+            "Locally: export GEMINI_API_KEY=... (or OPENAI_API_KEY) before starting Jupyter.")
+    if p != "mock" and not usable:
+        print(f"  ! LLM_PROVIDER={p} but its key ({PROVIDERS[p]['key']}) is missing")
+    return report
 
 
 def provider() -> str:
     explicit = setting("LLM_PROVIDER")
     if explicit:
+        if explicit.lower() not in (*PROVIDERS, "mock"):
+            raise ValueError(f"LLM_PROVIDER={explicit!r}: use one of {', '.join([*PROVIDERS, 'mock'])}")
         return explicit.lower()
     if setting("GEMINI_API_KEY"):
         return "gemini"
