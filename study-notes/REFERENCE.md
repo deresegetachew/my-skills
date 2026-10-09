@@ -234,8 +234,10 @@ import NotebookView from '@/components/NotebookView.astro';
 import nb from '../../../../code/course-1/4.4-claim-triage/claim_triage.ipynb?raw';
 ---
 <NotebookView notebook={nb} path="code/course-1/4.4-claim-triage/claim_triage.ipynb" />
-<NotebookView notebook={nb} cells={['gates', 'route']} path="…" />
 ```
+
+Show a lesson's notebook **whole, once** (see SKILL.md). `cells={['tag']}` renders only the cells
+with those tags: keep it for a rare single-cell excerpt, never to scatter one program across a page.
 
 Props: `notebook` (raw .ipynb string), `cells?` (notebook cell tags to show; unknown tag =
 build error), `path?` (module-relative path; adds the Colab button), `title?`. Tag cells in

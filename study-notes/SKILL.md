@@ -144,9 +144,12 @@ code strings inside lesson pages:
 └── course-1/4.4-…/x.ipynb one notebook per topic; code cells tagged for lessons
 ```
 
-- **Show it:** `NotebookView` renders a notebook (or the cells with given tags) at build
-  time, with its saved outputs, highlighted like `CodeBlock`. Import the notebook with
-  `?raw`. An unknown tag fails the build.
+- **Show it whole, in one place:** `NotebookView` renders the notebook at build time, with its
+  saved outputs, highlighted like `CodeBlock`. Import the notebook with `?raw`. Put it in one
+  "run it yourself" section with a short numbered list of what the notebook contains; the
+  notebook's own Markdown headings guide the reader. **Don't slice one program into cells
+  scattered across a lesson**: readers found that confusing. (`cells={[...]}` exists for a
+  rare single-cell excerpt; an unknown tag fails the build.)
 - **Run it:** `OpenInColab` (also built into `NotebookView` via `path`) opens the
   committed notebook in Colab, which works on phones too. Colab can't be embedded
   (`x-frame-options: DENY`), so it's always a new tab.
