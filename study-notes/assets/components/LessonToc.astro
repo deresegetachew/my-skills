@@ -28,6 +28,8 @@ const { title = 'On this page', depth = 3 } = Astro.props;
       a.textContent = h.text;
       if (h.id === 'deep-dive') a.addEventListener('click', () => document.getElementById('deep-dive')?.setAttribute('open', ''));
       li.appendChild(a);
+      // Headings that already carry their own number ("1. Define…") don't get a second one.
+      if (/^\d+[.)]\s/.test(h.text)) li.classList.add('ltoc-own-number');
       if (h.level === 2) {
         list.appendChild(li);
         currentSub = null;
@@ -53,10 +55,10 @@ const { title = 'On this page', depth = 3 } = Astro.props;
     letter-spacing: .1em; color: var(--muted); margin-bottom: .5rem;
   }
   .ltoc-list, .ltoc-list ol { margin: 0; padding-left: 1.2rem; }
-  .ltoc-list { counter-reset: none; }
   .ltoc-list li { margin: .15rem 0; font-size: .9rem; line-height: 1.5; }
   .ltoc-list ol li { font-size: .84rem; }
   .ltoc-list a { color: var(--ink); text-decoration: none; }
+  .ltoc-list li.ltoc-own-number { list-style: none; }
   .ltoc-list a:hover { color: var(--accent); text-decoration: underline; }
   .lesson-heading { scroll-margin-top: 1.25rem; }
 </style>

@@ -49,6 +49,12 @@ flowchart LR
 
 Props: `definition` (string — raw Mermaid syntax, not HTML-escaped).
 
+**Zoom viewer, built in:** every diagram gets a ⤢ button (clicking the diagram works
+too) that opens it full screen with wheel/pinch zoom, drag to pan, Fit / double-click
+to reset, and Esc to close. Nothing to configure. Still prefer readable inline
+diagrams: long chains read better as `flowchart TB`, and decision nodes with long
+labels stay compact as hexagons `{{"..."}}` rather than diamonds `{"..."}`.
+
 ---
 
 ### `LessonCallout`
