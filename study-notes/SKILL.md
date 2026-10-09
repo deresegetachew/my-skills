@@ -139,8 +139,9 @@ code strings inside lesson pages:
 
 ```
 <module>/code/
-├── shared/llm.py          get_completion(): Gemini / OpenAI / Vocareum via env vars or
-│                          Colab Secrets; scripted replies (set_mock_replies) for demos
+├── shared/llm.py          get_completion(): Colab built-in models (no key) / Gemini /
+│                          OpenAI / Vocareum via env vars or Colab Secrets; scripted
+│                          replies (set_mock_replies) for demos; check_setup()
 ├── run_notebooks.py       re-executes notebooks in place so saved outputs are real
 ├── requirements.txt       runtime + tooling (nbclient, nbmake, pytest)
 └── course-1/4.4-…/x.ipynb one notebook per topic; code cells tagged for lessons

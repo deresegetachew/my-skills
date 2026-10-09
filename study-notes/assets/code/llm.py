@@ -3,13 +3,14 @@
 Which LLM answers is decided by settings, read from environment variables or, in Colab,
 from the Secrets panel (key icon in the left sidebar):
 
-    LLM_PROVIDER   "gemini" | "openai" | "vocareum" | "mock"   (optional, see below)
+    LLM_PROVIDER   "colab" | "gemini" | "openai" | "vocareum" | "mock"   (optional, see below)
     GEMINI_API_KEY key for Gemini (Google AI Studio)
     OPENAI_API_KEY key for OpenAI, or your Vocareum key with LLM_PROVIDER=vocareum
     LLM_MODEL      override the provider's default model (optional)
 
-Without LLM_PROVIDER, the provider follows whichever key is set; with no key at all, only
-scripted replies work. Scripted replies (set_mock_replies) always take priority, so a demo
+Without LLM_PROVIDER, the provider follows whichever key is set; with no key, Colab's
+built-in models are used when running in Colab (google.colab.ai, no key needed, availability
+depends on your Colab plan); otherwise only scripted replies work. Scripted replies (set_mock_replies) always take priority, so a demo
 cell that scripts specific outputs behaves the same with or without a key.
 
 Call check_setup() in a notebook's setup cell to see what was found (and why something is
@@ -21,6 +22,9 @@ import os
 from collections import deque
 
 PROVIDERS = {
+    # Colab's built-in model access: an OpenAI-compatible proxy whose host and token
+    # Colab sets in the environment when google.colab.ai is imported. No key needed.
+    "colab":    {"base_url": None, "key": "MODEL_PROXY_API_KEY", "model": "google/gemini-2.5-flash"},
     "gemini":   {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
                  "key": "GEMINI_API_KEY", "model": "gemini-2.5-flash"},
     "openai":   {"base_url": None, "key": "OPENAI_API_KEY", "model": "gpt-4.1-mini"},
@@ -72,20 +76,33 @@ def check_setup(require_key: bool = False) -> str:
         else:
             lines.append(f"  · {name:15} not found: {_why_missing.get(name, 'not set')}")
     p = provider()
-    usable = p != "mock" and setting(PROVIDERS.get(p, {}).get("key", "")) is not None
+    usable = (p == "colab" and colab_ai_available()) or (
+        p not in ("mock", "colab") and setting(PROVIDERS[p]["key"]) is not None)
     status = describe() if p != "mock" else "LLM: mock (scripted replies only)"
     report = status + "\n" + "\n".join(lines)
     print(report)
 
     if require_key and not usable:
         raise RuntimeError(
-            "This cell needs a real LLM, but no usable API key was found.\n"
-            "In Colab: click the key icon (Secrets) in the left sidebar, add GEMINI_API_KEY or\n"
-            "OPENAI_API_KEY, switch on 'Notebook access' for it, then re-run the setup cell.\n"
+            "This cell needs a real LLM, but none is available.\n"
+            "In Colab: built-in models (google.colab.ai) aren't available on this account/plan, so\n"
+            "click the key icon (Secrets) in the left sidebar, add GEMINI_API_KEY or OPENAI_API_KEY,\n"
+            "switch on 'Notebook access' for it, then re-run the setup cell.\n"
             "Locally: export GEMINI_API_KEY=... (or OPENAI_API_KEY) before starting Jupyter.")
-    if p != "mock" and not usable:
+    if p not in ("mock", "colab") and not usable:
         print(f"  ! LLM_PROVIDER={p} but its key ({PROVIDERS[p]['key']}) is missing")
+    if p == "colab" and not usable:
+        print("  ! LLM_PROVIDER=colab but Colab's built-in models aren't available here")
     return report
+
+
+def colab_ai_available() -> bool:
+    """True inside Colab when the built-in model proxy (google.colab.ai) is set up."""
+    try:
+        from google.colab import ai  # noqa: F401  (importing it sets MODEL_PROXY_*)
+    except Exception:
+        return False
+    return bool(os.getenv("MODEL_PROXY_HOST") and os.getenv("MODEL_PROXY_API_KEY"))
 
 
 def provider() -> str:
@@ -98,6 +115,8 @@ def provider() -> str:
         return "gemini"
     if setting("OPENAI_API_KEY"):
         return "openai"
+    if colab_ai_available():
+        return "colab"
     return "mock"
 
 
@@ -112,7 +131,8 @@ def describe() -> str:
     if p == "mock":
         return "LLM: mock (no API key found; only scripted replies are available)"
     cfg = PROVIDERS[p]
-    return f"LLM: {p} · model {setting('LLM_MODEL') or cfg['model']}"
+    label = "Colab built-in (no key)" if p == "colab" else p
+    return f"LLM: {label} · model {setting('LLM_MODEL') or cfg['model']}"
 
 
 def get_completion(messages=None, system_prompt=None, user_prompt=None, model=None,
@@ -133,8 +153,12 @@ def get_completion(messages=None, system_prompt=None, user_prompt=None, model=No
     if user_prompt:
         messages.append({"role": "user", "content": user_prompt})
 
-    from openai import OpenAI  # Gemini and Vocareum both speak the OpenAI API
-    client = OpenAI(api_key=setting(cfg["key"]), base_url=cfg["base_url"])
+    from openai import OpenAI  # Gemini, Vocareum and Colab's proxy all speak the OpenAI API
+    if p == "colab":
+        client = OpenAI(api_key=os.getenv("MODEL_PROXY_API_KEY"),
+                        base_url=f"{os.getenv('MODEL_PROXY_HOST')}/models/openapi")
+    else:
+        client = OpenAI(api_key=setting(cfg["key"]), base_url=cfg["base_url"])
     response = client.chat.completions.create(
         model=model or setting("LLM_MODEL") or cfg["model"],
         messages=messages,
