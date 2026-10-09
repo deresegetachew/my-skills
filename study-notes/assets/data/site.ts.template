@@ -1,0 +1,4 @@
+// Where this module lives on GitHub — used by OpenInColab / NotebookView.
+export const NOTES_REPO = 'OWNER/REPO';
+export const NOTES_BRANCH = 'main';
+export const MODULE_DIR = 'MODULE_SLUG';

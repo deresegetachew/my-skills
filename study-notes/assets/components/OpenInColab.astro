@@ -1,0 +1,29 @@
+---
+// "Open in Colab" button for a notebook committed in this module's repo.
+//   <OpenInColab path="code/course-1/4.4-claim-triage/claim_triage.ipynb" />
+// `path` is relative to the module folder; the repo, branch and module folder
+// come from src/data/site.ts. Colab opens public GitHub notebooks directly;
+// edits stay in Colab until you save a copy (Drive or GitHub).
+import { NOTES_REPO, NOTES_BRANCH, MODULE_DIR } from '@/data/site';
+
+interface Props {
+  path: string;
+  label?: string;
+}
+const { path, label = 'Open in Colab' } = Astro.props;
+const repoPath = [MODULE_DIR, path].filter(Boolean).join('/');
+const href = `https://colab.research.google.com/github/${NOTES_REPO}/blob/${NOTES_BRANCH}/${repoPath}`;
+---
+<a class="open-in-colab" href={href} target="_blank" rel="noopener" title={`Open ${repoPath} in Google Colab`}>
+  <span class="oic-icon" aria-hidden="true">▶</span>{label}
+</a>
+
+<style is:global>
+  .open-in-colab {
+    display: inline-flex; align-items: center; gap: .4rem; white-space: nowrap;
+    padding: .3rem .75rem; border-radius: 999px; font-size: .8rem; text-decoration: none;
+    background: #f9ab00; color: #1a1a1a; border: 1px solid #e69500; font-weight: 600;
+  }
+  .open-in-colab:hover { background: #ffb81f; }
+  .oic-icon { font-size: .7rem; }
+</style>

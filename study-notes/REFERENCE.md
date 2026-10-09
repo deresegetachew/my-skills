@@ -224,6 +224,37 @@ needs.
 
 ---
 
+### `NotebookView`
+Renders a committed Jupyter notebook (or selected cells) with its saved outputs, at build
+time (notebookjs + Shiki, no JS shipped). Optional "Open in Colab" button.
+
+```astro
+---
+import NotebookView from '@/components/NotebookView.astro';
+import nb from '../../../../code/course-1/4.4-claim-triage/claim_triage.ipynb?raw';
+---
+<NotebookView notebook={nb} path="code/course-1/4.4-claim-triage/claim_triage.ipynb" />
+<NotebookView notebook={nb} cells={['gates', 'route']} path="…" />
+```
+
+Props: `notebook` (raw .ipynb string), `cells?` (notebook cell tags to show; unknown tag =
+build error), `path?` (module-relative path; adds the Colab button), `title?`. Tag cells in
+Jupyter/Colab via the cell's metadata `"tags": [...]`.
+
+---
+
+### `OpenInColab`
+Button that opens a committed notebook in Google Colab (new tab).
+
+```astro
+<OpenInColab path="code/course-1/4.4-claim-triage/claim_triage.ipynb" />
+```
+
+Props: `path` (relative to the module folder), `label?` (default "Open in Colab").
+Repo, branch and module folder come from `src/data/site.ts`.
+
+---
+
 ### `SourceBadge`
 Small pill inside a section heading marking where the content came from.
 

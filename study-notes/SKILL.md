@@ -132,6 +132,38 @@ guessing. Single-source modules can skip badges.
   LessonChecklist, LessonQuiz, DeepDive, LessonMindMap, LessonCollapsible, SourceBadge):
   see `REFERENCE.md`.
 
+## Runnable code: notebooks shown in lessons, opened in Colab
+
+Code that readers should run or edit lives in **committed Jupyter notebooks**, not in
+code strings inside lesson pages:
+
+```
+<module>/code/
+├── shared/llm.py          get_completion(): Gemini / OpenAI / Vocareum via env vars or
+│                          Colab Secrets; scripted replies (set_mock_replies) for demos
+├── run_notebooks.py       re-executes notebooks in place so saved outputs are real
+├── requirements.txt       runtime + tooling (nbclient, nbmake, pytest)
+└── course-1/4.4-…/x.ipynb one notebook per topic; code cells tagged for lessons
+```
+
+- **Show it:** `NotebookView` renders a notebook (or the cells with given tags) at build
+  time, with its saved outputs, highlighted like `CodeBlock`. Import the notebook with
+  `?raw`. An unknown tag fails the build.
+- **Run it:** `OpenInColab` (also built into `NotebookView` via `path`) opens the
+  committed notebook in Colab, which works on phones too. Colab can't be embedded
+  (`x-frame-options: DENY`), so it's always a new tab.
+- **Notebook setup cell:** load `llm.py` from `../../shared` locally, else download it
+  from the repo's raw GitHub URL (Colab only receives the one notebook file).
+- **Keep outputs honest:** after editing a notebook, run
+  `code/.venv/bin/python code/run_notebooks.py` before committing.
+- **`CodeBlock` stays** for short snippets that aren't meant to be run.
+- **Site config:** `src/data/site.ts` holds the GitHub repo, branch and module folder
+  (`assets/data/site.ts.template`); Colab links are built from it.
+- **Requirements:** the `notebookjs` npm package and Node ≥ 22 (it `require()`s an ES
+  module). Pin Node with an `.nvmrc` and use it in CI (`node-version-file`).
+- Course-provided notebooks (third-party, may contain keys) never go here; keep them
+  in a gitignored folder.
+
 ## Style exhaustion rule — follow before writing any CSS
 
 In this order, before adding a class or `<style>` block:

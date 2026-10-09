@@ -1,0 +1,96 @@
+---
+// Shows a committed Jupyter notebook (or selected cells) in a lesson, with its saved
+// outputs. Rendered at build time by notebookjs (no JS shipped); code cells are
+// highlighted with Shiki in the same theme as CodeBlock.
+//
+//   import nb from '../../../../code/course-1/4.4-claim-triage/claim_triage.ipynb?raw';
+//   <NotebookView notebook={nb} path="code/course-1/4.4-claim-triage/claim_triage.ipynb" />
+//   <NotebookView notebook={nb} cells={['route']} path="…" />   ← only cells tagged "route"
+//
+// Cells are picked by their notebook tags (cell metadata "tags"). An unknown tag fails
+// the build, so a renamed cell can't silently vanish from a lesson.
+// Needs: notebookjs (npm). Node ≥ 22 (it require()s an ES module).
+import nbjs from 'notebookjs';
+import { codeToHtml } from 'shiki';
+import OpenInColab from './OpenInColab.astro';
+
+interface Props {
+  notebook: string;     // raw .ipynb text (import with ?raw)
+  cells?: string[];     // tags to show; omit for the whole notebook
+  path?: string;        // module-relative path → adds an "Open in Colab" button
+  title?: string;
+}
+const { notebook, cells, path, title } = Astro.props;
+const nb = JSON.parse(notebook);
+const tagsOf = (c: any): string[] => c.metadata?.tags ?? [];
+
+if (cells?.length) {
+  const known = new Set(nb.cells.flatMap(tagsOf));
+  const missing = cells.filter((t) => !known.has(t));
+  if (missing.length) throw new Error(`NotebookView: no cell tagged ${missing.join(', ')} in ${path ?? 'notebook'}`);
+}
+const shown = cells?.length
+  ? { ...nb, cells: nb.cells.filter((c: any) => tagsOf(c).some((t) => cells.includes(t))) }
+  : nb;
+
+const rendered = nbjs.parse(shown).render();
+for (const pre of Array.from(rendered.querySelectorAll('.nb-input pre')) as any[]) {
+  pre.outerHTML = await codeToHtml(pre.textContent ?? '', { lang: 'python', theme: 'one-dark-pro' });
+}
+const html = rendered.outerHTML;
+const name = title ?? path?.split('/').pop() ?? 'notebook';
+---
+<figure class="notebook-view">
+  <figcaption class="nbv-bar">
+    <span class="nbv-name">📓 {name}</span>
+    {cells?.length ? <span class="nbv-count">{shown.cells.length} of {nb.cells.length} cells</span> : null}
+    {path && <OpenInColab path={path} />}
+  </figcaption>
+  <div class="nbv-body" set:html={html} />
+</figure>
+
+<style is:global>
+  .notebook-view { margin: 0; border: 1px solid var(--border); border-radius: var(--r); overflow: hidden; }
+  .nbv-bar {
+    display: flex; align-items: center; gap: .75rem; flex-wrap: wrap;
+    padding: .5rem .8rem; background: var(--bg2); border-bottom: 1px solid var(--border);
+    font-family: monospace; font-size: .8rem;
+  }
+  .nbv-name { font-weight: 700; color: var(--ink); }
+  .nbv-count { color: var(--muted); }
+  .nbv-bar .open-in-colab { margin-left: auto; }
+  .nbv-body { padding: .75rem; display: flex; flex-direction: column; gap: .75rem; }
+
+  /* notebookjs markup: .nb-cell > .nb-input (+ data-prompt-number) / .nb-output */
+  .nbv-body .nb-notebook { display: flex; flex-direction: column; gap: .9rem; }
+  .nbv-body .nb-cell { min-width: 0; }
+  .nbv-body .nb-input { position: relative; }
+  .nbv-body .nb-input[data-prompt-number]::before,
+  .nbv-body .nb-output[data-prompt-number]::before {
+    content: "In [" attr(data-prompt-number) "]";
+    display: block; font-family: monospace; font-size: .68rem; color: var(--muted); margin-bottom: .2rem;
+  }
+  .nbv-body .nb-output[data-prompt-number]::before { content: "Out [" attr(data-prompt-number) "]"; }
+  .nbv-body .nb-input pre.shiki {
+    margin: 0; padding: .8rem 1rem; border-radius: var(--r); overflow-x: auto;
+    font-size: .8rem; line-height: 1.55;
+  }
+  /* Same reset as CodeBlock: Shiki owns colors; the global inline-code style must not apply. */
+  .nbv-body pre code, .nbv-body .nb-output code {
+    background: none; border: none; padding: 0; border-radius: 0;
+    font-family: "JetBrains Mono", "Fira Mono", monospace; font-size: inherit;
+  }
+  .nbv-body .nb-output { margin-top: .4rem; }
+  .nbv-body .nb-output pre,
+  .nbv-body .nb-stdout, .nbv-body .nb-stderr, .nbv-body .nb-text-output {
+    margin: 0; padding: .6rem .9rem; border-radius: var(--r); overflow-x: auto;
+    background: var(--bg2); border: 1px dashed var(--border);
+    font-family: "JetBrains Mono", monospace; font-size: .76rem; line-height: 1.5; white-space: pre-wrap;
+  }
+  .nbv-body .nb-stderr, .nbv-body .nb-error { color: #dc2626; }
+  .nbv-body .nb-markdown-cell { font-size: .92rem; line-height: 1.6; }
+  .nbv-body .nb-markdown-cell h1 { font-size: 1.15rem; margin: 0 0 .4rem; }
+  .nbv-body .nb-markdown-cell h2 { font-size: 1rem; margin: .2rem 0 .3rem; }
+  .nbv-body .nb-markdown-cell code { font-size: .85em; }
+  .nbv-body img { max-width: 100%; }
+</style>
