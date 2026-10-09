@@ -139,9 +139,8 @@ code strings inside lesson pages:
 
 ```
 <module>/code/
-├── shared/llm.py          get_completion(): Colab built-in models (no key) / Gemini /
-│                          OpenAI / Vocareum via env vars or Colab Secrets; scripted
-│                          replies (set_mock_replies) for demos; check_setup()
+├── shared/llm.py          get_completion(): Colab's built-in models (no key) in Colab;
+│                          GEMINI_API_KEY / OPENAI_API_KEY elsewhere; check_setup()
 ├── run_notebooks.py       re-executes notebooks in place so saved outputs are real
 ├── requirements.txt       runtime + tooling (nbclient, nbmake, pytest)
 └── course-1/4.4-…/x.ipynb one notebook per topic; code cells tagged for lessons
@@ -155,10 +154,14 @@ code strings inside lesson pages:
   (`x-frame-options: DENY`), so it's always a new tab.
 - **Notebook setup cell:** load `llm.py` from `../../shared` locally, else download it
   from the repo's raw GitHub URL (Colab only receives the one notebook file).
-  End it with `check_setup()`: it reports which settings were found and why any are
-  missing (env var not set / no Colab secret / secret without Notebook access). Cells that
-  need a real model start with `check_setup(require_key=True)` and carry the
-  `raises-exception` tag, so `run_notebooks.py` accepts the expected stop when no key is set.
+  End it with `check_setup(require=False)`: it prints which LLM will answer (Colab's
+  built-in models, or a key) or exactly why none can.
+- **Cells that call a model** start with `check_setup()` (stops with instructions when no LLM
+  is available) and carry the `needs-llm` tag. `run_notebooks.py` skips them when no API key
+  is set locally and keeps their saved outputs, so results from a Colab run saved back to
+  GitHub survive. Everything else (models, gates, routing, gate tests) must run without an LLM.
+- **No scripted/fake LLM replies.** Demonstrate gate behavior by calling the gates directly
+  with bad outputs; demonstrate the chain with a real model.
 - **"Open in Colab" only on runnable notebook code** (`NotebookView` with `path`). Prompt
   templates, pseudocode, partial snippets, sample outputs and shell commands stay
   `CodeBlock` without a button: in Colab they'd be broken or meaningless.
