@@ -1,6 +1,5 @@
-# Runtime for the notes' notebooks (Colab already has most of these)
+# Runtime for the notes' notebooks (Colab already has pydantic)
 pydantic>=2.10
-openai>=1.0
 # Tooling: execute notebooks to capture outputs, and test them
 nbformat
 nbclient

@@ -139,8 +139,8 @@ code strings inside lesson pages:
 
 ```
 <module>/code/
-├── shared/llm.py          get_completion(): Colab's built-in models (no key) in Colab;
-│                          GEMINI_API_KEY / OPENAI_API_KEY elsewhere; check_setup()
+├── shared/llm.py          get_completion() on Colab's built-in models (no API key);
+│                          check_setup() lists models; use_model() picks one
 ├── run_notebooks.py       re-executes notebooks in place so saved outputs are real
 ├── requirements.txt       runtime + tooling (nbclient, nbmake, pytest)
 └── course-1/4.4-…/x.ipynb one notebook per topic; code cells tagged for lessons
@@ -155,12 +155,12 @@ code strings inside lesson pages:
 - **Notebook setup cell:** load `llm.py` from `../../shared` locally; otherwise (Colab only
   receives the one notebook file) **always** download it from the repo's raw GitHub URL and
   `importlib.reload` it, so a long-lived Colab session never runs a stale helper.
-  End it with `check_setup(require=False)`: it prints which LLM will answer (Colab's
-  built-in models, or a key) or exactly why none can.
-- **Cells that call a model** start with `check_setup()` (stops with instructions when no LLM
-  is available) and carry the `needs-llm` tag. `run_notebooks.py` skips them when no API key
-  is set locally and keeps their saved outputs, so results from a Colab run saved back to
-  GitHub survive. Everything else (models, gates, routing, gate tests) must run without an LLM.
+  Then `use_model(None)` (or a model name from the list) and `check_setup()`, which shows
+  the available models and the one in use, or says to open the notebook in Colab.
+- **Cells that call a model** carry the `needs-llm` tag. Models only exist in Colab, so
+  `run_notebooks.py` skips these cells and keeps their saved outputs: results from a Colab run
+  saved back to GitHub are what the lesson shows. Everything else (models, gates, routing,
+  gate tests) must run without an LLM.
 - **No scripted/fake LLM replies.** Demonstrate gate behavior by calling the gates directly
   with bad outputs; demonstrate the chain with a real model.
 - **"Open in Colab" only on runnable notebook code** (`NotebookView` with `path`). Prompt

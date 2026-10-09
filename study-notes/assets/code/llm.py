@@ -1,117 +1,52 @@
-"""get_completion() for study-notes notebooks.
+"""get_completion() for study-notes notebooks, using Google Colab's built-in models.
 
-In Google Colab it uses Colab's built-in models (google.colab.ai): no API key needed.
-Outside Colab (or to override), set an environment variable / Colab secret:
-
-    GEMINI_API_KEY   use Gemini through Google AI Studio
-    OPENAI_API_KEY   use OpenAI
-    LLM_MODEL        pick a specific model (optional)
-
-Run check_setup() first: it reports which LLM will be used, or exactly why none is available.
+No API key needed: Colab provides the models (google.colab.ai), so these notebooks are meant
+to run in Colab. In the setup cell, check_setup() lists the available models; pick one with
+use_model("google/...") or leave it unset for Colab's default.
 """
 from __future__ import annotations
 
-import os
-
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
-DEFAULT_MODELS = {"gemini": "gemini-2.5-flash", "openai": "gpt-4.1-mini"}
-
-_colab_error: str | None = None
-
-
-def setting(name: str) -> str | None:
-    """Environment variable first, then Colab Secrets (when running in Colab)."""
-    if os.getenv(name):
-        return os.getenv(name)
-    try:
-        from google.colab import userdata
-        return userdata.get(name) or None
-    except Exception:
-        return None
-
-
-def in_colab() -> bool:
-    try:
-        import google.colab  # noqa: F401
-        return True
-    except ImportError:
-        return False
+_model: str | None = None
 
 
 def _colab_ai():
-    """Colab's built-in model access, or None (the reason is kept for check_setup)."""
-    global _colab_error
     try:
         from google.colab import ai
-        _colab_error = None
-        return ai
-    except Exception as e:
-        _colab_error = f"{type(e).__name__}: {e}"
-        return None
+    except ImportError:
+        raise RuntimeError("This notebook calls Colab's built-in models: open it in Google Colab.") from None
+    return ai
 
 
-def provider() -> str | None:
-    """Which LLM get_completion() will use: an explicit key wins, then Colab's built-in."""
-    if setting("GEMINI_API_KEY"):
-        return "gemini"
-    if setting("OPENAI_API_KEY"):
-        return "openai"
-    if in_colab() and _colab_ai() is not None:
-        return "colab"
-    return None
+def use_model(name: str | None) -> None:
+    """Choose the model for every get_completion() call (None = Colab's default)."""
+    global _model
+    _model = name
 
 
-def check_setup(require: bool = True) -> None:
-    """Print which LLM will be used. With require=True, stop with instructions if none is."""
-    p = provider()
-    model = setting("LLM_MODEL")
-    if p == "colab":
+def check_setup() -> None:
+    """Print whether Colab's built-in models are available, the models, and the one in use."""
+    try:
         ai = _colab_ai()
-        print(f"✓ LLM: Colab built-in models (no key needed) · model: {model or 'Colab default'}")
-        try:
-            print(f"  available models: {', '.join(ai.list_models())}")
-        except Exception:
-            pass
-    elif p:
-        print(f"✓ LLM: {p} via API key · model: {model or DEFAULT_MODELS[p]}")
-    else:
-        where = "in this Colab session" if in_colab() else "on this machine"
-        print(f"✗ No LLM available {where}.")
-        if in_colab():
-            print(f"  google.colab.ai could not be used: {_colab_error}")
-        if require:
-            raise RuntimeError(
-                "No LLM available.\n"
-                "In Colab: the built-in models (google.colab.ai) aren't available to this account; "
-                "add GEMINI_API_KEY in Secrets (key icon, left sidebar) with Notebook access on.\n"
-                "Locally: export GEMINI_API_KEY=... (or OPENAI_API_KEY) before starting Jupyter.")
+    except RuntimeError as e:
+        print(f"✗ {e}")
+        return
+    models = ai.list_models()
+    if _model and _model not in models:
+        raise ValueError(f"use_model({_model!r}): not available here. Choose one of: {', '.join(models)}")
+    print(f"✓ Colab built-in models · using: {_model or 'Colab default'}")
+    print(f"  available: {', '.join(models)}")
 
 
-def _as_prompt(messages: list[dict]) -> str:
-    """Colab's generate_text takes one prompt string; keep the roles visible in it."""
-    parts = [f"{m['role'].upper()}:\n{m['content']}" for m in messages]
-    return "\n\n".join(parts) + "\n\nASSISTANT:\n"
+def get_completion(messages=None, system_prompt=None, user_prompt=None, model=None) -> str:
+    """Same call style as the course notebooks' helper; returns the reply text.
 
-
-def get_completion(messages=None, system_prompt=None, user_prompt=None, model=None,
-                   temperature: float = 0) -> str:
-    """Same signature as the course notebooks' helper. Returns the reply text."""
+    Colab's generate_text takes a single prompt, so chat messages are joined with their roles."""
     messages = list(messages or [])
     if system_prompt:
         messages.insert(0, {"role": "system", "content": system_prompt})
     if user_prompt:
         messages.append({"role": "user", "content": user_prompt})
-    model = model or setting("LLM_MODEL")
+    prompt = "\n\n".join(f"{m['role'].upper()}:\n{m['content']}" for m in messages) + "\n\nASSISTANT:\n"
 
-    p = provider()
-    if p == "colab":
-        kwargs = {"model_name": model} if model else {}
-        return _colab_ai().generate_text(_as_prompt(messages), **kwargs)
-    if p in ("gemini", "openai"):
-        from openai import OpenAI  # Gemini's API also accepts the OpenAI client
-        client = OpenAI(api_key=setting(f"{p.upper()}_API_KEY"),
-                        base_url=GEMINI_BASE_URL if p == "gemini" else None)
-        response = client.chat.completions.create(
-            model=model or DEFAULT_MODELS[p], messages=messages, temperature=temperature)
-        return response.choices[0].message.content
-    check_setup(require=True)  # raises with instructions
+    chosen = model or _model
+    return _colab_ai().generate_text(prompt, **({"model_name": chosen} if chosen else {}))
