@@ -176,6 +176,16 @@ Place the `<LessonMindMap />` call anywhere in the template (commonly right
 before `</LessonLayout>`) — it renders as a fixed overlay, not inline content.
 One per lesson page.
 
+**Inline mode** — `<LessonMindMap content={md} inline height="600px" />` renders
+the map in the page flow (foldable nodes, zoom, pan) instead of as a modal; use it
+for a summary/recap page's knowledge map, in place of a Mermaid `mindmap`. It adds no
+breadcrumb button and can sit alongside the page's modal map. Optional
+`expandLevel` (default `-1` = all levels open) works in both modes.
+
+Don't pass markmap options in a `<script type="application/json">` block — with
+autoloader 0.17 that blanks the root label. The component writes them as markmap
+frontmatter for you; `content` must not have its own frontmatter.
+
 ---
 
 ### `LessonCollapsible`
