@@ -132,6 +132,30 @@ guessing. Single-source modules can skip badges.
   LessonChecklist, LessonQuiz, DeepDive, LessonMindMap, LessonCollapsible, SourceBadge):
   see `REFERENCE.md`.
 
+## Course recap page — when a course (or module) ends
+
+Write one recap page as the course's last entry (`num: '★'`), built as a hierarchy
+of what was learned, not a list of lessons. Sections, in order:
+
+1. **The one-sentence version**: the whole course in a sentence.
+2. **In the course's words** (`course` badge): the course's own skills/goals → the lessons
+   that teach them (table).
+3. **Skill scorecard**: the course's skill areas, each with its lessons and a self-rating column.
+4. **Knowledge map** (`<h2 id="knowledge-map">`): `<LessonMindMap content={map} inline height="600px" />`.
+   Root = course, `##` = skill areas, `###` = concepts, `-` = one-line takeaways.
+5. **How it all connects**: a `LessonDiagram` read bottom to top (building blocks → techniques →
+   patterns), plus a table saying what each pattern is built from.
+6. **One task through every step / principles**: one example carried through the whole stack,
+   then the ideas that recur across lessons.
+7. **Practice: every notebook**: an `OpenInColab` button per notebook in the course.
+8. **What's next**, then the four required sections (checklist, quiz, DeepDive, modal mind map).
+
+Keep the recap last in the course, and link to it from the start: put a "★ Course map" line linking to
+`#knowledge-map` under the course on the contents page. In study-notes, the Udacity index adds
+it automatically for any course with a `★` entry. The
+course's first lesson gets an `info` callout, "Where this course is going", with the same link.
+See it before you start, read it properly at the end.
+
 ## Runnable code: notebooks shown in lessons, opened in Colab
 
 Code that readers should run or edit lives in **committed Jupyter notebooks**, not in
