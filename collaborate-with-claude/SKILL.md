@@ -32,36 +32,54 @@ This skill activates automatically when prompts include:
 
 ---
 
-## High-Level Division of Labor
+---
+
+## The Autonomous AI Software Factory Architecture
 
 ```mermaid
 flowchart TD
-    User["User Prompt / Feature Request"] --> Gemini["Phase 1: Gemini (Orchestrator)"]
-    
-    subgraph G [Gemini 1M+ Context Engine]
-        Gemini --> Scan["Scan Entire Workspace & Git History"]
-        Scan --> Index["Index Symbols, ASTs, Dependencies & Assets"]
-        Index --> Draft["Synthesize Concise plan.md State File"]
+    subgraph Station1 ["🏭 Station 1: Product Strategy & UX (Claude)"]
+        Req["Business Analysis & User Journeys"] --> UX["Ergonomic UX & Typography Scale"]
+        UX --> Spec["Draft Feature Spec & Component Contracts"]
     end
-    
-    Draft --> Claude["Phase 2: Local Claude CLI (Specialist)"]
-    
-    subgraph C [Claude Code Specialist]
-        Claude --> ReadPlan["Ingest plan.md (No Blind Directory Scans)"]
-        ReadPlan --> Design["Apply Senior Designer & Architect Persona"]
-        Design --> Exec["Execute Precision Code, Types & Diffs"]
+
+    Spec -->|"Exports into plan.md"| Station2
+
+    subgraph Station2 ["🔍 Station 2: Codebase Grounding & Audit (Gemini / AGY)"]
+        Scan["Scan Entire Repo (1M+ Token Context)"] --> Audit["Audit Feasibility, Schemas & Existing Utils"]
+        Audit --> Matrix["Populate Dynamic Task Allocation Matrix"]
     end
-    
-    Exec --> Verify["Phase 3: Gemini Verification & Test Suite"]
-    Verify --> Done["Deliver Completed, Polished Code"]
+
+    Matrix --> Gate1{{"🛡️ Human Review Bucket 1: Spec Sign-Off"}}
+    Gate1 -->|"Approved by Human"| Station3
+    Gate1 -->|"Revisions Requested"| Station1
+
+    subgraph Station3 ["⚙️ Station 3: Collaborative Manufacturing"]
+        ClaudeCode["Claude: Precision UI Components & Strict Types"]
+        GeminiCode["Gemini: Scaffolding, Backend Plumbing & Test Suites"]
+    end
+
+    ClaudeCode --> Station4
+    GeminiCode --> Station4
+
+    subgraph Station4 ["🔬 Station 4: Quality Control & Cross-Model Audit"]
+        DiffRev["Claude: Senior Architect Review on Git Diff"]
+        TestRun["Gemini: Automated Test Execution & Regressions"]
+    end
+
+    DiffRev --> Gate2{{"🚀 Human Review Bucket 2: Final Acceptance"}}
+    TestRun --> Gate2
+    Gate2 -->|"Approved by Human"| Done["Production Ready / Merge to Main"]
 ```
 
-| Dimension | Gemini (Bulk Orchestrator) | Claude (Precision Specialist) |
+| Factory Station | Lead Engine | Responsibility & Artifacts |
 | :--- | :--- | :--- |
-| **Primary Strength** | Massive context (1M+ tokens), rapid repo-wide search, scaffolding | Nuanced aesthetic taste, typographic hierarchy, micro-UX ergonomics, deep logic refactoring |
-| **Tokens Consumed** | Ingests entire repositories, configs, logs, and docs | Consumes ONLY compressed `plan.md` (saving ~80-95% tokens) |
-| **Execution Surface** | Antigravity IDE / CLI agent environment | Local Claude Code CLI (`~/.local/bin/claude`) & Claude Projects |
-| **Output Responsibility** | Produces `plan.md`, prepares diff targets, verifies execution | Modifies target files with architectural precision |
+| **1. Strategy & UX** | **Claude (Desktop / Projects)** | Business analysis, human ergonomics, typography hierarchy, component boundaries. |
+| **2. Codebase Grounding** | **Gemini (Antigravity)** | Ingests 1M+ token repo, checks schema feasibility, discovers existing helpers, flags conflicts. |
+| **🛡️ Human Gate 1** | **Developer / Product Owner** | **Spec & Architecture Sign-Off**: Reviews `plan.md` before coding begins. |
+| **3. Manufacturing** | **Gemini + Claude CLI** | Parallel execution: Claude writes ergonomic UI/types; Gemini scaffolds plumbing and backend. |
+| **4. Quality Control** | **Cross-Model Audit** | Claude reviews the `git diff` for design flaws; Gemini runs automated tests and edge cases. |
+| **🚀 Human Gate 2** | **Developer / Product Owner** | **Final Acceptance**: Inspects live behavior, approves final diff, and commits. |
 
 ---
 

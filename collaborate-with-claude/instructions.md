@@ -175,60 +175,91 @@ sequenceDiagram
     Gemini->>User: Runs test suite & final verification
 ```
 
-### The 4-Step Bidirectional Protocol
+---
 
-#### 1. Plan Ingestion & Gemini Codebase Audit
-1. Claude's business analysis, UX wireframes, and technical plans are placed into `plan.md`.
-2. In Antigravity (AGY), prompt:
-   ```text
-   /collaborate-with-claude Audit the business and technical plan in plan.md against our entire codebase. Check for architectural fit, existing reusable utilities, schema incompatibilities, and edge cases.
-   ```
-3. Gemini uses its massive context window to ground the plan in reality, appending a `## Codebase Grounding & Review` section to `plan.md`.
+## Phase 5: The Software Factory Protocol & Human Review Buckets
 
-#### 2. Spec Refinement & Task Allocation Matrix
-Claude digests Gemini's feedback and locks the formal specification. In `plan.md`, the models agree on who writes which layer:
+The hybrid setup operates as an **Autonomous AI Software Factory** governed by **Human-in-the-Loop Quality Gates**. Neither model may proceed to destructive edits or production merges without passing the designated Human Review Bucket.
 
-| Task / Layer | Best-Fit Model | Rationale |
-| :--- | :--- | :--- |
-| **Component Contracts & Design Tokens** | **Claude** | Ergonomic UX, strict typing, typography scale |
-| **Scaffolding, API Plumbing & DB Migrations** | **Gemini (AGY)** | Bulk code generation, speed, whole-repo context |
-| **Complex Frontend UI & Interaction States** | **Claude** | Micro-interactions, WCAG AAA accessibility, cognitive flow |
-| **Integration & Unit Test Suites** | **Gemini (AGY)** | Exhaustive test coverage, fast parallel mock generation |
-| **Architectural Code Review** | **Claude** | High-precision audit of `git diff` against design specs |
+```mermaid
+stateDiagram-v2
+    [*] --> Station1_Strategy: User Prompt or Claude Project Plan
+    Station1_Strategy --> Station2_Grounding: Export to plan.md
+    Station2_Grounding --> HumanBucket1_SpecGate: Ingestion & Feasibility Audit
+    
+    state HumanBucket1_SpecGate {
+        [*] --> PendingReview
+        PendingReview --> RevisionsNeeded: Human requests adjustments
+        RevisionsNeeded --> Station1_Strategy: Refine UX / Architecture
+        PendingReview --> SpecApproved: Human signs off
+    }
 
-#### 3. Execution According to Matrix
-- When **Gemini** implements its assigned tasks: AGY writes the files and runs local build checks.
-- When **Claude** implements its assigned tasks: Run `claude -p "Execute tasks assigned to Claude in plan.md"` (adhering to the token conservation rule).
+    SpecApproved --> Station3_Manufacturing: Unlock Code Generation
+    
+    state Station3_Manufacturing {
+        Gemini_Scaffolding --> Parallel_Assembly
+        Claude_PrecisionUI --> Parallel_Assembly
+    }
 
-#### 4. Cross-Model Code Review
-Before committing:
-1. Ask Claude to review Gemini's code:
-   ```bash
-   claude -p "Review the current git diff against the architectural specification in plan.md. Flag any design inconsistencies, UX regressions, or type flaws."
-   ```
-2. Ask Gemini to verify Claude's code:
-   Run automated test suites and verify edge cases across the broader repository.
+    Parallel_Assembly --> Station4_QC: Cross-Model Audit
+    
+    state Station4_QC {
+        Claude_DiffReview --> Gemini_TestSuite
+    }
+
+    Gemini_TestSuite --> HumanBucket2_AcceptanceGate: All QC checks pass
+    
+    state HumanBucket2_AcceptanceGate {
+        [*] --> PendingFinalSignoff
+        PendingFinalSignoff --> FinalAccepted: Human tests & approves
+        PendingFinalSignoff --> FixesNeeded: Human flags bugs
+        FixesNeeded --> Station3_Manufacturing
+    }
+
+    FinalAccepted --> [*]: Merge to Main
+```
 
 ---
 
-## Summary SOP Matrix
+### The Two Governance Gates
+
+#### 🛡️ Gate 1: Spec & Architecture Review Bucket
+- **When it triggers**: Immediately after Claude drafts the requirements/design and Gemini completes the codebase grounding audit in `plan.md`.
+- **Status Badge**: `STATUS: 🛡️ PENDING_HUMAN_SPEC_REVIEW`
+- **What the Human verifies**:
+  1. **Business Alignment**: Does the specification accurately solve the intended user problem?
+  2. **Ergonomic & Visual Standard**: Are typographic scales, spacing tokens, and accessibility (WCAG AA/AAA) clearly specified?
+  3. **Task Allocation Matrix**: Does the division of labor make sense (Claude on UI/types; Gemini on plumbing/backend)?
+- **Action**: The developer changes status to `STATUS: ✅ SPEC_APPROVED` (in `plan.md` or chat) to authorize code generation.
+
+#### 🚀 Gate 2: Final Acceptance & Release Review Bucket
+- **When it triggers**: After Station 3 (Implementation) and Station 4 (Cross-model QC: Claude diff review + Gemini test pass).
+- **Status Badge**: `STATUS: 🚀 PENDING_HUMAN_FINAL_ACCEPTANCE`
+- **What the Human verifies**:
+  1. **Live Interaction**: Spin up the local preview/dev server and test the user experience.
+  2. **Clean Diff**: Confirm that only the targeted files were modified and no regressions exist.
+  3. **Automated Passing**: Ensure test suite and TypeScript checks are 100% green.
+- **Action**: The developer changes status to `STATUS: 🚢 MERGED` and pushes to main.
+
+---
+
+## Complete Software Factory Lifecycle Summary
 
 ```text
-[User Request / Claude Plan]
-       │
-       ▼
-1. Gemini Ingestion & Audit
-   ├── Ground plan against whole repository
-   ├── Flag breaking changes & missing edge cases
-   └── Fill Task Allocation Matrix in plan.md
-       │
-       ▼
-2. Collaborative Implementation
-   ├── Claude: Strict component specs & ergonomic UI
-   └── Gemini: Scaffolding, plumbing, migrations & tests
-       │
-       ▼
-3. Cross-Model Review
-   ├── Claude reviews git diff against architectural specs
-   └── Gemini runs test suites & verifies build integrity
+[1. Strategy (Claude)] ──► [2. Codebase Audit (Gemini)]
+                                      │
+                                      ▼
+                      [🛡️ Human Review Bucket 1: Spec Sign-Off]
+                                      │
+                                      ▼
+[3. Manufacturing: Claude UI/Types + Gemini Backend/Plumbing]
+                                      │
+                                      ▼
+[4. Quality Control: Claude Diff Audit + Gemini Test Suite]
+                                      │
+                                      ▼
+                      [🚀 Human Review Bucket 2: Final Acceptance]
+                                      │
+                                      ▼
+                                [🚢 Merged]
 ```
