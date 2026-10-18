@@ -98,5 +98,5 @@ flowchart TD
 
 - Step-by-step SOP and token conservation rules: [instructions.md](./instructions.md)
 - Standardized `plan.md` hand-off template: [plan-template.md](./plan-template.md)
-- Agent persona and CLI configuration: [../../agents/claude-specialist.md](../../agents/claude-specialist.md)
+- Agent persona and CLI configuration: [../agents/claude-specialist.md](../agents/claude-specialist.md)
 - Automated execution script: [./scripts/run-claude-hand-off.sh](./scripts/run-claude-hand-off.sh)
