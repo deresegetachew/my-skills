@@ -92,6 +92,18 @@ flowchart TD
 5. **Review & Verification (Phase 3)**:
    - Gemini inspects `git diff`, runs test suites / linters, and presents the summary to the user.
 
+## Autonomous Zero-Copy Bridge (`claude-bridge.sh`)
+
+You never need to manually copy text between Gemini and Claude. Gemini in Antigravity can execute the bridge tool (`claude-bridge.sh`) directly via `run_command`:
+
+| User Intent in Chat | Autonomous Command Executed by Gemini |
+| :--- | :--- |
+| *"Pull Claude's plan and architecture"* | `~/.claude/skills/collaborate-with-claude/scripts/claude-bridge.sh pull-plan` |
+| *"Ask Claude what to build next"* | `~/.claude/skills/collaborate-with-claude/scripts/claude-bridge.sh ask-next` |
+| *"Send our audit feedback to Claude"* | `~/.claude/skills/collaborate-with-claude/scripts/claude-bridge.sh send-feedback "<audit text>"` |
+| *"Ask Claude to review our git diff"* | `~/.claude/skills/collaborate-with-claude/scripts/claude-bridge.sh review-diff` |
+| *"Have Claude implement its assigned tasks"* | `~/.claude/skills/collaborate-with-claude/scripts/claude-bridge.sh exec` |
+
 ---
 
 ## Detailed References
@@ -99,4 +111,5 @@ flowchart TD
 - Step-by-step SOP and token conservation rules: [instructions.md](./instructions.md)
 - Standardized `plan.md` hand-off template: [plan-template.md](./plan-template.md)
 - Agent persona and CLI configuration: [../agents/claude-specialist.md](../agents/claude-specialist.md)
-- Automated execution script: [./scripts/run-claude-hand-off.sh](./scripts/run-claude-hand-off.sh)
+- Autonomous zero-copy bridge script: [./scripts/claude-bridge.sh](./scripts/claude-bridge.sh)
+- Direct CLI runner script: [./scripts/run-claude-hand-off.sh](./scripts/run-claude-hand-off.sh)
