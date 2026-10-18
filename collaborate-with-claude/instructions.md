@@ -146,26 +146,89 @@ After Claude completes its execution run, control returns to Gemini to verify th
 
 ---
 
+---
+
+## Phase 4: Bidirectional Collaboration & Dynamic Work Division
+
+The workflow is not strictly one-way. When **Claude already holds the business analysis, UX design, and technical plans**, you can run a **Bidirectional Peer-Review & Division of Labor Loop**:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Developer
+    participant Claude as Claude (Strategy & Design)
+    participant Plan as plan.md (Shared Whiteboard)
+    participant Gemini as Gemini / AGY (Codebase Engine)
+
+    User->>Plan: Save Claude's Business & Tech Plan
+    User->>Gemini: /collaborate-with-claude Audit plan against codebase
+    Gemini->>Plan: Append Codebase Grounding & Feasibility Review
+    User->>Claude: Refine spec & populate Task Allocation Matrix
+    Claude->>Plan: Lock Component Specs & Assign Tasks
+    par Implementation Division
+        Gemini->>Code: Implements backend, plumbing, tests & scaffolding
+    and
+        Claude->>Code: Implements design system, ergonomic UI & types
+    end
+    Gemini->>Plan: Record Git Diff
+    Claude->>Gemini: Architectural & UX Code Review on Diff
+    Gemini->>User: Runs test suite & final verification
+```
+
+### The 4-Step Bidirectional Protocol
+
+#### 1. Plan Ingestion & Gemini Codebase Audit
+1. Claude's business analysis, UX wireframes, and technical plans are placed into `plan.md`.
+2. In Antigravity (AGY), prompt:
+   ```text
+   /collaborate-with-claude Audit the business and technical plan in plan.md against our entire codebase. Check for architectural fit, existing reusable utilities, schema incompatibilities, and edge cases.
+   ```
+3. Gemini uses its massive context window to ground the plan in reality, appending a `## Codebase Grounding & Review` section to `plan.md`.
+
+#### 2. Spec Refinement & Task Allocation Matrix
+Claude digests Gemini's feedback and locks the formal specification. In `plan.md`, the models agree on who writes which layer:
+
+| Task / Layer | Best-Fit Model | Rationale |
+| :--- | :--- | :--- |
+| **Component Contracts & Design Tokens** | **Claude** | Ergonomic UX, strict typing, typography scale |
+| **Scaffolding, API Plumbing & DB Migrations** | **Gemini (AGY)** | Bulk code generation, speed, whole-repo context |
+| **Complex Frontend UI & Interaction States** | **Claude** | Micro-interactions, WCAG AAA accessibility, cognitive flow |
+| **Integration & Unit Test Suites** | **Gemini (AGY)** | Exhaustive test coverage, fast parallel mock generation |
+| **Architectural Code Review** | **Claude** | High-precision audit of `git diff` against design specs |
+
+#### 3. Execution According to Matrix
+- When **Gemini** implements its assigned tasks: AGY writes the files and runs local build checks.
+- When **Claude** implements its assigned tasks: Run `claude -p "Execute tasks assigned to Claude in plan.md"` (adhering to the token conservation rule).
+
+#### 4. Cross-Model Code Review
+Before committing:
+1. Ask Claude to review Gemini's code:
+   ```bash
+   claude -p "Review the current git diff against the architectural specification in plan.md. Flag any design inconsistencies, UX regressions, or type flaws."
+   ```
+2. Ask Gemini to verify Claude's code:
+   Run automated test suites and verify edge cases across the broader repository.
+
+---
+
 ## Summary SOP Matrix
 
 ```text
-[User Request]
+[User Request / Claude Plan]
        │
        ▼
-1. Gemini Workspace Scan
-   ├── Index symbols & dependencies
-   ├── Extract design tokens & styles
-   └── Write dense plan.md
+1. Gemini Ingestion & Audit
+   ├── Ground plan against whole repository
+   ├── Flag breaking changes & missing edge cases
+   └── Fill Task Allocation Matrix in plan.md
        │
        ▼
-2. Claude CLI Execution
-   ├── Ingest plan.md ONLY
-   ├── Apply Senior Designer Persona
-   └── Perform surgical code modifications
+2. Collaborative Implementation
+   ├── Claude: Strict component specs & ergonomic UI
+   └── Gemini: Scaffolding, plumbing, migrations & tests
        │
        ▼
-3. Gemini Verification
-   ├── Check git diff & linting
-   ├── Run test suite
-   └── Present polished results to user
+3. Cross-Model Review
+   ├── Claude reviews git diff against architectural specs
+   └── Gemini runs test suites & verifies build integrity
 ```

@@ -57,16 +57,32 @@ export interface ComponentProps {
 
 ---
 
-## 6. Execution Tasks for Claude
-1. [ ] Update `path/to/types.ts` with new interfaces.
-2. [ ] Refactor `path/to/Component.tsx` applying typographic hierarchy and ergonomic states.
-3. [ ] Ensure keyboard navigation and focus-visible rings are implemented.
-4. [ ] Run targeted typecheck/lint: `npm run typecheck` or targeted unit test.
+## 6. Gemini Codebase Review & Grounding Audit
+> *Filled by Gemini after auditing Claude's plan against the 1M+ token repository context.*
+- **Feasibility & Architectural Fit**: [Analysis of how the plan aligns with existing patterns]
+- **Discovered Reusable Utilities**: [Existing hooks, helpers, or API clients to leverage]
+- **Potential Breaking Changes & Edge Cases**: [Schema incompatibilities, performance bottlenecks]
+- **Recommended Modifications to Plan**: [Specific adjustments proposed by Gemini]
 
 ---
 
-## 7. Verification Checklist
-- [ ] Typographic scale follows consistent ratio.
-- [ ] Line lengths kept within 45-75 characters.
-- [ ] No exploratory commands executed.
-- [ ] Clean git diff with zero unintended side effects.
+## 7. Dynamic Task Allocation Matrix
+> *Agreed work division between Claude and Gemini/AGY.*
+
+| Task / Deliverable | Assignee | Status | Target File(s) |
+| :--- | :--- | :--- | :--- |
+| Component spec & design tokens | **Claude** | Done | `src/types/`, `src/styles/` |
+| Scaffolding, API routes & DB plumbing | **Gemini (AGY)** | In Progress | `src/server/`, `prisma/` |
+| Ergonomic UI & interaction states | **Claude** | Pending | `src/components/` |
+| Test suite & edge case mocks | **Gemini (AGY)** | Pending | `src/__tests__/` |
+| Architectural code review on diff | **Claude** | Pending | `git diff` |
+
+---
+
+## 8. Cross-Model Review & Verification Checklist
+- [ ] **Claude**: Typographic scale adheres to proportional scale (no arbitrary font sizes).
+- [ ] **Claude**: Line lengths clamped to 45–75 characters (`max-w-prose`).
+- [ ] **Claude**: WCAG 2.1 AA/AAA contrast and focus rings implemented.
+- [ ] **Gemini**: Automated test suite passing with zero regressions.
+- [ ] **Gemini**: Lint and typecheck clean (`npm run typecheck`).
+- [ ] **Both**: Clean git diff with zero unintended side effects.
