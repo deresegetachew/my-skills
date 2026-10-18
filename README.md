@@ -58,3 +58,14 @@ No re-linking needed — symlinks always point at the current file.
 - **study-notes** — bootstrap and author pages for an Astro-based study-notes/
   lesson site (component library, dark-mode theme, optional Gemini AI-tutor chat
   sidebar).
+- **collaborate-with-claude** (`/collaborate-with-claude`) — hybrid dual-model
+  orchestration between Gemini (bulk scanning, repository indexing, AST analysis,
+  scaffolding) and local Claude CLI (`claude`) / Claude Projects (precision
+  product design, typography hierarchy, ergonomic UX, and modular code architecture)
+  via a token-conserving `plan.md` hand-off loop.
+
+## Custom Agents
+
+- **agents/claude-specialist.md** — custom agent profile wrapping the local Claude
+  CLI (`claude`), embedding a Senior Product Designer & Software Architect persona
+  with Claude Project / knowledge base targeting and token-conservation guardrails.
