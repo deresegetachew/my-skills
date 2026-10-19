@@ -147,6 +147,9 @@ of what was learned, not a list of lessons. Sections, in order:
    patterns), plus a table saying what each pattern is built from.
 6. **One task through every step / principles**: one example carried through the whole stack,
    then the ideas that recur across lessons.
+6b. **Choosing a design** (when the course offers alternative designs, e.g. prompt chain vs. workflow vs. agent):
+   the side-by-side diagram, the questions that tell them apart, a compact table of running cost,
+   cost of change (edit + verify) and testability, and the decision flowchart; link the full guide.
 7. **Practice: every notebook**: an `OpenInColab` button per notebook in the course.
 8. **What's next**, then the four required sections (checklist, quiz, DeepDive, modal mind map).
 
