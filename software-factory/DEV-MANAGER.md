@@ -146,6 +146,13 @@ can, and otherwise with one example that passes and one that fails, taken from t
 rule on two or three real cases before publishing it. When the coding agent shows a rule misfiring, fix the
 rule; don't defend it.
 
+## Several coding loops
+
+When the owner runs more than one `factory-loop.sh`, PRs arrive side by side for neighbouring tasks. Merge them in
+plan order when one builds on another; when a later PR conflicts after an earlier merge, ask its branch to rebase
+(or fix the conflict yourself if the loop has moved on). `python3 .claude/hooks/factory_claims.py list` on the
+owner's machine shows which loop holds which task; a claim lapses when its loop exits or after `claimStaleHours`.
+
 ## Token use
 
 Input tokens dominate the bill, not replies, so the big levers are context size and model choice:

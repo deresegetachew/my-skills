@@ -11,12 +11,15 @@ such as `1.3`, or `all` to keep going, phase after phase, until every remaining 
 
 ## 1. Pick the task
 
-1. **Start routine** (every task, so a stale context can't mislead you): `git checkout <mainBranch> && git pull`,
+1. **Start routine** (every task, so a stale context can't mislead you): `git fetch origin && git checkout --detach
+   origin/<mainBranch>` (detached, because another loop's worktree may have the main branch checked out),
    read `git log --oneline -15`, and run the `smoke` command from `factory.json` if it has one. If main is
    broken, fixing it is the task.
 2. **Let the script pick the task:** `python3 .claude/hooks/next_task.py`. It returns the first unticked task
    not in the blocked list, read from the main branch. Don't pick by reading the plan yourself; the PR gate
-   refuses a branch for a task that's ticked or blocked. If `$ARGUMENTS` names a task id, use that one.
+   refuses a branch for a task that's ticked or blocked. If `$ARGUMENTS` names a task id, use that one: under
+   `factory-loop.sh` (the `FACTORY_AGENT` variable is set) the loop has already claimed it for you, and other
+   loops may be building the tasks around it, so build only that task and never pick another yourself.
    Respect phase order: don't start a phase until the previous phase's "Done when" checks pass, unless the plan
    says phases overlap.
 3. Read the PRD sections, design references and decisions the task points to. Say in one line which task
@@ -29,7 +32,8 @@ or product decision the docs leave open), don't guess:
 
 - add it to the blocked list as `- 1.5: needs 30 real samples in data/samples/ (person)`,
 - commit that on a branch and open a short pull request titled `Blocked: <task>`,
-- go back to step 1 for the next task that isn't blocked.
+- go back to step 1 for the next task that isn't blocked (under `factory-loop.sh`, stop instead: the loop claims
+  the next one).
 
 Small gaps the docs don't cover: choose the simplest option that fits the PRD, write it down as
 `<decisions>/NNNN-title.md`, and carry on. Number it from main at the moment you open the PR (highest number on
@@ -77,7 +81,8 @@ write "Decision for you" in a report):
    reviewer and auditors raised, and any decision you recorded.
 3. Once CI is green, merge it yourself with `gh pr merge --squash --delete-branch`, then pull the main
    branch before the next task. The pull-request gate (`.claude/hooks/pr-gate.py`) allows this only when the
-   reviewer passed the latest commit, CI is green and no protected files changed. Ticking your task's box in
+   reviewer passed the latest commit, CI is green and no protected files changed. If `gh` can't switch to the
+   main branch afterwards because another worktree has it, that's fine: `git checkout --detach origin/<mainBranch>`. Ticking your task's box in
    the plan or adding to the blocked list is not a protected change. If the gate says a person must merge it,
    write "A person merges this one: <why>" at the end of the PR description, leave it open and continue: the
    dev manager reviews and merges those. If the person said not to merge, leave every pull request open.
@@ -93,8 +98,10 @@ write "Decision for you" in a report):
   (it changes the same files, or the plan stacks on it), run `.claude/hooks/wait_for_merge.sh <n> 30`. It
   polls GitHub every minute without using model tokens and returns as soon as the PR merges (exit 0). If it
   times out (exit 2), take `python3 .claude/hooks/next_task.py --after <id>` for a task that doesn't touch
-  those files, and say so in your report.
-- **Work-in-progress cap:** the PR gate won't open a new PR while `maxOpenPRs` of yours are open. Wait on the
+  those files, and say so in your report. Under `factory-loop.sh`, stop the run instead: the loop skips a task
+  whose branch is on the remote and claims the next free one.
+- **Work-in-progress cap:** the PR gate won't open a new PR while `maxOpenPRs` of yours are open (all loops
+  together). Wait on the
   oldest with `wait_for_merge.sh`, or answer whatever is holding it up.
 - **Fresh context per task:** if the owner started you with `./factory-loop.sh`, do exactly one task and stop;
   the script starts a fresh run for the next one. Keep anything the next run needs in git, the PR or the plan,

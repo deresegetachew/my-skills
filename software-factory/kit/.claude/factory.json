@@ -48,5 +48,6 @@
     "(^|/)package\\.json$"
   ],
   "maxOpenPRs": 3,
+  "claimStaleHours": 6,
   "prSizeWarn": 600
 }
