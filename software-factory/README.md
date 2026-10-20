@@ -56,6 +56,11 @@ the PRD, the plan, decisions, the code, and the PRs with their comments. Anythin
 into a commit, the PR or a decision file. (`claude` then `/loop /next-task all` also works, as one long
 interactive session; restart it every few hours.)
 
+To talk to the agent while it works, use `./factory-loop.sh --interactive`. Each task opens a normal Claude
+session with the task already started, so you can watch and type. When it says the task is done, type `/exit`,
+and the loop starts the next task in a fresh session. Claims and worktrees work the same, so you can run
+several interactive loops side by side.
+
 ### Several loops and the lock file
 
 Start `./factory-loop.sh` in as many terminals as you like:
@@ -134,6 +139,7 @@ bash ~/path/to/my-skills/software-factory/install.sh .
 # fill in .claude/factory.json, CLAUDE.md and docs/build-plan.md (or ask Claude: "set up the software factory")
 ./factory-loop.sh        # or: claude, then /loop /next-task all
 ./factory-loop.sh        # again, in a second terminal, for a second loop on other tasks
+./factory-loop.sh -i     # interactive: a normal Claude session per task; /exit moves on to the next
 ```
 
 Then, in a Claude session with the repo attached (cloud, so it runs with the laptop closed): "be the dev

@@ -3,6 +3,10 @@
 # (cheaper and more reliable than one long session; state lives in git, the plan and the PRs).
 #   ./factory-loop.sh            run until every task is done, blocked or taken by another loop
 #   ./factory-loop.sh 5          run at most 5 tasks
+#   ./factory-loop.sh --interactive [N]
+#                                each task opens a normal Claude session you can type into, with the task
+#                                already started; type /exit when it says it's done and the loop starts the
+#                                next task in a fresh session (still claimed, still one task per session)
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
 # (the first uses this folder, the others a git worktree in <project>-agents/agent-N) and claims each task in
@@ -16,6 +20,8 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 hooks="$PWD/.claude/hooks"
+interactive=0
+if [ "${1:-}" = "--interactive" ] || [ "${1:-}" = "-i" ]; then interactive=1; shift; fi
 limit="${1:-999}"
 
 read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$) || exit 1
@@ -31,6 +37,7 @@ if [ "$dir" != "$PWD" ]; then
 fi
 hooks="$PWD/.claude/hooks"
 export FACTORY_AGENT="$agent"
+export FACTORY_INTERACTIVE="$interactive"
 echo "[$agent] working in $PWD"
 
 last=""; repeats=0
@@ -45,6 +52,11 @@ for ((n = 1; n <= limit; n++)); do
     exit 1
   fi
   echo "=== [$agent] $(date '+%H:%M') task $next ==="
-  claude -p "/next-task $id" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+  if [ "$interactive" = 1 ]; then
+    echo "[$agent] Talk to it as usual. When it says the task is done, type /exit for the next task (Ctrl-C twice stops the loop)."
+    claude "/next-task $id" || true
+  else
+    claude -p "/next-task $id" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+  fi
   python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
 done
