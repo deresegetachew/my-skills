@@ -9,7 +9,8 @@ on:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A label change re-runs only the Factory guard, in its own group so it can't cancel a code run.
+  group: ci-${{ github.ref }}-${{ contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && 'label' || 'code' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -37,6 +38,7 @@ jobs:
 
   check:
     name: Typecheck, lint, test, build
+    if: ${{ !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
