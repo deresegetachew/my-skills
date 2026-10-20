@@ -12,6 +12,7 @@
 #
 # Stops when the same task comes up 3 times in a row (stuck), and prints why.
 # Commands Claude needs must be allowed in .claude/settings.json: in this mode nobody can answer a prompt.
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"   # `sh factory-loop.sh` on macOS is POSIX sh; this needs bash
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)"
 hooks="$PWD/.claude/hooks"
