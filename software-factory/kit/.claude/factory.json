@@ -1,0 +1,26 @@
+{
+  "_about": "Software factory settings for this project. The hooks and the next-task skill read this file; edit it, not the hooks.",
+  "prd": "docs/PRD.md",
+  "plan": "docs/build-plan.md",
+  "blocked": "docs/blocked.md",
+  "decisions": "docs/decisions",
+  "mainBranch": "main",
+  "commands": {
+    "install": "pnpm install --frozen-lockfile",
+    "typecheck": "pnpm -s typecheck",
+    "lint": "pnpm -s lint",
+    "test": "pnpm -s test",
+    "build": "pnpm -s build"
+  },
+  "codePaths": ["apps", "packages", "src", "tools"],
+  "protected": [
+    "^CLAUDE\\.md$",
+    "^\\.claude/",
+    "^docs/PRD\\.md$",
+    "^\\.github/workflows/",
+    "/migrations/",
+    "\\.env"
+  ],
+  "alwaysAllowed": ["docs/build-plan.md", "docs/blocked.md"],
+  "reviewMarkers": "tmp/reviews"
+}
