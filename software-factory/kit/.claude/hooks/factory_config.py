@@ -21,6 +21,9 @@ DEFAULTS = {
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",
+    # Style guides per path: [{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal"],
+    #   "check": "python3 .claude/hooks/check_structure.py"}]. The architecture reviewer and CI use them.
+    "styles": [],
 }
 
 
@@ -58,3 +61,14 @@ def branch_task(branch):
     """task/1-3-validators -> '1.3'; anything else -> None."""
     m = re.match(r"task/(\d+(?:-\d+)*?)-[a-z]", branch) or re.match(r"task/(\d+(?:-\d+)*)$", branch)
     return m.group(1).replace("-", ".") if m else None
+
+
+def styled(paths, cfg):
+    """The style entries whose `paths` globs match any of `paths` (fnmatch; `**` matches across folders)."""
+    import fnmatch
+    out = []
+    for style in cfg.get("styles", []):
+        globs = style.get("paths", [])
+        if any(fnmatch.fnmatch(p, g) for p in paths for g in globs):
+            out.append(style)
+    return out

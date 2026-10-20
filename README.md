@@ -22,7 +22,9 @@ Then pick what to install:
 ./install.sh --remove study-notes                     # uninstall
 ```
 
-It symlinks, not copies, so `git pull` here updates every install at once.
+It symlinks, not copies, so `git pull` here updates every install at once. For a project whose CI or cloud sessions
+need the skill too, add `--copy`: `./install.sh --project ~/dev/myapp --copy nestjs-best-practices` commits a pinned copy
+into the project, and re-running it updates the copy.
 
 ## Run
 
@@ -48,6 +50,11 @@ No re-linking needed — symlinks always point at the current file.
 - **study-notes** — bootstrap and author pages for an Astro-based study-notes/
   lesson site (component library, dark-mode theme, optional Gemini AI-tutor chat
   sidebar).
+- **nestjs-clean-code-ddd-hexagonal** — the backend architecture style: hexagonal layers, a framework-free domain,
+  use cases behind a CommandBus and QueryBus, thin controllers, SQL only in adapters, and strictly one class per file.
+  Comes with `scripts/check_structure.py`, a CI check with a legacy list that only shrinks.
+- **nestjs-best-practices** — 40 NestJS rules in 10 categories (architecture, DI, errors, security, performance,
+  testing, database, API, microservices, DevOps), each with wrong and right examples.
 - **software-factory** — turn a repo into a software factory: a coding agent builds
   from a PRD and a build plan in a loop (`/loop /next-task all`: tests first, reviewer and
   auditor subagents, hooks that gate PRs and merges), and a dev manager Claude session

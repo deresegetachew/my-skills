@@ -31,6 +31,17 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    the rules files, CI, lockfiles, migrations, and anything that implements a critical rule (safety logic,
    money, approval gates). Set `testPaths` and `goldenPaths` to where tests and expected outputs live, and
    `smoke` to a quick command that proves main works.
+   **Style guides:** ask the owner which style skills each part of the code follows, for example the NestJS backend
+   skills `nestjs-clean-code-ddd-hexagonal` and `nestjs-best-practices` from this repo.
+   - **Copy them into the project**, so CI, fresh clones and the cloud dev manager can read them:
+     `<my-skills>/install.sh --project . --copy <skill> [...]`.
+   - **Add a `styles` entry for each path**, for example
+     `{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal", "nestjs-best-practices"], "check": "python3 .claude/hooks/check_structure.py"}`.
+   - **For the hexagonal skill, also copy the checker:** `scripts/check_structure.py` into `.claude/hooks/`. Then set
+     `structure.roots`, and seed the legacy list with `check_structure.py --legacy` when existing code doesn't follow
+     the rules yet. That list only shrinks.
+   - **Enforcement:** the architecture-reviewer reviews diffs on those paths, the PR gate needs its pass, and CI runs
+     the `check` commands.
 4. **Write `CLAUDE.md`** from `CLAUDE.factory.md`: the product in a paragraph, the docs to read in order,
    **the rules that matter most** (each one checkable by a reviewer), voice and copy rules, code style, and
    the "How to work" section as given.

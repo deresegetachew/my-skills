@@ -77,6 +77,8 @@ write "Decision for you" in a report):
 1. Branch: `git checkout -b task/<id>-<short-name>`.
 2. For tasks that add behaviour, ask the `test-writer` subagent to write the failing tests first and commit
    them on their own. Then plan the change briefly and implement it following `CLAUDE.md` and the decisions.
+   **Style guides:** if the files you'll change match a `styles` entry in `.claude/factory.json`, read those skills
+   first (`.claude/skills/<name>/SKILL.md`) and follow them. Run their `check` command before every push.
    **Once implementation starts, the tests are read-only for you.** If a test turns out to be wrong, say why in
    a `<!-- factory-question -->` comment and let the test-writer or the dev manager change it. CI's factory guard
    fails a PR that edits tests or expected outputs after implementation started, changes tests or golden files
@@ -89,7 +91,8 @@ write "Decision for you" in a report):
    report in the pull request. If it touches auth, payments, public endpoints, uploads, storage, tenancy,
    secrets or model calls on untrusted input, ask the `security-reviewer` subagent. Fix every must-fix.
 6. Ask the `reviewer` subagent to review the diff against the task, the PRD and `CLAUDE.md`. Fix every
-   must-fix it reports. Ignore style preferences.
+   must-fix it reports. Ignore style preferences. If the diff touches a path with a style guide, also ask the
+   `architecture-reviewer` subagent and fix every must-fix: the PR gate needs both passes.
 
 ## 4. Ship it
 
