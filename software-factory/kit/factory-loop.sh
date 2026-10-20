@@ -37,8 +37,12 @@ if [ "$dir" != "$PWD" ]; then
 fi
 hooks="$PWD/.claude/hooks"
 export FACTORY_AGENT="$agent"
+# Own ports, database and queue per loop (agentEnv in factory.json), then the project's per-loop setup.
+eval "$(python3 "$hooks/factory_env.py" --agent "$agent")" || exit 1
+setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("agentSetup",""))')
+[ -n "$setup" ] && { echo "[$agent] $setup"; sh -c "$setup" || echo "[$agent] (agentSetup failed; tests may fail until it works)"; }
 export FACTORY_INTERACTIVE="$interactive"
-echo "[$agent] working in $PWD"
+echo "[$agent] working in $PWD (slot $FACTORY_SLOT)"
 
 last=""; repeats=0
 for ((n = 1; n <= limit; n++)); do

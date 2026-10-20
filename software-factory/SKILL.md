@@ -74,6 +74,10 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose
    `task/<id>-...` branch is on the remote. It helps only when the plan has tasks that don't build on each other,
    and costs tokens per loop. Raise `maxOpenPRs` to about loops + 1.
+   **Ports and databases for parallel loops:** during setup, find every fixed port and database or queue name the
+   tests and dev scripts use (docker-compose, vite/playwright configs, `DATABASE_URL`). Make each one read an
+   environment variable with today's value as the default, then list them in `agentEnv` and add an `agentSetup`
+   command that creates the slot's database. Slot 1 keeps the defaults.
    **Tokens:** most of the cost is input, so the fresh context per task matters most; use cheaper models for
    routine subagents. Terse-reply skills such as the community `/caveman` save a few percent at most.
 9. Offer to be the dev manager (Mode 2).

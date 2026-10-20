@@ -83,6 +83,9 @@ write "Decision for you" in a report):
    a `<!-- factory-question -->` comment and let the test-writer or the dev manager change it. CI's factory guard
    fails a PR that edits tests or expected outputs after implementation started, changes tests or golden files
    that already existed, adds `.skip`/`.only`, or adds a dependency, until the dev manager has reviewed it.
+   **Parallel loops:** other loops may be running tests on this machine. Ports, database names and queues come
+   from the environment (`agentEnv` in `factory.json`; the loop has exported them). Never hard-code a port in a
+   script or test config; read the variable and keep today's value as the default.
 3. Test what a user or another module can observe. Run the task's "Done when" check and the project's
    `typecheck`, `lint` and `test` commands. Fix until they pass. Show the output as evidence.
 4. UI work: run the `design-check` skill if the project has design references. Work on prompts, models or
