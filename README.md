@@ -9,30 +9,20 @@ Clone once, anywhere:
 
 ```bash
 git clone git@github.com:deresegetachew/my-skills.git ~/Documents/dev/my-skills
+cd ~/Documents/dev/my-skills
 ```
 
-Then make a skill available to Claude Code by symlinking it in — two ways to do that,
-depending on where you want it usable:
-
-**Globally** (every project on this machine):
+Then pick what to install:
 
 ```bash
-ln -s ~/Documents/dev/my-skills/<skill-name> ~/.claude/skills/<skill-name>
+./install.sh                  # list the skills and what's already installed
+./install.sh software-factory # install one globally (~/.claude/skills)
+./install.sh --all            # install everything
+./install.sh --project ~/dev/myapp software-factory   # only inside one project
+./install.sh --remove study-notes                     # uninstall
 ```
 
-**Project-scoped** (only inside one project, e.g. for a team member who's cloned
-`my-skills` at the same path):
-
-```bash
-mkdir -p .claude/skills
-ln -s ../../../my-skills/<skill-name> .claude/skills/<skill-name>   # adjust ../ depth to your project's location
-```
-
-Either way it's a symlink, not a copy — `git pull` inside `my-skills` updates every
-project using it at once. Skip this step if you've already symlinked a skill
-globally; a project-scoped copy is redundant unless you specifically want the
-project to carry the skill even when opened on a machine that has a different (or
-no) global skill set.
+It symlinks, not copies, so `git pull` here updates every install at once.
 
 ## Run
 
