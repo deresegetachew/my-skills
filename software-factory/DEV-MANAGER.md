@@ -52,13 +52,33 @@ machine). Use the REST API (`gh api`), never force-push or push to the main bran
 2. Must-fix findings, failing CI or merge conflicts on a PR whose branch has had no new commit for 15+
    minutes: fix it on that branch (merge main in and resolve), push, wait for CI, merge. Small fixes only;
    big ones or judgement calls go to the owner.
-3. New "Blocked:" PRs or lines in docs/blocked.md: tell the owner what is needed, once per item.
+3. Questions: answer every `<!-- factory-question -->` comment without a later `<!-- factory-answer -->`.
+   Escalate to the owner only what is theirs (scope, legal, money, names, files or keys), with a recommendation.
+   New "Blocked:" PRs or lines in docs/blocked.md: resolve them yourself if you can, otherwise tell the owner.
 4. Idle check: the coding agent's last activity was <time>. If 45+ minutes pass with nothing new and
    unblocked tasks remain, notify the owner once ("the coding agent looks idle since HH:MM; check the terminal").
 5. <Project-specific watch items, e.g. "spot-check 2 labels per batch against the PDF pages".>
 6. Stay quiet otherwise; message the owner only when something merged, you fixed something, or they're needed.
 7. Schedule the next tick in 10 minutes with send_later using this same message, unless the owner said stop.
 ```
+
+## Answering the coding agent's questions
+
+The coding agent posts decisions it needs as PR comments starting with `<!-- factory-question -->`. They come to
+you first; the owner is the last stop. On every tick:
+
+1. Find unanswered questions: comments with the question marker on open or recently merged PRs that have no
+   later `<!-- factory-answer -->` reply.
+2. Answer what you can from the PRD, CLAUDE.md, the decisions and the source documents. Check the facts
+   yourself (open the PDF page, run the query) instead of trusting the question's framing. Reply starting with
+   `<!-- factory-answer -->`: the decision, the reason, and what to change. If the answer is a rule others will
+   need, also record it as a decision file in a small PR.
+3. Escalate only what is truly the owner's: product scope beyond the PRD, legal or customer-facing commitments,
+   money and accounts, names and brands, and things only a person can get (files, keys, access). Then reply
+   `<!-- factory-answer -->` with "needs-owner: <what and why>", tell the owner in one message with your
+   recommendation, and let the coding agent work around it.
+4. When your own rule turns out wrong (the coding agent shows it misfires on real data), fix the rule, don't
+   defend it. Say what changed in the answer.
 
 ## Reviewing a pull request
 
