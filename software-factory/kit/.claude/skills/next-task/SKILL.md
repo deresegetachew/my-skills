@@ -124,6 +124,10 @@ write "Decision for you" in a report):
 - **Fresh context per task:** if the owner started you with `./factory-loop.sh`, do exactly one task and stop;
   the script starts a fresh run for the next one. Keep anything the next run needs in git, the PR or the plan,
   not in your memory.
+- **Interactive loop** (`FACTORY_INTERACTIVE=1`, from `./factory-loop.sh --interactive`): the owner is at the
+  terminal. You may ask them short questions there, but decisions still go in the PR or a decision file, so the
+  next fresh session sees them. When the task is done, end with one line: `Task <id> done: <PR link>. Type /exit for
+  the next task.` Don't start another task in this session.
 - Stop and report only when every remaining task is blocked, a "Done when" check or CI fails in a way you
   can't fix, or a task would break one of the rules in `CLAUDE.md`.
 - The report is short: tasks done (with PR links), tasks blocked, and questions still open (with links to
