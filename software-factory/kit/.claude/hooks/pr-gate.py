@@ -11,7 +11,7 @@ Exit 2 blocks the command and tells Claude why.
 import json, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from factory_config import load  # noqa: E402
+from factory_config import blocked_ids, branch_task, load, tasks  # noqa: E402
 
 
 def run(*a):
@@ -41,6 +41,23 @@ if re.search(r"\bgh\s+pr\s+create\b", cmd) and not is_draft:
     if not passed(branch, head):
         block("No reviewer pass for this commit. Ask the reviewer subagent to review the diff, fix any "
               "must-fix items, then open the pull request.")
+    tid = branch_task(branch)
+    if tid:
+        main = cfg["mainBranch"]
+        plan = run("git", "show", f"origin/{main}:{cfg['plan']}")[1]
+        done = {i for i, d, _ in tasks(plan) if d}
+        blocked = blocked_ids(run("git", "show", f"origin/{main}:{cfg['blocked']}")[1])
+        if tid in done:
+            block(f"Task {tid} is already ticked on {main}. Run `python3 .claude/hooks/next_task.py` and build that one.")
+        if tid in blocked:
+            block(f"Task {tid} is in {cfg['blocked']}. Pick the next task with `python3 .claude/hooks/next_task.py`.")
+    rc, out = run("gh", "pr", "list", "--author", "@me", "--state", "open", "--json", "number,isDraft")
+    if rc == 0:
+        ready = [p["number"] for p in json.loads(out or "[]") if not p["isDraft"]]
+        if len(ready) >= int(cfg["maxOpenPRs"]):
+            block(f"{len(ready)} of your pull requests are open (limit {cfg['maxOpenPRs']}): "
+                  + ", ".join(f"#{n}" for n in sorted(ready)) + ". Wait for the oldest with "
+                  f"`.claude/hooks/wait_for_merge.sh {min(ready)}`, or answer what's blocking it, before opening another.")
 
 m = re.search(r"\bgh\s+pr\s+merge\b\s*([^\s-][^\s]*)?", cmd)
 if m:

@@ -4,6 +4,7 @@ name: CI
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 
@@ -15,6 +16,25 @@ permissions:
   contents: read
 
 jobs:
+  guard:
+    # The factory guard: test and golden-file edits, skips, new dependencies, decision numbers, task ticks.
+    # It runs here, where the coding agent can't edit around it. The dev manager clears reviewable findings with
+    # the `tests-reviewed` / `deps-reviewed` labels.
+    name: Factory guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          # Passed through env, never inlined into the script: branch names and labels are untrusted text.
+          BASE: ${{ github.base_ref }}
+          BRANCH: ${{ github.head_ref }}
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: python3 .claude/hooks/factory_guard.py --base "origin/$BASE" --branch "$BRANCH" --labels "$LABELS"
+
   check:
     name: Typecheck, lint, test, build
     runs-on: ubuntu-latest

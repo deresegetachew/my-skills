@@ -14,7 +14,12 @@ software-factory/
     .claude/factory.json         paths, commands and protected files for this project
     .claude/settings.json        permissions and the two hooks
     .claude/hooks/check.py       Stop hook: typecheck and tests must pass before a turn ends
-    .claude/hooks/pr-gate.py     PreToolUse hook: reviewer pass, green CI, no protected files, or no merge
+    .claude/hooks/pr-gate.py     PreToolUse hook: reviewer pass, green CI, no protected files, or no merge;
+                                 refuses ticked or blocked tasks and more than maxOpenPRs at once
+    .claude/hooks/factory_guard.py   CI guard: tests/golden edits, skips, new deps, decision numbers, task ticks
+    .claude/hooks/next_task.py   picks the next task from the plan on main
+    .claude/hooks/wait_for_merge.sh  waits on a PR without spending tokens
+    factory-loop.sh              runs one fresh Claude session per task
     .claude/agents/              reviewer, test-writer, safety-auditor, security-reviewer
     .claude/skills/              next-task, design-check, eval
     docs/                        build-plan, blocked list and decision templates
@@ -26,8 +31,7 @@ Quick start in a project that has a PRD:
 ```bash
 bash ~/path/to/my-skills/software-factory/install.sh .
 # fill in .claude/factory.json, CLAUDE.md and docs/build-plan.md (or ask Claude: "set up the software factory")
-claude
-/loop /next-task all
+./factory-loop.sh        # or: claude, then /loop /next-task all
 ```
 
 Then, in a Claude session with the repo attached (cloud, so it runs with the laptop closed): "be the dev

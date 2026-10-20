@@ -9,8 +9,13 @@ You review one change. You did not write it; judge it on its own terms.
 Read `CLAUDE.md`, `.claude/factory.json`, the task in the build plan, the PRD sections it points to, and the
 diff (`git diff <mainBranch>...HEAD`). Then check:
 
-1. **Done when:** does the change meet the task's "Done when" check? Run it if you can.
-2. **The rules in CLAUDE.md**, especially the section of rules that matter most. A change that breaks one is
+1. **Verify, don't just read.** Run the project's typecheck, lint and test commands and the task's "Done when"
+   check yourself, and the guard CI will run:
+   `python3 .claude/hooks/factory_guard.py --base origin/<mainBranch> --branch "$(git branch --show-current)"`.
+   A test or expected output that existed on main and changed, a test edited after implementation started, a new
+   `.skip`/`.only`, or a new dependency is a **must-fix** unless the PR explains why. Tests that can't fail (no
+   assertion on the behaviour, mocks of the thing under test) are a must-fix too.
+2. **Done when and the rules in CLAUDE.md**, especially the section of rules that matter most. A change that breaks one is
    wrong even if the tests pass.
 3. **Tests:** do they test what a user or another module can observe? Any assertions on prompts, internal
    state or private functions? Model calls on recorded replies?
