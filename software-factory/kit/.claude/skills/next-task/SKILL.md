@@ -36,8 +36,9 @@ The owner isn't watching your terminal; the dev manager is watching the repo. Wh
 (the docs disagree, a rule gives a strange result, a reviewer suggestion is a judgement call, you'd otherwise
 write "Decision for you" in a report):
 
-1. Post it as a comment on the pull request it concerns (or open a short `Question: <topic>` PR if there's no
-   PR yet), starting with the marker `<!-- factory-question -->`. Write one question per comment, with the
+1. Post it as a comment on the pull request it concerns (or, if there's no PR yet or you're stuck before the
+   reviewer has passed, open a **draft** PR with `gh pr create --draft --title "Question: <topic>"`; drafts
+   skip the reviewer check), starting with the marker `<!-- factory-question -->`. Write one question per comment, with the
    options you see, what each would change, and your recommendation.
 2. Don't wait idle. Continue with the parts that don't depend on the answer, or the next task that doesn't.
 3. Check for answers at each poll and before each task: `gh pr view <n> --comments`. An answer starts with

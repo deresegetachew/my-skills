@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """PreToolUse hook on Bash: gate `gh pr create` and `gh pr merge` for the coding agent.
 
-create: needs a reviewer pass for the current commit (<reviewMarkers>/<branch>.ok holding HEAD).
+create: needs a reviewer pass for the current commit (<reviewMarkers>/<branch>.ok holding HEAD),
+        except draft PRs (`--draft`), which are for questions and early feedback.
 merge:  needs that pass for the PR's head commit, green CI, and no protected paths changed
         (`protected` in .claude/factory.json; `alwaysAllowed` files such as the build plan are fine).
         Protected changes are left for the dev manager or a person to merge.
@@ -31,7 +32,10 @@ cfg = load()
 mark = lambda b: os.path.join(cfg["reviewMarkers"], b.replace("/", "_") + ".ok")
 passed = lambda b, sha: os.path.exists(mark(b)) and open(mark(b)).read().strip() == sha
 
-if re.search(r"\bgh\s+pr\s+create\b", cmd):
+# Draft PRs are how the coding agent talks to the dev manager (questions, blocked work, early feedback).
+# They can't be merged, and merging stays fully gated below, so they skip the reviewer check.
+is_draft = re.search(r"(^|\s)(--draft|-d)(\s|$)", cmd) is not None
+if re.search(r"\bgh\s+pr\s+create\b", cmd) and not is_draft:
     _, branch = run("git", "branch", "--show-current")
     _, head = run("git", "rev-parse", "HEAD")
     if not passed(branch, head):
