@@ -23,8 +23,53 @@ Then pick what to install:
 ```
 
 It symlinks, not copies, so `git pull` here updates every install at once. For a project whose CI or cloud sessions
-need the skill too, add `--copy`: `./install.sh --project ~/dev/myapp --copy nestjs-best-practices` commits a pinned copy
+need the skill too, use a git submodule (next section), or add `--copy`: `./install.sh --project ~/dev/myapp --copy nestjs-best-practices` commits a pinned copy
 into the project, and re-running it updates the copy.
+
+## Use in a project as a git submodule
+
+When a project's CI, cloud sessions or other machines need a skill, a symlink to your laptop's folder won't do:
+the link points at a path that only exists on your laptop. Add my-skills to the project as a **git submodule**
+instead. The project then records exactly which my-skills commit it uses, and every clone gets the same files.
+
+**Set it up once** (use the https URL, so CI can fetch it without a key; my-skills is public):
+
+```bash
+cd ~/dev/myapp
+git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
+mkdir -p .claude/skills
+ln -s ../../vendor/my-skills/nestjs-best-practices .claude/skills/nestjs-best-practices
+ln -s ../../vendor/my-skills/nestjs-clean-code-ddd-hexagonal .claude/skills/nestjs-clean-code-ddd-hexagonal
+git add .gitmodules vendor/my-skills .claude/skills && git commit -m "Skills from my-skills as a submodule"
+```
+
+The links are **relative and inside the repo**, so they work on every machine, unlike a link to your laptop's folder.
+A skill's scripts run straight from the submodule, for example
+`python3 vendor/my-skills/nestjs-clean-code-ddd-hexagonal/scripts/check_structure.py`.
+
+**Clone or check out:**
+- `git clone --recurse-submodules <url>`, or `git submodule update --init` after a plain clone;
+- the same in each new git worktree (`factory-loop.sh` does it for you);
+- in GitHub Actions, `actions/checkout` with `submodules: true`.
+
+**Update the skills in the project:** push your change to my-skills first, then in the project:
+
+```bash
+git submodule update --remote vendor/my-skills
+git commit -am "Update my-skills"          # through a pull request, like any other change
+```
+
+The project keeps the old version until that commit, so a skill change never reaches a project by surprise.
+`git diff --submodule` shows which my-skills commits came in.
+
+**Software factory projects:** add `^vendor/my-skills` and `^\.gitmodules$` to `protected` in `.claude/factory.json`,
+so a coding agent can't change the rules it is reviewed against. Put `git submodule update --init` first in
+`commands.install`.
+
+**Which to use:**
+- **Symlink** (`./install.sh`): only you, only on this machine.
+- **Submodule:** the project's CI, cloud sessions and other people need the skill.
+- **Copy** (`--copy`): the same, but when you don't want a submodule.
 
 ## Run
 

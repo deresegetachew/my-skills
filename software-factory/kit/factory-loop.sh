@@ -31,6 +31,7 @@ if [ "$dir" != "$PWD" ]; then
   # A new worktree has no untracked local files: bring the local env files over, then install.
   for f in .env.local .env.*.local; do [ -f "$f" ] && [ ! -e "$dir/$f" ] && cp "$f" "$dir/$f"; done
   cd "$dir"
+  [ -f .gitmodules ] && git submodule update --init -q  # skills from my-skills, for example
   install=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("install",""))')
   marker="$(git rev-parse --git-dir)/factory-installed"
   [ -n "$install" ] && [ ! -e "$marker" ] && { echo "[$agent] $install"; sh -c "$install" && touch "$marker"; }
@@ -47,6 +48,7 @@ echo "[$agent] working in $PWD (slot $FACTORY_SLOT)"
 last=""; repeats=0
 for ((n = 1; n <= limit; n++)); do
   git fetch -q origin && git checkout -q --detach "origin/$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))')" 2>/dev/null
+  [ -f .gitmodules ] && git submodule update --init -q  # main may have moved the submodule
   next=$(python3 "$hooks/next_task.py" --claim "$agent" --pid $$) || {
     echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }
   id="${next%% *}"

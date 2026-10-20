@@ -129,8 +129,10 @@ Three layers enforce them:
    contract tests) against each guide's checklist.
 3. **The PR gate** refuses to open or merge a PR on a styled path without the architecture-reviewer's pass.
 
-Install the skills into the project as a copy, so CI and fresh clones have them:
-`./install.sh --project <dir> --copy nestjs-clean-code-ddd-hexagonal nestjs-best-practices`.
+Put the skills into the project so CI and fresh clones have them. The best way is a git submodule of my-skills, with
+relative links in `.claude/skills` and `vendor/my-skills` on the protected list (see "Use in a project as a git
+submodule" in the root README). Then `check` can run the script straight from the submodule. A pinned copy also
+works: `./install.sh --project <dir> --copy nestjs-clean-code-ddd-hexagonal nestjs-best-practices`.
 
 ### The Factory guard
 

@@ -12,7 +12,8 @@ such as `1.3`, or `all` to keep going, phase after phase, until every remaining 
 ## 1. Pick the task
 
 1. **Start routine** (every task, so a stale context can't mislead you): `git fetch origin && git checkout --detach
-   origin/<mainBranch>` (detached, because another loop's worktree may have the main branch checked out),
+   origin/<mainBranch>` (detached, because another loop's worktree may have the main branch checked out), then
+   `git submodule update --init` if the repo has a `.gitmodules`,
    read `git log --oneline -15`, and run the `smoke` command from `factory.json` if it has one. If main is
    broken, fixing it is the task.
 2. **Let the script pick the task:** `python3 .claude/hooks/next_task.py`. It returns the first unticked task
