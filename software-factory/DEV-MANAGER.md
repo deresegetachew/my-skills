@@ -68,7 +68,8 @@ The coding agent posts decisions it needs as PR comments starting with `<!-- fac
 you first; the owner is the last stop. On every tick:
 
 1. Find unanswered questions: comments with the question marker on open or recently merged PRs that have no
-   later `<!-- factory-answer -->` reply.
+   later `<!-- factory-answer -->` reply. Check draft PRs too: the coding agent opens a draft `Question:` PR when it's
+   stuck before review. Answer there; close the draft when it's resolved, unless the agent turns it into real work.
 2. Answer what you can from the PRD, CLAUDE.md, the decisions and the source documents. Check the facts
    yourself (open the PDF page, run the query) instead of trusting the question's framing. Reply starting with
    `<!-- factory-answer -->`: the decision, the reason, and what to change. If the answer is a rule others will
