@@ -18,5 +18,6 @@ find . -type f | sort | while read -r f; do
 done
 chmod +x "$dst"/.claude/hooks/*.py 2>/dev/null || true
 grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignore"
+grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 echo
 echo "Next: fill in .claude/factory.json, write CLAUDE.md from CLAUDE.factory.md, write docs/build-plan.md."
