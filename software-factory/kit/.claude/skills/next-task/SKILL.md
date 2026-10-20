@@ -30,6 +30,20 @@ or product decision the docs leave open), don't guess:
 Small gaps the docs don't cover: choose the simplest option that fits the PRD, write it down as
 `<decisions>/NNNN-title.md`, and carry on.
 
+## 2b. Questions go to the dev manager, not the terminal
+
+The owner isn't watching your terminal; the dev manager is watching the repo. Whenever you need a decision
+(the docs disagree, a rule gives a strange result, a reviewer suggestion is a judgement call, you'd otherwise
+write "Decision for you" in a report):
+
+1. Post it as a comment on the pull request it concerns (or open a short `Question: <topic>` PR if there's no
+   PR yet), starting with the marker `<!-- factory-question -->`. Write one question per comment, with the
+   options you see, what each would change, and your recommendation.
+2. Don't wait idle. Continue with the parts that don't depend on the answer, or the next task that doesn't.
+3. Check for answers at each poll and before each task: `gh pr view <n> --comments`. An answer starts with
+   `<!-- factory-answer -->`. Apply it, reply with what you changed, and carry on.
+4. Only things the dev manager has marked `needs-owner` wait for a person; for those, keep going around them.
+
 ## 3. Build it
 
 1. Branch: `git checkout -b task/<id>-<short-name>`.
@@ -72,4 +86,5 @@ Small gaps the docs don't cover: choose the simplest option that fits the PRD, w
   open after ~30 minutes, note it in your report and pick the next task that doesn't touch those files.
 - Stop and report only when every remaining task is blocked, a "Done when" check or CI fails in a way you
   can't fix, or a task would break one of the rules in `CLAUDE.md`.
-- The report is short: tasks done (with PR links), tasks blocked and what each needs from the person.
+- The report is short: tasks done (with PR links), tasks blocked, and questions still open (with links to
+  their comments). Questions are asked in PR comments, never only in the report.
