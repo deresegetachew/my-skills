@@ -64,6 +64,12 @@ Small gaps the docs don't cover: choose the simplest option that fits the PRD, w
   carry straight on with the next phase. Don't stop to report between phases.
 - Pull requests waiting for review don't stop you. Before each task, pull the main branch; if the PR you
   stacked on has merged, start the next branch from the main branch, not from the old one.
+- **Never sleep waiting for a merge; ask GitHub.** You get no notification when a PR merges, so a timed pause
+  ("I'll check back in 30 minutes") wastes the whole wait. When the next task depends on an unmerged PR (it
+  changes the same files, or the plan stacks on it), poll instead:
+  `gh pr view <n> --json state,mergeCommit` every 2–3 minutes (`sleep 150` between polls) — the dev manager
+  usually merges within minutes. The moment it's merged, pull the main branch and continue. If it's still
+  open after ~30 minutes, note it in your report and pick the next task that doesn't touch those files.
 - Stop and report only when every remaining task is blocked, a "Done when" check or CI fails in a way you
   can't fix, or a task would break one of the rules in `CLAUDE.md`.
 - The report is short: tasks done (with PR links), tasks blocked and what each needs from the person.

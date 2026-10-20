@@ -91,6 +91,9 @@ If it flakes again, fix the cause (a longer timeout for a cold start, for exampl
   "Done when", in the right place in the order, via a small PR. It picks the first unticked task.
 - **Stop duplicate work** with `docs/blocked.md`: when you take a task yourself, add
   `- <id>: in progress in PR #N (dev manager)` and remove it when you merge.
+- **Merge fast; the coding agent is polling.** The kit's next-task skill polls an unmerged PR it depends on
+  every 2–3 minutes (it gets no merge notifications). Each minute a reviewable PR sits is a minute the factory
+  idles or builds on a stale base.
 - **Unblock it fast.** A PR waiting on you is a coding agent stacking new branches on unmerged ones. Merging
   the base of a stack (especially CI) is often the single most useful thing in a tick.
 - If its instructions make it over-cautious (for example leaving PRs for a person when the gate would allow
