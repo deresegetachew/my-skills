@@ -58,14 +58,8 @@ No re-linking needed — symlinks always point at the current file.
 - **study-notes** — bootstrap and author pages for an Astro-based study-notes/
   lesson site (component library, dark-mode theme, optional Gemini AI-tutor chat
   sidebar).
-- **collaborate-with-claude** (`/collaborate-with-claude`) — hybrid dual-model
-  orchestration between Gemini (bulk scanning, repository indexing, AST analysis,
-  scaffolding) and local Claude CLI (`claude`) / Claude Projects (precision
-  product design, typography hierarchy, ergonomic UX, and modular code architecture)
-  via a token-conserving `plan.md` hand-off loop.
-
-## Custom Agents
-
-- **agents/claude-specialist.md** — custom agent profile wrapping the local Claude
-  CLI (`claude`), embedding a Senior Product Designer & Software Architect persona
-  with Claude Project / knowledge base targeting and token-conservation guardrails.
+- **software-factory** — turn a repo into a software factory: a coding agent builds
+  from a PRD and a build plan in a loop (`/loop /next-task all`: tests first, reviewer and
+  auditor subagents, hooks that gate PRs and merges), and a dev manager Claude session
+  reviews, merges, fixes leftovers and keeps it busy. Includes the kit to copy into a
+  project (`install.sh`) and the dev manager's playbook.
