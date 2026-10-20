@@ -62,10 +62,22 @@ if re.search(r"\bgh\s+pr\s+create\b", cmd) and not is_draft:
 m = re.search(r"\bgh\s+pr\s+merge\b\s*([^\s-][^\s]*)?", cmd)
 if m:
     ref = [m.group(1)] if m.group(1) else []
-    rc, out = run("gh", "pr", "view", *ref, "--json", "headRefName,headRefOid,files")
+    rc, out = run("gh", "pr", "view", *ref, "--json", "headRefName,headRefOid,files,comments")
     if rc != 0:
         block("Could not read the pull request: " + out)
     pr = json.loads(out)
+    # A dev-manager must-fix holds the merge until the dev manager approves a later commit: the agent's own
+    # reviewer passing is not enough once someone else has found a problem.
+    last = None
+    for c in pr.get("comments", []):
+        body = c.get("body") or ""
+        if "<!-- factory-mustfix" in body:
+            last = "mustfix"
+        elif "<!-- factory-approved" in body:
+            last = "approved"
+    if last == "mustfix":
+        block("The dev manager left a must-fix on this pull request (a `<!-- factory-mustfix -->` comment). Fix it, "
+              "push, reply on the PR, and leave the merge to the dev manager, who approves with `<!-- factory-approved -->`.")
     if not passed(pr["headRefName"], pr["headRefOid"]):
         block("This pull request has no reviewer pass for its latest commit. Review it first.")
     rc, _ = run("gh", "pr", "checks", *ref)

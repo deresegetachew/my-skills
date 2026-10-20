@@ -20,10 +20,28 @@ such as `1.3`, or `all` to keep going, phase after phase, until every remaining 
    refuses a branch for a task that's ticked or blocked. If `$ARGUMENTS` names a task id, use that one: under
    `factory-loop.sh` (the `FACTORY_AGENT` variable is set) the loop has already claimed it for you, and other
    loops may be building the tasks around it, so build only that task and never pick another yourself.
+   If it prints `pr-<n>` (or `$ARGUMENTS` is `pr-<n>`), the dev manager has a must-fix on that open PR: do
+   **1b. Rework** instead of a new task.
    Respect phase order: don't start a phase until the previous phase's "Done when" checks pass, unless the plan
    says phases overlap.
 3. Read the PRD sections, design references and decisions the task points to. Say in one line which task
    you're doing and what "done" means for it.
+
+## 1b. Rework a reviewed PR
+
+A `pr-<n>` comes before any new task: the dev manager reviewed that PR and its latest
+`<!-- factory-mustfix sha=... -->` comment names the head commit, so nothing has been fixed yet.
+
+1. `gh pr checkout <n>` (or `git fetch origin <branch> && git checkout <branch>`), and read that comment and
+   any later ones in full: `gh api repos/{owner}/{repo}/issues/<n>/comments`.
+2. Fix every must-fix on that branch. Write the failing test first when the finding is a behaviour; don't
+   weaken a test to make a finding go away. If you disagree with a finding, reply with your evidence in a
+   `<!-- factory-question -->` comment instead of pushing, and stop.
+3. Run the commands from `factory.json`, ask the `reviewer` subagent (and the auditor the PR needed) for a pass
+   on the new commit, then push. The push moves the head, so the PR is no longer rework.
+4. Reply on the PR: what changed for each must-fix, with the commit. Don't merge it: the PR gate holds a PR with a
+   must-fix until the dev manager approves the new commit. Then stop (under `factory-loop.sh`) or go back to
+   step 1.
 
 ## 2. Check what you need
 
