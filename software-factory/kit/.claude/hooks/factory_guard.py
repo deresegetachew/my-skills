@@ -2,9 +2,11 @@
 """CI guard for factory pull requests. Runs in CI, where the coding agent can't edit around it.
 
 Checks the PR's commits against the base branch and fails (exit 1) on:
-  - tests or golden/expected outputs that existed on the base being changed or deleted   } need the
-  - test files edited in a commit after implementation started                           } `tests-reviewed`
-  - new .skip / .only / xit / xdescribe / test.todo in test files                        } label
+  - existing tests weakened: a test file deleted, or a line with an assertion or a     } need the
+    test case removed or rewritten (adding new tests and assertions is fine)            } `tests-reviewed`
+  - tests weakened in a commit after implementation started (even tests new in this PR) } label
+  - golden/expected outputs that existed on the base changed or deleted                 }
+  - new .skip / .only / xit / xdescribe / test.todo in test files                        }
   - new dependencies in a package manifest                         (needs the `deps-reviewed` label)
   - two decision files with the same number                        (no label overrides this)
   - a task branch ticking a task other than its own in the plan    (no label overrides this)
@@ -50,20 +52,38 @@ def main():
     is_code = lambda p: any(p == c or p.startswith(c.rstrip("/") + "/") for c in cfg["codePaths"]) \
         and not is_test(p) and not is_golden(p)
 
-    # 1. Existing tests and golden outputs changed or deleted.
+    # A line that asserts or defines a test case. Removing or rewriting one is "weakening"; adding is fine.
+    weak = re.compile(r"\b(expect|assert\w*|should)\b|\b(it|test|describe)\s*\(|\bto(Be|Equal|Match|Throw|Contain|Have)\w*")
+
+    def weakened(diff_args):
+        out = []
+        for ln in git("diff", "-U0", *diff_args).splitlines():
+            if ln.startswith("-") and not ln.startswith("---") and weak.search(ln):
+                out.append(ln[1:].strip()[:70])
+        return out
+
+    # 1. Existing tests weakened; existing golden outputs changed.
     for line in git("diff", "--name-status", "--no-renames", f"{base}...{a.head}").splitlines():
         status, _, path = line.partition("\t")
-        if status[0] in "MD" and (is_test(path) or is_golden(path)):
-            kind = "golden output" if is_golden(path) else "test"
-            needs_tests.append(f"{'deleted' if status[0] == 'D' else 'changed'} existing {kind} `{path}`")
+        if status[0] not in "MD":
+            continue
+        if is_golden(path):
+            needs_tests.append(f"{'deleted' if status[0] == 'D' else 'changed'} existing expected output `{path}`")
+        elif is_test(path):
+            if status[0] == "D":
+                needs_tests.append(f"deleted existing test `{path}`")
+            elif (gone := weakened([f"{base}...{a.head}", "--", path])):
+                needs_tests.append(f"removes or rewrites {len(gone)} assertion/test line(s) in `{path}`, e.g. `{gone[0]}`")
 
-    # 2. Test files edited after implementation started.
+    # 2. Tests weakened after implementation started (catches tests written in this PR and then softened).
     started = False
     for sha in git("rev-list", "--reverse", "--no-merges", f"{base}..{a.head}").split():
         files = git("diff-tree", "--no-commit-id", "--name-only", "-r", sha).split()
-        if started and any(is_test(f) for f in files):
-            needs_tests.append(f"commit {sha[:8]} edits tests after implementation started: "
-                               + ", ".join(f"`{f}`" for f in files if is_test(f))[:300])
+        if started:
+            for f in (f for f in files if is_test(f)):
+                if (gone := weakened([f"{sha}^", sha, "--", f])):
+                    needs_tests.append(f"commit {sha[:8]} (after implementation started) removes or rewrites "
+                                       f"assertion/test line(s) in `{f}`, e.g. `{gone[0]}`")
         if any(is_code(f) for f in files):
             started = True
 
