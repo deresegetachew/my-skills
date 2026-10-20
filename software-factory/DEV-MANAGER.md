@@ -99,6 +99,13 @@ If it flakes again, fix the cause (a longer timeout for a cold start, for exampl
   45 minutes with nothing new, once per idle stretch. Common causes: a permission prompt, the laptop asleep,
   the loop ended.
 
+## Token use
+
+A factory run is long, so usage matters. The owner can run the community `/caveman` skill in the coding
+agent's session to keep its replies terse (the code, tests and PR descriptions stay normal). As dev manager,
+keep your own ticks cheap: don't re-review commits that carry a pr-watch marker, read diffs once, and keep
+owner messages short.
+
 ## Talking to the owner
 
 Short and only when it matters: what merged (one line each), what you fixed, what needs them (exactly what

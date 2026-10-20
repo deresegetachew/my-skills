@@ -49,6 +49,10 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    ```
    Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab). When it keeps asking to
    approve the same command, approve it with "don't ask again".
+   **Save tokens:** long factory runs burn subscription usage fast, mostly on chatty replies. Install the
+   community "caveman" skill (github.com/JuliusBrussee/caveman) and run `/caveman` in the coding agent's
+   session: it makes replies terse without changing the code, tests or PR text. The dev manager's reviews
+   don't need it; reviews are short already.
 9. Offer to be the dev manager (Mode 2).
 
 ## Mode 2: act as dev manager
