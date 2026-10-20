@@ -4,6 +4,69 @@ Turn a repo into a software factory: a coding agent builds from a PRD and a buil
 manager Claude session reviews, merges and keeps it busy. See `SKILL.md` for how it works and how to set it
 up, and `DEV-MANAGER.md` for the dev manager's playbook.
 
+## How it works
+
+```mermaid
+flowchart TB
+    plan[("PRD + build plan")] --> pick
+
+    subgraph agent["1 · Coding agent (laptop, factory-loop.sh, fresh session per task)"]
+        pick["Pick the next task<br/>next_task.py"] --> tests["Write failing tests<br/>test-writer"]
+        tests --> code["Implement"]
+        code --> stop{"Stop hook:<br/>tests pass?"}
+        stop -->|"no"| code
+        stop -->|"yes"| rev{"reviewer<br/>subagent"}
+        rev -->|"must-fix"| code
+        rev -->|"pass"| pr["Open PR<br/>pr-gate.py"]
+    end
+
+    subgraph ci["2 · CI on GitHub"]
+        guard["Factory guard"]
+        checks["Typecheck, lint, test, build"]
+    end
+
+    subgraph dm["3 · Dev manager (Claude in the cloud, every 10 min)"]
+        read["Review the diff and<br/>the guard findings"] --> ok{"Good?"}
+        ok -->|"yes"| merge["Add label if justified,<br/>merge"]
+        ok -->|"no"| fix["Must-fix comment,<br/>or fix it on the branch"]
+        answer["Answer factory-questions"]
+    end
+
+    pr --> guard
+    pr --> checks
+    guard --> read
+    checks --> read
+    merge --> main[("main")]
+    main -->|"wait_for_merge.sh"| pick
+    fix -.-> code
+    code -.->|"stuck"| answer
+    answer -.-> code
+    answer -.->|"owner-only"| owner(["Owner"])
+```
+
+The coding agent never merges anything protected and never grades its own tests: the reviewer subagent checks
+the diff before the PR, CI checks what the agent can't edit around, and the dev manager reads every finding
+before it labels or merges. Only owner-only decisions reach a person.
+
+### The Factory guard
+
+`kit/.claude/hooks/factory_guard.py` runs in CI on every pull request. It compares the branch with main and
+fails when the change could make the build look better than it is:
+
+| Finding | Passes with |
+|---|---|
+| An existing test deleted, or an assertion or test case removed or rewritten | `tests-reviewed` label |
+| A test softened in a commit after implementation started | `tests-reviewed` label |
+| An existing golden or expected output changed | `tests-reviewed` label |
+| A new `.skip`, `.only`, `xit`, `test.todo` | `tests-reviewed` label |
+| A new dependency in a package manifest | `deps-reviewed` label |
+| Two decision files with the same number | never: renumber |
+| A task branch ticking another task in the plan | never |
+| A workflow using `pull_request_target` | never |
+
+Large PRs get a warning, not a failure. The labels belong to the dev manager, who adds one only after reading
+the change. A label change re-runs only the guard job.
+
 ```
 software-factory/
   SKILL.md          set up a project (mode 1) or act as dev manager (mode 2)
