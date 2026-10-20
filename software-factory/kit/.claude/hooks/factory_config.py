@@ -18,6 +18,7 @@ DEFAULTS = {
     "goldenPaths": [r"(^|/)__snapshots__/", r"(^|/)fixtures?/", r"(^|/)golden[^/]*/"],
     "dependencyManifests": [r"(^|/)package\.json$"],
     "maxOpenPRs": 3,
+    "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",
 }
