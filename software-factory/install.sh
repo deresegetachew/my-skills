@@ -16,7 +16,7 @@ find . -type f | sort | while read -r f; do
     echo "added    ${f#./}"
   fi
 done
-chmod +x "$dst"/.claude/hooks/*.py 2>/dev/null || true
+chmod +x "$dst"/.claude/hooks/*.py "$dst"/.claude/hooks/*.sh "$dst"/factory-loop.sh 2>/dev/null || true
 grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignore"
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 echo

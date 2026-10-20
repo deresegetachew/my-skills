@@ -1,5 +1,5 @@
 {
-  "_about": "Software factory settings for this project. The hooks and the next-task skill read this file; edit it, not the hooks.",
+  "_about": "Software factory settings for this project. The hooks, next_task.py and the CI factory guard read this file; edit it, not the scripts. testPaths/goldenPaths: changing these after implementation needs the dev manager's `tests-reviewed` label; new dependencies need `deps-reviewed`. smoke: a quick command proving main still works.",
   "prd": "docs/PRD.md",
   "plan": "docs/build-plan.md",
   "blocked": "docs/blocked.md",
@@ -10,17 +10,43 @@
     "typecheck": "pnpm -s typecheck",
     "lint": "pnpm -s lint",
     "test": "pnpm -s test",
-    "build": "pnpm -s build"
+    "build": "pnpm -s build",
+    "smoke": ""
   },
-  "codePaths": ["apps", "packages", "src", "tools"],
+  "codePaths": [
+    "apps",
+    "packages",
+    "src",
+    "tools"
+  ],
   "protected": [
     "^CLAUDE\\.md$",
     "^\\.claude/",
     "^docs/PRD\\.md$",
-    "^\\.github/workflows/",
+    "^\\.github/",
     "/migrations/",
-    "\\.env"
+    "\\.env",
+    "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|bun\\.lockb?)$"
   ],
-  "alwaysAllowed": ["docs/build-plan.md", "docs/blocked.md"],
-  "reviewMarkers": "tmp/reviews"
+  "alwaysAllowed": [
+    "docs/build-plan.md",
+    "docs/blocked.md"
+  ],
+  "reviewMarkers": "tmp/reviews",
+  "testPaths": [
+    "(^|/)__tests__/",
+    "\\.(test|spec)\\.[cm]?[jt]sx?$",
+    "(^|/)e2e/",
+    "(^|/)tests?/"
+  ],
+  "goldenPaths": [
+    "(^|/)__snapshots__/",
+    "(^|/)fixtures?/",
+    "(^|/)golden[^/]*/"
+  ],
+  "dependencyManifests": [
+    "(^|/)package\\.json$"
+  ],
+  "maxOpenPRs": 3,
+  "prSizeWarn": 600
 }

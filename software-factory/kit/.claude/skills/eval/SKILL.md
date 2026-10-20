@@ -15,5 +15,6 @@ The project's CLAUDE.md names the eval command, the baseline file and the metric
    is a real improvement, update the baseline in the same pull request and say so.
 4. Paste the summary table into the pull request description.
 
-Rules: never edit an example's expected answers to make a test pass; never weaken a check to pass the eval;
+The score that counts is the one CI computes (add the eval to CI as soon as it exists); the number you report
+is a preview. Rules: never edit an example's expected answers to make a test pass; never weaken a check to pass the eval;
 re-record model replies only when a prompt or model changed on purpose, and say so in the pull request.

@@ -28,8 +28,9 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    settings, the doc templates and a CI workflow) and marks the hooks executable.
 3. **Fill in `.claude/factory.json`:** the doc paths, the install, typecheck, lint, test and build commands,
    the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges":
-   the rules files, CI, migrations, and anything that implements a critical rule (safety logic, money,
-   approval gates).
+   the rules files, CI, lockfiles, migrations, and anything that implements a critical rule (safety logic,
+   money, approval gates). Set `testPaths` and `goldenPaths` to where tests and expected outputs live, and
+   `smoke` to a quick command that proves main works.
 4. **Write `CLAUDE.md`** from `CLAUDE.factory.md`: the product in a paragraph, the docs to read in order,
    **the rules that matter most** (each one checkable by a reviewer), voice and copy rules, code style, and
    the "How to work" section as given.
@@ -38,21 +39,27 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    - tasks sized for one PR each, every one with a **"Done when"** check that can be run, not a feeling;
    - Phase 0 = scaffold, CI and the local stack; CI must exist before the factory can merge anything;
    - things only a person can provide go under "Before launch", or into `docs/blocked.md` when a task needs them.
-6. **Adapt the CI workflow** to the stack and the commands in `factory.json`.
+6. **Adapt the CI workflow** to the stack and the commands in `factory.json`. Keep its **Factory guard** job:
+   it checks, where the agent can't edit around it, that tests and expected outputs weren't quietly changed,
+   no `.skip`/`.only` slipped in, new dependencies were reviewed, decision numbers don't collide, and a branch
+   ticks only its own task. Once the project has an eval, run it in CI too, so the score isn't self-reported.
 7. **Protect the main branch** on GitHub (Settings → Rules → Rulesets): require a pull request, require the
-   CI checks, block force pushes. Optional: CODEOWNERS on the protected paths.
+   CI checks (including Factory guard), block force pushes. Optional: CODEOWNERS on the protected paths.
+   **Stronger, when the project matters:** let the coding agent's GitHub token push branches but not merge, and
+   have the reviewer pass posted as a commit status by a separate identity (a GitHub App or a second account)
+   that the ruleset requires. The local hooks then stay as the fast check, and the agent can't approve itself.
 8. **Commit on a branch and open a PR.** Then tell the owner how to start the coding agent, in a terminal
    on their machine, in the repo:
    ```
-   claude
-   /loop /next-task all
+   ./factory-loop.sh          # recommended: a fresh Claude run per task
    ```
-   Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab). When it keeps asking to
-   approve the same command, approve it with "don't ask again".
-   **Save tokens:** long factory runs burn subscription usage fast, mostly on chatty replies. Install the
-   community "caveman" skill (github.com/JuliusBrussee/caveman) and run `/caveman` in the coding agent's
-   session: it makes replies terse without changing the code, tests or PR text. The dev manager's reviews
-   don't need it; reviews are short already.
+   or, interactively, `claude` then `/loop /next-task all`. The loop script starts a clean context for every
+   task, which is cheaper and avoids an agent misled by a long, stale conversation; state lives in git, the PRs
+   and the plan. It runs without anyone to approve prompts, so `.claude/settings.json` must allow every command
+   the build needs. Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab), and run the
+   agent with the sandbox on rather than with permission checks skipped.
+   **Tokens:** most of the cost is input, so the fresh context per task matters most; use cheaper models for
+   routine subagents. Terse-reply skills such as the community `/caveman` save a few percent at most.
 9. Offer to be the dev manager (Mode 2).
 
 ## Mode 2: act as dev manager
@@ -72,3 +79,7 @@ merge, waiting for CI, keeping the coding agent busy, and what to tell the owner
   self-merge safe.
 - **Critical rules get a dedicated auditor and tests that fail when the rule breaks,** and the dev manager
   reads those diffs line by line even when CI is green.
+- **A gate is only as strong as who controls its signal.** Agents edit tests to pass and approve their own work
+  when they can, and asking them not to barely helps. So the checks that matter run in CI (the factory guard),
+  tests are read-only for the implementer, task choice is a script, and only the dev manager clears findings.
+- **Questions go to the dev manager in PR comments; the owner is the last stop.**

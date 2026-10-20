@@ -35,7 +35,16 @@ It can't type into the coding agent's terminal. Its levers are pull requests, PR
    - **An hourly scheduled task as a backup**, a fresh session with the same rules in its prompt, in case this
      session stops. It skips commits that already carry a review marker, so the two never double-review.
    Check the account's existing scheduled tasks first (`list_triggers`), so you don't duplicate one.
-5. Tell the owner, in a few lines, what you'll do, what you'll never merge, and how to stop you ("stop managing").
+   Scheduled tasks run at most hourly on a clock, so the 10-minute rhythm needs this live session. Better,
+   where the account allows it: give the scheduled task a **GitHub trigger** on pull requests (opened,
+   synchronize, closed-and-merged) in its settings at claude.ai/code, so a fresh dev manager runs on every PR
+   event and the ticks become a safety net. Events beyond the hourly caps are dropped, so keep the hourly run.
+   A green scheduled run only means the session ran, not that the review was right.
+5. **Create the review labels** once: `tests-reviewed` and `deps-reviewed` (`POST /repos/{o}/{r}/labels`). The
+   CI factory guard fails a PR that changes existing tests or expected outputs, edits tests after
+   implementation started, adds `.skip`/`.only`, or adds a dependency, until you've reviewed it and added the
+   label. Never add one without reading the change.
+6. Tell the owner, in a few lines, what you'll do, what you'll never merge, and how to stop you ("stop managing").
 
 ## The tick
 
@@ -86,6 +95,12 @@ you first; the owner is the last stop. On every tick:
 - **Read the diff, not just the description.** For protected or critical-rule paths, read every changed
   line. Check the CLAUDE.md rules, the task's "Done when" check, and that tests prove the rule (a test that
   fails if the rule breaks).
+- **Read the factory guard's summary** on every PR (the CI job's summary). For a test or golden-file change,
+  read every changed assertion: does the change fix a wrong expectation (fine: add `tests-reviewed`), or make
+  the test easier to pass (must-fix: say so and don't label)? For a new dependency, check the package exists
+  on the registry, is maintained, has real usage, and is the one intended (names an agent invents are often
+  squatted); then add `deps-reviewed`. Decision-number collisions and wrong task ticks can't be labelled away:
+  fix them on the branch or ask the coding agent to.
 - **Spot-check claims against sources.** If a PR says text was copied word for word from a document, open
   the document and compare (for PDFs: `pdftoppm -f N -l N -r 80 -png file.pdf out`, then look at the image).
 - **One comment per reviewed commit**: verdict (merge / needs changes / needs the owner), must-fix items with
@@ -112,8 +127,9 @@ If it flakes again, fix the cause (a longer timeout for a cold start, for exampl
   "Done when", in the right place in the order, via a small PR. It picks the first unticked task.
 - **Stop duplicate work** with `docs/blocked.md`: when you take a task yourself, add
   `- <id>: in progress in PR #N (dev manager)` and remove it when you merge.
-- **Merge fast; the coding agent is polling.** The kit's next-task skill polls an unmerged PR it depends on
-  every 2–3 minutes (it gets no merge notifications). Each minute a reviewable PR sits is a minute the factory
+- **Merge fast; the coding agent is waiting.** The kit's next-task skill waits on an unmerged PR it depends
+  on with `wait_for_merge.sh` (it gets no merge notifications), and the PR gate stops it opening more than
+  `maxOpenPRs` at once. Each minute a reviewable PR sits is a minute the factory
   idles or builds on a stale base.
 - **Unblock it fast.** A PR waiting on you is a coding agent stacking new branches on unmerged ones. Merging
   the base of a stack (especially CI) is often the single most useful thing in a tick.
@@ -123,17 +139,29 @@ If it flakes again, fix the cause (a longer timeout for a cold start, for exampl
   45 minutes with nothing new, once per idle stretch. Common causes: a permission prompt, the laptop asleep,
   the loop ended.
 
+## Writing rules for the coding agent
+
+Rules you write (decisions, answers, build-plan tasks) get applied literally. Write each one as a test where you
+can, and otherwise with one example that passes and one that fails, taken from the real material. Test a new
+rule on two or three real cases before publishing it. When the coding agent shows a rule misfiring, fix the
+rule; don't defend it.
+
 ## Token use
 
-A factory run is long, so usage matters. The owner can run the community `/caveman` skill in the coding
-agent's session to keep its replies terse (the code, tests and PR descriptions stay normal). As dev manager,
-keep your own ticks cheap: don't re-review commits that carry a pr-watch marker, read diffs once, and keep
-owner messages short.
+Input tokens dominate the bill, not replies, so the big levers are context size and model choice:
+- a fresh context per task (`factory-loop.sh`) instead of one long session;
+- cheaper models for routine subagents (test-writer, first-pass reviews), the strongest for the reviewer
+  and safety audits;
+- test output filtered to failures, a short CLAUDE.md with workflows moved into skills;
+- for yourself: skip commits that already carry a pr-watch marker, read each diff once, keep messages short.
+Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
+Check spend with `/usage`.
 
 ## Talking to the owner
 
 Short and only when it matters: what merged (one line each), what you fixed, what needs them (exactly what
-and why). Plain words, no tool names. Don't narrate quiet ticks.
+and why). Plain words, no tool names. Don't narrate quiet ticks. Offer the owner a once-a-day digest instead of
+per-event messages if they prefer: merged, open, blocked, questions escalated, and usage.
 
 ## Things that trip you up in a cloud session
 
