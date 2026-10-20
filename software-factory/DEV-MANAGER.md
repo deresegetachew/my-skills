@@ -103,6 +103,12 @@ you first; the owner is the last stop. On every tick:
   fix them on the branch or ask the coding agent to.
 - **Spot-check claims against sources.** If a PR says text was copied word for word from a document, open
   the document and compare (for PDFs: `pdftoppm -f N -l N -r 80 -png file.pdf out`, then look at the image).
+- **Must-fix comments start with `<!-- factory-mustfix sha=<head> -->`** (the head commit you reviewed). That
+  marker is how the coding agent finds rework: `next_task.py` hands out a PR whose latest must-fix names its
+  current head before any new task, and the agent's next push clears it. Without the marker, a must-fix waits
+  until someone notices.
+  It also holds the merge: `pr-gate.py` refuses the agent's `gh pr merge` while the latest marker on the PR is a
+  must-fix. When you re-review and it's good, merge it yourself or post `<!-- factory-approved sha=<head> -->`.
 - **One comment per reviewed commit**: verdict (merge / needs changes / needs the owner), must-fix items with
   file and line, follow-ups in a line each, and the marker `<!-- pr-watch sha=<head sha> -->`. The marker is
   how both you and the hourly backup know a commit has been reviewed.
