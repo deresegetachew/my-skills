@@ -90,6 +90,33 @@ When the dev manager finds a must-fix, its comment starts with `<!-- factory-mus
 3. `pr-gate.py` refuses the agent's own `gh pr merge` while the latest marker on the PR is a must-fix. The dev
    manager re-reviews, then merges it or posts `<!-- factory-approved sha=<head> -->`.
 
+### Style guides
+
+The factory is about process and works for any stack. How the code itself is written comes from **style-guide skills**,
+which live next to the factory in this repo. For NestJS backends those are `nestjs-clean-code-ddd-hexagonal`
+(hexagonal layers, a pure domain, a CommandBus and QueryBus, strictly one class per file) and `nestjs-best-practices`
+(40 rules). A project picks them per path in `.claude/factory.json`:
+
+```json
+"styles": [
+  { "paths": ["apps/api/**", "packages/ingest/**"],
+    "skills": ["nestjs-clean-code-ddd-hexagonal", "nestjs-best-practices"],
+    "check": "python3 .claude/hooks/check_structure.py" }
+],
+"structure": { "roots": ["apps/api/src", "packages/ingest/src"], "legacy": "tools/structure-legacy.txt" }
+```
+
+Three layers enforce them:
+1. **CI** runs each `check` command. `check_structure.py` fails on a second class in a file, a class file with free
+   functions, a class-less file exporting more than one function, a file name that isn't kebab-case, and a framework
+   import in `domain/`.
+2. **The `architecture-reviewer` subagent** reviews the judgement calls (thin controllers, aggregates, ports with
+   contract tests) against each guide's checklist.
+3. **The PR gate** refuses to open or merge a PR on a styled path without the architecture-reviewer's pass.
+
+Install the skills into the project as a copy, so CI and fresh clones have them:
+`./install.sh --project <dir> --copy nestjs-clean-code-ddd-hexagonal nestjs-best-practices`.
+
 ### The Factory guard
 
 `kit/.claude/hooks/factory_guard.py` runs in CI on every pull request. It compares the branch with main and
@@ -126,7 +153,8 @@ software-factory/
     .claude/hooks/factory_claims.py  lock file for several loops: a checkout each, one task each
     .claude/hooks/wait_for_merge.sh  waits on a PR without spending tokens
     factory-loop.sh              runs one fresh Claude session per task; start it again for a second loop
-    .claude/agents/              reviewer, test-writer, safety-auditor, security-reviewer
+    .claude/agents/              reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer
+    .claude/hooks/style_checks.py    CI: runs each style's `check` command from factory.json
     .claude/skills/              next-task, design-check, eval
     docs/                        build-plan, blocked list and decision templates
     .github/                     CI workflow and CODEOWNERS templates

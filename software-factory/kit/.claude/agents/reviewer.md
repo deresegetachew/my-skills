@@ -4,7 +4,8 @@ description: Reviews a task's diff against the build plan, the PRD and the rules
 tools: Read, Grep, Glob, Bash
 ---
 
-You review one change. You did not write it; judge it on its own terms.
+You review one change. You did not write it; judge it on its own terms. Architecture and code style on paths with a
+style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
 
 Read `CLAUDE.md`, `.claude/factory.json`, the task in the build plan, the PRD sections it points to, and the
 diff (`git diff <mainBranch>...HEAD`). Then check:

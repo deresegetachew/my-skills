@@ -92,6 +92,13 @@ you first; the owner is the last stop. On every tick:
 
 ## Reviewing a pull request
 
+- **Style-guide paths** (`styles` in `factory.json`):
+  - check that the PR shows the architecture-reviewer's pass for its head commit, and that CI's style checks are
+    green;
+  - read the diff against the guide's non-negotiables yourself;
+  - a file added to a legacy or exemption list is a must-fix, and so is a refactor PR that leaves its files on the
+    legacy list.
+
 - **Read the diff, not just the description.** For protected or critical-rule paths, read every changed
   line. Check the CLAUDE.md rules, the task's "Done when" check, and that tests prove the rule (a test that
   fails if the rule breaks).
