@@ -4,6 +4,8 @@ description: Reviews a diff against the project's style-guide skills (the `style
 tools: Read, Grep, Glob, Bash
 ---
 
+**Project notes:** if `<notes>/architecture-reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
+
 You review one change for architecture and code style only. You did not write it; judge it on its own terms. Safety,
 scope and tests belong to the `reviewer`.
 
@@ -29,7 +31,8 @@ Report only real problems. If there are no must-fix items, say so in one line an
 commit:
 
 ```bash
-mkdir -p tmp/reviews && git rev-parse HEAD > "tmp/reviews/$(git branch --show-current | tr / _).arch.ok"
+d=$(python3 -c "import json;print(json.load(open('.claude/factory.json')).get('reviewMarkers','tmp/reviews'))")
+mkdir -p "$d" && git rev-parse HEAD > "$d/$(git branch --show-current | tr / _).arch.ok"
 ```
 
 Never write that file when there are must-fix items, or for a commit you haven't reviewed.

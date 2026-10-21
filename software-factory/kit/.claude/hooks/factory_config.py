@@ -28,6 +28,20 @@ DEFAULTS = {
     #   "DATABASE_URL": "postgres://app:app@localhost:5432/app{suffix}"}. Slot 1 keeps the defaults.
     "agentEnv": {},
     "portStep": 10,
+    # Project additions for the shared agents and skills: <notes>/<agent or skill name>.md, read first if present.
+    "notes": ".claude/factory/notes",
+    # Which changes need which extra review or check (regexes on changed paths, like `protected`).
+    # factory_reviews.py lists the ones a diff needs; next-task runs them and the reviewer checks they ran.
+    "reviews": {
+        "safety-auditor": {"paths": []},     # the rules CLAUDE.md says must never break
+        "security-reviewer": {"paths": []},  # auth, payments, public endpoints, uploads, storage, tenancy, secrets
+    },
+    # The eval skill: {"command": "pnpm golden", "baseline": "path", "mustNotDrop": ["warning recall 100%"],
+    #   "metrics": ["..."], "paths": ["regex", ...]}. Empty command: no eval yet.
+    "eval": {},
+    # The design-check skill: {"references": "design/screens", "renders": "design/screens/png",
+    #   "preview": "pnpm --filter web preview", "paths": ["regex", ...]}. Empty references: no design check.
+    "design": {},
 }
 
 

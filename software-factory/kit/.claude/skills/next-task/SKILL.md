@@ -3,6 +3,8 @@ name: next-task
 description: Pick the next unticked task in the build plan, build it on its own branch with tests, open a pull request, merge it when the gate allows, tick it off, and continue. Use when asked to "do the next task", "continue the build", "go on one by one" or `/next-task all`.
 ---
 
+**Project notes:** if `<notes>/next-task.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
+
 # Next task
 
 Work through the build plan one task at a time. Paths and commands come from `.claude/factory.json`
@@ -91,11 +93,12 @@ write "Decision for you" in a report):
    script or test config; read the variable and keep today's value as the default.
 3. Test what a user or another module can observe. Run the task's "Done when" check and the project's
    `typecheck`, `lint` and `test` commands. Fix until they pass. Show the output as evidence.
-4. UI work: run the `design-check` skill if the project has design references. Work on prompts, models or
-   scoring: run the `eval` skill if the project has an eval.
-5. If the diff touches what CLAUDE.md calls critical rules, ask the `safety-auditor` subagent and put its
-   report in the pull request. If it touches auth, payments, public endpoints, uploads, storage, tenancy,
-   secrets or model calls on untrusted input, ask the `security-reviewer` subagent. Fix every must-fix.
+4. **Extra reviews and checks:** run `python3 .claude/hooks/factory_reviews.py`. For each line it prints, run that
+   skill (`design-check`, the eval skill) or ask that subagent (`safety-auditor`, `security-reviewer`), put its
+   result in the pull request, and fix every must-fix. Also ask the `safety-auditor` when the diff touches what
+   CLAUDE.md calls critical rules, and the `security-reviewer` for auth, payments, public endpoints, uploads,
+   storage, tenancy, secrets or model calls on untrusted input, even if the script doesn't list them.
+5. The reviewer checks that every review the script lists ran.
 6. Ask the `reviewer` subagent to review the diff against the task, the PRD and `CLAUDE.md`. Fix every
    must-fix it reports. Ignore style preferences. If the diff touches a path with a style guide, also ask the
    `architecture-reviewer` subagent and fix every must-fix: the PR gate needs both passes.

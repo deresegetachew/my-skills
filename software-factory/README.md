@@ -190,6 +190,8 @@ software-factory/
     .claude/hooks/factory_claims.py  lock file for several loops: a checkout each, one task each
     .claude/hooks/factory_env.py     per-loop ports, database names and queues (agentEnv)
     .claude/hooks/factory_session.py SessionStart: a plain `claude` session in a worktree becomes a factory agent
+    .claude/hooks/factory_reviews.py which extra reviews and checks a diff needs (reviews, eval, design, styles)
+    .claude/factory/notes/       the project's additions to the shared agents and skills
     .claude/hooks/wait_for_merge.sh  waits on a PR without spending tokens
     factory-loop.sh              runs one fresh Claude session per task; start it again for a second loop
     .claude/agents/              reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer
@@ -201,16 +203,26 @@ software-factory/
 
 ### One factory, many projects
 
-The factory has two parts:
-- **The engine** is the same in every project: `factory-loop.sh` and `.claude/hooks/*.py`/`*.sh` (claims, the PR
-  gate, the guard, next_task, the session hook, style checks).
-- **The templates** each project tailors: `factory.json`, `settings.json`, the agents, the `next-task` skill,
-  CLAUDE.md, the plan and CI.
+Almost everything is shared, and a project only fills in config:
 
-With my-skills as a git submodule (`vendor/my-skills`), `install.sh . --link` links the engine into the submodule and
-copies the templates. Each project then pins one factory version, the submodule commit, and a factory fix reaches it
-through one "update my-skills" PR. A project never ends up with a stale copy of a script. Without a submodule,
+| Shared (from my-skills, the same in every project) | The project's own |
+|---|---|
+| `factory-loop.sh`, `.claude/hooks/*` | `.claude/factory.json`: commands, paths, protected files, styles, `agentEnv`, and which paths need which review (`reviews`, `eval`, `design`) |
+| `.claude/agents/*`: reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer | `.claude/factory/notes/<agent or skill>.md`: the few lines an agent needs that only this project knows |
+| `.claude/skills/*`: next-task, design-check, eval, the style guides | `CLAUDE.md`, the PRD, the plan, the decisions: every agent reads these |
+| `.claude/settings.json` | |
+
+With my-skills as a git submodule (`vendor/my-skills`), `install.sh . --link` links every shared file into the
+submodule and copies the templates. Each project then pins one factory version, the submodule commit, and a factory
+fix reaches it through one "update my-skills" PR. A project never ends up with a stale copy. Without a submodule,
 `install.sh <dir>` copies everything, as before.
+
+**Overriding:** structured values go in `factory.json`. For example, `"reviews": {"security-reviewer": {"paths":
+["auth", "billing"]}}` makes `factory_reviews.py` list the security reviewer for any diff touching those paths, and
+`next-task` runs whatever it lists. Free text goes in a note: `.claude/factory/notes/security-reviewer.md` with
+"tenants are brands; payments are Stripe". A note only adds; it never removes a shared rule. If a project really needs
+a different shared file, keep a copy (the installer leaves a differing file alone), but then it no longer gets
+fixes, so change the shared file in my-skills instead whenever you can.
 
 Quick start in a project that has a PRD:
 

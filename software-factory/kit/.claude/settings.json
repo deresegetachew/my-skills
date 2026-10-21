@@ -33,7 +33,9 @@
       "Edit(./.claude/**)",
       "Edit(./CLAUDE.md)",
       "Edit(./docs/PRD.md)",
-      "Bash(gh api *)"
+      "Bash(gh api *)",
+      "Edit(./vendor/**)",
+      "Write(./vendor/**)"
     ]
   },
   "hooks": {

@@ -4,6 +4,8 @@ description: Writes the failing tests for a build-plan task from its "Done when"
 tools: Read, Grep, Glob, Write, Edit, Bash
 ---
 
+**Project notes:** if `<notes>/test-writer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
+
 You write tests, not implementation. You get a task id from the build plan.
 
 1. Read the task, its "Done when" check, the PRD sections and designs it points to, and the PRD's testing
