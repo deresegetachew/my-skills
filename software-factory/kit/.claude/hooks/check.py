@@ -9,10 +9,17 @@ import json, os, subprocess, sys
 sys.path.insert(0, os.path.dirname(__file__))
 from factory_config import load  # noqa: E402
 
-data = json.load(sys.stdin)
+try:
+    data = json.load(sys.stdin)
+except ValueError:
+    data = {}
 if data.get("stop_hook_active"):
     sys.exit(0)  # already continuing because of this hook; don't loop
 cfg = load()
+# Not installed yet (a fresh clone or worktree): nothing to check until `commands.install` has run.
+needs = cfg.get("checkRequires", [])
+if any(not os.path.exists(p) for p in needs):
+    sys.exit(0)
 paths = [p for p in cfg["codePaths"] if os.path.exists(p)]
 if not paths:
     sys.exit(0)  # no code yet

@@ -26,8 +26,11 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
 2. **Install the kit.** Prefer my-skills as a git submodule, so the project runs one pinned version of the factory:
    `git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills`, then
    `bash vendor/my-skills/software-factory/install.sh . --link`. The engine (`factory-loop.sh`, `.claude/hooks/*`)
-   becomes relative links into the submodule, and the templates (agents, skills, settings, doc templates, CI) are
-   copied for you to tailor. Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
+   and every shared file (agents, skills, `settings.json`) become relative links into the submodule. The templates
+   (`factory.json`, doc templates, CI) are copied for you to fill in. Project specifics never go in a shared file:
+   paths that need the safety auditor, security reviewer, eval or design check go in `factory.json` (`reviews`,
+   `eval`, `design`), and the few lines an agent needs that only this project knows go in
+   `.claude/factory/notes/<agent>.md`. Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
    `submodules: true`, and put `git submodule update --init` first in `commands.install`. Without a submodule,
    `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
 3. **Fill in `.claude/factory.json`:** the doc paths, the install, typecheck, lint, test and build commands,
