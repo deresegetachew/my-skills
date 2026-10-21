@@ -17,6 +17,8 @@ src="$here/kit"
 [ -d "${1:?Usage: install.sh <project dir> [--link]}" ] || { echo "No such folder: $1" >&2; exit 1; }
 dst="$(cd "$1" && pwd)"
 link=0; [ "${2:-}" = "--link" ] && link=1
+# A project that already has .claude/factory.json is set up: a relink only updates the links, never re-adds templates.
+setup=1; [ -f "$dst/.claude/factory.json" ] && setup=0
 if [ "$link" = 1 ]; then
   case "$src/" in "$dst"/*) ;; *) echo "--link needs this installer inside the project (my-skills as a submodule, for example vendor/my-skills)" >&2; exit 1;; esac
 fi
@@ -49,7 +51,9 @@ find . -type f -not -path '*/__pycache__/*' | sort | while read -r f; do
       ln -s "$want" "$target"; echo "linked   ${f#./}"
     fi
   elif [ -e "$target" ]; then
-    echo "kept     ${f#./} (already exists; merge by hand if needed)"
+    [ "$setup" = 1 ] && echo "kept     ${f#./} (already exists; merge by hand if needed)"
+  elif [ "$setup" = 0 ]; then
+    :  # a template the project chose not to keep (or not yet): leave it out
   else
     cp "$f" "$target"
     echo "added    ${f#./}"
@@ -59,6 +63,8 @@ done
 [ "$link" = 1 ] || chmod +x "$dst"/.claude/hooks/*.py "$dst"/.claude/hooks/*.sh "$dst"/factory-loop.sh "$dst"/factory 2>/dev/null || true
 grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignore"
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
-echo
-echo "Next: fill in .claude/factory.json, write CLAUDE.md from CLAUDE.factory.md, write docs/build-plan.md."
-echo "Then run ./factory help (and ./factory install-shim once, to type just: factory ...)."
+if [ "$setup" = 1 ]; then
+  echo
+  echo "Next: fill in .claude/factory.json, write CLAUDE.md from CLAUDE.factory.md, write docs/build-plan.md."
+  echo "Then run ./factory help (and ./factory install-shim once, to type just: factory ...)."
+fi
