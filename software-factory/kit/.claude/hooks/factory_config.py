@@ -78,8 +78,8 @@ def blocked_ids(blocked_text):
 
 
 def branch_task(branch):
-    """task/1-3-validators -> '1.3'; anything else -> None."""
-    m = re.match(r"task/(\d+(?:-\d+)*?)-[a-z]", branch) or re.match(r"task/(\d+(?:-\d+)*)$", branch)
+    """task/1-3-validators or task/1.3-validators -> '1.3'; anything else -> None."""
+    m = re.match(r"task/(\d+(?:[.-]\d+)*?)-[a-z]", branch) or re.match(r"task/(\d+(?:[.-]\d+)*)$", branch)
     return m.group(1).replace("-", ".") if m else None
 
 
