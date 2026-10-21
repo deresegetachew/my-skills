@@ -1,70 +1,119 @@
 # my-skills
 
-Reusable skills for Claude Code. Each top-level folder is one self-contained skill.
+My reusable skills for Claude Code, kept in one place so every project can use the same version.
+
+<br>
+
+## What's inside
 
 | Skill | What it does |
 |---|---|
-| [software-factory](software-factory/README.md) | Turns a repo into a software factory: coding agents build from a PRD and a plan, a dev manager reviews and merges. |
-| nestjs-clean-code-ddd-hexagonal | Backend architecture: hexagonal layers, a pure domain, CommandBus and QueryBus, strictly one class per file. Includes a CI checker (`scripts/check_structure.py`). |
-| nestjs-best-practices | 40 NestJS rules in 10 categories, each with wrong and right examples. |
-| study-notes | Bootstraps and writes pages for an Astro study-notes site. |
+| [**software-factory**](software-factory/README.md) | Turns a repo into a software factory. Coding agents build it task by task, and a dev manager reviews and merges. |
+| **nestjs-clean-code-ddd-hexagonal** | The backend architecture: hexagonal layers, a pure domain, strictly one class per file. Comes with a CI checker. |
+| **nestjs-best-practices** | 40 NestJS rules in 10 categories, each with a wrong and a right example. |
+| **study-notes** | Builds and fills an Astro site for study notes. |
 
-## Three ways to use a skill
+<br>
 
-| Way | Who sees it | When |
+## How a skill reaches Claude
+
+Claude Code reads skills from a `.claude/skills/` folder: either your personal one (`~/.claude/skills/`) or the one
+inside a project. So "installing" a skill means putting it in one of those folders.
+
+The question is **who needs to see it**:
+
+| Who needs the skill | Use | Section |
 |---|---|---|
-| **Symlink** (`./install.sh`) | Only you, on this machine | Personal use |
-| **Git submodule** | Everyone: CI, cloud sessions, other machines | A project depends on the skill (recommended) |
-| **Copy** (`./install.sh --copy`) | Everyone | Like a submodule, when you don't want one |
+| Only you, on your own laptop | A symlink to this folder | [1. Just for you](#1-just-for-you) |
+| A project: its CI, cloud sessions and every clone | A git submodule | [2. For a project](#2-for-a-project) |
 
-### Symlink: for yourself
+A symlink is the quickest, but it points at a folder on your laptop, so nothing else can follow it. A project needs
+the files inside its own repo, and a submodule puts them there.
+
+<br>
+
+## 1. Just for you
+
+Clone this repo once, then link the skills you want:
 
 ```bash
 git clone https://github.com/deresegetachew/my-skills.git ~/Documents/dev/my-skills
 cd ~/Documents/dev/my-skills
-./install.sh                                  # list skills and what's installed
-./install.sh software-factory                 # install one for all projects (~/.claude/skills)
-./install.sh --project ~/dev/myapp <skill>    # install into one project only
-./install.sh --remove <skill>                 # uninstall
+
+./install.sh                       # list the skills and what's installed
+./install.sh study-notes           # install one for all your projects
+./install.sh --remove study-notes  # uninstall
 ```
 
-`git pull` here updates every symlinked install. A symlink points at your laptop, so it is useless to CI and to
-other machines.
+To update, run `git pull` in this folder. Every linked skill updates at once.
 
-### Submodule: for a project
+<br>
 
-The project records the exact my-skills commit it uses, and every clone gets the same files.
+## 2. For a project
 
-**Set up** (https, so CI needs no key):
+The project adds this repo as a **git submodule** in `vendor/my-skills`. Git then records which my-skills commit the
+project uses, and every clone, CI run and cloud session gets exactly that version.
+
+### Set it up, once
 
 ```bash
+cd ~/dev/myapp
 git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
-ln -s ../../vendor/my-skills/nestjs-best-practices .claude/skills/nestjs-best-practices   # relative link, works everywhere
 ```
 
-For the software factory, run `bash vendor/my-skills/software-factory/install.sh . --link` instead; it makes all the
-links for you and adds the `./factory` command (see [its README](software-factory/README.md)).
-
-**Clone:** `git clone --recurse-submodules <url>`, or run `git submodule update --init` after a plain clone. In GitHub
-Actions, use `actions/checkout` with `submodules: true`.
-
-**Update:** push the change to my-skills, then in the project:
+Then link the skills you need into the project's `.claude/skills/`. The link is relative and lives inside the
+repo, so it works on every machine:
 
 ```bash
-git submodule update --remote vendor/my-skills
-git commit -am "Update my-skills"      # in a pull request, like any other change
+mkdir -p .claude/skills
+ln -s ../../vendor/my-skills/nestjs-best-practices .claude/skills/nestjs-best-practices
+git add .gitmodules vendor/my-skills .claude/skills
+git commit -m "Skills from my-skills"
 ```
 
-The project stays on the old version until that commit, so a skill change never reaches it by surprise.
+> **Using the software factory?** Skip the manual links. Its installer makes all of them and adds the `factory`
+> command. See [software-factory](software-factory/README.md#set-up-a-project).
 
-**Protect it:** a coding agent must not change the rules it is reviewed against. Add `^vendor/my-skills` and
-`^\.gitmodules$` to `protected` in `.claude/factory.json`.
+### Clone a project that uses it
 
-### Copy
+```bash
+git clone --recurse-submodules <project url>
+# or, after a plain clone:
+git submodule update --init
+```
 
-`./install.sh --project ~/dev/myapp --copy <skill>` puts a pinned copy into the project. Run it again to update.
+In GitHub Actions, check out with `submodules: true`.
+
+### Update to a newer my-skills
+
+1. Change the skill here and push it to main.
+2. In the project, move the submodule forward and commit it in a pull request:
+
+   ```bash
+   git submodule update --remote vendor/my-skills     # factory projects: just run `factory update`
+   git commit -am "Update my-skills"
+   ```
+
+The project stays on its old version until that commit merges. A change here never reaches a project by surprise.
+
+### Protect it
+
+A coding agent must not change the rules it is reviewed against. In a software factory project, `vendor/my-skills`
+and `.gitmodules` are on the protected list, and agents are denied edits under `vendor/`.
+
+<br>
 
 ## Using a skill
 
-Claude picks installed skills up by themselves. Call one by name (`/study-notes`), or describe the task in words
-that match its description. Each skill's own README or SKILL.md says what it needs to run.
+Once a skill is installed, Claude picks it up by itself. Call it by name, for example `/study-notes`, or describe
+the task in words that match its description.
+
+<br>
+
+<details>
+<summary>Another option: a pinned copy instead of a submodule</summary>
+
+`./install.sh --project ~/dev/myapp --copy <skill>` copies the skill into the project. Run it again to update the
+copy. This works like a submodule for CI and clones, but the files are duplicated, so prefer the submodule.
+
+</details>
