@@ -84,8 +84,9 @@ write "Decision for you" in a report):
    them on their own. Then plan the change briefly and implement it following `CLAUDE.md` and the decisions.
    **Style guides:** if the files you'll change match a `styles` entry in `.claude/factory.json`, read those skills
    first (`.claude/skills/<name>/SKILL.md`) and follow them. Run their `check` command before every push.
-   **Once implementation starts, the tests are read-only for you.** If a test turns out to be wrong, say why in
-   a `<!-- factory-question -->` comment and let the test-writer or the dev manager change it. CI's factory guard
+   **Once implementation starts, don't weaken or edit the existing tests** (adding new tests and assertions is
+   always fine). If a test turns out to be wrong, say why in a `<!-- factory-question -->` comment and let the
+   test-writer or the dev manager change it. CI's factory guard
    fails a PR that edits tests or expected outputs after implementation started, changes tests or golden files
    that already existed, adds `.skip`/`.only`, or adds a dependency, until the dev manager has reviewed it.
    **Parallel loops:** other loops may be running tests on this machine. Ports, database names and queues come

@@ -4,6 +4,7 @@
   python3 .claude/hooks/factory_reviews.py            the current branch against origin/<mainBranch>
   python3 .claude/hooks/factory_reviews.py --json
 
+Paths are matched as regexes, ignoring case; committed, uncommitted and untracked changes all count.
 Prints one line per needed review or check with the first changed files that triggered it, for example
   safety-auditor       packages/validators/src/rules.ts
   architecture-reviewer apps/api/src/brands/brands.controller.ts
@@ -18,7 +19,7 @@ from factory_config import load, styled  # noqa: E402
 def needed(changed, cfg):
     out = {}
     def match(name, rxs):
-        hits = [p for p in changed if any(re.search(rx, p) for rx in rxs)]
+        hits = [p for p in changed if any(re.search(rx, p, re.I) for rx in rxs)]
         if hits:
             out[name] = hits
     for name, rule in cfg.get("reviews", {}).items():
@@ -38,6 +39,7 @@ if __name__ == "__main__":
     cfg = load()
     diff = subprocess.run(["git", "diff", "--name-only", f"origin/{cfg['mainBranch']}...HEAD"],
                           capture_output=True, text=True).stdout.split()
+    diff += subprocess.run(["git", "diff", "--name-only", "HEAD"], capture_output=True, text=True).stdout.split()
     diff += subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], capture_output=True,
                            text=True).stdout.split()
     res = needed(sorted(set(diff)), cfg)

@@ -78,44 +78,36 @@ Everything reusable lives once, in my-skills. A project keeps only its config.
 | `.claude/skills/*`: next-task, design-check, eval, the style guides | `CLAUDE.md`, the PRD, the plan, the decisions (every agent reads these) |
 | `.claude/settings.json` | |
 
-### Your own sessions in worktrees, without the script
-
-You can also skip `factory-loop.sh` and run plain `claude` sessions, one per worktree:
-
-```bash
-claude                                                       # slot 1: the project folder
-cd "$(python3 .claude/hooks/factory_claims.py worktree 2)"   # creates <project>-agents/agent-2 the first time
-claude                                                       # then: /loop /next-task all
-```
-
-The `SessionStart` hook (`factory_session.py`) turns each session into a factory agent:
-- it records the session's checkout in the lock file, so loops avoid that folder;
-- it fetches submodules, runs `commands.install` (in worktrees), then runs `commands.agentSetup`;
-- it puts the slot's `agentEnv` (own ports and database), `FACTORY_AGENT` and `FACTORY_PID` into the session's
-  environment.
-
-`/next-task` then claims each task as that agent, so two sessions never build the same task. After opening the PR it
-drops the claim, and the pushed branch keeps the task taken. One long session collects context, so restart it every
-few hours.
-
-### Several loops and the lock file
+**To customise without forking:**
+- **Structured values go in `factory.json`.** For example, `"reviews": {"security-reviewer": {"paths": ["auth",
+  "billing"]}}` sends every diff touching those paths to the security reviewer.
+- **Free text goes in a note.** For example, `.claude/factory/notes/security-reviewer.md` could say "tenants are brands;
+  payments are Stripe". A note adds; it never removes a shared rule.
+- **To change a shared rule,** change it in my-skills, then update the submodule.
 
 `install.sh . --link` makes the links and copies the templates. A file that differs from the kit is kept and
 reported, so nothing is overwritten. Without a submodule, `install.sh <dir>` copies everything instead.
 
-- **A checkout each.** The first loop works in the project folder. Each further loop gets its own git worktree
-  next to it, in `<project>-agents/agent-2`, `agent-3` and so on, created on first use with the local
-  `.env*.local` files copied and `commands.install` run at each start (main may have new dependencies). Each start also brings a reused worktree up to main before reading its hooks. Worktrees share the repo, so branches and fetches
-  are shared, but the files aren't.
-- **A task each.** Before building, a loop claims its task in a lock file in the repo's shared git folder
-  (`.git/factory/claims.json`, under a file lock, never committed). Other loops skip claimed tasks.
-- **Claims end by themselves.** A claim lapses when its loop exits (Ctrl-C or a crash, checked by process id)
-  or after `claimStaleHours` (6 by default). After a run pushes its branch, the loop drops the claim: a recent
-  `task/<id>-…` branch on the remote counts as taken, which is also how loops on other machines avoid each other.
-- **Own ports and database.** Loops on one machine would otherwise share the dev servers' ports, the test database
-  and any job queue in it, so one loop's tests could take the other's jobs or migrations. `agentEnv` in
-  `factory.json` gives each slot its own values: slot 1 (the project folder) keeps the defaults, and slot N shifts
-  each port by `portStep * (N-1)` and adds `_N` to names:
+## Running agents
+
+| How | When |
+|---|---|
+| `./factory-loop.sh` | Unattended: one fresh `claude -p` per task |
+| `./factory-loop.sh -i` | Watch and type: a normal session per task; `/exit` moves on to the next |
+| `claude`, then `/loop /next-task all` | One long session you drive yourself; restart it every few hours |
+
+### Several agents at once
+
+Start more loops or sessions when the plan has tasks that don't build on each other:
+
+- **A folder each.** The first agent uses the project folder. Each further agent gets a git worktree in
+  `<project>-agents/agent-N`, created the first time and brought up to main at each start. For your own sessions, run
+  `cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`.
+- **A task each.** Each agent claims its task in a lock file (`.git/factory/claims.json`), and the others skip it. A
+  claim ends when its process exits. A pushed `task/<id>-…` branch also counts as taken, across machines. Run
+  `python3 .claude/hooks/factory_claims.py list` to see who holds what.
+- **Ports and a database each.** `agentEnv` in `factory.json` gives each agent its own values. Slot 1 keeps the
+  defaults; slot N shifts ports by `portStep × (N−1)` and adds `_N` to names:
 
   ```json
   "agentEnv": { "API_PORT": "{port:4100}", "DATABASE_URL": "postgres://app:app@localhost:5440/app{suffix}" },
@@ -168,52 +160,24 @@ pass. The legacy list exempts existing files until they're fixed, and it only sh
 software-factory/
   SKILL.md, DEV-MANAGER.md, install.sh
   kit/
-    CLAUDE.factory.md            template for the project's CLAUDE.md
-    .claude/factory.json         paths, commands and protected files for this project
-    .claude/settings.json        permissions and the two hooks
-    .claude/hooks/check.py       Stop hook: typecheck and tests must pass before a turn ends
-    .claude/hooks/pr-gate.py     PreToolUse hook: reviewer pass, green CI, no protected files, or no merge;
-                                 refuses ticked or blocked tasks and more than maxOpenPRs at once
-    .claude/hooks/factory_guard.py   CI guard: tests/golden edits, skips, new deps, decision numbers, task ticks
-    .claude/hooks/next_task.py   picks the next task from the plan on main (--claim: one no other loop holds)
-    .claude/hooks/factory_claims.py  lock file for several loops: a checkout each, one task each
-    .claude/hooks/factory_env.py     per-loop ports, database names and queues (agentEnv)
-    .claude/hooks/factory_session.py SessionStart: a plain `claude` session in a worktree becomes a factory agent
-    .claude/hooks/wait_for_merge.sh  waits on a PR without spending tokens
-    factory-loop.sh              runs one fresh Claude session per task; start it again for a second loop
-    .claude/agents/              reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer
-    .claude/hooks/style_checks.py    CI: runs each style's `check` command from factory.json
-    .claude/skills/              next-task, design-check, eval
-    docs/                        build-plan, blocked list and decision templates
-    .github/                     CI workflow and CODEOWNERS templates
+    factory-loop.sh                one fresh Claude run per task; start it again for another agent
+    CLAUDE.factory.md              template for the project's CLAUDE.md
+    .claude/factory.json           template: the project's config
+    .claude/factory/notes/         template: the project's additions to the shared agents and skills
+    .claude/settings.json          permissions and hooks
+    .claude/agents/                reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer
+    .claude/skills/                next-task, design-check, eval
+    .claude/hooks/
+      check.py                     Stop hook: typecheck and tests
+      pr-gate.py                   PreToolUse hook on gh pr create / merge
+      factory_session.py           SessionStart hook: a plain claude session becomes an agent
+      next_task.py                 the next job: rework first, then the first free task
+      factory_claims.py            lock file: a folder and a task per agent; `worktree N`
+      factory_env.py               per-agent ports and database (agentEnv)
+      factory_reviews.py           which extra reviews a diff needs
+      factory_guard.py             CI guard
+      style_checks.py              CI: each style's check
+      factory_config.py            reads factory.json, with defaults
+      wait_for_merge.sh            waits on a PR without spending tokens
+    docs/, .github/                plan, blocked list, decision and CI templates
 ```
-
-### One factory, many projects
-
-The factory has two parts:
-- **The engine** is the same in every project: `factory-loop.sh` and `.claude/hooks/*.py`/`*.sh` (claims, the PR
-  gate, the guard, next_task, the session hook, style checks).
-- **The templates** each project tailors: `factory.json`, `settings.json`, the agents, the `next-task` skill,
-  CLAUDE.md, the plan and CI.
-
-With my-skills as a git submodule (`vendor/my-skills`), `install.sh . --link` links the engine into the submodule and
-copies the templates. Each project then pins one factory version, the submodule commit, and a factory fix reaches it
-through one "update my-skills" PR. A project never ends up with a stale copy of a script. Without a submodule,
-`install.sh <dir>` copies everything, as before.
-
-Quick start in a project that has a PRD:
-
-```bash
-git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
-bash vendor/my-skills/software-factory/install.sh . --link     # or, without a submodule: bash ~/path/to/my-skills/software-factory/install.sh .
-# fill in .claude/factory.json, CLAUDE.md and docs/build-plan.md (or ask Claude: "set up the software factory")
-./factory-loop.sh        # or: claude, then /loop /next-task all
-./factory-loop.sh        # again, in a second terminal, for a second loop on other tasks
-./factory-loop.sh -i     # interactive: a normal Claude session per task; /exit moves on to the next
-cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude   # or your own session per worktree: /loop /next-task all
-```
-
-Then, in a Claude session with the repo attached (cloud, so it runs with the laptop closed): "be the dev
-manager for this repo".
-
-The hooks need Python 3 and the GitHub CLI (`gh`) on the coding agent's machine.

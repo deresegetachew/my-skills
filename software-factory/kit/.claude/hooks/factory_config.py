@@ -26,6 +26,8 @@ DEFAULTS = {
     "styles": [],
     # Per-loop environment for parallel loops (factory_env.py): {"API_PORT": "{port:4100}",
     #   "DATABASE_URL": "postgres://app:app@localhost:5432/app{suffix}"}. Slot 1 keeps the defaults.
+    # The Stop check skips while any of these is missing, e.g. ["node_modules"] before the first install.
+    "checkRequires": [],
     "agentEnv": {},
     "portStep": 10,
     # Project additions for the shared agents and skills: <notes>/<agent or skill name>.md, read first if present.

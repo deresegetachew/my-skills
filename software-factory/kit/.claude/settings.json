@@ -2,13 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(pnpm *)",
-      "Bash(npm *)",
-      "Bash(npx *)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
       "Bash(git show*)",
-      "Bash(git branch*)",
       "Bash(git checkout*)",
       "Bash(git switch*)",
       "Bash(git add*)",
@@ -16,11 +13,15 @@
       "Bash(git push*)",
       "Bash(git pull*)",
       "Bash(git fetch*)",
-      "Bash(git merge*)",
-      "Bash(git rebase*)",
       "Bash(gh pr *)",
       "Bash(docker compose *)",
-      "Bash(python3 .claude/hooks/*)"
+      "Bash(python3 .claude/hooks/*)",
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(npm ci*)",
+      "Bash(git branch --show-current*)",
+      "Bash(git merge origin/*)",
+      "Bash(git rebase origin/*)"
     ],
     "deny": [
       "Read(./.env)",
@@ -35,7 +36,12 @@
       "Edit(./docs/PRD.md)",
       "Bash(gh api *)",
       "Edit(./vendor/**)",
-      "Write(./vendor/**)"
+      "Write(./vendor/**)",
+      "Bash(git push * HEAD:main*)",
+      "Bash(git push *:main*)",
+      "Bash(git push * main)",
+      "Bash(git branch -D*)",
+      "Bash(git branch -f*)"
     ]
   },
   "hooks": {
