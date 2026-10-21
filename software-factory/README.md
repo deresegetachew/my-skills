@@ -74,11 +74,12 @@ Everything goes through one command. Run it from any folder inside the project.
 | Command | What it does |
 |---|---|
 | `factory loop` | Runs agents unattended: one fresh Claude run per task |
-| `factory loop -i` | One session per task that you can watch and type into. After `/exit`: Enter for the next task, `q` to stop |
+| `factory loop -i` | One session per task that you can watch and type into. It closes by itself when the task is done, and the next starts after 10 s (`q` stops) |
 | `factory agent 2` | Opens a second agent in its own folder. Then type `/loop /next-task all` |
 | `factory next` | Shows the job the factory would hand out next |
 | `factory claims` | Shows which agent holds which task |
 | `factory update` | Moves the project to the newest my-skills. Commit the result in a PR |
+| `factory clean` | Removes agent worktrees no agent is using, and local branches of finished tasks |
 | `factory help` | Lists the rest: `reviews`, `env`, `check`, `guard`, `wait`, `release` |
 
 `factory` works in every factory project. It finds the project you're in and runs that project's own copy, so each

@@ -14,8 +14,8 @@ usage() {
 factory <command>
 
 Build
-  loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into;
-                         after each task it asks whether to go on). Start it again in another terminal for more agents.
+  loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into,
+                         which closes by itself when the task is done). Start it again in another terminal for more agents.
   agent <N>              open Claude in agent N's own worktree (created the first time); then /loop /next-task all
   next                   the job the factory would hand out next
 
@@ -31,6 +31,8 @@ Check
 
 Maintain
   release <agent>        drop an agent's claims (agent-2 ...), for example after a crash
+  clean                  remove agent worktrees no agent is using (and with no uncommitted work), and local task
+                         branches whose task is done
   wait <pr> [minutes]    wait for a pull request to merge, without spending tokens
   update                 pull the newest my-skills into the project and relink; then commit it in a PR
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
@@ -49,6 +51,7 @@ case "$cmd" in
   next)      py next_task.py "$@" ;;
   claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
   release)   py factory_claims.py release --agent "${1:?usage: factory release agent-<N>}" ;;
+  clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   env)       if [ -n "${1:-}" ]; then py factory_env.py --agent "agent-$1"; else py factory_env.py; fi ;;
   check)     py style_checks.py ;;
