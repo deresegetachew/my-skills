@@ -31,7 +31,8 @@ def claude_pid():
         if not out:
             break
         ppid, _, args = out.partition(" ")
-        if "claude" in os.path.basename(args.split()[0] if args.split() else "") or " claude" in f" {args}":
+        words = args.split()[:3]  # the program, or node plus its script
+        if any(os.path.basename(w) == "claude" or "claude-code" in w for w in words):
             return pid
         if not ppid.strip().isdigit() or int(ppid) <= 1:
             break

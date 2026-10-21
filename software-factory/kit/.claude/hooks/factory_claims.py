@@ -15,6 +15,8 @@ A claim belongs to a live process: when the pid that made it has exited (or the 
   python3 .claude/hooks/factory_claims.py checkout --pid $$     -> prints "<agent> <directory>" to work in
   python3 .claude/hooks/factory_claims.py release --agent agent-2 [--tasks-only]
   python3 .claude/hooks/factory_claims.py list
+  python3 .claude/hooks/factory_claims.py done --agent agent-2 --task 3.2      (factory loop -i: close the session)
+  python3 .claude/hooks/factory_claims.py clean                                remove unused agent worktrees
   cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude
                                                                 -> a plain Claude session in slot 2's worktree; the
                                                                    SessionStart hook (factory_session.py) sets it up
@@ -176,6 +178,66 @@ def claim_task(open_ids, agent, pid, cfg):
     return None
 
 
+def done_file(agent):
+    return os.path.join(state_dir(), f"done-{agent}")
+
+
+def mark_done(agent, task):
+    """An interactive session finished its task: the Stop hook closes it and the loop moves on."""
+    with open(done_file(agent), "w") as f:
+        f.write(task)
+
+
+def take_done(agent):
+    """The task an agent marked done, removing the mark; '' when there is none."""
+    p = done_file(agent)
+    if not os.path.exists(p):
+        return ""
+    task = open(p).read().strip()
+    os.remove(p)
+    return task
+
+
+def tidy_branches(cfg):
+    """Delete local task/<id>-... branches whose task is ticked on main (their PR has merged)."""
+    from factory_config import branch_task, tasks
+    plan = git("show", f"origin/{cfg['mainBranch']}:{cfg['plan']}")
+    done = {i for i, d, _ in tasks(plan) if d}
+    gone = []
+    for name in git("for-each-ref", "--format=%(refname:short)", "refs/heads/task").split():
+        if branch_task(name) in done and subprocess.run(["git", "branch", "-D", "-q", name],
+                                                         capture_output=True).returncode == 0:
+            gone.append(name)
+    return gone
+
+
+def clean(cfg, stale_hours):
+    """Remove agent worktrees no live agent uses and that have no uncommitted work; prune merged task branches."""
+    main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
+    root = main_top + "-agents"
+    with locked() as data:
+        busy = {c.get("path") for c in data["checkouts"].values() if alive(c, stale_hours)}
+    removed, kept = [], []
+    for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
+        path = os.path.join(root, name)
+        if path in busy:
+            kept.append(f"{name} (in use)")
+            continue
+        dirty = subprocess.run(["git", "-C", path, "status", "--porcelain", "--ignore-submodules"],
+                               capture_output=True, text=True).stdout.strip()
+        if dirty:
+            kept.append(f"{name} (uncommitted changes)")
+            continue
+        if subprocess.run(["git", "worktree", "remove", "--force", path], capture_output=True).returncode == 0:
+            removed.append(name)
+    subprocess.run(["git", "worktree", "prune"], capture_output=True)
+    branches = tidy_branches(cfg)
+    print("removed worktrees: " + (", ".join(removed) or "none"))
+    if kept:
+        print("kept: " + ", ".join(kept))
+    print("deleted merged task branches: " + (", ".join(branches) or "none"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -187,11 +249,26 @@ def main():
     w = sub.add_parser("worktree", help="print (and create) the folder for slot N")
     w.add_argument("n", type=int)
     sub.add_parser("list")
+    d = sub.add_parser("done", help="mark the agent's task done (an interactive session then closes)")
+    d.add_argument("--agent", required=True)
+    d.add_argument("--task", required=True)
+    t = sub.add_parser("take-done")
+    t.add_argument("--agent", required=True)
+    sub.add_parser("tidy-branches")
+    sub.add_parser("clean")
     a = ap.parse_args()
     cfg = load()
     stale = float(cfg.get("claimStaleHours", 6))
     if a.cmd == "worktree":
         worktree(a.n)
+    elif a.cmd == "done":
+        mark_done(a.agent, a.task)
+    elif a.cmd == "take-done":
+        print(take_done(a.agent))
+    elif a.cmd == "tidy-branches":
+        print("\n".join(tidy_branches(cfg)))
+    elif a.cmd == "clean":
+        clean(cfg, stale)
     elif a.cmd == "checkout":
         checkout(a.pid, stale)
     elif a.cmd == "release":

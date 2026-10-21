@@ -5,8 +5,8 @@
 #   ./factory-loop.sh 5          run at most 5 tasks
 #   ./factory-loop.sh --interactive [N]
 #                                each task opens a normal Claude session you can type into, with the task
-#                                already started; type /exit when it says it's done, then Enter for the next
-#                                task (in a fresh session) or q to stop the loop
+#                                already started. When the task is done the session closes by itself and the
+#                                next one starts after a 10 s countdown (q stops); /exit early asks first
 #   (or: ./factory loop [-i] [N])
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
@@ -51,9 +51,18 @@ setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).ge
 export FACTORY_INTERACTIVE="$interactive"
 echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
 
+# Between tasks: back to a clean main. In an agent worktree, untracked leftovers go too (ignored files such as
+# node_modules stay, so no reinstall). Local task branches whose task is ticked on main are deleted.
+tidy() {
+  git fetch -q origin && git checkout -q --detach "origin/$main" 2>/dev/null
+  [ "$PWD" != "$home" ] && git clean -fdq 2>/dev/null
+  python3 "$hooks/factory_claims.py" tidy-branches >/dev/null 2>&1 || true
+}
+home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+
 last=""; repeats=0
 for ((n = 1; n <= limit; n++)); do
-  git fetch -q origin && git checkout -q --detach "origin/$main" 2>/dev/null
+  tidy
   [ -f .gitmodules ] && git submodule update --init -q  # main may have moved the submodule
   next=$(python3 "$hooks/next_task.py" --claim "$agent" --pid $$) || {
     echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }
@@ -65,12 +74,21 @@ for ((n = 1; n <= limit; n++)); do
   fi
   echo "=== [$agent] $(date '+%H:%M') task $next ==="
   if [ "$interactive" = 1 ]; then
-    echo "[$agent] Talk to it as usual. When it says the task is done, type /exit."
+    echo "[$agent] Talk to it as usual. When the task is done, the session closes by itself."
+    python3 "$hooks/factory_claims.py" take-done --agent "$agent" >/dev/null  # no stale mark from an earlier run
     claude "/next-task $id" || true
+    stty sane 2>/dev/null
     python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null
-    # /exit only ends this task's session: ask before claiming the next one.
-    printf '[%s] Task %s session ended. Next task? [Enter] go, q stop: ' "$agent" "$id"
-    read -r answer </dev/tty || answer=q
+    finished="$(python3 "$hooks/factory_claims.py" take-done --agent "$agent")"
+    if [ -n "$finished" ]; then
+      # The agent finished and the Stop hook closed the session: go on unless you say stop.
+      printf '[%s] Task %s done. Next task in 10 s; type q and Enter to stop: ' "$agent" "$finished"
+      if read -r -t 10 answer </dev/tty; then :; else answer=""; echo; fi
+    else
+      # You left with /exit before it was done: ask.
+      printf '[%s] Task %s session ended. Next task? [Enter] go, q stop: ' "$agent" "$id"
+      read -r answer </dev/tty || answer=q
+    fi
     case "$answer" in q|Q|quit|stop|n|N) echo "[$agent] Stopped."; exit 0;; esac
     continue
   else

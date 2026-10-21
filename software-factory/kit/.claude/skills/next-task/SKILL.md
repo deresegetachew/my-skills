@@ -144,8 +144,10 @@ write "Decision for you" in a report):
   not in your memory.
 - **Interactive loop** (`FACTORY_INTERACTIVE=1`, from `./factory-loop.sh --interactive`): the owner is at the
   terminal. You may ask them short questions there, but decisions still go in the PR or a decision file, so the
-  next fresh session sees them. When the task is done, end with one line: `Task <id> done: <PR link>. Type /exit for
-  the next task.` Don't start another task in this session.
+  next fresh session sees them. When the task is done (PR opened, claim dropped), mark it done with
+  `python3 .claude/hooks/factory_claims.py done --agent "$FACTORY_AGENT" --task <id>` and end with one line:
+  `Task <id> done: <PR link>.` The session then closes by itself and the loop starts the next task. Don't start
+  another task in this session.
 - Stop and report only when every remaining task is blocked, a "Done when" check or CI fails in a way you
   can't fix, or a task would break one of the rules in `CLAUDE.md`.
 - The report is short: tasks done (with PR links), tasks blocked, and questions still open (with links to

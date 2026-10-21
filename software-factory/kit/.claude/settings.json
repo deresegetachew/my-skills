@@ -52,6 +52,11 @@
             "type": "command",
             "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.py",
             "timeout": 600
+          },
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.py",
+            "timeout": 30
           }
         ]
       }
