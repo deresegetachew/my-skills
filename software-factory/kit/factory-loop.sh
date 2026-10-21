@@ -27,14 +27,19 @@ limit="${1:-999}"
 read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$) || exit 1
 trap 'python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1' EXIT
 trap 'exit 130' INT TERM
+main=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))')
 if [ "$dir" != "$PWD" ]; then
   # A new worktree has no untracked local files: bring the local env files over, then install.
   for f in .env.local .env.*.local; do [ -f "$f" ] && [ ! -e "$dir/$f" ] && cp "$f" "$dir/$f"; done
   cd "$dir"
+  # A reused worktree may be far behind: bring it to main before using its hooks and config.
+  git fetch -q origin && git checkout -q --detach "origin/$main" || {
+    echo "[$agent] Could not check out origin/$main in $dir (uncommitted changes there?). Clean it up, or remove it: git worktree remove $dir"
+    exit 1; }
   [ -f .gitmodules ] && git submodule update --init -q  # skills from my-skills, for example
   install=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("install",""))')
-  marker="$(git rev-parse --git-dir)/factory-installed"
-  [ -n "$install" ] && [ ! -e "$marker" ] && { echo "[$agent] $install"; sh -c "$install" && touch "$marker"; }
+  # Every start, not once: main may have new dependencies since this worktree was last used.
+  [ -n "$install" ] && { echo "[$agent] $install"; sh -c "$install" || echo "[$agent] (install failed; tests may fail)"; }
 fi
 hooks="$PWD/.claude/hooks"
 export FACTORY_AGENT="$agent"
@@ -43,11 +48,11 @@ eval "$(python3 "$hooks/factory_env.py" --agent "$agent")" || exit 1
 setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("agentSetup",""))')
 [ -n "$setup" ] && { echo "[$agent] $setup"; sh -c "$setup" || echo "[$agent] (agentSetup failed; tests may fail until it works)"; }
 export FACTORY_INTERACTIVE="$interactive"
-echo "[$agent] working in $PWD (slot $FACTORY_SLOT)"
+echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
 
 last=""; repeats=0
 for ((n = 1; n <= limit; n++)); do
-  git fetch -q origin && git checkout -q --detach "origin/$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))')" 2>/dev/null
+  git fetch -q origin && git checkout -q --detach "origin/$main" 2>/dev/null
   [ -f .gitmodules ] && git submodule update --init -q  # main may have moved the submodule
   next=$(python3 "$hooks/next_task.py" --claim "$agent" --pid $$) || {
     echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }

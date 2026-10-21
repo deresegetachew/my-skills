@@ -62,6 +62,12 @@ git commit -am "Update my-skills"          # through a pull request, like any ot
 The project keeps the old version until that commit, so a skill change never reaches a project by surprise.
 `git diff --submodule` shows which my-skills commits came in.
 
+**The software factory from the submodule:** `bash vendor/my-skills/software-factory/install.sh . --link`. The
+factory's engine (its hook scripts and `factory-loop.sh`, the same in every project) becomes relative links into the
+submodule, so the project runs exactly the version it pins. It also copies the templates the project tailors
+(`factory.json`, `settings.json`, the agents, the skills, `CLAUDE.factory.md`). Re-run it after an update to link any
+new engine file.
+
 **Software factory projects:** add `^vendor/my-skills` and `^\.gitmodules$` to `protected` in `.claude/factory.json`,
 so a coding agent can't change the rules it is reviewed against. Put `git submodule update --init` first in
 `commands.install`.

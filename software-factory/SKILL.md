@@ -23,9 +23,13 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
 1. **Check the inputs.** The project needs a PRD (user stories plus implementation and testing decisions)
    and should have an architecture note. If there is no PRD, help write one first; the factory builds only
    what the PRD and plan say.
-2. **Copy the kit** into the project without overwriting existing files:
-   `bash <this skill>/install.sh <project dir>`. It copies `kit/` (the `.claude/` hooks, agents, skills and
-   settings, the doc templates and a CI workflow) and marks the hooks executable.
+2. **Install the kit.** Prefer my-skills as a git submodule, so the project runs one pinned version of the factory:
+   `git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills`, then
+   `bash vendor/my-skills/software-factory/install.sh . --link`. The engine (`factory-loop.sh`, `.claude/hooks/*`)
+   becomes relative links into the submodule, and the templates (agents, skills, settings, doc templates, CI) are
+   copied for you to tailor. Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
+   `submodules: true`, and put `git submodule update --init` first in `commands.install`. Without a submodule,
+   `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
 3. **Fill in `.claude/factory.json`:** the doc paths, the install, typecheck, lint, test and build commands,
    the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges":
    the rules files, CI, lockfiles, migrations, and anything that implements a critical rule (safety logic,
@@ -72,8 +76,10 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    and the plan. It runs without anyone to approve prompts, so `.claude/settings.json` must allow every command
    the build needs. Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab), and run the
    agent with the sandbox on rather than with permission checks skipped.
+   **Your own sessions instead of the script:** `cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`,
+   then `/loop /next-task all`. The SessionStart hook gives the session its slot, ports, database and task claims.
    **More than one loop:** run `./factory-loop.sh` again in another terminal. Each loop gets its own checkout
-   (a git worktree in `<project>-agents/agent-N`, with `commands.install` run once) and claims its task in a
+   (a git worktree in `<project>-agents/agent-N`, with `commands.install` run at each start) and claims its task in a
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose
    `task/<id>-...` branch is on the remote. It helps only when the plan has tasks that don't build on each other,
    and costs tokens per loop. Raise `maxOpenPRs` to about loops + 1.
