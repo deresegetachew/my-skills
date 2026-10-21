@@ -81,6 +81,7 @@ Everything goes through one command. Run it from any folder inside the project.
 | `factory update` | Moves the project to the newest my-skills. Commit the result in a PR |
 | `factory clean` | Removes agent worktrees no agent is using, and local branches of finished tasks |
 | `factory issues` | Lists the task issues and their state (issues mode) |
+| `factory agents` | Lists the agents: working, idle or down, and their last ping (issues mode) |
 | `factory help` | Lists the rest: `reviews`, `env`, `check`, `guard`, `wait`, `release` |
 
 **From your phone:** sessions started by `factory loop -i` and `factory agent <name>` have Remote Control on. They appear
@@ -188,6 +189,22 @@ Instead of the build plan, tasks can be GitHub issues. Set this in `factory.json
 
 `factory issues` lists the issues and their state; `factory issues setup` creates the labels.
 
+**Live agents.** In issues mode each agent also has its own issue, `Agent: taytu · working on #42`, labelled
+`factory:agent`. The agent keeps it current by itself, with no extra work in the task:
+
+| When | Its issue says |
+|---|---|
+| It starts | `idle`, with the machine and folder |
+| It takes a task | `working on #42` |
+| It's working | a ping at most every 5 minutes (any tool use) |
+| A turn ends | `idle` |
+| It exits | `down` |
+
+No ping for 30 minutes means down: it crashed, the laptop slept, or it waits at a prompt. The dev manager's
+`factory agents sweep` marks it down and puts its issues back to ready, so another agent takes them. If the silent
+agent comes back, the PR gate stops it opening a PR for an issue that has moved on. `factory agents` lists them all.
+Change the timings with `pingMinutes` and `downMinutes` in `tasks`.
+
 <br>
 
 ## Agent names
@@ -294,6 +311,7 @@ software-factory/
       next_task.py                        the next job: rework first, then the first free task
       factory_claims.py                   lock file: a folder and a task per agent
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, stale
+      factory_agents.py                   live agents: register, ping, down, sweep
       factory_env.py                      per-agent ports and database
       factory_reviews.py                  which extra reviews a change needs
       factory_guard.py                    the CI guard

@@ -9,7 +9,8 @@ What factory-loop.sh does for its runs, this does for a session you start yourse
   2. Checkout claim: records this session in the lock file, so factory-loop.sh won't use the same folder, and warns
      when another live session already works here.
   3. Submodules (`git submodule update --init`), then `commands.install` (worktrees), then `commands.agentSetup`.
-  4. Environment: writes `agentEnv` (own ports and database), FACTORY_AGENT and FACTORY_PID to CLAUDE_ENV_FILE, so
+  4. Issues mode: registers the agent on GitHub (factory_agents.py), so the dev manager sees it's alive.
+  5. Environment: writes `agentEnv` (own ports and database), FACTORY_AGENT and FACTORY_PID to CLAUDE_ENV_FILE, so
      every command in the session uses them and `/next-task` claims its tasks as this agent.
 
 Under factory-loop.sh (FACTORY_AGENT already set) it only updates the submodules: the loop did the rest.
@@ -91,6 +92,11 @@ def main():
         notes.append("This Claude version gave the hook no CLAUDE_ENV_FILE, so the slot's variables aren't set: "
                      "run `eval \"$(python3 .claude/hooks/factory_env.py)\"` in each command, or use factory-loop.sh.")
 
+    try:  # issues mode: the agent's own issue on GitHub says it's alive (factory_agents.py)
+        sh(f"python3 {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'factory_agents.py')} register --agent {agent}",
+           env=child, timeout=30)
+    except subprocess.TimeoutExpired:
+        pass
     shown = ", ".join(f"{k}={v}" for k, v in env.items() if k not in ("FACTORY_PID",))
     print(f"Factory slot {slot}: this session is {agent} ({shown}). /next-task claims its tasks as {agent}.")
     for n in notes:

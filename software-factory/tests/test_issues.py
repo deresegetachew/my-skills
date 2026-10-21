@@ -138,6 +138,47 @@ def test_stale_lists_quiet_issues():
     assert "#1 agent:taytu quiet for" in out, out
 
 
+def agents(d, env, *args):
+    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_agents.py"), *args], cwd=d, env=env,
+                       capture_output=True, text=True)
+    return p.returncode, p.stdout.strip() + p.stderr.strip()
+
+
+def test_agent_registers_pings_and_goes_down():
+    d, db, env = setup([issue(1)])
+    agents(d, env, "register", "--agent", "taytu")
+    rc, out = agents(d, env, "list")
+    assert out.startswith("taytu") and " idle " in out, out
+    agents(d, env, "ping", "--agent", "taytu", "--status", "working on #1")
+    titles = {i["title"] for i in json.load(open(db))["issues"]}
+    assert "Agent: taytu · working on #1" in titles, titles
+    assert run(d, env, "pick", "--agent", "menelik")[1] == "issue-1 Task 1"  # the agent issue is not a task
+    agents(d, env, "down", "--agent", "taytu")
+    assert "factory:agent-down" in labels(db, 2)
+
+
+def test_sweep_marks_silent_agents_down_and_releases_their_issues():
+    old = "<!-- factory-agent name=taytu status=working ping=2020-01-01T00:00:00Z -->\n**Started:** x\n**Where:** y"
+    d, db, env = setup([issue(1, labels=("factory:in-progress", "agent:taytu")),
+                        issue(2, labels=("factory:agent",), body=old)])
+    rc, out = agents(d, env, "sweep")
+    assert out.startswith("taytu: down") and "released #1" in out, out
+    assert labels(db, 1) == ["factory:ready"], labels(db, 1)
+    assert "factory:agent-down" in labels(db, 2)
+    assert agents(d, env, "sweep")[1] == ""  # already down: nothing more to do
+
+
+def test_tool_use_pings_at_most_every_few_minutes():
+    d, db, env = setup([])
+    env = {**env, "FACTORY_AGENT": "taytu"}
+    agents(d, env, "register", "--agent", "taytu")
+    before = json.load(open(db)).get("clock")
+    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_agents.py"), "hook"], cwd=d, env=env,
+                       input=json.dumps({"hook_event_name": "PostToolUse"}), capture_output=True, text=True)
+    assert p.returncode == 0
+    assert json.load(open(db)).get("clock") == before  # registered moments ago: no network call
+
+
 if __name__ == "__main__":
     os.environ.pop("FACTORY_AGENT", None)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

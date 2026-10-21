@@ -26,6 +26,8 @@ Everything below still applies, with these changes:
 | Ship | Don't tick the plan. The PR body starts with `Closes #<n>` (the gate checks it), then what changed and how it was verified. After `gh pr create`: `factory_issues.py review <n>`. Merging closes the issue. |
 | Done | `factory_claims.py done --task issue-<n>` in an interactive loop, as below. |
 
+Your own issue, `Agent: <name>`, tracks that you're alive. The hooks keep it current; don't edit or close it. If the
+PR gate says your issue now belongs to another agent, you were quiet too long: leave that work and pick again.
 The dev manager writes the issues and hands quiet ones (no activity for `tasks.staleHours`) to another agent, so
 push your branch early and often: commits count as activity.
 

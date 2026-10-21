@@ -106,6 +106,10 @@ def issues_mode(cfg, a):
             i = ready[0] if ready else None
         if i:
             jobs = [(f"issue-{i['number']}", i["title"])]
+            if a.claim:
+                subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_agents.py"),
+                                "ping", "--agent", a.claim, "--status", f"working on #{i['number']}"],
+                               capture_output=True, timeout=60)
     if not jobs:
         print(json.dumps({"id": None, "remaining": 0}) if a.json else "none")
         sys.exit(1)

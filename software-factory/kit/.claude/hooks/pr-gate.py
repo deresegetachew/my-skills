@@ -62,6 +62,12 @@ if re.search(r"\bgh\s+pr\s+create\b", cmd) and not is_draft:
         issue = json.loads(out)
         if issue.get("state") != "open":
             block(f"Issue #{n} is closed. Pick the next job with `python3 .claude/hooks/next_task.py`.")
+        held_by = [x["name"][len(task_labels(cfg)["agentPrefix"]):] for x in issue.get("labels", [])
+                   if x["name"].startswith(task_labels(cfg)["agentPrefix"])]
+        me = os.environ.get("FACTORY_AGENT")
+        if me and held_by and me not in held_by:
+            block(f"Issue #{n} now belongs to {', '.join(held_by)} (it was released while you were quiet). Leave it, "
+                  "and pick the next job with `python3 .claude/hooks/next_task.py`.")
         if task_labels(cfg)["blocked"] in {x["name"] for x in issue.get("labels", [])}:
             block(f"Issue #{n} is blocked (see its comments). Pick the next job with `python3 .claude/hooks/next_task.py`.")
         body = cmd

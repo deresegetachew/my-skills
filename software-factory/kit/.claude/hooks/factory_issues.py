@@ -82,7 +82,8 @@ def comment(n, body):
 
 def task_issues(state="open", label=None):
     q = f"repos/{{owner}}/{{repo}}/issues?state={state}" + (f"&labels={label}" if label else "")
-    return [i for i in gh_all(q) if "pull_request" not in i]
+    return [i for i in gh_all(q) if "pull_request" not in i
+            and (label == "factory:agent" or "factory:agent" not in names(i))]  # agent issues aren't tasks
 
 
 def order(issue):
@@ -138,6 +139,19 @@ def pick(cfg, agent):
             return i
         remove_label(n, mine)  # someone else was first; their labels stay
     return None
+
+
+def release_issue(cfg, n, reason=""):
+    """Back to ready: the agent's label and the in-progress or in-review label come off."""
+    L = task_labels(cfg)
+    i = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{n}")
+    agents = [x[len(L["agentPrefix"]):] for x in names(i) if x.startswith(L["agentPrefix"])]
+    for x in names(i):
+        if x.startswith(L["agentPrefix"]) or x in (L["inProgress"], L["inReview"]):
+            remove_label(n, x)
+    add_labels(n, [L["ready"]])
+    who = agents[0] if agents else "none"
+    comment(n, f"<!-- factory-release agent={who} -->\nBack to ready" + (f": {reason}" if reason else "."))
 
 
 def tick(n, index):
@@ -208,14 +222,7 @@ def main():
         add_labels(a.n, [L["blocked"]])
         comment(a.n, f"**Blocked:** {a.reason}")
     elif a.cmd == "release":
-        i = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{a.n}")
-        agents = [x[len(L["agentPrefix"]):] for x in names(i) if x.startswith(L["agentPrefix"])]
-        for x in names(i):
-            if x.startswith(L["agentPrefix"]) or x in (L["inProgress"], L["inReview"]):
-                remove_label(a.n, x)
-        add_labels(a.n, [L["ready"]])
-        who = agents[0] if agents else "none"
-        comment(a.n, f"<!-- factory-release agent={who} -->\nBack to ready" + (f": {a.reason}" if a.reason else "."))
+        release_issue(cfg, a.n, a.reason)
     elif a.cmd == "stale":
         hours = a.hours or float((cfg.get("tasks") or {}).get("staleHours", 3))
         now = datetime.now(timezone.utc)
@@ -236,6 +243,7 @@ def main():
     elif a.cmd == "setup":
         have = {x["name"] for x in gh_all("repos/{owner}/{repo}/labels")}
         wanted = [(L[k], COLORS[k]) for k in COLORS] + [("factory-hold", "fbca04")]
+        wanted += [("factory:agent", "bfdadc"), ("factory:agent-down", "d4c5f9")]
         wanted += [(L["agentPrefix"] + n, "c5def5") for n in cfg.get("agents") or []]
         for name, color in wanted:
             if name not in have:

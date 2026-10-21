@@ -28,6 +28,8 @@ DEFAULTS = {
         "labels": {"ready": "factory:ready", "inProgress": "factory:in-progress", "inReview": "factory:in-review",
                    "blocked": "factory:blocked", "agentPrefix": "agent:"},
         "staleHours": 3,  # an in-progress issue with no activity for this long goes back to ready (dev manager)
+        "pingMinutes": 5,  # an agent pings its agent issue at most this often while it works
+        "downMinutes": 30,  # no ping for this long: the agent counts as down, and the sweep releases its issues
     },
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
