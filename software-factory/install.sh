@@ -5,12 +5,11 @@
 #       Copy the whole kit, never overwriting a file that's already there.
 #
 #   bash vendor/my-skills/software-factory/install.sh . --link      (my-skills as a git submodule of the project)
-#       Everything shared (the hook scripts, factory-loop.sh, the agents, the skills and settings.json) becomes
-#       relative symlinks into the submodule, so the project has one version of it: the submodule's commit. What a
-#       project fills in (factory.json, CLAUDE.factory.md, the docs templates, CI) is copied as before. A project's
-#       own additions go in factory.json and .claude/factory/notes/<agent or skill>.md, never in the shared files.
-#       A shared file that is already a plain copy identical to the kit becomes a link; one that differs is kept,
-#       with a warning: move its project-specific lines to factory.json or a note, delete it, and run this again. Re-run it after `git submodule update --remote` to link new shared files.
+#       The engine (the hook scripts and factory-loop.sh, which every project runs unchanged) becomes relative
+#       symlinks into the submodule, so the project has one version of it: the submodule's commit. The templates
+#       a project tailors (factory.json, settings.json, the agents, the skills, CLAUDE.factory.md, docs, CI) are
+#       copied as before. An engine file that is already a plain copy identical to the kit becomes a link; one that
+#       differs is kept, with a warning. Re-run it after `git submodule update --remote` to link new engine files.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 src="$here/kit"
@@ -21,11 +20,10 @@ if [ "$link" = 1 ]; then
   case "$src/" in "$dst"/*) ;; *) echo "--link needs this installer inside the project (my-skills as a submodule, for example vendor/my-skills)" >&2; exit 1;; esac
 fi
 
-# Shared: used unchanged by every project. Everything else in kit/ is a template the project fills in.
+# The engine: run unchanged by every project. Everything else in kit/ is a template the project tailors.
 is_engine() {
   case "$1" in
     ./factory-loop.sh|./.claude/hooks/*.py|./.claude/hooks/*.sh) return 0;;
-    ./.claude/agents/*.md|./.claude/skills/*/SKILL.md|./.claude/settings.json) return 0;;
     *) return 1;;
   esac
 }
