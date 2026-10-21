@@ -36,7 +36,6 @@
       "Edit(./docs/PRD.md)",
       "Bash(gh api *)",
       "Edit(./vendor/**)",
-      "Write(./vendor/**)",
       "Bash(git push * HEAD:main*)",
       "Bash(git push *:main*)",
       "Bash(git push * main)",
