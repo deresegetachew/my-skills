@@ -79,7 +79,7 @@ write "Decision for you" in a report):
 
 ## 3. Build it
 
-1. Branch: `git checkout -b task/<id>-<short-name>`.
+1. Branch: `git checkout -b task/<id with dashes>-<short-name>`, for example `task/3-2-10-auth-followups` for task 3.2.10.
 2. For tasks that add behaviour, ask the `test-writer` subagent to write the failing tests first and commit
    them on their own. Then plan the change briefly and implement it following `CLAUDE.md` and the decisions.
    **Style guides:** if the files you'll change match a `styles` entry in `.claude/factory.json`, read those skills
