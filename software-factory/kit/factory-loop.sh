@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Fresh-context factory loop: one Claude Code run per task, so every task starts with a clean context
 # (cheaper and more reliable than one long session; state lives in git, the plan and the PRs).
-#   ./factory-loop.sh            run tasks; when none is ready, wait and check again every `waitMinutes` (default 5;
+#   ./factory-loop.sh            run tasks; when none is ready, wait and check again every `waitMinutes` (default 1;
 #                                0 in factory.json makes it exit instead). Ctrl-C stops it
 #   ./factory-loop.sh 5          run at most 5 tasks
 #   ./factory-loop.sh --interactive [N]
@@ -50,7 +50,7 @@ export FACTORY_AGENT="$agent"
 eval "$(python3 "$hooks/factory_env.py" --agent "$agent")" || exit 1
 setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("agentSetup",""))')
 [ -n "$setup" ] && { echo "[$agent] $setup"; sh -c "$setup" || echo "[$agent] (agentSetup failed; tests may fail until it works)"; }
-wait_minutes=$(python3 -c 'import json;print(int(json.load(open(".claude/factory.json")).get("waitMinutes",5)))' 2>/dev/null || echo 5)
+wait_minutes=$(python3 -c 'import json;print(int(json.load(open(".claude/factory.json")).get("waitMinutes",1)))' 2>/dev/null || echo 1)
 export FACTORY_INTERACTIVE="$interactive"
 export FACTORY_LOOP=1
 python3 "$hooks/factory_agents.py" register --agent "$agent" >/dev/null 2>&1 || true  # its issue: Agent: <name> · idle
