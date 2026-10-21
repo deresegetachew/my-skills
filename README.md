@@ -1,113 +1,70 @@
 # my-skills
 
-Reusable agent skills — not tied to any one project or tool. Each top-level folder
-is a self-contained skill (instructions + templates/scripts it needs).
+Reusable skills for Claude Code. Each top-level folder is one self-contained skill.
 
-## Install
+| Skill | What it does |
+|---|---|
+| [software-factory](software-factory/README.md) | Turns a repo into a software factory: coding agents build from a PRD and a plan, a dev manager reviews and merges. |
+| nestjs-clean-code-ddd-hexagonal | Backend architecture: hexagonal layers, a pure domain, CommandBus and QueryBus, strictly one class per file. Includes a CI checker (`scripts/check_structure.py`). |
+| nestjs-best-practices | 40 NestJS rules in 10 categories, each with wrong and right examples. |
+| study-notes | Bootstraps and writes pages for an Astro study-notes site. |
 
-Clone once, anywhere:
+## Three ways to use a skill
+
+| Way | Who sees it | When |
+|---|---|---|
+| **Symlink** (`./install.sh`) | Only you, on this machine | Personal use |
+| **Git submodule** | Everyone: CI, cloud sessions, other machines | A project depends on the skill (recommended) |
+| **Copy** (`./install.sh --copy`) | Everyone | Like a submodule, when you don't want one |
+
+### Symlink: for yourself
 
 ```bash
-git clone git@github.com:deresegetachew/my-skills.git ~/Documents/dev/my-skills
+git clone https://github.com/deresegetachew/my-skills.git ~/Documents/dev/my-skills
 cd ~/Documents/dev/my-skills
+./install.sh                                  # list skills and what's installed
+./install.sh software-factory                 # install one for all projects (~/.claude/skills)
+./install.sh --project ~/dev/myapp <skill>    # install into one project only
+./install.sh --remove <skill>                 # uninstall
 ```
 
-Then pick what to install:
+`git pull` here updates every symlinked install. A symlink points at your laptop, so it is useless to CI and to
+other machines.
+
+### Submodule: for a project
+
+The project records the exact my-skills commit it uses, and every clone gets the same files.
+
+**Set up** (https, so CI needs no key):
 
 ```bash
-./install.sh                  # list the skills and what's already installed
-./install.sh software-factory # install one globally (~/.claude/skills)
-./install.sh --all            # install everything
-./install.sh --project ~/dev/myapp software-factory   # only inside one project
-./install.sh --remove study-notes                     # uninstall
-```
-
-It symlinks, not copies, so `git pull` here updates every install at once. For a project whose CI or cloud sessions
-need the skill too, use a git submodule (next section), or add `--copy`: `./install.sh --project ~/dev/myapp --copy nestjs-best-practices` commits a pinned copy
-into the project, and re-running it updates the copy.
-
-## Use in a project as a git submodule
-
-When a project's CI, cloud sessions or other machines need a skill, a symlink to your laptop's folder won't do:
-the link points at a path that only exists on your laptop. Add my-skills to the project as a **git submodule**
-instead. The project then records exactly which my-skills commit it uses, and every clone gets the same files.
-
-**Set it up once** (use the https URL, so CI can fetch it without a key; my-skills is public):
-
-```bash
-cd ~/dev/myapp
 git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
-mkdir -p .claude/skills
-ln -s ../../vendor/my-skills/nestjs-best-practices .claude/skills/nestjs-best-practices
-ln -s ../../vendor/my-skills/nestjs-clean-code-ddd-hexagonal .claude/skills/nestjs-clean-code-ddd-hexagonal
-git add .gitmodules vendor/my-skills .claude/skills && git commit -m "Skills from my-skills as a submodule"
+ln -s ../../vendor/my-skills/nestjs-best-practices .claude/skills/nestjs-best-practices   # relative link, works everywhere
 ```
 
-The links are **relative and inside the repo**, so they work on every machine, unlike a link to your laptop's folder.
-A skill's scripts run straight from the submodule, for example
-`python3 vendor/my-skills/nestjs-clean-code-ddd-hexagonal/scripts/check_structure.py`.
+For the software factory, run `bash vendor/my-skills/software-factory/install.sh . --link` instead; it makes all the
+links for you (see [its README](software-factory/README.md)).
 
-**Clone or check out:**
-- `git clone --recurse-submodules <url>`, or `git submodule update --init` after a plain clone;
-- the same in each new git worktree (`factory-loop.sh` does it for you);
-- in GitHub Actions, `actions/checkout` with `submodules: true`.
+**Clone:** `git clone --recurse-submodules <url>`, or run `git submodule update --init` after a plain clone. In GitHub
+Actions, use `actions/checkout` with `submodules: true`.
 
-**Update the skills in the project:** push your change to my-skills first, then in the project:
+**Update:** push the change to my-skills, then in the project:
 
 ```bash
 git submodule update --remote vendor/my-skills
-git commit -am "Update my-skills"          # through a pull request, like any other change
+git commit -am "Update my-skills"      # in a pull request, like any other change
 ```
 
-The project keeps the old version until that commit, so a skill change never reaches a project by surprise.
-`git diff --submodule` shows which my-skills commits came in.
+The project stays on the old version until that commit, so a skill change never reaches it by surprise.
 
-**The software factory from the submodule:** `bash vendor/my-skills/software-factory/install.sh . --link`. The
-factory's engine (its hook scripts and `factory-loop.sh`, the same in every project) becomes relative links into the
-submodule, so the project runs exactly the version it pins. It also copies the templates the project tailors
-(`factory.json`, `settings.json`, the agents, the skills, `CLAUDE.factory.md`). Re-run it after an update to link any
-new engine file.
+**Protect it:** a coding agent must not change the rules it is reviewed against. Add `^vendor/my-skills` and
+`^\.gitmodules$` to `protected` in `.claude/factory.json`.
 
-**Software factory projects:** add `^vendor/my-skills` and `^\.gitmodules$` to `protected` in `.claude/factory.json`,
-so a coding agent can't change the rules it is reviewed against. Put `git submodule update --init` first in
-`commands.install`.
+### Copy
 
-**Which to use:**
-- **Symlink** (`./install.sh`): only you, only on this machine.
-- **Submodule:** the project's CI, cloud sessions and other people need the skill.
-- **Copy** (`--copy`): the same, but when you don't want a submodule.
+`./install.sh --project ~/dev/myapp --copy <skill>` puts a pinned copy into the project. Run it again to update.
 
-## Run
+## Using a skill
 
-Once symlinked, Claude Code picks the skill up automatically — invoke it by name
-(`/study-notes`) or just describe the task in words matching the skill's
-description (e.g. "start a new study-notes site like my other one"); Claude reads
-the matched skill's `SKILL.md` and follows it, which for a skill like `study-notes`
-means it runs the setup commands (copy templates, `npm install`, etc.) itself. There's
-nothing to install with `npm`/`pip`/etc. at the my-skills-repo level — each skill's
-own README/SKILL.md documents whatever *it* needs to run (e.g. `study-notes` needs
-Node + npm to build the Astro site it scaffolds).
-
-## Update
-
-```bash
-cd ~/Documents/dev/my-skills && git pull
-```
-
-No re-linking needed — symlinks always point at the current file.
-
-## Skills
-
-- **study-notes** — bootstrap and author pages for an Astro-based study-notes/
-  lesson site (component library, dark-mode theme, optional Gemini AI-tutor chat
-  sidebar).
-- **nestjs-clean-code-ddd-hexagonal** — the backend architecture style: hexagonal layers, a framework-free domain,
-  use cases behind a CommandBus and QueryBus, thin controllers, SQL only in adapters, and strictly one class per file.
-  Comes with `scripts/check_structure.py`, a CI check with a legacy list that only shrinks.
-- **nestjs-best-practices** — 40 NestJS rules in 10 categories (architecture, DI, errors, security, performance,
-  testing, database, API, microservices, DevOps), each with wrong and right examples.
-- **software-factory** — turn a repo into a software factory: a coding agent builds
-  from a PRD and a build plan in a loop (`/loop /next-task all`: tests first, reviewer and
-  auditor subagents, hooks that gate PRs and merges), and a dev manager Claude session
-  reviews, merges, fixes leftovers and keeps it busy. Includes the kit to copy into a
-  project (`install.sh`) and the dev manager's playbook.
+Claude picks installed skills up by themselves. Call one by name (`/study-notes`), or describe the task in words
+that match its description. Each skill's own README or SKILL.md says what it needs to run.
