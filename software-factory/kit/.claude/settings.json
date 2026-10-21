@@ -19,7 +19,8 @@
       "Bash(git merge*)",
       "Bash(git rebase*)",
       "Bash(gh pr *)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(python3 .claude/hooks/*)"
     ],
     "deny": [
       "Read(./.env)",
@@ -39,7 +40,11 @@
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.py", "timeout": 600 }
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.py",
+            "timeout": 600
+          }
         ]
       }
     ],
@@ -47,7 +52,22 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pr-gate.py", "timeout": 60 }
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pr-gate.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_session.py",
+            "timeout": 600
+          }
         ]
       }
     ]

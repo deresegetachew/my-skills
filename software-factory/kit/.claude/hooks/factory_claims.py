@@ -15,6 +15,9 @@ A claim belongs to a live process: when the pid that made it has exited (or the 
   python3 .claude/hooks/factory_claims.py checkout --pid $$     -> prints "<agent> <directory>" to work in
   python3 .claude/hooks/factory_claims.py release --agent agent-2 [--tasks-only]
   python3 .claude/hooks/factory_claims.py list
+  cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude
+                                                                -> a plain Claude session in slot 2's worktree; the
+                                                                   SessionStart hook (factory_session.py) sets it up
 next_task.py --claim <agent> --pid <pid> uses `claim_task` below.
 """
 import argparse, contextlib, fcntl, json, os, socket, subprocess, sys, time
@@ -88,14 +91,44 @@ def checkout(pid, stale_hours):
                 break
         else:
             raise SystemExit("99 loops already running on this clone")
-    if not os.path.isdir(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        cfg = load()
-        subprocess.run(["git", "fetch", "-q", "origin", cfg["mainBranch"]], check=False)
-        subprocess.run(["git", "worktree", "add", "--detach", path, f"origin/{cfg['mainBranch']}"], check=True,
-                       stdout=subprocess.DEVNULL)
+    ensure_worktree(path, main_top)
     print(f"{agent} {path}")
     return agent, path
+
+
+def ensure_worktree(path, main_top):
+    """Create the worktree at `path` from origin/<main> if it doesn't exist, with the local env files copied."""
+    if path == main_top or os.path.isdir(path):
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cfg = load()
+    subprocess.run(["git", "fetch", "-q", "origin", cfg["mainBranch"]], check=False)
+    subprocess.run(["git", "worktree", "add", "--detach", path, f"origin/{cfg['mainBranch']}"], check=True,
+                   stdout=subprocess.DEVNULL)
+    # A new worktree has no untracked local files: bring the local env files over.
+    import glob, shutil
+    for f in [".env.local"] + glob.glob(os.path.join(main_top, ".env.*.local")):
+        src = os.path.join(main_top, os.path.basename(f))
+        if os.path.isfile(src):
+            shutil.copy2(src, os.path.join(path, os.path.basename(f)))
+
+
+def worktree(n):
+    """The folder for slot n (1 is the project folder), created if needed. Prints it, for `cd "$(...)"`."""
+    main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
+    path = main_top if n == 1 else os.path.join(main_top + "-agents", f"agent-{n}")
+    ensure_worktree(path, main_top)
+    print(path)
+
+
+def register(agent, pid, path, stale_hours):
+    """Record that an interactive session (pid) works in this checkout. Returns the other live holder, if any."""
+    with locked() as data:
+        held = data["checkouts"].get(agent)
+        if held and alive(held, stale_hours) and int(held.get("pid", 0)) != int(pid):
+            return held
+        data["checkouts"][agent] = stamp(agent, pid, path=path)
+    return None
 
 
 def release(agent, tasks_only=False):
@@ -151,11 +184,15 @@ def main():
     r = sub.add_parser("release")
     r.add_argument("--agent", required=True)
     r.add_argument("--tasks-only", action="store_true", help="keep the checkout, drop the task claim")
+    w = sub.add_parser("worktree", help="print (and create) the folder for slot N")
+    w.add_argument("n", type=int)
     sub.add_parser("list")
     a = ap.parse_args()
     cfg = load()
     stale = float(cfg.get("claimStaleHours", 6))
-    if a.cmd == "checkout":
+    if a.cmd == "worktree":
+        worktree(a.n)
+    elif a.cmd == "checkout":
         checkout(a.pid, stale)
     elif a.cmd == "release":
         release(a.agent, a.tasks_only)

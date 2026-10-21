@@ -61,6 +61,26 @@ session with the task already started, so you can watch and type. When it says t
 and the loop starts the next task in a fresh session. Claims and worktrees work the same, so you can run
 several interactive loops side by side.
 
+### Your own sessions in worktrees, without the script
+
+You can also skip `factory-loop.sh` and run plain `claude` sessions, one per worktree:
+
+```bash
+claude                                                       # slot 1: the project folder
+cd "$(python3 .claude/hooks/factory_claims.py worktree 2)"   # creates <project>-agents/agent-2 the first time
+claude                                                       # then: /loop /next-task all
+```
+
+The `SessionStart` hook (`factory_session.py`) turns each session into a factory agent:
+- it records the session's checkout in the lock file, so loops avoid that folder;
+- it fetches submodules, runs `commands.install` once per worktree, then runs `commands.agentSetup`;
+- it puts the slot's `agentEnv` (own ports and database), `FACTORY_AGENT` and `FACTORY_PID` into the session's
+  environment.
+
+`/next-task` then claims each task as that agent, so two sessions never build the same task. After opening the PR it
+drops the claim, and the pushed branch keeps the task taken. One long session collects context, so restart it every
+few hours.
+
 ### Several loops and the lock file
 
 Start `./factory-loop.sh` in as many terminals as you like:
@@ -169,6 +189,7 @@ software-factory/
     .claude/hooks/next_task.py   picks the next task from the plan on main (--claim: one no other loop holds)
     .claude/hooks/factory_claims.py  lock file for several loops: a checkout each, one task each
     .claude/hooks/factory_env.py     per-loop ports, database names and queues (agentEnv)
+    .claude/hooks/factory_session.py SessionStart: a plain `claude` session in a worktree becomes a factory agent
     .claude/hooks/wait_for_merge.sh  waits on a PR without spending tokens
     factory-loop.sh              runs one fresh Claude session per task; start it again for a second loop
     .claude/agents/              reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer
@@ -186,6 +207,7 @@ bash ~/path/to/my-skills/software-factory/install.sh .
 ./factory-loop.sh        # or: claude, then /loop /next-task all
 ./factory-loop.sh        # again, in a second terminal, for a second loop on other tasks
 ./factory-loop.sh -i     # interactive: a normal Claude session per task; /exit moves on to the next
+cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude   # or your own session per worktree: /loop /next-task all
 ```
 
 Then, in a Claude session with the repo attached (cloud, so it runs with the laptop closed): "be the dev
