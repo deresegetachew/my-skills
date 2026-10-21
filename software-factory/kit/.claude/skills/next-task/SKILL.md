@@ -16,7 +16,9 @@ such as `1.3`, or `all` to keep going, phase after phase, until every remaining 
    `git submodule update --init` if the repo has a `.gitmodules`,
    read `git log --oneline -15`, and run the `smoke` command from `factory.json` if it has one. If main is
    broken, fixing it is the task.
-2. **Let the script pick the task:** `python3 .claude/hooks/next_task.py`. It returns the first unticked task
+2. **Let the script pick the task:** `python3 .claude/hooks/next_task.py ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}`.
+   In a session you started yourself, the SessionStart hook set `FACTORY_AGENT` and `FACTORY_PID`, so this claims the
+   task and other sessions skip it. Under `factory-loop.sh` the loop passes the task id instead (below). It returns the first unticked task
    not in the blocked list, read from the main branch. Don't pick by reading the plan yourself; the PR gate
    refuses a branch for a task that's ticked or blocked. If `$ARGUMENTS` names a task id, use that one: under
    `factory-loop.sh` (the `FACTORY_AGENT` variable is set) the loop has already claimed it for you, and other
@@ -104,6 +106,9 @@ write "Decision for you" in a report):
 2. Commit in small logical commits, push, and open a pull request with `gh pr create`: title
    `<id>: <task name>`, body with what changed, how it was verified (commands and results), what the
    reviewer and auditors raised, and any decision you recorded.
+   Then drop your task claim, so the next pick moves on while the PR waits:
+   `python3 .claude/hooks/factory_claims.py release --agent "$FACTORY_AGENT" --tasks-only` (when `FACTORY_AGENT` is set).
+   The pushed `task/<id>-...` branch keeps the task taken for the other loops.
 3. Once CI is green, merge it yourself with `gh pr merge --squash --delete-branch`, then pull the main
    branch before the next task. The pull-request gate (`.claude/hooks/pr-gate.py`) allows this only when the
    reviewer passed the latest commit, CI is green and no protected files changed. If `gh` can't switch to the
