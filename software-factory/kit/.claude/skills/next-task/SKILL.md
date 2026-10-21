@@ -11,6 +11,26 @@ Work through the build plan one task at a time. Paths and commands come from `.c
 (`plan`, `blocked`, `prd`, `decisions`, `commands`). Arguments: `$ARGUMENTS`: empty for one task, a task id
 such as `1.3`, or `all` to keep going, phase after phase, until every remaining task is blocked.
 
+## Issues mode
+
+When `tasks.source` in `.claude/factory.json` is `"issues"`, each task is a GitHub issue, not a line in the plan.
+Everything below still applies, with these changes:
+
+| Step | In issues mode |
+|---|---|
+| Pick | `next_task.py` (as below) prints `issue-<n> <title>`: your own in-progress issue first, else it claims the next `factory:ready` one on GitHub for you (labels `factory:in-progress` and `agent:<your name>`). `$ARGUMENTS` may be `issue-<n>`. |
+| Read | `python3 .claude/hooks/factory_issues.py show <n>`: what we're building, goals, acceptance criteria, todos. The acceptance criteria are the "Done when". |
+| Branch | `task/<n>-<short-name>`, for example `task/42-style-leftovers`. |
+| Todos | Tick each checkbox as you finish it: `factory_issues.py tick <n> <index>` (1-based). The board and the owner's phone show it. |
+| Blocked | Instead of the blocked list: `factory_issues.py block <n> "<what a person must provide>"`, then the next job. |
+| Ship | Don't tick the plan. The PR body starts with `Closes #<n>` (the gate checks it), then what changed and how it was verified. After `gh pr create`: `factory_issues.py review <n>`. Merging closes the issue. |
+| Done | `factory_claims.py done --task issue-<n>` in an interactive loop, as below. |
+
+Your own issue, `Agent: <name>`, tracks that you're alive. The hooks keep it current; don't edit or close it. If the
+PR gate says your issue now belongs to another agent, you were quiet too long: leave that work and pick again.
+The dev manager writes the issues and hands quiet ones (no activity for `tasks.staleHours`) to another agent, so
+push your branch early and often: commits count as activity.
+
 ## 1. Pick the task
 
 1. **Start routine** (every task, so a stale context can't mislead you): `git fetch origin && git checkout --detach

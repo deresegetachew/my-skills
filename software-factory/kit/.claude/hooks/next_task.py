@@ -7,9 +7,12 @@
   Rework comes first: an open PR whose latest `<!-- factory-mustfix sha=<head> -->` comment from the dev manager
   names its current head commit (nothing pushed since) is printed as "pr-42 Rework #42: <title> (<branch>)".
   A PR with the `holdLabel` label (default `factory-hold`) is the dev manager's to review: it's never rework.
-  python3 .claude/hooks/next_task.py --claim agent-2 --pid 123
-      -> the first task no other running loop holds, claimed for agent-2 (factory-loop.sh does this; see
+  python3 .claude/hooks/next_task.py --claim taytu --pid 123
+      -> the first task no other running loop holds, claimed for taytu (factory-loop.sh does this; see
          factory_claims.py). Exit 1 when every open task is done, blocked or held by another loop.
+
+Issues mode (`tasks.source: "issues"`): tasks are GitHub issues (factory_issues.py). Rework still comes first; then
+the agent's own in-progress issue, else the next `factory:ready` one, claimed on GitHub: "issue-42 <title>".
 
 Reads the plan and blocked list from the main branch when it can (`git show origin/<main>:...`), so a stale
 working copy can't make the agent skip or repeat a task.
@@ -17,7 +20,7 @@ working copy can't make the agent skip or repeat a task.
 import argparse, json, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from factory_config import blocked_ids, load, tasks  # noqa: E402
+from factory_config import blocked_ids, load, task_source, tasks  # noqa: E402
 
 
 def read(cfg, path):
@@ -63,6 +66,8 @@ def main():
     a = ap.parse_args()
     cfg = load()
     subprocess.run(["git", "fetch", "-q", "origin", cfg["mainBranch"]], capture_output=True)
+    if task_source(cfg) == "issues":
+        return issues_mode(cfg, a)
     all_tasks = tasks(read(cfg, cfg["plan"]))
     blocked = blocked_ids(read(cfg, cfg["blocked"]))
     open_tasks = [(i, t) for i, done, t in all_tasks if not done and i not in blocked]
@@ -84,6 +89,32 @@ def main():
         print(json.dumps({"id": tid, "title": title, "remaining": remaining, "blocked": sorted(blocked)}))
     else:
         print(f"{tid} {title}")
+
+
+def issues_mode(cfg, a):
+    import factory_issues
+    jobs = [] if a.no_rework else rework(cfg)
+    if jobs and a.claim:
+        from factory_claims import claim_task
+        tid = claim_task([i for i, _ in jobs], a.claim, a.pid or os.getppid(), cfg)
+        jobs = [(i, t) for i, t in jobs if i == tid]
+    if not jobs:
+        if a.claim:
+            i = factory_issues.pick(cfg, a.claim)
+        else:
+            ready = factory_issues.ready_issues(cfg)
+            i = ready[0] if ready else None
+        if i:
+            jobs = [(f"issue-{i['number']}", i["title"])]
+            if a.claim:
+                subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_agents.py"),
+                                "ping", "--agent", a.claim, "--status", f"working on #{i['number']}"],
+                               capture_output=True, timeout=60)
+    if not jobs:
+        print(json.dumps({"id": None, "remaining": 0}) if a.json else "none")
+        sys.exit(1)
+    tid, title = jobs[0]
+    print(json.dumps({"id": tid, "title": title}) if a.json else f"{tid} {title}")
 
 
 if __name__ == "__main__":

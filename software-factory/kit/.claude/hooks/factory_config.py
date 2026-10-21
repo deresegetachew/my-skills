@@ -18,6 +18,19 @@ DEFAULTS = {
     "goldenPaths": [r"(^|/)__snapshots__/", r"(^|/)fixtures?/", r"(^|/)golden[^/]*/"],
     "dependencyManifests": [r"(^|/)package\.json$"],
     "maxOpenPRs": 3,
+    # The agents' names, one per loop: the first works in the project folder, the others in
+    # <project>-agents/<name>. Labels (`agent:<name>`), claims and logs use them.
+    "agents": ["menelik", "taytu", "haile", "tewodros", "yohannes", "zewditu", "lalibela", "ezana", "alula", "abebe"],
+    # Where tasks live. "plan": unticked lines of the build plan (the classic mode). "issues": open GitHub issues
+    # with the `ready` label, claimed with labels and a claim comment (factory_issues.py); the plan is an overview.
+    "tasks": {
+        "source": "plan",
+        "labels": {"ready": "factory:ready", "inProgress": "factory:in-progress", "inReview": "factory:in-review",
+                   "blocked": "factory:blocked", "agentPrefix": "agent:"},
+        "staleHours": 3,  # an in-progress issue with no activity for this long goes back to ready (dev manager)
+        "pingMinutes": 5,  # an agent pings its agent issue at most this often while it works
+        "downMinutes": 30,  # no ping for this long: the agent counts as down, and the sweep releases its issues
+    },
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",
@@ -94,3 +107,27 @@ def styled(paths, cfg):
         if any(fnmatch.fnmatch(p, g) for p in paths for g in globs):
             out.append(style)
     return out
+
+
+def agent_name(cfg, slot):
+    """The name of the agent in slot `slot` (1 = the project folder)."""
+    names = cfg.get("agents") or []
+    return names[slot - 1] if 0 < slot <= len(names) else f"agent-{slot}"
+
+
+def agent_slot(cfg, name):
+    """The slot of agent `name` ("taytu", or the old "agent-2"); None when it isn't one."""
+    names = cfg.get("agents") or []
+    if name in names:
+        return names.index(name) + 1
+    m = re.fullmatch(r"agent-(\d+)", name or "")
+    return int(m.group(1)) if m else None
+
+
+def task_source(cfg):
+    return (cfg.get("tasks") or {}).get("source", "plan")
+
+
+def task_labels(cfg):
+    return {**DEFAULTS["tasks"]["labels"], **((cfg.get("tasks") or {}).get("labels") or {})}
+

@@ -10,7 +10,7 @@
 #   (or: ./factory loop [-i] [N])
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
-# (the first uses this folder, the others a git worktree in <project>-agents/agent-N) and claims each task in
+# (the first uses this folder, the others a git worktree in <project>-agents/<name>) and claims each task in
 # a shared lock file before building it, so no two loops build the same task (.claude/hooks/factory_claims.py).
 # Loops on other machines see each other's task/<id>-... branches on the remote and skip those tasks too.
 # Parallel loops pay off when the plan has tasks that don't build on each other; the dev manager merges in order.
@@ -26,7 +26,8 @@ if [ "${1:-}" = "--interactive" ] || [ "${1:-}" = "-i" ]; then interactive=1; sh
 limit="${1:-999}"
 
 read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$) || exit 1
-trap 'python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1' EXIT
+# On exit: drop the local claims, and say on GitHub that this agent is down (issues mode; a no-op otherwise).
+trap 'python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1; python3 "$hooks/factory_agents.py" down --agent "$agent" >/dev/null 2>&1' EXIT
 trap 'exit 130' INT TERM
 main=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))')
 if [ "$dir" != "$PWD" ]; then
@@ -49,6 +50,8 @@ eval "$(python3 "$hooks/factory_env.py" --agent "$agent")" || exit 1
 setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("agentSetup",""))')
 [ -n "$setup" ] && { echo "[$agent] $setup"; sh -c "$setup" || echo "[$agent] (agentSetup failed; tests may fail until it works)"; }
 export FACTORY_INTERACTIVE="$interactive"
+export FACTORY_LOOP=1
+python3 "$hooks/factory_agents.py" register --agent "$agent" >/dev/null 2>&1 || true  # its issue: Agent: <name> · idle
 echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
 
 # Between tasks: back to a clean main. In an agent worktree, untracked leftovers go too (ignored files such as

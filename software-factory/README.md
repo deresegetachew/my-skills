@@ -75,14 +75,16 @@ Everything goes through one command. Run it from any folder inside the project.
 |---|---|
 | `factory loop` | Runs agents unattended: one fresh Claude run per task |
 | `factory loop -i` | One session per task that you can watch and type into, also from your phone (Remote Control). It closes by itself when the task is done, and the next starts after 10 s (`q` stops) |
-| `factory agent 2` | Opens a second agent in its own folder. Then type `/loop /next-task all` |
+| `factory agent taytu` | Opens that agent in its own folder (`factory agent 2` is the second name). Then type `/loop /next-task all` |
 | `factory next` | Shows the job the factory would hand out next |
 | `factory claims` | Shows which agent holds which task |
 | `factory update` | Moves the project to the newest my-skills. Commit the result in a PR |
 | `factory clean` | Removes agent worktrees no agent is using, and local branches of finished tasks |
+| `factory issues` | Lists the task issues and their state (issues mode) |
+| `factory agents` | Lists the agents: working, idle or down, and their last ping (issues mode) |
 | `factory help` | Lists the rest: `reviews`, `env`, `check`, `guard`, `wait`, `release` |
 
-**From your phone:** sessions started by `factory loop -i` and `factory agent N` have Remote Control on. They appear
+**From your phone:** sessions started by `factory loop -i` and `factory agent <name>` have Remote Control on. They appear
 at claude.ai/code and in the Claude app, named after the agent and task, so you can follow them and type into them,
 `/exit` included, when you're away. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan; set
 `FACTORY_REMOTE_CONTROL=0` to turn it off. For days away, `factory loop` (no `-i`) needs no one at all.
@@ -167,12 +169,66 @@ So the real files stay in the submodule, and `.claude/` holds symlinks that poin
 
 <br>
 
+## Tasks as GitHub issues
+
+Instead of the build plan, tasks can be GitHub issues. Set this in `factory.json`:
+
+```json
+"tasks": { "source": "issues" }
+```
+
+- **Each issue is one task:** what we're building, goals, acceptance criteria and a checklist of todos (the
+  `factory-task` template).
+- **Labels show the state:** `factory:ready`, `factory:in-progress`, `factory:in-review`, `factory:blocked`, plus
+  `agent:<name>` for who has it. A GitHub Project board shows the same as columns.
+- **An agent starts with its own issue.** If it holds one in progress, it carries on; otherwise it claims the next
+  ready one. Claims live on GitHub, so two agents never take the same issue, even on different machines.
+- **The agent ticks the todos as it goes,** opens the PR with `Closes #<n>`, and merging closes the issue.
+- **The dev manager watches for dead agents:** an issue with no activity for `staleHours` goes back to ready, and
+  another agent picks it up.
+
+`factory issues` lists the issues and their state; `factory issues setup` creates the labels.
+
+**Live agents.** In issues mode each agent also has its own issue, `Agent: taytu · working on #42`, labelled
+`factory:agent`. The agent keeps it current by itself, with no extra work in the task:
+
+| When | Its issue says |
+|---|---|
+| It starts | `idle`, with the machine and folder |
+| It takes a task | `working on #42` |
+| It's working | a ping at most every 5 minutes (any tool use) |
+| A turn ends | `idle` |
+| It exits | `down` |
+
+No ping for 30 minutes means down: it crashed, the laptop slept, or it waits at a prompt. The dev manager's
+`factory agents sweep` marks it down and puts its issues back to ready, so another agent takes them. If the silent
+agent comes back, the PR gate stops it opening a PR for an issue that has moved on. `factory agents` lists them all.
+Change the timings with `pingMinutes` and `downMinutes` in `tasks`.
+
+<br>
+
+## Agent names
+
+Agents have names. They show in the terminal, on Remote Control, in folder names (`<project>-agents/taytu`) and on
+issue labels (`agent:taytu`). The default ten are figures from Ethiopian history: menelik, taytu, haile, tewodros,
+yohannes, zewditu, lalibela, ezana, alula, abebe. The first works in the project folder.
+
+Choose your own in `factory.json`, in order, lowercase:
+
+```json
+"agents": ["ada", "grace", "linus"]
+```
+
+Start one by name: `factory agent taytu` (or `factory agent 2`, the second name).
+
+<br>
+
 ## Several agents at once
 
 Worth it when the plan has tasks that don't depend on each other. Each agent gets:
 
 - **its own folder:** the first agent uses the project folder, and the others get git worktrees in
-  `<project>-agents/agent-N`;
+  `<project>-agents/<name>`;
 - **its own task:** agents claim tasks in a shared lock file, and a pushed task branch counts as taken too;
 - **its own ports and database:** set in `agentEnv` in `factory.json`, so tests on one machine don't collide:
 
@@ -182,7 +238,7 @@ Worth it when the plan has tasks that don't depend on each other. Each agent get
 
   Agent 1 keeps the defaults. Agent N shifts every port by `10 × (N − 1)` and adds `_N` to names.
 
-Start one with `factory loop` in another terminal, or `factory agent 2`. Set `maxOpenPRs` to about the number of
+Start one with `factory loop` in another terminal, or `factory agent taytu`. Set `maxOpenPRs` to about the number of
 agents + 1.
 
 <br>
@@ -254,6 +310,8 @@ software-factory/
       factory_session.py                  session start: a plain `claude` session becomes an agent
       next_task.py                        the next job: rework first, then the first free task
       factory_claims.py                   lock file: a folder and a task per agent
+      factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, stale
+      factory_agents.py                   live agents: register, ping, down, sweep
       factory_env.py                      per-agent ports and database
       factory_reviews.py                  which extra reviews a change needs
       factory_guard.py                    the CI guard

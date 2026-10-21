@@ -81,11 +81,11 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    the build needs. Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab), and run the
    agent with the sandbox on rather than with permission checks skipped.
    **The `factory` command:** tell the owner to run `./factory install-shim` once; then `factory help` lists
-   everything (`factory loop`, `factory loop -i`, `factory agent 2`, `factory claims`, `factory update` ...).
-   **Your own sessions instead of the loop:** `factory agent 2` opens Claude in agent 2's worktree; then
+   everything (`factory loop`, `factory loop -i`, `factory agent taytu`, `factory claims`, `factory update` ...).
+   **Your own sessions instead of the loop:** `factory agent taytu` opens Claude in taytu's worktree; then
    `/loop /next-task all`. The SessionStart hook gives the session its slot, ports, database and task claims.
    **More than one loop:** run `factory loop` again in another terminal. Each loop gets its own checkout
-   (a git worktree in `<project>-agents/agent-N`, with `commands.install` run at each start) and claims its task in a
+   (a git worktree in `<project>-agents/<name>`, with `commands.install` run at each start) and claims its task in a
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose
    `task/<id>-...` branch is on the remote. It helps only when the plan has tasks that don't build on each other,
    and costs tokens per loop. Raise `maxOpenPRs` to about loops + 1.

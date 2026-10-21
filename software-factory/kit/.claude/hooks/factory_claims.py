@@ -5,7 +5,7 @@ Two things are claimed, both in a lock-protected JSON file inside the repo's sha
 (`<git-common-dir>/factory/claims.json`, so every worktree of a clone sees the same file and nothing is committed):
 
   - checkouts: each loop works in its own checkout. The first loop takes the project folder; later loops get a
-    git worktree next to it (`<project>-agents/agent-N`), created on first use and reused afterwards.
+    git worktree next to it (`<project>-agents/<name>`, named from `agents` in factory.json), created on first use and reused afterwards.
   - tasks: a loop claims a task before building it, and other loops skip it.
 
 A claim belongs to a live process: when the pid that made it has exited (or the claim is older than
@@ -13,19 +13,19 @@ A claim belongs to a live process: when the pid that made it has exited (or the 
 `task/<id>-...` branch got a commit on the remote within `claimStaleHours` counts as taken too.
 
   python3 .claude/hooks/factory_claims.py checkout --pid $$     -> prints "<agent> <directory>" to work in
-  python3 .claude/hooks/factory_claims.py release --agent agent-2 [--tasks-only]
+  python3 .claude/hooks/factory_claims.py release --agent taytu [--tasks-only]
   python3 .claude/hooks/factory_claims.py list
-  python3 .claude/hooks/factory_claims.py done --agent agent-2 --task 3.2      (factory loop -i: close the session)
+  python3 .claude/hooks/factory_claims.py done --agent taytu --task 3.2       (factory loop -i: close the session)
   python3 .claude/hooks/factory_claims.py clean                                remove unused agent worktrees
-  cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude
-                                                                -> a plain Claude session in slot 2's worktree; the
+  cd "$(python3 .claude/hooks/factory_claims.py worktree taytu)" && claude
+                                                                -> a plain Claude session in taytu's worktree; the
                                                                    SessionStart hook (factory_session.py) sets it up
 next_task.py --claim <agent> --pid <pid> uses `claim_task` below.
 """
 import argparse, contextlib, fcntl, json, os, socket, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from factory_config import load  # noqa: E402
+from factory_config import agent_name, agent_slot, load  # noqa: E402
 
 HOST = socket.gethostname()
 
@@ -84,15 +84,18 @@ def checkout(pid, stale_hours):
     main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
     with locked() as data:
         cos = data["checkouts"]
-        candidates = [("agent-1", main_top)] + [
-            (f"agent-{n}", os.path.join(main_top + "-agents", f"agent-{n}")) for n in range(2, 100)
+        cfg = load()
+        names = [agent_name(cfg, n) for n in range(1, max(len(cfg.get("agents") or []), 1) + 1)]
+        candidates = [(names[0], main_top)] + [
+            (name, os.path.join(main_top + "-agents", name)) for name in names[1:]
         ]
         for agent, path in candidates:
             if not alive(cos.get(agent), stale_hours):
                 cos[agent] = stamp(agent, pid, path=path)
                 break
         else:
-            raise SystemExit("99 loops already running on this clone")
+            raise SystemExit(f"every agent ({', '.join(names)}) already has a live loop on this clone; "
+                             "add names to `agents` in .claude/factory.json for more")
     ensure_worktree(path, main_top)
     print(f"{agent} {path}")
     return agent, path
@@ -115,10 +118,14 @@ def ensure_worktree(path, main_top):
             shutil.copy2(src, os.path.join(path, os.path.basename(f)))
 
 
-def worktree(n):
-    """The folder for slot n (1 is the project folder), created if needed. Prints it, for `cd "$(...)"`."""
+def worktree(who):
+    """The folder of agent `who` (a name, or a slot number; 1 is the project folder), created if needed. Prints it."""
+    cfg = load()
+    n = int(who) if str(who).isdigit() else agent_slot(cfg, str(who))
+    if n is None:
+        raise SystemExit(f"no agent called {who}: the agents are {', '.join(cfg.get('agents') or [])}")
     main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
-    path = main_top if n == 1 else os.path.join(main_top + "-agents", f"agent-{n}")
+    path = main_top if n == 1 else os.path.join(main_top + "-agents", agent_name(cfg, n))
     ensure_worktree(path, main_top)
     print(path)
 
@@ -200,9 +207,17 @@ def take_done(agent):
 
 def tidy_branches(cfg):
     """Delete local task/<id>-... branches whose task is ticked on main (their PR has merged)."""
-    from factory_config import branch_task, tasks
-    plan = git("show", f"origin/{cfg['mainBranch']}:{cfg['plan']}")
-    done = {i for i, d, _ in tasks(plan) if d}
+    from factory_config import branch_task, task_source, tasks
+    if task_source(cfg) == "issues":  # done = its issue is closed
+        p = subprocess.run(["gh", "api", "--paginate", "repos/{owner}/{repo}/issues?state=closed&per_page=100"],
+                           capture_output=True, text=True)
+        try:
+            done = {str(i["number"]) for i in json.loads(p.stdout.replace("][", ","))} if p.returncode == 0 else set()
+        except ValueError:
+            done = set()
+    else:
+        plan = git("show", f"origin/{cfg['mainBranch']}:{cfg['plan']}")
+        done = {i for i, d, _ in tasks(plan) if d}
     gone = []
     for name in git("for-each-ref", "--format=%(refname:short)", "refs/heads/task").split():
         if branch_task(name) in done and subprocess.run(["git", "branch", "-D", "-q", name],
@@ -247,7 +262,7 @@ def main():
     r.add_argument("--agent", required=True)
     r.add_argument("--tasks-only", action="store_true", help="keep the checkout, drop the task claim")
     w = sub.add_parser("worktree", help="print (and create) the folder for slot N")
-    w.add_argument("n", type=int)
+    w.add_argument("n", help="an agent name (taytu) or slot number (2)")
     sub.add_parser("list")
     d = sub.add_parser("done", help="mark the agent's task done (an interactive session then closes)")
     d.add_argument("--agent", required=True)

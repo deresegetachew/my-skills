@@ -82,6 +82,29 @@ When you're done, remove the label, and either approve (`<!-- factory-approved s
 `<!-- factory-mustfix sha=<head> -->` with the must-fixes, which makes it rework. Don't hold a PR with a must-fix
 comment that lists nothing: the agents would pick it up as rework and find nothing to do.
 
+## Tasks as GitHub issues
+
+When `tasks.source` is `"issues"` in `factory.json`, you write the tasks and the agents take them from GitHub.
+
+- **Setup, once:** `factory issues setup` creates the labels (`factory:ready`, `factory:in-progress`,
+  `factory:in-review`, `factory:blocked`, `agent:<name>` for each agent). Make one milestone per phase. Give the owner
+  the board steps: a GitHub Project with Todo, In progress, In review and Done; the owner adds the automations
+  (item added → Todo, PR opened → In review, closed → Done) and a label filter per column.
+- **Writing an issue:** use the `factory-task` template. What we're building and why (with PRD and decision links),
+  goals, acceptance criteria an agent can check, todos as checkboxes, and `Depends on #n` when it must wait.
+  `factory issues new --title "..." --body-file f.md --milestone "Phase 3"`. Agents take ready issues by milestone,
+  then number, so the number order is the build order.
+- **Each tick, dead agents first:** `factory agents sweep` marks agents with no ping for `tasks.downMinutes` as down
+  and puts their in-progress issues back to ready. Tell the owner in one line which agent went down (once per agent,
+  not every tick). `factory agents` shows who is alive.
+- **Then stale claims of live agents:** `factory issues stale` lists in-progress issues with no activity (issue updates or
+  commits on their branch) for `tasks.staleHours`. Before moving one, check the agent really is gone (no recent
+  commit, no open PR, no reply to a comment). Then `factory issues release <n> "<agent> went quiet"`: it goes back
+  to ready and the next live agent takes it. Tell the owner in one line which agent went quiet.
+- **Blocked issues** (`factory:blocked`) carry a comment saying what a person must provide. Escalate those to the
+  owner; when it's provided, move the issue back with `release`.
+- Unblocking, adding tasks beyond review follow-ups and reordering are scope: they need the owner's yes, as before.
+
 ## Answering the coding agent's questions
 
 The coding agent posts decisions it needs as PR comments starting with `<!-- factory-question -->`. They come to

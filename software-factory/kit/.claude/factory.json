@@ -1,5 +1,21 @@
 {
-  "_about": "Software factory settings for this project. The hooks, next_task.py and the CI factory guard read this file; edit it, not the scripts. testPaths/goldenPaths: changing these after implementation needs the dev manager's `tests-reviewed` label; new dependencies need `deps-reviewed`. smoke: a quick command proving main still works. styles: style-guide skills per path (for example the NestJS skills for a backend), with an optional `check` command CI runs; the architecture-reviewer reviews diffs on those paths, and the PR gate needs its pass. structure: roots and legacy list for check_structure.py when a style uses it. agentEnv: variables that differ per parallel loop, so loops don't share ports, databases or queues ({slot}, {suffix}, {port:N}); commands.agentSetup runs once per loop start with them set (for example, create the slot's database). notes: a folder of <agent or skill>.md files with this project's additions to the shared agents and skills. reviews/eval/design: which changed paths (regexes) need the safety auditor, the security reviewer, the eval and the design check (factory_reviews.py lists them for a diff), plus the eval and design settings.",
+  "_about": "Software factory settings for this project. The hooks, next_task.py and the CI factory guard read this file; edit it, not the scripts. testPaths/goldenPaths: changing these after implementation needs the dev manager's `tests-reviewed` label; new dependencies need `deps-reviewed`. smoke: a quick command proving main still works. styles: style-guide skills per path (for example the NestJS skills for a backend), with an optional `check` command CI runs; the architecture-reviewer reviews diffs on those paths, and the PR gate needs its pass. structure: roots and legacy list for check_structure.py when a style uses it. agentEnv: variables that differ per parallel loop, so loops don't share ports, databases or queues ({slot}, {suffix}, {port:N}); commands.agentSetup runs once per loop start with them set (for example, create the slot's database). notes: a folder of <agent or skill>.md files with this project's additions to the shared agents and skills. reviews/eval/design: which changed paths (regexes) need the safety auditor, the security reviewer, the eval and the design check (factory_reviews.py lists them for a diff), plus the eval and design settings. agents: the agents' names, in order (the first works in the project folder, the others in <project>-agents/<name>); lowercase letters, digits and dashes, since they become folder names and agent:<name> labels. tasks: where tasks come from, \"plan\" (the build plan) or \"issues\" (GitHub issues, see factory_issues.py), the status labels, and staleHours, after which the dev manager hands a quiet issue to another agent.",
+  "agents": [
+    "menelik",
+    "taytu",
+    "haile",
+    "tewodros",
+    "yohannes",
+    "zewditu",
+    "lalibela",
+    "ezana",
+    "alula",
+    "abebe"
+  ],
+  "tasks": {
+    "source": "plan",
+    "staleHours": 3
+  },
   "prd": "docs/PRD.md",
   "plan": "docs/build-plan.md",
   "blocked": "docs/blocked.md",
