@@ -73,7 +73,7 @@ Everything goes through one command. Run it from any folder inside the project.
 
 | Command | What it does |
 |---|---|
-| `factory loop` | Runs agents unattended: one fresh Claude run per task |
+| `factory loop` | Runs agents unattended: one fresh Claude run per task. When nothing is ready, it waits and checks again every 5 minutes (`waitMinutes` in `factory.json`; `0` exits instead) |
 | `factory loop -i` | One session per task that you can watch and type into, also from your phone (Remote Control). It closes by itself when the task is done, and the next starts after 10 s (`q` stops) |
 | `factory agent taytu` | Opens that agent in its own folder (`factory agent 2` is the second name). Then type `/loop /next-task all` |
 | `factory next` | Shows the job the factory would hand out next |
@@ -238,7 +238,8 @@ Worth it when the plan has tasks that don't depend on each other. Each agent get
 
   Agent 1 keeps the defaults. Agent N shifts every port by `10 × (N − 1)` and adds `_N` to names.
 
-Start one with `factory loop` in another terminal, or `factory agent taytu`. Set `maxOpenPRs` to about the number of
+Start one with `factory loop` in another terminal, or `factory agent taytu`. An agent with nothing to do waits for the next
+ready task instead of exiting, and stays `idle` on its agent issue, so you can start several and leave them. Set `maxOpenPRs` to about the number of
 agents + 1.
 
 <br>
