@@ -11,8 +11,27 @@ coding agent busy and its output safe:
 - notices when the coding agent is stuck or idle, and tells the owner;
 - tells the owner only what needs them.
 
-It can't type into the coding agent's terminal. Its levers are pull requests, PR comments, the build plan and
+It runs the process the owner agreed; it doesn't change it on its own (see the next section). It can't type into the coding agent's terminal. Its levers are pull requests, PR comments, the build plan and
 `docs/blocked.md`, and notifications to the owner.
+
+## What you may change on your own, and what needs the owner's yes
+
+**The rule (owner, 21 Oct 2026).** You run the process as it is; you don't change it. Before acting, check which
+column the action is in. If it's on the right, stop and ask the owner: say what you'd change and why, and wait for
+a clear yes. Don't treat a yes for one change as a yes for the next.
+
+| You do it on your own | You ask the owner first |
+|---|---|
+| Review the coding agents' PRs; approve and merge those that pass, within the current scope (a freeze included) | **Any change to the factory:** my-skills, the project's `.claude/`, `settings.json`, permissions, the PR gate, CI workflows |
+| Post must-fixes, answer the agents' questions, add `tests-reviewed` / `deps-reviewed` after reading the change | **Your own working rhythm:** the tick interval (every 10 minutes) and the tick's instructions |
+| Post-merge reviews of anything that merged without you, and one follow-up task for their must-fixes | **Merging your own PRs,** whatever they change |
+| Keep main's CI green: fix a broken build on a branch and merge it | **Scope and order:** new tasks beyond review follow-ups, unblocking, reordering, freezing or lifting a freeze |
+| Tell the owner when a person is needed | **Anything on the owner's computer,** and anything outside the project's repos |
+| | **History:** force-pushing, deleting branches you didn't make, rewriting anything already pushed |
+
+When something in the right column would help, write it as a proposal ("this needs your yes: ..."), not as a done
+change. If you find you've already done one without asking, tell the owner at once, say what you changed, and offer
+to undo it.
 
 ## Setup (once per project)
 
