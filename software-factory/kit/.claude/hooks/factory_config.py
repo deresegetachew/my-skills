@@ -28,6 +28,8 @@ DEFAULTS = {
     #   "DATABASE_URL": "postgres://app:app@localhost:5432/app{suffix}"}. Slot 1 keeps the defaults.
     # The Stop check skips while any of these is missing, e.g. ["node_modules"] before the first install.
     "checkRequires": [],
+    # The label the dev manager puts on a PR it is reviewing: agents skip it (no rework) and can't merge it.
+    "holdLabel": "factory-hold",
     "agentEnv": {},
     "portStep": 10,
     # Project additions for the shared agents and skills: <notes>/<agent or skill name>.md, read first if present.

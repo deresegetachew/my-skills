@@ -32,6 +32,9 @@ such as `1.3`, or `all` to keep going, phase after phase, until every remaining 
 3. Read the PRD sections, design references and decisions the task points to. Say in one line which task
    you're doing and what "done" means for it.
 
+A PR with the `factory-hold` label (`holdLabel` in `factory.json`) is being reviewed by the dev manager. Leave it
+alone: don't rework it, don't merge it. Take the next task.
+
 ## 1b. Rework a reviewed PR
 
 A `pr-<n>` comes before any new task: the dev manager reviewed that PR and its latest

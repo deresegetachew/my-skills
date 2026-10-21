@@ -6,6 +6,7 @@
   python3 .claude/hooks/next_task.py --after 1.3   -> the next one after 1.3 (to work around a blocked PR)
   Rework comes first: an open PR whose latest `<!-- factory-mustfix sha=<head> -->` comment from the dev manager
   names its current head commit (nothing pushed since) is printed as "pr-42 Rework #42: <title> (<branch>)".
+  A PR with the `holdLabel` label (default `factory-hold`) is the dev manager's to review: it's never rework.
   python3 .claude/hooks/next_task.py --claim agent-2 --pid 123
       -> the first task no other running loop holds, claimed for agent-2 (factory-loop.sh does this; see
          factory_claims.py). Exit 1 when every open task is done, blocked or held by another loop.
@@ -41,7 +42,10 @@ def rework(cfg):
             return []
     out = []
     marker = re.compile(r"<!--\s*factory-mustfix\s+sha=([0-9a-f]{7,40})\s*-->")
+    hold = cfg.get("holdLabel", "factory-hold")
     for pr in sorted(gh("repos/{owner}/{repo}/pulls?state=open&per_page=100"), key=lambda p: p["number"]):
+        if any(label.get("name") == hold for label in pr.get("labels", [])):
+            continue  # the dev manager is reviewing it: not rework, and nothing for an agent to do
         shas = [m.group(1) for c in gh(f"repos/{{owner}}/{{repo}}/issues/{pr['number']}/comments?per_page=100")
                 for m in [marker.search(c.get("body") or "")] if m]
         if shas and pr["head"]["sha"].startswith(shas[-1]):

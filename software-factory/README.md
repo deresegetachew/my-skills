@@ -191,6 +191,7 @@ agents + 1.
 | **PR gate** | Opening or merging a PR without the reviewer's pass, with red CI, with protected files, or for a task that's done or blocked |
 | **Factory guard (CI)** | Changes that make the build look better than it is (below) |
 | **Rework** | A dev manager must-fix makes that PR the agent's next job and holds its merge until the dev manager approves |
+| **Hold** | The `factory-hold` label: the dev manager is reviewing the PR. Agents skip it and can't merge it |
 
 The **Factory guard** fails a PR for:
 

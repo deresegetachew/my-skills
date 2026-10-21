@@ -71,6 +71,17 @@ machine). Use the REST API (`gh api`), never force-push or push to the main bran
 7. Schedule the next tick in 10 minutes with send_later using this same message, unless the owner said stop.
 ```
 
+## Holding a PR while you review it
+
+An agent may merge its own PR as soon as the gate allows. To stop that while you review, put the **`factory-hold`**
+label on the PR (`holdLabel` in `factory.json`; create the label in the repo once). With the label on:
+- the PR gate refuses the agent's merge;
+- `next_task.py` doesn't hand the PR out as rework, so the agents carry on with other tasks.
+
+When you're done, remove the label, and either approve (`<!-- factory-approved sha=<head> -->`, then merge) or post
+`<!-- factory-mustfix sha=<head> -->` with the must-fixes, which makes it rework. Don't hold a PR with a must-fix
+comment that lists nothing: the agents would pick it up as rework and find nothing to do.
+
 ## Answering the coding agent's questions
 
 The coding agent posts decisions it needs as PR comments starting with `<!-- factory-question -->`. They come to
