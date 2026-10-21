@@ -74,13 +74,18 @@ Everything goes through one command. Run it from any folder inside the project.
 | Command | What it does |
 |---|---|
 | `factory loop` | Runs agents unattended: one fresh Claude run per task |
-| `factory loop -i` | One session per task that you can watch and type into. It closes by itself when the task is done, and the next starts after 10 s (`q` stops) |
+| `factory loop -i` | One session per task that you can watch and type into, also from your phone (Remote Control). It closes by itself when the task is done, and the next starts after 10 s (`q` stops) |
 | `factory agent 2` | Opens a second agent in its own folder. Then type `/loop /next-task all` |
 | `factory next` | Shows the job the factory would hand out next |
 | `factory claims` | Shows which agent holds which task |
 | `factory update` | Moves the project to the newest my-skills. Commit the result in a PR |
 | `factory clean` | Removes agent worktrees no agent is using, and local branches of finished tasks |
 | `factory help` | Lists the rest: `reviews`, `env`, `check`, `guard`, `wait`, `release` |
+
+**From your phone:** sessions started by `factory loop -i` and `factory agent N` have Remote Control on. They appear
+at claude.ai/code and in the Claude app, named after the agent and task, so you can follow them and type into them,
+`/exit` included, when you're away. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan; set
+`FACTORY_REMOTE_CONTROL=0` to turn it off. For days away, `factory loop` (no `-i`) needs no one at all.
 
 `factory` works in every factory project. It finds the project you're in and runs that project's own copy, so each
 project uses the factory version it pins.

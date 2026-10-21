@@ -46,7 +46,10 @@ case "$cmd" in
     n="${1:?usage: factory agent <N>}"; shift
     dir="$(py factory_claims.py worktree "$n")" || exit 1
     echo "agent-$n: $dir"
-    cd "$dir" && exec claude "$@" ;;
+    cd "$dir" || exit 1
+    # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
+    if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then exec claude --remote-control="agent-$n" "$@"; fi
+    exec claude "$@" ;;
   worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <N>}" ;;
   next)      py next_task.py "$@" ;;
   claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
