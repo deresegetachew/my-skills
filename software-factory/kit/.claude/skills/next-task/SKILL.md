@@ -12,7 +12,8 @@ such as `1.3`, or `all` to keep going, phase after phase, until every remaining 
 ## 1. Pick the task
 
 1. **Start routine** (every task, so a stale context can't mislead you): `git fetch origin && git checkout --detach
-   origin/<mainBranch>` (detached, because another loop's worktree may have the main branch checked out),
+   origin/<mainBranch>` (detached, because another loop's worktree may have the main branch checked out), then
+   `git submodule update --init` if the repo has a `.gitmodules`,
    read `git log --oneline -15`, and run the `smoke` command from `factory.json` if it has one. If main is
    broken, fixing it is the task.
 2. **Let the script pick the task:** `python3 .claude/hooks/next_task.py`. It returns the first unticked task
@@ -83,6 +84,9 @@ write "Decision for you" in a report):
    a `<!-- factory-question -->` comment and let the test-writer or the dev manager change it. CI's factory guard
    fails a PR that edits tests or expected outputs after implementation started, changes tests or golden files
    that already existed, adds `.skip`/`.only`, or adds a dependency, until the dev manager has reviewed it.
+   **Parallel loops:** other loops may be running tests on this machine. Ports, database names and queues come
+   from the environment (`agentEnv` in `factory.json`; the loop has exported them). Never hard-code a port in a
+   script or test config; read the variable and keep today's value as the default.
 3. Test what a user or another module can observe. Run the task's "Done when" check and the project's
    `typecheck`, `lint` and `test` commands. Fix until they pass. Show the output as evidence.
 4. UI work: run the `design-check` skill if the project has design references. Work on prompts, models or

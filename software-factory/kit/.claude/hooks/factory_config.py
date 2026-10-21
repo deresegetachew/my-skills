@@ -24,6 +24,10 @@ DEFAULTS = {
     # Style guides per path: [{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal"],
     #   "check": "python3 .claude/hooks/check_structure.py"}]. The architecture reviewer and CI use them.
     "styles": [],
+    # Per-loop environment for parallel loops (factory_env.py): {"API_PORT": "{port:4100}",
+    #   "DATABASE_URL": "postgres://app:app@localhost:5432/app{suffix}"}. Slot 1 keeps the defaults.
+    "agentEnv": {},
+    "portStep": 10,
 }
 
 

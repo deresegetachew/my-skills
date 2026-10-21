@@ -74,6 +74,21 @@ Start `./factory-loop.sh` in as many terminals as you like:
 - **Claims end by themselves.** A claim lapses when its loop exits (Ctrl-C or a crash, checked by process id)
   or after `claimStaleHours` (6 by default). After a run pushes its branch, the loop drops the claim: a recent
   `task/<id>-…` branch on the remote counts as taken, which is also how loops on other machines avoid each other.
+- **Own ports and database.** Loops on one machine would otherwise share the dev servers' ports, the test database
+  and any job queue in it, so one loop's tests could take the other's jobs or migrations. `agentEnv` in
+  `factory.json` gives each slot its own values: slot 1 (the project folder) keeps the defaults, and slot N shifts
+  each port by `portStep * (N-1)` and adds `_N` to names:
+
+  ```json
+  "agentEnv": { "API_PORT": "{port:4100}", "PLAYER_PORT": "{port:4101}",
+                "DATABASE_URL": "postgres://app:app@localhost:5440/app{suffix}" },
+  "commands": { "agentSetup": "docker compose exec -T postgres createdb -U app app_$FACTORY_SLOT || true" }
+  ```
+
+  The loop exports these before each run (`factory_env.py`) and runs `agentSetup` at start, for example to create
+  the slot's database on the shared Postgres. Run `eval "$(python3 .claude/hooks/factory_env.py)"` in a worktree
+  to get the same values by hand. Every port in scripts and test configs has to come from these variables, with
+  the default as fallback.
 - **See who holds what:** `python3 .claude/hooks/factory_claims.py list`.
 - **When it helps:** only when the plan has tasks that don't build on each other. Each loop spends its own
   tokens, and `maxOpenPRs` counts all loops together, so raise it to about the number of loops plus one. The
@@ -114,8 +129,10 @@ Three layers enforce them:
    contract tests) against each guide's checklist.
 3. **The PR gate** refuses to open or merge a PR on a styled path without the architecture-reviewer's pass.
 
-Install the skills into the project as a copy, so CI and fresh clones have them:
-`./install.sh --project <dir> --copy nestjs-clean-code-ddd-hexagonal nestjs-best-practices`.
+Put the skills into the project so CI and fresh clones have them. The best way is a git submodule of my-skills, with
+relative links in `.claude/skills` and `vendor/my-skills` on the protected list (see "Use in a project as a git
+submodule" in the root README). Then `check` can run the script straight from the submodule. A pinned copy also
+works: `./install.sh --project <dir> --copy nestjs-clean-code-ddd-hexagonal nestjs-best-practices`.
 
 ### The Factory guard
 
@@ -151,6 +168,7 @@ software-factory/
     .claude/hooks/factory_guard.py   CI guard: tests/golden edits, skips, new deps, decision numbers, task ticks
     .claude/hooks/next_task.py   picks the next task from the plan on main (--claim: one no other loop holds)
     .claude/hooks/factory_claims.py  lock file for several loops: a checkout each, one task each
+    .claude/hooks/factory_env.py     per-loop ports, database names and queues (agentEnv)
     .claude/hooks/wait_for_merge.sh  waits on a PR without spending tokens
     factory-loop.sh              runs one fresh Claude session per task; start it again for a second loop
     .claude/agents/              reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer

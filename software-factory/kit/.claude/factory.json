@@ -1,5 +1,5 @@
 {
-  "_about": "Software factory settings for this project. The hooks, next_task.py and the CI factory guard read this file; edit it, not the scripts. testPaths/goldenPaths: changing these after implementation needs the dev manager's `tests-reviewed` label; new dependencies need `deps-reviewed`. smoke: a quick command proving main still works. styles: style-guide skills per path (for example the NestJS skills for a backend), with an optional `check` command CI runs; the architecture-reviewer reviews diffs on those paths, and the PR gate needs its pass. structure: roots and legacy list for check_structure.py when a style uses it.",
+  "_about": "Software factory settings for this project. The hooks, next_task.py and the CI factory guard read this file; edit it, not the scripts. testPaths/goldenPaths: changing these after implementation needs the dev manager's `tests-reviewed` label; new dependencies need `deps-reviewed`. smoke: a quick command proving main still works. styles: style-guide skills per path (for example the NestJS skills for a backend), with an optional `check` command CI runs; the architecture-reviewer reviews diffs on those paths, and the PR gate needs its pass. structure: roots and legacy list for check_structure.py when a style uses it. agentEnv: variables that differ per parallel loop, so loops don't share ports, databases or queues ({slot}, {suffix}, {port:N}); commands.agentSetup runs once per loop start with them set (for example, create the slot's database).",
   "prd": "docs/PRD.md",
   "plan": "docs/build-plan.md",
   "blocked": "docs/blocked.md",
@@ -11,7 +11,8 @@
     "lint": "pnpm -s lint",
     "test": "pnpm -s test",
     "build": "pnpm -s build",
-    "smoke": ""
+    "smoke": "",
+    "agentSetup": ""
   },
   "codePaths": [
     "apps",
@@ -54,5 +55,7 @@
   "structure": {
     "roots": [],
     "legacy": "tools/structure-legacy.txt"
-  }
+  },
+  "agentEnv": {},
+  "portStep": 10
 }

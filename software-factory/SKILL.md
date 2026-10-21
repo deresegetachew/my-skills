@@ -33,12 +33,15 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    `smoke` to a quick command that proves main works.
    **Style guides:** ask the owner which style skills each part of the code follows, for example the NestJS backend
    skills `nestjs-clean-code-ddd-hexagonal` and `nestjs-best-practices` from this repo.
-   - **Copy them into the project**, so CI, fresh clones and the cloud dev manager can read them:
-     `<my-skills>/install.sh --project . --copy <skill> [...]`.
+   - **Put them in the project**, so CI, fresh clones and the cloud dev manager can read them. Prefer a submodule:
+     add my-skills at `vendor/my-skills` (https URL), with relative links `.claude/skills/<skill>` →
+     `../../vendor/my-skills/<skill>`. Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, put
+     `git submodule update --init` first in `commands.install`, and give CI's checkout `submodules: true` (root
+     README, "Use in a project as a git submodule"). Otherwise copy them: `<my-skills>/install.sh --project . --copy <skill> [...]`.
    - **Add a `styles` entry for each path**, for example
-     `{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal", "nestjs-best-practices"], "check": "python3 .claude/hooks/check_structure.py"}`.
-   - **For the hexagonal skill, also copy the checker:** `scripts/check_structure.py` into `.claude/hooks/`. Then set
-     `structure.roots`, and seed the legacy list with `check_structure.py --legacy` when existing code doesn't follow
+     `{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal", "nestjs-best-practices"], "check": "python3 vendor/my-skills/nestjs-clean-code-ddd-hexagonal/scripts/check_structure.py"}`
+     (with a copy, copy the script into `.claude/hooks/` and point `check` there).
+   - **For the hexagonal skill, set** `structure.roots`, and seed the legacy list with `check_structure.py --legacy` when existing code doesn't follow
      the rules yet. That list only shrinks.
    - **Enforcement:** the architecture-reviewer reviews diffs on those paths, the PR gate needs its pass, and CI runs
      the `check` commands.
@@ -74,6 +77,10 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose
    `task/<id>-...` branch is on the remote. It helps only when the plan has tasks that don't build on each other,
    and costs tokens per loop. Raise `maxOpenPRs` to about loops + 1.
+   **Ports and databases for parallel loops:** during setup, find every fixed port and database or queue name the
+   tests and dev scripts use (docker-compose, vite/playwright configs, `DATABASE_URL`). Make each one read an
+   environment variable with today's value as the default, then list them in `agentEnv` and add an `agentSetup`
+   command that creates the slot's database. Slot 1 keeps the defaults.
    **Tokens:** most of the cost is input, so the fresh context per task matters most; use cheaper models for
    routine subagents. Terse-reply skills such as the community `/caveman` save a few percent at most.
 9. Offer to be the dev manager (Mode 2).
