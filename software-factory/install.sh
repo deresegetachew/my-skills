@@ -55,7 +55,7 @@ find . -type f -not -path '*/__pycache__/*' | sort | while read -r f; do
     echo "added    ${f#./}"
   fi
 done
-chmod +x "$src"/.claude/hooks/*.py "$src"/.claude/hooks/*.sh "$src"/factory-loop.sh 2>/dev/null || true
+# Never change files in the kit itself: with --link it is the project's submodule.
 [ "$link" = 1 ] || chmod +x "$dst"/.claude/hooks/*.py "$dst"/.claude/hooks/*.sh "$dst"/factory-loop.sh 2>/dev/null || true
 grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignore"
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
