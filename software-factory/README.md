@@ -199,10 +199,24 @@ software-factory/
     .github/                     CI workflow and CODEOWNERS templates
 ```
 
+### One factory, many projects
+
+The factory has two parts:
+- **The engine** is the same in every project: `factory-loop.sh` and `.claude/hooks/*.py`/`*.sh` (claims, the PR
+  gate, the guard, next_task, the session hook, style checks).
+- **The templates** each project tailors: `factory.json`, `settings.json`, the agents, the `next-task` skill,
+  CLAUDE.md, the plan and CI.
+
+With my-skills as a git submodule (`vendor/my-skills`), `install.sh . --link` links the engine into the submodule and
+copies the templates. Each project then pins one factory version, the submodule commit, and a factory fix reaches it
+through one "update my-skills" PR. A project never ends up with a stale copy of a script. Without a submodule,
+`install.sh <dir>` copies everything, as before.
+
 Quick start in a project that has a PRD:
 
 ```bash
-bash ~/path/to/my-skills/software-factory/install.sh .
+git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
+bash vendor/my-skills/software-factory/install.sh . --link     # or, without a submodule: bash ~/path/to/my-skills/software-factory/install.sh .
 # fill in .claude/factory.json, CLAUDE.md and docs/build-plan.md (or ask Claude: "set up the software factory")
 ./factory-loop.sh        # or: claude, then /loop /next-task all
 ./factory-loop.sh        # again, in a second terminal, for a second loop on other tasks
