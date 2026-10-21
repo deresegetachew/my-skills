@@ -37,7 +37,12 @@ You need a PRD first. The factory only builds what the PRD and the plan say.
    bash vendor/my-skills/software-factory/install.sh . --link
    ```
 
-   This links the shared files into the project and copies the templates you fill in.
+   The installer does two things:
+   - **Links the shared files.** For every agent, skill and hook in the kit it makes a symlink in the project's
+     `.claude/`, pointing into `vendor/my-skills` (see [Why `.claude/` holds links](#why-claude-holds-links)).
+   - **Copies the templates** you fill in: `factory.json`, `CLAUDE.factory.md`, the plan.
+
+   Commit the result. Git stores each link as its target path, so every clone gets the links back.
 
 2. **Fill in the templates**, or ask Claude to "set up the software factory":
    - `.claude/factory.json`: commands, paths, protected files;
@@ -111,6 +116,23 @@ flowchart TB
     merge --> main[("main")] --> pick
     fix -.->|"rework"| pick
 ```
+
+<br>
+
+## Why `.claude/` holds links
+
+Claude Code only looks for agents, skills and hooks in the project's `.claude/` folder. It never looks in `vendor/`.
+So the real files stay in the submodule, and `.claude/` holds symlinks that point to them:
+
+```
+.claude/agents/reviewer.md  ──►  vendor/my-skills/software-factory/kit/.claude/agents/reviewer.md
+   where Claude looks               the real file
+```
+
+- **There's one copy of each file,** in `vendor/my-skills`, pinned to one my-skills commit.
+- **Opening a link shows the real file.** Your editor and Claude both follow it. `ls -l .claude/agents` shows the
+  `->` arrows.
+- **Never edit a link.** Change the file in my-skills, then run `factory update` in the project.
 
 <br>
 
