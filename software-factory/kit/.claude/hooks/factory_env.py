@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Per-loop environment, so several loops on one machine don't share ports, databases or queues.
 
-Each loop has a slot: 1 for the project folder, N for the worktree `<project>-agents/agent-N`. `agentEnv` in
-.claude/factory.json maps variable names to templates:
+Each loop has a slot: 1 for the project folder, N for the worktree `<project>-agents/<name>` of the Nth name in
+`agents` (menelik, taytu, ...). `agentEnv` in .claude/factory.json maps variable names to templates:
 
   {slot}        the slot number: 1, 2, 3 ...
   {suffix}      "" in slot 1, "_N" in slot N (a database name: remanual, remanual_2 ...)
@@ -11,7 +11,7 @@ Each loop has a slot: 1 for the project folder, N for the worktree `<project>-ag
 Slot 1 gets the project's defaults, so the main folder works exactly as before.
 
   eval "$(python3 .claude/hooks/factory_env.py)"            in a worktree: the slot comes from the folder name
-  eval "$(python3 .claude/hooks/factory_env.py --agent agent-2)"
+  eval "$(python3 .claude/hooks/factory_env.py --agent taytu)"
   python3 .claude/hooks/factory_env.py --dotenv              KEY=value lines instead of exports
 
 factory-loop.sh does the eval for you and then runs `commands.agentSetup` (for example, create the slot's
@@ -24,12 +24,15 @@ from factory_config import load  # noqa: E402
 
 
 def slot_of(agent=None, path=None):
+    """The slot of an agent name (or the old agent-N), else of the folder (<project>-agents/<name>), else 1."""
+    from factory_config import agent_slot
+    cfg = load()
     name = agent or os.environ.get("FACTORY_AGENT") or ""
-    m = re.fullmatch(r"agent-(\d+)", name)
-    if m:
-        return int(m.group(1))
-    m = re.search(r"-agents[/\\]agent-(\d+)$", os.path.abspath(path or "."))
-    return int(m.group(1)) if m else 1
+    slot = agent_slot(cfg, name)
+    if slot:
+        return slot
+    m = re.search(r"-agents[/\\]([^/\\]+)$", os.path.abspath(path or "."))
+    return (agent_slot(cfg, m.group(1)) or 1) if m else 1
 
 
 def render(template, slot, step):

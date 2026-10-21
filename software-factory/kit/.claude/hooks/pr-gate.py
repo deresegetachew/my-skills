@@ -7,13 +7,15 @@ create: needs a reviewer pass for the current commit (<reviewMarkers>/<branch>.o
         (<reviewMarkers>/<branch>.arch.ok holding HEAD).
 merge:  needs those passes for the PR's head commit, green CI, and no protected paths changed
         (`protected` in .claude/factory.json; `alwaysAllowed` files such as the build plan are fine).
+Issues mode (`tasks.source: "issues"`): create also needs the branch's issue (task/<n>-...) open and not blocked,
+        and `Closes #<n>` in the PR body, so merging closes the issue.
         Protected changes are left for the dev manager or a person to merge.
 Exit 2 blocks the command and tells Claude why.
 """
 import json, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(__file__))
-from factory_config import blocked_ids, branch_task, load, styled, tasks  # noqa: E402
+from factory_config import blocked_ids, branch_task, load, styled, task_labels, task_source, tasks  # noqa: E402
 
 
 def run(*a):
@@ -52,7 +54,23 @@ if re.search(r"\bgh\s+pr\s+create\b", cmd) and not is_draft:
     if styles and not arch_passed(branch, head):
         block(ARCH_MSG.format(skills=", ".join(sorted({s for st in styles for s in st.get("skills", [])}))))
     tid = branch_task(branch)
-    if tid:
+    if tid and task_source(cfg) == "issues":
+        n = tid.split(".")[0]
+        rc, out = run("gh", "api", f"repos/{{owner}}/{{repo}}/issues/{n}")
+        if rc != 0:
+            block(f"Branch {branch} names issue #{n}, which I can't read. Name the branch task/<issue number>-<short-name>.")
+        issue = json.loads(out)
+        if issue.get("state") != "open":
+            block(f"Issue #{n} is closed. Pick the next job with `python3 .claude/hooks/next_task.py`.")
+        if task_labels(cfg)["blocked"] in {x["name"] for x in issue.get("labels", [])}:
+            block(f"Issue #{n} is blocked (see its comments). Pick the next job with `python3 .claude/hooks/next_task.py`.")
+        body = cmd
+        bf = re.search(r"(?:--body-file|-F)[=\s]+(\S+)", cmd)
+        if bf and os.path.exists(bf.group(1).strip("'\"")):
+            body += open(bf.group(1).strip("'\"")).read()
+        if not re.search(rf"\b(closes|fixes|resolves)\s+#{n}\b", body, re.I):
+            block(f"Say `Closes #{n}` in the pull request body, so merging it closes the issue.")
+    elif tid:
         main = cfg["mainBranch"]
         plan = run("git", "show", f"origin/{main}:{cfg['plan']}")[1]
         done = {i for i, d, _ in tasks(plan) if d}

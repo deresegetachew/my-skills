@@ -4,7 +4,8 @@
 What factory-loop.sh does for its runs, this does for a session you start yourself, for example
 `cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`, then `/loop /next-task all`:
 
-  1. Slot and name: slot 1 for the project folder, N for `<project>-agents/agent-N`; the agent is `agent-N`.
+  1. Slot and name: slot 1 is the project folder, slot N `<project>-agents/<name>`; the names are `agents` in
+     factory.json (menelik, taytu, ...).
   2. Checkout claim: records this session in the lock file, so factory-loop.sh won't use the same folder, and warns
      when another live session already works here.
   3. Submodules (`git submodule update --init`), then `commands.install` (worktrees), then `commands.agentSetup`.
@@ -58,7 +59,8 @@ def main():
     from factory_env import agent_env, slot_of
     cfg = load()
     slot = slot_of(None, root)
-    agent = f"agent-{slot}"
+    from factory_config import agent_name
+    agent = agent_name(cfg, slot)
     pid = claude_pid()
     notes = []
     other = register(agent, pid, root, float(cfg.get("claimStaleHours", 6)))

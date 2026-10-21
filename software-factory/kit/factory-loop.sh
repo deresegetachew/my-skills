@@ -10,7 +10,7 @@
 #   (or: ./factory loop [-i] [N])
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
-# (the first uses this folder, the others a git worktree in <project>-agents/agent-N) and claims each task in
+# (the first uses this folder, the others a git worktree in <project>-agents/<name>) and claims each task in
 # a shared lock file before building it, so no two loops build the same task (.claude/hooks/factory_claims.py).
 # Loops on other machines see each other's task/<id>-... branches on the remote and skip those tasks too.
 # Parallel loops pay off when the plan has tasks that don't build on each other; the dev manager merges in order.
