@@ -19,6 +19,16 @@ scope and tests belong to the `reviewer`.
    - its non-negotiable constraints and review checklist (in a hexagonal guide, sections 9 and 10);
    - its CRITICAL and HIGH rules.
 
+   With the hexagonal guide (`nestjs-clean-code-ddd-hexagonal`), these are always a **must-fix**:
+   - a framework, database or HTTP import in a `domain/` folder;
+   - a controller holding business logic or using a repository or SQL directly, instead of a command or query;
+   - SQL outside an `infrastructure/` repository adapter;
+   - an application layer that imports an infrastructure implementation instead of a port token;
+   - a port without a contract test;
+   - a file name that isn't kebab-case;
+   - more than one class in a file, a class file with other top-level functions, or a class-less file exporting more
+     than one function.
+
    For each problem, give the file and line, the rule's id (for example `hex-dependency-direction`, `controllers-thin`,
    `file-one-class`), and the fix. Breaking a CRITICAL rule or a non-negotiable is a **must-fix**. Breaking a lower
    rule is **worth fixing**.

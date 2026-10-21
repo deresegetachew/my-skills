@@ -83,7 +83,9 @@ write "Decision for you" in a report):
 2. For tasks that add behaviour, ask the `test-writer` subagent to write the failing tests first and commit
    them on their own. Then plan the change briefly and implement it following `CLAUDE.md` and the decisions.
    **Style guides:** if the files you'll change match a `styles` entry in `.claude/factory.json`, read those skills
-   first (`.claude/skills/<name>/SKILL.md`) and follow them. Run their `check` command before every push.
+   first (`.claude/skills/<name>/SKILL.md`) and follow them. Run their `check` command before every push. When you
+   fix a file on the style's legacy list (`structure.legacy`), remove it from the list in the same PR; never add one.
+   Never edit a golden or expected output (`goldenPaths`) to make a test pass.
    **Once implementation starts, don't weaken or edit the existing tests** (adding new tests and assertions is
    always fine). If a test turns out to be wrong, say why in a `<!-- factory-question -->` comment and let the
    test-writer or the dev manager change it. CI's factory guard
