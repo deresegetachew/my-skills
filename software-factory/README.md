@@ -73,7 +73,7 @@ claude                                                       # then: /loop /next
 
 The `SessionStart` hook (`factory_session.py`) turns each session into a factory agent:
 - it records the session's checkout in the lock file, so loops avoid that folder;
-- it fetches submodules, runs `commands.install` once per worktree, then runs `commands.agentSetup`;
+- it fetches submodules, runs `commands.install` (in worktrees), then runs `commands.agentSetup`;
 - it puts the slot's `agentEnv` (own ports and database), `FACTORY_AGENT` and `FACTORY_PID` into the session's
   environment.
 
@@ -87,7 +87,7 @@ Start `./factory-loop.sh` in as many terminals as you like:
 
 - **A checkout each.** The first loop works in the project folder. Each further loop gets its own git worktree
   next to it, in `<project>-agents/agent-2`, `agent-3` and so on, created on first use with the local
-  `.env*.local` files copied and `commands.install` run once. Worktrees share the repo, so branches and fetches
+  `.env*.local` files copied and `commands.install` run at each start (main may have new dependencies). Each start also brings a reused worktree up to main before reading its hooks. Worktrees share the repo, so branches and fetches
   are shared, but the files aren't.
 - **A task each.** Before building, a loop claims its task in a lock file in the repo's shared git folder
   (`.git/factory/claims.json`, under a file lock, never committed). Other loops skip claimed tasks.

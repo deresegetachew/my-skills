@@ -75,7 +75,7 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    **Your own sessions instead of the script:** `cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`,
    then `/loop /next-task all`. The SessionStart hook gives the session its slot, ports, database and task claims.
    **More than one loop:** run `./factory-loop.sh` again in another terminal. Each loop gets its own checkout
-   (a git worktree in `<project>-agents/agent-N`, with `commands.install` run once) and claims its task in a
+   (a git worktree in `<project>-agents/agent-N`, with `commands.install` run at each start) and claims its task in a
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose
    `task/<id>-...` branch is on the remote. It helps only when the plan has tasks that don't build on each other,
    and costs tokens per loop. Raise `maxOpenPRs` to about loops + 1.

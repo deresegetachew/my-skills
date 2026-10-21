@@ -7,7 +7,7 @@ What factory-loop.sh does for its runs, this does for a session you start yourse
   1. Slot and name: slot 1 for the project folder, N for `<project>-agents/agent-N`; the agent is `agent-N`.
   2. Checkout claim: records this session in the lock file, so factory-loop.sh won't use the same folder, and warns
      when another live session already works here.
-  3. Submodules (`git submodule update --init`), then `commands.install` once per worktree, then `commands.agentSetup`.
+  3. Submodules (`git submodule update --init`), then `commands.install` (worktrees), then `commands.agentSetup`.
   4. Environment: writes `agentEnv` (own ports and database), FACTORY_AGENT and FACTORY_PID to CLAUDE_ENV_FILE, so
      every command in the session uses them and `/next-task` claims its tasks as this agent.
 
@@ -70,12 +70,9 @@ def main():
     env.update({"FACTORY_AGENT": agent, "FACTORY_PID": str(pid)})
     child = {**os.environ, **env}
     cmds = cfg.get("commands", {})
-    marker = os.path.join(sh("git rev-parse --git-dir").stdout.strip() or ".git", "factory-installed")
-    if cmds.get("install") and slot != 1 and not os.path.exists(marker):
-        r = sh(cmds["install"], env=child)
-        if r.returncode == 0:
-            open(marker, "w").close()
-        else:
+    # Each session start (worktrees only): main may have new dependencies since the worktree was last used.
+    if cmds.get("install") and slot != 1:
+        if sh(cmds["install"], env=child).returncode != 0:
             notes.append(f"`{cmds['install']}` failed in this worktree; run it before testing.")
     if cmds.get("agentSetup"):
         if sh(cmds["agentSetup"], env=child).returncode != 0:
