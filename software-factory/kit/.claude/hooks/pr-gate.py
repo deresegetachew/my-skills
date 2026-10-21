@@ -72,7 +72,7 @@ if re.search(r"\bgh\s+pr\s+create\b", cmd) and not is_draft:
 m = re.search(r"\bgh\s+pr\s+merge\b\s*([^\s-][^\s]*)?", cmd)
 if m:
     ref = [m.group(1)] if m.group(1) else []
-    rc, out = run("gh", "pr", "view", *ref, "--json", "headRefName,headRefOid,files,comments")
+    rc, out = run("gh", "pr", "view", *ref, "--json", "headRefName,headRefOid,files,comments,labels")
     if rc != 0:
         block("Could not read the pull request: " + out)
     pr = json.loads(out)
@@ -85,6 +85,10 @@ if m:
             last = "mustfix"
         elif "<!-- factory-approved" in body:
             last = "approved"
+    hold = cfg.get("holdLabel", "factory-hold")
+    if any(label.get("name") == hold for label in pr.get("labels", [])):
+        block(f"The dev manager is reviewing this pull request (label `{hold}`). Leave it open and continue with the "
+              "next task: the dev manager approves and merges it, or posts must-fixes, and removes the label.")
     if last == "mustfix":
         block("The dev manager left a must-fix on this pull request (a `<!-- factory-mustfix -->` comment). Fix it, "
               "push, reply on the PR, and leave the merge to the dev manager, who approves with `<!-- factory-approved -->`.")
