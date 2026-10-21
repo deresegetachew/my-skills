@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Fresh-context factory loop: one Claude Code run per task, so every task starts with a clean context
 # (cheaper and more reliable than one long session; state lives in git, the plan and the PRs).
-#   ./factory-loop.sh            run until every task is done, blocked or taken by another loop
+#   ./factory-loop.sh            run tasks; when none is ready, wait and check again every `waitMinutes` (default 5;
+#                                0 in factory.json makes it exit instead). Ctrl-C stops it
 #   ./factory-loop.sh 5          run at most 5 tasks
 #   ./factory-loop.sh --interactive [N]
 #                                each task opens a normal Claude session you can type into, with the task
@@ -49,6 +50,7 @@ export FACTORY_AGENT="$agent"
 eval "$(python3 "$hooks/factory_env.py" --agent "$agent")" || exit 1
 setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("agentSetup",""))')
 [ -n "$setup" ] && { echo "[$agent] $setup"; sh -c "$setup" || echo "[$agent] (agentSetup failed; tests may fail until it works)"; }
+wait_minutes=$(python3 -c 'import json;print(int(json.load(open(".claude/factory.json")).get("waitMinutes",5)))' 2>/dev/null || echo 5)
 export FACTORY_INTERACTIVE="$interactive"
 export FACTORY_LOOP=1
 python3 "$hooks/factory_agents.py" register --agent "$agent" >/dev/null 2>&1 || true  # its issue: Agent: <name> · idle
@@ -67,8 +69,18 @@ last=""; repeats=0
 for ((n = 1; n <= limit; n++)); do
   tidy
   [ -f .gitmodules ] && git submodule update --init -q  # main may have moved the submodule
-  next=$(python3 "$hooks/next_task.py" --claim "$agent" --pid $$) || {
-    echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }
+  # Nothing to do: wait for work instead of exiting (`waitMinutes` in factory.json; 0 = exit as before). While it waits
+  # the agent stays registered as idle, so the dev manager doesn't take it for dead. Ctrl-C stops it.
+  waited=0
+  until next=$(python3 "$hooks/next_task.py" --claim "$agent" --pid $$); do
+    [ "$wait_minutes" -gt 0 ] 2>/dev/null || {
+      echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }
+    [ "$waited" = 0 ] && echo "[$agent] $(date '+%H:%M') nothing ready (every task is done, blocked or taken). Checking again every $wait_minutes min; Ctrl-C stops."
+    waited=1
+    python3 "$hooks/factory_agents.py" ping --agent "$agent" --status idle >/dev/null 2>&1 || true
+    sleep $((wait_minutes * 60))
+    tidy
+  done
   id="${next%% *}"
   if [ "$id" = "$last" ]; then repeats=$((repeats + 1)); else repeats=1; last="$id"; fi
   if [ "$repeats" -ge 3 ]; then
