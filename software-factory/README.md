@@ -15,7 +15,8 @@ In a project that has a PRD:
 git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
 bash vendor/my-skills/software-factory/install.sh . --link
 # fill in .claude/factory.json, CLAUDE.md and docs/build-plan.md (or ask Claude: "set up the software factory")
-./factory-loop.sh
+./factory install-shim     # once per machine: then just `factory ...` in any factory project
+factory loop
 ```
 
 Then, in a Claude session with the repo attached, say "be the dev manager for this repo".
@@ -88,24 +89,37 @@ Everything reusable lives once, in my-skills. A project keeps only its config.
 `install.sh . --link` makes the links and copies the templates. A file that differs from the kit is kept and
 reported, so nothing is overwritten. Without a submodule, `install.sh <dir>` copies everything instead.
 
-## Running agents
+## The `factory` command
 
-| How | When |
+Everything you run goes through one command, `./factory` in the project. After `./factory install-shim` (once per
+machine) it's just `factory`, from any folder of any factory project. The shim always runs the project's own pinned
+version.
+
+| Command | Does |
 |---|---|
-| `./factory-loop.sh` | Unattended: one fresh `claude -p` per task |
-| `./factory-loop.sh -i` | Watch and type: a normal session per task; `/exit` moves on to the next |
-| `claude`, then `/loop /next-task all` | One long session you drive yourself; restart it every few hours |
+| `factory loop` | Unattended: one fresh `claude -p` per task |
+| `factory loop -i` | Watch and type: a normal session per task. After `/exit` it asks: Enter for the next task, `q` to stop |
+| `factory agent 2` | Opens Claude in agent 2's own worktree (created the first time); then `/loop /next-task all` |
+| `factory next` | The job the factory would hand out next |
+| `factory claims` | Which agent holds which folder and task (`factory release agent-2` drops them) |
+| `factory reviews` | Which extra reviews the current change needs |
+| `factory env [N]` | This folder's ports and database (or agent N's) |
+| `factory check` / `factory guard` | The style checks and the Factory guard, as CI runs them |
+| `factory wait <pr>` | Waits for a PR to merge without spending tokens |
+| `factory update` | Pulls the newest my-skills into the project and relinks; then commit it in a PR |
+
+You can also run `claude` in the project folder yourself, then `/loop /next-task all`. It's one long session, so
+restart it every few hours.
 
 ### Several agents at once
 
 Start more loops or sessions when the plan has tasks that don't build on each other:
 
 - **A folder each.** The first agent uses the project folder. Each further agent gets a git worktree in
-  `<project>-agents/agent-N`, created the first time and brought up to main at each start. For your own sessions, run
-  `cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`.
+  `<project>-agents/agent-N`, created the first time and brought up to main at each start (`factory agent N`).
 - **A task each.** Each agent claims its task in a lock file (`.git/factory/claims.json`), and the others skip it. A
-  claim ends when its process exits. A pushed `task/<id>-…` branch also counts as taken, across machines. Run
-  `python3 .claude/hooks/factory_claims.py list` to see who holds what.
+  claim ends when its process exits. A pushed `task/<id>-…` branch also counts as taken, across machines.
+  `factory claims` shows who holds what.
 - **Ports and a database each.** `agentEnv` in `factory.json` gives each agent its own values. Slot 1 keeps the
   defaults; slot N shifts ports by `portStep × (N−1)` and adds `_N` to names:
 
@@ -160,7 +174,8 @@ pass. The legacy list exempts existing files until they're fixed, and it only sh
 software-factory/
   SKILL.md, DEV-MANAGER.md, install.sh
   kit/
-    factory-loop.sh                one fresh Claude run per task; start it again for another agent
+    factory                        the command line (factory help)
+    factory-loop.sh                one fresh Claude run per task (factory loop)
     CLAUDE.factory.md              template for the project's CLAUDE.md
     .claude/factory.json           template: the project's config
     .claude/factory/notes/         template: the project's additions to the shared agents and skills

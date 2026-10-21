@@ -43,7 +43,7 @@ ln -s ../../vendor/my-skills/nestjs-best-practices .claude/skills/nestjs-best-pr
 ```
 
 For the software factory, run `bash vendor/my-skills/software-factory/install.sh . --link` instead; it makes all the
-links for you (see [its README](software-factory/README.md)).
+links for you and adds the `./factory` command (see [its README](software-factory/README.md)).
 
 **Clone:** `git clone --recurse-submodules <url>`, or run `git submodule update --init` after a plain clone. In GitHub
 Actions, use `actions/checkout` with `submodules: true`.

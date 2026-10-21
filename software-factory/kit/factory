@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# The software factory's command line. Run it from anywhere inside the project (or one of its agent worktrees):
+#   ./factory <command>        or, with the shim on your PATH (factory install-shim), just: factory <command>
+[ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
+set -uo pipefail
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
+cd "$root"
+hooks="$root/.claude/hooks"
+py() { python3 "$hooks/$1" "${@:2}"; }
+main() { python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))'; }
+
+usage() {
+  cat <<'EOF'
+factory <command>
+
+Build
+  loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into;
+                         after each task it asks whether to go on). Start it again in another terminal for more agents.
+  agent <N>              open Claude in agent N's own worktree (created the first time); then /loop /next-task all
+  next                   the job the factory would hand out next
+
+Look
+  claims                 which agent holds which folder and task
+  reviews                which extra reviews and checks the current change needs
+  env [N]                the ports and database of this folder (or of agent N)
+  worktree <N>           print agent N's folder (created the first time): cd "$(factory worktree 2)"
+
+Check
+  check                  the style checks CI runs (one class per file and so on)
+  guard                  the Factory guard CI runs, on the current branch
+
+Maintain
+  release <agent>        drop an agent's claims (agent-2 ...), for example after a crash
+  wait <pr> [minutes]    wait for a pull request to merge, without spending tokens
+  update                 pull the newest my-skills into the project and relink; then commit it in a PR
+  install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
+EOF
+}
+
+cmd="${1:-help}"; shift || true
+case "$cmd" in
+  loop)      exec "$root/factory-loop.sh" "$@" ;;
+  agent)
+    n="${1:?usage: factory agent <N>}"; shift
+    dir="$(py factory_claims.py worktree "$n")" || exit 1
+    echo "agent-$n: $dir"
+    cd "$dir" && exec claude "$@" ;;
+  worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <N>}" ;;
+  next)      py next_task.py "$@" ;;
+  claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
+  release)   py factory_claims.py release --agent "${1:?usage: factory release agent-<N>}" ;;
+  reviews)   py factory_reviews.py "$@" ;;
+  env)       if [ -n "${1:-}" ]; then py factory_env.py --agent "agent-$1"; else py factory_env.py; fi ;;
+  check)     py style_checks.py ;;
+  guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
+  wait)      exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes]}" "${2:-30}" ;;
+  update)
+    sub="$(git config -f .gitmodules --get-regexp 'submodule\..*\.url' | awk '/my-skills/ {split($1, a, "."); print a[2]}' | head -1)"
+    [ -n "$sub" ] || { echo "factory: no my-skills submodule in .gitmodules" >&2; exit 1; }
+    path="$(git config -f .gitmodules --get "submodule.$sub.path")"
+    old="$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo none)"
+    git submodule update --init -q "$path" && git submodule update --remote -q "$path" || exit 1
+    new="$(git -C "$path" rev-parse --short HEAD)"
+    if [ "$old" = "$new" ]; then echo "my-skills is already at $new"; exit 0; fi
+    echo "my-skills $old -> $new:"; git -C "$path" log --oneline "$old..$new" 2>/dev/null | sed 's/^/  /'
+    bash "$path/software-factory/install.sh" . --link | grep -E '^(linked .*was a copy|kept .*differs)' || true
+    echo; echo "Now commit it on a branch and open a PR, for example:"
+    echo "  git checkout -b chore/update-my-skills && git add -A && git commit -m \"Update my-skills to $new\"" ;;
+  install-shim)
+    bin="${HOME}/.local/bin"; mkdir -p "$bin"
+    cat > "$bin/factory" <<'EOF'
+#!/usr/bin/env bash
+# Runs the `factory` of the project you're in, so each project uses the factory version it pins.
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside a project's git repo" >&2; exit 1; }
+[ -x "$root/factory" ] && exec "$root/factory" "$@"
+echo "factory: $root has no ./factory. Install the software factory there first." >&2; exit 1
+EOF
+    chmod +x "$bin/factory"
+    echo "Installed $bin/factory."
+    case ":$PATH:" in *":$bin:"*) ;; *) echo "Add it to your PATH, for example in ~/.zshrc:  export PATH=\"\$HOME/.local/bin:\$PATH\"";; esac ;;
+  help|-h|--help) usage ;;
+  *) echo "factory: unknown command '$cmd'" >&2; usage >&2; exit 1 ;;
+esac

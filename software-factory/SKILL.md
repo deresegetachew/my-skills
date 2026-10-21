@@ -72,16 +72,19 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
 8. **Commit on a branch and open a PR.** Then tell the owner how to start the coding agent, in a terminal
    on their machine, in the repo:
    ```
-   ./factory-loop.sh          # recommended: a fresh Claude run per task
+   ./factory install-shim     # once per machine: then `factory ...` works in any factory project
+   factory loop               # recommended: a fresh Claude run per task (factory loop -i to watch and type)
    ```
-   or, interactively, `claude` then `/loop /next-task all`. The loop script starts a clean context for every
+   or `claude` then `/loop /next-task all`. The loop starts a clean context for every
    task, which is cheaper and avoids an agent misled by a long, stale conversation; state lives in git, the PRs
    and the plan. It runs without anyone to approve prompts, so `.claude/settings.json` must allow every command
    the build needs. Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab), and run the
    agent with the sandbox on rather than with permission checks skipped.
-   **Your own sessions instead of the script:** `cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`,
-   then `/loop /next-task all`. The SessionStart hook gives the session its slot, ports, database and task claims.
-   **More than one loop:** run `./factory-loop.sh` again in another terminal. Each loop gets its own checkout
+   **The `factory` command:** tell the owner to run `./factory install-shim` once; then `factory help` lists
+   everything (`factory loop`, `factory loop -i`, `factory agent 2`, `factory claims`, `factory update` ...).
+   **Your own sessions instead of the loop:** `factory agent 2` opens Claude in agent 2's worktree; then
+   `/loop /next-task all`. The SessionStart hook gives the session its slot, ports, database and task claims.
+   **More than one loop:** run `factory loop` again in another terminal. Each loop gets its own checkout
    (a git worktree in `<project>-agents/agent-N`, with `commands.install` run at each start) and claims its task in a
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose
    `task/<id>-...` branch is on the remote. It helps only when the plan has tasks that don't build on each other,
