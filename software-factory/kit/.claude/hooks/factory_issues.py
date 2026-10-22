@@ -156,7 +156,9 @@ def waiting_for_slot(cfg, issue):
     if not branches:
         return None
     prs = gh_all("repos/{owner}/{repo}/pulls?state=open")
-    if any(p["head"]["ref"] in branches for p in prs):
+    base = (gh("GET", "repos/{owner}/{repo}") or {}).get("full_name")
+    if any(p["head"]["ref"] in branches and ((p["head"].get("repo") or {}).get("full_name") or base) == base
+           for p in prs):
         return None  # its PR is open: rework and review go their own way
     main = cfg.get("mainBranch", "main")
     ahead = [b for b in branches
@@ -257,6 +259,8 @@ def main():
         now = datetime.now(timezone.utc)
         for i in task_issues(label=L["inProgress"]):
             age = (now - last_activity(cfg, i)).total_seconds() / 3600
+            if age >= hours and waiting_for_slot(cfg, i):
+                continue  # finished and pushed, waiting for a PR slot: not abandoned, nothing to hand over
             if age >= hours:
                 agents = [x for x in names(i) if x.startswith(L["agentPrefix"])]
                 print(f"#{i['number']} {', '.join(agents) or '(no agent)'} quiet for {age:.1f} h: {i['title']}")

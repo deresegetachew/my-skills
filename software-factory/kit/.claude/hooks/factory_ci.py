@@ -43,6 +43,15 @@ def not_started(sha):
     bad = [r for r in runs if r.get("conclusion") in UNSUCCESSFUL]
     if not bad:
         return None
+    # Commit statuses (other CI services) are part of `gh pr checks` too: any that failed is a real result.
+    status = gh_json(f"repos/{{owner}}/{{repo}}/commits/{sha}/status?per_page=100")
+    if not isinstance(status, dict):
+        return None
+    statuses = status.get("statuses", [])
+    if status.get("total_count", len(statuses)) > len(statuses):
+        return None
+    if any(st.get("state") in ("failure", "error") for st in statuses):
+        return None
     why = None
     for r in bad:
         notes = gh_json(f"repos/{{owner}}/{{repo}}/check-runs/{r['id']}/annotations?per_page=100")

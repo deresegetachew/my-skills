@@ -32,6 +32,8 @@ if "--jq" in a and p in db.get("text", {}):
     print(db["text"][p]); sys.exit(0)
 if p in db.get("json", {}):
     print(json.dumps(db["json"][p])); sys.exit(0)
+if p.startswith("commits/") and p.endswith("/status"):  # GitHub's answer for a commit with no statuses
+    print(json.dumps({"total_count": 0, "statuses": []})); sys.exit(0)
 sys.exit("fake gh: no answer for " + p)
 '''
 
@@ -245,7 +247,7 @@ def issues_project(open_prs, branch_ahead=3):
              "labels": [{"name": "factory:ready"}]}
     answers(db, json={"issues": [mine, ready], "branches": [{"name": "task/107-demo-guides"}],
                       "pulls": open_prs, "compare/main...task/107-demo-guides": {"ahead_by": branch_ahead},
-                      "user": {"login": "owner"}})
+                      "user": {"login": "owner"}, "repos/{owner}/{repo}": {"full_name": "deresegetachew/remanual"}})
     return d, db, env
 
 
@@ -397,6 +399,48 @@ def test_the_loop_script_is_the_shells_first_argument():
                        ("/tmp/worker.sh /tmp/factory-loop.sh", False), ("worker.sh factory-loop.sh", False),
                        ("-c echo factory-loop.sh", False), ("/no such/dir/factory-loop.sh -i", False), ("", False)]:
         assert runs_loop_script(args) is want, (args, want)
+
+
+def test_a_failed_commit_status_next_to_billing_is_a_real_result():
+    d, db, env = project([], [])
+    answers(db, json={"commits/abc/check-runs": {"total_count": 1, "check_runs": [{"id": 1, "conclusion": "failure"}]},
+                      "check-runs/1/annotations": [{"message": BILLING}],
+                      "commits/abc/status": {"total_count": 1, "statuses": [{"state": "failure", "context": "ext"}]}})
+    assert ci(env) == (0, "")
+    answers(db, json={"commits/abc/status": {"total_count": 0, "statuses": []}})
+    assert ci(env)[0] == 3
+
+
+def test_a_fork_pr_with_the_same_branch_name_is_not_this_branchs_pr():
+    d, db, env = issues_project([pr(115, "a"), pr(144, "b"), pr(200, "task/107-demo-guides")])
+    data = json.load(open(db))
+    data["json"]["pulls"][2]["head"]["repo"] = {"full_name": "stranger/fork"}
+    data["json"]["repos/{owner}/{repo}"] = {"full_name": "deresegetachew/remanual"}
+    json.dump(data, open(db, "w"))
+    rc, out, err = pick(d, env)
+    assert out == "none" and "waits for a pull-request slot" in err, (out, err)
+
+
+def test_numbers_skip_only_this_repos_own_pr():
+    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-mine.md"])
+    answers(db, text={"pulls": "201\ttask/1-x\tstranger/fork\tme/app",
+                      "pulls/201/files": "docs/decisions/0002-theirs.md"})
+    rc, out = numbers(d, env)
+    assert rc == 1 and "0002-theirs.md in #201" in out, out
+    answers(db, text={"pulls": "144\ttask/1-x\tme/app\tme/app"})
+    assert numbers(d, env)[0] == 0
+
+
+def test_a_task_waiting_for_a_slot_is_not_stale():
+    d, db, env = issues_project([pr(115, "a"), pr(144, "b")])
+    data = json.load(open(db))
+    data["json"]["issues"][0]["updated_at"] = "2020-01-01T00:00:00Z"
+    data["json"]["branches"][0]["commit"] = {"sha": "c1"}
+    data["json"]["commits/c1"] = {"commit": {"committer": {"date": "2020-01-01T00:00:00Z"}}}
+    json.dump(data, open(db, "w"))
+    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_issues.py"), "stale"], cwd=d, env=env,
+                       capture_output=True, text=True)
+    assert "#107" not in p.stdout, p.stdout + p.stderr
 
 
 if __name__ == "__main__":

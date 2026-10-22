@@ -182,7 +182,9 @@ write "Decision for you" in a report):
   together). Push the finished branch and stop (under `factory-loop.sh`) or wait on the oldest with
   `wait_for_merge.sh`. Under the loop you don't have to ask anyone to restart you: `next_task.py` waits while your
   issue's branch is pushed and the cap is full, and gives you the issue again as soon as a slot frees, so the next
-  session only opens the PR.
+  session only opens the PR. **In an interactive loop**, end that session the usual way so the loop can wait:
+  `python3 .claude/hooks/factory_claims.py done --agent "$FACTORY_AGENT" --task <id>`, then one line,
+  `Task <id> pushed; its PR waits for a slot.` Keep the issue (don't release it): the loop gives it back to you.
 - **CI that never ran:** when every job fails at once with no steps, run
   `python3 .claude/hooks/factory_ci.py <head commit>`. If it says GitHub didn't start the jobs (billing or the
   spending limit), that's not about your code: don't change code, push again or re-run CI. Say so once on the PR

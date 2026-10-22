@@ -69,14 +69,16 @@ def keeps_its_number(path, previous):
 def open_prs_added(skip_branch):
     """{pr number: [(path, renamed from or None)]} for the open PRs other than this branch's."""
     rc, out, err = run("gh", "api", "--paginate", "repos/{owner}/{repo}/pulls?state=open&per_page=100",
-                       "--jq", '.[] | "\\(.number)\\t\\(.head.ref)"')
+                       "--jq", '.[] | "\\(.number)\\t\\(.head.ref)\\t\\(.head.repo.full_name // "")\\t\\(.base.repo.full_name)"')
     if rc != 0:
         raise RuntimeError(f"could not list the open pull requests: {err[:200]}")
     found = {}
     for line in out.splitlines():
-        n, _, ref = line.partition("\t")
-        if not n or ref == skip_branch:
+        n, ref, head_repo, base_repo = (line.split("\t") + ["", "", ""])[:4]
+        if not n:
             continue
+        if ref == skip_branch and head_repo in ("", base_repo):
+            continue  # this branch's own PR (a fork's branch with the same name is another PR)
         found[int(n)] = pr_added(n)
     return found
 
