@@ -22,7 +22,7 @@ A claim belongs to a live process: when the pid that made it has exited (or the 
                                                                    SessionStart hook (factory_session.py) sets it up
 next_task.py --claim <agent> --pid <pid> uses `claim_task` below.
 """
-import argparse, contextlib, fcntl, json, os, socket, subprocess, sys, time
+import argparse, contextlib, fcntl, json, os, re, socket, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import agent_name, agent_slot, load  # noqa: E402
@@ -86,8 +86,11 @@ def is_loop(pid):
     if prog == "factory-loop.sh":
         return True  # a script run directly (or a name set with exec -a)
     shells = ("bash", "sh", "zsh", "dash")
-    return is_claude(p.stdout) or (prog in shells and len(words) > 1
-                                   and os.path.basename(words[1]) == "factory-loop.sh")
+    # The script is the shell's first argument after its flags. ps joins the arguments with spaces, so a path with
+    # spaces in it (/Users/me/My Projects/app/factory-loop.sh) must be matched on the text, not on one word.
+    rest = p.stdout.strip()[len(words[0]):].lstrip()
+    return is_claude(p.stdout) or (prog in shells and re.match(r"(?:-\S+\s+)*\S[^\n]*?factory-loop\.sh(\s|$)", rest)
+                                   is not None)
 
 
 def alive(claim, stale_hours, loop=False):

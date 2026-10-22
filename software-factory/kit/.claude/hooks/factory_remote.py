@@ -42,14 +42,19 @@ def fixes():
     return out_list
 
 
+def shown(url):
+    """The URL with any credentials in it hidden, for printing (https://x-access-token:TOKEN@github.com/...)."""
+    return re.sub(r"^((?:https?|ssh)://)[^@/]+@", r"\1***@", url)
+
+
 def main():
     check = "--check" in sys.argv[1:]
     found = fixes()
     for remote, old, new in found:
         if check:
-            print(f"{remote} points at {old}, but the repository is now {new}.")
+            print(f"{remote} points at {shown(old)}, but the repository is now {shown(new)}.")
         elif run("git", "remote", "set-url", remote, new)[0] == 0:
-            print(f"The repository moved on GitHub: {remote} now points at {new} (was {old}).")
+            print(f"The repository moved on GitHub: {remote} now points at {shown(new)} (was {shown(old)}).")
     sys.exit(1 if check and found else 0)
 
 

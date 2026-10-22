@@ -361,6 +361,31 @@ def test_only_a_loop_or_claude_by_its_program_holds_a_name():
             p.kill(); p.wait()
 
 
+def test_a_loop_in_a_folder_with_spaces_is_still_a_loop():
+    sys.path.insert(0, HOOKS)
+    from factory_claims import is_loop
+    d = os.path.join(tempfile.mkdtemp(), "My Projects", "app")
+    os.makedirs(d)
+    script = os.path.join(d, "factory-loop.sh")
+    open(script, "w").write("sleep 30\n")
+    loop = subprocess.Popen(["bash", script, "-i"])
+    try:
+        assert is_loop(loop.pid)
+    finally:
+        loop.kill(); loop.wait()
+
+
+def test_a_token_in_a_remote_url_is_never_printed():
+    d, db, env = project([], [])
+    git(d, "remote", "set-url", "origin", "https://x-access-token:SECRET123@github.com/old/app.git")
+    answers(db, text={"repos/old/app": "new/app"})
+    rc, out = remote(d, env, "--check")
+    assert rc == 1 and "SECRET123" not in out and "https://***@github.com/old/app.git" in out, out
+    rc, out = remote(d, env)
+    assert "SECRET123" not in out, out
+    assert git(d, "config", "--get", "remote.origin.url") == "https://x-access-token:SECRET123@github.com/new/app.git"
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
