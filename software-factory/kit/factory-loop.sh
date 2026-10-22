@@ -16,17 +16,28 @@
 # Loops on other machines see each other's task/<id>-... branches on the remote and skip those tasks too.
 # Parallel loops pay off when the plan has tasks that don't build on each other; the dev manager merges in order.
 #
+# Between tasks it brings its folder to main. When main has a newer factory-loop.sh (after a factory update), it
+# restarts itself with that version, as the same agent in the same folder; no need to stop and start it.
+#
 # Stops when the same task comes up 3 times in a row (stuck), and prints why.
 # Commands Claude needs must be allowed in .claude/settings.json: in this mode nobody can answer a prompt.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"   # `sh factory-loop.sh` on macOS is POSIX sh; this needs bash
 set -uo pipefail
+# This script as it was when the loop started. Between tasks the loop brings its folder to main; when main has
+# a newer factory-loop.sh (a factory update), the loop restarts itself with it (reload_if_changed below).
+self_sum=$(cksum < "$0")
 cd "$(git rev-parse --show-toplevel)"
 hooks="$PWD/.claude/hooks"
 interactive=0
 if [ "${1:-}" = "--interactive" ] || [ "${1:-}" = "-i" ]; then interactive=1; shift; fi
 limit="${1:-999}"
 
-read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$) || exit 1
+if [ -n "${FACTORY_RELOAD_DIR:-}" ]; then
+  # Restarted by reload_if_changed: same pid, so the same agent and folder (its checkout claim still holds).
+  agent="$FACTORY_RELOAD_AGENT"; dir="$FACTORY_RELOAD_DIR"; unset FACTORY_RELOAD_AGENT FACTORY_RELOAD_DIR
+else
+  read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$) || exit 1
+fi
 # On exit: drop the local claims, and say on GitHub that this agent is down (issues mode; a no-op otherwise).
 trap 'python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1; python3 "$hooks/factory_agents.py" down --agent "$agent" >/dev/null 2>&1' EXIT
 trap 'exit 130' INT TERM
@@ -61,14 +72,24 @@ echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
 tidy() {
   git fetch -q origin && git checkout -q --detach "origin/$main" 2>/dev/null
   [ "$PWD" != "$home" ] && git clean -fdq 2>/dev/null
+  [ -f .gitmodules ] && git submodule update --init -q  # main may have moved the submodule (the factory kit)
   python3 "$hooks/factory_claims.py" tidy-branches >/dev/null 2>&1 || true
 }
 home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+# After tidy: if main brought a different factory-loop.sh, carry on with that one. exec keeps the pid, so the
+# agent keeps its name, folder and claims, and the EXIT trap doesn't run (it's still alive). $1 = tasks left.
+reload_if_changed() {
+  [ -f factory-loop.sh ] || return 0
+  [ "$(cksum < factory-loop.sh)" = "$self_sum" ] && return 0
+  echo "[$agent] $(date '+%H:%M') the factory loop changed on main: restarting with the new version."
+  export FACTORY_RELOAD_AGENT="$agent" FACTORY_RELOAD_DIR="$PWD"
+  if [ "$interactive" = 1 ]; then exec bash ./factory-loop.sh -i "$1"; else exec bash ./factory-loop.sh "$1"; fi
+}
 
 last=""; repeats=0
 for ((n = 1; n <= limit; n++)); do
   tidy
-  [ -f .gitmodules ] && git submodule update --init -q  # main may have moved the submodule
+  reload_if_changed $((limit - n + 1))
   # Nothing to do: wait for work instead of exiting (`waitMinutes` in factory.json; 0 = exit as before). While it waits
   # the agent stays registered as idle, so the dev manager doesn't take it for dead. Ctrl-C stops it.
   waited=0
@@ -80,6 +101,7 @@ for ((n = 1; n <= limit; n++)); do
     python3 "$hooks/factory_agents.py" ping --agent "$agent" --status idle >/dev/null 2>&1 || true
     sleep $((wait_minutes * 60))
     tidy
+    reload_if_changed $((limit - n + 1))
   done
   id="${next%% *}"
   if [ "$id" = "$last" ]; then repeats=$((repeats + 1)); else repeats=1; last="$id"; fi
