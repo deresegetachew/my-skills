@@ -66,4 +66,6 @@ if __name__ == "__main__":
     cfg = load()
     env = agent_env(cfg, slot_of(a.agent, here))
     for k, v in env.items():
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k):  # the loop evals this output: a key must be a plain name
+            raise SystemExit(f"agentEnv: {k!r} isn't a valid variable name (letters, digits and _ only)")
         print(f"{k}={v}" if a.dotenv else f"export {k}={shlex.quote(v)}")

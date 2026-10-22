@@ -25,21 +25,35 @@ def sh(cmd, **kw):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True, **kw)
 
 
-def claude_pid():
-    """The pid of the Claude process that started this hook (claims last as long as it runs)."""
+def is_claude(args):
+    """Whether a process's command line is Claude Code: the `claude` program, or node running Claude Code's script.
+    Only the program and node's script count, so a folder named claude (/home/claude/...) in an argument doesn't."""
+    words = args.split()
+    if not words:
+        return False
+    prog = os.path.basename(words[0])
+    if prog == "claude":
+        return True
+    return prog in ("node", "nodejs", "bun") and len(words) > 1 and (
+        "claude-code" in words[1] or os.path.basename(words[1]) == "claude")
+
+
+def claude_pid(strict=False):
+    """The pid of the Claude process that started this hook (claims last as long as it runs). When none is found:
+    the parent process, or None with `strict` (the stop hook, which must never signal some other process)."""
     pid = os.getppid()
     for _ in range(8):
-        out = sh(f"ps -o ppid=,args= -p {pid}").stdout.strip()
+        out = subprocess.run(["ps", "-o", "ppid=,args=", "-p", str(int(pid))], capture_output=True,
+                             text=True).stdout.strip()
         if not out:
             break
         ppid, _, args = out.partition(" ")
-        words = args.split()[:3]  # the program, or node plus its script
-        if any(os.path.basename(w) == "claude" or "claude-code" in w for w in words):
+        if is_claude(args.strip()):
             return pid
         if not ppid.strip().isdigit() or int(ppid) <= 1:
             break
         pid = int(ppid)
-    return os.getppid()
+    return None if strict else os.getppid()
 
 
 def main():
@@ -93,8 +107,8 @@ def main():
                      "run `eval \"$(python3 .claude/hooks/factory_env.py)\"` in each command, or use factory-loop.sh.")
 
     try:  # issues mode: the agent's own issue on GitHub says it's alive (factory_agents.py)
-        sh(f"python3 {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'factory_agents.py')} register --agent {agent}",
-           env=child, timeout=30)
+        subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_agents.py"),
+                        "register", "--agent", agent], env=child, timeout=30, capture_output=True, text=True)
     except subprocess.TimeoutExpired:
         pass
     shown = ", ".join(f"{k}={v}" for k, v in env.items() if k not in ("FACTORY_PID",))

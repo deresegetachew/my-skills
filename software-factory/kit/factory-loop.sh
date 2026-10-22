@@ -71,8 +71,13 @@ echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
 # Between tasks: back to a clean main. In an agent worktree, untracked leftovers go too (ignored files such as
 # node_modules stay, so no reinstall). Local task branches whose task is ticked on main are deleted.
 tidy() {
-  git fetch -q origin && git checkout -q --detach "origin/$main" 2>/dev/null
-  [ "$PWD" != "$home" ] && git clean -fdq 2>/dev/null
+  # Clean leftovers only after a clean switch to main, and never in the project folder: when the checkout fails
+  # (uncommitted changes), the files may be unfinished work, so they stay and the loop says so.
+  if git fetch -q origin && git checkout -q --detach "origin/$main" 2>/dev/null; then
+    [ "$PWD" != "$home" ] && [ "$(git rev-parse --show-toplevel)" != "$home" ] && git clean -fdq 2>/dev/null
+  else
+    echo "[$agent] Could not switch $PWD to origin/$main (uncommitted changes?); leaving the files as they are."
+  fi
   [ -f .gitmodules ] && git submodule update --init -q  # main may have moved the submodule (the factory kit)
   python3 "$hooks/factory_claims.py" tidy-branches >/dev/null 2>&1 || true
 }

@@ -40,7 +40,20 @@
       "Bash(git push *:main*)",
       "Bash(git push * main)",
       "Bash(git branch -D*)",
-      "Bash(git branch -f*)"
+      "Bash(git branch -f*)",
+      "Bash(git push *refs/heads/main*)",
+      "Bash(git push * +*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push --mirror*)",
+      "Bash(git push * --mirror*)",
+      "Bash(git push * --delete*)",
+      "Bash(git push * :*)",
+      "Bash(gh alias *)",
+      "Bash(gh pr review *--approve*)",
+      "Bash(gh pr comment *factory-approved*)",
+      "Bash(gh pr comment *factory-answer*)",
+      "Bash(gh pr comment *factory-mustfix*)"
     ]
   },
   "hooks": {

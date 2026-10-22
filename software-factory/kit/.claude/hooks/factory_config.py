@@ -109,10 +109,19 @@ def styled(paths, cfg):
     return out
 
 
+def safe_agent(name):
+    """`name` if it's a valid agent name (lowercase letters, digits, dashes), else stop. Names become folder and
+    file names and labels, so a name like ../x must never reach a path."""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,39}", name or ""):
+        raise SystemExit(f"{name!r} isn't a valid agent name: use lowercase letters, digits and dashes "
+                         "(`agents` in .claude/factory.json, or FACTORY_AGENT).")
+    return name
+
+
 def agent_name(cfg, slot):
     """The name of the agent in slot `slot` (1 = the project folder)."""
     names = cfg.get("agents") or []
-    return names[slot - 1] if 0 < slot <= len(names) else f"agent-{slot}"
+    return safe_agent(names[slot - 1]) if 0 < slot <= len(names) else f"agent-{slot}"
 
 
 def agent_slot(cfg, name):

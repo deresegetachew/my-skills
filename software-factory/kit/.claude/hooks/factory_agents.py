@@ -47,7 +47,8 @@ def iso(t):
 
 def stamp_file(agent):
     from factory_claims import state_dir
-    return os.path.join(state_dir(), f"agent-{agent}.json")
+    from factory_config import safe_agent
+    return os.path.join(state_dir(), f"agent-{safe_agent(agent)}.json")
 
 
 def remember(agent, **kw):
@@ -81,7 +82,7 @@ def find_issue(agent):
 
 
 def render(agent, status, detail, started, ping=None, where=None):
-    where = where or f"{socket.gethostname()} · {os.path.basename(os.getcwd())}"
+    where = where or f"slot {os.environ.get('FACTORY_SLOT') or 1}"
     shown = {"working": detail or "working", "idle": "idle", "down": "down"}[status]
     t = iso(ping or now())
     body = (f"<!-- factory-agent name={agent} status={status} ping={t} -->\n"
@@ -99,7 +100,10 @@ def update(cfg, agent, status, detail=""):
         if i:
             n = i["number"]
     started = seen.get("started") or iso(now())
-    title, body = render(agent, status, detail, started)
+    # The machine and folder are posted to GitHub only when the project opts in (tasks.showWhere: true).
+    where = (f"{socket.gethostname()} · {os.path.basename(os.getcwd())}"
+             if (cfg.get("tasks") or {}).get("showWhere") else None)
+    title, body = render(agent, status, detail, started, where=where)
     if n:
         gh("PATCH", f"repos/{{owner}}/{{repo}}/issues/{n}", {"title": title, "body": body, "state": "open"})
     else:
