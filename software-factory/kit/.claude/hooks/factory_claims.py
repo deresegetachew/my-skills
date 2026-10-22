@@ -63,16 +63,33 @@ def locked():
         os.replace(tmp, path)
 
 
-def alive(claim, stale_hours):
-    if not claim or time.time() - claim.get("at", 0) > stale_hours * 3600:
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def is_loop(pid):
+    """Whether the process is a factory loop or an agent's Claude session (`register`), so a reused pid of some
+    other program doesn't hold a name."""
+    p = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True)
+    return p.returncode != 0 or "factory-loop" in p.stdout or "claude" in p.stdout  # can't tell: trust the pid
+
+
+def alive(claim, stale_hours, loop=False):
+    """Whether a claim still holds. A loop's checkout (`loop=True`) on this machine holds for as long as its loop
+    runs, however long that is: the age limit is only for what can't be checked (another machine, a task)."""
+    if not claim:
+        return False
+    if loop and claim.get("host") == HOST:
+        return pid_alive(claim.get("pid")) and is_loop(claim.get("pid"))
+    if time.time() - claim.get("at", 0) > stale_hours * 3600:
         return False
     if claim.get("host") != HOST:
         return True  # can't check a pid on another machine; the age limit applies
-    try:
-        os.kill(int(claim["pid"]), 0)
-        return True
-    except (OSError, ValueError, KeyError):
-        return False
+    return pid_alive(claim.get("pid"))
 
 
 def stamp(agent, pid, **extra):
@@ -90,7 +107,7 @@ def checkout(pid, stale_hours):
             (name, os.path.join(main_top + "-agents", name)) for name in names[1:]
         ]
         for agent, path in candidates:
-            if not alive(cos.get(agent), stale_hours):
+            if not alive(cos.get(agent), stale_hours, loop=True):
                 cos[agent] = stamp(agent, pid, path=path)
                 break
         else:
@@ -134,7 +151,7 @@ def register(agent, pid, path, stale_hours):
     """Record that an interactive session (pid) works in this checkout. Returns the other live holder, if any."""
     with locked() as data:
         held = data["checkouts"].get(agent)
-        if held and alive(held, stale_hours) and int(held.get("pid", 0)) != int(pid):
+        if held and alive(held, stale_hours, loop=True) and int(held.get("pid", 0)) != int(pid):
             return held
         data["checkouts"][agent] = stamp(agent, pid, path=path)
     return None
@@ -232,7 +249,7 @@ def clean(cfg, stale_hours):
     main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
     root = main_top + "-agents"
     with locked() as data:
-        busy = {c.get("path") for c in data["checkouts"].values() if alive(c, stale_hours)}
+        busy = {c.get("path") for c in data["checkouts"].values() if alive(c, stale_hours, loop=True)}
     removed, kept = [], []
     for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         path = os.path.join(root, name)

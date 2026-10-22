@@ -7,6 +7,8 @@ create (and `gh pr new`, `gh pr ready`): needs a reviewer pass for the commit (<
 merge:  needs those passes for the PR's head commit, green CI, no protected paths changed (`protected` in
         .claude/factory.json; `alwaysAllowed` files such as the build plan are fine), no hold label, no open
         dev-manager must-fix, and `--match-head-commit <head>` so the commit checked is the commit merged.
+Numbers: create and ready also need every new decision or migration file (`decisions`, `numberedDirs`) to take a
+        number that neither main nor another open PR has (factory_numbers.py); the message names the next free one.
 Issues mode (`tasks.source: "issues"`): create also needs the branch's issue (task/<n>-...) open, not blocked, not
         held by another agent, and `Closes #<n>` in the PR body.
 Markers: agents may not post the dev manager's markers (factory-approved, factory-answer, factory-mustfix), add
@@ -302,6 +304,17 @@ def need_room(cfg):
               f"`.claude/hooks/wait_for_merge.sh {min(ready)}`, or answer what's blocking it, before opening another.")
 
 
+def need_free_numbers(cfg, branch, added=None):
+    import factory_numbers
+    try:
+        found = factory_numbers.clashes(cfg, branch, added)
+    except RuntimeError as e:
+        block(f"Could not check the decision and migration numbers ({e}). Run `git fetch origin` and try again.")
+    if found:
+        block("A new numbered file takes a number that's already used:\n- " + "\n- ".join(found)
+              + "\nRename it on this branch, commit, push, then open the pull request again.")
+
+
 def gate_create(cfg, args):
     flags, _ = parse_args(args)
     if is_true(flags, "--draft", "-d"):
@@ -315,6 +328,7 @@ def gate_create(cfg, args):
     changed = out.split()
     need_reviews(cfg, branch, head, changed)
     need_task(cfg, branch, body_text(flags))
+    need_free_numbers(cfg, branch)
     need_room(cfg)
 
 
@@ -347,6 +361,12 @@ def gate_ready(cfg, args):
     pr = view(pr_ref(pos), "number,headRefName,headRefOid,body")
     need_reviews(cfg, pr["headRefName"], pr["headRefOid"], pr_files(pr["number"]))
     need_task(cfg, pr["headRefName"], pr.get("body") or "")
+    import factory_numbers
+    try:
+        added = factory_numbers.pr_added(pr["number"])
+    except RuntimeError as e:
+        block(f"Could not check the decision and migration numbers ({e}). Try again in a moment.")
+    need_free_numbers(cfg, pr["headRefName"], added)
     need_room(cfg)
 
 
@@ -379,6 +399,10 @@ def gate_merge(cfg, args):
     need_reviews(cfg, pr["headRefName"], head, files)
     rc, _, _ = run("gh", "pr", "checks", str(pr["number"]))
     if rc != 0:
+        from factory_ci import MESSAGE, not_started
+        why = not_started(head)
+        if why:
+            block(MESSAGE.format(why=why))
         block("CI is not green (or still running) for this pull request. Wait for it or fix it; do not merge.")
     hits = [p for p in files if p not in cfg["alwaysAllowed"] and any(re.search(rx, p) for rx in cfg["protected"])]
     if hits:
