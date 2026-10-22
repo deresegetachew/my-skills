@@ -33,6 +33,11 @@ VALUE_FLAGS = {  # flags of the gh subcommands the gate reads that take a value
     "--add-assignee", "--remove-assignee", "--add-reviewer", "--remove-reviewer", "--add-project",
     "--remove-project", "-c", "--comment", "-R", "--repo", "-q", "--jq", "--json", "-S", "--search", "-L",
     "--limit", "-s", "--state"}
+# gh pr merge: -s, -m, -r and -d are booleans there (squash, merge, rebase, delete branch), not values.
+MERGE_VALUE_FLAGS = {"-t", "--subject", "-b", "--body", "-F", "--body-file", "-A", "--author-email",
+                     "--match-head-commit", "-R", "--repo"}
+# Text the gate can't see because the shell would expand it first: $(...), `...`, ${...} and $NAME.
+SHELL_EXPANSION = re.compile(r"\$\(|`|\$\{|\$[A-Za-z_]")
 MARKERS = re.compile(r"<!--\s*factory-(approved|answer|mustfix)\b")
 REVIEW_LABELS = {"tests-reviewed", "deps-reviewed"}
 SEPARATORS = set(";&|()<>")
@@ -94,18 +99,19 @@ def gh_call(tokens):
     return top, sub, lead + rest[k:]
 
 
-def parse_args(args):
+def parse_args(args, value_flags=None):
     """(flags {name: [values]}, positionals) for gh-style arguments."""
+    value_flags = VALUE_FLAGS if value_flags is None else value_flags
     flags, pos, k = {}, [], 0
     while k < len(args):
         t = args[k]
         if t.startswith("--") and "=" in t:
             name, value = t.split("=", 1)
             flags.setdefault(name, []).append(value)
-        elif t in VALUE_FLAGS and k + 1 < len(args):
+        elif t in value_flags and k + 1 < len(args):
             flags.setdefault(t, []).append(args[k + 1])
             k += 1
-        elif len(t) > 2 and not t.startswith("--") and t[:2] in VALUE_FLAGS:  # -F/tmp/x.md, -b'text'
+        elif len(t) > 2 and not t.startswith("--") and t[:2] in value_flags:  # -F/tmp/x.md, -b'text'
             flags.setdefault(t[:2], []).append(t[2:])
         elif t.startswith("-") and len(t) > 1:
             flags.setdefault(t, []).append("")
@@ -121,6 +127,10 @@ def values(flags, *names):
 
 def body_text(flags):
     """The PR or comment body the command passes: --body values and --body-file contents."""
+    given = values(flags, "-b", "--body", "-c", "--comment", "-F", "--body-file")
+    if any(SHELL_EXPANSION.search(v) for v in given):
+        block("Write the body as plain text or a --body-file path: the PR gate reads the command before the shell "
+              "expands $(...), `...` or $VARIABLES, so it can't check what they'd say.")
     text = "\n".join(values(flags, "-b", "--body", "-c", "--comment"))
     for f in values(flags, "-F", "--body-file"):
         if f == "-":
@@ -268,7 +278,11 @@ def gate_create(cfg, args):
         return  # drafts are how agents ask questions; they can't be merged, and ready and merge stay gated
     branch = run("git", "branch", "--show-current")[1]
     head = run("git", "rev-parse", "HEAD")[1]
-    changed = run("git", "diff", "--name-only", f"origin/{cfg['mainBranch']}...HEAD")[1].split()
+    rc, out, err = run("git", "diff", "--name-only", f"origin/{cfg['mainBranch']}...HEAD")
+    if rc != 0:
+        block(f"Could not list this branch's changes against origin/{cfg['mainBranch']} ({err[:200]}). "
+              "Run `git fetch origin` and try again.")
+    changed = out.split()
     need_reviews(cfg, branch, head, changed)
     need_task(cfg, branch, body_text(flags))
     need_room(cfg)
@@ -307,7 +321,7 @@ def gate_ready(cfg, args):
 
 
 def gate_merge(cfg, args):
-    flags, pos = parse_args(args)
+    flags, pos = parse_args(args, MERGE_VALUE_FLAGS)
     pr = view(pr_ref(pos), "number,headRefName,headRefOid,comments,labels")
     head = pr["headRefOid"]
     hold = cfg.get("holdLabel", "factory-hold")

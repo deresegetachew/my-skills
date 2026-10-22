@@ -185,6 +185,16 @@ def test_copilot_review_points_on_pr_36():
     assert gate(d, env, "gh pr edit 7 --remove-label review-in-progress")[0] == 2
 
 
+def test_copilot_second_review_on_pr_36():
+    d, env = setup()
+    gate(d, env, f"gh pr merge -s 99 --match-head-commit {HEAD}")
+    assert "pr view 99 " in log(d), log(d)  # -s is squash, not a value
+    assert gate(d, env, 'gh pr comment 7 --body "$(cat reply.md)"')[0] == 2
+    assert gate(d, env, "gh pr comment 7 --body `cat reply.md`")[0] == 2
+    assert gate(d, env, 'gh pr comment 7 --body "$TEXT"')[0] == 2
+    assert gate(d, env, "gh pr create --title x --body 'Closes #1'")[0] == 2  # no origin/main: git diff fails
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
