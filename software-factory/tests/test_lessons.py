@@ -386,6 +386,19 @@ def test_a_token_in_a_remote_url_is_never_printed():
     assert git(d, "config", "--get", "remote.origin.url") == "https://x-access-token:SECRET123@github.com/new/app.git"
 
 
+def test_the_loop_script_is_the_shells_first_argument():
+    sys.path.insert(0, HOOKS)
+    from factory_claims import runs_loop_script
+    spaced = os.path.join(tempfile.mkdtemp(), "My Projects", "app")
+    os.makedirs(spaced)
+    open(os.path.join(spaced, "factory-loop.sh"), "w").write("")
+    for args, want in [("factory-loop.sh -i", True), ("./factory-loop.sh", True), ("/x/factory-loop.sh 5", True),
+                       ("-x factory-loop.sh", True), (f"{spaced}/factory-loop.sh -i", True),
+                       ("/tmp/worker.sh /tmp/factory-loop.sh", False), ("worker.sh factory-loop.sh", False),
+                       ("-c echo factory-loop.sh", False), ("/no such/dir/factory-loop.sh -i", False), ("", False)]:
+        assert runs_loop_script(args) is want, (args, want)
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

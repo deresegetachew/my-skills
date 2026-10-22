@@ -86,11 +86,25 @@ def is_loop(pid):
     if prog == "factory-loop.sh":
         return True  # a script run directly (or a name set with exec -a)
     shells = ("bash", "sh", "zsh", "dash")
-    # The script is the shell's first argument after its flags. ps joins the arguments with spaces, so a path with
-    # spaces in it (/Users/me/My Projects/app/factory-loop.sh) must be matched on the text, not on one word.
-    rest = p.stdout.strip()[len(words[0]):].lstrip()
-    return is_claude(p.stdout) or (prog in shells and re.match(r"(?:-\S+\s+)*\S[^\n]*?factory-loop\.sh(\s|$)", rest)
-                                   is not None)
+    return is_claude(p.stdout) or (prog in shells and runs_loop_script(p.stdout.strip()[len(words[0]):].strip()))
+
+
+def runs_loop_script(args):
+    """Whether a shell's arguments (as ps prints them, joined with spaces) start with the factory-loop.sh script.
+    The script is the first argument after the shell's flags. A one-word path (`factory-loop.sh`,
+    `./factory-loop.sh`, `/x/factory-loop.sh`) is unambiguous. A path with spaces in it (`/Users/me/My Projects/
+    app/factory-loop.sh`) can't be told from several arguments, so it counts only if that file exists."""
+    words = args.split()
+    k = 0
+    while k < len(words) and words[k].startswith("-"):
+        k += 1
+    if k == len(words):
+        return False
+    if os.path.basename(words[k]) == "factory-loop.sh":
+        return True
+    rest = " ".join(words[k:])
+    m = re.match(r"(/.*?/factory-loop\.sh)(?:\s|$)", rest)
+    return bool(m) and os.path.isfile(m.group(1))
 
 
 def alive(claim, stale_hours, loop=False):
