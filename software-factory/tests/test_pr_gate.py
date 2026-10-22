@@ -217,6 +217,16 @@ def test_copilot_fourth_review_on_pr_36():
     assert gate(d, env, "grep -n 'gh pr merge' README.md")[0] == 0
 
 
+def test_copilot_fifth_review_on_pr_36():
+    d, env = setup(ci_green=False)
+    for c in (f"if gh pr merge 7 --match-head-commit {HEAD}; then :; fi",
+              f"! gh pr merge 7 --match-head-commit {HEAD}",
+              'result="$(gh pr merge 7 --squash)"', "echo `gh pr merge 7`",
+              "gh pr edit 7 --add-label \"$LABEL\"",
+              "cd ../other && gh pr ready 7"):
+        assert gate(d, env, c)[0] == 2, c
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
