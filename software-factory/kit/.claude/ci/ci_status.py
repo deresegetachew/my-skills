@@ -47,7 +47,8 @@ def main():
         print("CI runs: GitHub can't be read right now (gh offline or logged out).")
         return 0
     main_branch = (repo or {}).get("default_branch", "main")
-    branches = {main_branch: "main"} | {p["head"]["ref"]: f"#{p['number']}" for p in pulls}
+    # No `dict | dict`: macOS can still have Python 3.8 as `python3`.
+    branches = {main_branch: "main", **{p["head"]["ref"]: f"#{p['number']}" for p in pulls}}
     latest = {}
     for r in runs.get("workflow_runs", []):
         b = r.get("head_branch")
