@@ -98,7 +98,7 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
   - a running loop keeps its name.
 - **Self-hosted CI** (Remanual #149, open): `ops/ci-runner/` runs an ephemeral runner as Linux containers on the
   owner's Mac, chosen by the repo variable `CI_RUNS_ON`.
-- **Tests:** `software-factory/tests/` (about 60 tests across the gate, issues, hardening, loop reload and
+- **Tests:** `software-factory/tests/` (71 tests on 22 Oct, across the gate, issues, hardening, loop reload and
   countdown, rework, and lessons).
 
 ## 4. What hurts today
