@@ -278,7 +278,7 @@ def pr_ref(pos):
     if not pos:
         return []
     ref = pos[0]
-    if not re.fullmatch(r"\d+|https://github\.com/[\w.-]+/[\w.-]+/pull/\d+", ref):
+    if not re.fullmatch(r"\d+", ref):  # a URL could name another repository, which the gate doesn't check
         block(f"Name the pull request by its number (got `{ref}`), so the gate checks the one you mean.")
     return [ref]
 

@@ -180,6 +180,7 @@ def test_copilot_review_points_on_pr_36():
     os.remove(os.path.join(d, "tmp", "reviews", "task_1-x.ok"))
     assert gate(d, env, "gh pr create --draft=false --title x --body y")[0] == 2  # not a draft
     assert gate(d, env, "gh pr ready 7 --undo")[0] == 0  # back to draft needs nothing
+    assert gate(d, env, f"gh pr merge https://github.com/other/repo/pull/7 --match-head-commit {HEAD}")[0] == 2
     d, env = setup(cfg_extra={"holdLabel": "review-in-progress"})
     assert gate(d, env, "gh pr edit 7 --remove-label review-in-progress")[0] == 2
 
