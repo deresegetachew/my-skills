@@ -7,7 +7,8 @@
 #   ./factory-loop.sh --interactive [N]
 #                                each task opens a normal Claude session you can type into, with the task
 #                                already started. When the task is done the session closes by itself and the
-#                                next one starts after a 10 s countdown (q stops); /exit early asks first
+#                                next one starts after a 10 s countdown (q stops). If the session closes before
+#                                the task is done (/exit, a crash, a usage limit), it also carries on after 10 s
 #   (or: ./factory loop [-i] [N])
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
@@ -128,9 +129,10 @@ for ((n = 1; n <= limit; n++)); do
       printf '[%s] Task %s done. Next task in 10 s; type q and Enter to stop: ' "$agent" "$finished"
       if read -r -t 10 answer </dev/tty; then :; else answer=""; echo; fi
     else
-      # You left with /exit before it was done: ask.
-      printf '[%s] Task %s session ended. Next task? [Enter] go, q stop: ' "$agent" "$id"
-      read -r answer </dev/tty || answer=q
+      # The session closed before the task was done (/exit, a crash, a usage limit). Carry on unless you say stop,
+      # so a loop never waits all night for a key. The same task usually comes back; 3 times in a row stops the loop.
+      printf '[%s] Task %s session ended before it was done. Carrying on in 10 s; type q and Enter to stop: ' "$agent" "$id"
+      if read -r -t 10 answer </dev/tty; then :; else answer=""; echo; fi
     fi
     case "$answer" in q|Q|quit|stop|n|N) echo "[$agent] Stopped."; exit 0;; esac
     continue
