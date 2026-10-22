@@ -31,7 +31,9 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    paths that need the safety auditor, security reviewer, eval or design check go in `factory.json` (`reviews`,
    `eval`, `design`), and the few lines an agent needs that only this project knows go in
    `.claude/factory/notes/<agent>.md`. Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
-   `submodules: true`, and put `git submodule update --init` first in `commands.install`. Without a submodule,
+   `submodules: true`, and put `git submodule update --init` first in `commands.install`. To take a newer factory
+   later, the owner runs `factory update` and commits it in a PR; `git config submodule.recurse true` once per clone
+   makes `git pull` update the submodule too (README, "Updating the factory"). Without a submodule,
    `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
 3. **Fill in `.claude/factory.json`:** the doc paths, the install, typecheck, lint, test and build commands,
    the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges":
@@ -64,8 +66,10 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    it checks, where the agent can't edit around it, that tests and expected outputs weren't quietly changed,
    no `.skip`/`.only` slipped in, new dependencies were reviewed, decision numbers don't collide, and a branch
    ticks only its own task. Once the project has an eval, run it in CI too, so the score isn't self-reported.
-7. **Protect the main branch** on GitHub (Settings → Rules → Rulesets): require a pull request, require the
-   CI checks (including Factory guard), block force pushes. Optional: CODEOWNERS on the protected paths.
+7. **Protect the main branch** on GitHub (Settings → Rules → Rulesets). The PR gate is a guard rail; this is the
+   lock. Require a pull request with 0 approvals (everything is opened under one account, and an author can't
+   approve their own PR), require the CI checks (`Factory guard` and `Typecheck, lint, test, build`), block force
+   pushes, and include administrators (no bypass list). Optional: CODEOWNERS on the protected paths.
    **Stronger, when the project matters:** let the coding agent's GitHub token push branches but not merge, and
    have the reviewer pass posted as a commit status by a separate identity (a GitHub App or a second account)
    that the ruleset requires. The local hooks then stay as the fast check, and the agent can't approve itself.
