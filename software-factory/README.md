@@ -454,6 +454,10 @@ current; the task never has to:
   prompt. `factory agents` shows such an agent as `silent`. The dev manager's `factory agents sweep` marks it down
   and puts its in-progress issues back to ready, so another agent takes them. If the silent agent comes back, the
   PR gate stops it opening a PR for an issue another agent now holds.
+- **One issue per agent.** Only registering may open an agent's issue, and only when the agent has none, open or
+  closed. A ping, a turn's end or an exit that can't find it changes nothing, and a lookup that fails is an error,
+  never "no issue". If copies exist anyway, only the open one with the newest ping counts (in `list` and `sweep`),
+  and `sweep` closes the others, so an old copy that went quiet never releases a live agent's work.
 - **Where.** By default the issue says only the agent's slot. With `"tasks": { "showWhere": true }` it also posts
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
