@@ -207,6 +207,16 @@ def test_copilot_third_review_on_pr_36():
     assert gate(d, env, "echo 'use gh to open it'")[0] == 0  # plain text mentioning gh is fine
 
 
+def test_copilot_fourth_review_on_pr_36():
+    d, env = setup(ci_green=False)
+    assert gate(d, env, f"gh pr \\\nmerge 7 --match-head-commit {HEAD}")[0] == 2  # backslash-newline
+    assert gate(d, env, f"gh -Rother/repo pr merge 7 --match-head-commit {HEAD}")[0] == 2
+    assert gate(d, env, f"gh pr merge 7 -Rother/repo --match-head-commit {HEAD}")[0] == 2
+    assert gate(d, env, f"env GH_DEBUG=1 gh pr merge 7 --match-head-commit {HEAD}")[0] == 2  # still gh
+    assert gate(d, env, "echo gh pr merge 7 --squash")[0] == 0  # gh as data, not the program
+    assert gate(d, env, "grep -n 'gh pr merge' README.md")[0] == 0
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

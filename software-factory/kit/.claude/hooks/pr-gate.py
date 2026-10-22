@@ -41,6 +41,8 @@ SHELL_EXPANSION = re.compile(r"\$\(|`|\$\{|\$[A-Za-z_]")
 MARKERS = re.compile(r"<!--\s*factory-(approved|answer|mustfix)\b")
 REVIEW_LABELS = {"tests-reviewed", "deps-reviewed"}
 SEPARATORS = set(";&|()<>")
+# Prefixes that run the next word as the program, so `env gh pr merge` and `sudo gh ...` are still gh.
+PREFIXES = {"env", "command", "builtin", "exec", "sudo", "nohup", "time", "nice", "doas"}
 # Programs that run a command given as text; a gh command inside their arguments can't be checked.
 WRAPPERS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "xargs", "env", "nohup", "time", "timeout",
             "sudo", "script", "watch", "nice", "python", "python3", "node", "perl", "ruby"}
@@ -59,6 +61,7 @@ def block(msg):
 
 def simple_commands(cmd):
     """The command split into simple commands (on ; & | && || newlines and brackets), each a token list."""
+    cmd = cmd.replace("\\\r\n", " ").replace("\\\n", " ")  # a backslash-newline continues the line in bash
     lex = shlex.shlex(cmd.replace("\n", " ; "), posix=True, punctuation_chars="".join(sorted(SEPARATORS)))
     lex.whitespace_split = True
     lex.commenters = ""
@@ -77,8 +80,11 @@ def simple_commands(cmd):
 
 def gh_call(tokens):
     """(top-level command, subcommand, args) when this simple command runs gh, else None."""
-    i = next((k for k, t in enumerate(tokens) if os.path.basename(t) == "gh"), None)
-    if i is None:
+    i = 0  # gh counts only as the program: after VAR=value assignments and plain prefixes like env or sudo
+    while i < len(tokens) and (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[i]) or tokens[i] in PREFIXES
+                               or (i and tokens[i - 1] in PREFIXES and tokens[i].startswith("-"))):
+        i += 1
+    if i >= len(tokens) or os.path.basename(tokens[i]) != "gh":
         return None
     rest, k = tokens[i + 1:], 0
 
@@ -171,7 +177,7 @@ def main():
     from factory_config import load
     cfg = load()
     for (top, sub, args), tokens in calls:
-        if top in ("pr", "issue") and any(t in ("-R", "--repo") or t.startswith("--repo=") for t in tokens):
+        if top in ("pr", "issue") and any(t in ("-R", "--repo") or t.startswith(("--repo=", "-R")) for t in tokens):
             block("Agents work on this repository only: leave out -R/--repo, so the gate checks the PR it means.")
     calls = [c for c, _ in calls]
     for top, sub, args in calls:
