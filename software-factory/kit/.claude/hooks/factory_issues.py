@@ -143,12 +143,12 @@ def pick(cfg, agent):
 
 
 def release_issue(cfg, n, reason=""):
-    """Back to ready: the agent's label and the in-progress or in-review label come off."""
+    """Back to ready: the agent's label and the in-progress, in-review or blocked label come off."""
     L = task_labels(cfg)
     i = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{n}")
     agents = [x[len(L["agentPrefix"]):] for x in names(i) if x.startswith(L["agentPrefix"])]
     for x in names(i):
-        if x.startswith(L["agentPrefix"]) or x in (L["inProgress"], L["inReview"]):
+        if x.startswith(L["agentPrefix"]) or x in (L["inProgress"], L["inReview"], L["blocked"]):
             remove_label(n, x)
     add_labels(n, [L["ready"]])
     who = agents[0] if agents else "none"
