@@ -195,6 +195,18 @@ def test_copilot_second_review_on_pr_36():
     assert gate(d, env, "gh pr create --title x --body 'Closes #1'")[0] == 2  # no origin/main: git diff fails
 
 
+def test_copilot_third_review_on_pr_36():
+    d, env = setup(ci_green=False)
+    for c in (f"bash -lc 'gh pr merge 7 --match-head-commit {HEAD}'", f"sh -c \"gh pr merge 7\"",
+              "eval 'gh pr comment 7 --body hi'"):
+        assert gate(d, env, c)[0] == 2, c
+    d, env = setup()
+    os.remove(os.path.join(d, "tmp", "reviews", "task_1-x.ok"))
+    assert gate(d, env, "gh pr create --draft --draft=false --title x --body y")[0] == 2
+    assert gate(d, env, "gh pr ready 7 --undo=false")[0] == 2
+    assert gate(d, env, "echo 'use gh to open it'")[0] == 0  # plain text mentioning gh is fine
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

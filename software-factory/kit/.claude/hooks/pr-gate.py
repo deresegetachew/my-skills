@@ -41,6 +41,10 @@ SHELL_EXPANSION = re.compile(r"\$\(|`|\$\{|\$[A-Za-z_]")
 MARKERS = re.compile(r"<!--\s*factory-(approved|answer|mustfix)\b")
 REVIEW_LABELS = {"tests-reviewed", "deps-reviewed"}
 SEPARATORS = set(";&|()<>")
+# Programs that run a command given as text; a gh command inside their arguments can't be checked.
+WRAPPERS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "xargs", "env", "nohup", "time", "timeout",
+            "sudo", "script", "watch", "nice", "python", "python3", "node", "perl", "ruby"}
+GH_IN_TEXT = re.compile(r"(^|[^\w.-])gh\s+(-\S+\s+)*[a-z]")
 
 
 def run(*a):
@@ -121,6 +125,13 @@ def parse_args(args, value_flags=None):
     return flags, pos
 
 
+def is_true(flags, *names):
+    """Whether a boolean flag is set and every value given for it is true (gh uses the last one, so a mix is refused
+    as not set: --draft --draft=false is not a draft)."""
+    given = values(flags, *names)
+    return bool(given) and all(v in ("", "true") for v in given)
+
+
 def values(flags, *names):
     return [v for n in names for v in flags.get(n, [])]
 
@@ -152,6 +163,9 @@ def main():
     except ValueError:
         block("The PR gate can't read this command (unbalanced quotes?). Write it more simply.")
     calls = [(c, p) for c, p in ((gh_call(p), p) for p in parts) if c]
+    # gh hidden inside one argument (bash -c '...', eval "...", xargs sh -c ...) can't be checked: refuse it.
+    if any(os.path.basename(p[0]) in WRAPPERS and any(GH_IN_TEXT.search(t) for t in p[1:]) for p in parts if p):
+        block("Run gh directly, not inside bash -c, sh -c, eval or a quoted string: the PR gate has to see the command.")
     if not calls:
         return
     from factory_config import load
@@ -172,7 +186,7 @@ def main():
     pr_calls = [(sub, args) for top, sub, args in calls if top == "pr"]
     merges = [args for sub, args in pr_calls if sub == "merge"]
     gated = [(sub, args) for sub, args in pr_calls if sub in ("create", "new", "ready", "merge")
-             and not (sub == "ready" and "--undo" in parse_args(args)[0])]  # back to draft: nothing to gate
+             and not (sub == "ready" and is_true(parse_args(args)[0], "--undo"))]  # back to draft: nothing to gate
     if not gated:
         return
     if len(merges) > 1:
@@ -274,7 +288,7 @@ def need_room(cfg):
 
 def gate_create(cfg, args):
     flags, _ = parse_args(args)
-    if any(v in ("", "true") for v in values(flags, "--draft", "-d")):
+    if is_true(flags, "--draft", "-d"):
         return  # drafts are how agents ask questions; they can't be merged, and ready and merge stay gated
     branch = run("git", "branch", "--show-current")[1]
     head = run("git", "rev-parse", "HEAD")[1]
