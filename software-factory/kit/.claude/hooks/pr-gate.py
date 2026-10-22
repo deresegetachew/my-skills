@@ -105,6 +105,8 @@ def parse_args(args):
         elif t in VALUE_FLAGS and k + 1 < len(args):
             flags.setdefault(t, []).append(args[k + 1])
             k += 1
+        elif len(t) > 2 and not t.startswith("--") and t[:2] in VALUE_FLAGS:  # -F/tmp/x.md, -b'text'
+            flags.setdefault(t[:2], []).append(t[2:])
         elif t.startswith("-") and len(t) > 1:
             flags.setdefault(t, []).append("")
         else:
@@ -139,9 +141,15 @@ def main():
         parts = simple_commands(cmd)
     except ValueError:
         block("The PR gate can't read this command (unbalanced quotes?). Write it more simply.")
-    calls = [c for c in (gh_call(p) for p in parts) if c]
+    calls = [(c, p) for c, p in ((gh_call(p), p) for p in parts) if c]
     if not calls:
         return
+    from factory_config import load
+    cfg = load()
+    for (top, sub, args), tokens in calls:
+        if top in ("pr", "issue") and any(t in ("-R", "--repo") or t.startswith("--repo=") for t in tokens):
+            block("Agents work on this repository only: leave out -R/--repo, so the gate checks the PR it means.")
+    calls = [c for c, _ in calls]
     for top, sub, args in calls:
         if top == "alias":
             block("Agents don't define gh aliases.")
@@ -149,11 +157,12 @@ def main():
             block(f"`gh {top}` isn't a gh command the factory knows (aliases and extensions aren't allowed for "
                   "agents). Use the plain gh command.")
     for top, sub, args in calls:
-        if top in ("pr", "issue") and sub in ("comment", "edit", "review", "close", "reopen"):
-            check_markers(sub, args)
+        if top in ("pr", "issue") and sub in ("comment", "edit", "review", "close", "reopen", "create", "new"):
+            check_markers(cfg, sub, args)
     pr_calls = [(sub, args) for top, sub, args in calls if top == "pr"]
     merges = [args for sub, args in pr_calls if sub == "merge"]
-    gated = [(sub, args) for sub, args in pr_calls if sub in ("create", "new", "ready", "merge")]
+    gated = [(sub, args) for sub, args in pr_calls if sub in ("create", "new", "ready", "merge")
+             and not (sub == "ready" and "--undo" in parse_args(args)[0])]  # back to draft: nothing to gate
     if not gated:
         return
     if len(merges) > 1:
@@ -162,8 +171,6 @@ def main():
         block("Push and merge in separate commands: a push in the same command would merge a commit nobody checked.")
     if len(gated) > 1:
         block("One pull-request command at a time (create, ready or merge), so each one is checked.")
-    from factory_config import load
-    cfg = load()
     sub, args = gated[0]
     if sub in ("create", "new"):
         gate_create(cfg, args)
@@ -173,7 +180,7 @@ def main():
         gate_merge(cfg, args)
 
 
-def check_markers(sub, args):
+def check_markers(cfg, sub, args):
     flags, _ = parse_args(args)
     if sub == "review" and ("--approve" in flags or "-a" in flags):
         block("Agents don't approve pull requests; the dev manager does.")
@@ -181,8 +188,9 @@ def check_markers(sub, args):
         block("Only the dev manager posts factory-approved, factory-answer and factory-mustfix comments. Ask with "
               "<!-- factory-question --> instead.")
     labels = lambda *n: {x.strip() for v in values(flags, *n) for x in v.split(",")}
-    if "factory-hold" in labels("--remove-label"):
-        block("Only the dev manager removes `factory-hold`.")
+    hold = cfg.get("holdLabel", "factory-hold")
+    if hold in labels("--remove-label"):
+        block(f"Only the dev manager removes `{hold}`.")
     if REVIEW_LABELS & labels("--add-label", "-l", "--label"):
         block("Only the dev manager adds the review labels (tests-reviewed, deps-reviewed).")
 
@@ -256,7 +264,7 @@ def need_room(cfg):
 
 def gate_create(cfg, args):
     flags, _ = parse_args(args)
-    if "--draft" in flags or "-d" in flags:
+    if any(v in ("", "true") for v in values(flags, "--draft", "-d")):
         return  # drafts are how agents ask questions; they can't be merged, and ready and merge stay gated
     branch = run("git", "branch", "--show-current")[1]
     head = run("git", "rev-parse", "HEAD")[1]
@@ -270,7 +278,7 @@ def pr_ref(pos):
     if not pos:
         return []
     ref = pos[0]
-    if not re.fullmatch(r"\d+|https://github\.com/[\w.-]+/[\w.-]+/pull/\d+", ref):
+    if not re.fullmatch(r"\d+", ref):  # a URL could name another repository, which the gate doesn't check
         block(f"Name the pull request by its number (got `{ref}`), so the gate checks the one you mean.")
     return [ref]
 

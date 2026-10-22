@@ -54,6 +54,23 @@ def test_only_claude_itself_counts_as_claude():
     assert not is_claude("python3 /home/claude/x.py")
 
 
+def test_agent_env_refuses_bad_keys_for_every_caller():
+    sys.path.insert(0, HOOKS)
+    from factory_env import agent_env
+    assert agent_env({"agentEnv": {"PORT": "{port:4100}"}}, 2)["PORT"] == "4110"
+    try:
+        agent_env({"agentEnv": {"X;rm -rf ~": "v"}}, 1)
+    except SystemExit:
+        return
+    raise AssertionError("a bad key was accepted")
+
+
+def test_release_takes_the_blocked_label_off():
+    d, db, env = setup([issue(1, labels=("factory:blocked",))])
+    run(d, env, "release", "1", "unblocked")
+    assert labels(db, 1) == ["factory:ready"], labels(db, 1)
+
+
 if __name__ == "__main__":
     os.environ.pop("FACTORY_AGENT", None)
     for k, v in sorted(globals().items()):
