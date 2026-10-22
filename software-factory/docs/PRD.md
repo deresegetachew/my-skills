@@ -96,10 +96,15 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
   - `factory_ci.py` (tells CI that never started from real failures);
   - waiting for a PR slot;
   - a running loop keeps its name.
-- **Self-hosted CI** (Remanual #149, open): `ops/ci-runner/` runs an ephemeral runner as Linux containers on the
-  owner's Mac, chosen by the repo variable `CI_RUNS_ON`.
+- **`factory ci`** (my-skills #40, open; it moves Remanual's `ops/ci-runner/` from #149 into the kit). It runs
+  CI on GitHub's runners or on an ephemeral self-hosted runner, as Linux containers on the owner's Mac, chosen by
+  the repo variable `CI_RUNS_ON`.
+  - `status` works in both modes. `use local|github` switches the mode. `install`, `uninstall`, `start`, `stop`
+    and `logs` manage the runner.
+  - The names come from the project: `<repo>-ci`, label `<repo>-local`, or `"ci"` in `factory.json`.
+  - Several Macs can run runners with one label.
 - **Tests:** `software-factory/tests/` (71 tests on 22 Oct, across the gate, issues, hardening, loop reload and
-  countdown, rework, and lessons).
+  countdown, rework, and lessons; #40 adds 14 for `factory ci`).
 
 ## 4. What hurts today
 
@@ -110,7 +115,7 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
 | P3 | **Agents report wrong causes.** "The repo moved to remanual-org" was false: only the agent's remote was stale. | taytu's report, 22 Oct; fixed by `factory_remote.py` |
 | P4 | **Numbering clashes.** Decision numbers were renumbered PR after PR. | #115, #127, #144, #145, #107; fixed by `factory_numbers.py` |
 | P5 | **Deadlocks on the PR cap.** All slots taken by PRs that can't merge, so finished work can't open. | #107, #134 and #147 waiting on 22 Oct |
-| P6 | **CI outages look like code failures.** The billing block turned every check red; agents nearly chased it. | 08:04Z onwards; `factory_ci.py` |
+| P6 | **CI outages look like code failures.** The billing block turned every check red; agents nearly chased it. GitHub Actions stopped for the whole account, which is why the self-hosted runner was built the same day. | 08:04Z onwards; `factory_ci.py`; Remanual #149 |
 | P7 | **Sessions don't close; loops stall.** Agents sat in finished sessions all night. | #34, #35; "both agents down" from 02:50Z |
 | P8 | **Two agents with one name.** A loop's claim expired after 6 h while it still ran. | The owner's report, 11:31 Berlin; fixed in #38 |
 | P9 | **Agents ask instead of fixing** what a rule already decides. | menelik on #145 ("here or a follow-up?") |
@@ -119,6 +124,9 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
 | P12 | **Hard to set up a second machine.** The steps live in chat. | The owner's request for a dedicated dev laptop, 22 Oct |
 | P13 | **Cost is invisible.** No per-agent or per-task token count. | `/usage` only; DEV-MANAGER.md "Token use" |
 | P14 | **Everything reaches the owner through one chat.** Decisions, status and noise are mixed; the owner reads on a phone. | This conversation |
+| P15 | **The self-hosted runner lacked what GitHub's image has.** `pnpm/action-setup` failed without `node` (Node must come first). Parallel test runs timed out on a Mac shared with the agents (`--concurrency=1` there). There was no Google Chrome for Lighthouse (Playwright's Chromium with `--no-sandbox`). | Remanual #149, decision 0047, 22 Oct |
+| P16 | **The runner showed as `bash`** in macOS's background items, and the owner asked for it to show its own name. `factory ci` installs the loop as an executable named after the runner. The process is still `bash`; what macOS shows now is untested. | Owner's message, 22 Oct; #40 |
+| P17 | **The runner was Remanual-only.** Its names (`remanual-ci-runner`, `remanual-local`) were hard-coded, its commands were scripts in one repo, and status only made sense in local mode. | `ops/ci-runner/` on Remanual main; the owner's ask for "`<project>-ci status`"; #40 |
 
 ## 5. User stories
 
@@ -180,14 +188,32 @@ Each story says who wants what. *Must* is for the first product release, *Should
 
 ### CI
 
-21. *Must.* As the owner, CI runs on GitHub's runners or on my own machine, switched by one setting (exists in
-    #149: `CI_RUNS_ON`).
-22. *Must.* As the owner, setting up the self-hosted runner is one script that survives reboots, with a status
-    command (asked for on #149).
+21. *Must.* As the owner, CI runs on GitHub's runners or on my own machine, switched by one command:
+    `factory ci use local|github`, which sets or deletes the repo variable `CI_RUNS_ON` (my-skills #40). Pull
+    requests from forks always stay on GitHub's runners.
+22. *Must.* As the owner, setting up the self-hosted runner is one command that survives reboots:
+    `factory ci install` (#40). Running it again updates the runner in place, and it warns when the checkout
+    isn't on main.
 23. *Must.* As everyone, a CI outage (billing, no runner) is shown as an outage, not as a code failure, and
     agents don't chase it (exists: `factory_ci.py`).
 24. *Should.* As the owner, the self-hosted runner runs in an isolated VM, so a job can't reach my machine (#150).
-25. *Could.* As the owner, several runners split a PR's jobs.
+25. *Could.* As the owner, several runners split a PR's jobs. Several Macs with one label already share the
+    queue (#40); GitHub gives each job to one of them.
+25a. *Must.* As the owner, `factory ci status` works in both modes. It shows:
+    - where CI runs;
+    - the latest run on main and on each open PR;
+    - runs queued for long.
+
+    In local mode it also shows the LaunchAgent and its pid, Docker, every runner with the label, and the last
+    log lines (#40).
+25b. *Must.* As the owner of several projects, each project's runner is named after it (`<repo>-ci`, label
+    `<repo>-local`, unless `factory.json` says otherwise), so runners of two projects run side by side. Each
+    shows by its own name in launchd and in GitHub's runner list (#40).
+25c. *Must.* As the owner, one `factory` command handles CI whichever mode is on. The agents' commands don't
+    change with the mode (#40).
+25d. *Should.* As the owner, a project with its own runner from before `factory ci` moves to it in one
+    `factory ci install`. `"ci": {"replaces": [...]}` names the old LaunchAgent, which is unloaded and removed
+    (#40; Remanual's migration).
 
 ### The dev manager
 
@@ -303,7 +329,8 @@ Add: pluggable task sources (issues, plan, Linear later), pluggable CI providers
 **Risks.**
 - **A second source of truth** (the store) drifting from GitHub. Mitigate: rebuild it from GitHub; never write
   only to the store.
-- **Security of the self-hosted runner** (privileged Docker today; #150).
+- **Security of the self-hosted runner** (privileged Docker today; #150). `factory ci` makes it easy to turn on in
+  every project, which spreads the same risk. *(inference)*
 - **One shared GitHub account** undermines every approval rule until agents get their own.
 - **Costs grow with agents and ticks**, and are unmeasured today.
 - **Over-building the UI before the loop is reliable.** The 22 Oct problems were all in the loop, not the UI.
@@ -317,13 +344,17 @@ Add: pluggable task sources (issues, plan, Linear later), pluggable CI providers
 5. Which task sources besides GitHub issues matter (Linear, Jira, the plan file)?
 6. What's an acceptable monthly cost for agents plus CI, so budgets have a number?
 7. Should the dev manager stay a Claude cloud session, or run next to the agents on the dev laptop?
+8. Once the billing block is lifted, should CI go back to GitHub's runners (`factory ci use github`), stay on the
+   Mac, or depend on the project? The local runner costs no minutes but runs branch code on your Mac (#150).
+9. Should `factory ci` support Linux machines (systemd) as well as macOS, for example for the dev laptop? Today
+   it is macOS only, and it hasn't been run on a Mac yet; its tests use fakes.
 
 ## 9. Roadmap
 
 | Phase | What | Done when |
 |---|---|---|
-| **0. Reliable loop** (mostly done) | The 22 Oct fixes (#33–#38), the self-hosted runner (#149) with `install.sh`, the VM runner (#150), the dev-laptop setup script, the priority label honoured | Two agents run 24 h on the dev laptop with no stall the owner has to fix; CI green on the owner's runner; one-script setup of a new machine |
-| **1. One place to look** | `factory status` and `factory doctor`; a pinned GitHub status issue the dev manager edits; the state store (option B) rebuilt from GitHub | The owner answers "what's waiting for me?" from one page, and the tick message shrinks to a pointer to the store |
+| **0. Reliable loop** (mostly done) | The 22 Oct fixes (#33–#38), `factory ci` (#40: local or GitHub runners, one command, project-named, status in both modes; replaces Remanual's `ops/ci-runner/` from #149), the VM runner (#150), the dev-laptop setup script, the priority label honoured | Two agents run 24 h on the dev laptop with no stall the owner has to fix; CI green on the owner's runner; one-script setup of a new machine |
+| **1. One place to look** | `factory status` and `factory doctor` (taking in `factory ci status`); a pinned GitHub status issue the dev manager edits; the state store (option B) rebuilt from GitHub | The owner answers "what's waiting for me?" from one page, and the tick message shrinks to a pointer to the store |
 | **2. The inbox** | A mobile web inbox of decisions with one-tap answers written back as marked comments; notifications only for inbox items; a daily digest | A week of operation where every owner decision went through the inbox, not chat |
 | **3. Dashboard and TUI** | The status page (agents, board, PR queue, CI, usage where available); `factory top` | The owner can see and act on every agent and PR from a phone or the dev laptop |
 | **4. Product** | An installer and wizard for any repo, the agents' own account, packaging (plugin plus CLI or submodule), docs and an example repo | A second repo goes from zero to a first merged agent PR by following the quick start alone |
