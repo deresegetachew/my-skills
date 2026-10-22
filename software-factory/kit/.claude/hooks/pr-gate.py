@@ -42,10 +42,13 @@ MARKERS = re.compile(r"<!--\s*factory-(approved|answer|mustfix)\b")
 REVIEW_LABELS = {"tests-reviewed", "deps-reviewed"}
 SEPARATORS = set(";&|()<>")
 # Prefixes that run the next word as the program, so `env gh pr merge` and `sudo gh ...` are still gh.
-PREFIXES = {"env", "command", "builtin", "exec", "sudo", "nohup", "time", "nice", "doas"}
+PREFIXES = {"env", "command", "builtin", "exec", "sudo", "nohup", "time", "nice", "doas",
+            # shell words that start a command list: `if gh pr merge ...; then`, `! gh ...`, `{ gh ...; }`
+            "if", "then", "else", "elif", "while", "until", "do", "!", "{", "}"}
 # Programs that run a command given as text; a gh command inside their arguments can't be checked.
 WRAPPERS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "xargs", "env", "nohup", "time", "timeout",
             "sudo", "script", "watch", "nice", "python", "python3", "node", "perl", "ruby"}
+GH_IN_SUBSTITUTION = re.compile(r"(\$\(|`)\s*(\S*/)?gh(\s|[`)]|$)")  # "$(gh pr merge 7)", `gh ...`
 GH_IN_TEXT = re.compile(r"(^|[^\w.-])gh\s+(-\S+\s+)*[a-z]")
 
 
@@ -170,7 +173,8 @@ def main():
         block("The PR gate can't read this command (unbalanced quotes?). Write it more simply.")
     calls = [(c, p) for c, p in ((gh_call(p), p) for p in parts) if c]
     # gh hidden inside one argument (bash -c '...', eval "...", xargs sh -c ...) can't be checked: refuse it.
-    if any(os.path.basename(p[0]) in WRAPPERS and any(GH_IN_TEXT.search(t) for t in p[1:]) for p in parts if p):
+    if any((os.path.basename(p[0]) in WRAPPERS and any(GH_IN_TEXT.search(t) for t in p[1:]))
+           for p in parts if p) or GH_IN_SUBSTITUTION.search(cmd):
         block("Run gh directly, not inside bash -c, sh -c, eval or a quoted string: the PR gate has to see the command.")
     if not calls:
         return
@@ -179,6 +183,9 @@ def main():
     for (top, sub, args), tokens in calls:
         if top in ("pr", "issue") and any(t in ("-R", "--repo") or t.startswith(("--repo=", "-R")) for t in tokens):
             block("Agents work on this repository only: leave out -R/--repo, so the gate checks the PR it means.")
+    if any(p and os.path.basename(p[0]) in ("cd", "pushd", "popd") for p in parts):
+        block("Run pull-request commands from the project folder, without cd in the same command: the gate checks "
+              "the repository it runs in.")
     calls = [c for c, _ in calls]
     for top, sub, args in calls:
         if top == "alias":
@@ -212,6 +219,9 @@ def main():
 
 def check_markers(cfg, sub, args):
     flags, _ = parse_args(args)
+    if any(SHELL_EXPANSION.search(v) for vs in flags.values() for v in vs):
+        block("Write labels and other values as plain text: the PR gate reads the command before the shell expands "
+              "$(...), `...` or $VARIABLES.")
     if sub == "review" and ("--approve" in flags or "-a" in flags):
         block("Agents don't approve pull requests; the dev manager does.")
     if MARKERS.search(body_text(flags)):
