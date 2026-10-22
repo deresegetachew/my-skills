@@ -32,6 +32,14 @@ Check
   check                  the style checks CI runs (one class per file and so on)
   guard                  the Factory guard CI runs, on the current branch
 
+CI                       local (a self-hosted runner on this Mac) or GitHub's runners; names from the project
+  ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
+  ci use local|github    send CI jobs to the self-hosted runners (label <repo>-local), or back to GitHub's
+  ci install             install the runner as a macOS LaunchAgent named <repo>-ci (run it again to update)
+  ci uninstall           remove it: the LaunchAgent, its containers and this Mac's idle registrations
+  ci start | stop        run the runner once by hand, in the background, until stop or a restart
+  ci logs [-f]           the runner's log
+
 Maintain
   release <agent>        drop an agent's local claims (taytu ...), for example after a crash
   clean                  remove agent worktrees no agent is using (and with no uncommitted work), and local task
@@ -92,6 +100,7 @@ EOF
     chmod +x "$bin/factory"
     echo "Installed $bin/factory."
     case ":$PATH:" in *":$bin:"*) ;; *) echo "Add it to your PATH, for example in ~/.zshrc:  export PATH=\"\$HOME/.local/bin:\$PATH\"";; esac ;;
+  ci)        exec bash "$root/.claude/ci/ci.sh" "$@" ;;
   help|-h|--help) usage ;;
   *) echo "factory: unknown command '$cmd'" >&2; usage >&2; exit 1 ;;
 esac

@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""The names a project's self-hosted CI runner uses, as shell assignments for `factory ci` (ci.sh).
+
+Every name comes from the project, so two projects can run their runners side by side on one Mac:
+
+  CI_REPO      owner/name on GitHub                  "ci.repo" in .claude/factory.json, else `gh repo view`,
+                                                     else the origin remote
+  CI_NAME      the runner's name                     "ci.name", else "<repo name>-ci"         (remanual-ci)
+  CI_LABEL     the label jobs ask for                "ci.label", else "<repo name>-local"     (remanual-local)
+  CI_AGENT     the LaunchAgent's label               dev.software-factory.<name>
+  CI_PLIST     ~/Library/LaunchAgents/<agent>.plist
+  CI_INSTALLED ~/Library/Application Support/<name>  the private copy launchd runs (never the checkout)
+  CI_STATE     ~/.local/state/<name>                 the log and the pid of a loop started by hand
+  CI_REPLACES  "ci.replaces": LaunchAgent labels of an older install to unload first
+
+  python3 ci_names.py            prints them as `NAME=value` lines, quoted for `eval` in bash
+"""
+import json, os, re, shlex, subprocess, sys
+
+SAFE = re.compile(r"[a-z0-9][a-z0-9._-]{0,47}")
+REPO = re.compile(r"[\w.-]+/[\w.-]+")
+
+
+def run(*a):
+    try:
+        p = subprocess.run(a, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return 1, ""
+    return p.returncode, p.stdout.strip()
+
+
+def config():
+    try:
+        with open(os.path.join(".claude", "factory.json")) as f:
+            return json.load(f).get("ci") or {}
+    except FileNotFoundError:
+        return {}
+
+
+def repo_from_remote():
+    rc, url = run("git", "config", "--get", "remote.origin.url")
+    m = re.search(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$", url) if rc == 0 else None
+    return m.group(1) if m else None
+
+
+def names(cfg):
+    repo = cfg.get("repo")
+    if not repo:
+        rc, out = run("gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner")
+        repo = out if rc == 0 and REPO.fullmatch(out) else repo_from_remote()
+    if not repo or not REPO.fullmatch(repo):
+        raise SystemExit("factory ci: can't tell this project's GitHub repository. Set \"ci\": {\"repo\": "
+                         "\"owner/name\"} in .claude/factory.json, or log in with `gh auth login`.")
+    base = repo.split("/")[1].lower()
+    name = cfg.get("name") or f"{base}-ci"
+    label = cfg.get("label") or f"{base}-local"
+    for what, value in (("name", name), ("label", label)):
+        if not SAFE.fullmatch(value):
+            raise SystemExit(f"factory ci: the {what} {value!r} must be lowercase letters, digits, dots, dashes or "
+                             "underscores (up to 48), starting with a letter or digit.")
+    # LaunchAgents of an older install under other names (a project's own runner from before `factory ci`):
+    # `factory ci install` unloads them first, so two loops never compete for the same jobs.
+    replaces = [a for a in (cfg.get("replaces") or []) if isinstance(a, str)]
+    for a in replaces:
+        if not re.fullmatch(r"[\w.-]{1,128}", a):
+            raise SystemExit(f"factory ci: {a!r} in ci.replaces isn't a LaunchAgent label.")
+    home = os.path.expanduser("~")
+    state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
+    agent = f"dev.software-factory.{name}"
+    return {
+        "CI_REPO": repo,
+        "CI_NAME": name,
+        "CI_LABEL": label,
+        "CI_AGENT": agent,
+        "CI_PLIST": os.path.join(home, "Library", "LaunchAgents", f"{agent}.plist"),
+        "CI_INSTALLED": os.path.join(home, "Library", "Application Support", name),
+        "CI_STATE": os.path.join(state_home, name),
+        "CI_REPLACES": " ".join(replaces),
+    }
+
+
+def main():
+    for k, v in names(config()).items():
+        print(f"{k}={shlex.quote(v)}")
+
+
+if __name__ == "__main__":
+    sys.exit(main())
