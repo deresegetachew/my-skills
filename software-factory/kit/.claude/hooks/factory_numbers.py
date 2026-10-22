@@ -41,15 +41,33 @@ def on_main(cfg, folder):
     return {} if rc != 0 else {n[0]: f"{folder}/{f}" for f in out.splitlines() for n in [number(f)] if n}
 
 
+def fetch_main(cfg):
+    """Main as it is now: a number another PR took and merged while this branch was built must count."""
+    rc, _, err = run("git", "fetch", "-q", "origin", cfg["mainBranch"])
+    if rc != 0:
+        raise RuntimeError(f"could not fetch origin/{cfg['mainBranch']}: {err[:200]}")
+
+
 def added_here(cfg):
-    rc, out, err = run("git", "diff", "--name-only", "--diff-filter=AR", f"origin/{cfg['mainBranch']}...HEAD")
+    """[(path, renamed from or None)] for the files this branch adds or renames."""
+    rc, out, err = run("git", "diff", "--name-status", "-M", "--diff-filter=AR", f"origin/{cfg['mainBranch']}...HEAD")
     if rc != 0:
         raise RuntimeError(f"could not list this branch's new files against origin/{cfg['mainBranch']}: {err[:200]}")
-    return out.splitlines()
+    found = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        found.append((parts[2], parts[1]) if parts[0].startswith("R") and len(parts) == 3 else (parts[-1], None))
+    return found
+
+
+def keeps_its_number(path, previous):
+    """A rename in the same folder that keeps its number (a new title) takes no new number."""
+    return bool(previous) and os.path.dirname(previous) == os.path.dirname(path) \
+        and number(previous) is not None and number(path) is not None and number(previous)[0] == number(path)[0]
 
 
 def open_prs_added(skip_branch):
-    """{pr number: [added or renamed file paths]} for the open PRs other than this branch's."""
+    """{pr number: [(path, renamed from or None)]} for the open PRs other than this branch's."""
     rc, out, err = run("gh", "api", "--paginate", "repos/{owner}/{repo}/pulls?state=open&per_page=100",
                        "--jq", '.[] | "\\(.number)\\t\\(.head.ref)"')
     if rc != 0:
@@ -64,8 +82,11 @@ def open_prs_added(skip_branch):
 
 
 def clashes(cfg, branch, mine=None):
-    """Plain sentences, one per clash, each naming the next free number; [] when every new number is free."""
+    """Plain sentences, one per clash, each naming the next free number; [] when every new number is free.
+    `mine`: [(path, renamed from or None)], or this checkout's branch when None."""
+    fetch_main(cfg)
     mine = added_here(cfg) if mine is None else mine
+    mine = [p for p, prev in mine if not keeps_its_number(p, prev)]
     folder_list = [f for f in folders(cfg) if any(in_folder(p, f) for p in mine)]
     if not folder_list:
         return []
@@ -74,7 +95,7 @@ def clashes(cfg, branch, mine=None):
     for folder in folder_list:
         taken = {n: f"{p} on main" for n, p in on_main(cfg, folder).items()}
         for pr, files in sorted(others.items()):
-            for p in files:
+            for p, _ in files:
                 if in_folder(p, folder) and number(p):
                     taken.setdefault(number(p)[0], f"{p} in #{pr}")
         new = sorted((number(p), p) for p in mine if in_folder(p, folder) and number(p))
@@ -93,12 +114,13 @@ def clashes(cfg, branch, mine=None):
 
 
 def pr_added(number_):
-    """The files a PR adds or renames, from GitHub (for `gh pr ready`, where the checkout may be another branch)."""
-    rc, out, err = run("gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number_}/files",
-                       "--jq", '.[] | select(.status == "added" or .status == "renamed") | .filename')
+    """[(path, renamed from or None)] for the files a PR adds or renames, from GitHub (for `gh pr ready`, where the
+    checkout may be another branch)."""
+    rc, out, err = run("gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/pulls/{number_}/files", "--jq",
+                       '.[] | select(.status == "added" or .status == "renamed") | "\\(.filename)\\t\\(.previous_filename // "")"')
     if rc != 0:
         raise RuntimeError(f"could not list the files of #{number_}: {err[:200]}")
-    return out.splitlines()
+    return [(p, prev or None) for line in out.splitlines() if line for p, _, prev in [line.partition("\t")]]
 
 
 def main():

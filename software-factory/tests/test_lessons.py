@@ -19,7 +19,14 @@ if a[:1] == ["pr"] and a[1:2] == ["list"]:
     print(json.dumps(db.get("open_prs", []))); sys.exit(0)
 if a[:1] != ["api"]:
     sys.exit("fake gh: no answer for " + " ".join(a))
-path = next(x for x in a[1:] if not x.startswith("-") and x not in ("GET",) and "/" in x)
+rest, path, k = a[1:], None, 0
+while k < len(rest):  # the first word that isn't a flag or a flag's value
+    if rest[k] in ("-X", "-H", "--jq", "-f", "-F", "--input"):
+        k += 2
+    elif rest[k].startswith("-"):
+        k += 1
+    else:
+        path = rest[k]; break
 p = urlparse(path.replace("repos/{owner}/{repo}/", "")).path
 if "--jq" in a and p in db.get("text", {}):
     print(db["text"][p]); sys.exit(0)
@@ -237,12 +244,13 @@ def issues_project(open_prs, branch_ahead=3):
     ready = {"number": 108, "title": "Next", "state": "open", "body": "", "milestone": None,
              "labels": [{"name": "factory:ready"}]}
     answers(db, json={"issues": [mine, ready], "branches": [{"name": "task/107-demo-guides"}],
-                      "pulls": open_prs, "compare/main...task/107-demo-guides": {"ahead_by": branch_ahead}})
+                      "pulls": open_prs, "compare/main...task/107-demo-guides": {"ahead_by": branch_ahead},
+                      "user": {"login": "owner"}})
     return d, db, env
 
 
-def pr(n, ref, draft=False):
-    return {"number": n, "head": {"ref": ref}, "draft": draft}
+def pr(n, ref, draft=False, by="owner"):
+    return {"number": n, "head": {"ref": ref}, "draft": draft, "user": {"login": by}}
 
 
 def test_a_pushed_branch_waits_quietly_while_the_cap_is_full():
@@ -296,6 +304,61 @@ def test_a_reused_pid_of_another_program_does_not_hold_a_name():
     finally:
         other.kill()
         other.wait()
+
+
+def test_other_accounts_prs_do_not_fill_this_accounts_slots():
+    d, db, env = issues_project([pr(115, "a", by="someone-else"), pr(144, "b", by="someone-else")])
+    assert pick(d, env)[1] == "issue-107 Demo guides"
+
+
+def test_a_rename_that_keeps_its_number_is_not_a_new_number():
+    d, db, env = project(["docs/decisions/0001-a.md", "docs/decisions/0002-old-title.md"], [])
+    git(d, "mv", "docs/decisions/0002-old-title.md", "docs/decisions/0002-new-title.md")
+    git(d, "commit", "-qm", "retitle")
+    assert numbers(d, env)[0] == 0
+    answers(db, text={"pulls": "150\ttask/9-y",
+                      "pulls/150/files": "docs/decisions/0002-retitled.md\tdocs/decisions/0002-old-title.md"})
+    assert numbers(d, env)[0] == 0  # another PR retitling a decision takes no number either
+
+
+def test_a_number_merged_to_main_meanwhile_counts_without_a_manual_fetch():
+    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-mine.md"])
+    other = tempfile.mkdtemp()
+    subprocess.run(["git", "clone", "-q", git(d, "config", "--get", "remote.origin.url"), other], check=True)
+    git(other, "config", "user.email", "t@t"); git(other, "config", "user.name", "t")
+    os.makedirs(os.path.join(other, "docs", "decisions"), exist_ok=True)
+    open(os.path.join(other, "docs", "decisions", "0002-theirs.md"), "w").write("x")
+    git(other, "add", "-A"); git(other, "commit", "-qm", "theirs"); git(other, "push", "-q", "origin", "HEAD:main")
+    rc, out = numbers(d, env)  # this checkout never fetched since: the check does
+    assert rc == 1 and "0002-theirs.md on main" in out and "Rename it to 0003" in out, out
+
+
+def test_a_timed_out_job_next_to_billing_is_a_real_result():
+    d, db, env = project([], [])
+    runs = {"total_count": 2, "check_runs": [{"id": 1, "conclusion": "failure"}, {"id": 2, "conclusion": "timed_out"}]}
+    answers(db, json={"commits/abc/check-runs": runs, "check-runs/1/annotations": [{"message": BILLING}],
+                      "check-runs/2/annotations": []})
+    assert ci(env) == (0, "")
+
+
+def test_more_runs_than_one_page_is_treated_as_a_real_result():
+    d, db, env = project([], [])
+    answers(db, json={"commits/abc/check-runs": {"total_count": 150, "check_runs": [{"id": 1, "conclusion": "failure"}]},
+                      "check-runs/1/annotations": [{"message": BILLING}]})
+    assert ci(env) == (0, "")
+
+
+def test_only_a_loop_or_claude_by_its_program_holds_a_name():
+    sys.path.insert(0, HOOKS)
+    from factory_claims import is_loop
+    procs = [subprocess.Popen(["bash", "-c", "exec -a factory-loop.sh sleep 30"]),
+             subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "/home/claude/factory-loop.sh"])]
+    try:
+        assert is_loop(procs[0].pid)
+        assert not is_loop(procs[1].pid)  # "claude" and "factory-loop" only as arguments don't count
+    finally:
+        for p in procs:
+            p.kill(); p.wait()
 
 
 if __name__ == "__main__":

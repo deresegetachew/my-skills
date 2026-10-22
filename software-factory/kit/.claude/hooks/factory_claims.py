@@ -72,10 +72,22 @@ def pid_alive(pid):
 
 
 def is_loop(pid):
-    """Whether the process is a factory loop or an agent's Claude session (`register`), so a reused pid of some
-    other program doesn't hold a name."""
-    p = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True)
-    return p.returncode != 0 or "factory-loop" in p.stdout or "claude" in p.stdout  # can't tell: trust the pid
+    """Whether the process is a factory loop or an agent's Claude session (`register`), judged by its program and
+    entry script, so a reused pid of some other program doesn't hold a name. Unknown (no `ps`): trust the pid."""
+    try:
+        p = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True)
+    except FileNotFoundError:
+        return True  # no ps to ask: the pid alone decides
+    words = p.stdout.split()
+    if not words:
+        return False
+    from factory_session import is_claude
+    prog = os.path.basename(words[0])
+    if prog == "factory-loop.sh":
+        return True  # a script run directly (or a name set with exec -a)
+    shells = ("bash", "sh", "zsh", "dash")
+    return is_claude(p.stdout) or (prog in shells and len(words) > 1
+                                   and os.path.basename(words[1]) == "factory-loop.sh")
 
 
 def alive(claim, stale_hours, loop=False):

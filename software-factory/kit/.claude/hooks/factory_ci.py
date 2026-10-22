@@ -18,29 +18,39 @@ MESSAGE = ("CI didn't run on this commit: GitHub didn't start the jobs ({why}). 
            "the dev manager re-runs CI when it works again.")
 
 
+UNSUCCESSFUL = {"failure", "startup_failure", "timed_out", "cancelled", "action_required", "stale"}
+
+
 def gh_json(path):
-    p = subprocess.run(["gh", "api", "--paginate", path], capture_output=True, text=True)
+    p = subprocess.run(["gh", "api", path], capture_output=True, text=True)
     if p.returncode != 0:
         return None
     try:
-        return json.loads(p.stdout.replace("}{", "},{").replace("][", ","))
+        return json.loads(p.stdout)
     except json.JSONDecodeError:
         return None
 
 
 def not_started(sha):
-    """The annotation's text when every failed check run on the commit never started, else None."""
+    """The annotation's text when every unsuccessful check run on the commit never started, else None. Anything it
+    can't see in full (more runs or annotations than one page) counts as a real result, the safe side."""
     data = gh_json(f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=100")
-    runs = (data or {}).get("check_runs", []) if isinstance(data, dict) else []
-    failed = [r for r in runs if r.get("conclusion") in ("failure", "startup_failure")]
-    if not failed:
+    if not isinstance(data, dict):
+        return None
+    runs = data.get("check_runs", [])
+    if data.get("total_count", len(runs)) > len(runs):
+        return None
+    bad = [r for r in runs if r.get("conclusion") in UNSUCCESSFUL]
+    if not bad:
         return None
     why = None
-    for r in failed:
-        notes = gh_json(f"repos/{{owner}}/{{repo}}/check-runs/{r['id']}/annotations") or []
+    for r in bad:
+        notes = gh_json(f"repos/{{owner}}/{{repo}}/check-runs/{r['id']}/annotations?per_page=100")
+        if not isinstance(notes, list):
+            return None
         hit = next((n.get("message", "") for n in notes if NOT_STARTED.search(n.get("message", ""))), None)
         if not hit:
-            return None  # at least one job really ran and failed
+            return None  # this job ran (or ended some other way): a real result
         why = why or hit
     return why.strip().rstrip(".")
 

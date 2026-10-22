@@ -161,7 +161,8 @@ def waiting_for_slot(cfg, issue):
     main = cfg.get("mainBranch", "main")
     ahead = [b for b in branches
              if (gh("GET", f"repos/{{owner}}/{{repo}}/compare/{main}...{b}") or {}).get("ahead_by", 0) > 0]
-    ready = sorted(p["number"] for p in prs if not p.get("draft"))
+    me = (gh("GET", "user") or {}).get("login")  # the gate's cap counts this account's ready PRs (--author @me)
+    ready = sorted(p["number"] for p in prs if not p.get("draft") and (p.get("user") or {}).get("login") == me)
     if ahead and len(ready) >= int(cfg.get("maxOpenPRs", 3)):
         return f"{len(ready)} of {cfg.get('maxOpenPRs', 3)} open: " + ", ".join(f"#{x}" for x in ready)
     return None
