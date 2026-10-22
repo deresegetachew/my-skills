@@ -6,6 +6,9 @@ DEFAULTS = {
     "plan": "docs/build-plan.md",
     "blocked": "docs/blocked.md",
     "decisions": "docs/decisions",
+    # More folders of numbered files besides `decisions` (for example ["db/migrations"]): a new file there must take
+    # a number neither main nor another open PR has (factory_numbers.py, checked by the PR gate).
+    "numberedDirs": [],
     "mainBranch": "main",
     "commands": {"typecheck": "", "lint": "", "test": "", "build": "", "smoke": ""},
     "codePaths": ["src"],

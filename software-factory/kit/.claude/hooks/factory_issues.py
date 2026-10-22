@@ -128,6 +128,12 @@ def pick(cfg, agent):
     own = [i for i in task_issues(label=mine) if L["inProgress"] in names(i)]
     if own:
         i = sorted(own, key=order)[0]
+        full = waiting_for_slot(cfg, i)
+        if full:
+            # Its branch is pushed but the PR can't open yet: wait instead of a session that the gate stops, and
+            # don't take new work meanwhile. The next pick after a merge frees a slot opens the PR.
+            print(f"#{i['number']} is ready on its branch and waits for a pull-request slot ({full}).", file=sys.stderr)
+            return None
         return i  # carry on with what this agent already holds
     for i in ready_issues(cfg):
         n = i["number"]
@@ -139,6 +145,28 @@ def pick(cfg, agent):
         if winner == agent:
             return i
         remove_label(n, mine)  # someone else was first; their labels stay
+    return None
+
+
+def waiting_for_slot(cfg, issue):
+    """When the issue's task branch is pushed with no open PR and `maxOpenPRs` ready PRs are open (the gate's cap),
+    a short reason; else None. A branch with no commits beyond main is still being built, so it doesn't wait."""
+    n = issue["number"]
+    branches = [b["name"] for b in gh_all("repos/{owner}/{repo}/branches") if b["name"].startswith(f"task/{n}-")]
+    if not branches:
+        return None
+    prs = gh_all("repos/{owner}/{repo}/pulls?state=open")
+    base = (gh("GET", "repos/{owner}/{repo}") or {}).get("full_name")
+    if any(p["head"]["ref"] in branches and ((p["head"].get("repo") or {}).get("full_name") or base) == base
+           for p in prs):
+        return None  # its PR is open: rework and review go their own way
+    main = cfg.get("mainBranch", "main")
+    ahead = [b for b in branches
+             if (gh("GET", f"repos/{{owner}}/{{repo}}/compare/{main}...{b}") or {}).get("ahead_by", 0) > 0]
+    me = (gh("GET", "user") or {}).get("login")  # the gate's cap counts this account's ready PRs (--author @me)
+    ready = sorted(p["number"] for p in prs if not p.get("draft") and (p.get("user") or {}).get("login") == me)
+    if ahead and len(ready) >= int(cfg.get("maxOpenPRs", 3)):
+        return f"{len(ready)} of {cfg.get('maxOpenPRs', 3)} open: " + ", ".join(f"#{x}" for x in ready)
     return None
 
 
@@ -231,6 +259,8 @@ def main():
         now = datetime.now(timezone.utc)
         for i in task_issues(label=L["inProgress"]):
             age = (now - last_activity(cfg, i)).total_seconds() / 3600
+            if age >= hours and waiting_for_slot(cfg, i):
+                continue  # finished and pushed, waiting for a PR slot: not abandoned, nothing to hand over
             if age >= hours:
                 agents = [x for x in names(i) if x.startswith(L["agentPrefix"])]
                 print(f"#{i['number']} {', '.join(agents) or '(no agent)'} quiet for {age:.1f} h: {i['title']}")

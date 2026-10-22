@@ -318,6 +318,8 @@ and dashes:
 - The first agent works in the project folder. The others get git worktrees in `<project>-agents/<name>`, next to the
   project, created on first use and reused after that.
 - A new loop takes the first name that no live loop on this clone holds. `factory agent 2` means the second name.
+  A loop holds its name for as long as it runs, however long that is. (Before 22 Oct a loop older than
+  `claimStaleHours` lost its name, so a new loop could start as a second menelik.)
 - Each time a loop starts in a worktree, it checks out `origin/main`, copies `.env.local` and `.env.*.local` across
   if they're missing, updates the submodules and runs `commands.install`.
 
@@ -341,12 +343,17 @@ as defaults.
 
 ### Between tasks
 
+- **Remote.** If the repository was moved or renamed on GitHub, the loop points `origin` at its new name and says so
+  in one line (`factory_remote.py`). The old address still reads, but API writes to it answer `307`.
 - **Back to main.** The loop checks out `origin/main` (detached), cleans leftovers in agent worktrees (never in the
   project folder), updates the submodules and deletes local task branches whose task is done.
 - **Self-update.** If main brought a different `factory-loop.sh`, the loop restarts itself with the new one, as the
   same agent in the same folder. No need to stop and start it.
 - **Waiting.** When nothing is ready (every task done, blocked or taken), the loop checks again every `waitMinutes`
   (default 1) and stays `idle` on its agent issue. `"waitMinutes": 0` makes it exit instead. Ctrl-C stops it.
+- **Waiting for a PR slot** (issues mode). When the agent's issue has its branch pushed, no PR yet, and `maxOpenPRs`
+  ready PRs are open, the loop waits and takes no new work. As soon as a slot frees, it gives the agent that issue
+  again, and the session opens the PR. Nobody has to restart it.
 - **Stuck.** If the same task comes up 3 times in a row without being ticked or pushed, the loop stops and says so,
   so a person or the dev manager can look.
 
@@ -475,8 +482,8 @@ pipes, subshells), and blocks the pull-request commands that aren't ready:
 
 | Command | Allowed only when |
 |---|---|
-| `gh pr create`, `gh pr new`, `gh pr ready` | The reviewer passed the current commit (and the architecture reviewer, on styled paths). Fewer than `maxOpenPRs` of your ready PRs are open. Plan mode: the task isn't ticked or blocked on main. Issues mode: the issue is open, not blocked, not held by another agent, and the body says `Closes #<n>`. Drafts (`--draft`) skip all of this: they're how agents ask questions |
-| `gh pr merge` | The PR is named by number or URL. It has no `factory-hold` label. The latest marker on it isn't a must-fix, and if it's an approval, it names the current head. The command has `--match-head-commit <head>`, so GitHub merges only the commit the gate checked. The reviewer passes (and the architecture reviewer's, on styled paths) are for that head. CI is green (`gh pr checks`). No protected file changed (all files, past the first 100) |
+| `gh pr create`, `gh pr new`, `gh pr ready` | The reviewer passed the current commit (and the architecture reviewer, on styled paths). Fewer than `maxOpenPRs` of your ready PRs are open. Plan mode: the task isn't ticked or blocked on main. Issues mode: the issue is open, not blocked, not held by another agent, and the body says `Closes #<n>`. Every new decision or migration file (`decisions`, `numberedDirs`) takes a number neither main nor another open PR has; the message names the next free one (`factory_numbers.py`). Drafts (`--draft`) skip all of this: they're how agents ask questions |
+| `gh pr merge` | The PR is named by number or URL. It has no `factory-hold` label. The latest marker on it isn't a must-fix, and if it's an approval, it names the current head. The command has `--match-head-commit <head>`, so GitHub merges only the commit the gate checked. The reviewer passes (and the architecture reviewer's, on styled paths) are for that head. CI is green (`gh pr checks`); when the jobs never started (GitHub billing or the spending limit), the gate says that isn't a code result, so the agent doesn't push or re-run to chase it (`factory_ci.py`). No protected file changed (all files, past the first 100) |
 
 It also blocks:
 

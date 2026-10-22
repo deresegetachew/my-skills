@@ -22,7 +22,7 @@ A claim belongs to a live process: when the pid that made it has exited (or the 
                                                                    SessionStart hook (factory_session.py) sets it up
 next_task.py --claim <agent> --pid <pid> uses `claim_task` below.
 """
-import argparse, contextlib, fcntl, json, os, socket, subprocess, sys, time
+import argparse, contextlib, fcntl, json, os, re, socket, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import agent_name, agent_slot, load  # noqa: E402
@@ -63,16 +63,62 @@ def locked():
         os.replace(tmp, path)
 
 
-def alive(claim, stale_hours):
-    if not claim or time.time() - claim.get("at", 0) > stale_hours * 3600:
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def is_loop(pid):
+    """Whether the process is a factory loop or an agent's Claude session (`register`), judged by its program and
+    entry script, so a reused pid of some other program doesn't hold a name. Unknown (no `ps`): trust the pid."""
+    try:
+        p = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True)
+    except FileNotFoundError:
+        return True  # no ps to ask: the pid alone decides
+    words = p.stdout.split()
+    if not words:
+        return False
+    from factory_session import is_claude
+    prog = os.path.basename(words[0])
+    if prog == "factory-loop.sh":
+        return True  # a script run directly (or a name set with exec -a)
+    shells = ("bash", "sh", "zsh", "dash")
+    return is_claude(p.stdout) or (prog in shells and runs_loop_script(p.stdout.strip()[len(words[0]):].strip()))
+
+
+def runs_loop_script(args):
+    """Whether a shell's arguments (as ps prints them, joined with spaces) start with the factory-loop.sh script.
+    The script is the first argument after the shell's flags. A one-word path (`factory-loop.sh`,
+    `./factory-loop.sh`, `/x/factory-loop.sh`) is unambiguous. A path with spaces in it (`/Users/me/My Projects/
+    app/factory-loop.sh`) can't be told from several arguments, so it counts only if that file exists."""
+    words = args.split()
+    k = 0
+    while k < len(words) and words[k].startswith("-"):
+        k += 1
+    if k == len(words):
+        return False
+    if os.path.basename(words[k]) == "factory-loop.sh":
+        return True
+    rest = " ".join(words[k:])
+    m = re.match(r"(/.*?/factory-loop\.sh)(?:\s|$)", rest)
+    return bool(m) and os.path.isfile(m.group(1))
+
+
+def alive(claim, stale_hours, loop=False):
+    """Whether a claim still holds. A loop's checkout (`loop=True`) on this machine holds for as long as its loop
+    runs, however long that is: the age limit is only for what can't be checked (another machine, a task)."""
+    if not claim:
+        return False
+    if loop and claim.get("host") == HOST:
+        return pid_alive(claim.get("pid")) and is_loop(claim.get("pid"))
+    if time.time() - claim.get("at", 0) > stale_hours * 3600:
         return False
     if claim.get("host") != HOST:
         return True  # can't check a pid on another machine; the age limit applies
-    try:
-        os.kill(int(claim["pid"]), 0)
-        return True
-    except (OSError, ValueError, KeyError):
-        return False
+    return pid_alive(claim.get("pid"))
 
 
 def stamp(agent, pid, **extra):
@@ -90,7 +136,7 @@ def checkout(pid, stale_hours):
             (name, os.path.join(main_top + "-agents", name)) for name in names[1:]
         ]
         for agent, path in candidates:
-            if not alive(cos.get(agent), stale_hours):
+            if not alive(cos.get(agent), stale_hours, loop=True):
                 cos[agent] = stamp(agent, pid, path=path)
                 break
         else:
@@ -134,7 +180,7 @@ def register(agent, pid, path, stale_hours):
     """Record that an interactive session (pid) works in this checkout. Returns the other live holder, if any."""
     with locked() as data:
         held = data["checkouts"].get(agent)
-        if held and alive(held, stale_hours) and int(held.get("pid", 0)) != int(pid):
+        if held and alive(held, stale_hours, loop=True) and int(held.get("pid", 0)) != int(pid):
             return held
         data["checkouts"][agent] = stamp(agent, pid, path=path)
     return None
@@ -232,7 +278,7 @@ def clean(cfg, stale_hours):
     main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
     root = main_top + "-agents"
     with locked() as data:
-        busy = {c.get("path") for c in data["checkouts"].values() if alive(c, stale_hours)}
+        busy = {c.get("path") for c in data["checkouts"].values() if alive(c, stale_hours, loop=True)}
     removed, kept = [], []
     for name in sorted(os.listdir(root)) if os.path.isdir(root) else []:
         path = os.path.join(root, name)

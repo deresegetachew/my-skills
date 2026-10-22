@@ -47,6 +47,7 @@ if [ "$dir" != "$PWD" ]; then
   # A new worktree has no untracked local files: bring the local env files over, then install.
   for f in .env.local .env.*.local; do [ -f "$f" ] && [ ! -e "$dir/$f" ] && cp "$f" "$dir/$f"; done
   cd "$dir"
+  python3 "$hooks/factory_remote.py" 2>/dev/null | sed "s/^/[$agent] /"  # the repository may have moved on GitHub
   # A reused worktree may be far behind: bring it to main before using its hooks and config.
   git fetch -q origin && git checkout -q --detach "origin/$main" || {
     echo "[$agent] Could not check out origin/$main in $dir (uncommitted changes there?). Clean it up, or remove it: git worktree remove $dir"
@@ -71,6 +72,8 @@ echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
 # Between tasks: back to a clean main. In an agent worktree, untracked leftovers go too (ignored files such as
 # node_modules stay, so no reinstall). Local task branches whose task is ticked on main are deleted.
 tidy() {
+  # The repository moved or was renamed on GitHub: point the remote at its new name before anything uses it.
+  python3 "$hooks/factory_remote.py" 2>/dev/null | sed "s/^/[$agent] /"
   # Clean leftovers only after a clean switch to main, and never in the project folder: when the checkout fails
   # (uncommitted changes), the files may be unfinished work, so they stay and the loop says so.
   # Tracked edits can survive a checkout, so check first: with any, leave the folder alone this time.

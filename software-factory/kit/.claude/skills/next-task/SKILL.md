@@ -87,8 +87,10 @@ or product decision the docs leave open), don't guess:
   the next one).
 
 Small gaps the docs don't cover: choose the simplest option that fits the PRD, write it down as
-`<decisions>/NNNN-title.md`, and carry on. Number it from main at the moment you open the PR (highest number on
-`origin/<mainBranch>` + 1); CI fails a PR whose decision number is already taken, and then you renumber.
+`<decisions>/NNNN-title.md`, and carry on. A number must be free on main **and** in every open PR (other agents'
+PRs take numbers too). Run `python3 .claude/hooks/factory_numbers.py` before you open the PR: it lists any clash
+with the next free number. The PR gate runs the same check and won't open the PR until the numbers are free.
+Migrations (`numberedDirs` in `.claude/factory.json`) follow the same rule.
 
 ## 2b. Questions go to the dev manager, not the terminal
 
@@ -104,6 +106,14 @@ write "Decision for you" in a report):
 3. Check for answers at each poll and before each task: `gh pr view <n> --comments`. An answer starts with
    `<!-- factory-answer -->`. Apply it, reply with what you changed, and carry on.
 4. Only things the dev manager has marked `needs-owner` wait for a person; for those, keep going around them.
+5. **Not a question:** a fix inside this PR's own scope that `CLAUDE.md`, the style guide or a reviewer's must-fix
+   requires (a missed reduced-motion rule, a flaky test you caused, a wrong label). Make it in this PR and say so
+   in the PR. Don't offer "here or in a follow-up?": the answer is here. Ask only when the fix would reach outside
+   the task, change what the PRD or a decision says, or when the rules themselves disagree.
+6. **Before you report a cause, check it on GitHub.** If a `gh` command fails oddly (a 307, a 404 on something
+   that exists, "repository moved"), run `python3 .claude/hooks/factory_remote.py`: it asks GitHub where the
+   repository is now and points `origin` there if it moved. Don't tell the dev manager the repository moved unless
+   that script says so.
 
 ## 3. Build it
 
@@ -169,8 +179,16 @@ write "Decision for you" in a report):
   those files, and say so in your report. Under `factory-loop.sh`, stop the run instead: the loop skips a task
   whose branch is on the remote and claims the next free one.
 - **Work-in-progress cap:** the PR gate won't open a new PR while `maxOpenPRs` of yours are open (all loops
-  together). Wait on the
-  oldest with `wait_for_merge.sh`, or answer whatever is holding it up.
+  together). Push the finished branch and stop (under `factory-loop.sh`) or wait on the oldest with
+  `wait_for_merge.sh`. Under the loop you don't have to ask anyone to restart you: `next_task.py` waits while your
+  issue's branch is pushed and the cap is full, and gives you the issue again as soon as a slot frees, so the next
+  session only opens the PR. **In an interactive loop**, end that session the usual way so the loop can wait:
+  `python3 .claude/hooks/factory_claims.py done --agent "$FACTORY_AGENT" --task <id>`, then one line,
+  `Task <id> pushed; its PR waits for a slot.` Keep the issue (don't release it): the loop gives it back to you.
+- **CI that never ran:** when every job fails at once with no steps, run
+  `python3 .claude/hooks/factory_ci.py <head commit>`. If it says GitHub didn't start the jobs (billing or the
+  spending limit), that's not about your code: don't change code, push again or re-run CI. Say so once on the PR
+  and carry on; the dev manager re-runs CI when it works.
 - **Fresh context per task:** if the owner started you with `./factory-loop.sh`, do exactly one task and stop;
   the script starts a fresh run for the next one. Keep anything the next run needs in git, the PR or the plan,
   not in your memory.
