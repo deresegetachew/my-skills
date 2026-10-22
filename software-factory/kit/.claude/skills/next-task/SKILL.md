@@ -143,9 +143,13 @@ write "Decision for you" in a report):
    Then drop your task claim, so the next pick moves on while the PR waits:
    `python3 .claude/hooks/factory_claims.py release --agent "$FACTORY_AGENT" --tasks-only` (when `FACTORY_AGENT` is set).
    The pushed `task/<id>-...` branch keeps the task taken for the other loops.
-3. Once CI is green, merge it yourself with `gh pr merge --squash --delete-branch`, then pull the main
-   branch before the next task. The pull-request gate (`.claude/hooks/pr-gate.py`) allows this only when the
-   reviewer passed the latest commit, CI is green and no protected files changed. If `gh` can't switch to the
+3. Once CI is green, merge it yourself with
+   `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, where `<sha>` is the full commit hash that
+   `git rev-parse HEAD` printed (paste the hash itself: the gate reads the command before the shell runs it, so
+   `$(...)` can't stand in for it). Run it as its own command, with no push in it, then pull the main branch
+   before the next task. The pull-request gate
+   (`.claude/hooks/pr-gate.py`) allows this only when the reviewer passed that commit, CI is green, no protected
+   files changed and the dev manager has no hold or must-fix on it. If `gh` can't switch to the
    main branch afterwards because another worktree has it, that's fine: `git checkout --detach origin/<mainBranch>`. Ticking your task's box in
    the plan or adding to the blocked list is not a protected change. If the gate says a person must merge it,
    write "A person merges this one: <why>" at the end of the PR description, leave it open and continue: the

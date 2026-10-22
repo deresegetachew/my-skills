@@ -29,8 +29,12 @@ def sh(cmd):
     return subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
 
-changed = sh("git diff --quiet HEAD -- " + " ".join(paths)).returncode != 0
-untracked = sh("git ls-files --others --exclude-standard -- " + " ".join(paths)).stdout.strip()
+def git(*a):  # paths go as arguments, never into a shell string
+    return subprocess.run(["git", *a], capture_output=True, text=True)
+
+
+changed = git("diff", "--quiet", "HEAD", "--", *paths).returncode != 0
+untracked = git("ls-files", "--others", "--exclude-standard", "--", *paths).stdout.strip()
 if not changed and not untracked:
     sys.exit(0)
 

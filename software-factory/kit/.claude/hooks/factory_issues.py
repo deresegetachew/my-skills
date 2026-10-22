@@ -100,7 +100,8 @@ def open_dependencies(issue, open_numbers):
 
 
 def claim_winner(n):
-    """The agent whose claim comment came first since the last release, or None."""
+    """The agent whose claim comment came first since the last release, or None. Block and release both post a
+    release, so an old claim never outlives them (unblock an issue with `release`, not by editing labels)."""
     winner = None
     for c in gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments"):
         body = c.get("body") or ""
@@ -142,12 +143,12 @@ def pick(cfg, agent):
 
 
 def release_issue(cfg, n, reason=""):
-    """Back to ready: the agent's label and the in-progress or in-review label come off."""
+    """Back to ready: the agent's label and the in-progress, in-review or blocked label come off."""
     L = task_labels(cfg)
     i = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{n}")
     agents = [x[len(L["agentPrefix"]):] for x in names(i) if x.startswith(L["agentPrefix"])]
     for x in names(i):
-        if x.startswith(L["agentPrefix"]) or x in (L["inProgress"], L["inReview"]):
+        if x.startswith(L["agentPrefix"]) or x in (L["inProgress"], L["inReview"], L["blocked"]):
             remove_label(n, x)
     add_labels(n, [L["ready"]])
     who = agents[0] if agents else "none"
@@ -220,7 +221,9 @@ def main():
             if x.startswith(L["agentPrefix"]) or x in (L["inProgress"], L["ready"]):
                 remove_label(a.n, x)
         add_labels(a.n, [L["blocked"]])
-        comment(a.n, f"**Blocked:** {a.reason}")
+        # A block ends the claim too, so whoever takes it after the unblock wins it (factory-release).
+        held = [x[len(L["agentPrefix"]):] for x in names(i) if x.startswith(L["agentPrefix"])]
+        comment(a.n, f"<!-- factory-release agent={held[0] if held else 'none'} -->\n**Blocked:** {a.reason}")
     elif a.cmd == "release":
         release_issue(cfg, a.n, a.reason)
     elif a.cmd == "stale":

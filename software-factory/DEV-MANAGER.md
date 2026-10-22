@@ -169,6 +169,12 @@ you first; the owner is the last stop. On every tick:
   until someone notices.
   It also holds the merge: `pr-gate.py` refuses the agent's `gh pr merge` while the latest marker on the PR is a
   must-fix. When you re-review and it's good, merge it yourself or post `<!-- factory-approved sha=<head> -->`.
+  An approval counts only for the commit its `sha=` names, and the agent's merge must carry
+  `--match-head-commit <head>`. With `trustedReviewers: ["<your login>"]` in factory.json, only your approvals
+  count; that's worth it once the agents use their own GitHub account. The gate is a guard rail, not a lock:
+  keep branch protection with the CI checks required on main.
+- **Unblock an issue with `factory_issues.py release <n> "<reason>"`**, not by editing labels: release (and block)
+  post a `factory-release` marker, so an old claim from before the block can't win the issue again.
 - **One comment per reviewed commit**: verdict (merge / needs changes / needs the owner), must-fix items with
   file and line, follow-ups in a line each, and the marker `<!-- pr-watch sha=<head sha> -->`. The marker is
   how both you and the hourly backup know a commit has been reviewed.

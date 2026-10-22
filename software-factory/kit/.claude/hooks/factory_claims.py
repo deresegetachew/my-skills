@@ -186,7 +186,8 @@ def claim_task(open_ids, agent, pid, cfg):
 
 
 def done_file(agent):
-    return os.path.join(state_dir(), f"done-{agent}")
+    from factory_config import safe_agent
+    return os.path.join(state_dir(), f"done-{safe_agent(agent)}")
 
 
 def mark_done(agent, task):
