@@ -20,8 +20,7 @@
       "Bash(npm test*)",
       "Bash(npm ci*)",
       "Bash(git branch --show-current*)",
-      "Bash(git merge origin/*)",
-      "Bash(git rebase origin/*)"
+      "Bash(git merge origin/*)"
     ],
     "deny": [
       "Read(./.env)",
