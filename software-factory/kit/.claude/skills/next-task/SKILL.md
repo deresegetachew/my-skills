@@ -31,6 +31,10 @@ PR gate says your issue now belongs to another agent, you were quiet too long: l
 The dev manager writes the issues and hands quiet ones (no activity for `tasks.staleHours`) to another agent, so
 push your branch early and often: commits count as activity.
 
+To bring a branch up to date with the main branch, merge it in (`git merge origin/<mainBranch>`); never rebase a
+branch you have pushed. Force pushes are blocked, so a rebased branch can't be pushed again. Pull requests are
+squash-merged, so merge commits on the branch don't matter.
+
 ## 1. Pick the task
 
 1. **Start routine** (every task, so a stale context can't mislead you): `git fetch origin && git checkout --detach
