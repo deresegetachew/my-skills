@@ -9,6 +9,11 @@ Oct and 01:30Z on 24 Oct the factory merged 23 Remanual PRs, with one self-hoste
 (P18–P28): CI capacity on one shared machine, the dev manager's chain of ticks, decisions made where the dev
 manager can't see them, and everything stopping when the Mac sleeps. New stories 43–55 cover them.
 
+**What changed on 24 Oct (evening).** A second machine (Ubuntu) runs agents next to the Mac, which showed agent
+names colliding across machines (P29, my-skills #45 and #48) and an agent starting without the hooks in a new
+worktree (P30, #46). The owner asked to cut token use, measure it and keep a record (P31, #50): stories 56–60 and
+the token plan under "Cost and tokens".
+
 ## 1. Problem and vision
 
 **Problem.** One person wants several AI coding agents to build a product from a PRD, around the clock, without
@@ -132,7 +137,7 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
 | P10 | **One GitHub account for everyone.** Agents, dev manager and owner are all `deresegetachew`, so approvals can't be told apart and branch protection can't require an independent review. | `trustedReviewers` unused; README security notes |
 | P11 | **No branch protection** on a private free-plan repo. The gate is a guard rail, not a lock. | Owner's settings, 21 Oct |
 | P12 | **Hard to set up a second machine.** The steps live in chat. | The owner's request for a dedicated dev laptop, 22 Oct |
-| P13 | **Cost is invisible.** No per-agent or per-task token count. | `/usage` only; DEV-MANAGER.md "Token use" |
+| P13 | **Cost is invisible.** No per-agent or per-task token count. | `/usage` only; DEV-MANAGER.md "Token use". Being addressed: `factory usage` (#50) |
 | P14 | **Everything reaches the owner through one chat.** Decisions, status and noise are mixed; the owner reads on a phone. | This conversation |
 | P15 | **The self-hosted runner lacked what GitHub's image has.** `pnpm/action-setup` failed without `node` (Node must come first). Parallel test runs timed out on a Mac shared with the agents (`--concurrency=1` there). There was no Google Chrome for Lighthouse (Playwright's Chromium with `--no-sandbox`). | Remanual #149, decision 0047, 22 Oct |
 | P16 | **The runner showed as `bash`** in macOS's background items, and the owner asked for it to show its own name. `factory ci` installs the loop as an executable named after the runner. The process is still `bash`; what macOS shows now is untested. | Owner's message, 22 Oct; #40 |
@@ -148,6 +153,9 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
 | P26 | **When agents are offline, nobody can land work.** The dev manager may build a task, but may not merge its own PR without the owner's yes, and its cloud workspace couldn't install packages or run the full test suite. | 24 Oct: #173 built by the dev manager with a stand-in test runner |
 | P27 | **Reviewer quota and access run out quietly.** Copilot's review quota ran out mid-day; the cloud session can't read job logs or the runner list (403), so it judges CI from annotations and job steps. | 23 Oct; DEV-MANAGER.md notes |
 | P28 | **Duplicate and stale tasks.** Two issues held the same task (#350 and #351); the agent found it only after claiming one. | #350, 24 Oct |
+| P29 | **Agent names collide across machines.** Names are unique per clone only, and claims compare names, so two machines' `menelik` both win a claim. | Owner's second machine, 24 Oct; my-skills #45, #48 |
+| P30 | **A new worktree started without the hooks.** `factory agent` ran Claude before the submodule existed, so no gate or deny rules. | Ubuntu set-up, 24 Oct; #46 |
+| P31 | **Tokens go to reading.** Every subagent ran on the strongest model, tasks read whole documents, and the dev manager's long session re-reads its context on every reply (about 75M cache reads in a day). | `factory usage --by agent`, 24 Oct; #50 |
 
 ## 5. User stories
 
@@ -257,9 +265,36 @@ Each story says who wants what. *Must* is for the first product release, *Should
 
 ### Cost and tokens
 
-33. *Should.* As the owner, I see tokens or cost per agent, per task and per day, where the tools expose it.
-    Unknown today: what Claude Code reports per session needs checking.
+33. *Should.* As the owner, I see tokens per agent, per task and per day. **In progress (#50):** `factory usage`
+    reads Claude Code's own session logs on each machine, where every reply records input, cache writes, cache
+    reads and output. It reports per task, per subagent type or per model. Money stays with `/usage` or the console,
+    since prices differ per model.
+56. *Must.* As the owner, every factory change meant to save tokens has a measured before and after.
+    `factory usage --record "<label>"` appends a row of per-task averages to `docs/factory-usage.md` in the project,
+    and the change's PR names the row it should move. Run it on each agent machine: the logs stay local.
+57. *Should.* As the owner, routine subagents run on a cheaper model, and the reviews where a miss is costly keep
+    the strongest. **In progress (#50):** the test-writer and architecture-reviewer run on Sonnet.
+58. *Should.* As a coding agent, I read the parts of the docs the task and the diff point to, never whole documents
+    by habit. My Stop check runs on the changed packages only and shows the failing lines first. **In progress (#50).**
+59. *Should.* As the dev manager, I write the edge cases the reviewers will try into each task, so it passes review in
+    one round. I tick every 10 minutes with work open, every 30 otherwise, and start a fresh session once a day so my own
+    context stays small. **In progress (#50).**
+60. *Should.* As the owner, `factory settings` lists every setting with its value, default, type and options, and
+    changes one checked against its type. Agents can read settings but never change them. **In progress (#50)**;
+    this covers story 7 from the command line.
 34. *Could.* As the owner, I set a daily budget per agent; the loop pauses when it's reached.
+
+**Token plan (squeezing the lemon).** Measure, change one thing, measure again, and keep each row:
+
+| Step | Change | Expected to move | Status |
+|---|---|---|---|
+| 0 | Baseline: `factory usage --since <a week back> --until <rollout> --record "baseline"` on each machine | — | to run |
+| 1 | Sonnet for the test-writer and architecture-reviewer | subagent tokens on the strongest model | #50 |
+| 2 | Read what the task points to (CLAUDE.md, the agents, next-task) | fresh input per task | #50 |
+| 3 | Changed-only Stop check, failures first | tokens per Stop and turn time | #50; project sets `commands.testChanged` |
+| 4 | Edge cases in each task | review rounds per task | #50 |
+| 5 | Quieter dev manager, a fresh session daily | the dev manager's cache reads | #50 |
+| next | Pick from the largest row of `factory usage --by agent`: e.g. prompt size of the loop's first message, a smaller CLAUDE.md, fewer subagent re-reads | — | after step 0 and the first "after" row |
 
 ### Security
 
