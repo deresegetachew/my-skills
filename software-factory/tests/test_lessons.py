@@ -17,6 +17,14 @@ a = sys.argv[1:]
 open(os.environ["FAKE_GH_DB"] + ".log", "a").write(" ".join(a) + "\n")
 if a[:1] == ["pr"] and a[1:2] == ["list"]:
     print(json.dumps(db.get("open_prs", []))); sys.exit(0)
+if a[:2] == ["repo", "view"]:  # the default branch, as GitHub has it
+    print("main"); sys.exit(0)
+if a[:1] == ["api"] and "contents/.claude/factory.json" in " ".join(a):  # main's settings, as GitHub has them
+    import subprocess
+    r = subprocess.run(["git", "show", "origin/main:.claude/factory.json"], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit("gh: Not Found (HTTP 404)")
+    print(r.stdout); sys.exit(0)
 if a[:1] != ["api"]:
     sys.exit("fake gh: no answer for " + " ".join(a))
 rest, path, k = a[1:], None, 0

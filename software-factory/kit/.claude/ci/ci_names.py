@@ -12,6 +12,10 @@ Every name comes from the project, so two projects can run their runners side by
   CI_INSTALLED ~/Library/Application Support/<name>  the private copy launchd runs (never the checkout)
   CI_STATE     ~/.local/state/<name>                 the log and the pid of a loop started by hand
   CI_REPLACES  "ci.replaces": LaunchAgent labels of an older install to unload first
+On Linux (FACTORY_CI_PLATFORM=linux, set by ci.sh) a systemd --user service runs it instead of launchd:
+  CI_UNIT      <name>.service
+  CI_UNIT_FILE ~/.config/systemd/user/<name>.service  ($XDG_CONFIG_HOME)
+  CI_INSTALLED ~/.local/share/<name>                   ($XDG_DATA_HOME), the private copy systemd runs
 
   python3 ci_names.py            prints them as `NAME=value` lines, quoted for `eval` in bash
 """
@@ -67,13 +71,18 @@ def names(cfg):
     home = os.path.expanduser("~")
     state_home = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
     agent = f"dev.software-factory.{name}"
+    linux = os.environ.get("FACTORY_CI_PLATFORM") == "linux"
+    config_home = os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+    data_home = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
     return {
         "CI_REPO": repo,
         "CI_NAME": name,
         "CI_LABEL": label,
         "CI_AGENT": agent,
         "CI_PLIST": os.path.join(home, "Library", "LaunchAgents", f"{agent}.plist"),
-        "CI_INSTALLED": os.path.join(home, "Library", "Application Support", name),
+        "CI_INSTALLED": os.path.join(data_home, name) if linux else os.path.join(home, "Library", "Application Support", name),
+        "CI_UNIT": f"{name}.service",
+        "CI_UNIT_FILE": os.path.join(config_home, "systemd", "user", f"{name}.service"),
         "CI_STATE": os.path.join(state_home, name),
         "CI_REPLACES": " ".join(replaces),
     }

@@ -291,7 +291,7 @@ version it pins. `factory help` lists everything.
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
-| `factory ci install` / `uninstall` | Installs the runner on this Mac as a LaunchAgent named `<repo>-ci` (again to update), or removes it |
+| `factory ci install` / `uninstall` | Installs the runner as `<repo>-ci` (again to update), or removes it: a LaunchAgent on macOS, a systemd `--user` service on Linux. [Linux](#ci-on-linux) |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
 | `factory ci logs [-f]` | The runner's log |
 
@@ -418,6 +418,10 @@ factory usage --by agent                     # per subagent type: main, reviewer
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```
 
+Agents also post each task's tokens on its PR, per subagent, when they open it and again before it merges
+(`factory usage --task <n> --markdown`, a `<!-- factory-usage task=<n> -->` comment), so whoever merges sees
+what the task cost.
+
 `--record` appends one row of per-task averages to `docs/factory-usage.md` (`usageLog`). Commit it, so every
 factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each
 machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size), and use `/usage`
@@ -461,7 +465,8 @@ Set `"tasks": { "source": "issues" }` in `factory.json`, and run `factory issues
   criteria (the "Done when") and a checklist of todos. The dev manager writes them:
   `factory issues new --title "..." --body-file f.md --milestone "Phase 3"`.
 - **Order:** by milestone (oldest first), then issue number.
-- **Dependencies:** `Depends on #12, #14` in the body. Agents skip the issue until those are closed.
+- **Dependencies:** `Depends on #12, #14` in the body. Agents skip the issue until those are closed. The numbers can
+  be issues or pull requests: a task that depends on an open PR waits until it is merged or closed.
 - **Labels show the state:**
 
   | Label | Meaning |
@@ -675,6 +680,24 @@ branch checked out later can't change what runs unattended; `factory ci install`
 runner (`#!/bin/bash`), so `ps` shows `/bin/bash …/<name>` and `factory ci stop` only kills a process with exactly
 that command line. *Not tested:* what macOS shows for it in Login Items and Activity Monitor; the process itself is
 still `bash`.
+
+<a id="ci-on-linux"></a>
+
+**On Linux.** `factory ci install` writes a systemd user service, `~/.config/systemd/user/<name>.service`, that runs
+the private copy in `~/.local/share/<name>/`, with `Restart=always`. It then runs `systemctl --user daemon-reload`
+and `enable --now`. `uninstall`, `status`, `stop` and `logs` work as on a Mac.
+- **Linger:** without it, systemd stops a user's services at logout and doesn't start them at boot. `install` says so
+  and gives the command: `sudo loginctl enable-linger <user>`.
+- **Docker:** the service gets `DOCKER_HOST` from your shell, else from the current `docker context`, else
+  `$XDG_RUNTIME_DIR/docker.sock` when rootless Docker is there.
+- **The user manager:** `systemctl --user` needs that user's session. From `sudo -iu ci` or `su - ci` there is none, so
+  `factory ci` stops before changing anything and says how to get one (log in as the user directly, or enable linger
+  and set `XDG_RUNTIME_DIR=/run/user/<uid>`).
+- **gh on the CI user:** sign in with `gh auth login --insecure-storage`, so the token is in gh's own file. A keyring
+  can't be unlocked by a service at boot. Never put a token in the unit.
+- **Recommended:** run CI as a dedicated user with **rootless Docker**. The privileged Docker-in-Docker container
+  then has only that user's rights, which contains the known risk below.
+- Several machines, Mac or Linux, can serve the same label.
 
 **The workflow.** Each job picks its machine from the repo variable `CI_RUNS_ON`, and a pull request from another
 repository (a fork) always runs on GitHub's runners:

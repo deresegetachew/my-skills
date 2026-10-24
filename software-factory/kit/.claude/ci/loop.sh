@@ -1,7 +1,8 @@
 #!/bin/bash
 # The runner loop. `factory ci install` copies it, with compose.yaml and entrypoint.sh, into
-# ~/Library/Application Support/<name>/ as an executable called <name>, and launchd runs that copy (never the
-# checkout); `factory ci start` runs the same copy once, by hand. One round per job: a fresh compose project
+# ~/Library/Application Support/<name>/ (macOS) or ~/.local/share/<name>/ (Linux) as an executable called <name>,
+# and launchd or a systemd --user service runs that copy (never the checkout); `factory ci start` runs the same
+# copy once, by hand. One round per job: a fresh compose project
 # (dind + runner), the runner takes one job and exits, then everything is removed, volumes included.
 #
 # A registration token lasts one hour, and an ephemeral runner needs one per job. So each round asks the
@@ -9,8 +10,9 @@
 # No token is written to disk or printed. Each `docker compose up` gets the round's token in its environment,
 # because compose passes it to the runner from there.
 #
-# Environment (from the LaunchAgent, or from `factory ci start`): CI_NAME, CI_LABEL, RUNNER_REPO, CI_STATE, and
-# CI_HOST (this Mac, in the runner's name, so `factory ci stop` removes only this Mac's registrations).
+# Environment (from the LaunchAgent or the systemd unit, or from `factory ci start`): CI_NAME, CI_LABEL,
+# RUNNER_REPO, CI_STATE, CI_HOST (this machine, in the runner's name, so `factory ci stop` removes only this
+# machine's registrations), and on Linux DOCKER_HOST when Docker is rootless.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
