@@ -69,6 +69,18 @@ def test_record_appends_a_row_to_the_usage_log():
     assert len(rows) == 2 and "baseline / before" in rows[0] and "| 2 |" in rows[0], text
 
 
+def test_a_task_comment_for_the_pr():
+    root, logs = setup()
+    p = usage(root, logs, "--task", "7", "--markdown")
+    assert p.returncode == 0, p
+    out = p.stdout
+    assert out.startswith("<!-- factory-usage task=7 -->"), out
+    assert "| reviewer | 1 |" in out and "| main | 2 |" in out and "| **All** | 3 |" in out, out
+    assert "task 8" not in out, out
+    p = usage(root, logs, "--task", "99", "--markdown")
+    assert "No replies found" in p.stdout, p.stdout
+
+
 def test_the_text_report_runs():
     root, logs = setup()
     p = usage(root, logs)
