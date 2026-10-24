@@ -69,6 +69,9 @@ def names(cfg):
         raise SystemExit(f"factory ci: ci.runners (or FACTORY_CI_RUNNERS) must be a whole number, not {raw!r}.")
     if not 1 <= runners <= 16:
         raise SystemExit(f"factory ci: ci.runners is {runners}; use 1 to 16.")
+    if light_label == label:
+        raise SystemExit(f"factory ci: ci.lightLabel must differ from ci.label ({label!r}): with one label, light jobs "
+                         "would wait behind heavy ones again.")
     light = cfg.get("light", True) is not False
     for what, value in (("name", name), ("label", label), ("lightLabel", light_label)):
         if not SAFE.fullmatch(value):

@@ -50,7 +50,9 @@ use_instance() {
   I_UNIT="$CI_NAME$sfx.service"
   I_UNIT_FILE="$(dirname "$CI_UNIT_FILE")/$I_UNIT"
   I_PROJECT="$CI_NAME$sfx"
-  I_PREFIX="$CI_NAME-$host$sfx"
+  # A dot before the instance, which a host name here never has (it is made of a-z, 0-9 and -): instance 2 on
+  # `foo` is <name>-foo.2-..., never the same as instance 1 on a machine called `foo-2` (<name>-foo-2-...).
+  I_PREFIX="$CI_NAME-$host${sfx/#-/.}"
   I_LOG="$CI_STATE/runner$sfx.log"
   if [ "$1" = light ]; then I_COMPOSE=compose-light.yaml; I_LABEL="$CI_LIGHT_LABEL"
   else I_COMPOSE=compose.yaml; I_LABEL="$CI_LABEL"; fi
@@ -220,7 +222,8 @@ linger_note() {
 remove_registrations() {
   local ids
   ids="$(gh api "repos/$CI_REPO/actions/runners?per_page=100" --jq ".runners[] | select((.busy | not) and
-    ((.name | startswith(\"$CI_NAME-$host-\")) or ((.name | startswith(\"$CI_NAME-\")) and .status == \"offline\")))
+    ((.name | startswith(\"$CI_NAME-$host-\")) or (.name | startswith(\"$CI_NAME-$host.\")) or
+     ((.name | startswith(\"$CI_NAME-\")) and .status == \"offline\")))
     | .id" 2>/dev/null)" || return 0
   for id in $ids; do
     gh api -X DELETE "repos/$CI_REPO/actions/runners/$id" >/dev/null && echo "Removed runner registration $id."
@@ -339,14 +342,28 @@ free_mb() {
 # and the light runner's 1 GB limit.
 HEAVY_MB=4096
 LIGHT_MB=1024
+budget_mb() { if [ "$1" = light ]; then echo "$LIGHT_MB"; else echo "$HEAVY_MB"; fi; }
 memory_note() {
-  local need free
+  local need free where id total
   need=$((CI_RUNNERS * HEAVY_MB + (CI_LIGHT == 1 ? LIGHT_MB : 0)))
-  free="$(free_mb || true)"
-  case "$free" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$platform" = mac ] && [ -z "${FACTORY_CI_FREE_MB:-}" ]; then
+    # On a Mac the jobs run in Docker Desktop's VM, so its memory is the limit, not the Mac's.
+    total="$(docker info --format '{{.MemTotal}}' 2>/dev/null || true)"
+    case "$total" in ''|*[!0-9]*) return 0 ;; esac
+    free=$((total / 1048576))
+    where="Docker Desktop's VM has about $free MB"
+  else
+    free="$(free_mb || true)"
+    case "$free" in ''|*[!0-9]*) return 0 ;; esac
+    # Instances already running hold their memory now; only the new ones need free memory.
+    for id in $(installed_ids); do
+      case " $(wanted_ids | tr '\n' ' ')" in *" $id "*) instance_loaded "$id" && free=$((free + $(budget_mb "$id"))) ;; esac
+    done
+    where="$machine has about $free MB free (counting what its running runners already use)"
+  fi
   if [ "$need" -gt "$free" ]; then
     echo "Warning: $CI_RUNNERS heavy runner(s)$([ "$CI_LIGHT" = 1 ] && echo " and the light one") need about $need MB at once,"
-    echo "  and $machine has about $free MB free. Jobs may slow down or fail; lower ci.runners (or FACTORY_CI_RUNNERS)."
+    echo "  and $where. Jobs may slow down or fail; lower ci.runners (or FACTORY_CI_RUNNERS)."
   fi
 }
 
@@ -360,18 +377,29 @@ remove_instance_registrations() {
   done
 }
 
+# 0: busy, 1: idle, 2: can't tell (GitHub can't be read), which a scale-down treats as busy.
 instance_busy() {
-  [ -n "$(gh api "repos/$CI_REPO/actions/runners?per_page=100" --jq ".runners[] | select(.busy and
-    (.name | startswith(\"$1-\"))) | .id" 2>/dev/null)" ]
+  local out
+  out="$(gh api "repos/$CI_REPO/actions/runners?per_page=100" --jq ".runners[] | select(.busy and
+    (.name | startswith(\"$1-\"))) | .id" 2>/dev/null)" || return 2
+  [ -n "$out" ]
 }
 
 # Unloads one instance and removes its file and containers. $2 = keep-busy: leave it alone while it runs a job
 # (a scale-down waits for that job; run install again afterwards).
 remove_instance() {
   use_instance "$1"
-  if [ "${2:-}" = keep-busy ] && [ "$1" != 1 ] && instance_busy "$I_PREFIX"; then
-    echo "Instance $1 ($I_NAME) is running a job, so it stays for now. Run \`factory ci install\` again after it ends."
-    return 0
+  if [ "${2:-}" = keep-busy ] && [ "$1" != 1 ]; then
+    local busy=0
+    instance_busy "$I_PREFIX" || busy=$?
+    if [ "$busy" -eq 0 ]; then
+      echo "Instance $1 ($I_NAME) is running a job, so it stays for now. Run \`factory ci install\` again after it ends."
+      return 0
+    elif [ "$busy" -eq 2 ]; then
+      echo "Can't tell whether instance $1 ($I_NAME) is running a job (GitHub can't be read), so it stays for now."
+      echo "  Run \`factory ci install\` again when gh works."
+      return 0
+    fi
   fi
   if [ "$platform" = linux ]; then
     systemctl --user disable --now "$I_UNIT" >/dev/null 2>&1 || true
@@ -461,8 +489,21 @@ cmd_install() {
 
 # The light lane needs the repo variable CI_RUNS_ON_LIGHT. In local mode, set it now; otherwise say what
 # `factory ci use local` will set.
+# With the light lane off, a CI_RUNS_ON_LIGHT left from before would send every Factory guard to a runner that
+# no longer exists: delete it, or say that a person must.
+drop_light_variable() {
+  local out
+  out="$(gh api "repos/$CI_REPO/actions/variables/CI_RUNS_ON_LIGHT" --jq .value 2>/dev/null)" || return 0
+  if gh variable delete CI_RUNS_ON_LIGHT --repo "$CI_REPO" >/dev/null 2>&1; then
+    echo "The light lane is off, so I deleted the repo variable CI_RUNS_ON_LIGHT (it was $out); the Factory guard uses CI_RUNS_ON."
+  else
+    echo "The light lane is off: Delete the repo variable CI_RUNS_ON_LIGHT (it is $out) under Settings > Secrets and"
+    echo "  variables > Actions > Variables; gh can't (it needs admin on $CI_REPO). Until then the Factory guard waits."
+  fi
+}
+
 light_variable_note() {
-  [ "$CI_LIGHT" = 1 ] || return 0
+  [ "$CI_LIGHT" = 1 ] || { drop_light_variable; return 0; }
   local value="[\"self-hosted\",\"$CI_LIGHT_LABEL\"]" rc=0
   runs_on >/dev/null || rc=$?
   if [ "$rc" -eq 0 ]; then
@@ -574,7 +615,9 @@ cmd_use() {
       gh variable set CI_RUNS_ON --repo "$CI_REPO" --body "[\"self-hosted\",\"$CI_LABEL\"]" >/dev/null ||
         die "gh can't set the repository variable CI_RUNS_ON (it needs admin on $CI_REPO)."
       echo "CI now runs on self-hosted runners with the label $CI_LABEL. Pull requests from forks stay on GitHub."
-      if [ "$CI_LIGHT" = 1 ]; then
+      if [ "$CI_LIGHT" != 1 ]; then
+        drop_light_variable
+      else
         if gh variable set CI_RUNS_ON_LIGHT --repo "$CI_REPO" --body "[\"self-hosted\",\"$CI_LIGHT_LABEL\"]" >/dev/null; then
           echo "Light jobs (the Factory guard) run on the light runner, label $CI_LIGHT_LABEL (CI_RUNS_ON_LIGHT)."
         else
@@ -652,8 +695,17 @@ cmd_status() {
       echo "Docker: not running. Jobs for $machine wait in GitHub's queue until it is."
     fi
   fi
+  # The light lane as GitHub will route it: the label in CI_RUNS_ON_LIGHT, if it is set, whatever ci.light says.
+  local light_var light_label=""
+  if light_var="$(gh api "repos/$CI_REPO/actions/variables/CI_RUNS_ON_LIGHT" --jq .value 2>/dev/null)"; then
+    light_label="$(python3 -c 'import json,sys
+v = json.loads(sys.argv[1]); v = [v] if isinstance(v, str) else v
+print(next((x for x in v if x != "self-hosted"), ""))' "$light_var" 2>/dev/null || true)"
+  elif [ "$CI_LIGHT" = 1 ]; then
+    light_label="$CI_LIGHT_LABEL"
+  fi
   python3 "$kit/ci_status.py" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
-    $([ "$CI_LIGHT" = 1 ] && echo "--light-label $CI_LIGHT_LABEL")
+    ${light_label:+--light-label "$light_label"} ${light_var:+--light-variable-set}
   if [ -n "$local_mode$installed" ] && [ -f "$CI_STATE/runner.log" ]; then
     echo
     echo "Last log lines ($CI_STATE/runner.log):"
