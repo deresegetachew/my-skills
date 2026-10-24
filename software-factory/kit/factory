@@ -77,6 +77,10 @@ case "$cmd" in
       echo "factory: $dir/.claude/settings.json doesn't resolve, so the factory's hooks and deny rules wouldn't load. Run \`git submodule update --init\` there, or \`bash vendor/my-skills/software-factory/install.sh . --link\`, and try again." >&2
       exit 1
     fi
+    # Only the project's MCP servers (its .mcp.json, else none), never the user's own connectors (#55), as in
+    # factory-loop.sh. --mcp-config takes several values, so another flag must follow it.
+    mcp='{"mcpServers":{}}'; [ -f "$PWD/.mcp.json" ] && mcp="$PWD/.mcp.json"
+    set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' "$@"
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
     exec claude "$@" ;;
