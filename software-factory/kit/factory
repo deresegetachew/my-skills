@@ -15,13 +15,16 @@ factory <command>
 
 Build
   loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into,
-                         FACTORY_AGENTS=haile,tewodros: only those names on this machine;
                          which closes by itself when the task is done). Start it again in another terminal for more agents.
-  agent <name|N>         open Claude in that agent's own worktree (created the first time); then /loop /next-task all.
+                         FACTORY_AGENTS=haile,tewodros: only those names on this machine
+  agent <name|N>         open Claude in that agent's own worktree (created the first time), for manual work there.
+                         To run the queue, use loop -i instead (a fresh session per task).
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next
 
 Look
+  status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
+                         the CI queue and runners, and the tasks; read-only
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
   env [name|N]           the ports and database of this folder (or of that agent)
@@ -32,6 +35,8 @@ Look
 Check
   check                  the style checks CI runs (one class per file and so on)
   guard                  the Factory guard CI runs, on the current branch
+  doctor                 check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
+                         agent names) and say how to fix each gap; read-only
 
 CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
   ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
@@ -51,6 +56,7 @@ Settings
 Measure
   usage [--since D] [--by task|agent|model] [--record LABEL]
                          tokens per task from this machine's Claude Code logs; --record appends a row to the usage log
+  report [--since D]     per task, from GitHub: claim to PR to merge, rework rounds and CI runs (failed)
 
 Maintain
   release <agent>        drop an agent's local claims (taytu ...), for example after a crash
@@ -66,10 +72,14 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   loop)      exec "$root/factory-loop.sh" "$@" ;;
   agent)
-    who="${1:?usage: factory agent <name|N>}"; shift
+    [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
+    who="$1"; shift
+    bare=0; [ "$#" = 0 ] && bare=1
     dir="$(py factory_claims.py worktree "$who")" || exit 1
     name="$(basename "$dir")"; [ "$dir" = "$root" ] && name="$who"
     echo "$name: $dir"
+    # One session for many tasks grows with each one (#56): the loop gives every task a fresh context instead.
+    [ "$bare" = 1 ] && echo "For manual work in $name's folder. To run the queue, use factory loop -i instead: a fresh session per task."
     cd "$dir" || exit 1
     # A reused worktree may be behind main's submodule pin, and a new one may have none yet: without it the kit's
     # links in .claude/ point at nothing and Claude would start without the hooks and deny rules (#46).
@@ -78,6 +88,10 @@ case "$cmd" in
       echo "factory: $dir/.claude/settings.json doesn't resolve, so the factory's hooks and deny rules wouldn't load. Run \`git submodule update --init\` there, or \`bash vendor/my-skills/software-factory/install.sh . --link\`, and try again." >&2
       exit 1
     fi
+    # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
+    # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
+    mcp="$(python3 "$dir/.claude/hooks/factory_mcp.py")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
+    set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' "$@"
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
     exec claude "$@" ;;
@@ -85,17 +99,20 @@ case "$cmd" in
   issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
+  status)    py factory_status.py "$@" ;;
   claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
   release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
+  report)    py factory_report.py "$@" ;;
   env)       if [ -n "${1:-}" ]; then
                case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
              else py factory_env.py; fi ;;
   check)     py style_checks.py ;;
   guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
+  doctor)    py factory_doctor.py "$@" ;;
   wait)      exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes]}" "${2:-30}" ;;
   update)
     sub="$(git config -f .gitmodules --get-regexp 'submodule\..*\.url' | awk '/my-skills/ {split($1, a, "."); print a[2]}' | head -1)"

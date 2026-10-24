@@ -44,6 +44,7 @@
     "^\\.claude/",
     "^docs/PRD\\.md$",
     "^\\.github/",
+    "^\\.mcp\\.json$",
     "/migrations/",
     "\\.env",
     "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|bun\\.lockb?)$"
