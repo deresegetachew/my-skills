@@ -53,7 +53,8 @@ squash-merged, so merge commits on the branch don't matter.
    **1b. Rework** instead of a new task.
    Respect phase order: don't start a phase until the previous phase's "Done when" checks pass, unless the plan
    says phases overlap.
-3. Read the PRD sections, design references and decisions the task points to. Say in one line which task
+3. Read the PRD sections, design references and decisions the task points to, and its edge cases if it lists
+   any (they're what the reviewers will try). Search long documents (`grep -n`) instead of reading them whole. Say in one line which task
    you're doing and what "done" means for it.
 
 A PR with the `factory-hold` label (`holdLabel` in `factory.json`) is being reviewed by the dev manager. Leave it

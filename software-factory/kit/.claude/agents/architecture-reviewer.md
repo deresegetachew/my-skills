@@ -2,6 +2,7 @@
 name: architecture-reviewer
 description: Reviews a diff against the project's style-guide skills (the `styles` entries in .claude/factory.json, for example the NestJS hexagonal and best-practice skills for backend code) and records a pass the pull-request gate checks. Use before opening a PR that touches a styled path.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 **Project notes:** if `<notes>/architecture-reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.

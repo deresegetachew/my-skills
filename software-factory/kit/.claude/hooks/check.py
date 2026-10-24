@@ -2,9 +2,11 @@
 """Stop hook: don't let a turn end with a broken build.
 
 Runs the project's typecheck and test commands (from .claude/factory.json) only when files under
-`codePaths` changed. Exit 2 sends the failure back to Claude so it fixes it before stopping.
+`codePaths` changed. `commands.typecheckChanged` and `commands.testChanged`, when set, run instead, for the
+changed packages only. Exit 2 sends the failure back to Claude so it fixes it before stopping: the lines that
+name a failure first, then the end of the output, `checkOutputLines` in all.
 """
-import json, os, subprocess, sys
+import json, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from factory_config import load  # noqa: E402
@@ -38,13 +40,34 @@ untracked = git("ls-files", "--others", "--exclude-standard", "--", *paths).stdo
 if not changed and not untracked:
     sys.exit(0)
 
+# A line that names a failure: a failed test, an assertion, a compiler error with its file and line.
+FAILURE = re.compile(r"(\bFAIL(ED)?\b|\u2717|\u00d7|\bError\b|\berror TS\d+|AssertionError|\bexpected\b|"
+                     r"Traceback|:\d+:\d+)", re.I)
+
+
+def excerpt(text, limit):
+    """At most `limit` lines: the failing ones first (in order), then the end of the output, without repeats."""
+    lines = [l for l in text.strip().splitlines() if l.strip()]
+    failing = [i for i, l in enumerate(lines) if FAILURE.search(l)][: max(limit // 2, 1)]
+    tail = list(range(max(len(lines) - (limit - len(failing)), 0), len(lines)))
+    keep = sorted(set(failing) | set(tail))[-limit:] if limit > 0 else []
+    out, last = [], None
+    for i in keep:
+        if last is not None and i != last + 1:
+            out.append("...")
+        out.append(lines[i])
+        last = i
+    return out
+
+
+limit = int(cfg.get("checkOutputLines") or 40)
 for name in ("typecheck", "test"):
-    cmd = cfg["commands"].get(name)
+    cmd = cfg["commands"].get(f"{name}Changed") or cfg["commands"].get(name)
     if not cmd:
         continue
     r = sh(cmd)
     if r.returncode != 0:
-        out = (r.stdout + r.stderr).strip().splitlines()[-40:]
+        out = excerpt(r.stdout + r.stderr, limit)
         print(f"`{cmd}` fails. Fix it before finishing:\n" + "\n".join(out), file=sys.stderr)
         sys.exit(2)
 sys.exit(0)

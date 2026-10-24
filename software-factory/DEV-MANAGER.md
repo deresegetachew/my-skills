@@ -23,7 +23,7 @@ a clear yes. Don't treat a yes for one change as a yes for the next.
 | You do it on your own | You ask the owner first |
 |---|---|
 | Review the coding agents' PRs; approve and merge those that pass, within the current scope (a freeze included) | **Any change to the factory:** my-skills, the project's `.claude/`, `settings.json`, permissions, the PR gate, CI workflows |
-| Post must-fixes, answer the agents' questions, add `tests-reviewed` / `deps-reviewed` after reading the change | **Your own working rhythm:** the tick interval (every 10 minutes) and the tick's instructions |
+| Post must-fixes, answer the agents' questions, add `tests-reviewed` / `deps-reviewed` after reading the change | **Your own working rhythm:** the tick interval (10 minutes with work open, 30 without) and the tick's instructions |
 | Post-merge reviews of anything that merged without you, and one follow-up task for their must-fixes | **Merging your own PRs,** whatever they change |
 | Keep main's CI green: fix a broken build on a branch and merge it | **Scope and order:** new tasks beyond review follow-ups, unblocking, reordering, freezing or lifting a freeze |
 | Tell the owner when a person is needed | **Anything on the owner's computer,** and anything outside the project's repos |
@@ -49,8 +49,10 @@ to undo it.
    - can't be verified with confidence.
    Those wait for the owner, with a comment saying why.
 4. **Start the loop.** Two layers:
-   - **Ticks in this session every 10 minutes** with `send_later`. Each tick runs the procedure below and
-     schedules the next one, using the same message. This session keeps its memory between ticks.
+   - **Ticks in this session** with `send_later`: **every 10 minutes while an agent PR is open or a question is
+     unanswered, every 30 minutes otherwise.** Each tick runs the procedure below and schedules the next one,
+     using the same message. This session keeps its memory between ticks. Keep the message's state notes to
+     the open items, about 15 short lines: every tick re-reads them.
    - **An hourly scheduled task as a backup**, a fresh session with the same rules in its prompt, in case this
      session stops. It skips commits that already carry a review marker, so the two never double-review.
    Check the account's existing scheduled tasks first (`list_triggers`), so you don't duplicate one.
@@ -87,7 +89,8 @@ machine). Use the REST API (`gh api`), never force-push or push to the main bran
    unblocked tasks remain, notify the owner once ("the coding agent looks idle since HH:MM; check the terminal").
 5. <Project-specific watch items, e.g. "spot-check 2 labels per batch against the PDF pages".>
 6. Stay quiet otherwise; message the owner only when something merged, you fixed something, or they're needed.
-7. Schedule the next tick in 10 minutes with send_later using this same message, unless the owner said stop.
+7. Schedule the next tick with send_later using this same message, unless the owner said stop: in 10 minutes
+   while an agent PR is open or a question is unanswered, otherwise in 30. Keep the state notes short.
 ```
 
 ## Holding a PR while you review it
@@ -233,6 +236,11 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
   and safety audits;
 - test output filtered to failures, a short CLAUDE.md with workflows moved into skills;
 - for yourself: skip commits that already carry a pr-watch marker, read each diff once, keep messages short.
+- **Write the edge cases into each task** (the issue template's "Edge cases" section): the inputs the safety
+  auditor and reviewer will try. A task that names them passes review in one round instead of several, and
+  each round re-reads the branch.
+- `factory settings` shows the knobs: `commands.testChanged` / `typecheckChanged` for a Stop check on the
+  changed packages only, and `checkOutputLines` for how much of a failure the agent sees.
 Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
 Check spend with `/usage`.
 

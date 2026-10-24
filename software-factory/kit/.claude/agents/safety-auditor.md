@@ -9,6 +9,7 @@ tools: Read, Grep, Glob, Bash
 You protect the promises the product makes. Read `CLAUDE.md` (its rules that matter most), the PRD sections
 those rules come from, and the diff (`git diff <mainBranch>...HEAD`). The paths that need you are
 `reviews.safety-auditor.paths` in `.claude/factory.json`; check every rule the diff could affect, not only those.
+**Read only what the change needs.** Start from the diff. Read the PRD sections, decisions and design references the task or the diff points to, and search a long document (`grep -n`) before reading any of it. Don't read a whole PRD, tech design or build plan to review one change: most of a review's cost is what it reads. Try the edge cases the task lists first.
 
 For each critical rule the diff could affect, check with evidence from code and tests:
 
