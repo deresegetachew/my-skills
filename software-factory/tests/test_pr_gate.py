@@ -21,6 +21,14 @@ if a[:2] == ["pr", "checks"]:
     sys.exit(0 if s.get("ci_green", True) else 1)
 if a[:2] == ["pr", "list"]:
     print(json.dumps(s.get("open_prs", []))); sys.exit(0)
+if a[:2] == ["repo", "view"]:
+    print(s.get("default_branch", "main")); sys.exit(0)
+if a[:1] == ["api"] and "/contents/.claude/factory.json" in " ".join(a):
+    if s.get("settings_error"):
+        sys.exit(s["settings_error"])
+    if s.get("main_settings") is None:
+        sys.exit("gh: Not Found (HTTP 404)")
+    print(json.dumps(s["main_settings"])); sys.exit(0)
 if a[:1] == ["api"] and "/files" in " ".join(a):
     print("\n".join(s.get("files", ["src/a.ts"]))); sys.exit(0)
 if a[:1] == ["api"] and "/issues/" in " ".join(a):
@@ -43,7 +51,8 @@ def setup(pr=None, cfg_extra=None, **scenario):
     open(os.path.join(d, "tmp", "reviews", "task_1-x.ok"), "w").write(HEAD)  # the reviewer passed HEAD
     pr = {"number": 7, "headRefName": "task/1-x", "headRefOid": HEAD, "comments": [], "labels": [], "body": "",
           **(pr or {})}
-    json.dump({"pr": pr, **scenario}, open(os.path.join(d, "scenario.json"), "w"))
+    # The gate reads the settings from GitHub's default branch (#51): the fake gh serves the same ones.
+    json.dump({"pr": pr, "main_settings": cfg, **scenario}, open(os.path.join(d, "scenario.json"), "w"))
     subprocess.run(["git", "init", "-q", d], check=True)
     env = {**os.environ, "PATH": f"{d}/bin:{os.environ['PATH']}", "GATE_SCENARIO": os.path.join(d, "scenario.json"),
            "GATE_LOG": os.path.join(d, "log")}
@@ -226,6 +235,67 @@ def test_copilot_fifth_review_on_pr_36():
               "cd ../other && gh pr ready 7"):
         assert gate(d, env, c)[0] == 2, c
 
+
+
+def test_agents_cannot_delete_remote_branches():
+    d, env = setup()
+    for c in ("git push origin :task/1-x", "git -C . push origin :x", "true && git push origin +:x",
+              "git push origin a:a :b", "bash -c 'git push origin :x'"):
+        rc, err = gate(d, env, c)
+        assert rc == 2 and "delete remote branches" in err, (c, rc, err)
+    for c in ("git push origin task/1-x", "git push -u origin HEAD", "git push origin task/1-x:task/1-x",
+              "git push origin HEAD:refs/heads/task/1-x", "echo push: done"):
+        assert gate(d, env, c)[0] == 0, c
+
+
+def test_gh_run_through_a_package_runner_is_refused():
+    d, env = setup()
+    for c in (f"pnpm exec gh pr merge 7 --squash --match-head-commit {HEAD}", "npx gh pr merge 7",
+              "pnpm dlx gh pr merge 7", "yarn exec gh pr comment 7 --body x"):
+        rc, err = gate(d, env, c)
+        assert rc == 2, (c, rc, err)
+    for c in ("pnpm test", "pnpm -s typecheck", "npx vitest run"):
+        assert gate(d, env, c)[0] == 0, c
+
+
+def test_the_worktree_copy_of_the_settings_changes_nothing():
+    # Main's settings protect .claude/ and know the hold label; the agent edits its own copy to drop both.
+    d, env = setup(pr={"labels": [{"name": "factory-hold"}]})
+    cfg = json.load(open(os.path.join(d, ".claude", "factory.json")))
+    json.dump({**cfg, "holdLabel": "none", "protected": []}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and "factory-hold" in err, (rc, err)
+    d, env = setup(files=[".claude/settings.json"])
+    cfg = json.load(open(os.path.join(d, ".claude", "factory.json")))
+    json.dump({**cfg, "protected": []}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and ".claude/settings.json" in err, (rc, err)
+
+
+def test_settings_the_gate_cannot_read_from_github_fail_closed():
+    d, env = setup(settings_error="gh: HTTP 500")
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and "factory.json" in err, (rc, err)
+
+
+def test_no_settings_on_main_yet_means_the_defaults():
+    d, env = setup(files=[".claude/settings.json"], main_settings=None)
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and ".claude/settings.json" in err, (rc, err)  # the default `protected` covers .claude/
+
+
+def test_local_refs_and_mainbranch_cannot_steer_the_settings():
+    # The agent points mainBranch at its own branch and plants a local `origin/main` with permissive settings.
+    d, env = setup(files=[".claude/settings.json"])
+    cfg = json.load(open(os.path.join(d, ".claude", "factory.json")))
+    json.dump({**cfg, "mainBranch": "task/x", "protected": []}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "x"], check=True)
+    subprocess.run(git + ["branch", "origin/main"], check=True)
+    subprocess.run(git + ["update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and ".claude/settings.json" in err, (rc, err)
 
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
