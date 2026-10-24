@@ -8,7 +8,8 @@
   CI         runs queued and the oldest one's age, and the self-hosted runners (when GitHub lets us see them)
   Tasks      issues mode: ready (by milestone), in progress, in review, blocked; plan mode: the next task
 
-Everything comes from `gh api` (GitHub's REST API), git and local files; nothing is written anywhere. A section
+Everything comes from `gh api` (GitHub's REST API), git and local files. It changes nothing on GitHub or in the
+working tree; in plan mode `next_task.py` runs a `git fetch` to see main's plan. A section
 GitHub can't answer says so and the rest still shows.
 
   python3 .claude/hooks/factory_status.py [--json]
@@ -18,10 +19,10 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from factory_config import load, task_labels, task_source  # noqa: E402
+from factory_config import load, load_from_main, task_labels, task_source  # noqa: E402
 
 HOOKS = os.path.dirname(os.path.abspath(__file__))
-DM_MARK = re.compile(r"<!--\s*factory-(mustfix|approved)\b")
+SHA_IN = re.compile(r"sha=([0-9a-f]{7,40})")
 
 
 def gh(path):
@@ -55,10 +56,36 @@ def agents(cfg):
                         "minutesAgo": round(q)} for n, s, t, q in sorted(r for r in rows if r)]}
 
 
+def last_line(p, what):
+    text = (p.stderr or p.stdout or "").strip().splitlines()
+    return text[-1] if text else f"{what} exited {p.returncode}"
+
+
 def here():
     p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_claims.py"), "list"], capture_output=True,
                        text=True)
+    if p.returncode != 0:
+        raise RuntimeError(last_line(p, "factory_claims.py"))
     return {"claims": [l for l in p.stdout.splitlines() if l.strip()]}
+
+
+def dev_manager(comments, head, trusted):
+    """The dev manager's word on a PR, by the PR gate's rule (pr-gate.py, gate_merge): the last marker counts; an
+    approval only from a trusted login (when `trustedReviewers` is set on main) and only for the head commit."""
+    last, mustfix_sha = None, None
+    for c in comments:
+        body = c.get("body") or ""
+        login = (c.get("user") or c.get("author") or {}).get("login", "")
+        if "<!-- factory-mustfix" in body:
+            last = "mustfix"
+            m = SHA_IN.search(body)
+            mustfix_sha = m.group(1) if m else None
+        elif "<!-- factory-approved" in body and (not trusted or login in trusted):
+            m = re.search(r"factory-approved\s+sha=([0-9a-f]{7,40})", body)
+            last = "approved" if m and head.startswith(m.group(1)) else "stale"
+    if last == "mustfix":  # it holds the merge whatever commit it names, until an approval of the head
+        return "must-fix" if not mustfix_sha or head.startswith(mustfix_sha) else "must-fix (older commit)"
+    return {"approved": "approved", "stale": "approval stale"}.get(last)
 
 
 def marker(cfg, branch, sha, kind):
@@ -71,7 +98,10 @@ def marker(cfg, branch, sha, kind):
 
 
 def ci_state(sha):
-    runs = (gh(f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=100") or {}).get("check_runs", [])
+    try:
+        runs = (gh(f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=100") or {}).get("check_runs", [])
+    except RuntimeError:
+        return "unknown"  # this PR's checks couldn't be read; the others still show
     if not runs:
         return "none"
     if any(r.get("status") != "completed" for r in runs):
@@ -81,19 +111,22 @@ def ci_state(sha):
 
 
 def pulls(cfg):
-    hold = cfg.get("holdLabel", "factory-hold")
+    # Main's settings, as the gate reads them: an agent can't widen trustedReviewers in its own copy.
+    try:
+        gate_cfg = load_from_main(cfg)
+    except RuntimeError:
+        gate_cfg = cfg
+    trusted = set(gate_cfg.get("trustedReviewers") or [])
+    hold = gate_cfg.get("holdLabel", "factory-hold")
 
     def one(p):
         sha, branch = p["head"]["sha"], p["head"]["ref"]
         labels = {x["name"] for x in p.get("labels", [])}
-        dm = None
-        for c in gh(f"repos/{{owner}}/{{repo}}/issues/{p['number']}/comments?per_page=100") or []:
-            m = DM_MARK.search(c.get("body") or "")
-            if m:
-                dm = m.group(1)
+        dm = dev_manager(gh(f"repos/{{owner}}/{{repo}}/issues/{p['number']}/comments?per_page=100") or [], sha,
+                         trusted)
         return {"number": p["number"], "title": p["title"], "branch": branch, "draft": bool(p.get("draft")),
                 "ci": ci_state(sha), "reviewed": marker(cfg, branch, sha, ".ok"), "hold": hold in labels,
-                "devManager": {"mustfix": "must-fix", "approved": "approved"}.get(dm),
+                "devManager": dm,
                 "personMerges": "a person merges this one" in (p.get("body") or "").lower()}
 
     with ThreadPoolExecutor(8) as pool:  # two calls per PR: side by side, so it stays quick
@@ -115,7 +148,12 @@ def ci(now):
 def tasks(cfg):
     if task_source(cfg) != "issues":
         p = subprocess.run([sys.executable, os.path.join(HOOKS, "next_task.py")], capture_output=True, text=True)
-        return {"next": p.stdout.strip() or "nothing ready"}
+        out = p.stdout.strip()
+        if p.returncode == 0 and out:
+            return {"next": out}
+        if p.returncode == 1 and out == "none":
+            return {"next": "nothing ready"}
+        raise RuntimeError(last_line(p, "next_task.py"))
     from factory_issues import names, task_issues
     L = task_labels(cfg)
     counts, ready = {"inProgress": 0, "inReview": 0, "blocked": 0}, {}
@@ -133,7 +171,7 @@ def tasks(cfg):
     return {"ready": ready, **counts}
 
 
-def show(s):
+def show(s, task_mode="plan"):
     def err(part):
         return f"  can't read it: {part['error']}" if "error" in part else None
 
@@ -143,7 +181,9 @@ def show(s):
         f"  {x['name']:<12} {x['status']:<8} last ping {x['minutesAgo']} min ago" for x in a["agents"])
         or "  none registered"))
     print("This machine")
-    print("\n".join("  " + l for l in s["here"].get("claims", [])) or "  no claims")
+    h = s["here"]
+    print(f"  claims: can't read them: {h['error']}" if "error" in h else
+          "\n".join("  " + l for l in h.get("claims", [])) or "  no claims")
     print("Pull requests")
     p = s["pulls"]
     if "error" in p:
@@ -171,7 +211,9 @@ def show(s):
                                              for r in c["runners"]))
     print("Tasks")
     t = s["tasks"]
-    if "error" in t:
+    if "error" in t and task_mode != "issues":
+        print(f"  next task: can't read it: {t['error']}")
+    elif "error" in t:
         print(err(t))
     elif "next" in t:
         print(f"  next: {t['next']}")
@@ -194,7 +236,7 @@ def main():
     if a.json:
         print(json.dumps(s, indent=2))
     else:
-        show(s)
+        show(s, task_source(cfg))
     return 0
 
 
