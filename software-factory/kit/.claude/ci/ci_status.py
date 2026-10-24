@@ -36,6 +36,7 @@ def main():
     ap.add_argument("--repo", required=True)
     ap.add_argument("--label", required=True)
     ap.add_argument("--local", action="store_true")
+    ap.add_argument("--light-label", default=None, help="the light lane's label (#90): its runners are listed too")
     ap.add_argument("--now", default=None)
     a = ap.parse_args()
     now = when(a.now) if a.now else datetime.now(timezone.utc)
@@ -74,6 +75,15 @@ def main():
             print(f"  {x['name']}: {x['status']}{', busy' if x.get('busy') else ''}")
         if data is not None and not mine:
             print("  none registered right now")
+        if a.light_label and data is not None:
+            light = [x for x in data.get("runners", [])
+                     if a.light_label in {lab.get("name") for lab in x.get("labels", [])}]
+            print(f"Light lane ({a.light_label}, the Factory guard):")
+            for x in light:
+                print(f"  {x['name']}: {x['status']}{', busy' if x.get('busy') else ''}")
+            if not light:
+                print("  none registered right now: light jobs wait (or set CI_RUNS_ON_LIGHT back to CI_RUNS_ON's "
+                      "value)")
         online = None if data is None else [x for x in mine if x.get("status") == "online"]
     if old:
         longest = max(int((now - when(r["created_at"])).total_seconds() // 60) for r in old)

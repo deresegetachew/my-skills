@@ -39,12 +39,12 @@ Check
 
 CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
   ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
-  ci use local|github    send CI jobs to the self-hosted runners (label <repo>-local), or back to GitHub's
-  ci install             install the runner as <repo>-ci: a LaunchAgent on macOS, a systemd --user service on Linux
-                         (run it again to update)
-  ci uninstall           remove it: the service, its containers and this machine's idle registrations
-  ci start | stop        run the runner once by hand, in the background, until stop or a restart
-  ci logs [-f]           the runner's log
+  ci use local|github    send CI jobs to the self-hosted runners (labels <repo>-local and <repo>-light), or back
+  ci install             install ci.runners runners and the light lane as <repo>-ci, -2 ... and -light: LaunchAgents
+                         on macOS, systemd --user services on Linux (run it again to update or change the number)
+  ci uninstall [i]       remove them (or instance i: 2 ... or light), their containers and idle registrations
+  ci start | stop        run one runner by hand, in the background, until stop or a restart
+  ci logs [i] [-f]       a runner's log (instance 1 unless you name one)
 
 Settings
   settings               every setting: its value here (or the default) and what it does

@@ -16,6 +16,13 @@ concurrency:
 permissions:
   contents: read
 
+# Where the jobs run (`factory ci use local|github`, README.md "CI"). Two lanes, each from a repo variable:
+# - light jobs, the Factory guard (and anything else short that runs on label changes, which are the dev manager's
+#   merge steps): vars.CI_RUNS_ON_LIGHT, for example ["self-hosted","<repo>-light"], a small runner that takes
+#   nothing else, so a 30-second check never waits behind a 15-minute build. Unset: the heavy lane's runners.
+# - heavy jobs (typecheck, tests, build, browsers): vars.CI_RUNS_ON, for example ["self-hosted","<repo>-local"].
+# Neither set: GitHub's runners. A pull request from another repository (a fork) always runs on GitHub's runners.
+
 jobs:
   guard:
     # The factory guard: test and golden-file edits, skips, new dependencies, decision numbers, task ticks.
@@ -23,7 +30,8 @@ jobs:
     # the `tests-reviewed` / `deps-reviewed` labels.
     name: Factory guard
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    # The light lane.
+    runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '"ubuntu-latest"' || vars.CI_RUNS_ON_LIGHT || vars.CI_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +47,8 @@ jobs:
   check:
     name: Typecheck, lint, test, build
     if: ${{ !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
-    runs-on: ubuntu-latest
+    # The heavy lane.
+    runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '"ubuntu-latest"' || vars.CI_RUNS_ON || '"ubuntu-latest"') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4

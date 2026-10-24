@@ -3,10 +3,11 @@
 #
 #   factory ci status              where CI runs (local or github), the latest runs, and the local runner
 #   factory ci use local|github    sends CI jobs to the self-hosted runners, or back to GitHub's
-#   factory ci install             installs the runner as a LaunchAgent (macOS) or a systemd --user service (Linux)
-#   factory ci uninstall           removes it: the service, its containers and its idle registrations
-#   factory ci start | stop        runs it once by hand, in the background, until stop or a restart
-#   factory ci logs [-f]           the runner's log
+#   factory ci install             installs the runners: ci.runners heavy ones and the light lane, each a LaunchAgent
+#                                  (macOS) or a systemd --user service (Linux); run it again to update or rescale
+#   factory ci uninstall [i]       removes them (or instance i: 2, 3 ... or light), their containers and idle registrations
+#   factory ci start | stop        runs one by hand, in the background, until stop or a restart
+#   factory ci logs [i] [-f]       a runner's log (instance 1 unless you name one)
 #
 # Every name comes from the project (ci_names.py): the runner is `<repo>-ci`, its jobs ask for the label
 # `<repo>-local`, unless "ci" in .claude/factory.json says otherwise. Several machines can run runners with the
@@ -32,6 +33,52 @@ host="$( (scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || e
   tr -c 'a-z0-9-\n' '-' | head -c 24)"
 host="${host:-$platform}"
 compose=(docker compose --file "$kit/compose.yaml" --project-name "$CI_NAME")
+
+# Instances (#67, #90): heavy runners 1 .. ci.runners, each with its own compose project (its dind, volumes and
+# workspace), registration names and log, and unless ci.light is false the light lane: one small runner without
+# Docker, label <repo>-light, for the Factory guard. Instance 1 keeps the single runner's names, so an existing
+# install carries on; instance N adds "-N" and the light lane "-light" to them.
+wanted_ids() { seq 1 "$CI_RUNNERS"; [ "$CI_LIGHT" = 1 ] && echo light; return 0; }
+valid_id() { case "$1" in light|[1-9]|1[0-6]) return 0 ;; esac; return 1; }
+use_instance() {
+  local sfx=""
+  [ "$1" = 1 ] || sfx="-$1"
+  I_ID="$1"
+  I_NAME="$CI_NAME$sfx"
+  I_AGENT="$CI_AGENT$sfx"
+  I_PLIST="$(dirname "$CI_PLIST")/$I_AGENT.plist"
+  I_UNIT="$CI_NAME$sfx.service"
+  I_UNIT_FILE="$(dirname "$CI_UNIT_FILE")/$I_UNIT"
+  I_PROJECT="$CI_NAME$sfx"
+  I_PREFIX="$CI_NAME-$host$sfx"
+  I_LOG="$CI_STATE/runner$sfx.log"
+  if [ "$1" = light ]; then I_COMPOSE=compose-light.yaml; I_LABEL="$CI_LIGHT_LABEL"
+  else I_COMPOSE=compose.yaml; I_LABEL="$CI_LABEL"; fi
+}
+# The instances installed on this machine, from their LaunchAgent or unit files.
+installed_ids() {
+  local dir base ext f b id
+  if [ "$platform" = linux ]; then dir="$(dirname "$CI_UNIT_FILE")"; base="$CI_NAME"; ext=.service
+  else dir="$(dirname "$CI_PLIST")"; base="$CI_AGENT"; ext=.plist; fi
+  [ -d "$dir" ] || return 0
+  for f in "$dir"/*"$ext"; do
+    [ -e "$f" ] || continue
+    b="$(basename "$f")"
+    if [ "$b" = "$base$ext" ]; then echo 1; continue; fi
+    case "$b" in "$base-"*"$ext") id="${b#"$base-"}"; id="${id%"$ext"}"; valid_id "$id" && [ "$id" != 1 ] && echo "$id" ;; esac
+  done
+  return 0
+}
+instance_loaded() {
+  use_instance "$1"
+  if [ "$platform" = linux ]; then systemctl --user is-enabled --quiet "$I_UNIT" 2>/dev/null; return; fi
+  launchctl print "$domain/$I_AGENT" >/dev/null 2>&1
+}
+any_loaded() {
+  local id
+  for id in $(installed_ids); do instance_loaded "$id" && return 0; done
+  return 1
+}
 
 die() { echo "factory ci: $*" >&2; exit 1; }
 
@@ -79,6 +126,7 @@ copy_files() {
   chmod 700 "$CI_STATE" "$CI_INSTALLED"
   install -m 700 "$kit/loop.sh" "$exe"
   install -m 600 "$kit/compose.yaml" "$CI_INSTALLED/compose.yaml"
+  install -m 600 "$kit/compose-light.yaml" "$CI_INSTALLED/compose-light.yaml"
   install -m 600 "$kit/entrypoint.sh" "$CI_INSTALLED/entrypoint.sh"
 }
 
@@ -131,27 +179,28 @@ write_unit() {
   done
   path="$path/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
   dh="$(docker_host)"
-  mkdir -p "$(dirname "$CI_UNIT_FILE")" "$CI_STATE"
+  mkdir -p "$(dirname "$I_UNIT_FILE")" "$CI_STATE"
   {
     echo "[Unit]"
-    echo "Description=$CI_NAME: self-hosted GitHub Actions runner for $CI_REPO (software factory)"
+    echo "Description=$I_NAME: self-hosted GitHub Actions runner for $CI_REPO, label $I_LABEL (software factory)"
     echo
     echo "[Service]"
     echo "ExecStart=/bin/bash \"$(sd_exec "$exe")\""
     echo "WorkingDirectory=$(sd_path "$CI_INSTALLED")"
-    for kv in "PATH=$path" "CI_NAME=$CI_NAME" "CI_LABEL=$CI_LABEL" "CI_HOST=$host" "CI_STATE=$CI_STATE" \
-              "RUNNER_REPO=$CI_REPO" ${dh:+"DOCKER_HOST=$dh"}; do
+    for kv in "PATH=$path" "CI_NAME=$CI_NAME" "CI_LABEL=$I_LABEL" "CI_HOST=$host" "CI_STATE=$CI_STATE" \
+              "RUNNER_REPO=$CI_REPO" "CI_PROJECT=$I_PROJECT" "CI_RUNNER_PREFIX=$I_PREFIX" "CI_COMPOSE=$I_COMPOSE" \
+              "CI_LOG=$I_LOG" ${dh:+"DOCKER_HOST=$dh"}; do
       echo "Environment=\"$(sd "$kv")\""
     done
     echo "Restart=always"
     echo "RestartSec=30"
-    echo "StandardOutput=append:$(sd_path "$CI_STATE/runner.log")"
-    echo "StandardError=append:$(sd_path "$CI_STATE/runner.log")"
+    echo "StandardOutput=append:$(sd_path "$I_LOG")"
+    echo "StandardError=append:$(sd_path "$I_LOG")"
     echo
     echo "[Install]"
     echo "WantedBy=default.target"
-  } >"$CI_UNIT_FILE.tmp"
-  mv "$CI_UNIT_FILE.tmp" "$CI_UNIT_FILE"
+  } >"$I_UNIT_FILE.tmp"
+  mv "$I_UNIT_FILE.tmp" "$I_UNIT_FILE"
 }
 
 # Without linger, systemd stops a user's services when the user logs out (and doesn't start them at boot).
@@ -164,31 +213,6 @@ linger_note() {
   fi
 }
 
-install_linux() {
-  need gh docker systemctl
-  need_user_manager
-  can_register || die "gh can't create a runner registration token for $CI_REPO. Log in with \`gh auth login\` as an admin of the repository, then run this again."
-  if [ -n "$(hand_pid || true)" ]; then
-    echo "Stopping the runner started with \`factory ci start\` first..."
-  fi
-  stop_hand_loop
-  copy_files
-  on_main_note
-  if docker info >/dev/null 2>&1; then
-    echo "Pulling the runner images..."
-    RUNNER_REPO="$CI_REPO" RUNNER_NAME=none RUNNER_LABEL="$CI_LABEL" \
-      docker compose --file "$CI_INSTALLED/compose.yaml" --project-name "$CI_NAME" pull --quiet
-  fi
-  write_unit
-  # enable, then restart: starts it the first time, and replaces a loop that's already running after an update.
-  systemctl --user daemon-reload
-  systemctl --user enable "$CI_UNIT" >/dev/null 2>&1
-  systemctl --user restart "$CI_UNIT"
-  echo "Installed $CI_NAME (commit $(cat "$CI_STATE/commit")): systemd runs it as the user service $CI_UNIT."
-  echo "Repository $CI_REPO, label $CI_LABEL. Log: $CI_STATE/runner.log"
-  linger_note
-  echo "Jobs go to it after \`factory ci use local\`. Check it with \`factory ci status\`."
-}
 
 # Removes registrations GitHub still lists: this Mac's idle ones (after a stop, GitHub shows them online for
 # a minute or so, so not-busy is the test), and any of this project's that are offline and idle (left by a
@@ -204,10 +228,14 @@ remove_registrations() {
 }
 
 down() {
-  if docker info >/dev/null 2>&1; then
-    RUNNER_REPO="$CI_REPO" RUNNER_NAME=none RUNNER_LABEL="$CI_LABEL" \
-      "${compose[@]}" down --volumes --remove-orphans --timeout 10 >/dev/null 2>&1 || true
-  fi
+  docker info >/dev/null 2>&1 || return 0
+  local id
+  for id in $( { wanted_ids; installed_ids; } | sort -u); do
+    use_instance "$id"
+    RUNNER_REPO="$CI_REPO" RUNNER_NAME=none RUNNER_LABEL="$I_LABEL" \
+      docker compose --file "$kit/$I_COMPOSE" --project-name "$I_PROJECT" down --volumes --remove-orphans \
+      --timeout 10 >/dev/null 2>&1 || true
+  done
 }
 
 stop_hand_loop() {
@@ -234,14 +262,14 @@ write_plist() {
     case "$dir" in /*) path="$path$dir:" ;; esac
   done
   path="$path/opt/homebrew/bin:/usr/local/bin:/Applications/Docker.app/Contents/Resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-  mkdir -p "$(dirname "$CI_PLIST")"
-  cat >"$CI_PLIST.tmp" <<EOF
+  mkdir -p "$(dirname "$I_PLIST")"
+  cat >"$I_PLIST.tmp" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>$(xml "$CI_AGENT")</string>
+  <string>$(xml "$I_AGENT")</string>
   <key>ProgramArguments</key>
   <array>
     <string>$(xml "$exe")</string>
@@ -255,13 +283,21 @@ write_plist() {
     <key>CI_NAME</key>
     <string>$(xml "$CI_NAME")</string>
     <key>CI_LABEL</key>
-    <string>$(xml "$CI_LABEL")</string>
+    <string>$(xml "$I_LABEL")</string>
     <key>CI_HOST</key>
     <string>$(xml "$host")</string>
     <key>CI_STATE</key>
     <string>$(xml "$CI_STATE")</string>
     <key>RUNNER_REPO</key>
     <string>$(xml "$CI_REPO")</string>
+    <key>CI_PROJECT</key>
+    <string>$(xml "$I_PROJECT")</string>
+    <key>CI_RUNNER_PREFIX</key>
+    <string>$(xml "$I_PREFIX")</string>
+    <key>CI_COMPOSE</key>
+    <string>$(xml "$I_COMPOSE")</string>
+    <key>CI_LOG</key>
+    <string>$(xml "$I_LOG")</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -270,14 +306,14 @@ write_plist() {
   <key>ThrottleInterval</key>
   <integer>30</integer>
   <key>StandardOutPath</key>
-  <string>$(xml "$CI_STATE/runner.log")</string>
+  <string>$(xml "$I_LOG")</string>
   <key>StandardErrorPath</key>
-  <string>$(xml "$CI_STATE/runner.log")</string>
+  <string>$(xml "$I_LOG")</string>
 </dict>
 </plist>
 EOF
-  plutil -lint "$CI_PLIST.tmp" >/dev/null || { rm -f "$CI_PLIST.tmp"; die "the LaunchAgent file didn't pass plutil -lint."; }
-  mv "$CI_PLIST.tmp" "$CI_PLIST"
+  plutil -lint "$I_PLIST.tmp" >/dev/null || { rm -f "$I_PLIST.tmp"; die "the LaunchAgent file didn't pass plutil -lint."; }
+  mv "$I_PLIST.tmp" "$I_PLIST"
 }
 
 # CI_RUNS_ON: prints the value; exit 0 set, 1 not set, 2 can't tell.
@@ -291,19 +327,84 @@ runs_on() {
   rm -f "$err"; return 2
 }
 
-cmd_install() {
-  if [ "$platform" = linux ]; then install_linux; return; fi
-  need gh docker launchctl plutil
-  can_register || die "gh can't create a runner registration token for $CI_REPO. Log in with \`gh auth login\` as an admin of the repository, then run this again."
-  # An older install under another name would compete for the same jobs: unload it and remove its file.
-  for old in $CI_REPLACES; do
-    if agent_loaded "$old" || [ -f "$HOME/Library/LaunchAgents/$old.plist" ]; then
-      echo "Removing the older LaunchAgent $old..."
-      launchctl bootout "$domain/$old" 2>/dev/null || true
-      wait_unloaded "$old"
-      rm -f "$HOME/Library/LaunchAgents/$old.plist"
-    fi
+# This machine's memory left for jobs, in MB (FACTORY_CI_FREE_MB overrides it); empty when it can't tell.
+free_mb() {
+  if [ -n "${FACTORY_CI_FREE_MB:-}" ]; then echo "$FACTORY_CI_FREE_MB"; return; fi
+  if [ -r /proc/meminfo ]; then awk '/^MemAvailable:/ { print int($2 / 1024); exit }' /proc/meminfo; return; fi
+  vm_stat 2>/dev/null | awk '/page size of/ { size = $8 } /^Pages (free|inactive|speculative)/ { gsub(/\./, "", $NF); n += $NF }
+    END { if (size) print int(n * size / 1048576) }'
+}
+
+# A rough budget per runner (README.md, "How many runners"): a heavy job with its dind and service containers,
+# and the light runner's 1 GB limit.
+HEAVY_MB=4096
+LIGHT_MB=1024
+memory_note() {
+  local need free
+  need=$((CI_RUNNERS * HEAVY_MB + (CI_LIGHT == 1 ? LIGHT_MB : 0)))
+  free="$(free_mb || true)"
+  case "$free" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$need" -gt "$free" ]; then
+    echo "Warning: $CI_RUNNERS heavy runner(s)$([ "$CI_LIGHT" = 1 ] && echo " and the light one") need about $need MB at once,"
+    echo "  and $machine has about $free MB free. Jobs may slow down or fail; lower ci.runners (or FACTORY_CI_RUNNERS)."
+  fi
+}
+
+# Idle registrations of one instance on this machine (its names start with <prefix>-): removed after a scale-down.
+remove_instance_registrations() {
+  local ids
+  ids="$(gh api "repos/$CI_REPO/actions/runners?per_page=100" --jq ".runners[] | select((.busy | not) and
+    (.name | startswith(\"$1-\"))) | .id" 2>/dev/null)" || return 0
+  for id in $ids; do
+    gh api -X DELETE "repos/$CI_REPO/actions/runners/$id" >/dev/null && echo "Removed runner registration $id."
   done
+}
+
+instance_busy() {
+  [ -n "$(gh api "repos/$CI_REPO/actions/runners?per_page=100" --jq ".runners[] | select(.busy and
+    (.name | startswith(\"$1-\"))) | .id" 2>/dev/null)" ]
+}
+
+# Unloads one instance and removes its file and containers. $2 = keep-busy: leave it alone while it runs a job
+# (a scale-down waits for that job; run install again afterwards).
+remove_instance() {
+  use_instance "$1"
+  if [ "${2:-}" = keep-busy ] && [ "$1" != 1 ] && instance_busy "$I_PREFIX"; then
+    echo "Instance $1 ($I_NAME) is running a job, so it stays for now. Run \`factory ci install\` again after it ends."
+    return 0
+  fi
+  if [ "$platform" = linux ]; then
+    systemctl --user disable --now "$I_UNIT" >/dev/null 2>&1 || true
+    rm -f "$I_UNIT_FILE"
+  else
+    launchctl bootout "$domain/$I_AGENT" 2>/dev/null || true
+    wait_unloaded "$I_AGENT"
+    rm -f "$I_PLIST"
+  fi
+  if docker info >/dev/null 2>&1; then
+    RUNNER_REPO="$CI_REPO" RUNNER_NAME=none RUNNER_LABEL="$I_LABEL" \
+      docker compose --file "$kit/$I_COMPOSE" --project-name "$I_PROJECT" down --volumes --remove-orphans \
+      --timeout 10 >/dev/null 2>&1 || true
+  fi
+  [ "$1" = 1 ] || remove_instance_registrations "$I_PREFIX"
+  echo "Removed instance $1 ($I_NAME)."
+}
+
+cmd_install() {
+  if [ "$platform" = linux ]; then need gh docker systemctl; need_user_manager
+  else need gh docker launchctl plutil; fi
+  can_register || die "gh can't create a runner registration token for $CI_REPO. Log in with \`gh auth login\` as an admin of the repository, then run this again."
+  if [ "$platform" = mac ]; then
+    # An older install under another name would compete for the same jobs: unload it and remove its file.
+    for old in $CI_REPLACES; do
+      if agent_loaded "$old" || [ -f "$HOME/Library/LaunchAgents/$old.plist" ]; then
+        echo "Removing the older LaunchAgent $old..."
+        launchctl bootout "$domain/$old" 2>/dev/null || true
+        wait_unloaded "$old"
+        rm -f "$HOME/Library/LaunchAgents/$old.plist"
+      fi
+    done
+  fi
   if [ -n "$(hand_pid || true)" ]; then
     echo "Stopping the runner started with \`factory ci start\` first..."
   fi
@@ -312,44 +413,101 @@ cmd_install() {
   on_main_note
   if docker info >/dev/null 2>&1; then
     echo "Pulling the runner images..."
-    RUNNER_REPO="$CI_REPO" RUNNER_NAME=none RUNNER_LABEL="$CI_LABEL" \
-      docker compose --file "$CI_INSTALLED/compose.yaml" --project-name "$CI_NAME" pull --quiet
+    for f in compose.yaml $([ "$CI_LIGHT" = 1 ] && echo compose-light.yaml); do
+      RUNNER_REPO="$CI_REPO" RUNNER_NAME=none RUNNER_LABEL="$CI_LABEL" \
+        docker compose --file "$CI_INSTALLED/$f" --project-name "$CI_NAME" pull --quiet
+    done
   fi
-  write_plist
-  # Unload the old one first (its loop removes its containers), then load the new one. bootout returns
-  # before launchd has let go, and bootstrap fails (error 5) until it has.
-  launchctl bootout "$domain/$CI_AGENT" 2>/dev/null || true
-  wait_unloaded "$CI_AGENT"
-  launchctl bootstrap "$domain" "$CI_PLIST"
-  echo "Installed $CI_NAME (commit $(cat "$CI_STATE/commit")): launchd runs it whenever you're logged in."
-  echo "Repository $CI_REPO, label $CI_LABEL. Log: $CI_STATE/runner.log"
-  echo "Jobs go to it after \`factory ci use local\`. Check it with \`factory ci status\`."
+  memory_note
+  # Scale down first: instances this machine has but no longer wants.
+  local id wanted
+  wanted=" $(wanted_ids | tr '\n' ' ')"
+  for id in $(installed_ids); do
+    case "$wanted" in *" $id "*) ;; *) remove_instance "$id" keep-busy ;; esac
+  done
+  for id in $(wanted_ids); do
+    use_instance "$id"
+    if [ "$platform" = linux ]; then write_unit; else write_plist; fi
+  done
+  if [ "$platform" = linux ]; then
+    # enable, then restart: starts each the first time, and replaces a loop that's already running after an update.
+    systemctl --user daemon-reload
+    for id in $(wanted_ids); do
+      use_instance "$id"
+      systemctl --user enable "$I_UNIT" >/dev/null 2>&1
+      systemctl --user restart "$I_UNIT"
+    done
+    echo "Installed $CI_NAME (commit $(cat "$CI_STATE/commit")): systemd runs it as the user service $CI_UNIT."
+  else
+    for id in $(wanted_ids); do
+      use_instance "$id"
+      # Unload the old one first (its loop removes its containers), then load the new one. bootout returns
+      # before launchd has let go, and bootstrap fails (error 5) until it has.
+      launchctl bootout "$domain/$I_AGENT" 2>/dev/null || true
+      wait_unloaded "$I_AGENT"
+      launchctl bootstrap "$domain" "$I_PLIST"
+    done
+    echo "Installed $CI_NAME (commit $(cat "$CI_STATE/commit")): launchd runs it whenever you're logged in."
+  fi
+  echo "Repository $CI_REPO. Runners on $machine:"
+  for id in $(wanted_ids); do
+    use_instance "$id"
+    echo "  $I_NAME: label $I_LABEL$([ "$id" = light ] && echo " (light jobs, no Docker)"), log $I_LOG"
+  done
+  [ "$platform" = linux ] && linger_note
+  light_variable_note
+  echo "Jobs go to them after \`factory ci use local\`. Check them with \`factory ci status\`."
+}
+
+# The light lane needs the repo variable CI_RUNS_ON_LIGHT. In local mode, set it now; otherwise say what
+# `factory ci use local` will set.
+light_variable_note() {
+  [ "$CI_LIGHT" = 1 ] || return 0
+  local value="[\"self-hosted\",\"$CI_LIGHT_LABEL\"]" rc=0
+  runs_on >/dev/null || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    if gh variable set CI_RUNS_ON_LIGHT --repo "$CI_REPO" --body "$value" >/dev/null 2>&1; then
+      echo "Light jobs (the Factory guard) go to $CI_LIGHT_LABEL: the repo variable CI_RUNS_ON_LIGHT is $value."
+    else
+      echo "Set the repo variable CI_RUNS_ON_LIGHT to $value (Settings > Secrets and variables > Actions >"
+      echo "  Variables); gh can't set it (it needs admin on $CI_REPO). Until then light jobs use CI_RUNS_ON."
+    fi
+  else
+    echo "\`factory ci use local\` also sets CI_RUNS_ON_LIGHT to $value, so light jobs get their own runner."
+  fi
 }
 
 cmd_uninstall() {
-  if [ "$platform" = linux ]; then
-    need systemctl
-    need_user_manager
-    systemctl --user disable --now "$CI_UNIT" >/dev/null 2>&1 || true
-    rm -f "$CI_UNIT_FILE"
-    systemctl --user daemon-reload 2>/dev/null || true
-    rm -rf "$CI_INSTALLED"
-    echo "User service $CI_UNIT removed."
-    cmd_stop
-    return
+  if [ "$platform" = linux ]; then need systemctl; need_user_manager; else need launchctl; fi
+  if [ -n "${1:-}" ]; then
+    valid_id "$1" || die "say which instance: 1 to 16, or light."
+    case " $(installed_ids | tr '\n' ' ')" in *" $1 "*) ;; *) die "instance $1 isn't installed on $machine." ;; esac
+    remove_instance "$1"
+    [ "$platform" = linux ] && systemctl --user daemon-reload 2>/dev/null || true
+    return 0
   fi
-  need launchctl
-  launchctl bootout "$domain/$CI_AGENT" 2>/dev/null || true
-  wait_unloaded "$CI_AGENT"
-  rm -f "$CI_PLIST"
+  local id
+  for id in $(installed_ids); do
+    use_instance "$id"
+    if [ "$platform" = linux ]; then
+      systemctl --user disable --now "$I_UNIT" >/dev/null 2>&1 || true
+      rm -f "$I_UNIT_FILE"
+      echo "User service $I_UNIT removed."
+    else
+      launchctl bootout "$domain/$I_AGENT" 2>/dev/null || true
+      wait_unloaded "$I_AGENT"
+      rm -f "$I_PLIST"
+      echo "LaunchAgent $I_AGENT removed."
+    fi
+  done
+  [ "$platform" = linux ] && { systemctl --user daemon-reload 2>/dev/null || true; }
   rm -rf "$CI_INSTALLED"
-  echo "LaunchAgent $CI_AGENT removed."
   cmd_stop
 }
 
 cmd_start() {
   need gh docker
-  if agent_loaded "$CI_AGENT"; then
+  if any_loaded; then
     echo "$CI_NAME is installed and $manager keeps it running (factory ci status). Nothing to start."
     return 0
   fi
@@ -387,7 +545,7 @@ cmd_start() {
 
 cmd_stop() {
   if [ "$platform" = linux ]; then need systemctl; need_user_manager; fi
-  if agent_loaded "$CI_AGENT"; then
+  if any_loaded; then
     die "$CI_NAME is installed, so $manager would start it again. Remove it with \`factory ci uninstall\`."
   fi
   stop_hand_loop
@@ -397,7 +555,13 @@ cmd_stop() {
 }
 
 cmd_logs() {
-  local file="$CI_STATE/runner.log"
+  local id=1
+  if [ -n "${1:-}" ] && [ "$1" != -f ]; then
+    valid_id "$1" || die "say which instance: 1 to 16, or light."
+    id="$1"; shift
+  fi
+  use_instance "$id"
+  local file="$I_LOG"
   [ -f "$file" ] || { echo "No log yet ($file)."; return 0; }
   if [ "${1:-}" = "-f" ]; then exec tail -n 50 -f "$file"; fi
   tail -n 50 "$file"
@@ -410,7 +574,14 @@ cmd_use() {
       gh variable set CI_RUNS_ON --repo "$CI_REPO" --body "[\"self-hosted\",\"$CI_LABEL\"]" >/dev/null ||
         die "gh can't set the repository variable CI_RUNS_ON (it needs admin on $CI_REPO)."
       echo "CI now runs on self-hosted runners with the label $CI_LABEL. Pull requests from forks stay on GitHub."
-      if ! agent_loaded "$CI_AGENT" && [ -z "$(hand_pid || true)" ]; then
+      if [ "$CI_LIGHT" = 1 ]; then
+        if gh variable set CI_RUNS_ON_LIGHT --repo "$CI_REPO" --body "[\"self-hosted\",\"$CI_LIGHT_LABEL\"]" >/dev/null; then
+          echo "Light jobs (the Factory guard) run on the light runner, label $CI_LIGHT_LABEL (CI_RUNS_ON_LIGHT)."
+        else
+          echo "gh can't set CI_RUNS_ON_LIGHT; set it to [\"self-hosted\",\"$CI_LIGHT_LABEL\"] in the repo's Actions variables."
+        fi
+      fi
+      if ! any_loaded && [ -z "$(hand_pid || true)" ]; then
         echo "No runner is running on $machine: jobs wait until one is (\`factory ci install\`)."
       fi
       ;;
@@ -423,6 +594,7 @@ cmd_use() {
       fi
       gh variable delete CI_RUNS_ON --repo "$CI_REPO" >/dev/null ||
         die "gh can't delete the repository variable CI_RUNS_ON (it needs admin on $CI_REPO)."
+      gh variable delete CI_RUNS_ON_LIGHT --repo "$CI_REPO" >/dev/null 2>&1 || true
       echo "CI now runs on GitHub's runners. A local runner, if installed, stays idle until \`factory ci use local\`."
       ;;
     *) die "say where: \`factory ci use local\` or \`factory ci use github\`." ;;
@@ -440,38 +612,48 @@ cmd_status() {
     1) echo "Mode: github (CI_RUNS_ON isn't set, so CI runs on GitHub's runners)" ;;
     *) echo "Mode: unknown (gh can't read the repository variable CI_RUNS_ON; it needs admin on $CI_REPO)" ;;
   esac
-  local installed=""
-  agent_loaded "$CI_AGENT" && installed=1
+  local installed="" id
+  [ -n "$(installed_ids)" ] && installed=1
   if [ -n "$local_mode" ] || [ -n "$installed" ] || [ -n "$(hand_pid || true)" ]; then
     local pid
-    if [ -n "$installed" ] && [ "$platform" = linux ]; then
-      pid="$(systemctl --user show "$CI_UNIT" -p MainPID --value 2>/dev/null || true)"
-      if [ -n "$pid" ] && [ "$pid" != 0 ]; then
-        echo "Runner $CI_NAME: running (systemd user service $CI_UNIT, pid $pid). It starts again by itself after a restart."
-      else
-        echo "Runner $CI_NAME: installed, but its loop isn't running right now; systemd starts it again within 30 s."
+    for id in $( { echo 1; installed_ids; } | sort -u); do
+      use_instance "$id"
+      local what="Runner $I_NAME"
+      [ "$id" = light ] && what="Runner $I_NAME (light lane, label $I_LABEL)"
+      if instance_loaded "$id" && [ "$platform" = linux ]; then
+        pid="$(systemctl --user show "$I_UNIT" -p MainPID --value 2>/dev/null || true)"
+        if [ -n "$pid" ] && [ "$pid" != 0 ]; then
+          echo "$what: running (systemd user service $I_UNIT, pid $pid). It starts again by itself after a restart."
+        else
+          echo "$what: installed, but its loop isn't running right now; systemd starts it again within 30 s."
+        fi
+      elif instance_loaded "$id"; then
+        pid="$(launchctl print "$domain/$I_AGENT" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
+        if [ -n "$pid" ]; then
+          echo "$what: running (LaunchAgent $I_AGENT, pid $pid). It starts again by itself after a restart."
+        else
+          echo "$what: installed, but its loop isn't running right now; launchd starts it again within 30 s."
+        fi
+      elif [ "$platform" = mac ] && [ -f "$I_PLIST" ]; then
+        echo "$what: installed but not loaded. Run \`factory ci install\` again."
+      elif [ "$id" = 1 ] && pid="$(hand_pid)"; then
+        echo "$what: running (started by hand, pid $pid). It stops at a restart; \`factory ci install\` keeps it running."
+      elif [ "$id" = 1 ]; then
+        echo "$what: not running on $machine. \`factory ci install\` starts it (another machine may run one)."
       fi
-    elif [ -n "$installed" ]; then
-      pid="$(launchctl print "$domain/$CI_AGENT" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
-      if [ -n "$pid" ]; then
-        echo "Runner $CI_NAME: running (LaunchAgent $CI_AGENT, pid $pid). It starts again by itself after a restart."
-      else
-        echo "Runner $CI_NAME: installed, but its loop isn't running right now; launchd starts it again within 30 s."
-      fi
-    elif [ "$platform" = mac ] && [ -f "$CI_PLIST" ]; then
-      echo "Runner $CI_NAME: installed but not loaded. Run \`factory ci install\` again."
-    elif pid="$(hand_pid)"; then
-      echo "Runner $CI_NAME: running (started by hand, pid $pid). It stops at a restart; \`factory ci install\` keeps it running."
-    else
-      echo "Runner $CI_NAME: not running on $machine. \`factory ci install\` starts it (another machine may run one)."
-    fi
+    done
+    local want
+    want="$(wanted_ids | wc -l | tr -d ' ')"
+    [ -n "$installed" ] && [ "$(installed_ids | wc -l | tr -d ' ')" != "$want" ] &&
+      echo "  ci.runners and ci.light ask for $want instance(s) here; \`factory ci install\` brings it to that."
     if docker info >/dev/null 2>&1; then
       echo "Docker: running"
     else
       echo "Docker: not running. Jobs for $machine wait in GitHub's queue until it is."
     fi
   fi
-  python3 "$kit/ci_status.py" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local}
+  python3 "$kit/ci_status.py" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
+    $([ "$CI_LIGHT" = 1 ] && echo "--light-label $CI_LIGHT_LABEL")
   if [ -n "$local_mode$installed" ] && [ -f "$CI_STATE/runner.log" ]; then
     echo
     echo "Last log lines ($CI_STATE/runner.log):"
@@ -483,13 +665,14 @@ case "${1:-status}" in
   status) cmd_status ;;
   use) shift; cmd_use "$@" ;;
   install) cmd_install ;;
-  uninstall) cmd_uninstall ;;
+  uninstall) shift; cmd_uninstall "$@" ;;
   start) cmd_start ;;
   stop) cmd_stop ;;
   logs) shift; cmd_logs "$@" ;;
-  names) for v in CI_REPO CI_NAME CI_LABEL CI_AGENT CI_PLIST CI_INSTALLED CI_STATE CI_REPLACES CI_UNIT CI_UNIT_FILE; do
+  names) for v in CI_REPO CI_NAME CI_LABEL CI_AGENT CI_PLIST CI_INSTALLED CI_STATE CI_REPLACES CI_UNIT CI_UNIT_FILE \
+               CI_RUNNERS CI_LIGHT CI_LIGHT_LABEL; do
       echo "$v=${!v}"
     done
     echo "CI_HOST=$host" ;;
-  *) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

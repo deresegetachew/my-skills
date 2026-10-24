@@ -82,6 +82,9 @@ SETTINGS = {
     "styles": ("list", "Style guides per path: [{\"paths\": [...], \"skills\": [...], \"check\": \"...\"}].", None, None),
     "ci.name": ("str", "The self-hosted runner's name (default `<repo>-ci`).", None, ""),
     "ci.label": ("str", "The runner label CI jobs ask for (default `<repo>-local`).", None, ""),
+    "ci.runners": ("int", "Heavy runner loops per machine (each with its own Docker); FACTORY_CI_RUNNERS overrides it on one machine.", None, 1),
+    "ci.light": ("bool", "Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`.", None, True),
+    "ci.lightLabel": ("str", "The light runner's label (default `<repo>-light`).", None, ""),
 }
 
 
