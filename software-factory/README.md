@@ -417,6 +417,10 @@ factory usage --by agent                     # per subagent type: main, reviewer
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```
 
+Agents also post each task's tokens on its PR, per subagent, when they open it and again before it merges
+(`factory usage --task <n> --markdown`, a `<!-- factory-usage task=<n> -->` comment), so whoever merges sees
+what the task cost.
+
 `--record` appends one row of per-task averages to `docs/factory-usage.md` (`usageLog`). Commit it, so every
 factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each
 machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size), and use `/usage`
