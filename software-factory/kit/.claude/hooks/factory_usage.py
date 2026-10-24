@@ -6,6 +6,7 @@ this machine. Use it to measure a change to the factory (a cheaper model, less r
   factory usage --since 2026-10-20 --until 2026-10-24
   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
   factory usage --json                the same as JSON
+  factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it)
   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
                                       factory.json, default docs/factory-usage.md), to commit in a PR
 
@@ -141,6 +142,26 @@ def k(n):
     return f"{n / 1000:,.0f}k" if n >= 1000 else str(n)
 
 
+def markdown(task, groups, total, since, until):
+    """A PR comment: this task's tokens per subagent type, from this machine's logs up to now."""
+    t = total["tokens"]
+    lines = [f"<!-- factory-usage task={task} -->",
+             f"**Tokens for task {task}** so far, from this machine's Claude Code logs ({since:%Y-%m-%d} to now). "
+             "Fresh input is input that missed the cache.", "",
+             "| Agent | Replies | Fresh input | Cache reads | Output | Cache hit |", "|---|---|---|---|---|---|"]
+    for key, g in sorted(groups.items(), key=lambda kv: -fresh(kv[1]["tokens"]) - kv[1]["tokens"]["cache_read"]):
+        x = g["tokens"]
+        lines.append(f"| {key} | {g['replies']} | {k(fresh(x))} | {k(x['cache_read'])} | {k(x['output'])} | "
+                     f"{hit(x):.0f}% |")
+    lines.append(f"| **All** | {total['replies']} | {k(fresh(t))} | {k(t['cache_read'])} | {k(t['output'])} | "
+                 f"{hit(t):.0f}% |")
+    if total["models"]:
+        lines += ["", "By model: " + ", ".join(f"{m} {k(v)}" for m, v in total["models"].most_common()) + "."]
+    if not total["replies"]:
+        lines += ["", "No replies found for this task on this machine (another machine may have built it)."]
+    return "\n".join(lines)
+
+
 def report(groups, total, by, since, until):
     print(f"Token use {since:%Y-%m-%d} to {until:%Y-%m-%d} (from this machine's Claude Code logs), per {by}.\n")
     print(f"{by:14} {'replies':>8} {'fresh in':>10} {'cache read':>11} {'output':>9} {'cache hit':>10}")
@@ -187,6 +208,8 @@ def main(argv):
     p.add_argument("--by", choices=("task", "agent", "model"), default="task")
     p.add_argument("--json", action="store_true")
     p.add_argument("--record", metavar="LABEL", help="append a summary row to the usage log")
+    p.add_argument("--task", help="only the sessions of this task (its id or issue number)")
+    p.add_argument("--markdown", action="store_true", help="print a PR comment (use with --task)")
     p.add_argument("--logs", default=os.path.join(os.path.expanduser("~"), ".claude", "projects"),
                    help=argparse.SUPPRESS)
     a = p.parse_args(argv)
@@ -195,8 +218,14 @@ def main(argv):
     since = a.since or until - dt.timedelta(days=8)
     cfg = load()
     root = os.getcwd()
-    groups, total = summarise(collect(root, a.logs, since, until), a.by)
-    if a.json:
+    sessions = collect(root, a.logs, since, until)
+    if a.task:
+        task = a.task.lstrip("#").replace("-", ".")
+        sessions = {sid: s for sid, s in sessions.items() if s["task"] == task}
+    groups, total = summarise(sessions, "agent" if a.markdown else a.by)
+    if a.markdown:
+        print(markdown(a.task.lstrip("#") if a.task else "-", groups, total, since, until))
+    elif a.json:
         print(json.dumps({"since": since.isoformat(), "until": until.isoformat(), "by": a.by,
                           "groups": {str(key): {"tokens": g["tokens"], "replies": g["replies"]}
                                      for key, g in groups.items()},

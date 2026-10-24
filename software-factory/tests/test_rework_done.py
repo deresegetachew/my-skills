@@ -6,6 +6,7 @@ import json, os, re, subprocess, sys, tempfile
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
 HOOKS = os.path.join(KIT, ".claude", "hooks")
 SKILL = os.path.join(KIT, ".claude", "skills", "next-task", "SKILL.md")
+REWORK = os.path.join(KIT, ".claude", "skills", "next-task", "rework.md")  # the rework step, split out of SKILL.md (#57)
 
 
 def claims(cwd, *args):
@@ -26,8 +27,8 @@ def test_a_rework_mark_is_seen_by_the_loop():
 
 
 def test_the_rework_step_tells_an_interactive_agent_to_mark_it_done():
-    text = open(SKILL).read()
-    rework = text.split("## 1b. Rework a reviewed PR", 1)[1].split("\n## ", 1)[0]
+    assert "rework.md" in open(SKILL).read()  # the core skill sends a pr-<n> pick there
+    rework = open(REWORK).read()
     assert "FACTORY_INTERACTIVE=1" in rework, rework
     assert re.search(r"factory_claims\.py done --agent \"\$FACTORY_AGENT\" --task pr-<n>", rework), rework
 
