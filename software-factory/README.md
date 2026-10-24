@@ -383,6 +383,22 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 `/exit` included. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan. Set
 `FACTORY_REMOTE_CONTROL=0` to turn it off. Unattended `factory loop` runs don't use it.
 
+### MCP servers: the project's only
+
+Every factory session (`factory loop`, `factory loop -i` and `factory agent`) starts Claude with
+`--strict-mcp-config --mcp-config <main's .mcp.json>`, or an empty config when main has none, and with
+`--settings '{"disableClaudeAiConnectors": true}'`. So agents never load your own claude.ai connectors (Notion,
+Slack, Figma ...) or the MCP servers in your user settings. Their tools would go into every turn, cost tokens and
+tempt an agent to use them. Your own `claude` sessions outside the factory keep them.
+
+The config is `.mcp.json` as the main branch has it on origin (`factory_mcp.py` fetches it into
+`.git/factory-mcp.json`), never the worktree's copy: Claude starts the servers in it without asking, so an
+uncommitted, untracked or branch-only `.mcp.json` must never count. `.mcp.json` is in `protected`, and the deny
+rules stop agents editing it, so a change to it needs a person to merge.
+
+If the agents need an MCP server (a docs or design server, for example), add it to `.mcp.json` at the project root
+in a PR that a person merges. Check a new session with `/mcp`: it should list only the project's servers.
+
 ### Practical notes
 
 - More agents only help when the plan has tasks that don't depend on each other, and each one costs tokens.
@@ -394,6 +410,8 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 Most of the cost is what the agents read, not what they write.
 
 - **A fresh session per task** (the loop already does this), so no task carries the last one's context.
+- **No personal MCP connectors:** agent sessions load only the project's `.mcp.json`
+  ([MCP servers](#mcp-servers-the-projects-only)).
 - **Cheaper models for routine subagents:** the test-writer and the architecture-reviewer run on Sonnet
   (`model:` in their files); the reviewer and the safety and security reviews keep the session's model.
 - **Read what the task needs.** Every agent reads the PRD sections, decisions and designs the task points to

@@ -18,7 +18,7 @@ DEFAULTS = {
     "codePaths": ["src"],
     # How many lines of a failing Stop check the agent sees: the failing lines first, then the end of the output.
     "checkOutputLines": 40,
-    "protected": [r"^CLAUDE\.md$", r"^\.claude/", r"^\.github/", r"\.env",
+    "protected": [r"^CLAUDE\.md$", r"^\.claude/", r"^\.github/", r"^\.mcp\.json$", r"\.env",
                   r"(^|/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$"],
     "alwaysAllowed": ["docs/build-plan.md", "docs/blocked.md"],
     # Tests and expected outputs: the implementer must not quietly change them (factory_guard.py).

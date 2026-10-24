@@ -32,6 +32,7 @@
       "Bash(git push origin main*)",
       "Edit(./.claude/**)",
       "Edit(./CLAUDE.md)",
+      "Edit(./.mcp.json)",
       "Edit(./docs/PRD.md)",
       "Bash(gh api *)",
       "Edit(./vendor/**)",
