@@ -156,6 +156,10 @@ def ensure_worktree(path, main_top):
     subprocess.run(["git", "fetch", "-q", "origin", cfg["mainBranch"]], check=False)
     subprocess.run(["git", "worktree", "add", "--detach", path, f"origin/{cfg['mainBranch']}"], check=True,
                    stdout=subprocess.DEVNULL)
+    # The kit's files in .claude/ are links into a submodule (vendor/my-skills): without it they point at nothing,
+    # and a session would start without the factory's settings, hooks and deny rules (#46).
+    if os.path.exists(os.path.join(path, ".gitmodules")):
+        subprocess.run(["git", "-C", path, "submodule", "update", "--init", "-q"], check=True)
     # A new worktree has no untracked local files: bring the local env files over.
     import glob, shutil
     for f in [".env.local"] + glob.glob(os.path.join(main_top, ".env.*.local")):
