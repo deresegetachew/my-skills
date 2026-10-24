@@ -50,6 +50,7 @@ Settings
 Measure
   usage [--since D] [--by task|agent|model] [--record LABEL]
                          tokens per task from this machine's Claude Code logs; --record appends a row to the usage log
+  report [--since D]     per task, from GitHub: claim to PR to merge, rework rounds and CI runs (failed)
 
 Maintain
   release <agent>        drop an agent's local claims (taytu ...), for example after a crash
@@ -90,6 +91,7 @@ case "$cmd" in
   reviews)   py factory_reviews.py "$@" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
+  report)    py factory_report.py "$@" ;;
   env)       if [ -n "${1:-}" ]; then
                case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
              else py factory_env.py; fi ;;
