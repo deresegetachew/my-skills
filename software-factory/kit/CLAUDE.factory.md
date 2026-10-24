@@ -4,13 +4,16 @@
 
 <One paragraph: what the product is and who it is for.>
 
-Read these before writing code, in this order:
+What each document is for. Read the parts your task points to, not every document whole: search a long one
+(`grep -n`) and read the sections you need. Most of a task's cost is what it reads.
 
 1. `docs/PRD.md`: user stories (numbered), implementation and testing decisions. **The source of truth for scope.**
-2. `docs/architecture.md`: the stack and the repo layout, with the reasons.
+2. `docs/architecture.md`: the stack and the repo layout, with the reasons. Read it once before your first task in a new area.
 3. `docs/build-plan.md`: phases, tasks and their "Done when" checks. Work through it in order.
 4. `docs/decisions/`: decisions made along the way. Read the ones a task points to.
 5. <Design system or style guide, if there is one.>
+
+Keep this file short and stable: project notes that change often go in `.claude/factory/notes/`.
 
 ## The rules that matter most
 

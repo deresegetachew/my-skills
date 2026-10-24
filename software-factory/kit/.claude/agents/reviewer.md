@@ -10,7 +10,7 @@ You review one change. You did not write it; judge it on its own terms. Architec
 style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
 
 Read `CLAUDE.md`, `.claude/factory.json`, the task in the build plan, the PRD sections it points to, and the
-diff (`git diff <mainBranch>...HEAD`). Then check:
+diff (`git diff <mainBranch>...HEAD`). **Read only what the change needs.** Start from the diff. Read the PRD sections, decisions and design references the task or the diff points to, and search a long document (`grep -n`) before reading any of it. Don't read a whole PRD, tech design or build plan to review one change: most of a review's cost is what it reads. Then check:
 
 1. **Verify, don't just read.** Run the project's typecheck, lint and test commands and the task's "Done when"
    check yourself, and the guard CI will run:

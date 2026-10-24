@@ -279,6 +279,8 @@ version it pins. `factory help` lists everything.
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
 | `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
+| `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
+| `factory settings` | Every setting in `factory.json`: its value here (or the default) and what it does. `settings show <key>` gives its type, default and options; `settings set <key> <value>` changes one, checked against its type; `settings unset <key>` goes back to the default. Then commit the file in a PR. Agents can't run `set` or `unset` |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
@@ -377,6 +379,43 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 - More agents only help when the plan has tasks that don't depend on each other, and each one costs tokens.
 - Set `maxOpenPRs` to about the number of agents + 1. The gate won't open more ready PRs than that.
 - Keep the machine awake while agents run (on a Mac, `caffeinate -d` in another tab).
+
+### Saving tokens
+
+Most of the cost is what the agents read, not what they write.
+
+- **A fresh session per task** (the loop already does this), so no task carries the last one's context.
+- **Cheaper models for routine subagents:** the test-writer and the architecture-reviewer run on Sonnet
+  (`model:` in their files); the reviewer and the safety and security reviews keep the session's model.
+- **Read what the task needs.** Every agent reads the PRD sections, decisions and designs the task points to
+  and searches long documents, instead of reading them whole. Keep `CLAUDE.md` short and stable (it starts
+  every session, and an unchanged start is cheaper to read again); put notes that change often in
+  `.claude/factory/notes/`.
+- **A smaller Stop check:** set `commands.testChanged` and `typecheckChanged` to run only the changed packages
+  (for example `pnpm -s turbo run test --filter=...[origin/main]`). A failure shows the failing lines first,
+  `checkOutputLines` in all.
+- **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
+  review in one round instead of several.
+- **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
+  otherwise, with short state notes.
+
+### Measuring it
+
+`factory usage` reads Claude Code's own session logs on this machine (`~/.claude/projects/`, the project folder
+and every agent worktree, with their subagents) and prints tokens per task: fresh input (what missed the cache),
+cache reads, output and the cache hit rate. Each reply counts once; a session belongs to the task branch it spent
+most replies on.
+
+```sh
+factory usage                                # the last 7 days, per task
+factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
+factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
+```
+
+`--record` appends one row of per-task averages to `docs/factory-usage.md` (`usageLog`). Commit it, so every
+factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each
+machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size), and use `/usage`
+or the console for money, since prices differ per model.
 
 <br>
 
@@ -700,12 +739,26 @@ Files that don't follow the guide yet go on a legacy list (`structure.legacy`). 
 ## factory.json settings
 
 The template has every key with a short `_about`. Missing keys fall back to the defaults in `factory_config.py`.
+`factory settings` lists them with their values and changes them for you:
+
+```sh
+factory settings                          # every setting, its value here or the default, and what it does
+factory settings show tasks.source        # type, default, value here, options (plan, issues)
+factory settings set maxOpenPRs 5
+factory settings set agents '["ada","grace"]'   # lists and objects as JSON
+factory settings unset maxOpenPRs         # back to the default
+```
+
+`set` and `unset` only write `.claude/factory.json`; commit it on a branch and merge it in a PR (`.claude/` is
+protected). They refuse inside an agent session, and `settings.json` denies them to agents, because the PR gate
+reads these settings.
 
 | Key | What it sets | Default |
 |---|---|---|
 | `prd`, `plan`, `blocked`, `decisions` | Where the docs live | `docs/PRD.md`, `docs/build-plan.md`, `docs/blocked.md`, `docs/decisions` |
 | `mainBranch` | The main branch | `main` |
-| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup` | empty |
+| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only | empty |
+| `checkOutputLines` | How many lines of a failing Stop check the agent sees: the failing lines first, then the end | 40 |
 | `codePaths` | Folders with code: the Stop check runs when they change | `["src"]` |
 | `checkRequires` | Paths that must exist before the Stop check runs, such as `node_modules` | `[]` |
 | `protected` | Regexes of files an agent may not merge | `CLAUDE.md`, `.claude/`, `.github/`, `.env`, lockfiles |
@@ -760,6 +813,8 @@ software-factory/
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_reviews.py                  which extra reviews a change needs
+      factory_settings.py                 `factory settings`: list, show, set and unset factory.json values
+      factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
       factory_guard.py                    the CI guard
       style_checks.py                     CI: each style's check
       factory_config.py                   reads factory.json, with defaults

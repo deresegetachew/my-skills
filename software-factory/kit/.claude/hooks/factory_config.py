@@ -10,8 +10,14 @@ DEFAULTS = {
     # a number neither main nor another open PR has (factory_numbers.py, checked by the PR gate).
     "numberedDirs": [],
     "mainBranch": "main",
-    "commands": {"typecheck": "", "lint": "", "test": "", "build": "", "smoke": ""},
+    # typecheckChanged / testChanged: the Stop check runs these instead of typecheck / test when set, for the
+    # changed packages only (for example `pnpm -s turbo run test --filter=...[origin/main]`). Fewer test lines in
+    # the agent's context, and a faster turn.
+    "commands": {"typecheck": "", "lint": "", "test": "", "build": "", "smoke": "",
+                 "typecheckChanged": "", "testChanged": ""},
     "codePaths": ["src"],
+    # How many lines of a failing Stop check the agent sees: the failing lines first, then the end of the output.
+    "checkOutputLines": 40,
     "protected": [r"^CLAUDE\.md$", r"^\.claude/", r"^\.github/", r"\.env",
                   r"(^|/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$"],
     "alwaysAllowed": ["docs/build-plan.md", "docs/blocked.md"],

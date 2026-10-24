@@ -28,8 +28,11 @@
     "test": "pnpm -s test",
     "build": "pnpm -s build",
     "smoke": "",
-    "agentSetup": ""
+    "agentSetup": "",
+    "typecheckChanged": "",
+    "testChanged": ""
   },
+  "checkOutputLines": 40,
   "codePaths": [
     "apps",
     "packages",

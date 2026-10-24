@@ -98,7 +98,10 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    environment variable with today's value as the default, then list them in `agentEnv` and add an `agentSetup`
    command that creates the slot's database. Slot 1 keeps the defaults.
    **Tokens:** most of the cost is input, so the fresh context per task matters most; use cheaper models for
-   routine subagents. Terse-reply skills such as the community `/caveman` save a few percent at most.
+   routine subagents (the kit's test-writer and architecture-reviewer run on Sonnet), ask agents to read only the
+   parts of the docs a task points to, and set `commands.testChanged` / `typecheckChanged` so the Stop check runs
+   on the changed packages only (`factory settings`). Terse-reply skills such as the community `/caveman` save a
+   few percent at most.
 9. Offer to be the dev manager (Mode 2).
 
 ## Mode 2: act as dev manager

@@ -40,6 +40,16 @@ CI                       local (a self-hosted runner on this Mac) or GitHub's ru
   ci start | stop        run the runner once by hand, in the background, until stop or a restart
   ci logs [-f]           the runner's log
 
+Settings
+  settings               every setting: its value here (or the default) and what it does
+  settings show <key>    one setting in full: type, default, value here, options
+  settings set <key> <v> change one (checked against its type); unset <key> goes back to the default.
+                         Then commit .claude/factory.json in a pull request. Agents can't run set or unset.
+
+Measure
+  usage [--since D] [--by task|agent|model] [--record LABEL]
+                         tokens per task from this machine's Claude Code logs; --record appends a row to the usage log
+
 Maintain
   release <agent>        drop an agent's local claims (taytu ...), for example after a crash
   clean                  remove agent worktrees no agent is using (and with no uncommitted work), and local task
@@ -70,6 +80,8 @@ case "$cmd" in
   release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
+  settings)  py factory_settings.py "$@" ;;
+  usage)     py factory_usage.py "$@" ;;
   env)       if [ -n "${1:-}" ]; then
                case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
              else py factory_env.py; fi ;;

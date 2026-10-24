@@ -18,6 +18,14 @@ labels: ["factory:ready"]
 
 - 
 
+## Edge cases
+
+<!-- The inputs the reviewers and the safety auditor will try: other languages and scripts, punctuation,
+     empty and huge input, page or line breaks, a second machine or agent. The test-writer covers these first,
+     so the task passes review in one round. Leave empty if none. -->
+
+- 
+
 ## Todos
 
 - [ ] Failing tests first (test-writer)
