@@ -85,6 +85,30 @@ def load():
     return cfg
 
 
+def load_from_main(local=None):
+    """The settings as main has them (`git show origin/<main>:.claude/factory.json`), never the worktree's copy.
+
+    The PR gate enforces these settings, so an agent must not be able to change them by editing its own worktree
+    (#51). The main branch's name still comes from the worktree. A main without the file gives the defaults; a git
+    error (no origin/<main>) raises, so the gate fails closed."""
+    local = local or load()
+    main = local.get("mainBranch") or DEFAULTS["mainBranch"]
+    import subprocess
+    p = subprocess.run(["git", "show", f"origin/{main}:.claude/factory.json"], capture_output=True, text=True)
+    cfg = dict(DEFAULTS)
+    cfg["mainBranch"] = main
+    if p.returncode != 0:
+        exists = subprocess.run(["git", "rev-parse", "--verify", "-q", f"origin/{main}"], capture_output=True)
+        if exists.returncode != 0:
+            raise RuntimeError(f"origin/{main} isn't there to read the factory's settings from (git fetch origin)")
+        return cfg  # main has no factory.json yet: the defaults
+    user = json.loads(p.stdout)
+    cfg.update({k: v for k, v in user.items() if not k.startswith("_")})
+    cfg["commands"] = {**DEFAULTS["commands"], **user.get("commands", {})}
+    cfg["mainBranch"] = main
+    return cfg
+
+
 def matches(path, patterns):
     return any(re.search(rx, path) for rx in patterns)
 

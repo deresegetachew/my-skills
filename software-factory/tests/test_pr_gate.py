@@ -29,6 +29,14 @@ sys.exit("fake gh: no answer for " + " ".join(a))
 '''
 
 
+def publish_settings(d):
+    """Commit the worktree's .claude/factory.json and point origin/main at that commit."""
+    git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(git + ["add", ".claude/factory.json"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "settings"], check=True)
+    subprocess.run(git + ["update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+
+
 def setup(pr=None, cfg_extra=None, **scenario):
     d = tempfile.mkdtemp()
     os.makedirs(os.path.join(d, "bin"))
@@ -45,6 +53,7 @@ def setup(pr=None, cfg_extra=None, **scenario):
           **(pr or {})}
     json.dump({"pr": pr, **scenario}, open(os.path.join(d, "scenario.json"), "w"))
     subprocess.run(["git", "init", "-q", d], check=True)
+    publish_settings(d)  # the gate reads main's factory.json, never the worktree's (#51)
     env = {**os.environ, "PATH": f"{d}/bin:{os.environ['PATH']}", "GATE_SCENARIO": os.path.join(d, "scenario.json"),
            "GATE_LOG": os.path.join(d, "log")}
     env.pop("FACTORY_AGENT", None)
@@ -225,6 +234,28 @@ def test_copilot_fifth_review_on_pr_36():
               "gh pr edit 7 --add-label \"$LABEL\"",
               "cd ../other && gh pr ready 7"):
         assert gate(d, env, c)[0] == 2, c
+
+
+
+def test_the_worktree_copy_of_the_settings_changes_nothing():
+    # Main's settings protect .claude/ and know the hold label; the agent edits its own copy to drop both.
+    d, env = setup(pr={"labels": [{"name": "factory-hold"}]})
+    cfg = json.load(open(os.path.join(d, ".claude", "factory.json")))
+    json.dump({**cfg, "holdLabel": "none", "protected": []}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and "factory-hold" in err, (rc, err)
+    d, env = setup(files=[".claude/settings.json"])
+    cfg = json.load(open(os.path.join(d, ".claude", "factory.json")))
+    json.dump({**cfg, "protected": []}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and ".claude/settings.json" in err, (rc, err)
+
+
+def test_no_main_to_read_the_settings_from_fails_closed():
+    d, env = setup()
+    subprocess.run(["git", "-C", d, "update-ref", "-d", "refs/remotes/origin/main"], check=True)
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and "origin/main" in err, (rc, err)
 
 
 if __name__ == "__main__":
