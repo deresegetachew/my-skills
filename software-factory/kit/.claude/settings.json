@@ -50,7 +50,6 @@
       "Bash(git push --delete*)",
       "Bash(git push -d *)",
       "Bash(git push * -d *)",
-      "Bash(git push * :*)",
       "Bash(gh alias *)",
       "Bash(factory settings set*)",
       "Bash(factory settings unset*)",
