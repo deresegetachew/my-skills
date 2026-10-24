@@ -326,6 +326,11 @@ and dashes:
 - The first agent works in the project folder. The others get git worktrees in `<project>-agents/<name>`, next to the
   project, created on first use and reused after that.
 - A new loop takes the first name that no live loop on this clone holds. `factory agent 2` means the second name.
+- **Several machines:** give each machine its own names with `FACTORY_AGENTS` in its shell profile, never in
+  `factory.json`. For example `export FACTORY_AGENTS=menelik,taytu` on the Mac and
+  `export FACTORY_AGENTS=haile,tewodros` on the Linux machine. `factory loop` then takes only those names, each
+  with its usual folder, ports and database, so two machines never run the same agent. A name that isn't in
+  `agents` stops the loop with a plain message.
   A loop holds its name for as long as it runs, however long that is. (Before 22 Oct a loop older than
   `claimStaleHours` lost its name, so a new loop could start as a second menelik.)
 - Each time a loop starts in a worktree, it checks out `origin/main`, copies `.env.local` and `.env.*.local` across
@@ -411,6 +416,10 @@ factory usage                                # the last 7 days, per task
 factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```
+
+Agents also post each task's tokens on its PR, per subagent, when they open it and again before it merges
+(`factory usage --task <n> --markdown`, a `<!-- factory-usage task=<n> -->` comment), so whoever merges sees
+what the task cost.
 
 `--record` appends one row of per-task averages to `docs/factory-usage.md` (`usageLog`). Commit it, so every
 factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each

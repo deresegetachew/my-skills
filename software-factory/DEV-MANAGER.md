@@ -244,6 +244,11 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
 Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
 Check spend with `/usage`.
 
+**Tokens on every PR.** Agents post a `<!-- factory-usage task=<n> -->` comment with the task's tokens per
+subagent when they open the PR and again before it merges. Read it before you merge: a task far above the usual
+fresh input per task is worth a line in your review (what it read, how many rounds), and a pattern across tasks is
+the next saving to try. If it's missing, ask for it in the review; it isn't a must-fix.
+
 **Measure, then squeeze.** `factory usage --by agent` shows where the tokens go; `factory usage --record "<what
 changed>"` keeps a row per measurement in `docs/factory-usage.md`. Take a row before and after each factory change
 that should save tokens (ask the owner to run it on each agent machine, or run it where the logs are), and say in

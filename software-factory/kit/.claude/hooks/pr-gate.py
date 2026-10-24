@@ -213,8 +213,9 @@ def main():
         block("Run gh directly, not inside bash -c, sh -c, eval or a quoted string: the PR gate has to see the command.")
     if not calls:
         return
-    from factory_config import load
-    cfg = load()
+    from factory_config import load, load_from_main
+    # The rules come from main's factory.json, never this worktree's copy, which the agent could edit (#51).
+    cfg = load_from_main(load())
     for (top, sub, args), tokens in calls:
         if top in ("pr", "issue") and any(t in ("-R", "--repo") or t.startswith(("--repo=", "-R")) for t in tokens):
             block("Agents work on this repository only: leave out -R/--repo, so the gate checks the PR it means.")
