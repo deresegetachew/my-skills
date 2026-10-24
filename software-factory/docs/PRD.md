@@ -1,8 +1,13 @@
 # PRD: the software factory as a product
 
-Status: draft for the owner. Date: 22 Oct 2026. Source: what the factory does today in my-skills
-(`software-factory/`), how Remanual uses it, and what went wrong on 21–22 Oct. Anything marked *(inference)* is a
-reading of the evidence, not something observed.
+Status: draft for the owner. Date: 22 Oct 2026, updated 24 Oct 2026. Source: what the factory does today in
+my-skills (`software-factory/`), how Remanual uses it, and what went wrong on 21–24 Oct. Anything marked
+*(inference)* is a reading of the evidence, not something observed.
+
+**What changed since 22 Oct.** `factory ci` merged (#40), with #41, #42 and #44 after it. Between the evening of 23
+Oct and 01:30Z on 24 Oct the factory merged 23 Remanual PRs, with one self-hosted runner on the owner's Mac. That night showed new pains
+(P18–P28): CI capacity on one shared machine, the dev manager's chain of ticks, decisions made where the dev
+manager can't see them, and everything stopping when the Mac sleeps. New stories 43–55 cover them.
 
 ## 1. Problem and vision
 
@@ -96,15 +101,20 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
   - `factory_ci.py` (tells CI that never started from real failures);
   - waiting for a PR slot;
   - a running loop keeps its name.
-- **`factory ci`** (my-skills #40, open; it moves Remanual's `ops/ci-runner/` from #149 into the kit). It runs
+- **`factory ci`** (my-skills #40, merged; it moved Remanual's `ops/ci-runner/` from #149 into the kit). It runs
   CI on GitHub's runners or on an ephemeral self-hosted runner, as Linux containers on the owner's Mac, chosen by
   the repo variable `CI_RUNS_ON`.
   - `status` works in both modes. `use local|github` switches the mode. `install`, `uninstall`, `start`, `stop`
     and `logs` manage the runner.
   - The names come from the project: `<repo>-ci`, label `<repo>-local`, or `"ci"` in `factory.json`.
   - Several Macs can run runners with one label.
+- **Merged since 22 Oct:**
+  - one agent issue per agent, instead of a copy on every ping (#41);
+  - `factory ci status` on Python 3.8 (#42);
+  - branches are brought up to date by merging main, never by rebasing, and the `git rebase origin/*` allow is
+    gone (#44). Agents had rebased a pushed branch, then were stuck because force-push is denied.
 - **Tests:** `software-factory/tests/` (71 tests on 22 Oct, across the gate, issues, hardening, loop reload and
-  countdown, rework, and lessons; #40 adds 14 for `factory ci`).
+  countdown, rework, and lessons; #40 added 14 for `factory ci`).
 
 ## 4. What hurts today
 
@@ -127,6 +137,17 @@ Everything below lives in `my-skills/software-factory/` and is linked into a pro
 | P15 | **The self-hosted runner lacked what GitHub's image has.** `pnpm/action-setup` failed without `node` (Node must come first). Parallel test runs timed out on a Mac shared with the agents (`--concurrency=1` there). There was no Google Chrome for Lighthouse (Playwright's Chromium with `--no-sandbox`). | Remanual #149, decision 0047, 22 Oct |
 | P16 | **The runner showed as `bash`** in macOS's background items, and the owner asked for it to show its own name. `factory ci` installs the loop as an executable named after the runner. The process is still `bash`; what macOS shows now is untested. | Owner's message, 22 Oct; #40 |
 | P17 | **The runner was Remanual-only.** Its names (`remanual-ci-runner`, `remanual-local`) were hard-coded, its commands were scripts in one repo, and status only made sense in local mode. | `ops/ci-runner/` on Remanual main; the owner's ask for "`<project>-ci status`"; #40 |
+| P18 | **One runner for everything.** One self-hosted runner takes one job at a time, so every open PR and every merge to main queue behind each other. PRs that passed review waited hours for CI. | Remanual, night of 23–24 Oct: up to four PRs and main queued at once |
+| P19 | **The agents' own work starves CI.** Agents run the full test suite on the same Mac as the runner. Test jobs ran past their 15-minute limit 6 times, Lighthouse failed under load, and timing tests failed. None were code faults, so each meant a manual re-run. | Remanual CI, 23 Oct; the owner's yes to raise the limit still pending |
+| P20 | **The runner drops off.** It lost its connection to GitHub 5 times on 23 Oct, once when the Mac went to sleep at night. Jobs then fail as "lost communication", which looks like a red build. | Run annotations, 23 Oct |
+| P21 | **Everything stops when the Mac sleeps.** Agents, the runner and the owner's sessions share one laptop. "Remote sessions are offline" on 24 Oct meant no agent, no CI and no merges for the whole morning. | 24 Oct, 01:00–12:00Z |
+| P22 | **The guard judges stale labels.** A push-event CI run reads the labels from the event, so a run started before `tests-reviewed` was added fails for good; re-running it fails again. The dev manager has to run the guard by hand to see the real answer. | #393, #395 and #399, 23–24 Oct |
+| P23 | **The dev manager's tick chain breaks silently.** Each tick schedules the next one. One tick ended without scheduling, and nothing ran for 6.5 hours until the owner asked. | 24 Oct, 05:09Z–11:47Z |
+| P24 | **Decisions are made where the dev manager can't see them.** The owner answered an agent in its terminal ("no separate VM, Docker is enough" on #150); the dev manager only learnt it from the agent's release note and had to ask again. | #150, 24 Oct |
+| P25 | **The owner's queue keeps growing.** By 24 Oct more than 15 questions waited on the owner (timeouts, page limits, keys, wording, closing issues). They live in chat and in the tick message, with no list he can work through. | The tick message's "Waiting on the owner" list |
+| P26 | **When agents are offline, nobody can land work.** The dev manager may build a task, but may not merge its own PR without the owner's yes, and its cloud workspace couldn't install packages or run the full test suite. | 24 Oct: #173 built by the dev manager with a stand-in test runner |
+| P27 | **Reviewer quota and access run out quietly.** Copilot's review quota ran out mid-day; the cloud session can't read job logs or the runner list (403), so it judges CI from annotations and job steps. | 23 Oct; DEV-MANAGER.md notes |
+| P28 | **Duplicate and stale tasks.** Two issues held the same task (#350 and #351); the agent found it only after claiming one. | #350, 24 Oct |
 
 ## 5. User stories
 
@@ -196,7 +217,8 @@ Each story says who wants what. *Must* is for the first product release, *Should
     isn't on main.
 23. *Must.* As everyone, a CI outage (billing, no runner) is shown as an outage, not as a code failure, and
     agents don't chase it (exists: `factory_ci.py`).
-24. *Should.* As the owner, the self-hosted runner runs in an isolated VM, so a job can't reach my machine (#150).
+24. *Could.* As the owner, the self-hosted runner runs in an isolated VM, so a job can't reach my machine (#150).
+    On 24 Oct the owner told an agent Docker is enough for now, so this moved from Should to Could.
 25. *Could.* As the owner, several runners split a PR's jobs. Several Macs with one label already share the
     queue (#40); GitHub gives each job to one of them.
 25a. *Must.* As the owner, `factory ci status` works in both modes. It shows:
@@ -260,6 +282,37 @@ Each story says who wants what. *Must* is for the first product release, *Should
 41. *Must.* As a new user, a quick start gets one agent building one task end to end on an example repo.
 42. *Must.* As the owner, setting up a new dev machine is one script plus sign-ins, with a checklist (P12).
 
+### Learnt on 23–24 Oct
+
+43. *Must.* As the owner, CI has enough capacity: several runners, or GitHub's runners for some jobs, so a PR
+    that passed review doesn't wait hours (P18). `factory ci status` shows the queue and how long each job
+    waited.
+44. *Must.* As the owner, agents' local test runs and CI don't share one machine's cores, or the factory limits
+    how many run at once (P19).
+45. *Must.* As everyone, a job that ran out of time, lost its runner or was cancelled by a newer commit is shown as
+    infrastructure, not as a failed check. The factory re-runs it once by itself and tells the owner only if it
+    happens again (P19, P20).
+46. *Must.* As the owner, the factory keeps working when my laptop sleeps: agents and the runner live on a machine
+    that stays on, or the laptop is kept awake while the factory runs (P21).
+47. *Must.* As a coding agent, the Factory guard judges the labels the PR has now, not the ones on the event that
+    started the run (P22).
+48. *Must.* As the owner, the dev manager's schedule doesn't depend on each tick scheduling the next. A missed
+    tick is noticed within one interval and restarted (P23; sharpens story 28).
+49. *Must.* As the owner, a decision I give an agent in its terminal is written to the issue or PR as a marked
+    comment, so the dev manager and other agents see it (P24).
+50. *Must.* As the owner, every question waiting on me is one item in one list, with its context, a recommendation
+    and the options, and it leaves the list when I answer (P25; this is the inbox of section 6).
+51. *Should.* As the owner, when no agent is running, the dev manager can build a small task with the same tests
+    and reviews, and I can say whether it may merge its own PR (P26).
+52. *Should.* As the dev manager, my workspace can install the project's packages and run its test suite, or I
+    can ask the dev machine to run it (P26).
+53. *Should.* As the owner, the factory notices when a reviewer is unavailable (Copilot's quota, no log access)
+    and says so once, instead of each review finding out (P27).
+54. *Should.* As a coding agent, before I claim a task the factory checks it isn't a duplicate of an open or
+    closed one (P28).
+55. *Could.* As the owner, the task board is a GitHub Projects board the factory keeps in step with the labels.
+    I chose this on 23 Oct; it waits on the GitHub MCP server being set up on the Mac.
+
 ## 6. UIs
 
 All UIs read the same state (section 7). None of them may do what the rights table forbids. A UI action that
@@ -279,6 +332,9 @@ web app. *(inference: the owner works from a phone and most of his messages ask 
   agents and the dev manager read it as they do today.
 - The status page shows agents, tasks, PRs and CI.
 - The TUI comes second, for the dev laptop. The CLI stays the base everything else calls.
+
+The night of 23–24 Oct supports this order: almost every message to the owner was either a question for him or
+"CI is queued on your Mac" (P18, P25). Design alternatives for the UI are in the "Software factory UI" design.
 
 ## 7. Architecture options
 
@@ -347,13 +403,17 @@ Add: pluggable task sources (issues, plan, Linear later), pluggable CI providers
 8. Once the billing block is lifted, should CI go back to GitHub's runners (`factory ci use github`), stay on the
    Mac, or depend on the project? The local runner costs no minutes but runs branch code on your Mac (#150).
 9. Should `factory ci` support Linux machines (systemd) as well as macOS, for example for the dev laptop? Today
-   it is macOS only, and it hasn't been run on a Mac yet; its tests use fakes.
+   it is macOS only.
+10. Where should the agents and the runner live so they keep going when your laptop sleeps (P21): the dev
+    laptop, a small always-on machine, or GitHub's runners for CI?
+11. May the dev manager merge its own PRs when no agent is running, after the reviewer and CI pass (P26)?
+12. Should CI's test-job time limit go from 15 to 25 minutes now, while the runner is shared (P19)?
 
 ## 9. Roadmap
 
 | Phase | What | Done when |
 |---|---|---|
-| **0. Reliable loop** (mostly done) | The 22 Oct fixes (#33–#38), `factory ci` (#40: local or GitHub runners, one command, project-named, status in both modes; replaces Remanual's `ops/ci-runner/` from #149), the VM runner (#150), the dev-laptop setup script, the priority label honoured | Two agents run 24 h on the dev laptop with no stall the owner has to fix; CI green on the owner's runner; one-script setup of a new machine |
+| **0. Reliable loop** (mostly done) | Done: the 22 Oct fixes (#33–#38), `factory ci` (#40), #41, #42, merge-not-rebase (#44). Left: CI capacity and re-runs of infrastructure failures (stories 43–45), an always-on machine (46), the guard reading current labels (47), a tick that can't break (48), the dev-laptop setup script, the priority label honoured | Two agents run 24 h with no stall the owner has to fix; CI keeps up with them; one-script setup of a new machine |
 | **1. One place to look** | `factory status` and `factory doctor` (taking in `factory ci status`); a pinned GitHub status issue the dev manager edits; the state store (option B) rebuilt from GitHub | The owner answers "what's waiting for me?" from one page, and the tick message shrinks to a pointer to the store |
 | **2. The inbox** | A mobile web inbox of decisions with one-tap answers written back as marked comments; notifications only for inbox items; a daily digest | A week of operation where every owner decision went through the inbox, not chat |
 | **3. Dashboard and TUI** | The status page (agents, board, PR queue, CI, usage where available); `factory top` | The owner can see and act on every agent and PR from a phone or the dev laptop |
