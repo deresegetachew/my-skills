@@ -15,6 +15,7 @@ factory <command>
 
 Build
   loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into,
+                         FACTORY_AGENTS=haile,tewodros: only those names on this machine;
                          which closes by itself when the task is done). Start it again in another terminal for more agents.
   agent <name|N>         open Claude in that agent's own worktree (created the first time); then /loop /next-task all.
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
