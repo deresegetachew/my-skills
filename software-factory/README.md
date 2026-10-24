@@ -398,9 +398,12 @@ Most of the cost is what the agents read, not what they write.
   `.claude/factory/notes/`.
 - **A smaller Stop check:** set `commands.testChanged` and `typecheckChanged` to run only the changed packages
   (for example `pnpm -s turbo run test --filter=...[origin/main]`). A failure shows the failing lines first,
-  `checkOutputLines` in all. After a green check, the next Stop skips it when nothing changed: same HEAD, same
-  changes under `codePaths` (untracked files included) and same commands. It remembers this in the git folder
-  (`.git/factory-check-green`, one per worktree); a failure is never remembered.
+  `checkOutputLines` in all. After a green check, the next Stop skips it when nothing changed. That means the same
+  HEAD, the same tracked changes anywhere in the repo, the same untracked files that aren't ignored, the same
+  commands, and `checkRequires` paths (such as `node_modules`) not touched since. Other ignored files, such as
+  `.env`, aren't compared.
+  It remembers this in the git folder (`.git/factory-check-green`, one per worktree), and a failure is never
+  remembered. Like the review markers, it's a guard rail: a hand-written file there skips the check.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30

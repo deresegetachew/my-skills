@@ -90,6 +90,38 @@ def test_changed_commands_run_it_again():
     assert runs(log) == 3, "typecheck and test both ran"
 
 
+def test_a_change_outside_code_paths_runs_it_again():
+    # A root tsconfig.json, package.json or lockfile changes the result too (dev manager, #81).
+    d, log = project()
+    write(d, "tsconfig.json", "good\n")
+    git(d, "add", "tsconfig.json")
+    git(d, "commit", "-qm", "config")
+    write(d, "src/a.ts", "two\n")
+    stop(d)
+    write(d, "tsconfig.json", "broken\n")
+    stop(d)
+    assert runs(log) == 2, "a tracked change outside codePaths must rerun"
+    write(d, "vitest.config.ts", "new\n")  # untracked, outside codePaths
+    stop(d)
+    assert runs(log) == 3
+
+
+def test_a_new_install_runs_it_again():
+    d, log = project()
+    cfg = json.load(open(os.path.join(d, ".claude", "factory.json")))
+    json.dump({**cfg, "checkRequires": ["node_modules"]}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    open(os.path.join(d, ".gitignore"), "w").write("node_modules/\n")
+    git(d, "add", "-A")
+    git(d, "commit", "-qm", "ignore")
+    os.makedirs(os.path.join(d, "node_modules"))
+    write(d, "src/a.ts", "two\n")
+    stop(d)
+    t = os.stat(os.path.join(d, "node_modules")).st_mtime + 5
+    os.utime(os.path.join(d, "node_modules"), (t, t))  # `pnpm install` touched it
+    stop(d)
+    assert runs(log) == 2
+
+
 def test_a_failing_check_is_never_skipped():
     d, log = project(exit_code=1)
     write(d, "src/a.ts", "two\n")

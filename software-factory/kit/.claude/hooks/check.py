@@ -6,8 +6,9 @@ Runs the project's typecheck and test commands (from .claude/factory.json) only 
 changed packages only. Exit 2 sends the failure back to Claude so it fixes it before stopping: the lines that
 name a failure first, then the end of the output, `checkOutputLines` in all.
 
-After a green run it remembers what it checked (HEAD, the changes under `codePaths`, tracked and untracked, and the
-commands) in the git folder, and skips the next Stop if all of that is the same. A failure is never remembered.
+After a green run it remembers what it checked (HEAD, every tracked change, every untracked file that isn't ignored,
+the commands, and when each `checkRequires` path last changed) in the git folder, and skips the next Stop if all of
+that is the same. A failure is never remembered. Other ignored files (`.env`, build output) aren't in it.
 """
 import hashlib, json, os, re, subprocess, sys
 
@@ -45,13 +46,13 @@ if not changed and not untracked:
 
 
 def fingerprint(commands):
-    """What a green run covered: HEAD, the commands, the diff under codePaths and each untracked file there."""
+    """What a green run covered: HEAD, the commands, the whole tracked diff (a root tsconfig.json or lockfile counts
+    too), each untracked file that isn't ignored, and when each `checkRequires` path last changed (an install)."""
     h = hashlib.sha256()
     h.update(git("rev-parse", "HEAD").stdout.encode())
     h.update(json.dumps(commands, sort_keys=True).encode())
-    h.update(subprocess.run(["git", "diff", "--binary", "HEAD", "--", *paths], capture_output=True).stdout)
-    names = subprocess.run(["git", "ls-files", "-z", "--others", "--exclude-standard", "--", *paths],
-                           capture_output=True).stdout
+    h.update(subprocess.run(["git", "diff", "--binary", "HEAD"], capture_output=True).stdout)
+    names = subprocess.run(["git", "ls-files", "-z", "--others", "--exclude-standard"], capture_output=True).stdout
     for name in sorted(n for n in names.split(b"\0") if n):
         h.update(name + b"\0")
         try:
@@ -59,6 +60,11 @@ def fingerprint(commands):
                 h.update(hashlib.sha256(f.read()).digest())
         except OSError:
             h.update(b"?")
+    for p in needs:
+        try:
+            h.update(f"{p}:{os.stat(p).st_mtime_ns}".encode())
+        except OSError:
+            h.update(f"{p}:-".encode())
     return h.hexdigest()
 
 
