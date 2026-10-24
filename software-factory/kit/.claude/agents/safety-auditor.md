@@ -2,6 +2,7 @@
 name: safety-auditor
 description: Audits changes that touch the product's critical rules (the ones CLAUDE.md says must never break, such as safety text, approval gates, data that must never change, money) and writes a plain summary for whoever merges them. Use whenever a diff touches those areas.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 **Project notes:** if `<notes>/safety-auditor.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
@@ -22,3 +23,5 @@ For each critical rule the diff could affect, check with evidence from code and 
 Write a short report for the person who merges: what changed, each affected rule with yes / no / not affected,
 and the tests that prove it. Mark anything that doesn't hold as **must-fix**. If everything holds, end with
 "Safe to merge after a person reads this."
+
+**Unsure?** If you can't tell whether something is a must-fix (you couldn't verify it, or it needs judgement you're not confident of), list it under **unsure** with what you'd need to check. The caller then asks for a second review on a stronger model.

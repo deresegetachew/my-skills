@@ -62,6 +62,10 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    untrusted input.
 5. Ask the `reviewer` subagent to review the diff, and the `architecture-reviewer` on styled paths. Fix every
    must-fix; the PR gate needs their passes for the current commit.
+6. **Escalate a review only when it finds something.** The `reviewer`, `safety-auditor` and `security-reviewer` run
+   on Sonnet (`model:` in their files). Ask the same subagent again with `model: "opus"` when its pass reports a
+   must-fix or something it's unsure of, and keep `opus` for that subagent's later rounds on this task. Start on
+   `opus` when the diff is over `prSizeWarn` lines or touches a `protected` path. Fix what either pass raises.
 
 ## 4. Ship it
 

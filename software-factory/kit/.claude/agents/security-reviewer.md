@@ -2,6 +2,7 @@
 name: security-reviewer
 description: Reviews changes to auth, payments, public endpoints, file uploads, storage, secrets, tenancy and anything that sends untrusted input to a model, before the pull request.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 **Project notes:** if `<notes>/security-reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
@@ -22,3 +23,5 @@ architecture notes for who the customers and tenants are. **Read only what the c
 
 Report each finding with file and line, a one-line attack scenario and the fix, marked **must-fix** or
 **worth fixing**. No theoretical issues without a path to exploit them.
+
+**Unsure?** If you can't tell whether something is a must-fix (you couldn't verify it, or it needs judgement you're not confident of), list it under **unsure** with what you'd need to check. The caller then asks for a second review on a stronger model.

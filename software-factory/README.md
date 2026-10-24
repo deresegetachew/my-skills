@@ -385,8 +385,11 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 Most of the cost is what the agents read, not what they write.
 
 - **A fresh session per task** (the loop already does this), so no task carries the last one's context.
-- **Cheaper models for routine subagents:** the test-writer and the architecture-reviewer run on Sonnet
-  (`model:` in their files); the reviewer and the safety and security reviews keep the session's model.
+- **Cheaper models for subagents, the strong one when it matters:** every subagent runs on Sonnet (`model:` in
+  its file). When the `reviewer`, `safety-auditor` or `security-reviewer` reports a must-fix or something it's
+  unsure of, the next-task skill asks it again on Opus, and keeps Opus for that review's later rounds on the task.
+  A diff over `prSizeWarn` lines, or one that touches a `protected` path, goes to Opus from the start. A clean,
+  small change is reviewed once, on Sonnet.
 - **Read what the task needs.** Every agent reads the PRD sections, decisions and designs the task points to
   and searches long documents, instead of reading them whole. Keep `CLAUDE.md` short and stable (it starts
   every session, and an unchanged start is cheaper to read again); put notes that change often in
@@ -518,6 +521,11 @@ current; the task never has to:
 | `architecture-reviewer` | Changes on paths with a style guide (`styles`) | Reviews against the style-guide skills, runs their `check`, and records its own pass |
 | `safety-auditor` | Changes on `reviews.safety-auditor.paths`, or anything touching the critical rules | Checks each critical rule still holds and is tested; writes a summary for whoever merges |
 | `security-reviewer` | Changes on `reviews.security-reviewer.paths`, plus auth, payments, uploads, tenancy, secrets | Reports exploitable problems with file, line and fix |
+
+**Models.** All five run on Sonnet. The `reviewer`, `safety-auditor` and `security-reviewer` get a second pass on
+Opus when the first one finds a must-fix or something it's unsure of, and start on Opus for a diff over
+`prSizeWarn` lines or one that touches a `protected` path ([Saving tokens](#saving-tokens)). The architecture
+reviewer and the test-writer stay on Sonnet.
 
 `factory reviews` (`factory_reviews.py`) lists the extra reviews and checks a change needs, from `reviews`, `eval`,
 `design` and `styles` in `factory.json`: for example `safety-auditor`, `security-reviewer`, `eval`, `design-check`,

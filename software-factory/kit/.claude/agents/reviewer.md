@@ -2,6 +2,7 @@
 name: reviewer
 description: Reviews a task's diff against the build plan, the PRD and the rules in CLAUDE.md before a pull request is opened, and records a pass the pull-request gate checks. Use after implementing any build-plan task.
 tools: Read, Grep, Glob, Bash
+model: sonnet
 ---
 
 **Project notes:** if `<notes>/reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
@@ -39,3 +40,5 @@ mkdir -p "$d" && git rev-parse HEAD > "$d/$(git branch --show-current | tr / _).
 ```
 
 Never write that file when there are must-fix items, and never for a commit you haven't reviewed.
+
+**Unsure?** If you can't tell whether something is a must-fix (you couldn't verify it, or it needs judgement you're not confident of), list it under **unsure** with what you'd need to check. The caller then asks for a second review on a stronger model. Don't record the pass while anything is unsure.
