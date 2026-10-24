@@ -11,7 +11,12 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - run: python3 tools/check_skills.py
+      - name: Factory tests
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          python3 tools/run_tests.py

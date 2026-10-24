@@ -35,11 +35,12 @@ Check
   doctor                 check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only
 
-CI                       local (a self-hosted runner on this Mac) or GitHub's runners; names from the project
+CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
   ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
   ci use local|github    send CI jobs to the self-hosted runners (label <repo>-local), or back to GitHub's
-  ci install             install the runner as a macOS LaunchAgent named <repo>-ci (run it again to update)
-  ci uninstall           remove it: the LaunchAgent, its containers and this Mac's idle registrations
+  ci install             install the runner as <repo>-ci: a LaunchAgent on macOS, a systemd --user service on Linux
+                         (run it again to update)
+  ci uninstall           remove it: the service, its containers and this machine's idle registrations
   ci start | stop        run the runner once by hand, in the background, until stop or a restart
   ci logs [-f]           the runner's log
 
