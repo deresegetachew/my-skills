@@ -237,6 +237,27 @@ def test_copilot_fifth_review_on_pr_36():
 
 
 
+def test_agents_cannot_delete_remote_branches():
+    d, env = setup()
+    for c in ("git push origin :task/1-x", "git -C . push origin :x", "true && git push origin +:x",
+              "git push origin a:a :b", "bash -c 'git push origin :x'"):
+        rc, err = gate(d, env, c)
+        assert rc == 2 and "delete remote branches" in err, (c, rc, err)
+    for c in ("git push origin task/1-x", "git push -u origin HEAD", "git push origin task/1-x:task/1-x",
+              "git push origin HEAD:refs/heads/task/1-x", "echo push: done"):
+        assert gate(d, env, c)[0] == 0, c
+
+
+def test_gh_run_through_a_package_runner_is_refused():
+    d, env = setup()
+    for c in (f"pnpm exec gh pr merge 7 --squash --match-head-commit {HEAD}", "npx gh pr merge 7",
+              "pnpm dlx gh pr merge 7", "yarn exec gh pr comment 7 --body x"):
+        rc, err = gate(d, env, c)
+        assert rc == 2, (c, rc, err)
+    for c in ("pnpm test", "pnpm -s typecheck", "npx vitest run"):
+        assert gate(d, env, c)[0] == 0, c
+
+
 def test_the_worktree_copy_of_the_settings_changes_nothing():
     # Main's settings protect .claude/ and know the hold label; the agent edits its own copy to drop both.
     d, env = setup(pr={"labels": [{"name": "factory-hold"}]})

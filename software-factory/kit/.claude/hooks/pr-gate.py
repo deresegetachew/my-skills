@@ -16,6 +16,8 @@ Issues mode (`tasks.source: "issues"`): create also needs the branch's issue (ta
 Markers: agents may not post the dev manager's markers (factory-approved, factory-answer, factory-mustfix), add
         the review labels or remove the hold label. With `trustedReviewers` in factory.json, only those GitHub
         logins' approvals count. An approval counts only for the commit it names (`sha=`).
+Pushes: agents may not delete remote branches (`git push <remote> :<branch>` or `+:<branch>`), also inside bash -c.
+Wrappers: gh run through a shell, eval, xargs or a package runner (pnpm exec, npx, yarn) can't be checked: refused.
 
 This gate is a guard rail for well-meaning agents, not a security boundary: branch protection and required CI
 checks on GitHub are. It fails closed: an error, or a command it can't read, blocks the command.
@@ -51,9 +53,29 @@ PREFIXES = {"env", "command", "builtin", "exec", "sudo", "nohup", "time", "nice"
             "if", "then", "else", "elif", "while", "until", "do", "!", "{", "}"}
 # Programs that run a command given as text; a gh command inside their arguments can't be checked.
 WRAPPERS = {"bash", "sh", "zsh", "dash", "ksh", "fish", "eval", "xargs", "env", "nohup", "time", "timeout",
-            "sudo", "script", "watch", "nice", "python", "python3", "node", "perl", "ruby"}
+            "sudo", "script", "watch", "nice", "python", "python3", "node", "perl", "ruby",
+            # package runners run the next words as a program: `pnpm exec gh pr merge 7` is gh, unchecked
+            "pnpm", "pnpx", "npx", "npm", "yarn", "bunx", "bun", "corepack"}
 GH_IN_SUBSTITUTION = re.compile(r"(\$\(|`)\s*(\S*/)?gh(\s|[`)]|$)")  # "$(gh pr merge 7)", `gh ...`
 GH_IN_TEXT = re.compile(r"(^|[^\w.-])gh\s+(-\S+\s+)*[a-z]")
+# A refspec that deletes a remote branch: `git push origin :task/1-x` or `+:x` (#47).
+GIT_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
+PUSH_DELETE_IN_TEXT = re.compile(r"(^|[^\w.-])git\b[^;&|]*\bpush\b[^;&|]*\s\+?:")
+
+
+def push_deletes(tokens):
+    """Whether this simple command is `git push` with a refspec that deletes a remote branch (`:branch`)."""
+    i = 0
+    while i < len(tokens) and (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[i]) or tokens[i] in PREFIXES):
+        i += 1
+    if i >= len(tokens) or os.path.basename(tokens[i]) != "git":
+        return False
+    i += 1
+    while i < len(tokens) and tokens[i].startswith("-"):  # git's global options, some with a value
+        i += 2 if tokens[i] in GIT_GLOBAL_WITH_VALUE else 1
+    if i >= len(tokens) or tokens[i] != "push":
+        return False
+    return any(t.startswith((":", "+:")) and len(t.lstrip("+")) > 1 for t in tokens[i + 1:])
 
 
 def run(*a):
@@ -169,6 +191,16 @@ def body_text(flags):
 def main():
     data = json.load(sys.stdin)
     cmd = (data.get("tool_input") or {}).get("command", "") or ""
+    if re.search(r"\bpush\b", cmd) and re.search(r"\bgit\b", cmd):
+        try:
+            pushes = simple_commands(cmd)
+        except ValueError:
+            block("The PR gate can't read this command (unbalanced quotes?). Write it more simply.")
+        if any(push_deletes(p) for p in pushes) or any(
+                p and os.path.basename(p[0]) in WRAPPERS and PUSH_DELETE_IN_TEXT.search(" ".join(p[1:]))
+                for p in pushes):
+            block("Agents don't delete remote branches (`git push <remote> :<branch>`). Leave branch clean-up to the "
+                  "dev manager.")
     if not re.search(r"(^|[^\w.-])gh\b", cmd):
         return  # no gh at all: the fast path for every other Bash call
     try:
@@ -177,7 +209,8 @@ def main():
         block("The PR gate can't read this command (unbalanced quotes?). Write it more simply.")
     calls = [(c, p) for c, p in ((gh_call(p), p) for p in parts) if c]
     # gh hidden inside one argument (bash -c '...', eval "...", xargs sh -c ...) can't be checked: refuse it.
-    if any((os.path.basename(p[0]) in WRAPPERS and any(GH_IN_TEXT.search(t) for t in p[1:]))
+    if any((os.path.basename(p[0]) in WRAPPERS and (any(GH_IN_TEXT.search(t) for t in p[1:])
+                                                     or GH_IN_TEXT.search(" ".join(p[1:]))))
            for p in parts if p) or GH_IN_SUBSTITUTION.search(cmd):
         block("Run gh directly, not inside bash -c, sh -c, eval or a quoted string: the PR gate has to see the command.")
     if not calls:

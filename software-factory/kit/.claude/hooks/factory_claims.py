@@ -125,6 +125,18 @@ def stamp(agent, pid, **extra):
     return {"agent": agent, "pid": int(pid), "host": HOST, "at": time.time(), **extra}
 
 
+def machine_agents(names):
+    """The names this machine may run, from FACTORY_AGENTS (comma-separated, set in the machine's shell profile, never
+    committed), so two machines never start the same agent (#48). Empty: every name. A name that isn't in `agents`
+    stops with a plain message."""
+    only = [n.strip() for n in os.environ.get("FACTORY_AGENTS", "").split(",") if n.strip()]
+    unknown = [n for n in only if n not in names]
+    if unknown:
+        raise SystemExit(f"FACTORY_AGENTS names {', '.join(unknown)}, which aren't agents in .claude/factory.json "
+                         f"({', '.join(names)}).")
+    return only
+
+
 def checkout(pid, stale_hours):
     """The project folder if no live loop holds it, else this loop's own worktree. Prints and returns it."""
     main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
@@ -135,11 +147,17 @@ def checkout(pid, stale_hours):
         candidates = [(names[0], main_top)] + [
             (name, os.path.join(main_top + "-agents", name)) for name in names[1:]
         ]
+        only = machine_agents(names)
+        if only:  # this machine's names (FACTORY_AGENTS); each keeps its own slot, folder, ports and database
+            candidates = [c for c in candidates if c[0] in only]
         for agent, path in candidates:
             if not alive(cos.get(agent), stale_hours, loop=True):
                 cos[agent] = stamp(agent, pid, path=path)
                 break
         else:
+            if only:
+                raise SystemExit(f"every agent this machine may run ({', '.join(only)}, from FACTORY_AGENTS) already "
+                                 "has a live loop on this clone; add a name to FACTORY_AGENTS for more")
             raise SystemExit(f"every agent ({', '.join(names)}) already has a live loop on this clone; "
                              "add names to `agents` in .claude/factory.json for more")
     ensure_worktree(path, main_top)
@@ -156,6 +174,10 @@ def ensure_worktree(path, main_top):
     subprocess.run(["git", "fetch", "-q", "origin", cfg["mainBranch"]], check=False)
     subprocess.run(["git", "worktree", "add", "--detach", path, f"origin/{cfg['mainBranch']}"], check=True,
                    stdout=subprocess.DEVNULL)
+    # The kit's files in .claude/ are links into a submodule (vendor/my-skills): without it they point at nothing,
+    # and a session would start without the factory's settings, hooks and deny rules (#46).
+    if os.path.exists(os.path.join(path, ".gitmodules")):
+        subprocess.run(["git", "-C", path, "submodule", "update", "--init", "-q"], check=True)
     # A new worktree has no untracked local files: bring the local env files over.
     import glob, shutil
     for f in [".env.local"] + glob.glob(os.path.join(main_top, ".env.*.local")):
