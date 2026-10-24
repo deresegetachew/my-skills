@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for issues mode, against a fake `gh` that keeps issues in a JSON file.  python3 software-factory/tests/test_issues.py"""
 import json, os, subprocess, sys, tempfile, textwrap
+from datetime import datetime, timezone
 
 KIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit")
 HOOKS = os.path.abspath(os.path.join(KIT, ".claude", "hooks"))
@@ -24,6 +25,7 @@ def lab(names): return [{"name": n} for n in names]
 db["clock"] = db.get("clock", 0) + 1
 m = re.fullmatch(r"issues/(\d+)", p)
 if p == "issues" and method == "GET":
+    if os.environ.get("FAKE_GH_MOVED"): out({"message": "Moved Permanently", "url": "https://api.github.com/repositories/1"})
     if page > 1: out([])
     res = [i for i in db["issues"] if q.get("state", ["open"])[0] in (i["state"], "all")]
     if "labels" in q: res = [i for i in res if q["labels"][0] in {l["name"] for l in i["labels"]}]
@@ -177,6 +179,60 @@ def test_tool_use_pings_at_most_every_few_minutes():
                        input=json.dumps({"hook_event_name": "PostToolUse"}), capture_output=True, text=True)
     assert p.returncode == 0
     assert json.load(open(db)).get("clock") == before  # registered moments ago: no network call
+
+
+def agent_issue(n, name, ping, state="open"):
+    body = f"<!-- factory-agent name={name} status=idle ping={ping} -->\n**Started:** x\n**Where:** y"
+    return {"number": n, "title": f"Agent: {name} · idle", "body": body, "state": state,
+            "labels": [{"name": "factory:agent"}], "milestone": None, "updated_at": "2020-01-01T00:00:00Z"}
+
+
+def count_agent_issues(db):
+    return sum(1 for i in json.load(open(db))["issues"] if "factory:agent" in {l["name"] for l in i["labels"]})
+
+
+def test_a_ping_or_a_turns_end_never_opens_an_agent_issue():
+    # 22 Oct: a lookup that came back empty made every ping open another issue (195 copies).
+    d, db, env = setup([issue(1)])
+    agents(d, env, "ping", "--agent", "menelik", "--force")
+    agents(d, env, "ping", "--agent", "menelik", "--status", "working on #1")
+    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_agents.py"), "hook"], cwd=d,
+                       env={**env, "FACTORY_AGENT": "menelik"}, input=json.dumps({"hook_event_name": "Stop"}),
+                       capture_output=True, text=True)
+    assert p.returncode == 0
+    agents(d, env, "down", "--agent", "menelik")
+    assert count_agent_issues(db) == 0
+
+
+def test_register_reuses_the_agents_issue_even_a_closed_one():
+    d, db, env = setup([agent_issue(5, "menelik", "2026-10-22T10:00:00Z", state="closed")])
+    rc, out = agents(d, env, "register", "--agent", "menelik")
+    assert out == "#5", out
+    agents(d, env, "register", "--agent", "menelik")
+    assert count_agent_issues(db) == 1
+    assert json.load(open(db))["issues"][0]["state"] == "open"
+
+
+def test_a_failed_lookup_is_not_an_empty_one():
+    d, db, env = setup([])
+    rc, out = agents(d, {**env, "FAKE_GH_MOVED": "1"}, "register", "--agent", "menelik")
+    assert rc != 0 and "something other than a list" in out, out
+    assert count_agent_issues(db) == 0
+
+
+def test_only_an_agents_newest_issue_counts_and_sweep_closes_the_copies():
+    fresh = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    d, db, env = setup([issue(1, labels=("factory:in-progress", "agent:menelik")),
+                        agent_issue(2, "menelik", "2020-01-01T00:00:00Z"),
+                        agent_issue(3, "menelik", fresh),
+                        agent_issue(4, "menelik", "2020-01-01T00:00:00Z", state="closed")])
+    rc, out = agents(d, env, "list")
+    assert out.count("menelik") == 1 and " idle " in out, out
+    rc, out = agents(d, env, "sweep")
+    assert out == "closed 1 duplicate agent issue: #2", out  # the old copy went quiet, but the agent is alive
+    assert labels(db, 1) == ["agent:menelik", "factory:in-progress"], labels(db, 1)  # its work stays with it
+    state = {i["number"]: i["state"] for i in json.load(open(db))["issues"]}
+    assert state == {1: "open", 2: "closed", 3: "open", 4: "closed"}, state
 
 
 if __name__ == "__main__":

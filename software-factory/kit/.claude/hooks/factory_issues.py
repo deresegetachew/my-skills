@@ -57,6 +57,9 @@ def gh_all(path):
     while True:
         sep = "&" if "?" in path else "?"
         chunk = gh("GET", f"{path}{sep}per_page=100&page={page}") or []
+        if not isinstance(chunk, list):
+            # A redirect or error object is not an empty list: callers would act on "nothing there".
+            raise SystemExit(f"gh api GET {path} answered something other than a list: {str(chunk)[:200]}")
         out += chunk
         if len(chunk) < 100:
             return out

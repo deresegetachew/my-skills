@@ -23,7 +23,7 @@ ready, so a live agent takes them.
 
 Hooks never fail or slow a session: errors are ignored, and the tool-use ping runs detached.
 """
-import argparse, json, os, re, socket, subprocess, sys, time
+import argparse, json, os, re, socket, subprocess, sys, tempfile, time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,19 +46,37 @@ def iso(t):
 
 
 def stamp_file(agent):
-    from factory_claims import state_dir
+    """Where an agent's last ping and issue number are kept: the repository's factory folder, or, when that can't be
+    written (a sandboxed hook), a private folder in the temp directory, so pings stay rate-limited either way."""
     from factory_config import safe_agent
-    return os.path.join(state_dir(), f"agent-{safe_agent(agent)}.json")
+    name = f"agent-{safe_agent(agent)}.json"
+    try:
+        from factory_claims import state_dir
+        d = state_dir()
+        if os.access(d, os.W_OK):
+            return os.path.join(d, name)
+    except (OSError, SystemExit):
+        pass
+    d = os.path.join(tempfile.gettempdir(), f"factory-{os.getuid() if hasattr(os, 'getuid') else 'user'}")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    return os.path.join(d, name)
 
 
 def remember(agent, **kw):
     try:
         path = stamp_file(agent)
-        data = json.load(open(path)) if os.path.exists(path) else {}
+        try:
+            data = json.load(open(path)) if os.path.exists(path) else {}
+        except ValueError:
+            data = {}
         data.update(kw)
-        json.dump(data, open(path, "w"))
+        # Written whole, then moved into place: two hooks at once never leave half a file that reads as empty.
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
         return data
-    except (OSError, ValueError):
+    except OSError:
         return kw
 
 
@@ -74,11 +92,38 @@ def agent_issues():
     return task_issues(state="all", label=LABEL)
 
 
+def name_of(issue):
+    """The agent an agent issue belongs to: the marker's name, else the title's (`Agent: <name> · ...`)."""
+    m = MARK.search(issue.get("body") or "")
+    if m:
+        return m.group(1)
+    m = re.match(r"Agent: ([\w.-]+)(\s|$)", issue.get("title") or "")
+    return m.group(1) if m else None
+
+
+def last_ping(issue):
+    m = MARK.search(issue.get("body") or "")
+    return m.group(3) if m else ""
+
+
+def ranked(issues):
+    """An agent's issues, the one to use first: open before closed, then the newest ping, then the newest issue."""
+    return sorted(issues, key=lambda i: (i.get("state") == "open", last_ping(i), i["number"]), reverse=True)
+
+
+def by_agent(issues):
+    """{agent: its issues, the one to use first}. Several issues for one agent are duplicates."""
+    out = {}
+    for i in issues:
+        name = name_of(i)
+        if name:
+            out.setdefault(name, []).append(i)
+    return {name: ranked(found) for name, found in out.items()}
+
+
 def find_issue(agent):
-    for i in agent_issues():
-        if re.match(rf"Agent: {re.escape(agent)}(\s|$)", i["title"]):
-            return i
-    return None
+    found = by_agent(agent_issues()).get(agent)
+    return found[0] if found else None
 
 
 def render(agent, status, detail, started, ping=None, where=None):
@@ -91,7 +136,10 @@ def render(agent, status, detail, started, ping=None, where=None):
     return f"Agent: {agent} · {shown}", body
 
 
-def update(cfg, agent, status, detail=""):
+def update(cfg, agent, status, detail="", create=False):
+    """Updates the agent's one issue. Only `register` (create=True) may open a new one, and only when the agent has
+    none at all, open or closed: a ping, a turn's end or a session's end that can't find the issue changes nothing.
+    (On 22 Oct a lookup that came back empty made every ping open another issue: 195 copies in two hours.)"""
     from factory_issues import add_labels, gh, remove_label
     seen = recall(agent)
     n = seen.get("issue")
@@ -99,6 +147,8 @@ def update(cfg, agent, status, detail=""):
         i = find_issue(agent)
         if i:
             n = i["number"]
+        elif not create:
+            return None
     started = seen.get("started") or iso(now())
     # The machine and folder are posted to GitHub only when the project opts in (tasks.showWhere: true).
     where = (f"{socket.gethostname()} · {os.path.basename(os.getcwd())}"
@@ -129,12 +179,36 @@ def state_of(cfg, issue):
     return name, status, t, quiet
 
 
+def current(issues):
+    """Each agent's one issue: its open issue with the newest ping. Closed ones and older copies don't count."""
+    return [found[0] for found in by_agent(issues).values() if found[0].get("state") == "open"]
+
+
+def close_copies(issues):
+    """Closes an agent's other open issues, keeping its current one. Returns the numbers it closed."""
+    from factory_issues import gh
+    closed = []
+    for name, found in by_agent(issues).items():
+        for extra in found[1:]:
+            if extra.get("state") == "open":
+                gh("PATCH", f"repos/{{owner}}/{{repo}}/issues/{extra['number']}",
+                   {"state": "closed", "state_reason": "not_planned"})
+                closed.append(extra["number"])
+    return closed
+
+
 def sweep(cfg):
-    """Mark silent agents down and put their in-progress issues back to ready. Returns what it did."""
+    """Close duplicate agent issues, then mark silent agents down and put their in-progress issues back to ready.
+    Only an agent's current issue counts: an old copy that went quiet must never release a live agent's work."""
     import factory_issues
     L = task_labels(cfg)
+    issues = agent_issues()
     done = []
-    for i in agent_issues():
+    copies = close_copies(issues)
+    if copies:
+        done.append(f"closed {len(copies)} duplicate agent issue{'s' if len(copies) > 1 else ''}: "
+                    + ", ".join(f"#{n}" for n in sorted(copies)))
+    for i in current(issues):
         st = state_of(cfg, i)
         if not st or st[1] != "silent":
             continue
@@ -206,7 +280,7 @@ def main():
         raise SystemExit("which agent? pass --agent <name> or set FACTORY_AGENT")
     if a.cmd == "register":
         remember(a.agent, started=iso(now()), issue=None)
-        print(f"#{update(cfg, a.agent, 'idle')}")
+        print(f"#{update(cfg, a.agent, 'idle', create=True)}")
     elif a.cmd == "down":
         update(cfg, a.agent, "down")
     elif a.cmd == "ping":
@@ -221,7 +295,7 @@ def main():
             return
         update(cfg, a.agent, status, detail)
     elif a.cmd == "list":
-        rows = [st for st in (state_of(cfg, i) for i in agent_issues()) if st]
+        rows = [st for st in (state_of(cfg, i) for i in current(agent_issues())) if st]
         for name, status, t, quiet in sorted(rows):
             when = f"{quiet:.0f} min ago" if quiet < 120 else f"{quiet / 60:.1f} h ago"
             print(f"{name:<12} {status:<8} last ping {iso(t)} ({when})")

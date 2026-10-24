@@ -21,6 +21,7 @@ version of it as a git submodule.
 - [Live agents (issues mode)](#live-agents-issues-mode)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
+- [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
 - [Security notes](#security-notes)
 - [Style guides](#style-guides)
 - [factory.json settings](#factoryjson-settings)
@@ -172,8 +173,8 @@ Three ideas make it safe to leave running:
 
 `bash vendor/my-skills/software-factory/install.sh . --link`, run from the project's folder:
 
-- **Links the shared files.** For every agent, skill, hook, `settings.json`, `factory` and `factory-loop.sh` in the
-  kit, it makes a relative symlink in the project that points into `vendor/my-skills`. A plain copy that's identical
+- **Links the shared files.** For every agent, skill, hook, `factory ci` file (`.claude/ci/`), `settings.json`,
+  `factory` and `factory-loop.sh` in the kit, it makes a relative symlink in the project that points into `vendor/my-skills`. A plain copy that's identical
   to the kit becomes a link. A copy that differs is kept, with a warning: move its project lines into `factory.json`
   or a note, delete it, and run the installer again.
 - **Copies the templates** the first time only (when there's no `.claude/factory.json` yet): `factory.json`, the
@@ -207,7 +208,7 @@ files stay in the submodule, and `.claude/` points to them:
 |---|---|
 | The agents: reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer | `.claude/factory.json`: commands, paths, protected files, ports, which paths need which review |
 | The skills: next-task, design-check, eval | `.claude/factory/notes/<agent or skill>.md`: what an agent needs that only this project knows |
-| The hooks, `settings.json`, `factory`, `factory-loop.sh` | `CLAUDE.md`, the PRD, the plan, the decisions, the CI workflow |
+| The hooks, `.claude/ci/`, `settings.json`, `factory`, `factory-loop.sh` | `CLAUDE.md`, the PRD, the plan, the decisions, the CI workflow |
 | Style-guide skills you link from my-skills | The `.gitmodules` entry and the pinned commit |
 
 **To customise, never edit a shared file in the project:**
@@ -285,6 +286,11 @@ version it pins. `factory help` lists everything.
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
 | `factory update` | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
+| `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
+| `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
+| `factory ci install` / `uninstall` | Installs the runner on this Mac as a LaunchAgent named `<repo>-ci` (again to update), or removes it |
+| `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
+| `factory ci logs [-f]` | The runner's log |
 
 <br>
 
@@ -448,6 +454,10 @@ current; the task never has to:
   prompt. `factory agents` shows such an agent as `silent`. The dev manager's `factory agents sweep` marks it down
   and puts its in-progress issues back to ready, so another agent takes them. If the silent agent comes back, the
   PR gate stops it opening a PR for an issue another agent now holds.
+- **One issue per agent.** Only registering may open an agent's issue, and only when the agent has none, open or
+  closed. A ping, a turn's end or an exit that can't find it changes nothing, and a lookup that fails is an error,
+  never "no issue". If copies exist anyway, only the open one with the newest ping counts (in `list` and `sweep`),
+  and `sweep` closes the others, so an old copy that went quiet never releases a live agent's work.
 - **Where.** By default the issue says only the agent's slot. With `"tasks": { "showWhere": true }` it also posts
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
@@ -575,6 +585,77 @@ session with the repo attached.
 
 <br>
 
+## CI: GitHub's runners or your own Mac
+
+A project's CI can run on GitHub's runners (the default) or on a self-hosted runner on your Mac, which uses no
+GitHub Actions minutes, for example when the account's Actions minutes or billing are blocked. GitHub still starts
+the jobs and shows the checks on each pull request; only the machine changes. `factory ci` does both, and doesn't
+care which: `factory ci status` works in either mode.
+
+```sh
+factory ci install        # once, from a checkout on main, with Docker Desktop running and gh logged in
+factory ci use local      # sends jobs to it (the repo variable CI_RUNS_ON)
+factory ci status         # mode, latest runs, the runner, Docker, the last log lines
+factory ci use github     # back to GitHub's runners; the runner stays installed and idle
+factory ci uninstall
+```
+
+**Names come from the project.** For `acme/widget` the runner is `widget-ci` and its jobs ask for the label
+`widget-local`. The LaunchAgent is `dev.software-factory.widget-ci`, the installed copy is
+`~/Library/Application Support/widget-ci/widget-ci`, the log is `~/.local/state/widget-ci/runner.log`, the compose
+project is `widget-ci`, and each registration is `widget-ci-<mac>-<time>`. To choose others, or to replace an older
+install under another LaunchAgent label (`factory ci install` unloads it and removes its file first):
+
+```json
+"ci": {"name": "widget-ci", "label": "widget-local", "repo": "acme/widget", "replaces": ["com.example.old-runner"]}
+```
+
+**Several Macs.** Run `factory ci install` on each: they register with the same label and GitHub gives each job to
+one of them. `factory ci status` lists every runner with the label; `factory ci stop` removes only this Mac's idle
+registrations (and any of the project's that are offline and idle).
+
+**How it runs.** The runner is GitHub's runner image as a Linux container, with its own Docker beside it
+(Docker-in-Docker, on a unix socket only, no TCP port). Each registration is ephemeral: one job, then both
+containers and all their volumes are removed (`down -v`) and a new round starts. No token is stored: each round gets
+a registration token from your `gh` login (`factory ci start` also takes one on stdin or from `RUNNER_TOKEN`, and
+never writes it). launchd runs a private copy in `~/Library/Application Support/<name>/`, never the checkout, so a
+branch checked out later can't change what runs unattended; `factory ci install` warns when the checkout isn't on
+`origin/main`. The LaunchAgent has only absolute PATH entries, is checked with `plutil -lint`, and is reloaded with
+`launchctl bootout`, a wait until launchd lets go, then `bootstrap`. The loop is an executable named after the
+runner (`#!/bin/bash`), so `ps` shows `/bin/bash …/<name>` and `factory ci stop` only kills a process with exactly
+that command line. *Not tested:* what macOS shows for it in Login Items and Activity Monitor; the process itself is
+still `bash`.
+
+**The workflow.** Each job picks its machine from the repo variable `CI_RUNS_ON`, and a pull request from another
+repository (a fork) always runs on GitHub's runners:
+
+```yaml
+runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '"ubuntu-latest"' || vars.CI_RUNS_ON || '"ubuntu-latest"') }}
+```
+
+What the self-hosted runner needs that GitHub's image has (found in remanual, decision 0047 there):
+
+- `actions/setup-node` **before** `pnpm/action-setup`: pnpm's installer needs `node`, which the runner image lacks.
+  Use `pnpm/action-setup`'s own `cache: true` then.
+- Tests one package at a time there: `pnpm run test ${{ runner.environment == 'self-hosted' && '--concurrency=1' || '' }}`.
+  The Mac's CPUs are shared with the agents' work, and parallel test runs pushed slow tests past their timeouts.
+- No Google Chrome (and none for Linux ARM64): for Lighthouse, point `CHROME_PATH` at Playwright's Chromium,
+  wrapped with `--no-sandbox` (a container has no user namespaces for Chrome's sandbox).
+
+**Before you use it.** Keep the repository private, and leave *Settings → Actions → General → Run workflows from
+fork pull requests* off: that is what keeps outside code off your Mac (the `runs-on` rule above is a second layer).
+Creating registration tokens needs admin on the repository. Keep the Mac awake while CI should run; queued jobs
+wait (GitHub keeps them up to 24 hours) and start when the runner is back. `factory ci status` calls out runs
+queued for a long time with no runner online.
+
+**The known risk.** A job runs the code of the branch it tests, and the Docker-in-Docker container is privileged,
+so it is not a security boundary: a job that tries can reach Docker Desktop's VM, your other containers and their
+data, the folders Docker Desktop shares (by default all of `/Users`), and services on your Mac's `localhost`. Only
+people who can push to the repository (you and the agents) run code on it. Running the runner in a separate VM is
+the follow-up ([remanual #150](https://github.com/deresegetachew/remanual/issues/150)).
+
+<br>
+
 ## Security notes
 
 - **One GitHub login for everything is the weak spot.** By default the agents use your `gh` login. When the dev manager
@@ -589,7 +670,8 @@ session with the repo attached.
 - **Agent issues are public to anyone who can read the repo.** They show the slot only, unless you set
   `tasks.showWhere`.
 - **CI:** the kit's workflow has read-only permissions and no secrets, and the guard fails a workflow that uses
-  `pull_request_target`.
+  `pull_request_target`. A self-hosted runner (`factory ci`) runs branch code on your Mac with a privileged
+  container: see [the known risk](#ci-githubs-runners-or-your-own-mac).
 
 <br>
 
@@ -682,6 +764,8 @@ software-factory/
       style_checks.py                     CI: each style's check
       factory_config.py                   reads factory.json, with defaults
       wait_for_merge.sh                   waits on a PR without spending tokens
+    .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
+                                          compose.yaml, entrypoint.sh, ci_names.py, ci_status.py
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
 ```

@@ -26,7 +26,7 @@ fi
 # Shared: used unchanged by every project. Everything else in kit/ is a template the project fills in.
 is_engine() {
   case "$1" in
-    ./factory|./factory-loop.sh|./.claude/hooks/*.py|./.claude/hooks/*.sh) return 0;;
+    ./factory|./factory-loop.sh|./.claude/hooks/*.py|./.claude/hooks/*.sh|./.claude/ci/*) return 0;;
     ./.claude/agents/*.md|./.claude/skills/*/SKILL.md|./.claude/settings.json) return 0;;
     *) return 1;;
   esac
@@ -60,7 +60,7 @@ find . -type f -not -path '*/__pycache__/*' | sort | while read -r f; do
   fi
 done
 # Never change files in the kit itself: with --link it is the project's submodule.
-[ "$link" = 1 ] || chmod +x "$dst"/.claude/hooks/*.py "$dst"/.claude/hooks/*.sh "$dst"/factory-loop.sh "$dst"/factory 2>/dev/null || true
+[ "$link" = 1 ] || chmod +x "$dst"/.claude/hooks/*.py "$dst"/.claude/hooks/*.sh "$dst"/.claude/ci/*.sh "$dst"/factory-loop.sh "$dst"/factory 2>/dev/null || true
 grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignore"
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 if [ "$setup" = 1 ]; then
