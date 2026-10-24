@@ -78,6 +78,7 @@ echo "$*" >>"$FAKE_DB.docker.log"
 case " $* " in
   *" build "*) [ -z "${FAKE_DOCKER_BUILD_FAILS:-}" ] || exit 1 ;;
   *" info "*"MemTotal"*) [ -n "${FAKE_DOCKER_MEMTOTAL:-}" ] && echo "$FAKE_DOCKER_MEMTOTAL"; exit 0 ;;
+  *" image inspect "*) [ -n "${FAKE_DOCKER_IMAGE_LABELS:-}" ] || exit 1; echo "$FAKE_DOCKER_IMAGE_LABELS"; exit 0 ;;
   *" up "*)  # one round: say whether the runner got the given token, then fail registration (code 3)
     [ "${RUNNER_TOKEN:-}" = "given-token" ] && echo "token ok" >>"$FAKE_DB.docker.log"
     echo "name $RUNNER_NAME label $RUNNER_LABEL" >>"$FAKE_DB.docker.log"
@@ -755,25 +756,60 @@ def test_a_failed_build_falls_back_to_the_plain_image_and_the_settings_turn_it_a
     assert plist_env(env, "dev.software-factory.widget-ci")["CI_CACHES"] == "0"
 
 
-def test_only_content_addressed_caches_outlive_a_job():
+def test_only_the_registry_mirror_outlives_a_job_and_no_job_shares_a_network_or_a_writable_store():
     import re
     ci_dir = os.path.join(KIT, ".claude", "ci")
     caches = open(os.path.join(ci_dir, "compose-caches.yaml")).read()
     base = open(os.path.join(ci_dir, "compose.yaml")).read()
-    # The runner's mounts: the entrypoint, dind's socket and the pnpm store; never its workspace (/home/runner/_work).
-    assert "_work" not in base + caches
-    assert re.findall(r"^  (\S+):\n    external: true", caches, re.M) == ["cache", "pnpm-store"], caches
+    body = "\n".join(l for l in (caches + base).splitlines() if not l.lstrip().startswith("#"))
+    # No workspace mount, and no pnpm store (a job could poison it for later jobs; #92 review).
+    assert "_work" not in body and "pnpm" not in body and "npm_config_store_dir" not in open(
+        os.path.join(ci_dir, "entrypoint.sh")).read(), body
+    assert re.findall(r"^  (\S+):\n    external: true", caches, re.M) == ["cache"], caches
     assert "--registry-mirror=http://${CI_MIRROR:?}:5000" in caches
-    entry = open(os.path.join(ci_dir, "entrypoint.sh")).read()
-    assert '[ -w "$FACTORY_CI_CACHE" ]' in entry and "npm_config_store_dir" in entry
+    loop = open(os.path.join(ci_dir, "loop.sh")).read()
+    assert 'CI_CACHE_NETWORK="$project-cache"' in loop, "each instance its own network"
+    assert "MIRROR_IMAGE=registry:2." in loop and re.search(r"registry:2\.\d+\.\d+", loop), "pinned"
+    assert 'docker network connect "$CI_CACHE_NETWORK" "$CI_MIRROR"' in loop
     docker_file = open(os.path.join(ci_dir, "runner.Dockerfile")).read()
     assert "RUNNER_TOOL_CACHE=/opt/hostedtoolcache" in docker_file and "PLAYWRIGHT_BROWSERS_PATH" in docker_file
+    # The jobs' user owns the browsers: Playwright's install writes a lock there even when they're present.
+    assert re.search(r"chown -R runner:runner [^\n]*/ms-playwright", docker_file), docker_file
+    assert "a+rX /ms-playwright" not in docker_file
+    assert 'LABEL factory.node="$NODE_VERSION"' in docker_file
     assert ".complete" in open(os.path.join(ci_dir, "install-tools.sh")).read()
 
 
+def test_two_instances_get_their_own_cache_networks():
+    d, db, env = project(ci={"runners": 2})
+    assert ci(d, env, "install")[0] == 0
+    n = names(d, env)
+    exe = os.path.join(n["CI_INSTALLED"], "widget-ci")
+    for label in ("dev.software-factory.widget-ci", "dev.software-factory.widget-ci-2"):
+        e = plist_env(env, label)
+        subprocess.run(["/bin/bash", exe], input="given-token\n", env={**env, **e, "PATH": env["PATH"]},
+                       capture_output=True, text=True, timeout=60, cwd=n["CI_INSTALLED"])
+    dl = log(db, "docker")
+    assert "network inspect widget-ci-cache" in dl and "network inspect widget-ci-2-cache" in dl, dl
+    assert "network connect widget-ci-cache widget-ci-mirror" in dl, dl
+    assert "network connect widget-ci-2-cache widget-ci-mirror" in dl, dl
+    assert "registry:2.8.3" in dl and "volume create" not in dl, dl
+
+
+def test_status_says_when_the_image_is_older_than_the_checkouts_tools():
+    d, db, env = tooled_project()
+    assert ci(d, env, "install")[0] == 0
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]'})
+    runs_and_pulls(db, [run("main")], runners=[])
+    old = "node=22 pnpm=9.12.0 playwright=1.48.2"
+    rc, out = ci(d, {**env, "FAKE_DOCKER_IMAGE_LABELS": old}, "status")
+    assert f"Runner image: built for {old}, and this checkout wants node=24 pnpm=9.12.0 playwright=1.48.2" in out, out
+    rc, out = ci(d, {**env, "FAKE_DOCKER_IMAGE_LABELS": "node=24 pnpm=9.12.0 playwright=1.48.2"}, "status")
+    assert "Runner image:" not in out, out
+
+
 # A Docker that keeps state in files: a project's volumes and workspace live in $STATE/<project>/ until
-# `down --volumes`, external volumes in $STATE/volumes/. Each `up` is one job: it says whether it can see the last
-# job's file, and whether the shared store has it, then writes its own to both.
+# `down --volumes`. Each `up` is one job: it says whether it can see the last job's file, then writes its own.
 STATEFUL_DOCKER = r'''#!/usr/bin/env bash
 echo "$*" >>"$FAKE_DB.docker.log"
 st="$FAKE_DOCKER_STATE"; mkdir -p "$st/volumes"
@@ -783,8 +819,7 @@ case " $* " in
   *" up "*)
     ws="$st/$project/workspace"; mkdir -p "$ws"
     [ -e "$ws/job-file" ] && echo "SAW the last job's file" >>"$FAKE_DB.jobs.log" || echo "clean workspace" >>"$FAKE_DB.jobs.log"
-    [ -e "$st/volumes/$CI_PNPM_STORE/pkg" ] && echo "store hit" >>"$FAKE_DB.jobs.log"
-    echo secret >"$ws/job-file"; mkdir -p "$st/volumes/$CI_PNPM_STORE"; echo pkg >"$st/volumes/$CI_PNPM_STORE/pkg"
+    echo secret >"$ws/job-file"
     exit 0 ;;
   *" down "*"--volumes"*) rm -rf "${st:?}/$project" ;;
 esac
@@ -792,7 +827,7 @@ exit 0
 '''
 
 
-def test_a_job_never_sees_the_last_jobs_files_but_the_store_carries_over():
+def test_a_job_never_sees_the_last_jobs_files():
     d, db, env = project()
     assert ci(d, env, "install")[0] == 0
     n = names(d, env)
@@ -805,14 +840,14 @@ def test_a_job_never_sees_the_last_jobs_files_but_the_store_carries_over():
                             env=run_env, cwd=n["CI_INSTALLED"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         for _ in range(200):
-            if len(log(db, "jobs").splitlines()) >= 3:  # two jobs: 1 line, then 2
+            if len(log(db, "jobs").splitlines()) >= 3:  # three jobs
                 break
             time.sleep(0.1)
     finally:
         loop.terminate()
         loop.wait(timeout=20)
     jobs = log(db, "jobs").splitlines()
-    assert jobs[:3] == ["clean workspace", "clean workspace", "store hit"], jobs
+    assert jobs[:3] == ["clean workspace"] * 3, jobs
     assert "SAW" not in "".join(jobs)
 
 

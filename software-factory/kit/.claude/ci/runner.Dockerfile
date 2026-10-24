@@ -11,6 +11,8 @@ FROM ghcr.io/actions/actions-runner:${RUNNER_VERSION}
 ARG NODE_VERSION=
 ARG PNPM_VERSION=
 ARG PLAYWRIGHT_VERSION=
+# What it was built for: `factory ci status` compares these with the checkout and says when to rebuild.
+LABEL factory.node="$NODE_VERSION" factory.pnpm="$PNPM_VERSION" factory.playwright="$PLAYWRIGHT_VERSION"
 USER root
 ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
     AGENT_TOOLSDIRECTORY=/opt/hostedtoolcache \
@@ -23,8 +25,8 @@ RUN apt-get update \
 COPY install-tools.sh /tmp/install-tools.sh
 RUN NODE_VERSION="$NODE_VERSION" PNPM_VERSION="$PNPM_VERSION" PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
     bash /tmp/install-tools.sh && rm -f /tmp/install-tools.sh
-# The pnpm store's mount point, owned by the runner user, so the shared store volume is writable.
-RUN mkdir -p /cache/pnpm-store /opt/hostedtoolcache /opt/corepack /ms-playwright \
- && chown -R runner:runner /cache /opt/hostedtoolcache /opt/corepack \
- && chmod -R a+rX /ms-playwright
+# Owned by the runner user, who runs the jobs: Playwright's install takes a lock and writes links in
+# /ms-playwright even when the browser is there. Safe, since the container is new for every job.
+RUN mkdir -p /opt/hostedtoolcache /opt/corepack /ms-playwright \
+ && chown -R runner:runner /opt/hostedtoolcache /opt/corepack /ms-playwright
 USER runner

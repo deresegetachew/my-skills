@@ -22,11 +22,11 @@ here="$(cd "$(dirname "$0")" && pwd)"
 : "${CI_NAME:?}" "${CI_LABEL:?}" "${RUNNER_REPO:?}" "${CI_STATE:?}"
 project="${CI_PROJECT:-$CI_NAME}"
 compose=(docker compose --file "$here/${CI_COMPOSE:-compose.yaml}")
-# CI_CACHES=1 (heavy runners, ci.caches on): the caches that outlive a job (compose-caches.yaml, #60). Their names
-# are per project and machine, shared by its heavy runners: a Docker Hub mirror and a pnpm store.
+# CI_CACHES=1 (heavy runners, ci.caches on): the Docker Hub mirror that outlives a job (compose-caches.yaml, #60),
+# one per project and machine, on a network of this instance's own.
 if [ "${CI_CACHES:-0}" = 1 ]; then
   compose+=(--file "$here/compose-caches.yaml")
-  export CI_MIRROR="$CI_NAME-mirror" CI_CACHE_NETWORK="$CI_NAME-cache" CI_PNPM_STORE="$CI_NAME-pnpm-store"
+  export CI_MIRROR="$CI_NAME-mirror" CI_CACHE_NETWORK="$project-cache"
 fi
 compose+=(--project-name "$project")
 prefix="${CI_RUNNER_PREFIX:-$CI_NAME-${CI_HOST:-mac}}"
@@ -58,22 +58,19 @@ trim_log() {
   fi
 }
 
-# The caches: created once, idempotent, so several loops can race to it. The store volume is handed to the runner
-# image's user (uid 1001), and the mirror (registry:2 in proxy mode, read-only to jobs) restarts with Docker.
+# The mirror: idempotent, so several loops can race to it. A registry in proxy mode (read-only to jobs), pinned,
+# restarted with Docker, and attached to each instance's own network, so instances never share a network.
+MIRROR_IMAGE=registry:2.8.3
 ensure_caches() {
   [ "${CI_CACHES:-0}" = 1 ] || return 0
   docker network inspect "$CI_CACHE_NETWORK" >/dev/null 2>&1 || docker network create "$CI_CACHE_NETWORK" >/dev/null 2>&1
-  if ! docker volume inspect "$CI_PNPM_STORE" >/dev/null 2>&1; then
-    docker volume create "$CI_PNPM_STORE" >/dev/null 2>&1
-    docker run --rm --user 0 --entrypoint chown -v "$CI_PNPM_STORE:/s" "${RUNNER_IMAGE:-ghcr.io/actions/actions-runner:2.338.0}" \
-      1001:1001 /s >/dev/null 2>&1 || true
-  fi
   if [ "$(docker inspect -f '{{.State.Running}}' "$CI_MIRROR" 2>/dev/null)" != true ]; then
     docker rm -f "$CI_MIRROR" >/dev/null 2>&1 || true
     docker run -d --name "$CI_MIRROR" --restart unless-stopped --network "$CI_CACHE_NETWORK" \
       -e REGISTRY_PROXY_REMOTEURL=https://registry-1.docker.io -v "$CI_NAME-mirror-data:/var/lib/registry" \
-      registry:2 >/dev/null 2>&1 || log "the Docker Hub mirror didn't start; jobs pull from Docker Hub"
+      "$MIRROR_IMAGE" >/dev/null 2>&1 || log "the Docker Hub mirror didn't start; jobs pull from Docker Hub"
   fi
+  docker network connect "$CI_CACHE_NETWORK" "$CI_MIRROR" >/dev/null 2>&1 || true  # already there: fine
 }
 
 wait_and_retry() {

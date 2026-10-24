@@ -17,7 +17,7 @@ Every name comes from the project, so two projects can run their runners side by
   CI_LIGHT_LABEL "ci.lightLabel", else "<repo name>-light"                                  (remanual-light)
   CI_IMAGE     "ci.image": "build" (default: build runner.Dockerfile with the project's Node, pnpm and Playwright)
                or "base" (GitHub's plain runner image)
-  CI_CACHES    1 unless "ci.caches" is false: the Docker Hub mirror and the pnpm store outlive a job
+  CI_CACHES    1 unless "ci.caches" is false: a pull-through Docker Hub mirror outlives a job
 On Linux (FACTORY_CI_PLATFORM=linux, set by ci.sh) a systemd --user service runs it instead of launchd:
   CI_UNIT      <name>.service
   CI_UNIT_FILE ~/.config/systemd/user/<name>.service  ($XDG_CONFIG_HOME)

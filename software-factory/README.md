@@ -687,29 +687,38 @@ still `bash`.
 
 <a id="ci-faster"></a>
 
-**Faster rounds: a pre-built image and caches (#60).** A fresh runner per job used to download everything again:
-Node, pnpm and its packages, the service images (Postgres ...), Playwright's browser. Two things now carry over.
+**Faster rounds: a pre-built image and a registry mirror (#60).** A fresh runner per job used to download everything
+again: Node, pnpm, the service images (Postgres ...) and Playwright's browser. Two things now carry over.
 
 1. **The runner image** (`ci.image`, default `"build"`). `factory ci install` builds `<name>-runner:latest` from
    `runner.Dockerfile`: GitHub's runner image plus what this checkout asks for.
    - Node from `.nvmrc`, in the tool cache `actions/setup-node` looks in first, so it doesn't download it.
    - pnpm from `package.json`'s `packageManager`, through corepack.
-   - Playwright's Chromium and its system libraries, in `/ms-playwright`, at the version in the lockfile.
-   - The image sets `FACTORY_CI_IMAGE=1`, so a workflow can skip `playwright install` there.
-   - Run `install` again after changing the Node, pnpm or Playwright version. If the build fails, the runners use
-     GitHub's plain image and say so. `"image": "base"` skips the build. The light lane always uses the plain image.
-2. **Caches that outlive a job** (`ci.caches`, default on; heavy runners only), shared by the project's runners on
-   the machine:
-   - a pull-through **mirror of Docker Hub** (`<name>-mirror`, `registry:2`), which dind uses as its registry mirror;
-   - a **pnpm store** volume (`<name>-pnpm-store`), which the runner points `npm_config_store_dir` at.
+   - Playwright's Chromium and its system libraries, in `/ms-playwright`, at the version in the lockfile. The jobs'
+     user owns that folder, because Playwright's install writes a lock there even when the browser is present.
+   - The image sets `FACTORY_CI_IMAGE=1`, so a workflow can leave out `--with-deps` there.
+   - It is labelled with the three versions. `factory ci status` says when the checkout wants others (after a Node
+     bump on main, say): then run `install` again, which rebuilds it.
+   - If the build fails, the runners use GitHub's plain image and say so. `"image": "base"` skips the build. The
+     light lane always uses the plain image.
+2. **A pull-through mirror of Docker Hub** (`ci.caches`, default on; heavy runners only). It is `<name>-mirror`, a
+   pinned `registry:2.8.3`, one per project and machine, and dind uses it as its registry mirror. Each instance
+   reaches it over a network of its own (`<project>-cache`), so two jobs never share a network, and their
+   published service ports stay apart.
 
-**What persists, and why it's safe.** Only those two caches. Both are content-addressed: an image layer is stored
-under its digest, and a pnpm package under its hash. A job can read them, but it can't change what another job gets
-under a name it asks for. The mirror is read-only to jobs (a pull-through registry takes no pushes) and holds public
-images only. No workspace, build output, environment variable, token or secret is ever written there. dind's data
-(the job's own images, containers and volumes), the runner's workspace and the job's networks are still removed by
-`down --volumes` after every job, so a job never sees another job's files. `factory ci uninstall` removes the caches
-and the image too.
+**What persists, and who can write it.** Only the mirror's store of image layers, and only the mirror writes it,
+from Docker Hub.
+- A job can pull through it but can't push to it: a pull-through registry takes no pushes, and its volume is mounted
+  in no job.
+- dind checks every layer against its digest.
+- No workspace, build output, environment variable, token or secret is written there.
+- **No pnpm store is shared.** Job steps could write into one, and pnpm doesn't re-check a stored file's hash, so one
+  pull request could plant code that later jobs (main pushes too) would run. Each job's pnpm store is new.
+- dind's data (the job's own images, containers and volumes), the runner's workspace and the job's networks are
+  removed by `down --volumes` after every job, so a job never sees another job's files.
+- `factory ci uninstall` removes the mirror, its networks and the image too.
+- **`factory ci start`** (one loop by hand) uses neither: it runs GitHub's plain image with no mirror. Use `install`
+  for the faster rounds.
 
 <a id="ci-on-linux"></a>
 

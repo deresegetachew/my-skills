@@ -86,6 +86,19 @@ print(node); print(pnpm); print(pw)
 PY
 }
 
+# The image is built from the checkout at install time. When main has moved Node, pnpm or Playwright since, say so.
+image_note() {
+  [ "$CI_IMAGE" = build ] || return 0
+  local built node pnpm pw want
+  built="$(docker image inspect --format 'node={{index .Config.Labels "factory.node"}} pnpm={{index .Config.Labels "factory.pnpm"}} playwright={{index .Config.Labels "factory.playwright"}}' "$CI_NAME-runner:latest" 2>/dev/null)" || return 0
+  [ -n "$built" ] || return 0
+  { read -r node; read -r pnpm; read -r pw; } < <(tool_versions)
+  want="node=$node pnpm=$pnpm playwright=$pw"
+  if [ "$built" != "$want" ]; then
+    echo "Runner image: built for $built, and this checkout wants $want. Run \`factory ci install\` to rebuild it."
+  fi
+}
+
 # Builds the heavy runners' image (ci.image "build"). On failure it says so and they use GitHub's plain image.
 build_image() {
   RUNNER_IMAGE_BUILT=""
@@ -599,8 +612,12 @@ cmd_uninstall() {
   # The caches (compose-caches.yaml) and the built image go too.
   if docker info >/dev/null 2>&1; then
     docker rm -f "$CI_NAME-mirror" >/dev/null 2>&1 || true
-    docker network rm "$CI_NAME-cache" >/dev/null 2>&1 || true
-    docker volume rm "$CI_NAME-pnpm-store" "$CI_NAME-mirror-data" >/dev/null 2>&1 || true
+    for id in $(seq 1 16) light; do
+      use_instance "$id"
+      docker network rm "$I_PROJECT-cache" >/dev/null 2>&1 || true
+    done
+    # <name>-pnpm-store: left by an earlier version, which shared a pnpm store.
+    docker volume rm "$CI_NAME-mirror-data" "$CI_NAME-pnpm-store" >/dev/null 2>&1 || true
     docker image rm "$CI_NAME-runner:latest" >/dev/null 2>&1 || true
   fi
   cmd_stop
@@ -751,6 +768,7 @@ cmd_status() {
       echo "  ci.runners and ci.light ask for $want instance(s) here; \`factory ci install\` brings it to that."
     if docker info >/dev/null 2>&1; then
       echo "Docker: running"
+      image_note
     else
       echo "Docker: not running. Jobs for $machine wait in GitHub's queue until it is."
     fi
