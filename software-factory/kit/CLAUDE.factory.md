@@ -34,7 +34,7 @@ A change that breaks one of these is wrong even if the tests pass. The `safety-a
 
 ## How to work (software factory)
 
-- To build: `./factory-loop.sh` (a fresh run per task) or `/loop /next-task all`. The next task comes from
+- To build: `factory loop -i` (a fresh session per task that you can type into) or `factory loop` (unattended). The next task comes from
   `python3 .claude/hooks/next_task.py`, never from reading the plan by eye. Tests come first from `test-writer`
   and are read-only once implementation starts; `reviewer` passes each commit before its PR.
 - Questions go to the dev manager as PR comments starting with `<!-- factory-question -->`; keep working around

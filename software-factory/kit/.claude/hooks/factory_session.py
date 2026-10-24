@@ -2,7 +2,8 @@
 """SessionStart hook: makes a plain `claude` session in a project folder or worktree a factory agent.
 
 What factory-loop.sh does for its runs, this does for a session you start yourself, for example
-`cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`, then `/loop /next-task all`:
+`factory agent taytu` (or `cd "$(python3 .claude/hooks/factory_claims.py worktree 2)" && claude`), for manual work
+in that agent's folder; to run the queue, use `factory loop -i`, which gives each task a fresh session:
 
   1. Slot and name: slot 1 is the project folder, slot N `<project>-agents/<name>`; the names are `agents` in
      factory.json (menelik, taytu, ...).

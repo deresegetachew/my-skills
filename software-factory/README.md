@@ -63,9 +63,11 @@ need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
    ```bash
    ./factory install-shim              # puts a `factory` command in ~/.local/bin
    git config submodule.recurse true   # so `git pull` also updates vendor/my-skills
+   factory doctor                      # what's missing on this machine, and how to fix it
    ```
 
-5. **Start an agent:** `factory loop` (unattended) or `factory loop -i` (a session you can watch and type into).
+5. **Start an agent:** `factory loop -i` (a session per task that you can watch and type into), or `factory loop`
+   (unattended). [Which one](#three-ways-to-run-an-agent).
 
 6. **Start the dev manager:** in a Claude session with the repo attached, say "be the dev manager for this repo". It
    follows [DEV-MANAGER.md](DEV-MANAGER.md).
@@ -271,19 +273,22 @@ version it pins. `factory help` lists everything.
 |---|---|
 | `factory loop [N]` | Starts an agent loop: one fresh, unattended Claude run per task (`claude -p`). `N` caps the number of tasks. Run it again in another terminal for another agent |
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
-| `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on. Then type `/loop /next-task all` |
+| `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
+| `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
 | `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
+| `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
 | `factory settings` | Every setting in `factory.json`: its value here (or the default) and what it does. `settings show <key>` gives its type, default and options; `settings set <key> <value>` changes one, checked against its type; `settings unset <key>` goes back to the default. Then commit the file in a PR. Agents can't run `set` or `unset` |
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`. Read-only; exits 1 when something needs fixing |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -309,9 +314,16 @@ version it pins. `factory help` lists everything.
   10 seconds and starts the next task; type `q` and Enter to stop. If the session ends before the task is done
   (`/exit`, a crash, a usage limit), the loop also carries on after the same 10 s countdown, so it never waits all
   night for a key.
-- **`factory agent <name>`**: your own Claude session in that agent's folder. The SessionStart hook claims the folder,
-  runs the install (in a worktree) and `agentSetup`, sets the agent's ports and database, and (issues mode) registers the agent. Then
-  type `/loop /next-task all`.
+- **`factory agent <name>`**: your own Claude session in that agent's folder, for manual work there (a fix by hand,
+  a look around). The SessionStart hook claims the folder, runs the install (in a worktree) and `agentSetup`, sets the
+  agent's ports and database, and (issues mode) registers the agent. Started with no other arguments, it says in one
+  line that the queue belongs in `factory loop -i`.
+
+**Which one to use.** Run the queue with `factory loop -i`, on every machine: each task gets a fresh session, and you
+can still type into it, here or through Remote Control. Use `factory loop` when nobody will watch. On a second machine,
+give it its own agent names with `FACTORY_AGENTS` (see [Names and folders](#names-and-folders)), then run
+`factory loop -i` there too. Avoid `/loop /next-task all` in one `factory agent` session: that session keeps every
+task's context and grows with each one, which costs tokens and attention until it compacts.
 
 ### Names and folders
 
@@ -380,6 +392,23 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 `/exit` included. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan. Set
 `FACTORY_REMOTE_CONTROL=0` to turn it off. Unattended `factory loop` runs don't use it.
 
+### MCP servers: the project's only
+
+Every factory session (`factory loop`, `factory loop -i` and `factory agent`) starts Claude with
+`--strict-mcp-config --mcp-config <main's .mcp.json>`, or an empty config when main has none, and with
+`--settings '{"disableClaudeAiConnectors": true}'`. So agents never load your own claude.ai connectors (Notion,
+Slack, Figma ...) or the MCP servers in your user settings. Their tools would go into every turn, cost tokens and
+tempt an agent to use them. Your own `claude` sessions outside the factory keep them.
+
+The config is `.mcp.json` as the main branch has it on origin (`factory_mcp.py` fetches it into
+`.git/factory-mcp.json`), never the worktree's copy: Claude starts the servers in it without asking, so an
+uncommitted, untracked or branch-only `.mcp.json` must never count. `.mcp.json` is in `protected`, and the deny
+rules stop agents editing it, so a change to it needs a person to merge.
+`origin` comes from the clone's git config, so anyone who can change that config (`remote.origin.url`, `url.*.insteadOf`) can change which repository the servers come from; the PR gate trusts that config in the same way.
+
+If the agents need an MCP server (a docs or design server, for example), add it to `.mcp.json` at the project root
+in a PR that a person merges. Check a new session with `/mcp`: it should list only the project's servers.
+
 ### Practical notes
 
 - More agents only help when the plan has tasks that don't depend on each other, and each one costs tokens.
@@ -391,6 +420,8 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 Most of the cost is what the agents read, not what they write.
 
 - **A fresh session per task** (the loop already does this), so no task carries the last one's context.
+- **No personal MCP connectors:** agent sessions load only the project's `.mcp.json`
+  ([MCP servers](#mcp-servers-the-projects-only)).
 - **Cheaper models for routine subagents:** the test-writer and the architecture-reviewer run on Sonnet
   (`model:` in their files); the reviewer and the safety and security reviews keep the session's model.
 - **Read what the task needs.** Every agent reads the PRD sections, decisions and designs the task points to
@@ -399,7 +430,12 @@ Most of the cost is what the agents read, not what they write.
   `.claude/factory/notes/`.
 - **A smaller Stop check:** set `commands.testChanged` and `typecheckChanged` to run only the changed packages
   (for example `pnpm -s turbo run test --filter=...[origin/main]`). A failure shows the failing lines first,
-  `checkOutputLines` in all.
+  `checkOutputLines` in all. After a green check, the next Stop skips it when nothing changed. That means the same
+  HEAD, the same tracked changes anywhere in the repo, the same untracked files that aren't ignored, the same
+  commands, and `checkRequires` paths (such as `node_modules`) not touched since. Other ignored files, such as
+  `.env`, aren't compared.
+  It remembers this in the git folder (`.git/factory-check-green`, one per worktree), and a failure is never
+  remembered. Like the review markers, it's a guard rail: a hand-written file there skips the check.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
@@ -426,6 +462,11 @@ what the task cost.
 factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each
 machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size), and use `/usage`
 or the console for money, since prices differ per model.
+
+`factory report` adds what GitHub knows, the same on every machine: per task pull request opened in the last 7 days
+(`--since 2026-10-20` or `--since 30d`), the hours from the agent's claim to the PR (issues mode) and from the PR to
+the merge, the rework rounds (the dev manager's must-fix comments), and the CI runs on its branch with how many
+failed. Then the medians and totals for the merged ones. `--json` gives the same for scripts. It only reads.
 
 <br>
 
@@ -460,7 +501,8 @@ Set `"tasks": { "source": "issues" }` in `factory.json`, and run `factory issues
   criteria (the "Done when") and a checklist of todos. The dev manager writes them:
   `factory issues new --title "..." --body-file f.md --milestone "Phase 3"`.
 - **Order:** by milestone (oldest first), then issue number.
-- **Dependencies:** `Depends on #12, #14` in the body. Agents skip the issue until those are closed.
+- **Dependencies:** `Depends on #12, #14` in the body. Agents skip the issue until those are closed. The numbers can
+  be issues or pull requests: a task that depends on an open PR waits until it is merged or closed.
 - **Labels show the state:**
 
   | Label | Meaning |
@@ -578,7 +620,7 @@ no reading `.env` files.
 
 | Hook | What it does |
 |---|---|
-| Stop: `check.py` | Won't let a turn end while typecheck or tests fail, when code under `codePaths` changed |
+| Stop: `check.py` | Won't let a turn end while typecheck or tests fail, when code under `codePaths` changed. Skips a rerun when nothing changed since the last green check |
 | Stop: `factory_stop.py` | In `factory loop -i`, closes the session a few seconds after the agent marks its task done |
 | SessionStart: `factory_session.py` | Updates the submodules. For your own sessions, also claims the folder, installs, sets the agent's env and registers it |
 | Post-tool, Stop, SessionEnd: `factory_agents.py hook` | Pings, idle and down on the agent issue (issues mode) |
@@ -849,9 +891,12 @@ software-factory/
       factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
       next_task.py                        the next job: rework first, then a free task
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
+      factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
+      factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
       factory_reviews.py                  which extra reviews a change needs
+      factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
       factory_settings.py                 `factory settings`: list, show, set and unset factory.json values
       factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
       factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)

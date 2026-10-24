@@ -36,7 +36,10 @@ if p == "issues" and method == "POST":
          "milestone": {"number": body["milestone"]} if "milestone" in body else None, "updated_at": "2026-10-21T08:00:00Z",
          "html_url": f"https://x/{n}"}
     db["issues"].append(i); out(i)
-if m and method == "GET": out(issue(int(m.group(1))))
+if m and method == "GET":
+    if not any(i["number"] == int(m.group(1)) for i in db["issues"]):
+        print('{"message":"Not Found","status":"404"}'); sys.exit("gh: Not Found (HTTP 404)")
+    out(issue(int(m.group(1))))
 if m and method == "PATCH": issue(int(m.group(1))).update(body); out(issue(int(m.group(1))))
 m = re.fullmatch(r"issues/(\d+)/labels", p)
 if m:
@@ -93,6 +96,32 @@ def test_pick_claims_in_milestone_order_and_skips_dependencies():
     rc, out = run(d, env, "pick", "--agent", "menelik")
     assert (rc, out) == (0, "issue-3 Task 3"), out
     assert labels(db, 3) == ["agent:menelik", "factory:in-progress"], labels(db, 3)
+
+
+def pull(n, state="open"):
+    """A pull request as the issues API lists it: an issue with a `pull_request` key."""
+    return {**issue(n, labels=()), "state": state, "pull_request": {"url": f"https://x/pulls/{n}"}}
+
+
+def test_a_task_that_depends_on_an_open_pull_request_waits():
+    d, db, env = setup([issue(1, body="Depends on #5"), issue(2), pull(5)])
+    assert run(d, env, "peek")[1].startswith("issue-2 "), run(d, env, "peek")
+    rc, out = run(d, env, "pick", "--agent", "menelik")
+    assert (rc, out) == (0, "issue-2 Task 2"), out
+    assert labels(db, 1) == ["factory:ready"], labels(db, 1)
+
+
+def test_a_task_whose_pull_request_dependency_closed_is_handed_out():
+    d, db, env = setup([issue(1, body="Depends on #5 and #6"), pull(5, state="closed"),
+                        {**issue(6), "state": "closed"}])
+    rc, out = run(d, env, "pick", "--agent", "menelik")
+    assert (rc, out) == (0, "issue-1 Task 1"), out
+
+
+def test_a_dependency_that_doesnt_exist_doesnt_hold_the_task_back():
+    d, db, env = setup([issue(1, body="Depends on #99")])
+    rc, out = run(d, env, "pick", "--agent", "menelik")
+    assert (rc, out) == (0, "issue-1 Task 1"), out
 
 
 def test_agent_resumes_its_own_issue_first():

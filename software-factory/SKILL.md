@@ -9,7 +9,7 @@ Two roles, one repo:
 
 | Role | Runs where | Does |
 |---|---|---|
-| **Coding agent** | Claude Code on a machine with the toolchain: `/loop /next-task all` | Takes the next build-plan task, writes failing tests (`test-writer`), builds, asks `reviewer` (and `safety-auditor` / `security-reviewer` when relevant), opens a PR, merges it if the gate allows, ticks the task, repeats |
+| **Coding agent** | Claude Code on a machine with the toolchain: `factory loop -i` (a fresh session per task) | Takes the next build-plan task, writes failing tests (`test-writer`), builds, asks `reviewer` (and `safety-auditor` / `security-reviewer` when relevant), opens a PR, merges it if the gate allows, ticks the task, repeats |
 | **Dev manager** | A Claude session, usually in the cloud | Reviews every PR including protected ones, merges, fixes leftovers, adds tasks, flags blockers and idleness to the owner |
 
 Guard rails live in the repo, not in anyone's memory: `CLAUDE.md` (the rules), `.claude/factory.json`
@@ -77,17 +77,19 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    on their machine, in the repo:
    ```
    ./factory install-shim     # once per machine: then `factory ...` works in any factory project
-   factory loop               # recommended: a fresh Claude run per task (factory loop -i to watch and type)
+   factory loop -i            # recommended: a fresh Claude session per task, which you can watch and type into
    ```
-   or `claude` then `/loop /next-task all`. The loop starts a clean context for every
+   or `factory loop` to run unattended. The loop starts a clean context for every
    task, which is cheaper and avoids an agent misled by a long, stale conversation; state lives in git, the PRs
    and the plan. It runs without anyone to approve prompts, so `.claude/settings.json` must allow every command
    the build needs. Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab), and run the
    agent with the sandbox on rather than with permission checks skipped.
    **The `factory` command:** tell the owner to run `./factory install-shim` once; then `factory help` lists
    everything (`factory loop`, `factory loop -i`, `factory agent taytu`, `factory claims`, `factory update` ...).
-   **Your own sessions instead of the loop:** `factory agent taytu` opens Claude in taytu's worktree; then
-   `/loop /next-task all`. The SessionStart hook gives the session its slot, ports, database and task claims.
+   **Manual work in an agent's folder:** `factory agent taytu` opens Claude in taytu's worktree, with its slot,
+   ports, database and task claims from the SessionStart hook. Don't run the queue there with `/loop /next-task all`:
+   one session for many tasks keeps growing. On a second machine, set `FACTORY_AGENTS` to its own names and run
+   `factory loop -i` there too.
    **More than one loop:** run `factory loop` again in another terminal. Each loop gets its own checkout
    (a git worktree in `<project>-agents/<name>`, with `commands.install` run at each start) and claims its task in a
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose

@@ -368,6 +368,17 @@ def test_a_merge_doesnt_need_the_local_ci_check():
     d, env = setup(cfg_extra={"commands": {"ci": CI_CMD}})  # CI itself is green on GitHub by then
     assert gate(d, env, MERGE) == (0, ""), gate(d, env, MERGE)
 
+
+def test_the_kits_settings_protect_the_mcp_config():
+    # Claude starts the servers in main's .mcp.json without asking (#55), so a change to it needs a person.
+    kit_cfg = json.load(open(os.path.join(KIT, ".claude", "factory.json")))
+    d, env = setup(files=[".mcp.json"], cfg_extra={"protected": kit_cfg["protected"]})
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and ".mcp.json" in err, (rc, err)
+    deny = json.load(open(os.path.join(KIT, ".claude", "settings.json")))["permissions"]["deny"]
+    assert "Edit(./.mcp.json)" in deny, deny
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
