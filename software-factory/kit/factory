@@ -22,6 +22,8 @@ Build
   next                   the job the factory would hand out next
 
 Look
+  status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
+                         the CI queue and runners, and the tasks; read-only
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
   env [name|N]           the ports and database of this folder (or of that agent)
@@ -88,6 +90,7 @@ case "$cmd" in
   issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
+  status)    py factory_status.py "$@" ;;
   claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
   release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     py factory_claims.py clean ;;
