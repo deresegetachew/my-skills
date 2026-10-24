@@ -95,11 +95,23 @@ def order(issue):
     return (m["number"] if m else 10**9, issue["number"])
 
 
-def open_dependencies(issue, open_numbers):
+def open_dependencies(issue, open_numbers, looked_up=None):
+    """The issues and pull requests this one depends on ("Depends on #12, #14") that are still open. One of the
+    open task issues in `open_numbers` is known; any other number (a pull request, an issue that isn't a task) is
+    looked up once, since `open_numbers` holds no pull requests. A number that doesn't exist doesn't hold it back.
+    `looked_up` caches the answers across issues."""
     deps = set()
     for group in DEPENDS.findall(issue.get("body") or ""):
         deps |= {int(d) for d in re.findall(r"#(\d+)", group)}
-    return sorted(d for d in deps if d in open_numbers)
+    looked_up = {} if looked_up is None else looked_up
+    still_open = []
+    for d in sorted(deps):
+        if d not in open_numbers and d not in looked_up:
+            found = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{d}", ok_404=True)
+            looked_up[d] = bool(found) and found.get("state") == "open"
+        if d in open_numbers or looked_up[d]:
+            still_open.append(d)
+    return still_open
 
 
 def claim_winner(n):
@@ -122,7 +134,8 @@ def ready_issues(cfg):
     open_numbers = {i["number"] for i in open_now}
     ready = [i for i in open_now if L["ready"] in names(i) and L["blocked"] not in names(i)
              and not any(x.startswith(L["agentPrefix"]) for x in names(i))]
-    return [i for i in sorted(ready, key=order) if not open_dependencies(i, open_numbers)]
+    looked_up = {}
+    return [i for i in sorted(ready, key=order) if not open_dependencies(i, open_numbers, looked_up)]
 
 
 def pick(cfg, agent):

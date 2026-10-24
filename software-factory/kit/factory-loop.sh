@@ -88,6 +88,16 @@ tidy() {
   python3 "$hooks/factory_claims.py" tidy-branches >/dev/null 2>&1 || true
 }
 home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
+# Only the project's MCP servers: never the user's own claude.ai connectors or the servers in their settings, which
+# would put tool definitions nobody here needs into every turn (#55). The config is the .mcp.json main has on origin
+# (factory_mcp.py), never this worktree's copy, since Claude starts those servers without asking. Set before each
+# run, since main may change it. --mcp-config takes several values, so another flag must follow it.
+isolate() {
+  local cfg
+  cfg="$(python3 "$hooks/factory_mcp.py")" || cfg='{"mcpServers":{}}'
+  [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
+  claude_flags=(--mcp-config "$cfg" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}')
+}
 # After tidy: if main brought a different factory-loop.sh, carry on with that one. exec keeps the pid, so the
 # agent keeps its name, folder and claims, and the EXIT trap doesn't run (it's still alive). $1 = tasks left.
 reload_if_changed() {
@@ -122,15 +132,16 @@ for ((n = 1; n <= limit; n++)); do
     exit 1
   fi
   echo "=== [$agent] $(date '+%H:%M') task $next ==="
+  isolate
   if [ "$interactive" = 1 ]; then
     echo "[$agent] Talk to it as usual. When the task is done, the session closes by itself."
     python3 "$hooks/factory_claims.py" take-done --agent "$agent" >/dev/null  # no stale mark from an earlier run
     # Remote Control (on by default; FACTORY_REMOTE_CONTROL=0 turns it off): the session also appears at
     # claude.ai/code and in the Claude app, so you can watch it and type into it (/exit included) from your phone.
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then
-      claude --remote-control="$agent $id" "/next-task $id" || true
+      claude "${claude_flags[@]}" --remote-control="$agent $id" "/next-task $id" || true
     else
-      claude "/next-task $id" || true
+      claude "${claude_flags[@]}" "/next-task $id" || true
     fi
     stty sane 2>/dev/null
     python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null
@@ -148,7 +159,7 @@ for ((n = 1; n <= limit; n++)); do
     case "$answer" in q|Q|quit|stop|n|N) echo "[$agent] Stopped."; exit 0;; esac
     continue
   else
-    claude -p "/next-task $id" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+    claude "${claude_flags[@]}" -p "/next-task $id" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
   fi
   python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
 done
