@@ -421,8 +421,11 @@ Most of the cost is what the agents read, not what they write.
 - **A fresh session per task** (the loop already does this), so no task carries the last one's context.
 - **No personal MCP connectors:** agent sessions load only the project's `.mcp.json`
   ([MCP servers](#mcp-servers-the-projects-only)).
-- **Cheaper models for routine subagents:** the test-writer and the architecture-reviewer run on Sonnet
-  (`model:` in their files); the reviewer and the safety and security reviews keep the session's model.
+- **Cheaper models where it's safe:** the test-writer, the architecture-reviewer and the first pass of the
+  `reviewer` run on Sonnet (`model:` in their files). The `safety-auditor` and the `security-reviewer` stay on Opus.
+  When the reviewer reports a must-fix, the agent fixes it and the fixed commit is reviewed again on Opus, which says
+  how each earlier must-fix was resolved before it records the pass; Opus without a fix is only for items marked
+  unsure. A diff over `prSizeWarn` lines, or one that touches a `protected` path, goes to Opus from the start.
 - **Read what the task needs.** Every agent reads the PRD sections, decisions and designs the task points to
   and searches long documents, instead of reading them whole. Keep `CLAUDE.md` short and stable (it starts
   every session, and an unchanged start is cheaper to read again); put notes that change often in
@@ -565,6 +568,11 @@ current; the task never has to:
 | `architecture-reviewer` | Changes on paths with a style guide (`styles`) | Reviews against the style-guide skills, runs their `check`, and records its own pass |
 | `safety-auditor` | Changes on `reviews.safety-auditor.paths`, or anything touching the critical rules | Checks each critical rule still holds and is tested; writes a summary for whoever merges |
 | `security-reviewer` | Changes on `reviews.security-reviewer.paths`, plus auth, payments, uploads, tenancy, secrets | Reports exploitable problems with file, line and fix |
+
+**Models.** The test-writer, the architecture-reviewer and the reviewer's first pass run on Sonnet; the
+safety-auditor and the security-reviewer run on Opus. A reviewer must-fix is fixed first, then the fixed commit is
+reviewed on Opus; a diff over `prSizeWarn` lines or one on a `protected` path starts on Opus
+([Saving tokens](#saving-tokens)).
 
 `factory reviews` (`factory_reviews.py`) lists the extra reviews and checks a change needs, from `reviews`, `eval`,
 `design` and `styles` in `factory.json`: for example `safety-auditor`, `security-reviewer`, `eval`, `design-check`,
