@@ -555,7 +555,10 @@ It also blocks:
 **A local CI check before the PR** (`commands.ci`). Set it to what the CI job runs, scoped to what changed and
 building dependent packages first, for example
 `pnpm -s turbo run typecheck lint test build --filter=...[{base}]` (`{base}` becomes `origin/<main>`).
-`factory verify` runs it on a clean working tree and records the commit in `<reviewMarkers>/<branch>.ci.ok`. The gate
+`factory verify` runs main's `commands.ci` (read from GitHub like the gate's rules, so a branch can't change or
+miss it; the worktree's copy only when GitHub can't be reached, and it says so). It needs a clean working tree,
+with no uncommitted changes and no untracked files that aren't ignored, and records the commit in
+`<reviewMarkers>/<branch>.ci.ok`. The gate
 then needs that mark for the PR's commit at `gh pr create` and `gh pr ready`, so a type error doesn't cost a CI round
 trip and a new session. Drafts don't need it, nor does the merge (CI itself is green by then). Without `commands.ci`
 on main, nothing changes.

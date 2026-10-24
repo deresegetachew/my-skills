@@ -11,7 +11,7 @@ mark for `gh pr create` and `gh pr ready` when main's factory.json sets `command
 import os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from factory_config import load  # noqa: E402
+from factory_config import load, load_from_main  # noqa: E402
 
 
 def git(*a):
@@ -25,17 +25,26 @@ def tail(text, limit):
 
 
 def main():
-    cfg = load()
+    # Main's settings, as the PR gate reads them (#51): the command the gate requires, not whatever this branch says.
+    local = load()
+    try:
+        cfg = load_from_main(local)
+    except RuntimeError as e:
+        cfg = local
+        print(f"factory verify: can't read main's settings from GitHub ({e}); using this worktree's "
+              ".claude/factory.json.", file=sys.stderr)
     cmd = (cfg.get("commands") or {}).get("ci") or ""
     if not cmd:
-        print("commands.ci isn't set in .claude/factory.json, so there is nothing to run. Set it to what CI runs.")
+        print("commands.ci isn't set in main's .claude/factory.json, so there is nothing to run. Set it to what CI "
+              "runs.")
         return 0
     rc, branch = git("branch", "--show-current")
     if rc != 0 or not branch:
         print("factory verify: check out the task branch first (no branch here).", file=sys.stderr)
         return 1
-    # The mark says "this commit passed", so the files must be that commit: nothing uncommitted.
-    rc, dirty = git("status", "--porcelain", "--untracked-files=no")
+    # The mark says "this commit passed", so the files must be that commit: nothing uncommitted, and no untracked file
+    # (.gitignore respected) that CI wouldn't have.
+    rc, dirty = git("status", "--porcelain", "--untracked-files=all")
     if rc != 0 or dirty:
         print("factory verify: commit your changes first. The pass is recorded for a commit, and these files "
               "aren't in it:\n" + dirty, file=sys.stderr)
@@ -52,7 +61,7 @@ def main():
         print(f"`{run_cmd}` fails, so CI would fail too. The last lines:\n"
               + "\n".join(tail(p.stdout + p.stderr, limit)), file=sys.stderr)
         return 1
-    if git("rev-parse", "HEAD")[1] != head or git("status", "--porcelain", "--untracked-files=no")[1]:
+    if git("rev-parse", "HEAD")[1] != head or git("status", "--porcelain", "--untracked-files=all")[1]:
         print("factory verify: the commit or the files changed while it ran; run it again.", file=sys.stderr)
         return 1
     d = cfg["reviewMarkers"]
