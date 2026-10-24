@@ -21,20 +21,20 @@ if a[:2] == ["pr", "checks"]:
     sys.exit(0 if s.get("ci_green", True) else 1)
 if a[:2] == ["pr", "list"]:
     print(json.dumps(s.get("open_prs", []))); sys.exit(0)
+if a[:2] == ["repo", "view"]:
+    print(s.get("default_branch", "main")); sys.exit(0)
+if a[:1] == ["api"] and "/contents/.claude/factory.json" in " ".join(a):
+    if s.get("settings_error"):
+        sys.exit(s["settings_error"])
+    if s.get("main_settings") is None:
+        sys.exit("gh: Not Found (HTTP 404)")
+    print(json.dumps(s["main_settings"])); sys.exit(0)
 if a[:1] == ["api"] and "/files" in " ".join(a):
     print("\n".join(s.get("files", ["src/a.ts"]))); sys.exit(0)
 if a[:1] == ["api"] and "/issues/" in " ".join(a):
     print(json.dumps(s.get("issue", {"state": "open", "labels": []}))); sys.exit(0)
 sys.exit("fake gh: no answer for " + " ".join(a))
 '''
-
-
-def publish_settings(d):
-    """Commit the worktree's .claude/factory.json and point origin/main at that commit."""
-    git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t"]
-    subprocess.run(git + ["add", ".claude/factory.json"], check=True)
-    subprocess.run(git + ["commit", "-q", "-m", "settings"], check=True)
-    subprocess.run(git + ["update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
 
 
 def setup(pr=None, cfg_extra=None, **scenario):
@@ -51,9 +51,9 @@ def setup(pr=None, cfg_extra=None, **scenario):
     open(os.path.join(d, "tmp", "reviews", "task_1-x.ok"), "w").write(HEAD)  # the reviewer passed HEAD
     pr = {"number": 7, "headRefName": "task/1-x", "headRefOid": HEAD, "comments": [], "labels": [], "body": "",
           **(pr or {})}
-    json.dump({"pr": pr, **scenario}, open(os.path.join(d, "scenario.json"), "w"))
+    # The gate reads the settings from GitHub's default branch (#51): the fake gh serves the same ones.
+    json.dump({"pr": pr, "main_settings": cfg, **scenario}, open(os.path.join(d, "scenario.json"), "w"))
     subprocess.run(["git", "init", "-q", d], check=True)
-    publish_settings(d)  # the gate reads main's factory.json, never the worktree's (#51)
     env = {**os.environ, "PATH": f"{d}/bin:{os.environ['PATH']}", "GATE_SCENARIO": os.path.join(d, "scenario.json"),
            "GATE_LOG": os.path.join(d, "log")}
     env.pop("FACTORY_AGENT", None)
@@ -251,12 +251,30 @@ def test_the_worktree_copy_of_the_settings_changes_nothing():
     assert rc == 2 and ".claude/settings.json" in err, (rc, err)
 
 
-def test_no_main_to_read_the_settings_from_fails_closed():
-    d, env = setup()
-    subprocess.run(["git", "-C", d, "update-ref", "-d", "refs/remotes/origin/main"], check=True)
+def test_settings_the_gate_cannot_read_from_github_fail_closed():
+    d, env = setup(settings_error="gh: HTTP 500")
     rc, err = gate(d, env, MERGE)
-    assert rc == 2 and "origin/main" in err, (rc, err)
+    assert rc == 2 and "factory.json" in err, (rc, err)
 
+
+def test_no_settings_on_main_yet_means_the_defaults():
+    d, env = setup(files=[".claude/settings.json"], main_settings=None)
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and ".claude/settings.json" in err, (rc, err)  # the default `protected` covers .claude/
+
+
+def test_local_refs_and_mainbranch_cannot_steer_the_settings():
+    # The agent points mainBranch at its own branch and plants a local `origin/main` with permissive settings.
+    d, env = setup(files=[".claude/settings.json"])
+    cfg = json.load(open(os.path.join(d, ".claude", "factory.json")))
+    json.dump({**cfg, "mainBranch": "task/x", "protected": []}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(git + ["add", "-A"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "x"], check=True)
+    subprocess.run(git + ["branch", "origin/main"], check=True)
+    subprocess.run(git + ["update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+    rc, err = gate(d, env, MERGE)
+    assert rc == 2 and ".claude/settings.json" in err, (rc, err)
 
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):

@@ -86,26 +86,31 @@ def load():
 
 
 def load_from_main(local=None):
-    """The settings as main has them (`git show origin/<main>:.claude/factory.json`), never the worktree's copy.
+    """The settings as the repository's default branch has them on GitHub, never this machine's copy or refs.
 
-    The PR gate enforces these settings, so an agent must not be able to change them by editing its own worktree
-    (#51). The main branch's name still comes from the worktree. A main without the file gives the defaults; a git
-    error (no origin/<main>) raises, so the gate fails closed."""
-    local = local or load()
-    main = local.get("mainBranch") or DEFAULTS["mainBranch"]
+    The PR gate enforces these settings, so an agent must not be able to change them from its worktree (#51): not
+    by editing `.claude/factory.json`, not by setting `mainBranch`, and not by planting a local ref or tag named
+    `origin/<main>`. So the branch comes from GitHub (`gh repo view`) and the file is read through the API at that
+    branch. A 404 (no file on main yet) gives the defaults; any other failure raises, so the gate fails closed.
+    `local` is unused and kept for callers."""
     import subprocess
-    p = subprocess.run(["git", "show", f"origin/{main}:.claude/factory.json"], capture_output=True, text=True)
+    p = subprocess.run(["gh", "repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"],
+                       capture_output=True, text=True)
+    main = p.stdout.strip()
+    if p.returncode != 0 or not re.fullmatch(r"[\w./-]+", main or ""):
+        raise RuntimeError("could not ask GitHub for the default branch (gh repo view): " + p.stderr.strip()[:200])
+    p = subprocess.run(["gh", "api", f"repos/{{owner}}/{{repo}}/contents/.claude/factory.json?ref={main}",
+                        "-H", "Accept: application/vnd.github.raw"], capture_output=True, text=True)
     cfg = dict(DEFAULTS)
-    cfg["mainBranch"] = main
     if p.returncode != 0:
-        exists = subprocess.run(["git", "rev-parse", "--verify", "-q", f"origin/{main}"], capture_output=True)
-        if exists.returncode != 0:
-            raise RuntimeError(f"origin/{main} isn't there to read the factory's settings from (git fetch origin)")
-        return cfg  # main has no factory.json yet: the defaults
+        if "404" in p.stderr or "Not Found" in p.stderr:
+            cfg["mainBranch"] = main
+            return cfg  # main has no factory.json yet: the defaults
+        raise RuntimeError(f"could not read .claude/factory.json on {main} from GitHub: " + p.stderr.strip()[:200])
     user = json.loads(p.stdout)
     cfg.update({k: v for k, v in user.items() if not k.startswith("_")})
     cfg["commands"] = {**DEFAULTS["commands"], **user.get("commands", {})}
-    cfg["mainBranch"] = main
+    cfg["mainBranch"] = main  # GitHub's default branch wins over the file's own `mainBranch`
     return cfg
 
 
