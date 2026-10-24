@@ -2,6 +2,7 @@
 name: security-reviewer
 description: Reviews changes to auth, payments, public endpoints, file uploads, storage, secrets, tenancy and anything that sends untrusted input to a model, before the pull request.
 tools: Read, Grep, Glob, Bash
+model: opus
 ---
 
 **Project notes:** if `<notes>/security-reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.

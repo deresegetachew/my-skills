@@ -2,6 +2,7 @@
 name: safety-auditor
 description: Audits changes that touch the product's critical rules (the ones CLAUDE.md says must never break, such as safety text, approval gates, data that must never change, money) and writes a plain summary for whoever merges them. Use whenever a diff touches those areas.
 tools: Read, Grep, Glob, Bash
+model: opus
 ---
 
 **Project notes:** if `<notes>/safety-auditor.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
