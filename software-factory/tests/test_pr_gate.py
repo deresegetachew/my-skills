@@ -276,6 +276,77 @@ def test_local_refs_and_mainbranch_cannot_steer_the_settings():
     rc, err = gate(d, env, MERGE)
     assert rc == 2 and ".claude/settings.json" in err, (rc, err)
 
+
+CI_CMD = "pnpm turbo run typecheck lint test build --filter=...[{base}]"
+
+
+def give_origin(d):
+    """A bare origin with one commit on main, so the gate's number check can fetch it."""
+    git = ["git", "-C", d, "-c", "user.name=t", "-c", "user.email=t@t"]
+    origin = tempfile.mkdtemp()
+    subprocess.run(["git", "init", "-q", "--bare", "-b", "main", origin], check=True)
+    open(os.path.join(d, "README"), "w").write("start\n")
+    subprocess.run(git + ["add", "README"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "start"], check=True)
+    subprocess.run(git + ["remote", "add", "origin", origin], check=True)
+    subprocess.run(git + ["push", "-q", "origin", "HEAD:main"], check=True, capture_output=True)
+    subprocess.run(git + ["fetch", "-q", "origin"], check=True)
+    return git
+
+
+def branch_with_a_commit(d):
+    """A real task branch one commit past origin/main, reviewed; returns its HEAD."""
+    git = give_origin(d)
+    subprocess.run(git + ["checkout", "-q", "-b", "task/1-x"], check=True)
+    os.makedirs(os.path.join(d, "src"), exist_ok=True)
+    open(os.path.join(d, "src", "a.ts"), "w").write("x\n")
+    subprocess.run(git + ["add", "src"], check=True)
+    subprocess.run(git + ["commit", "-q", "-m", "work"], check=True)
+    head = subprocess.run(git + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    open(os.path.join(d, "tmp", "reviews", "task_1-x.ok"), "w").write(head)
+    return head
+
+
+def ci_mark(d, sha):
+    open(os.path.join(d, "tmp", "reviews", "task_1-x.ci.ok"), "w").write(sha)
+
+
+def test_a_ready_pr_needs_the_local_ci_check_for_its_head_commit():
+    d, env = setup(cfg_extra={"commands": {"ci": CI_CMD}})
+    give_origin(d)
+    rc, err = gate(d, env, "gh pr ready 7")
+    assert rc == 2 and "factory verify" in err, (rc, err)  # no marker
+    ci_mark(d, "b" * 40)
+    rc, err = gate(d, env, "gh pr ready 7")
+    assert rc == 2 and "factory verify" in err, (rc, err)  # a marker for an older commit
+    ci_mark(d, HEAD)
+    assert gate(d, env, "gh pr ready 7") == (0, ""), gate(d, env, "gh pr ready 7")
+
+
+def test_pr_create_needs_the_local_ci_check_but_a_draft_does_not():
+    d, env = setup(cfg_extra={"commands": {"ci": CI_CMD}})
+    head = branch_with_a_commit(d)
+    rc, err = gate(d, env, "gh pr create --title x --body y")
+    assert rc == 2 and "factory verify" in err, (rc, err)
+    assert gate(d, env, "gh pr create --draft --title x --body y")[0] == 0
+    ci_mark(d, head)
+    assert gate(d, env, "gh pr create --title x --body y") == (0, ""), gate(d, env, "gh pr create --title x --body y")
+
+
+def test_without_commands_ci_on_main_no_local_ci_check_is_needed():
+    d, env = setup()
+    give_origin(d)
+    assert gate(d, env, "gh pr ready 7") == (0, "")
+    # An agent can't switch the check off in its own copy of the settings either.
+    d, env = setup(cfg_extra={"commands": {"ci": CI_CMD}})
+    json.dump({"reviewMarkers": "tmp/reviews", "commands": {"ci": ""}}, open(os.path.join(d, ".claude", "factory.json"), "w"))
+    assert gate(d, env, "gh pr ready 7")[0] == 2
+
+
+def test_a_merge_doesnt_need_the_local_ci_check():
+    d, env = setup(cfg_extra={"commands": {"ci": CI_CMD}})  # CI itself is green on GitHub by then
+    assert gate(d, env, MERGE) == (0, ""), gate(d, env, MERGE)
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

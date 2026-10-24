@@ -3,7 +3,9 @@
 
 create (and `gh pr new`, `gh pr ready`): needs a reviewer pass for the commit (<reviewMarkers>/<branch>.ok holding
         it), except draft PRs (`--draft`), which are for questions and early feedback. When the diff touches a path
-        in `styles`, it also needs the architecture-reviewer's pass (<branch>.arch.ok).
+        in `styles`, it also needs the architecture-reviewer's pass (<branch>.arch.ok). When main's factory.json sets
+        `commands.ci`, it also needs `factory verify` to have passed that commit (<branch>.ci.ok), so a PR doesn't
+        reach CI with errors the agent could have caught locally (#58).
 merge:  needs those passes for the PR's head commit, green CI, no protected paths changed (`protected` in
         .claude/factory.json; `alwaysAllowed` files such as the build plan are fine), no hold label, no open
         dev-manager must-fix, and `--match-head-commit <head>` so the commit checked is the commit merged.
@@ -260,6 +262,13 @@ def need_reviews(cfg, branch, head, changed):
         block(ARCH_MSG.format(skills=", ".join(sorted({s for st in styles for s in st.get("skills", [])}))))
 
 
+def need_local_ci(cfg, branch, head):
+    """`commands.ci` on main: the same checks CI runs, passed locally for this exact commit by `factory verify`."""
+    if (cfg.get("commands") or {}).get("ci") and not passed(cfg, branch, head, ".ci.ok"):
+        block("CI's checks haven't passed locally for this commit. Run `factory verify` (or "
+              "`python3 .claude/hooks/factory_verify.py`), fix what fails, commit, and try again.")
+
+
 def need_task(cfg, branch, body):
     from factory_config import blocked_ids, branch_task, task_labels, task_source, tasks
     tid = branch_task(branch)
@@ -328,6 +337,7 @@ def gate_create(cfg, args):
               "Run `git fetch origin` and try again.")
     changed = out.split()
     need_reviews(cfg, branch, head, changed)
+    need_local_ci(cfg, branch, head)
     need_task(cfg, branch, body_text(flags))
     need_free_numbers(cfg, branch)
     need_room(cfg)
@@ -361,6 +371,7 @@ def gate_ready(cfg, args):
     _, pos = parse_args(args)
     pr = view(pr_ref(pos), "number,headRefName,headRefOid,body")
     need_reviews(cfg, pr["headRefName"], pr["headRefOid"], pr_files(pr["number"]))
+    need_local_ci(cfg, pr["headRefName"], pr["headRefOid"])
     need_task(cfg, pr["headRefName"], pr.get("body") or "")
     import factory_numbers
     try:
