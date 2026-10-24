@@ -1,7 +1,7 @@
 # Dev manager playbook
 
 The dev manager is a Claude session (usually a cloud session, so it keeps running with the laptop shut) that
-manages a repo while a **coding agent** builds it. The coding agent runs `/loop /next-task all` in Claude Code
+manages a repo while a **coding agent** builds it. The coding agent runs `factory loop -i` (a fresh Claude session per task)
 on a machine with the full toolchain and network. The dev manager doesn't write the product. It keeps the
 coding agent busy and its output safe:
 
@@ -73,7 +73,7 @@ Paste this as the `send_later` message, adjusted to the project, and keep the li
 activity up to date on each tick:
 
 ```
-[Dev manager tick] Manage <owner>/<repo> for the owner (the coding agent runs `/loop /next-task all` on his
+[Dev manager tick] Manage <owner>/<repo> for the owner (the coding agent runs `factory loop -i` on his
 machine). Use the REST API (`gh api`), never force-push or push to the main branch.
 1. Open PRs: for any head commit without a `<!-- pr-watch sha=... -->` comment, review and merge under the
    agreed rules. Give a PR a few minutes after it opens if the coding agent may still be pushing; a clean,

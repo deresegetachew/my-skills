@@ -15,9 +15,10 @@ factory <command>
 
 Build
   loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into,
-                         FACTORY_AGENTS=haile,tewodros: only those names on this machine;
                          which closes by itself when the task is done). Start it again in another terminal for more agents.
-  agent <name|N>         open Claude in that agent's own worktree (created the first time); then /loop /next-task all.
+                         FACTORY_AGENTS=haile,tewodros: only those names on this machine
+  agent <name|N>         open Claude in that agent's own worktree (created the first time), for manual work there.
+                         To run the queue, use loop -i instead (a fresh session per task).
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next
 
@@ -71,10 +72,14 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   loop)      exec "$root/factory-loop.sh" "$@" ;;
   agent)
-    who="${1:?usage: factory agent <name|N>}"; shift
+    [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
+    who="$1"; shift
+    bare=0; [ "$#" = 0 ] && bare=1
     dir="$(py factory_claims.py worktree "$who")" || exit 1
     name="$(basename "$dir")"; [ "$dir" = "$root" ] && name="$who"
     echo "$name: $dir"
+    # One session for many tasks grows with each one (#56): the loop gives every task a fresh context instead.
+    [ "$bare" = 1 ] && echo "For manual work in $name's folder. To run the queue, use factory loop -i instead: a fresh session per task."
     cd "$dir" || exit 1
     # A reused worktree may be behind main's submodule pin, and a new one may have none yet: without it the kit's
     # links in .claude/ point at nothing and Claude would start without the hooks and deny rules (#46).

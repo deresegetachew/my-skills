@@ -66,7 +66,8 @@ need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
    factory doctor                      # what's missing on this machine, and how to fix it
    ```
 
-5. **Start an agent:** `factory loop` (unattended) or `factory loop -i` (a session you can watch and type into).
+5. **Start an agent:** `factory loop -i` (a session per task that you can watch and type into), or `factory loop`
+   (unattended). [Which one](#three-ways-to-run-an-agent).
 
 6. **Start the dev manager:** in a Claude session with the repo attached, say "be the dev manager for this repo". It
    follows [DEV-MANAGER.md](DEV-MANAGER.md).
@@ -272,7 +273,7 @@ version it pins. `factory help` lists everything.
 |---|---|
 | `factory loop [N]` | Starts an agent loop: one fresh, unattended Claude run per task (`claude -p`). `N` caps the number of tasks. Run it again in another terminal for another agent |
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
-| `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on. Then type `/loop /next-task all` |
+| `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
@@ -312,9 +313,16 @@ version it pins. `factory help` lists everything.
   10 seconds and starts the next task; type `q` and Enter to stop. If the session ends before the task is done
   (`/exit`, a crash, a usage limit), the loop also carries on after the same 10 s countdown, so it never waits all
   night for a key.
-- **`factory agent <name>`**: your own Claude session in that agent's folder. The SessionStart hook claims the folder,
-  runs the install (in a worktree) and `agentSetup`, sets the agent's ports and database, and (issues mode) registers the agent. Then
-  type `/loop /next-task all`.
+- **`factory agent <name>`**: your own Claude session in that agent's folder, for manual work there (a fix by hand,
+  a look around). The SessionStart hook claims the folder, runs the install (in a worktree) and `agentSetup`, sets the
+  agent's ports and database, and (issues mode) registers the agent. Started with no other arguments, it says in one
+  line that the queue belongs in `factory loop -i`.
+
+**Which one to use.** Run the queue with `factory loop -i`, on every machine: each task gets a fresh session, and you
+can still type into it, here or through Remote Control. Use `factory loop` when nobody will watch. On a second machine,
+give it its own agent names with `FACTORY_AGENTS` (see [Names and folders](#names-and-folders)), then run
+`factory loop -i` there too. Avoid `/loop /next-task all` in one `factory agent` session: that session keeps every
+task's context and grows with each one, which costs tokens and attention until it compacts.
 
 ### Names and folders
 
@@ -395,6 +403,7 @@ The config is `.mcp.json` as the main branch has it on origin (`factory_mcp.py` 
 `.git/factory-mcp.json`), never the worktree's copy: Claude starts the servers in it without asking, so an
 uncommitted, untracked or branch-only `.mcp.json` must never count. `.mcp.json` is in `protected`, and the deny
 rules stop agents editing it, so a change to it needs a person to merge.
+`origin` comes from the clone's git config, so anyone who can change that config (`remote.origin.url`, `url.*.insteadOf`) can change which repository the servers come from; the PR gate trusts that config in the same way.
 
 If the agents need an MCP server (a docs or design server, for example), add it to `.mcp.json` at the project root
 in a PR that a person merges. Check a new session with `/mcp`: it should list only the project's servers.
