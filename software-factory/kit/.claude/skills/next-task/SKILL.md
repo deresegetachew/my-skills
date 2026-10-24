@@ -72,7 +72,8 @@ A `pr-<n>` comes before any new task: the dev manager reviewed that PR and its l
    `<!-- factory-question -->` comment instead of pushing, and stop (step 5).
 3. Run the commands from `factory.json`, ask the `reviewer` subagent (and the auditor the PR needed) for a pass
    on the new commit, then push. The push moves the head, so the PR is no longer rework.
-4. Reply on the PR: what changed for each must-fix, with the commit. Don't merge it: the PR gate holds a PR with a
+4. Reply on the PR: what changed for each must-fix, with the commit, and post the task's tokens again
+   (`python3 .claude/hooks/factory_usage.py --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`). Don't merge it: the PR gate holds a PR with a
    must-fix until the dev manager approves the new commit.
 5. Then stop (under `factory-loop.sh`) or go back to step 1. **In an interactive loop** (`FACTORY_INTERACTIVE=1`),
    stopping means marking the rework done, exactly like a new task:
@@ -158,7 +159,10 @@ write "Decision for you" in a report):
    Then drop your task claim, so the next pick moves on while the PR waits:
    `python3 .claude/hooks/factory_claims.py release --agent "$FACTORY_AGENT" --tasks-only` (when `FACTORY_AGENT` is set).
    The pushed `task/<id>-...` branch keeps the task taken for the other loops.
-3. Once CI is green, merge it yourself with
+   **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
+   `python3 .claude/hooks/factory_usage.py --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
+   (`<id>` is the issue number in issues mode, else the task id). If it says no replies were found, post it anyway.
+3. Once CI is green, post the tokens again (the same command: rework and CI rounds add to them), then merge it yourself with
    `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, where `<sha>` is the full commit hash that
    `git rev-parse HEAD` printed (paste the hash itself: the gate reads the command before the shell runs it, so
    `$(...)` can't stand in for it). Run it as its own command, with no push in it, then pull the main branch
