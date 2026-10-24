@@ -11,11 +11,14 @@ if [ -z "$token" ]; then
   exit 3
 fi
 
-for _ in $(seq 1 60); do
-  docker info >/dev/null 2>&1 && break
-  sleep 1
-done
-docker info >/dev/null
+# The light runner (compose-light.yaml) has no Docker; the heavy ones wait for their dind.
+if [ "${RUNNER_DOCKER:-1}" != 0 ]; then
+  for _ in $(seq 1 60); do
+    docker info >/dev/null 2>&1 && break
+    sleep 1
+  done
+  docker info >/dev/null
+fi
 
 cd /home/runner
 if ! ./config.sh --unattended --ephemeral --replace \

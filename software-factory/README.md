@@ -296,9 +296,9 @@ version it pins. `factory help` lists everything.
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
-| `factory ci install` / `uninstall` | Installs the runner as `<repo>-ci` (again to update), or removes it: a LaunchAgent on macOS, a systemd `--user` service on Linux. [Linux](#ci-on-linux) |
+| `factory ci install` / `uninstall [i]` | Installs `ci.runners` heavy runners and the light lane (again to update or change the number), or removes them (or one: `2`, `light`): LaunchAgents on macOS, systemd `--user` services on Linux. [Lanes](#ci-lanes) · [Linux](#ci-on-linux) |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
-| `factory ci logs [-f]` | The runner's log |
+| `factory ci logs [i] [-f]` | A runner's log: instance 1, or `2`, `light` ... |
 
 <br>
 
@@ -717,7 +717,8 @@ project is `widget-ci`, and each registration is `widget-ci-<mac>-<time>`. To ch
 install under another LaunchAgent label (`factory ci install` unloads it and removes its file first):
 
 ```json
-"ci": {"name": "widget-ci", "label": "widget-local", "repo": "acme/widget", "replaces": ["com.example.old-runner"]}
+"ci": {"name": "widget-ci", "label": "widget-local", "repo": "acme/widget", "replaces": ["com.example.old-runner"],
+       "runners": 3, "light": true, "lightLabel": "widget-light"}
 ```
 
 **Several Macs.** Run `factory ci install` on each: they register with the same label and GitHub gives each job to
@@ -754,10 +755,54 @@ and `enable --now`. `uninstall`, `status`, `stop` and `logs` work as on a Mac.
   then has only that user's rights, which contains the known risk below.
 - Several machines, Mac or Linux, can serve the same label.
 
-**The workflow.** Each job picks its machine from the repo variable `CI_RUNS_ON`, and a pull request from another
-repository (a fork) always runs on GitHub's runners:
+<a id="ci-lanes"></a>
+
+**Two lanes: light and heavy jobs.** Every runner takes one job at a time, so a 30-second Factory guard waits behind
+whatever is queued before it. The guard reruns on every label change, and label changes are the dev manager's merge
+steps (approval, `tests-reviewed`, the hold), so on one busy runner a merge could wait hours for it (#90). So:
+
+- **Light jobs**: the Factory guard, and any other short job that runs on label changes and needs no Docker. They
+  go to the **light lane**: one small runner per machine, label `<repo>-light`, without Docker-in-Docker
+  (`compose-light.yaml`, 1 CPU, 1 GB), that takes nothing else.
+- **Heavy jobs**: typecheck, lint, tests, build, browsers, evals, anything with service containers. They go to the
+  `ci.runners` heavy runners, label `<repo>-local`, each with its own Docker.
+
+`factory ci install` installs both (`"ci": {"light": false}` leaves the light lane out). `factory ci use local` sets
+`CI_RUNS_ON` to `["self-hosted","<repo>-local"]` and `CI_RUNS_ON_LIGHT` to `["self-hosted","<repo>-light"]`, and
+`use github` deletes both. `install` sets `CI_RUNS_ON_LIGHT` too when local mode is on. If gh can't set a variable
+(that needs admin on the repository), the command prints the value, and a person sets it under *Settings → Secrets
+and variables → Actions → Variables*. With no light runner online, light jobs wait. Then set `CI_RUNS_ON_LIGHT` to the
+same value as `CI_RUNS_ON`, or delete it.
+
+**How many runners** (`ci.runners`, default 1, set with `factory settings set ci.runners 3`). Each heavy runner is
+a loop with its own compose project (`<name>`, `<name>-2`, ...), registration names (`<name>-<host>.2-<time>`),
+Docker-in-Docker, volumes and workspace, all removed after each job. They share the label, so GitHub gives each job
+to whichever is free, on any machine. A machine can override the number with `FACTORY_CI_RUNNERS=3` in its shell
+profile (a CI box runs 3, a laptop 1); run `factory ci install` again after changing either.
+- Budget about 4 GB of memory per heavy runner (a job, its dind and its service containers) and 1 GB for the light
+  one. `install` warns when that is more than the machine has free.
+- CPU matters less: most jobs use one or two cores.
+- Scaling down removes the extra instances and their idle registrations. An instance that is running a job stays
+  until the job ends, and so does one whose state GitHub can't tell `install` (gh offline); run `install` again then.
+  There is a short window between that check and the unload: a job that starts in it is cancelled, and GitHub
+  shows it as failed.
+- **Running `install` again restarts every instance**, so jobs in progress on this machine are cancelled. Run it when
+  the runners are idle (`factory ci status`).
+- Registration names keep machines apart: `<name>-<host>-<time>` for instance 1, `<name>-<host>.2-<time>` and
+  `<name>-<host>.light-<time>` for the others (a host name never has a dot here). So instance 2 on `foo` and a
+  machine called `foo-2` never touch each other's runners.
+- On a Mac, the memory check uses Docker Desktop's VM (the jobs run there). On Linux it uses free memory, counting
+  the instances that already run.
+- With `"light": false`, `install` and `use local` delete `CI_RUNS_ON_LIGHT` (or say a person must), and `status`
+  warns whenever `CI_RUNS_ON_LIGHT` names a label that no online runner has.
+
+**The workflow.** Each job picks its machine from those variables, and a pull request from another repository (a
+fork) always runs on GitHub's runners. The kit's `.github/workflows/ci.yml` does this:
 
 ```yaml
+# light: the Factory guard
+runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '"ubuntu-latest"' || vars.CI_RUNS_ON_LIGHT || vars.CI_RUNS_ON || '"ubuntu-latest"') }}
+# heavy: everything else
 runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '"ubuntu-latest"' || vars.CI_RUNS_ON || '"ubuntu-latest"') }}
 ```
 
@@ -913,7 +958,7 @@ software-factory/
       factory_config.py                   reads factory.json, with defaults
       wait_for_merge.sh                   waits on a PR without spending tokens
     .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
-                                          compose.yaml, entrypoint.sh, ci_names.py, ci_status.py
+                                          compose.yaml, compose-light.yaml, entrypoint.sh, ci_names.py, ci_status.py
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
 ```

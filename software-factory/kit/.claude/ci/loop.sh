@@ -12,12 +12,17 @@
 #
 # Environment (from the LaunchAgent or the systemd unit, or from `factory ci start`): CI_NAME, CI_LABEL,
 # RUNNER_REPO, CI_STATE, CI_HOST (this machine, in the runner's name, so `factory ci stop` removes only this
-# machine's registrations), and on Linux DOCKER_HOST when Docker is rootless.
+# machine's registrations), and on Linux DOCKER_HOST when Docker is rootless. With several loops on one machine
+# (ci.runners, and the light lane), each also gets its own CI_PROJECT (compose project: its dind, volumes and
+# workspace), CI_RUNNER_PREFIX (registration names), CI_COMPOSE (compose.yaml, or compose-light.yaml for the light
+# lane) and CI_LOG; without them it is the single runner it always was.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 : "${CI_NAME:?}" "${CI_LABEL:?}" "${RUNNER_REPO:?}" "${CI_STATE:?}"
-compose=(docker compose --file "$here/compose.yaml" --project-name "$CI_NAME")
+project="${CI_PROJECT:-$CI_NAME}"
+compose=(docker compose --file "$here/${CI_COMPOSE:-compose.yaml}" --project-name "$project")
+prefix="${CI_RUNNER_PREFIX:-$CI_NAME-${CI_HOST:-mac}}"
 # `factory ci start` writes the token it was given (or an empty line) on stdin; under launchd, stdin is empty.
 given_token=""
 IFS= read -r given_token || true
@@ -38,7 +43,7 @@ trap 'cleanup; log "stopped"; exit 0' TERM INT
 # The log grows by megabytes per job; past 20 MB, keep its last megabyte. Rewritten in place, so whoever
 # holds it open (the start redirect, launchd) keeps appending to the same file.
 trim_log() {
-  local file="$CI_STATE/runner.log"
+  local file="${CI_LOG:-$CI_STATE/runner.log}"
   [ -f "$file" ] || return 0
   if [ "$(wc -c <"$file")" -gt 20000000 ]; then
     tail -c 1000000 "$file" >"$file.tmp" && cat "$file.tmp" >"$file"
@@ -84,7 +89,7 @@ while true; do
   round=$((round + 1))
   log "round $round: starting a runner for one job"
   # The token goes through this command's environment only (compose passes RUNNER_TOKEN through).
-  RUNNER_TOKEN="$token" RUNNER_REPO="$RUNNER_REPO" RUNNER_NAME="$CI_NAME-${CI_HOST:-mac}-$(date +%s)" RUNNER_LABEL="$CI_LABEL" \
+  RUNNER_TOKEN="$token" RUNNER_REPO="$RUNNER_REPO" RUNNER_NAME="$prefix-$(date +%s)" RUNNER_LABEL="$CI_LABEL" \
     "${compose[@]}" up --abort-on-container-exit --exit-code-from runner &
   wait $!
   code=$?

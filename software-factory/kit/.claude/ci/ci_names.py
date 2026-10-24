@@ -12,6 +12,9 @@ Every name comes from the project, so two projects can run their runners side by
   CI_INSTALLED ~/Library/Application Support/<name>  the private copy launchd runs (never the checkout)
   CI_STATE     ~/.local/state/<name>                 the log and the pid of a loop started by hand
   CI_REPLACES  "ci.replaces": LaunchAgent labels of an older install to unload first
+  CI_RUNNERS   "ci.runners": heavy runner loops on this machine (default 1); FACTORY_CI_RUNNERS overrides it here
+  CI_LIGHT     1 unless "ci.light" is false: one more, small loop without Docker for light jobs
+  CI_LIGHT_LABEL "ci.lightLabel", else "<repo name>-light"                                  (remanual-light)
 On Linux (FACTORY_CI_PLATFORM=linux, set by ci.sh) a systemd --user service runs it instead of launchd:
   CI_UNIT      <name>.service
   CI_UNIT_FILE ~/.config/systemd/user/<name>.service  ($XDG_CONFIG_HOME)
@@ -58,7 +61,19 @@ def names(cfg):
     base = repo.split("/")[1].lower()
     name = cfg.get("name") or f"{base}-ci"
     label = cfg.get("label") or f"{base}-local"
-    for what, value in (("name", name), ("label", label)):
+    light_label = cfg.get("lightLabel") or f"{base}-light"
+    raw = os.environ.get("FACTORY_CI_RUNNERS") or cfg.get("runners", 1)
+    try:
+        runners = int(raw)
+    except (TypeError, ValueError):
+        raise SystemExit(f"factory ci: ci.runners (or FACTORY_CI_RUNNERS) must be a whole number, not {raw!r}.")
+    if not 1 <= runners <= 16:
+        raise SystemExit(f"factory ci: ci.runners is {runners}; use 1 to 16.")
+    if light_label == label:
+        raise SystemExit(f"factory ci: ci.lightLabel must differ from ci.label ({label!r}): with one label, light jobs "
+                         "would wait behind heavy ones again.")
+    light = cfg.get("light", True) is not False
+    for what, value in (("name", name), ("label", label), ("lightLabel", light_label)):
         if not SAFE.fullmatch(value):
             raise SystemExit(f"factory ci: the {what} {value!r} must be lowercase letters, digits, dots, dashes or "
                              "underscores (up to 48), starting with a letter or digit.")
@@ -85,6 +100,9 @@ def names(cfg):
         "CI_UNIT_FILE": os.path.join(config_home, "systemd", "user", f"{name}.service"),
         "CI_STATE": os.path.join(state_home, name),
         "CI_REPLACES": " ".join(replaces),
+        "CI_RUNNERS": str(runners),
+        "CI_LIGHT": "1" if light else "0",
+        "CI_LIGHT_LABEL": light_label,
     }
 
 

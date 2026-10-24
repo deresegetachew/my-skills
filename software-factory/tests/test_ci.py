@@ -23,7 +23,9 @@ if a[:2] == ["repo", "view"]:
 if a[:1] == ["variable"]:
     name = a[2]
     if a[1] == "set": db.setdefault("vars", {})[name] = a[a.index("--body") + 1]; save(); sys.exit(0)
-    if a[1] == "delete": db.get("vars", {}).pop(name, None); save(); sys.exit(0)
+    if a[1] == "delete":
+        if db.get("no_delete"): sys.exit("HTTP 403: Resource not accessible")
+        db.get("vars", {}).pop(name, None); save(); sys.exit(0)
 if a[:1] != ["api"]: sys.exit("fake gh: no answer for %s" % a)
 method, jq, path, k, rest = "GET", None, None, 0, a[1:]
 while k < len(rest):
@@ -74,6 +76,7 @@ FAKE_DOCKER = r'''#!/usr/bin/env bash
 echo "$*" >>"$FAKE_DB.docker.log"
 [ "${FAKE_DOCKER_UP:-1}" = 1 ] || exit 1
 case " $* " in
+  *" info "*"MemTotal"*) [ -n "${FAKE_DOCKER_MEMTOTAL:-}" ] && echo "$FAKE_DOCKER_MEMTOTAL"; exit 0 ;;
   *" up "*)  # one round: say whether the runner got the given token, then fail registration (code 3)
     [ "${RUNNER_TOKEN:-}" = "given-token" ] && echo "token ok" >>"$FAKE_DB.docker.log"
     echo "name $RUNNER_NAME label $RUNNER_LABEL" >>"$FAKE_DB.docker.log"
@@ -480,6 +483,238 @@ def test_linux_install_starts_the_loop_once_and_escapes_the_unit():
     assert "/50%%$$off/.local/share/widget-ci/widget-ci\"" in unit.split("ExecStart=")[1].splitlines()[0], unit
     assert "WorkingDirectory=" + n["CI_INSTALLED"].replace("%", "%%") + "\n" in unit, unit
     assert "append:" + n["CI_STATE"].replace("%", "%%") + "/runner.log" in unit, unit
+
+
+# --- several runners and the light lane (#67, #90) ------------------------------------------------------------------
+
+def agents_dir(env):
+    return os.path.join(env["HOME"], "Library", "LaunchAgents")
+
+
+def plist_env(env, label):
+    return plistlib.load(open(os.path.join(agents_dir(env), f"{label}.plist"), "rb"))["EnvironmentVariables"]
+
+
+def test_two_runners_and_the_light_lane_get_their_own_projects_names_and_logs():
+    d, db, env = project(ci={"runners": 2})
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    labels = sorted(f[:-6] for f in os.listdir(agents_dir(env)))
+    assert labels == ["dev.software-factory.widget-ci", "dev.software-factory.widget-ci-2",
+                      "dev.software-factory.widget-ci-light"], labels
+    envs = {l: plist_env(env, l) for l in labels}
+    for key in ("CI_PROJECT", "CI_RUNNER_PREFIX", "CI_LOG"):
+        assert len({e[key] for e in envs.values()}) == 3, (key, envs)  # nothing shared: own dind, volumes, workspace
+    one, two, light = (envs[l] for l in labels)
+    assert (one["CI_PROJECT"], two["CI_PROJECT"], light["CI_PROJECT"]) == ("widget-ci", "widget-ci-2", "widget-ci-light")
+    assert two["CI_RUNNER_PREFIX"] == "widget-ci-test-mac.2" and light["CI_RUNNER_PREFIX"] == "widget-ci-test-mac.light"
+    assert one["CI_LABEL"] == two["CI_LABEL"] == "widget-local" and light["CI_LABEL"] == "widget-light", envs
+    assert one["CI_COMPOSE"] == two["CI_COMPOSE"] == "compose.yaml" and light["CI_COMPOSE"] == "compose-light.yaml"
+    lc = log(db, "launchctl")
+    assert lc.count("bootstrap") == 3, lc
+    assert "widget-ci-2: label widget-local" in out and "widget-ci-light: label widget-light (light jobs" in out, out
+
+
+def test_the_light_runner_has_no_docker_and_is_small():
+    import re
+    text = open(os.path.join(KIT, ".claude", "ci", "compose-light.yaml")).read()
+    body = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+    assert "dind" not in body and "privileged" not in body and "docker.sock" not in body, body
+    assert "RUNNER_DOCKER: '0'" in body and re.search(r"mem_limit: \d+[mg]", body), body
+    entry = open(os.path.join(KIT, ".claude", "ci", "entrypoint.sh")).read()
+    assert 'if [ "${RUNNER_DOCKER:-1}" != 0 ]' in entry
+
+
+def test_each_loop_runs_its_own_compose_project_and_registration_name():
+    d, db, env = project(ci={"runners": 2})
+    assert ci(d, env, "install")[0] == 0
+    n = names(d, env)
+    exe = os.path.join(n["CI_INSTALLED"], "widget-ci")
+    for label in ("dev.software-factory.widget-ci-2", "dev.software-factory.widget-ci-light"):
+        e = plist_env(env, label)
+        # One round with a given token: the fake runner fails registration (code 3), so the loop ends.
+        subprocess.run(["/bin/bash", exe], input="given-token\n", env={**env, **e, "PATH": env["PATH"]},
+                       capture_output=True, text=True, timeout=60, cwd=n["CI_INSTALLED"])
+    dl = log(db, "docker")
+    assert "--project-name widget-ci-2 up" in dl and "name widget-ci-test-mac.2-" in dl, dl
+    assert "compose-light.yaml --project-name widget-ci-light up" in dl and "label widget-light" in dl, dl
+    assert "name widget-ci-test-mac.light-" in dl, dl
+
+
+def test_scaling_down_removes_extra_instances_and_their_idle_registrations_but_waits_for_a_busy_one():
+    d, db, env = project(ci={"runners": 3})
+    assert ci(d, env, "install")[0] == 0
+    runner = lambda i, name, busy=False: {"id": i, "name": name, "status": "online", "busy": busy}
+    update(db, api={"repos/acme/Widget/actions/runners": {"runners": [
+        runner(21, "widget-ci-test-mac.2-100"),            # instance 2, idle: removed with it
+        runner(31, "widget-ci-test-mac.3-100", True),      # instance 3, busy: it stays for now
+        runner(11, "widget-ci-test-mac-100")]}})           # instance 1: kept
+    rc, out = ci(d, env, "install", )
+    assert rc == 0, out
+    rc, out = ci(d, {**env, "FACTORY_CI_RUNNERS": "1"}, "install")
+    assert rc == 0, out
+    labels = sorted(f[:-6] for f in os.listdir(agents_dir(env)))
+    assert labels == ["dev.software-factory.widget-ci", "dev.software-factory.widget-ci-3",
+                      "dev.software-factory.widget-ci-light"], labels
+    assert "Instance 3 (widget-ci-3) is running a job" in out and "Removed instance 2 (widget-ci-2)" in out, out
+    assert json.load(open(db)).get("deleted") == ["21"], json.load(open(db))
+    assert "bootout gui/" in log(db, "launchctl") and "/dev.software-factory.widget-ci-2" in log(db, "launchctl")
+    assert "--project-name widget-ci-2 down --volumes" in log(db, "docker"), log(db, "docker")
+    update(db, api={"repos/acme/Widget/actions/runners": {"runners": []}})  # its job ended
+    rc, out = ci(d, {**env, "FACTORY_CI_RUNNERS": "1"}, "install")
+    assert "Removed instance 3" in out and not os.path.exists(os.path.join(agents_dir(env), "dev.software-factory.widget-ci-3.plist")), out
+
+
+def test_light_can_be_turned_off_and_one_instance_uninstalled():
+    d, db, env = project(ci={"light": False})
+    assert ci(d, env, "install")[0] == 0
+    assert os.listdir(agents_dir(env)) == ["dev.software-factory.widget-ci.plist"]
+    d, db, env = project()
+    assert ci(d, env, "install")[0] == 0
+    rc, out = ci(d, env, "uninstall", "light")
+    assert rc == 0 and "Removed instance light" in out, out
+    assert os.listdir(agents_dir(env)) == ["dev.software-factory.widget-ci.plist"]
+    assert ci(d, env, "uninstall", "7")[0] == 1
+
+
+def test_install_warns_when_the_runners_need_more_memory_than_is_free():
+    d, db, env = project(ci={"runners": 3})
+    rc, out = ci(d, {**env, "FACTORY_CI_FREE_MB": "6000"}, "install")
+    assert rc == 0 and "Warning: 3 heavy runner(s) and the light one need about 13312 MB" in out, out
+    rc, out = ci(d, {**env, "FACTORY_CI_FREE_MB": "64000"}, "install")
+    assert "Warning" not in out, out
+
+
+def test_use_local_also_sets_the_light_lane_variable_and_install_says_it():
+    d, db, env = project()
+    rc, out = ci(d, env, "install")
+    assert "`factory ci use local` also sets CI_RUNS_ON_LIGHT to [\"self-hosted\",\"widget-light\"]" in out, out
+    rc, out = ci(d, env, "use", "local")
+    v = json.load(open(db))["vars"]
+    assert v["CI_RUNS_ON_LIGHT"] == '["self-hosted","widget-light"]' and v["CI_RUNS_ON"] == '["self-hosted","widget-local"]'
+    rc, out = ci(d, env, "install")  # in local mode, install sets it itself
+    assert "the repo variable CI_RUNS_ON_LIGHT is [\"self-hosted\",\"widget-light\"]" in out, out
+    rc, out = ci(d, env, "use", "github")
+    assert "CI_RUNS_ON_LIGHT" not in json.load(open(db))["vars"], out
+
+
+def test_status_lists_every_instance_and_logs_takes_one():
+    d, db, env = project(ci={"runners": 2})
+    assert ci(d, env, "install")[0] == 0
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]'})
+    runs_and_pulls(db, [run("main")], runners=[{"name": "widget-ci-test-mac.light-1", "status": "online", "busy": False,
+                                                "labels": [{"name": "self-hosted"}, {"name": "widget-light"}]}])
+    rc, out = ci(d, env, "status")
+    assert "Runner widget-ci: running (LaunchAgent dev.software-factory.widget-ci, pid 4242)" in out, out
+    assert "Runner widget-ci-2: running (LaunchAgent dev.software-factory.widget-ci-2, pid 4242)" in out, out
+    assert "Runner widget-ci-light (light lane, label widget-light): running" in out, out
+    assert "Light lane (widget-light, the Factory guard):" in out and "widget-ci-test-mac.light-1: online" in out, out
+    n = names(d, env)
+    open(os.path.join(n["CI_STATE"], "runner-2.log"), "w").write("round 9: job done\n")
+    rc, out = ci(d, env, "logs", "2")
+    assert rc == 0 and "round 9" in out, out
+
+
+def test_linux_two_runners_and_the_light_lane_are_user_units_and_scale_down():
+    d, db, env = linux_project(ci={"runners": 2})
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    unit_dir = os.path.join(env["HOME"], ".config", "systemd", "user")
+    assert sorted(os.listdir(unit_dir)) == ["widget-ci-2.service", "widget-ci-light.service", "widget-ci.service"]
+    projects = {unit_env(os.path.join(unit_dir, u))["CI_PROJECT"] for u in os.listdir(unit_dir)}
+    assert projects == {"widget-ci", "widget-ci-2", "widget-ci-light"}, projects
+    sc = log(db, "systemctl")
+    for u in ("widget-ci.service", "widget-ci-2.service", "widget-ci-light.service"):
+        assert f"--user enable {u}" in sc and f"--user restart {u}" in sc, (u, sc)
+    update(db, api={"repos/acme/Widget/actions/runners": {"runners": []}})  # GitHub says nothing is busy
+    rc, out = ci(d, {**env, "FACTORY_CI_RUNNERS": "1"}, "install")
+    assert rc == 0 and sorted(os.listdir(unit_dir)) == ["widget-ci-light.service", "widget-ci.service"], out
+    assert "--user disable --now widget-ci-2.service" in log(db, "systemctl")
+
+
+def test_turning_the_light_lane_off_removes_its_variable_and_status_flags_a_stale_one():
+    # (#91 review) Otherwise every Factory guard waits for a runner that no longer exists.
+    d, db, env = project()
+    assert ci(d, env, "install")[0] == 0 and ci(d, env, "use", "local")[0] == 0
+    assert "CI_RUNS_ON_LIGHT" in json.load(open(db))["vars"]
+    cfg = os.path.join(d, ".claude", "factory.json")
+    json.dump({"ci": {"light": False}}, open(cfg, "w"))
+    rc, out = ci(d, env, "install")
+    assert rc == 0 and "CI_RUNS_ON_LIGHT" not in json.load(open(db))["vars"], out
+    assert "deleted the repo variable CI_RUNS_ON_LIGHT" in out, out
+    # use local with the light lane off deletes it too
+    update(db, vars={"CI_RUNS_ON_LIGHT": '["self-hosted","widget-light"]'})
+    rc, out = ci(d, env, "use", "local")
+    assert "CI_RUNS_ON_LIGHT" not in json.load(open(db))["vars"], out
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]', "CI_RUNS_ON_LIGHT": '["self-hosted","widget-light"]'})
+    # status: a set CI_RUNS_ON_LIGHT that no online runner has is flagged, whatever ci.light says
+    runs_and_pulls(db, [run("main")], runners=[])
+    rc, out = ci(d, env, "status")
+    assert "CI_RUNS_ON_LIGHT asks for widget-light, and no runner with that label is online" in out, out
+
+
+def test_light_variable_that_gh_cant_delete_is_a_persons_step():
+    d, db, env = project(ci={"light": False})
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]', "CI_RUNS_ON_LIGHT": '["self-hosted","widget-light"]'},
+           no_delete=True)
+    rc, out = ci(d, env, "install")
+    assert rc == 0 and "Delete the repo variable CI_RUNS_ON_LIGHT" in out, out
+
+
+def test_registration_prefixes_dont_collide_between_hosts_foo_and_foo_2():
+    # Instance 2 on `foo` and instance 1 on `foo-2` must never match each other (#91 review).
+    d, db, env = project(ci={"runners": 2})
+    bin_ = env["PATH"].split(":")[0]
+    open(os.path.join(bin_, "scutil"), "w").write("#!/bin/sh\necho foo\n")
+    assert ci(d, env, "install")[0] == 0
+    runner = lambda i, name, busy=False: {"id": i, "name": name, "status": "online", "busy": busy}
+    update(db, api={"repos/acme/Widget/actions/runners": {"runners": [
+        runner(1, "widget-ci-foo-2-100", True),   # instance 1 on machine foo-2, busy
+        runner(2, "widget-ci-foo-2-200"),         # instance 1 on machine foo-2, idle
+        runner(3, "widget-ci-foo.2-300")]}})      # instance 2 on this machine (foo), idle
+    rc, out = ci(d, {**env, "FACTORY_CI_RUNNERS": "1"}, "install")
+    assert rc == 0 and "Removed instance 2" in out, out  # foo-2's busy runner didn't hold it back
+    assert json.load(open(db)).get("deleted") == ["3"], json.load(open(db))  # and foo-2's idle one was left alone
+
+
+def test_a_scale_down_that_cant_ask_github_leaves_the_instance_alone():
+    d, db, env = project(ci={"runners": 2})
+    assert ci(d, env, "install")[0] == 0
+    update(db, fail=["repos/acme/Widget/actions/runners"])
+    rc, out = ci(d, {**env, "FACTORY_CI_RUNNERS": "1"}, "install")
+    assert rc == 0 and "Can't tell whether instance 2 (widget-ci-2) is running a job" in out, out
+    assert os.path.exists(os.path.join(agents_dir(env), "dev.software-factory.widget-ci-2.plist"))
+
+
+def test_the_memory_warning_uses_docker_desktops_vm_on_macos_and_counts_running_instances_on_linux():
+    d, db, env = project(ci={"runners": 3})
+    rc, out = ci(d, {**env, "FAKE_DOCKER_MEMTOTAL": str(8 * 1024 ** 3)}, "install")
+    assert "Docker Desktop's VM has about 8192 MB" in out and "Warning" in out, out
+    rc, out = ci(d, {**env, "FAKE_DOCKER_MEMTOTAL": str(32 * 1024 ** 3)}, "install")
+    assert "Warning" not in out, out
+    d, db, env = linux_project(ci={"runners": 2})
+    assert ci(d, {**env, "FACTORY_CI_FREE_MB": "64000"}, "install")[0] == 0
+    # Re-install with the 2 heavy and the light instance running: only a new third needs memory.
+    rc, out = ci(d, {**env, "FACTORY_CI_FREE_MB": "5000", "FACTORY_CI_RUNNERS": "3"}, "install")
+    assert rc == 0 and "Warning" not in out, out
+    rc, out = ci(d, {**env, "FACTORY_CI_FREE_MB": "3000", "FACTORY_CI_RUNNERS": "4"}, "install")
+    assert "Warning" in out, out
+
+
+def test_the_light_label_must_differ_from_the_heavy_one():
+    d, db, env = project(ci={"lightLabel": "widget-local"})
+    rc, out = ci(d, env, "names")
+    assert rc != 0 and "ci.lightLabel must differ from ci.label" in out, out
+
+
+def test_the_workflow_template_puts_the_guard_on_the_light_lane_and_forks_on_github():
+    import re
+    text = open(os.path.join(KIT, ".github", "workflows", "ci.yml")).read()
+    runs_on = dict(re.findall(r"\n  (\w+):\n(?:    .*\n)*?    runs-on: (.*)", text))
+    fork = "github.event.pull_request.head.repo.full_name != github.repository && '\"ubuntu-latest\"'"
+    assert fork in runs_on["guard"] and fork in runs_on["check"], runs_on
+    assert "|| vars.CI_RUNS_ON_LIGHT || vars.CI_RUNS_ON || '\"ubuntu-latest\"'" in runs_on["guard"], runs_on
+    assert "CI_RUNS_ON_LIGHT" not in runs_on["check"] and "|| vars.CI_RUNS_ON || '\"ubuntu-latest\"'" in runs_on["check"]
 
 
 def test_factory_help_lists_the_ci_commands():
