@@ -382,13 +382,18 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 ### MCP servers: the project's only
 
 Every factory session (`factory loop`, `factory loop -i` and `factory agent`) starts Claude with
-`--strict-mcp-config --mcp-config <project>/.mcp.json`, or an empty config when the project has none, and with
+`--strict-mcp-config --mcp-config <main's .mcp.json>`, or an empty config when main has none, and with
 `--settings '{"disableClaudeAiConnectors": true}'`. So agents never load your own claude.ai connectors (Notion,
 Slack, Figma ...) or the MCP servers in your user settings. Their tools would go into every turn, cost tokens and
 tempt an agent to use them. Your own `claude` sessions outside the factory keep them.
 
+The config is `.mcp.json` as the main branch has it on origin (`factory_mcp.py` fetches it into
+`.git/factory-mcp.json`), never the worktree's copy: Claude starts the servers in it without asking, so an
+uncommitted, untracked or branch-only `.mcp.json` must never count. `.mcp.json` is in `protected`, and the deny
+rules stop agents editing it, so a change to it needs a person to merge.
+
 If the agents need an MCP server (a docs or design server, for example), add it to `.mcp.json` at the project root
-and commit it in a PR. Check a new session with `/mcp`: it should list only the project's servers.
+in a PR that a person merges. Check a new session with `/mcp`: it should list only the project's servers.
 
 ### Practical notes
 

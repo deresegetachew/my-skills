@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Factory sessions load only the project's MCP servers, never the user's own connectors (#55): every `claude` that
-factory-loop.sh (headless and -i) and `factory agent` start gets --strict-mcp-config, --mcp-config with the project's
-.mcp.json (or an empty config) and settings that turn the claude.ai connectors off. Runs the real scripts with stub
+factory-loop.sh (headless and -i) and `factory agent` start gets --strict-mcp-config, --mcp-config with the
+.mcp.json main has on origin (or an empty config), never the worktree's copy, and settings that turn the claude.ai
+connectors off. Runs the real scripts with stub
 hooks and a stub `claude` that records its arguments.
   python3 software-factory/tests/test_mcp_isolation.py"""
 import json, os, pty, select, shutil, subprocess, sys, tempfile, time
@@ -47,7 +48,7 @@ def fake_claude(d):
     return env
 
 
-def loop_project(mcp=None):
+def loop_project(mcp=None, worktree_mcp=None):
     d = tempfile.mkdtemp()
     origin, work = os.path.join(d, "origin.git"), os.path.join(d, "work")
     sh("git", "init", "-q", "--bare", "-b", "main", origin)
@@ -56,6 +57,7 @@ def loop_project(mcp=None):
     os.makedirs(hooks)
     for name in ("factory_claims.py", "factory_env.py", "factory_agents.py", "factory_remote.py", "next_task.py"):
         open(os.path.join(hooks, name), "w").write(STUB)
+    shutil.copy(os.path.join(HOOKS, "factory_mcp.py"), os.path.join(hooks, "factory_mcp.py"))
     open(os.path.join(work, ".claude", "factory.json"), "w").write('{"waitMinutes": 0}')
     if mcp is not None:
         json.dump(mcp, open(os.path.join(work, ".mcp.json"), "w"))
@@ -63,6 +65,8 @@ def loop_project(mcp=None):
     sh("git", "add", "-A", cwd=work)
     sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start", cwd=work)
     sh("git", "push", "-q", "origin", "HEAD:main", cwd=work)
+    if worktree_mcp is not None:  # only in this worktree: untracked, or an uncommitted edit
+        json.dump(worktree_mcp, open(os.path.join(work, ".mcp.json"), "w"))
     return work, fake_claude(d)
 
 
@@ -73,6 +77,13 @@ def calls(env):
 def flag(args, name):
     assert name in args, args
     return args[args.index(name) + 1]
+
+
+MAIN_COPY = os.path.join(".git", "factory-mcp.json")
+
+
+def main_copy(work):
+    return os.path.join(os.path.realpath(work), MAIN_COPY)
 
 
 def assert_isolated(args, mcp_config):
@@ -119,13 +130,32 @@ def test_a_headless_loop_run_gets_an_empty_mcp_config_without_a_project_file():
     assert args[-2:] == ["-p", "/next-task 1.1"], args
 
 
-def test_a_headless_loop_run_uses_the_projects_mcp_json():
-    work, env = loop_project(mcp={"mcpServers": {"docs": {"command": "docs-server"}}})
+def headless(work, env):
     p = subprocess.run(["bash", "./factory-loop.sh", "1"], cwd=work, env=env, capture_output=True, text=True,
                        timeout=60)
     assert p.returncode == 0, p
     (args,) = calls(env)
-    assert_isolated(args, os.path.join(os.path.realpath(work), ".mcp.json"))
+    return args
+
+
+DOCS = {"mcpServers": {"docs": {"command": "docs-server"}}}
+EVIL = {"mcpServers": {"github": {"command": "github-mcp-server"}}}
+
+
+def test_a_headless_loop_run_uses_the_mcp_json_main_has():
+    work, env = loop_project(mcp=DOCS)
+    args = headless(work, env)
+    assert_isolated(args, main_copy(work))
+    assert json.load(open(main_copy(work))) == DOCS
+
+
+def test_a_worktree_only_mcp_json_is_never_passed_to_claude():
+    work, env = loop_project(worktree_mcp=EVIL)  # untracked, main has none
+    assert_isolated(headless(work, env), EMPTY)
+    work, env = loop_project(mcp=DOCS, worktree_mcp=EVIL)  # an uncommitted edit: main's copy wins
+    args = headless(work, env)
+    assert_isolated(args, main_copy(work))
+    assert json.load(open(main_copy(work))) == DOCS and "github-mcp-server" not in json.dumps(args)
 
 
 def test_an_interactive_loop_session_is_isolated_too():
@@ -147,15 +177,21 @@ def test_factory_agent_starts_claude_isolated_and_passes_its_own_arguments_on():
             os.symlink(os.path.join(HOOKS, f), os.path.join(work, ".claude", "hooks", f))
     json.dump({"hooks": {}}, open(os.path.join(work, ".claude", "settings.json"), "w"))
     json.dump({"agents": ["menelik", "taytu"]}, open(os.path.join(work, ".claude", "factory.json"), "w"))
-    json.dump({"mcpServers": {}}, open(os.path.join(work, ".mcp.json"), "w"))
+    json.dump(DOCS, open(os.path.join(work, ".mcp.json"), "w"))
     sh("git", "add", "-A", cwd=work)
     sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start", cwd=work)
+    origin = os.path.join(d, "origin.git")
+    sh("git", "init", "-q", "--bare", "-b", "main", origin)
+    sh("git", "remote", "add", "origin", origin, cwd=work)
+    sh("git", "push", "-q", "origin", "HEAD:main", cwd=work)
+    json.dump(EVIL, open(os.path.join(work, ".mcp.json"), "w"))  # the agent's edit, not on main
     env = fake_claude(d)
     p = subprocess.run(["bash", os.path.join(KIT, "factory"), "agent", "menelik", "--resume"], cwd=work, env=env,
                        capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p
     (args,) = calls(env)
-    assert_isolated(args, os.path.join(os.path.realpath(work), ".mcp.json"))
+    assert_isolated(args, main_copy(work))
+    assert json.load(open(main_copy(work))) == DOCS
     assert args[-1] == "--resume", args
 
 
