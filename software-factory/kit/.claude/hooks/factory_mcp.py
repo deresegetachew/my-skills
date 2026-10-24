@@ -3,8 +3,8 @@
 remote, never this worktree's copy.
 
 `claude --mcp-config <file>` starts the stdio servers in that file without asking, so the file must be one an agent
-can't change: an uncommitted, untracked or branch-only `.mcp.json` is never used. This fetches the main branch
-(`mainBranch` in .claude/factory.json) from origin, writes its `.mcp.json` to this worktree's git folder
+can't change: an uncommitted, untracked or branch-only `.mcp.json` is never used. This fetches the remote's default branch
+(asked of the remote, never `mainBranch` in the worktree's .claude/factory.json) from origin, writes its `.mcp.json` to this worktree's git folder
 (`.git/factory-mcp.json`, out of the working tree) and prints that path. When main has none, or the fetch fails,
 it prints the empty config `{"mcpServers":{}}`, so nothing starts. `.mcp.json` is protected, so a change to it
 needs a person to merge.
@@ -21,18 +21,20 @@ def git(*a, text=True):
 
 
 def main_branch():
-    try:
-        with open(os.path.join(".claude", "factory.json")) as f:
-            name = json.load(f).get("mainBranch") or "main"
-    except (OSError, ValueError):
-        name = "main"
-    return name if re.fullmatch(r"[\w./-]+", name) and not name.startswith("-") else "main"
+    """The remote's default branch, asked of the remote itself (`git ls-remote --symref origin HEAD`). Never the
+    worktree's `.claude/factory.json` (`mainBranch`) or a local ref: an agent can change those, and could point them
+    at a branch with its own `.mcp.json` (#77 review). None when the remote can't say: then no servers start."""
+    p = git("ls-remote", "--symref", "origin", "HEAD")
+    m = re.search(r"^ref: refs/heads/(\S+)\s+HEAD$", p.stdout or "", re.M) if p.returncode == 0 else None
+    name = m.group(1) if m else None
+    return name if name and re.fullmatch(r"[\w./-]+", name) and not name.startswith("-") else None
 
 
 def main():
     try:
         # FETCH_HEAD, straight from the remote: a local ref named origin/<main> can't stand in for it.
-        if git("fetch", "-q", "origin", f"refs/heads/{main_branch()}").returncode != 0:
+        branch = main_branch()
+        if not branch or git("fetch", "-q", "origin", f"refs/heads/{branch}").returncode != 0:
             print(EMPTY)
             return 0
         shown = git("show", "FETCH_HEAD:.mcp.json", text=False)
