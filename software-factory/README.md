@@ -280,6 +280,7 @@ version it pins. `factory help` lists everything.
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
 | `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
+| `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
 | `factory settings` | Every setting in `factory.json`: its value here (or the default) and what it does. `settings show <key>` gives its type, default and options; `settings set <key> <value>` changes one, checked against its type; `settings unset <key>` goes back to the default. Then commit the file in a PR. Agents can't run `set` or `unset` |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
@@ -427,6 +428,11 @@ what the task cost.
 factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each
 machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size), and use `/usage`
 or the console for money, since prices differ per model.
+
+`factory report` adds what GitHub knows, the same on every machine: per task pull request opened in the last 7 days
+(`--since 2026-10-20` or `--since 30d`), the hours from the agent's claim to the PR (issues mode) and from the PR to
+the merge, the rework rounds (the dev manager's must-fix comments), and the CI runs on its branch with how many
+failed. Then the medians and totals for the merged ones. `--json` gives the same for scripts. It only reads.
 
 <br>
 
@@ -844,6 +850,7 @@ software-factory/
       factory_env.py                      per-agent ports and database
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
       factory_reviews.py                  which extra reviews a change needs
+      factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
       factory_settings.py                 `factory settings`: list, show, set and unset factory.json values
       factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
       factory_guard.py                    the CI guard
