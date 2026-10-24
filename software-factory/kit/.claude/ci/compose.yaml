@@ -24,7 +24,8 @@ services:
       retries: 30
 
   runner:
-    image: ghcr.io/actions/actions-runner:${RUNNER_VERSION:-2.338.0}
+    # The image `factory ci install` built for this project (runner.Dockerfile), else GitHub's plain one.
+    image: ${RUNNER_IMAGE:-ghcr.io/actions/actions-runner:2.338.0}
     # The runner shares dind's network, so a service port published by a job (`ports: - 5432`) is on
     # the runner's localhost, as on GitHub's runners, and never on the machine.
     network_mode: service:dind
