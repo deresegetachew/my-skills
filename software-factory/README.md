@@ -429,7 +429,12 @@ Most of the cost is what the agents read, not what they write.
   `.claude/factory/notes/`.
 - **A smaller Stop check:** set `commands.testChanged` and `typecheckChanged` to run only the changed packages
   (for example `pnpm -s turbo run test --filter=...[origin/main]`). A failure shows the failing lines first,
-  `checkOutputLines` in all.
+  `checkOutputLines` in all. After a green check, the next Stop skips it when nothing changed. That means the same
+  HEAD, the same tracked changes anywhere in the repo, the same untracked files that aren't ignored, the same
+  commands, and `checkRequires` paths (such as `node_modules`) not touched since. Other ignored files, such as
+  `.env`, aren't compared.
+  It remembers this in the git folder (`.git/factory-check-green`, one per worktree), and a failure is never
+  remembered. Like the review markers, it's a guard rail: a hand-written file there skips the check.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
@@ -603,7 +608,7 @@ no reading `.env` files.
 
 | Hook | What it does |
 |---|---|
-| Stop: `check.py` | Won't let a turn end while typecheck or tests fail, when code under `codePaths` changed |
+| Stop: `check.py` | Won't let a turn end while typecheck or tests fail, when code under `codePaths` changed. Skips a rerun when nothing changed since the last green check |
 | Stop: `factory_stop.py` | In `factory loop -i`, closes the session a few seconds after the agent marks its task done |
 | SessionStart: `factory_session.py` | Updates the submodules. For your own sessions, also claims the folder, installs, sets the agent's env and registers it |
 | Post-tool, Stop, SessionEnd: `factory_agents.py hook` | Pings, idle and down on the agent issue (issues mode) |
