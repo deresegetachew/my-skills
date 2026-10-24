@@ -749,7 +749,7 @@ and variables → Actions → Variables*. With no light runner online, light job
 same value as `CI_RUNS_ON`, or delete it.
 
 **How many runners** (`ci.runners`, default 1, set with `factory settings set ci.runners 3`). Each heavy runner is
-a loop with its own compose project (`<name>`, `<name>-2`, ...), registration names (`<name>-<host>-2-<time>`),
+a loop with its own compose project (`<name>`, `<name>-2`, ...), registration names (`<name>-<host>.2-<time>`),
 Docker-in-Docker, volumes and workspace, all removed after each job ([what persists](#ci-faster)). They share the label, so GitHub gives each job
 to whichever is free, on any machine. A machine can override the number with `FACTORY_CI_RUNNERS=3` in its shell
 profile (a CI box runs 3, a laptop 1); run `factory ci install` again after changing either.
@@ -757,7 +757,18 @@ profile (a CI box runs 3, a laptop 1); run `factory ci install` again after chan
   one. `install` warns when that is more than the machine has free.
 - CPU matters less: most jobs use one or two cores.
 - Scaling down removes the extra instances and their idle registrations. An instance that is running a job stays
-  until the job ends; run `install` again then.
+  until the job ends, and so does one whose state GitHub can't tell `install` (gh offline); run `install` again then.
+  There is a short window between that check and the unload: a job that starts in it is cancelled, and GitHub
+  shows it as failed.
+- **Running `install` again restarts every instance**, so jobs in progress on this machine are cancelled. Run it when
+  the runners are idle (`factory ci status`).
+- Registration names keep machines apart: `<name>-<host>-<time>` for instance 1, `<name>-<host>.2-<time>` and
+  `<name>-<host>.light-<time>` for the others (a host name never has a dot here). So instance 2 on `foo` and a
+  machine called `foo-2` never touch each other's runners.
+- On a Mac, the memory check uses Docker Desktop's VM (the jobs run there). On Linux it uses free memory, counting
+  the instances that already run.
+- With `"light": false`, `install` and `use local` delete `CI_RUNS_ON_LIGHT` (or say a person must), and `status`
+  warns whenever `CI_RUNS_ON_LIGHT` names a label that no online runner has.
 
 **The workflow.** Each job picks its machine from those variables, and a pull request from another repository (a
 fork) always runs on GitHub's runners. The kit's `.github/workflows/ci.yml` does this:
