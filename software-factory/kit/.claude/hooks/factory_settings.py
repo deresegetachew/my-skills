@@ -84,6 +84,8 @@ SETTINGS = {
     "ci.label": ("str", "The runner label CI jobs ask for (default `<repo>-local`).", None, ""),
     "ci.runners": ("int", "Heavy runner loops per machine (each with its own Docker); FACTORY_CI_RUNNERS overrides it on one machine.", None, 1),
     "ci.light": ("bool", "Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`.", None, True),
+    "ci.image": ("str", "The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base.", ["build", "base"], "build"),
+    "ci.caches": ("bool", "Keep a Docker Hub mirror and a pnpm store between jobs (content-addressed; no workspace or secrets).", None, True),
     "ci.lightLabel": ("str", "The light runner's label (default `<repo>-light`).", None, ""),
 }
 

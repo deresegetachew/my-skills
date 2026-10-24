@@ -15,6 +15,9 @@ Every name comes from the project, so two projects can run their runners side by
   CI_RUNNERS   "ci.runners": heavy runner loops on this machine (default 1); FACTORY_CI_RUNNERS overrides it here
   CI_LIGHT     1 unless "ci.light" is false: one more, small loop without Docker for light jobs
   CI_LIGHT_LABEL "ci.lightLabel", else "<repo name>-light"                                  (remanual-light)
+  CI_IMAGE     "ci.image": "build" (default: build runner.Dockerfile with the project's Node, pnpm and Playwright)
+               or "base" (GitHub's plain runner image)
+  CI_CACHES    1 unless "ci.caches" is false: the Docker Hub mirror and the pnpm store outlive a job
 On Linux (FACTORY_CI_PLATFORM=linux, set by ci.sh) a systemd --user service runs it instead of launchd:
   CI_UNIT      <name>.service
   CI_UNIT_FILE ~/.config/systemd/user/<name>.service  ($XDG_CONFIG_HOME)
@@ -70,6 +73,10 @@ def names(cfg):
     if not 1 <= runners <= 16:
         raise SystemExit(f"factory ci: ci.runners is {runners}; use 1 to 16.")
     light = cfg.get("light", True) is not False
+    image = cfg.get("image") or "build"
+    if image not in ("build", "base"):
+        raise SystemExit(f"factory ci: ci.image is {image!r}; use \"build\" or \"base\".")
+    caches = cfg.get("caches", True) is not False
     for what, value in (("name", name), ("label", label), ("lightLabel", light_label)):
         if not SAFE.fullmatch(value):
             raise SystemExit(f"factory ci: the {what} {value!r} must be lowercase letters, digits, dots, dashes or "
@@ -100,6 +107,8 @@ def names(cfg):
         "CI_RUNNERS": str(runners),
         "CI_LIGHT": "1" if light else "0",
         "CI_LIGHT_LABEL": light_label,
+        "CI_IMAGE": image,
+        "CI_CACHES": "1" if caches else "0",
     }
 
 

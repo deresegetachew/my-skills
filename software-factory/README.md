@@ -666,7 +666,7 @@ install under another LaunchAgent label (`factory ci install` unloads it and rem
 
 ```json
 "ci": {"name": "widget-ci", "label": "widget-local", "repo": "acme/widget", "replaces": ["com.example.old-runner"],
-       "runners": 3, "light": true, "lightLabel": "widget-light"}
+       "runners": 3, "light": true, "lightLabel": "widget-light", "image": "build", "caches": true}
 ```
 
 **Several Macs.** Run `factory ci install` on each: they register with the same label and GitHub gives each job to
@@ -684,6 +684,32 @@ branch checked out later can't change what runs unattended; `factory ci install`
 runner (`#!/bin/bash`), so `ps` shows `/bin/bash …/<name>` and `factory ci stop` only kills a process with exactly
 that command line. *Not tested:* what macOS shows for it in Login Items and Activity Monitor; the process itself is
 still `bash`.
+
+<a id="ci-faster"></a>
+
+**Faster rounds: a pre-built image and caches (#60).** A fresh runner per job used to download everything again:
+Node, pnpm and its packages, the service images (Postgres ...), Playwright's browser. Two things now carry over.
+
+1. **The runner image** (`ci.image`, default `"build"`). `factory ci install` builds `<name>-runner:latest` from
+   `runner.Dockerfile`: GitHub's runner image plus what this checkout asks for.
+   - Node from `.nvmrc`, in the tool cache `actions/setup-node` looks in first, so it doesn't download it.
+   - pnpm from `package.json`'s `packageManager`, through corepack.
+   - Playwright's Chromium and its system libraries, in `/ms-playwright`, at the version in the lockfile.
+   - The image sets `FACTORY_CI_IMAGE=1`, so a workflow can skip `playwright install` there.
+   - Run `install` again after changing the Node, pnpm or Playwright version. If the build fails, the runners use
+     GitHub's plain image and say so. `"image": "base"` skips the build. The light lane always uses the plain image.
+2. **Caches that outlive a job** (`ci.caches`, default on; heavy runners only), shared by the project's runners on
+   the machine:
+   - a pull-through **mirror of Docker Hub** (`<name>-mirror`, `registry:2`), which dind uses as its registry mirror;
+   - a **pnpm store** volume (`<name>-pnpm-store`), which the runner points `npm_config_store_dir` at.
+
+**What persists, and why it's safe.** Only those two caches. Both are content-addressed: an image layer is stored
+under its digest, and a pnpm package under its hash. A job can read them, but it can't change what another job gets
+under a name it asks for. The mirror is read-only to jobs (a pull-through registry takes no pushes) and holds public
+images only. No workspace, build output, environment variable, token or secret is ever written there. dind's data
+(the job's own images, containers and volumes), the runner's workspace and the job's networks are still removed by
+`down --volumes` after every job, so a job never sees another job's files. `factory ci uninstall` removes the caches
+and the image too.
 
 <a id="ci-on-linux"></a>
 
@@ -724,7 +750,7 @@ same value as `CI_RUNS_ON`, or delete it.
 
 **How many runners** (`ci.runners`, default 1, set with `factory settings set ci.runners 3`). Each heavy runner is
 a loop with its own compose project (`<name>`, `<name>-2`, ...), registration names (`<name>-<host>-2-<time>`),
-Docker-in-Docker, volumes and workspace, all removed after each job. They share the label, so GitHub gives each job
+Docker-in-Docker, volumes and workspace, all removed after each job ([what persists](#ci-faster)). They share the label, so GitHub gives each job
 to whichever is free, on any machine. A machine can override the number with `FACTORY_CI_RUNNERS=3` in its shell
 profile (a CI box runs 3, a laptop 1); run `factory ci install` again after changing either.
 - Budget about 4 GB of memory per heavy runner (a job, its dind and its service containers) and 1 GB for the light
@@ -894,7 +920,9 @@ software-factory/
       factory_config.py                   reads factory.json, with defaults
       wait_for_merge.sh                   waits on a PR without spending tokens
     .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
-                                          compose.yaml, compose-light.yaml, entrypoint.sh, ci_names.py, ci_status.py
+                                          compose.yaml, compose-light.yaml, compose-caches.yaml,
+                                          runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.py,
+                                          ci_status.py
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
 ```

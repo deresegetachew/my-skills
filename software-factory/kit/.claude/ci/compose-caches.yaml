@@ -1,0 +1,28 @@
+# Added to compose.yaml for the heavy runners when ci.caches is on (#60): the caches that outlive a job.
+# - A pull-through mirror of Docker Hub (registry:2, one per machine, started by loop.sh): a job's service images
+#   (Postgres ...) come from it after the first pull. It holds public images only, by content digest, and a job
+#   can't push to it.
+# - A pnpm store volume (one per project and machine): packages by content hash, written by pnpm, read by every
+#   job's install. No job's workspace, build output, environment or secrets go into it.
+# Everything else is still per job and removed by `down --volumes`: dind's data, the runner's workspace, the
+# job's containers and networks.
+services:
+  dind:
+    command: ['dockerd', '--host=unix:///run/dind/docker.sock', '--group=123',
+              '--registry-mirror=http://${CI_MIRROR:?}:5000', '--insecure-registry=${CI_MIRROR:?}:5000']
+    networks: [default, cache]
+  runner:
+    environment:
+      FACTORY_CI_CACHE: /cache/pnpm-store
+    volumes:
+      - pnpm-store:/cache/pnpm-store
+
+networks:
+  cache:
+    external: true
+    name: ${CI_CACHE_NETWORK:?}
+
+volumes:
+  pnpm-store:
+    external: true
+    name: ${CI_PNPM_STORE:?}

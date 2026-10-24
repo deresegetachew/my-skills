@@ -74,6 +74,7 @@ FAKE_DOCKER = r'''#!/usr/bin/env bash
 echo "$*" >>"$FAKE_DB.docker.log"
 [ "${FAKE_DOCKER_UP:-1}" = 1 ] || exit 1
 case " $* " in
+  *" build "*) [ -z "${FAKE_DOCKER_BUILD_FAILS:-}" ] || exit 1 ;;
   *" up "*)  # one round: say whether the runner got the given token, then fail registration (code 3)
     [ "${RUNNER_TOKEN:-}" = "given-token" ] && echo "token ok" >>"$FAKE_DB.docker.log"
     echo "name $RUNNER_NAME label $RUNNER_LABEL" >>"$FAKE_DB.docker.log"
@@ -636,6 +637,104 @@ def test_the_workflow_template_puts_the_guard_on_the_light_lane_and_forks_on_git
     assert fork in runs_on["guard"] and fork in runs_on["check"], runs_on
     assert "|| vars.CI_RUNS_ON_LIGHT || vars.CI_RUNS_ON || '\"ubuntu-latest\"'" in runs_on["guard"], runs_on
     assert "CI_RUNS_ON_LIGHT" not in runs_on["check"] and "|| vars.CI_RUNS_ON || '\"ubuntu-latest\"'" in runs_on["check"]
+
+
+# --- faster rounds: a pre-built image and caches that outlive a job (#60) --------------------------------------------
+
+def tooled_project(**kw):
+    d, db, env = project(**kw)
+    open(os.path.join(d, ".nvmrc"), "w").write("24\n")
+    json.dump({"packageManager": "pnpm@9.12.0+sha512.abc"}, open(os.path.join(d, "package.json"), "w"))
+    open(os.path.join(d, "pnpm-lock.yaml"), "w").write("  '@playwright/test@1.48.2':\n")
+    return d, db, env
+
+
+def test_install_builds_the_runner_image_with_the_projects_tools():
+    d, db, env = tooled_project()
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    dl = log(db, "docker")
+    assert "build --quiet --tag widget-ci-runner:latest" in dl, dl
+    for arg in ("NODE_VERSION=24", "PNPM_VERSION=9.12.0", "PLAYWRIGHT_VERSION=1.48.2"):
+        assert f"--build-arg {arg}" in dl, (arg, dl)
+    heavy, light = plist_env(env, "dev.software-factory.widget-ci"), plist_env(env, "dev.software-factory.widget-ci-light")
+    assert (heavy["RUNNER_IMAGE"], heavy["CI_CACHES"]) == ("widget-ci-runner:latest", "1"), heavy
+    assert (light["RUNNER_IMAGE"], light["CI_CACHES"]) == ("", "0"), light  # the light lane stays plain and small
+    n = names(d, env)
+    for f in ("runner.Dockerfile", "install-tools.sh", "compose-caches.yaml"):
+        assert os.path.isfile(os.path.join(n["CI_INSTALLED"], f)), f
+
+
+def test_a_failed_build_falls_back_to_the_plain_image_and_the_settings_turn_it_all_off():
+    d, db, env = tooled_project()
+    rc, out = ci(d, {**env, "FAKE_DOCKER_BUILD_FAILS": "1"}, "install")
+    assert rc == 0 and "the runner image didn't build" in out, out
+    assert plist_env(env, "dev.software-factory.widget-ci")["RUNNER_IMAGE"] == ""
+    d, db, env = tooled_project(ci={"image": "base", "caches": False})
+    assert ci(d, env, "install")[0] == 0
+    assert " build " not in log(db, "docker"), log(db, "docker")
+    assert plist_env(env, "dev.software-factory.widget-ci")["CI_CACHES"] == "0"
+
+
+def test_only_content_addressed_caches_outlive_a_job():
+    import re
+    ci_dir = os.path.join(KIT, ".claude", "ci")
+    caches = open(os.path.join(ci_dir, "compose-caches.yaml")).read()
+    base = open(os.path.join(ci_dir, "compose.yaml")).read()
+    # The runner's mounts: the entrypoint, dind's socket and the pnpm store; never its workspace (/home/runner/_work).
+    assert "_work" not in base + caches
+    assert re.findall(r"^  (\S+):\n    external: true", caches, re.M) == ["cache", "pnpm-store"], caches
+    assert "--registry-mirror=http://${CI_MIRROR:?}:5000" in caches
+    entry = open(os.path.join(ci_dir, "entrypoint.sh")).read()
+    assert '[ -w "$FACTORY_CI_CACHE" ]' in entry and "npm_config_store_dir" in entry
+    docker_file = open(os.path.join(ci_dir, "runner.Dockerfile")).read()
+    assert "RUNNER_TOOL_CACHE=/opt/hostedtoolcache" in docker_file and "PLAYWRIGHT_BROWSERS_PATH" in docker_file
+    assert ".complete" in open(os.path.join(ci_dir, "install-tools.sh")).read()
+
+
+# A Docker that keeps state in files: a project's volumes and workspace live in $STATE/<project>/ until
+# `down --volumes`, external volumes in $STATE/volumes/. Each `up` is one job: it says whether it can see the last
+# job's file, and whether the shared store has it, then writes its own to both.
+STATEFUL_DOCKER = r'''#!/usr/bin/env bash
+echo "$*" >>"$FAKE_DB.docker.log"
+st="$FAKE_DOCKER_STATE"; mkdir -p "$st/volumes"
+project=""; prev=""
+for a in "$@"; do [ "$prev" = --project-name ] && project="$a"; prev="$a"; done
+case " $* " in
+  *" up "*)
+    ws="$st/$project/workspace"; mkdir -p "$ws"
+    [ -e "$ws/job-file" ] && echo "SAW the last job's file" >>"$FAKE_DB.jobs.log" || echo "clean workspace" >>"$FAKE_DB.jobs.log"
+    [ -e "$st/volumes/$CI_PNPM_STORE/pkg" ] && echo "store hit" >>"$FAKE_DB.jobs.log"
+    echo secret >"$ws/job-file"; mkdir -p "$st/volumes/$CI_PNPM_STORE"; echo pkg >"$st/volumes/$CI_PNPM_STORE/pkg"
+    exit 0 ;;
+  *" down "*"--volumes"*) rm -rf "${st:?}/$project" ;;
+esac
+exit 0
+'''
+
+
+def test_a_job_never_sees_the_last_jobs_files_but_the_store_carries_over():
+    d, db, env = project()
+    assert ci(d, env, "install")[0] == 0
+    n = names(d, env)
+    e = plist_env(env, "dev.software-factory.widget-ci")
+    bin2 = tempfile.mkdtemp()
+    open(os.path.join(bin2, "docker"), "w").write(STATEFUL_DOCKER)
+    os.chmod(os.path.join(bin2, "docker"), 0o755)
+    run_env = {**env, **e, "PATH": f"{bin2}:{env['PATH']}", "FAKE_DOCKER_STATE": tempfile.mkdtemp()}
+    loop = subprocess.Popen(["/bin/bash", os.path.join(n["CI_INSTALLED"], "widget-ci")], stdin=subprocess.DEVNULL,
+                            env=run_env, cwd=n["CI_INSTALLED"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        for _ in range(200):
+            if len(log(db, "jobs").splitlines()) >= 3:  # two jobs: 1 line, then 2
+                break
+            time.sleep(0.1)
+    finally:
+        loop.terminate()
+        loop.wait(timeout=20)
+    jobs = log(db, "jobs").splitlines()
+    assert jobs[:3] == ["clean workspace", "clean workspace", "store hit"], jobs
+    assert "SAW" not in "".join(jobs)
 
 
 def test_factory_help_lists_the_ci_commands():

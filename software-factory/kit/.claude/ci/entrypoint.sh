@@ -20,6 +20,11 @@ if [ "${RUNNER_DOCKER:-1}" != 0 ]; then
   docker info >/dev/null
 fi
 
+# The shared pnpm store (compose-caches.yaml), when it's there and this user can write it.
+if [ -n "${FACTORY_CI_CACHE:-}" ] && [ -w "$FACTORY_CI_CACHE" ]; then
+  export npm_config_store_dir="$FACTORY_CI_CACHE"
+fi
+
 cd /home/runner
 if ! ./config.sh --unattended --ephemeral --replace \
   --url "https://github.com/$RUNNER_REPO" --token "$token" \

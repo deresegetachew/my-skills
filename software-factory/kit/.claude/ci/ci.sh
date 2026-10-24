@@ -52,8 +52,53 @@ use_instance() {
   I_PROJECT="$CI_NAME$sfx"
   I_PREFIX="$CI_NAME-$host$sfx"
   I_LOG="$CI_STATE/runner$sfx.log"
-  if [ "$1" = light ]; then I_COMPOSE=compose-light.yaml; I_LABEL="$CI_LIGHT_LABEL"
-  else I_COMPOSE=compose.yaml; I_LABEL="$CI_LABEL"; fi
+  if [ "$1" = light ]; then I_COMPOSE=compose-light.yaml; I_LABEL="$CI_LIGHT_LABEL"; I_CACHES=0; I_IMAGE=""
+  else I_COMPOSE=compose.yaml; I_LABEL="$CI_LABEL"; I_CACHES="$CI_CACHES"; I_IMAGE="${RUNNER_IMAGE_BUILT:-}"; fi
+}
+
+# The versions runner.Dockerfile bakes in, from this checkout: Node from .nvmrc, pnpm from package.json's
+# packageManager, Playwright from node_modules or the lockfile. Prints three lines (each may be empty).
+tool_versions() {
+  python3 - <<'PY'
+import json, os, re
+node = ""
+if os.path.exists(".nvmrc"):
+    v = open(".nvmrc").read().strip()
+    node = v if re.fullmatch(r"v?\d+(\.\d+){0,2}", v) else ""
+pnpm = ""
+try:
+    m = re.fullmatch(r"pnpm@(\d+\.\d+\.\d+)(\+.*)?", json.load(open("package.json")).get("packageManager", ""))
+    pnpm = m.group(1) if m else ""
+except (OSError, ValueError):
+    pass
+pw = ""
+try:
+    pw = json.load(open("node_modules/@playwright/test/package.json"))["version"]
+except (OSError, ValueError, KeyError):
+    try:
+        m = re.search(r"@playwright/test@(\d+\.\d+\.\d+)", open("pnpm-lock.yaml").read())
+        pw = m.group(1) if m else ""
+    except OSError:
+        pass
+print(node); print(pnpm); print(pw)
+PY
+}
+
+# Builds the heavy runners' image (ci.image "build"). On failure it says so and they use GitHub's plain image.
+build_image() {
+  RUNNER_IMAGE_BUILT=""
+  [ "$CI_IMAGE" = build ] || return 0
+  docker info >/dev/null 2>&1 || { echo "Docker isn't running, so the runner image isn't built; the runners use GitHub's."; return 0; }
+  local node pnpm pw tag="$CI_NAME-runner:latest"
+  { read -r node; read -r pnpm; read -r pw; } < <(tool_versions)
+  echo "Building the runner image $tag (Node ${node:-none}, pnpm ${pnpm:-none}, Playwright ${pw:-none})..."
+  if docker build --quiet --tag "$tag" --file "$CI_INSTALLED/runner.Dockerfile" \
+      --build-arg "NODE_VERSION=$node" --build-arg "PNPM_VERSION=$pnpm" --build-arg "PLAYWRIGHT_VERSION=$pw" \
+      "$CI_INSTALLED" >/dev/null; then
+    RUNNER_IMAGE_BUILT="$tag"
+  else
+    echo "Warning: the runner image didn't build; the runners use GitHub's plain image (jobs download their tools)."
+  fi
 }
 # The instances installed on this machine, from their LaunchAgent or unit files.
 installed_ids() {
@@ -127,6 +172,9 @@ copy_files() {
   install -m 700 "$kit/loop.sh" "$exe"
   install -m 600 "$kit/compose.yaml" "$CI_INSTALLED/compose.yaml"
   install -m 600 "$kit/compose-light.yaml" "$CI_INSTALLED/compose-light.yaml"
+  install -m 600 "$kit/compose-caches.yaml" "$CI_INSTALLED/compose-caches.yaml"
+  install -m 600 "$kit/runner.Dockerfile" "$CI_INSTALLED/runner.Dockerfile"
+  install -m 600 "$kit/install-tools.sh" "$CI_INSTALLED/install-tools.sh"
   install -m 600 "$kit/entrypoint.sh" "$CI_INSTALLED/entrypoint.sh"
 }
 
@@ -189,7 +237,7 @@ write_unit() {
     echo "WorkingDirectory=$(sd_path "$CI_INSTALLED")"
     for kv in "PATH=$path" "CI_NAME=$CI_NAME" "CI_LABEL=$I_LABEL" "CI_HOST=$host" "CI_STATE=$CI_STATE" \
               "RUNNER_REPO=$CI_REPO" "CI_PROJECT=$I_PROJECT" "CI_RUNNER_PREFIX=$I_PREFIX" "CI_COMPOSE=$I_COMPOSE" \
-              "CI_LOG=$I_LOG" ${dh:+"DOCKER_HOST=$dh"}; do
+              "CI_LOG=$I_LOG" "CI_CACHES=$I_CACHES" ${I_IMAGE:+"RUNNER_IMAGE=$I_IMAGE"} ${dh:+"DOCKER_HOST=$dh"}; do
       echo "Environment=\"$(sd "$kv")\""
     done
     echo "Restart=always"
@@ -298,6 +346,10 @@ write_plist() {
     <string>$(xml "$I_COMPOSE")</string>
     <key>CI_LOG</key>
     <string>$(xml "$I_LOG")</string>
+    <key>CI_CACHES</key>
+    <string>$(xml "$I_CACHES")</string>
+    <key>RUNNER_IMAGE</key>
+    <string>$(xml "$I_IMAGE")</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -418,6 +470,7 @@ cmd_install() {
         docker compose --file "$CI_INSTALLED/$f" --project-name "$CI_NAME" pull --quiet
     done
   fi
+  build_image
   memory_note
   # Scale down first: instances this machine has but no longer wants.
   local id wanted
@@ -502,6 +555,13 @@ cmd_uninstall() {
   done
   [ "$platform" = linux ] && { systemctl --user daemon-reload 2>/dev/null || true; }
   rm -rf "$CI_INSTALLED"
+  # The caches (compose-caches.yaml) and the built image go too.
+  if docker info >/dev/null 2>&1; then
+    docker rm -f "$CI_NAME-mirror" >/dev/null 2>&1 || true
+    docker network rm "$CI_NAME-cache" >/dev/null 2>&1 || true
+    docker volume rm "$CI_NAME-pnpm-store" "$CI_NAME-mirror-data" >/dev/null 2>&1 || true
+    docker image rm "$CI_NAME-runner:latest" >/dev/null 2>&1 || true
+  fi
   cmd_stop
 }
 
@@ -670,7 +730,7 @@ case "${1:-status}" in
   stop) cmd_stop ;;
   logs) shift; cmd_logs "$@" ;;
   names) for v in CI_REPO CI_NAME CI_LABEL CI_AGENT CI_PLIST CI_INSTALLED CI_STATE CI_REPLACES CI_UNIT CI_UNIT_FILE \
-               CI_RUNNERS CI_LIGHT CI_LIGHT_LABEL; do
+               CI_RUNNERS CI_LIGHT CI_LIGHT_LABEL CI_IMAGE CI_CACHES; do
       echo "$v=${!v}"
     done
     echo "CI_HOST=$host" ;;
