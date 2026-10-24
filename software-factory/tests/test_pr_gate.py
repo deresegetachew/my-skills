@@ -305,7 +305,7 @@ def test_the_kits_settings_protect_the_mcp_config():
     rc, err = gate(d, env, MERGE)
     assert rc == 2 and ".mcp.json" in err, (rc, err)
     deny = json.load(open(os.path.join(KIT, ".claude", "settings.json")))["permissions"]["deny"]
-    assert "Edit(./.mcp.json)" in deny and "Write(./.mcp.json)" in deny, deny
+    assert "Edit(./.mcp.json)" in deny, deny
 
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):

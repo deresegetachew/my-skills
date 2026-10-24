@@ -158,6 +158,21 @@ def test_a_worktree_only_mcp_json_is_never_passed_to_claude():
     assert json.load(open(main_copy(work))) == DOCS and "github-mcp-server" not in json.dumps(args)
 
 
+def test_the_worktree_cannot_steer_which_branch_the_config_comes_from():
+    # An agent pushes a branch with its own .mcp.json, then points the worktree at it: an uncommitted `mainBranch`
+    # in .claude/factory.json, and a planted local origin/main ref. main's copy must still win.
+    work, env = loop_project(mcp=DOCS)
+    sh("git", "checkout", "-q", "-b", "task/x", cwd=work)
+    json.dump(EVIL, open(os.path.join(work, ".mcp.json"), "w"))
+    sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "evil", cwd=work)
+    sh("git", "push", "-q", "origin", "task/x", cwd=work)
+    sh("git", "update-ref", "refs/remotes/origin/main", "HEAD", cwd=work)
+    open(os.path.join(work, ".claude", "factory.json"), "w").write('{"waitMinutes": 0, "mainBranch": "task/x"}')
+    args = headless(work, env)
+    assert_isolated(args, main_copy(work))
+    assert json.load(open(main_copy(work))) == DOCS and "github-mcp-server" not in json.dumps(args)
+
+
 def test_an_interactive_loop_session_is_isolated_too():
     work, env = loop_project()
     out = run_on_a_terminal(work, env, timeout=45)

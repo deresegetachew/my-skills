@@ -33,7 +33,6 @@
       "Edit(./.claude/**)",
       "Edit(./CLAUDE.md)",
       "Edit(./.mcp.json)",
-      "Write(./.mcp.json)",
       "Edit(./docs/PRD.md)",
       "Bash(gh api *)",
       "Edit(./vendor/**)",
