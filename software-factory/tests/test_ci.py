@@ -346,7 +346,7 @@ d="$FAKE_SYSTEMD"; mkdir -p "$d"
 shift
 case "$1" in
   daemon-reload) ;;
-  enable) [ "$2" = "--now" ] && echo 4343 >"$d/$3" ;;
+  enable) [ "$2" = "--now" ] && echo 4343 >"$d/$3" || echo 4343 >"$d/$2" ;;
   disable) rm -f "$d/${3:-$2}" ;;
   is-enabled) [ -f "$d/${3:-$2}" ] ;;
   show) [ -f "$d/$2" ] && cat "$d/$2" || echo 0 ;;
@@ -403,7 +403,7 @@ def test_linux_install_writes_and_starts_a_user_service_that_runs_the_private_co
     assert open(exe).readline() == "#!/bin/bash\n" and not exe.startswith(d)
     assert stat.S_IMODE(os.stat(n["CI_INSTALLED"]).st_mode) == 0o700
     sc = log(db, "systemctl")
-    assert sc.index("--user daemon-reload") < sc.index("--user enable --now widget-ci.service"), sc
+    assert sc.index("--user daemon-reload") < sc.index("--user enable widget-ci.service"), sc
     assert "Installed widget-ci" in out and "linger" not in out.lower(), out
 
 
@@ -444,6 +444,42 @@ def test_linux_status_stop_and_uninstall():
     assert not os.path.exists(n["CI_UNIT_FILE"]) and not os.path.exists(n["CI_INSTALLED"]), out
     rc, out = ci(d, env, "status")
     assert "not running on this machine" in out, out
+
+
+NO_BUS = '#!/bin/sh\necho "$*" >>"$FAKE_DB.systemctl.log"\necho "Failed to connect to bus: No medium found" >&2\nexit 1\n'
+
+
+def test_linux_without_a_user_manager_stops_before_touching_anything():
+    # `sudo -iu ci` or `su - ci`: no session bus, so every `systemctl --user` fails (dev manager, #87).
+    d, db, env = linux_project()
+    open(os.path.join(env["PATH"].split(":")[0], "systemctl"), "w").write(NO_BUS)
+    n = names(d, env)
+    for cmd in ("install", "uninstall", "stop", "status"):
+        rc, out = ci(d, env, cmd)
+        assert rc != 0, (cmd, out)
+        assert "user manager" in out and "machinectl shell" in out and "enable-linger" in out, (cmd, out)
+        assert "XDG_RUNTIME_DIR=/run/user/" in out, (cmd, out)
+        assert "Installed" not in out and "removed" not in out and "stopped" not in out, (cmd, out)
+    assert not os.path.exists(n["CI_UNIT_FILE"]) and not os.path.exists(n["CI_INSTALLED"]), "nothing written"
+    calls = log(db, "systemctl").splitlines()
+    assert calls and all(c == "--user show-environment" for c in calls), calls
+
+
+def test_linux_install_starts_the_loop_once_and_escapes_the_unit():
+    d, db, env = linux_project()
+    env["HOME"] = os.path.join(env["HOME"], "50%$off")  # % and $ mean something to systemd
+    os.makedirs(env["HOME"])
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    sc = log(db, "systemctl")
+    assert "--user enable widget-ci.service" in sc and "enable --now" not in sc, sc
+    assert sc.index("--user enable widget-ci.service") < sc.index("--user restart widget-ci.service"), sc
+    n = names(d, env)
+    unit = open(n["CI_UNIT_FILE"]).read()
+    assert "network-online" not in unit, unit
+    assert "/50%%$$off/.local/share/widget-ci/widget-ci\"" in unit.split("ExecStart=")[1].splitlines()[0], unit
+    assert "WorkingDirectory=" + n["CI_INSTALLED"].replace("%", "%%") + "\n" in unit, unit
+    assert "append:" + n["CI_STATE"].replace("%", "%%") + "/runner.log" in unit, unit
 
 
 def test_factory_help_lists_the_ci_commands():

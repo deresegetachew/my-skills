@@ -683,6 +683,11 @@ and `enable --now`. `uninstall`, `status`, `stop` and `logs` work as on a Mac.
   and gives the command: `sudo loginctl enable-linger <user>`.
 - **Docker:** the service gets `DOCKER_HOST` from your shell, else from the current `docker context`, else
   `$XDG_RUNTIME_DIR/docker.sock` when rootless Docker is there.
+- **The user manager:** `systemctl --user` needs that user's session. From `sudo -iu ci` or `su - ci` there is none, so
+  `factory ci` stops before changing anything and says how to get one (log in as the user directly, or enable linger
+  and set `XDG_RUNTIME_DIR=/run/user/<uid>`).
+- **gh on the CI user:** sign in with `gh auth login --insecure-storage`, so the token is in gh's own file. A keyring
+  can't be unlocked by a service at boot. Never put a token in the unit.
 - **Recommended:** run CI as a dedicated user with **rootless Docker**. The privileged Docker-in-Docker container
   then has only that user's rights, which contains the known risk below.
 - Several machines, Mac or Linux, can serve the same label.

@@ -27,7 +27,7 @@ cd "$root"
 eval "$(python3 "$kit/ci_names.py")"
 domain="gui/$(id -u)"
 exe="$CI_INSTALLED/$CI_NAME"
-# Which Mac a runner is on, in its name (<name>-<host>-<epoch>), so `stop` removes only this Mac's.
+# Which machine a runner is on, in its name (<name>-<host>-<epoch>), so `stop` removes only this machine's.
 host="$( (scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || echo mac) | tr '[:upper:]' '[:lower:]' |
   tr -c 'a-z0-9-\n' '-' | head -c 24)"
 host="${host:-$platform}"
@@ -107,6 +107,22 @@ docker_host() {
 # A value for systemd's Environment="KEY=value": quotes and backslashes escaped, % doubled.
 sd() { local v="${1//\\/\\\\}"; v="${v//\"/\\\"}"; printf '%s' "${v//%/%%}"; }
 
+# A path systemd takes as it is (WorkingDirectory=, append:): only % (a specifier) needs doubling.
+sd_path() { printf '%s' "${1//%/%%}"; }
+# In ExecStart= systemd also expands $VAR, so $ is doubled too.
+sd_exec() { local v; v="$(sd "$1")"; printf '%s' "${v//\$/\$\$}"; }
+
+# `systemctl --user` needs this user's systemd instance and its session bus. Logged in with `sudo -iu ci` or
+# `su - ci`, or over SSH before linger is on, there is none: stop before changing anything, and say how to get one.
+need_user_manager() {
+  systemctl --user show-environment >/dev/null 2>&1 && return 0
+  local u; u="$(id -un)"
+  die "systemd's user manager for $u isn't reachable (\`systemctl --user\` can't connect to its bus), so this shell can't
+manage the runner's service. Nothing was changed. Either log in as $u directly
+(ssh $u@<host>, or \`machinectl shell $u@\`), or run \`sudo loginctl enable-linger $u\` and then
+\`export XDG_RUNTIME_DIR=/run/user/$(id -u)\` in this shell, and try again."
+}
+
 write_unit() {
   local path="" dir tool dh
   for tool in gh docker; do
@@ -119,19 +135,18 @@ write_unit() {
   {
     echo "[Unit]"
     echo "Description=$CI_NAME: self-hosted GitHub Actions runner for $CI_REPO (software factory)"
-    echo "After=network-online.target"
     echo
     echo "[Service]"
-    echo "ExecStart=/bin/bash \"$(sd "$exe")\""
-    echo "WorkingDirectory=$CI_INSTALLED"
+    echo "ExecStart=/bin/bash \"$(sd_exec "$exe")\""
+    echo "WorkingDirectory=$(sd_path "$CI_INSTALLED")"
     for kv in "PATH=$path" "CI_NAME=$CI_NAME" "CI_LABEL=$CI_LABEL" "CI_HOST=$host" "CI_STATE=$CI_STATE" \
               "RUNNER_REPO=$CI_REPO" ${dh:+"DOCKER_HOST=$dh"}; do
       echo "Environment=\"$(sd "$kv")\""
     done
     echo "Restart=always"
     echo "RestartSec=30"
-    echo "StandardOutput=append:$CI_STATE/runner.log"
-    echo "StandardError=append:$CI_STATE/runner.log"
+    echo "StandardOutput=append:$(sd_path "$CI_STATE/runner.log")"
+    echo "StandardError=append:$(sd_path "$CI_STATE/runner.log")"
     echo
     echo "[Install]"
     echo "WantedBy=default.target"
@@ -151,6 +166,7 @@ linger_note() {
 
 install_linux() {
   need gh docker systemctl
+  need_user_manager
   can_register || die "gh can't create a runner registration token for $CI_REPO. Log in with \`gh auth login\` as an admin of the repository, then run this again."
   if [ -n "$(hand_pid || true)" ]; then
     echo "Stopping the runner started with \`factory ci start\` first..."
@@ -164,10 +180,10 @@ install_linux() {
       docker compose --file "$CI_INSTALLED/compose.yaml" --project-name "$CI_NAME" pull --quiet
   fi
   write_unit
-  # restart, not just enable --now: an update must replace a loop that's already running.
+  # enable, then restart: starts it the first time, and replaces a loop that's already running after an update.
   systemctl --user daemon-reload
-  systemctl --user enable --now "$CI_UNIT" >/dev/null
-  systemctl --user restart "$CI_UNIT" 2>/dev/null || true
+  systemctl --user enable "$CI_UNIT" >/dev/null 2>&1
+  systemctl --user restart "$CI_UNIT"
   echo "Installed $CI_NAME (commit $(cat "$CI_STATE/commit")): systemd runs it as the user service $CI_UNIT."
   echo "Repository $CI_REPO, label $CI_LABEL. Log: $CI_STATE/runner.log"
   linger_note
@@ -313,6 +329,7 @@ cmd_install() {
 cmd_uninstall() {
   if [ "$platform" = linux ]; then
     need systemctl
+    need_user_manager
     systemctl --user disable --now "$CI_UNIT" >/dev/null 2>&1 || true
     rm -f "$CI_UNIT_FILE"
     systemctl --user daemon-reload 2>/dev/null || true
@@ -369,6 +386,7 @@ cmd_start() {
 }
 
 cmd_stop() {
+  if [ "$platform" = linux ]; then need systemctl; need_user_manager; fi
   if agent_loaded "$CI_AGENT"; then
     die "$CI_NAME is installed, so $manager would start it again. Remove it with \`factory ci uninstall\`."
   fi
@@ -413,6 +431,7 @@ cmd_use() {
 
 cmd_status() {
   need gh
+  if [ "$platform" = linux ]; then need systemctl; need_user_manager; fi
   local value rc=0 local_mode=""
   value="$(runs_on)" || rc=$?
   case "$rc" in
