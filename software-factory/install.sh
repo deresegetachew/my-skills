@@ -27,7 +27,7 @@ fi
 is_engine() {
   case "$1" in
     ./factory|./factory-loop.sh|./.claude/hooks/*.py|./.claude/hooks/*.sh|./.claude/ci/*) return 0;;
-    ./.claude/agents/*.md|./.claude/skills/*/SKILL.md|./.claude/settings.json) return 0;;
+    ./.claude/agents/*.md|./.claude/skills/*/*.md|./.claude/settings.json) return 0;;
     *) return 1;;
   esac
 }
