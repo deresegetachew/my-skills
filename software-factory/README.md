@@ -390,11 +390,11 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 Most of the cost is what the agents read, not what they write.
 
 - **A fresh session per task** (the loop already does this), so no task carries the last one's context.
-- **Cheaper models for subagents, the strong one when it matters:** every subagent runs on Sonnet (`model:` in
-  its file). When the `reviewer`, `safety-auditor` or `security-reviewer` reports a must-fix or something it's
-  unsure of, the next-task skill asks it again on Opus, and keeps Opus for that review's later rounds on the task.
-  A diff over `prSizeWarn` lines, or one that touches a `protected` path, goes to Opus from the start. A clean,
-  small change is reviewed once, on Sonnet.
+- **Cheaper models where it's safe:** the test-writer, the architecture-reviewer and the first pass of the
+  `reviewer` run on Sonnet (`model:` in their files). The `safety-auditor` and the `security-reviewer` stay on Opus.
+  When the reviewer reports a must-fix, the agent fixes it and the fixed commit is reviewed again on Opus, which says
+  how each earlier must-fix was resolved before it records the pass; Opus without a fix is only for items marked
+  unsure. A diff over `prSizeWarn` lines, or one that touches a `protected` path, goes to Opus from the start.
 - **Read what the task needs.** Every agent reads the PRD sections, decisions and designs the task points to
   and searches long documents, instead of reading them whole. Keep `CLAUDE.md` short and stable (it starts
   every session, and an unchanged start is cheaper to read again); put notes that change often in
@@ -527,10 +527,10 @@ current; the task never has to:
 | `safety-auditor` | Changes on `reviews.safety-auditor.paths`, or anything touching the critical rules | Checks each critical rule still holds and is tested; writes a summary for whoever merges |
 | `security-reviewer` | Changes on `reviews.security-reviewer.paths`, plus auth, payments, uploads, tenancy, secrets | Reports exploitable problems with file, line and fix |
 
-**Models.** All five run on Sonnet. The `reviewer`, `safety-auditor` and `security-reviewer` get a second pass on
-Opus when the first one finds a must-fix or something it's unsure of, and start on Opus for a diff over
-`prSizeWarn` lines or one that touches a `protected` path ([Saving tokens](#saving-tokens)). The architecture
-reviewer and the test-writer stay on Sonnet.
+**Models.** The test-writer, the architecture-reviewer and the reviewer's first pass run on Sonnet; the
+safety-auditor and the security-reviewer run on Opus. A reviewer must-fix is fixed first, then the fixed commit is
+reviewed on Opus; a diff over `prSizeWarn` lines or one on a `protected` path starts on Opus
+([Saving tokens](#saving-tokens)).
 
 `factory reviews` (`factory_reviews.py`) lists the extra reviews and checks a change needs, from `reviews`, `eval`,
 `design` and `styles` in `factory.json`: for example `safety-auditor`, `security-reviewer`, `eval`, `design-check`,

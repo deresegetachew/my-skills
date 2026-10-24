@@ -42,3 +42,6 @@ mkdir -p "$d" && git rev-parse HEAD > "$d/$(git branch --show-current | tr / _).
 Never write that file when there are must-fix items, and never for a commit you haven't reviewed.
 
 **Unsure?** If you can't tell whether something is a must-fix (you couldn't verify it, or it needs judgement you're not confident of), list it under **unsure** with what you'd need to check. The caller then asks for a second review on a stronger model. Don't record the pass while anything is unsure.
+
+**Earlier must-fixes.** When the caller names earlier must-fix items, check each one in this commit and
+say how it was resolved before you record the pass. One that isn't resolved is still a must-fix.
