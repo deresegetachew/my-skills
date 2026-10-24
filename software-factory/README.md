@@ -63,6 +63,7 @@ need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
    ```bash
    ./factory install-shim              # puts a `factory` command in ~/.local/bin
    git config submodule.recurse true   # so `git pull` also updates vendor/my-skills
+   factory doctor                      # what's missing on this machine, and how to fix it
    ```
 
 5. **Start an agent:** `factory loop` (unattended) or `factory loop -i` (a session you can watch and type into).
@@ -283,6 +284,7 @@ version it pins. `factory help` lists everything.
 | `factory settings` | Every setting in `factory.json`: its value here (or the default) and what it does. `settings show <key>` gives its type, default and options; `settings set <key> <value>` changes one, checked against its type; `settings unset <key>` goes back to the default. Then commit the file in a PR. Agents can't run `set` or `unset` |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`. Read-only; exits 1 when something needs fixing |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -840,6 +842,7 @@ software-factory/
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
+      factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
       factory_reviews.py                  which extra reviews a change needs
       factory_settings.py                 `factory settings`: list, show, set and unset factory.json values
       factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
