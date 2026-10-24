@@ -285,6 +285,7 @@ version it pins. `factory help` lists everything.
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
 | `factory settings` | Every setting in `factory.json`: its value here (or the default) and what it does. `settings show <key>` gives its type, default and options; `settings set <key> <value>` changes one, checked against its type; `settings unset <key>` goes back to the default. Then commit the file in a PR. Agents can't run `set` or `unset` |
+| `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
 | `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`. Read-only; exits 1 when something needs fixing |
@@ -582,7 +583,7 @@ pipes, subshells), and blocks the pull-request commands that aren't ready:
 
 | Command | Allowed only when |
 |---|---|
-| `gh pr create`, `gh pr new`, `gh pr ready` | The reviewer passed the current commit (and the architecture reviewer, on styled paths). Fewer than `maxOpenPRs` of your ready PRs are open. Plan mode: the task isn't ticked or blocked on main. Issues mode: the issue is open, not blocked, not held by another agent, and the body says `Closes #<n>`. Every new decision or migration file (`decisions`, `numberedDirs`) takes a number neither main nor another open PR has; the message names the next free one (`factory_numbers.py`). Drafts (`--draft`) skip all of this: they're how agents ask questions |
+| `gh pr create`, `gh pr new`, `gh pr ready` | The reviewer passed the current commit (and the architecture reviewer, on styled paths). When main's `factory.json` sets `commands.ci`, `factory verify` passed that commit too. Fewer than `maxOpenPRs` of your ready PRs are open. Plan mode: the task isn't ticked or blocked on main. Issues mode: the issue is open, not blocked, not held by another agent, and the body says `Closes #<n>`. Every new decision or migration file (`decisions`, `numberedDirs`) takes a number neither main nor another open PR has; the message names the next free one (`factory_numbers.py`). Drafts (`--draft`) skip all of this: they're how agents ask questions |
 | `gh pr merge` | The PR is named by number or URL. It has no `factory-hold` label. The latest marker on it isn't a must-fix, and if it's an approval, it names the current head. The command has `--match-head-commit <head>`, so GitHub merges only the commit the gate checked. The reviewer passes (and the architecture reviewer's, on styled paths) are for that head. CI is green (`gh pr checks`); when the jobs never started (GitHub billing or the spending limit), the gate says that isn't a code result, so the agent doesn't push or re-run to chase it (`factory_ci.py`). No protected file changed (all files, past the first 100) |
 
 It also blocks:
@@ -592,6 +593,17 @@ It also blocks:
 - an agent posting the dev manager's markers (`factory-approved`, `factory-answer`, `factory-mustfix`) in a PR or issue
   comment, edit, review or close; `gh pr review --approve`; adding `tests-reviewed` or `deps-reviewed`; removing
   `factory-hold`.
+
+**A local CI check before the PR** (`commands.ci`). Set it to what the CI job runs, scoped to what changed and
+building dependent packages first, for example
+`pnpm -s turbo run typecheck lint test build --filter=...[{base}]` (`{base}` becomes `origin/<main>`).
+`factory verify` runs main's `commands.ci` (read from GitHub like the gate's rules, so a branch can't change or
+miss it; the worktree's copy only when GitHub can't be reached, and it says so). It needs a clean working tree,
+with no uncommitted changes and no untracked files that aren't ignored, and records the commit in
+`<reviewMarkers>/<branch>.ci.ok`. The gate
+then needs that mark for the PR's commit at `gh pr create` and `gh pr ready`, so a type error doesn't cost a CI round
+trip and a new session. Drafts don't need it, nor does the merge (CI itself is green by then). Without `commands.ci`
+on main, nothing changes.
 
 **It fails closed.** If it hits an error (a broken `factory.json`, `gh` not signed in, a command it can't parse), it
 blocks the command and says why.
@@ -826,7 +838,7 @@ reads these settings.
 |---|---|---|
 | `prd`, `plan`, `blocked`, `decisions` | Where the docs live | `docs/PRD.md`, `docs/build-plan.md`, `docs/blocked.md`, `docs/decisions` |
 | `mainBranch` | The main branch | `main` |
-| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only | empty |
+| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
 | `checkOutputLines` | How many lines of a failing Stop check the agent sees: the failing lines first, then the end | 40 |
 | `codePaths` | Folders with code: the Stop check runs when they change | `["src"]` |
 | `checkRequires` | Paths that must exist before the Stop check runs, such as `node_modules` | `[]` |
@@ -887,6 +899,7 @@ software-factory/
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
       factory_settings.py                 `factory settings`: list, show, set and unset factory.json values
       factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
+      factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
       factory_guard.py                    the CI guard
       style_checks.py                     CI: each style's check
       factory_config.py                   reads factory.json, with defaults

@@ -13,8 +13,9 @@ DEFAULTS = {
     # typecheckChanged / testChanged: the Stop check runs these instead of typecheck / test when set, for the
     # changed packages only (for example `pnpm -s turbo run test --filter=...[origin/main]`). Fewer test lines in
     # the agent's context, and a faster turn.
+    # ci: what CI runs, for `factory verify`; when set on main, the PR gate needs it passed for the PR's commit.
     "commands": {"typecheck": "", "lint": "", "test": "", "build": "", "smoke": "",
-                 "typecheckChanged": "", "testChanged": ""},
+                 "typecheckChanged": "", "testChanged": "", "ci": ""},
     "codePaths": ["src"],
     # How many lines of a failing Stop check the agent sees: the failing lines first, then the end of the output.
     "checkOutputLines": 40,

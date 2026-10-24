@@ -48,6 +48,7 @@ SETTINGS = {
     "commands.smoke": ("str", "A quick command proving main still works.", None, None),
     "commands.agentSetup": ("str", "Runs once per loop after the env is set, e.g. to create the slot's database.", None, ""),
     "commands.typecheckChanged": ("str", "The Stop check's typecheck, for the changed packages only (saves time and tokens). Empty: use commands.typecheck.", None, ""),
+    "commands.ci": ("str", "What CI runs (typecheck, lint, test, build), for `factory verify`; `{base}` is origin/<main>. When set on main, a ready PR needs it passed for its commit.", None, ""),
     "commands.testChanged": ("str", "The Stop check's tests, for the changed packages only. Empty: use commands.test.", None, ""),
     "codePaths": ("list", "Folders with code: the Stop check runs only when they changed.", None, None),
     "checkRequires": ("list", "Paths that must exist before the Stop check runs, e.g. [\"node_modules\"].", None, None),
