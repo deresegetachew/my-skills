@@ -273,6 +273,7 @@ version it pins. `factory help` lists everything.
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on. Then type `/loop /next-task all` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
+| `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
@@ -815,6 +816,7 @@ software-factory/
       factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
       next_task.py                        the next job: rework first, then a free task
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
+      factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_reviews.py                  which extra reviews a change needs
