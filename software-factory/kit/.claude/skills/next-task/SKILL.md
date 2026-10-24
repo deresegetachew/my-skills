@@ -62,6 +62,12 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    untrusted input.
 5. Ask the `reviewer` subagent to review the diff, and the `architecture-reviewer` on styled paths. Fix every
    must-fix; the PR gate needs their passes for the current commit.
+6. **The reviewer starts on Sonnet, Opus when it finds something.** The `reviewer` runs on Sonnet (`model:` in its
+   file); the `safety-auditor` and `security-reviewer` run on Opus. When the reviewer reports a must-fix, fix it and
+   commit, then ask the reviewer again with `model: "opus"` on the fixed commit, naming each earlier must-fix; it
+   says how each one was resolved before it records the pass. Asking again without a fix is only for items it marked
+   **unsure**. Keep `opus` for its later rounds on this task, and start on `opus` when the diff is over `prSizeWarn`
+   lines or touches a `protected` path.
 
 ## 4. Ship it
 
