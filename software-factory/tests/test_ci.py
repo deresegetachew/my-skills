@@ -336,6 +336,116 @@ def test_start_gives_the_token_on_stdin_and_never_writes_it():
     assert "registration failed" in open(os.path.join(n2["CI_STATE"], "runner.log")).read()
 
 
+# --- Linux: a systemd --user service (#62) -------------------------------------------------------------------------
+
+# Enabled units are files in $FAKE_SYSTEMD/<unit> holding the pid; every call is logged.
+FAKE_SYSTEMCTL = r'''#!/usr/bin/env bash
+echo "$*" >>"$FAKE_DB.systemctl.log"
+d="$FAKE_SYSTEMD"; mkdir -p "$d"
+[ "$1" = "--user" ] || { echo "only --user" >&2; exit 1; }
+shift
+case "$1" in
+  daemon-reload) ;;
+  enable) [ "$2" = "--now" ] && echo 4343 >"$d/$3" ;;
+  disable) rm -f "$d/${3:-$2}" ;;
+  is-enabled) [ -f "$d/${3:-$2}" ] ;;
+  show) [ -f "$d/$2" ] && cat "$d/$2" || echo 0 ;;
+esac
+'''
+
+
+def linux_project(linger="yes", **kw):
+    d, db, env = project(**kw)
+    bin_ = env["PATH"].split(":")[0]
+    for name in ("launchctl", "plutil", "scutil"):
+        os.remove(os.path.join(bin_, name))
+    for name, body in (("systemctl", FAKE_SYSTEMCTL), ("loginctl", f"#!/bin/sh\necho {linger}\n"),
+                       ("hostname", "#!/bin/sh\necho Test-Box\n")):
+        open(os.path.join(bin_, name), "w").write(body)
+        os.chmod(os.path.join(bin_, name), 0o755)
+    root = os.path.dirname(db)
+    env.update({"FACTORY_CI_PLATFORM": "linux", "FAKE_SYSTEMD": os.path.join(root, "systemd"),
+                "XDG_RUNTIME_DIR": os.path.join(root, "run")})
+    for k in ("XDG_CONFIG_HOME", "XDG_DATA_HOME", "DOCKER_HOST"):
+        env.pop(k, None)
+    os.makedirs(env["XDG_RUNTIME_DIR"])
+    return d, db, env
+
+
+def unit_env(path):
+    return dict(l[len("Environment=\""):-1].split("=", 1) for l in open(path).read().splitlines()
+                if l.startswith("Environment="))
+
+
+def test_linux_names_use_xdg_folders_and_a_user_unit():
+    d, db, env = linux_project()
+    n = names(d, env)
+    home = env["HOME"]
+    assert n["CI_INSTALLED"] == f"{home}/.local/share/widget-ci", n
+    assert n["CI_UNIT"] == "widget-ci.service", n
+    assert n["CI_UNIT_FILE"] == f"{home}/.config/systemd/user/widget-ci.service", n
+    assert n["CI_STATE"] == f"{home}/.local/state/widget-ci" and n["CI_HOST"] == "test-box", n
+
+
+def test_linux_install_writes_and_starts_a_user_service_that_runs_the_private_copy():
+    d, db, env = linux_project()
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    n = names(d, env)
+    unit = open(n["CI_UNIT_FILE"]).read()
+    exe = os.path.join(n["CI_INSTALLED"], "widget-ci")
+    assert f'ExecStart=/bin/bash "{exe}"' in unit and "Restart=always" in unit and "WantedBy=default.target" in unit, unit
+    e = unit_env(n["CI_UNIT_FILE"])
+    assert (e["CI_NAME"], e["CI_LABEL"], e["RUNNER_REPO"], e["CI_HOST"]) == \
+        ("widget-ci", "widget-local", "acme/Widget", "test-box"), e
+    assert all(x.startswith("/") for x in e["PATH"].split(":")), e["PATH"]
+    assert not any("TOKEN" in k for k in e) and "fresh-token" not in unit, unit
+    assert open(exe).readline() == "#!/bin/bash\n" and not exe.startswith(d)
+    assert stat.S_IMODE(os.stat(n["CI_INSTALLED"]).st_mode) == 0o700
+    sc = log(db, "systemctl")
+    assert sc.index("--user daemon-reload") < sc.index("--user enable --now widget-ci.service"), sc
+    assert "Installed widget-ci" in out and "linger" not in out.lower(), out
+
+
+def test_linux_install_says_how_to_keep_it_running_when_linger_is_off():
+    d, db, env = linux_project(linger="no")
+    rc, out = ci(d, env, "install")
+    assert rc == 0 and "sudo loginctl enable-linger" in out, out
+
+
+def test_linux_install_finds_rootless_docker():
+    d, db, env = linux_project()
+    open(os.path.join(env["XDG_RUNTIME_DIR"], "docker.sock"), "w").close()
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    e = unit_env(names(d, env)["CI_UNIT_FILE"])
+    assert e["DOCKER_HOST"] == f"unix://{env['XDG_RUNTIME_DIR']}/docker.sock", e
+    d, db, env = linux_project()
+    rc, out = ci(d, env, "install")
+    assert "DOCKER_HOST" not in unit_env(names(d, env)["CI_UNIT_FILE"]), "no rootless socket: Docker's default"
+    env["DOCKER_HOST"] = "unix:///custom/docker.sock"
+    ci(d, env, "install")
+    assert unit_env(names(d, env)["CI_UNIT_FILE"])["DOCKER_HOST"] == "unix:///custom/docker.sock"
+
+
+def test_linux_status_stop_and_uninstall():
+    d, db, env = linux_project()
+    assert ci(d, env, "install")[0] == 0
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]'})
+    runs_and_pulls(db, [run("main")], runners=[])
+    rc, out = ci(d, env, "status")
+    assert rc == 0 and "Runner widget-ci: running (systemd user service widget-ci.service, pid 4343)" in out, out
+    rc, out = ci(d, env, "stop")
+    assert rc == 1 and "systemd would start it again" in out, out
+    n = names(d, env)
+    rc, out = ci(d, env, "uninstall")
+    assert rc == 0, out
+    assert "--user disable --now widget-ci.service" in log(db, "systemctl"), log(db, "systemctl")
+    assert not os.path.exists(n["CI_UNIT_FILE"]) and not os.path.exists(n["CI_INSTALLED"]), out
+    rc, out = ci(d, env, "status")
+    assert "not running on this machine" in out, out
+
+
 def test_factory_help_lists_the_ci_commands():
     out = subprocess.run(["bash", os.path.join(KIT, "factory"), "help"], cwd=project()[0], capture_output=True,
                          text=True).stdout

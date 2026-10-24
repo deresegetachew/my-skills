@@ -290,7 +290,7 @@ version it pins. `factory help` lists everything.
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
-| `factory ci install` / `uninstall` | Installs the runner on this Mac as a LaunchAgent named `<repo>-ci` (again to update), or removes it |
+| `factory ci install` / `uninstall` | Installs the runner as `<repo>-ci` (again to update), or removes it: a LaunchAgent on macOS, a systemd `--user` service on Linux. [Linux](#ci-on-linux) |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
 | `factory ci logs [-f]` | The runner's log |
 
@@ -669,6 +669,19 @@ branch checked out later can't change what runs unattended; `factory ci install`
 runner (`#!/bin/bash`), so `ps` shows `/bin/bash …/<name>` and `factory ci stop` only kills a process with exactly
 that command line. *Not tested:* what macOS shows for it in Login Items and Activity Monitor; the process itself is
 still `bash`.
+
+<a id="ci-on-linux"></a>
+
+**On Linux.** `factory ci install` writes a systemd user service, `~/.config/systemd/user/<name>.service`, that runs
+the private copy in `~/.local/share/<name>/`, with `Restart=always`. It then runs `systemctl --user daemon-reload`
+and `enable --now`. `uninstall`, `status`, `stop` and `logs` work as on a Mac.
+- **Linger:** without it, systemd stops a user's services at logout and doesn't start them at boot. `install` says so
+  and gives the command: `sudo loginctl enable-linger <user>`.
+- **Docker:** the service gets `DOCKER_HOST` from your shell, else from the current `docker context`, else
+  `$XDG_RUNTIME_DIR/docker.sock` when rootless Docker is there.
+- **Recommended:** run CI as a dedicated user with **rootless Docker**. The privileged Docker-in-Docker container
+  then has only that user's rights, which contains the known risk below.
+- Several machines, Mac or Linux, can serve the same label.
 
 **The workflow.** Each job picks its machine from the repo variable `CI_RUNS_ON`, and a pull request from another
 repository (a fork) always runs on GitHub's runners:

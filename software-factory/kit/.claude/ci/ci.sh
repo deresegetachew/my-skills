@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
-# factory ci: the project's CI, on GitHub's runners or on a self-hosted runner on this Mac (README.md, "CI").
+# factory ci: the project's CI, on GitHub's runners or on a self-hosted runner on this machine (README.md, "CI").
 #
 #   factory ci status              where CI runs (local or github), the latest runs, and the local runner
 #   factory ci use local|github    sends CI jobs to the self-hosted runners, or back to GitHub's
-#   factory ci install             installs the runner as a LaunchAgent (run it again to update it)
-#   factory ci uninstall           removes it: the LaunchAgent, its containers and its idle registrations
+#   factory ci install             installs the runner as a LaunchAgent (macOS) or a systemd --user service (Linux)
+#   factory ci uninstall           removes it: the service, its containers and its idle registrations
 #   factory ci start | stop        runs it once by hand, in the background, until stop or a restart
 #   factory ci logs [-f]           the runner's log
 #
 # Every name comes from the project (ci_names.py): the runner is `<repo>-ci`, its jobs ask for the label
-# `<repo>-local`, unless "ci" in .claude/factory.json says otherwise. Several Macs can run runners with the
+# `<repo>-local`, unless "ci" in .claude/factory.json says otherwise. Several machines can run runners with the
 # same label; GitHub gives each job to one of them.
 set -euo pipefail
+
+# macOS runs the runner with launchd, Linux with systemd --user (#62). FACTORY_CI_PLATFORM=mac|linux overrides.
+platform="${FACTORY_CI_PLATFORM:-}"
+if [ -z "$platform" ]; then
+  if [ "$(uname -s)" = Darwin ] || command -v launchctl >/dev/null 2>&1; then platform=mac; else platform=linux; fi
+fi
+export FACTORY_CI_PLATFORM="$platform"
+if [ "$platform" = linux ]; then machine="this machine"; manager=systemd; else machine="this Mac"; manager=launchd; fi
 
 kit="$(cd "$(dirname "$0")" && pwd)"
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -22,7 +30,7 @@ exe="$CI_INSTALLED/$CI_NAME"
 # Which Mac a runner is on, in its name (<name>-<host>-<epoch>), so `stop` removes only this Mac's.
 host="$( (scutil --get LocalHostName 2>/dev/null || hostname -s 2>/dev/null || echo mac) | tr '[:upper:]' '[:lower:]' |
   tr -c 'a-z0-9-\n' '-' | head -c 24)"
-host="${host:-mac}"
+host="${host:-$platform}"
 compose=(docker compose --file "$kit/compose.yaml" --project-name "$CI_NAME")
 
 die() { echo "factory ci: $*" >&2; exit 1; }
@@ -33,7 +41,11 @@ need() {
   done
 }
 
-agent_loaded() { launchctl print "$domain/$1" >/dev/null 2>&1; }
+# Installed and managed: a loaded LaunchAgent (macOS), or an enabled user unit (Linux, always this project's unit).
+agent_loaded() {
+  if [ "$platform" = linux ]; then systemctl --user is-enabled --quiet "$CI_UNIT" 2>/dev/null; return; fi
+  launchctl print "$domain/$1" >/dev/null 2>&1
+}
 
 # The loop started by `factory ci start` is `/bin/bash <installed>/<name>`. Anything else with that pid
 # (a reused pid) is left alone.
@@ -53,6 +65,7 @@ can_register() {
 }
 
 wait_unloaded() {
+  [ "$platform" = linux ] && return 0
   for _ in $(seq 1 30); do
     agent_loaded "$1" || return 0
     sleep 1
@@ -76,6 +89,89 @@ on_main_note() {
     echo "Note: commit $commit isn't on origin/main. Run this from a checkout on main to install the reviewed runner."
   fi
   echo "$commit" >"$CI_STATE/commit"
+}
+
+# Rootless Docker on Linux: the daemon is the user's, at $XDG_RUNTIME_DIR/docker.sock. systemd starts the
+# service without the login shell's DOCKER_HOST, so the unit gets it: the shell's value, else the current docker
+# context's, else the rootless socket when there is one. Empty: Docker's default socket.
+docker_host() {
+  local h="${DOCKER_HOST:-}"
+  [ -n "$h" ] || h="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
+  case "$h" in unix:///var/run/docker.sock) h="" ;; esac
+  if [ -z "$h" ] && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -e "$XDG_RUNTIME_DIR/docker.sock" ]; then
+    h="unix://$XDG_RUNTIME_DIR/docker.sock"
+  fi
+  echo "$h"
+}
+
+# A value for systemd's Environment="KEY=value": quotes and backslashes escaped, % doubled.
+sd() { local v="${1//\\/\\\\}"; v="${v//\"/\\\"}"; printf '%s' "${v//%/%%}"; }
+
+write_unit() {
+  local path="" dir tool dh
+  for tool in gh docker; do
+    dir="$(dirname "$(command -v "$tool")")"
+    case "$dir" in /*) path="$path$dir:" ;; esac
+  done
+  path="$path/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+  dh="$(docker_host)"
+  mkdir -p "$(dirname "$CI_UNIT_FILE")" "$CI_STATE"
+  {
+    echo "[Unit]"
+    echo "Description=$CI_NAME: self-hosted GitHub Actions runner for $CI_REPO (software factory)"
+    echo "After=network-online.target"
+    echo
+    echo "[Service]"
+    echo "ExecStart=/bin/bash \"$(sd "$exe")\""
+    echo "WorkingDirectory=$CI_INSTALLED"
+    for kv in "PATH=$path" "CI_NAME=$CI_NAME" "CI_LABEL=$CI_LABEL" "CI_HOST=$host" "CI_STATE=$CI_STATE" \
+              "RUNNER_REPO=$CI_REPO" ${dh:+"DOCKER_HOST=$dh"}; do
+      echo "Environment=\"$(sd "$kv")\""
+    done
+    echo "Restart=always"
+    echo "RestartSec=30"
+    echo "StandardOutput=append:$CI_STATE/runner.log"
+    echo "StandardError=append:$CI_STATE/runner.log"
+    echo
+    echo "[Install]"
+    echo "WantedBy=default.target"
+  } >"$CI_UNIT_FILE.tmp"
+  mv "$CI_UNIT_FILE.tmp" "$CI_UNIT_FILE"
+}
+
+# Without linger, systemd stops a user's services when the user logs out (and doesn't start them at boot).
+linger_note() {
+  local on
+  on="$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null || true)"
+  if [ "$on" != yes ]; then
+    echo "Note: linger is off for $(id -un), so the runner stops when you log out and doesn't start at boot."
+    echo "  Turn it on once: sudo loginctl enable-linger $(id -un)"
+  fi
+}
+
+install_linux() {
+  need gh docker systemctl
+  can_register || die "gh can't create a runner registration token for $CI_REPO. Log in with \`gh auth login\` as an admin of the repository, then run this again."
+  if [ -n "$(hand_pid || true)" ]; then
+    echo "Stopping the runner started with \`factory ci start\` first..."
+  fi
+  stop_hand_loop
+  copy_files
+  on_main_note
+  if docker info >/dev/null 2>&1; then
+    echo "Pulling the runner images..."
+    RUNNER_REPO="$CI_REPO" RUNNER_NAME=none RUNNER_LABEL="$CI_LABEL" \
+      docker compose --file "$CI_INSTALLED/compose.yaml" --project-name "$CI_NAME" pull --quiet
+  fi
+  write_unit
+  # restart, not just enable --now: an update must replace a loop that's already running.
+  systemctl --user daemon-reload
+  systemctl --user enable --now "$CI_UNIT" >/dev/null
+  systemctl --user restart "$CI_UNIT" 2>/dev/null || true
+  echo "Installed $CI_NAME (commit $(cat "$CI_STATE/commit")): systemd runs it as the user service $CI_UNIT."
+  echo "Repository $CI_REPO, label $CI_LABEL. Log: $CI_STATE/runner.log"
+  linger_note
+  echo "Jobs go to it after \`factory ci use local\`. Check it with \`factory ci status\`."
 }
 
 # Removes registrations GitHub still lists: this Mac's idle ones (after a stop, GitHub shows them online for
@@ -180,6 +276,7 @@ runs_on() {
 }
 
 cmd_install() {
+  if [ "$platform" = linux ]; then install_linux; return; fi
   need gh docker launchctl plutil
   can_register || die "gh can't create a runner registration token for $CI_REPO. Log in with \`gh auth login\` as an admin of the repository, then run this again."
   # An older install under another name would compete for the same jobs: unload it and remove its file.
@@ -214,6 +311,16 @@ cmd_install() {
 }
 
 cmd_uninstall() {
+  if [ "$platform" = linux ]; then
+    need systemctl
+    systemctl --user disable --now "$CI_UNIT" >/dev/null 2>&1 || true
+    rm -f "$CI_UNIT_FILE"
+    systemctl --user daemon-reload 2>/dev/null || true
+    rm -rf "$CI_INSTALLED"
+    echo "User service $CI_UNIT removed."
+    cmd_stop
+    return
+  fi
   need launchctl
   launchctl bootout "$domain/$CI_AGENT" 2>/dev/null || true
   wait_unloaded "$CI_AGENT"
@@ -226,14 +333,14 @@ cmd_uninstall() {
 cmd_start() {
   need gh docker
   if agent_loaded "$CI_AGENT"; then
-    echo "$CI_NAME is installed and launchd keeps it running (factory ci status). Nothing to start."
+    echo "$CI_NAME is installed and $manager keeps it running (factory ci status). Nothing to start."
     return 0
   fi
   if pid="$(hand_pid)"; then
     echo "$CI_NAME is already running (pid $pid). Stop it with \`factory ci stop\`."
     return 0
   fi
-  docker info >/dev/null 2>&1 || die "Docker isn't running. Start Docker Desktop, then run this again."
+  docker info >/dev/null 2>&1 || die "Docker isn't running. Start Docker$([ "$platform" = mac ] && echo " Desktop"), then run this again."
   local token="${RUNNER_TOKEN:-}"
   unset RUNNER_TOKEN
   if [ -z "$token" ]; then
@@ -263,7 +370,7 @@ cmd_start() {
 
 cmd_stop() {
   if agent_loaded "$CI_AGENT"; then
-    die "$CI_NAME is installed, so launchd would start it again. Remove it with \`factory ci uninstall\`."
+    die "$CI_NAME is installed, so $manager would start it again. Remove it with \`factory ci uninstall\`."
   fi
   stop_hand_loop
   down
@@ -286,7 +393,7 @@ cmd_use() {
         die "gh can't set the repository variable CI_RUNS_ON (it needs admin on $CI_REPO)."
       echo "CI now runs on self-hosted runners with the label $CI_LABEL. Pull requests from forks stay on GitHub."
       if ! agent_loaded "$CI_AGENT" && [ -z "$(hand_pid || true)" ]; then
-        echo "No runner is running on this Mac: jobs wait until one is (\`factory ci install\`)."
+        echo "No runner is running on $machine: jobs wait until one is (\`factory ci install\`)."
       fi
       ;;
     github)
@@ -318,24 +425,31 @@ cmd_status() {
   agent_loaded "$CI_AGENT" && installed=1
   if [ -n "$local_mode" ] || [ -n "$installed" ] || [ -n "$(hand_pid || true)" ]; then
     local pid
-    if [ -n "$installed" ]; then
+    if [ -n "$installed" ] && [ "$platform" = linux ]; then
+      pid="$(systemctl --user show "$CI_UNIT" -p MainPID --value 2>/dev/null || true)"
+      if [ -n "$pid" ] && [ "$pid" != 0 ]; then
+        echo "Runner $CI_NAME: running (systemd user service $CI_UNIT, pid $pid). It starts again by itself after a restart."
+      else
+        echo "Runner $CI_NAME: installed, but its loop isn't running right now; systemd starts it again within 30 s."
+      fi
+    elif [ -n "$installed" ]; then
       pid="$(launchctl print "$domain/$CI_AGENT" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
       if [ -n "$pid" ]; then
         echo "Runner $CI_NAME: running (LaunchAgent $CI_AGENT, pid $pid). It starts again by itself after a restart."
       else
         echo "Runner $CI_NAME: installed, but its loop isn't running right now; launchd starts it again within 30 s."
       fi
-    elif [ -f "$CI_PLIST" ]; then
+    elif [ "$platform" = mac ] && [ -f "$CI_PLIST" ]; then
       echo "Runner $CI_NAME: installed but not loaded. Run \`factory ci install\` again."
     elif pid="$(hand_pid)"; then
       echo "Runner $CI_NAME: running (started by hand, pid $pid). It stops at a restart; \`factory ci install\` keeps it running."
     else
-      echo "Runner $CI_NAME: not running on this Mac. \`factory ci install\` starts it (another Mac may run one)."
+      echo "Runner $CI_NAME: not running on $machine. \`factory ci install\` starts it (another machine may run one)."
     fi
     if docker info >/dev/null 2>&1; then
       echo "Docker: running"
     else
-      echo "Docker: not running. Jobs for this Mac wait in GitHub's queue until it is."
+      echo "Docker: not running. Jobs for $machine wait in GitHub's queue until it is."
     fi
   fi
   python3 "$kit/ci_status.py" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local}
@@ -354,7 +468,7 @@ case "${1:-status}" in
   start) cmd_start ;;
   stop) cmd_stop ;;
   logs) shift; cmd_logs "$@" ;;
-  names) for v in CI_REPO CI_NAME CI_LABEL CI_AGENT CI_PLIST CI_INSTALLED CI_STATE CI_REPLACES; do
+  names) for v in CI_REPO CI_NAME CI_LABEL CI_AGENT CI_PLIST CI_INSTALLED CI_STATE CI_REPLACES CI_UNIT CI_UNIT_FILE; do
       echo "$v=${!v}"
     done
     echo "CI_HOST=$host" ;;
