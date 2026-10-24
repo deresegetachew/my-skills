@@ -46,6 +46,10 @@ Settings
   settings set <key> <v> change one (checked against its type); unset <key> goes back to the default.
                          Then commit .claude/factory.json in a pull request. Agents can't run set or unset.
 
+Measure
+  usage [--since D] [--by task|agent|model] [--record LABEL]
+                         tokens per task from this machine's Claude Code logs; --record appends a row to the usage log
+
 Maintain
   release <agent>        drop an agent's local claims (taytu ...), for example after a crash
   clean                  remove agent worktrees no agent is using (and with no uncommitted work), and local task
@@ -77,6 +81,7 @@ case "$cmd" in
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   settings)  py factory_settings.py "$@" ;;
+  usage)     py factory_usage.py "$@" ;;
   env)       if [ -n "${1:-}" ]; then
                case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
              else py factory_env.py; fi ;;

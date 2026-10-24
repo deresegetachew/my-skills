@@ -60,7 +60,10 @@ def excerpt(text, limit):
     return out
 
 
-limit = int(cfg.get("checkOutputLines") or 40)
+try:  # a bad value must never skip the check (exit 1 would let the turn end)
+    limit = max(int(cfg.get("checkOutputLines") or 40), 1)
+except (TypeError, ValueError):
+    limit = 40
 for name in ("typecheck", "test"):
     cmd = cfg["commands"].get(f"{name}Changed") or cfg["commands"].get(name)
     if not cmd:

@@ -244,6 +244,13 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
 Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
 Check spend with `/usage`.
 
+**Measure, then squeeze.** `factory usage --by agent` shows where the tokens go; `factory usage --record "<what
+changed>"` keeps a row per measurement in `docs/factory-usage.md`. Take a row before and after each factory change
+that should save tokens (ask the owner to run it on each agent machine, or run it where the logs are), and say in
+the PR which row it is meant to move. Your own session counts too: a dev manager that has run for a day re-reads a
+very long context on every reply. When the tick's state notes carry what matters, start a fresh session with the
+last tick message once a day, and keep a review's reading in a subagent so only its verdict lands in your context.
+
 ## Talking to the owner
 
 Short and only when it matters: what merged (one line each), what you fixed, what needs them (exactly what

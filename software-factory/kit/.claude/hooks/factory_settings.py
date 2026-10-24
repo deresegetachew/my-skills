@@ -78,6 +78,7 @@ SETTINGS = {
     "eval.baseline": ("str", "The eval's baseline file.", None, ""),
     "design.references": ("str", "The folder of design references. Empty: no design check.", None, ""),
     "notes": ("str", "The folder of project notes for the shared agents and skills.", None, None),
+    "usageLog": ("str", "Where `factory usage --record` appends its rows (commit it to keep the history).", None, "docs/factory-usage.md"),
     "styles": ("list", "Style guides per path: [{\"paths\": [...], \"skills\": [...], \"check\": \"...\"}].", None, None),
     "ci.name": ("str", "The self-hosted runner's name (default `<repo>-ci`).", None, ""),
     "ci.label": ("str", "The runner label CI jobs ask for (default `<repo>-local`).", None, ""),
@@ -166,7 +167,7 @@ def as_text(value):
 
 def refuse_in_agent_session():
     for var in ("FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"):
-        if os.environ.get(var):
+        if var in os.environ:  # set at all, even to an empty string
             raise SystemExit("factory settings: only a person changes the factory's settings, in their own "
                              f"terminal ({var} is set, so this looks like an agent session). The PR gate reads "
                              "these settings, so an agent never changes them.")

@@ -56,7 +56,7 @@
       "Bash(factory settings unset*)",
       "Bash(./factory settings set*)",
       "Bash(./factory settings unset*)",
-      "Bash(*factory_settings.py*)",
+      "Bash(*factory_setting*)",
       "Bash(gh pr review *--approve*)",
       "Bash(gh pr comment *factory-approved*)",
       "Bash(gh pr comment *factory-answer*)",

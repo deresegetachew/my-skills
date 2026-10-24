@@ -77,8 +77,8 @@ def test_unset_goes_back_to_the_default():
 
 def test_an_agent_session_can_read_but_never_change_settings():
     d = project({"maxOpenPRs": 4, "protected": ["^\\.claude/"]})
-    for var in ("FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"):
-        env = {**person_env(), var: "1"}
+    for var, value in (("FACTORY_AGENT", "1"), ("FACTORY_LOOP", "1"), ("CLAUDECODE", "1"), ("CLAUDECODE", "")):
+        env = {**person_env(), var: value}
         assert settings(d, "set", "protected", "[]", env=env).returncode != 0
         assert settings(d, "unset", "protected", env=env).returncode != 0
         assert settings(d, "get", "maxOpenPRs", env=env).stdout.strip() == "4"
@@ -87,7 +87,7 @@ def test_an_agent_session_can_read_but_never_change_settings():
 
 def test_agents_are_denied_the_settings_command():
     rules = json.load(open(os.path.join(HOOKS, "..", "settings.json")))["permissions"]["deny"]
-    for rule in ("Bash(factory settings set*)", "Bash(factory settings unset*)", "Bash(*factory_settings.py*)"):
+    for rule in ("Bash(factory settings set*)", "Bash(factory settings unset*)", "Bash(*factory_setting*)"):
         assert rule in rules, rule
 
 
@@ -109,6 +109,12 @@ def test_the_stop_check_runs_the_changed_only_command_when_set():
     assert open(os.path.join(d, "ran")).read().strip() == "changed"
     p = stop_check(d, {"test": "echo full > ran; exit 0"})
     assert open(os.path.join(d, "ran")).read().strip() == "full"
+
+
+def test_a_bad_output_limit_never_skips_the_check():
+    d = project()
+    p = stop_check(d, {"test": "echo 'FAIL x'; exit 1"}, out_lines="forty")
+    assert p.returncode == 2 and "FAIL x" in p.stderr, p
 
 
 def test_a_failing_check_shows_the_failures_first_within_the_limit():

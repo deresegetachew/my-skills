@@ -279,6 +279,7 @@ version it pins. `factory help` lists everything.
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
 | `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
+| `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
 | `factory settings` | Every setting in `factory.json`: its value here (or the default) and what it does. `settings show <key>` gives its type, default and options; `settings set <key> <value>` changes one, checked against its type; `settings unset <key>` goes back to the default. Then commit the file in a PR. Agents can't run `set` or `unset` |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
@@ -397,6 +398,24 @@ Most of the cost is what the agents read, not what they write.
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
   otherwise, with short state notes.
+
+### Measuring it
+
+`factory usage` reads Claude Code's own session logs on this machine (`~/.claude/projects/`, the project folder
+and every agent worktree, with their subagents) and prints tokens per task: fresh input (what missed the cache),
+cache reads, output and the cache hit rate. Each reply counts once; a session belongs to the task branch it spent
+most replies on.
+
+```sh
+factory usage                                # the last 7 days, per task
+factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
+factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
+```
+
+`--record` appends one row of per-task averages to `docs/factory-usage.md` (`usageLog`). Commit it, so every
+factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each
+machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size), and use `/usage`
+or the console for money, since prices differ per model.
 
 <br>
 
@@ -795,6 +814,7 @@ software-factory/
       factory_env.py                      per-agent ports and database
       factory_reviews.py                  which extra reviews a change needs
       factory_settings.py                 `factory settings`: list, show, set and unset factory.json values
+      factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
       factory_guard.py                    the CI guard
       style_checks.py                     CI: each style's check
       factory_config.py                   reads factory.json, with defaults
