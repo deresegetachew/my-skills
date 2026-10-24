@@ -236,6 +236,9 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
   and safety audits;
 - test output filtered to failures, a short CLAUDE.md with workflows moved into skills;
 - for yourself: skip commits that already carry a pr-watch marker, read each diff once, keep messages short.
+- **Write a brief into each task** (the template's "Brief: read these, not more"): the PRD sections, decisions,
+  design reference and files the agent should open, and what's out of scope. The agent reads only those first, so
+  it doesn't spend its first turns exploring.
 - **Write the edge cases into each task** (the issue template's "Edge cases" section): the inputs the safety
   auditor and reviewer will try. A task that names them passes review in one round instead of several, and
   each round re-reads the branch.
@@ -243,6 +246,11 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
   changed packages only, and `checkOutputLines` for how much of a failure the agent sees.
 Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
 Check spend with `/usage`.
+
+**Tokens on every PR.** Agents post a `<!-- factory-usage task=<n> -->` comment with the task's tokens per
+subagent when they open the PR and again before it merges. Read it before you merge: a task far above the usual
+fresh input per task is worth a line in your review (what it read, how many rounds), and a pattern across tasks is
+the next saving to try. If it's missing, ask for it in the review; it isn't a must-fix.
 
 **Measure, then squeeze.** `factory usage --by agent` shows where the tokens go; `factory usage --record "<what
 changed>"` keeps a row per measurement in `docs/factory-usage.md`. Take a row before and after each factory change

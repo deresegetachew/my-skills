@@ -8,6 +8,17 @@ labels: ["factory:ready"]
 
 <!-- One short paragraph: what, for whom, and why now. Link the PRD story, design reference and decisions. -->
 
+## Brief: read these, not more
+
+<!-- What the agent opens first, so it doesn't explore: the PRD stories or sections by heading, the decisions,
+     the design reference, the files and modules it will change, and what's out of scope. -->
+
+- **PRD:** 
+- **Decisions:** 
+- **Design reference:** 
+- **Code:** 
+- **Out of scope:** 
+
 ## Goals
 
 - 

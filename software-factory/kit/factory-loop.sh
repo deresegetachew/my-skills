@@ -88,12 +88,14 @@ tidy() {
   python3 "$hooks/factory_claims.py" tidy-branches >/dev/null 2>&1 || true
 }
 home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
-# Only the project's MCP servers (its .mcp.json, else none): never the user's own claude.ai connectors or the servers
-# in their settings, which would put tool definitions nobody here needs into every turn (#55). Set before each run,
-# since main may bring a .mcp.json. --mcp-config takes several values, so another flag must follow it.
+# Only the project's MCP servers: never the user's own claude.ai connectors or the servers in their settings, which
+# would put tool definitions nobody here needs into every turn (#55). The config is the .mcp.json main has on origin
+# (factory_mcp.py), never this worktree's copy, since Claude starts those servers without asking. Set before each
+# run, since main may change it. --mcp-config takes several values, so another flag must follow it.
 isolate() {
-  local cfg='{"mcpServers":{}}'
-  [ -f "$PWD/.mcp.json" ] && cfg="$PWD/.mcp.json"
+  local cfg
+  cfg="$(python3 "$hooks/factory_mcp.py")" || cfg='{"mcpServers":{}}'
+  [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
   claude_flags=(--mcp-config "$cfg" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}')
 }
 # After tidy: if main brought a different factory-loop.sh, carry on with that one. exec keeps the pid, so the
