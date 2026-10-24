@@ -459,7 +459,8 @@ Set `"tasks": { "source": "issues" }` in `factory.json`, and run `factory issues
   criteria (the "Done when") and a checklist of todos. The dev manager writes them:
   `factory issues new --title "..." --body-file f.md --milestone "Phase 3"`.
 - **Order:** by milestone (oldest first), then issue number.
-- **Dependencies:** `Depends on #12, #14` in the body. Agents skip the issue until those are closed.
+- **Dependencies:** `Depends on #12, #14` in the body. Agents skip the issue until those are closed. The numbers can
+  be issues or pull requests: a task that depends on an open PR waits until it is merged or closed.
 - **Labels show the state:**
 
   | Label | Meaning |
