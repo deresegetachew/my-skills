@@ -65,7 +65,8 @@ need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
    git config submodule.recurse true   # so `git pull` also updates vendor/my-skills
    ```
 
-5. **Start an agent:** `factory loop` (unattended) or `factory loop -i` (a session you can watch and type into).
+5. **Start an agent:** `factory loop -i` (a session per task that you can watch and type into), or `factory loop`
+   (unattended). [Which one](#three-ways-to-run-an-agent).
 
 6. **Start the dev manager:** in a Claude session with the repo attached, say "be the dev manager for this repo". It
    follows [DEV-MANAGER.md](DEV-MANAGER.md).
@@ -271,7 +272,7 @@ version it pins. `factory help` lists everything.
 |---|---|
 | `factory loop [N]` | Starts an agent loop: one fresh, unattended Claude run per task (`claude -p`). `N` caps the number of tasks. Run it again in another terminal for another agent |
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
-| `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on. Then type `/loop /next-task all` |
+| `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
 | `factory reviews` | Which extra reviews and checks the current change needs |
@@ -308,9 +309,16 @@ version it pins. `factory help` lists everything.
   10 seconds and starts the next task; type `q` and Enter to stop. If the session ends before the task is done
   (`/exit`, a crash, a usage limit), the loop also carries on after the same 10 s countdown, so it never waits all
   night for a key.
-- **`factory agent <name>`**: your own Claude session in that agent's folder. The SessionStart hook claims the folder,
-  runs the install (in a worktree) and `agentSetup`, sets the agent's ports and database, and (issues mode) registers the agent. Then
-  type `/loop /next-task all`.
+- **`factory agent <name>`**: your own Claude session in that agent's folder, for manual work there (a fix by hand,
+  a look around). The SessionStart hook claims the folder, runs the install (in a worktree) and `agentSetup`, sets the
+  agent's ports and database, and (issues mode) registers the agent. Started with no other arguments, it says in one
+  line that the queue belongs in `factory loop -i`.
+
+**Which one to use.** Run the queue with `factory loop -i`, on every machine: each task gets a fresh session, and you
+can still type into it, here or through Remote Control. Use `factory loop` when nobody will watch. On a second machine,
+give it its own agent names with `FACTORY_AGENTS` (see [Names and folders](#names-and-folders)), then run
+`factory loop -i` there too. Avoid `/loop /next-task all` in one `factory agent` session: that session keeps every
+task's context and grows with each one, which costs tokens and attention until it compacts.
 
 ### Names and folders
 
