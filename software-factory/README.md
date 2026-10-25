@@ -2163,6 +2163,10 @@ software-factory/
     factory_settings_interactive.py     the interactive menu behind `factory settings`
     factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
     factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
+    factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
+    factory_po.py                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
+    factory_prd.py                      `factory prd`: progress against the PRD, per user story
+    factory_signoff.py                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)
     factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
     factory_guard.py                    the CI guard
     style_checks.py                     CI: each style's check
@@ -2186,66 +2190,6 @@ software-factory/
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
     .claude/skills/product-pass/          the product owner's standing rules (one page)
     .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main)
-    .claude/hooks/
-      manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
-      factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
-      factory_roles.py                    the roles' definitions, role folders (`init-roles`) and `choose`
-      factory_watch.py                    the dev manager's seven checks on GitHub (`factory watch`), no model
-      factory_orchestrator.py             `factory dev-manager loop`: cycles, thread notes, owner asks, sub-managers
-      factory_lease.py                    the lease on an item (claim comments), the interface #99 will replace
-      factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
-      factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
-      pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
-      check.py                            Stop: typecheck and tests
-      factory_stop.py                     Stop: closes a finished session in `factory loop -i`
-      factory_session.py                  SessionStart: a plain `claude` session becomes an agent
-      factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
-      next_task.py                        the next job: rework first, then a free task
-      factory_machine.py                  this machine's id, agent names and autostart settings (outside the repo)
-      factory_autostart.py                `factory autostart`: status, install and uninstall of the boot service
-      factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
-      factory_heartbeat.py                `factory heartbeat`: the per-machine liveness daemon
-      factory_heartbeat_service.py        install and uninstall of the daemon's service
-      factory_agents_ls.py                `factory agents ls`
-      factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
-      factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
-      factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
-      factory_po.py                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
-      factory_prd.py                      `factory prd`: progress against the PRD, per user story
-      factory_signoff.py                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)
-      factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
-      factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
-      factory_env.py                      per-agent ports and database
-      factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
-      factory_remotes.py                  remotes, ssh calls and finding sessions by name
-      factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
-      factory_release.py                  `factory version | releases | update | rollback`: the release client
-      factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
-      factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
-      factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
-      factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
-      factory_netguard.py                 renders the nftables rules and the guard's systemd unit
-      factory_sandbox.py                  `factory doctor --sandbox`
-      factory_models.py                   the `models` setting: claude flags per role, effective models
-      factory_reviews.py                  which extra reviews a change needs
-      factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
-      factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
-      factory_settings_schema.py          the table that describes every setting: help, limits, defaults, README tables
-      factory_settings_store.py           reads and writes factory.json and the machine file (order, indent, atomic)
-      factory_settings_interactive.py     the interactive menu behind `factory settings`
-      factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
-      factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
-      factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
-      factory_guard.py                    the CI guard
-      style_checks.py                     CI: each style's check
-      factory_config.py                   reads factory.json, with defaults
-      wait_for_merge.sh                   waits on a PR without spending tokens
-      factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
-      factory_turbo.py                    `factory turbo`: the shared Turborepo cache (status, install, down, env, ci-env)
-    .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
-                                          compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,
-                                          runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.py,
-                                          ci_status.py
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
 ```
