@@ -49,6 +49,21 @@ def test_the_files_in_the_kit_tree_lists_the_hooks_and_ci_folders_beside_kit_not
             assert hook in tree, hook
 
 
+def test_the_readme_points_at_the_prd_near_the_top_and_the_file_exists():
+    assert os.path.isfile(os.path.join(SF, "docs", "PRD.md"))
+    top = README[:README.index("## Contents")]
+    assert "software-factory/docs/PRD.md" in top, "the README intro must link the PRD"
+    assert "source of truth" in top
+
+
+def test_the_dev_manager_playbook_reads_the_prd_before_scope_questions_and_sends_them_to_the_owner():
+    text = open(os.path.join(SF, "DEV-MANAGER.md")).read()
+    assert "software-factory/docs/PRD.md" in text, "DEV-MANAGER.md must link the PRD"
+    m = re.search(r"[^\n]*docs/PRD\.md[^\n]*(?:\n[^\n]+)*", text)
+    para = m.group(0)
+    assert "before" in para and "scope" in para and "owner" in para, para
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
