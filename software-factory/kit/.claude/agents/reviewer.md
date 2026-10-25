@@ -7,8 +7,12 @@ model: sonnet
 
 **Project notes:** if `<notes>/reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
+**Formatting is not your job.** If `commands.fix` is set in `.claude/factory.json`, a tool already formats and auto-fixes the changed files before every check (`factory fix`): never comment on whitespace, quotes, import order or anything that fixer handles, and never ask the author to run the formatter by hand. Run `./factory fix` yourself first if you want a clean diff to read.
+
 You review one change. You did not write it; judge it on its own terms. Architecture and code style on paths with a
 style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
+
+**Lessons.** Run `python3 .claude/hooks/factory_lessons.py show` (a short list of this project's repeated mistakes) and check the diff against each lesson. A change that repeats a lesson is a **must-fix**: quote the lesson. If you find a problem a lesson would have caught but none says so, tell the caller in one line ("lesson candidate: ..."); the dev manager decides.
 
 **Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind reviewer`
 and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is

@@ -125,7 +125,8 @@ def project(r, cfg):
         r.ok(".claude/settings.json")
     else:
         r.fix(".claude/settings.json", "it doesn't resolve, so the hooks and deny rules won't load: run "
-              "`git submodule update --init`, or `bash vendor/my-skills/software-factory/install.sh . --link`")
+              "`factory update` (a project on releases), or `git submodule update --init` / "
+              "`bash vendor/my-skills/software-factory/install.sh . --link` (a project on the submodule)")
     if os.path.exists(".env.example") and not os.path.exists(".env.local"):
         r.note(".env.local", "missing; copy .env.example to .env.local and fill it in")
     if os.path.exists(".sops.yaml"):
@@ -168,6 +169,25 @@ def factory(r, cfg):
         r.note("sleep", "keep the Mac awake while agents run (`caffeinate -d` in another tab)")
 
 
+def release(r):
+    """A project that takes the factory from releases (#113): the installed files are the pinned release's, and this
+    machine is ready (hooks exist, scripts parse, runner files readable). The same checks `factory update` ends with."""
+    import factory_release as fr
+    try:
+        pin = fr.read_pin(os.getcwd())
+    except fr.FactoryError as e:
+        r.fix(fr.PIN_PATH, f"{e.message} {e.fix}")
+        return
+    if pin is None:
+        return
+    problems = fr.verify_machine(os.getcwd(), pin)
+    if problems:
+        for p in problems:
+            r.fix(f"factory {pin['tag']}", f"{p}: run `factory update` (it repairs the files and the services, and checks again)")
+    else:
+        r.ok(f"factory {pin['tag']}: the files match the pin and this machine is ready")
+
+
 def models(r, cfg):
     from factory_models import table, validate
     try:
@@ -197,6 +217,7 @@ def main():
         project(r, cfg)
         factory(r, cfg)
         models(r, cfg)
+        release(r)
     if "--sandbox" in sys.argv[1:]:
         from factory_sandbox import run as sandbox
         print()
