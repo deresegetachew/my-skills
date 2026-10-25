@@ -19,6 +19,7 @@ A claim belongs to a live process: when the pid that made it has exited (or the 
                                                                    `<project>-agents/<name>`. A name belongs to one
                                                                    loop on a clone, whatever its role.
   python3 .claude/hooks/factory_claims.py release --agent taytu [--tasks-only]
+                                                                -> one line: what was released, or "Nothing to release: ..."
   python3 .claude/hooks/factory_claims.py list
   python3 .claude/hooks/factory_claims.py done --agent taytu --task 3.2       (factory loop -i: close the session)
   python3 .claude/hooks/factory_claims.py clean                                remove unused agent worktrees
@@ -256,11 +257,22 @@ def register(agent, pid, path, stale_hours):
 
 
 def release(agent, tasks_only=False):
+    """Lets the agent's claims go; returns (checkout released, [task ids released]) so the caller can say what changed."""
     with locked() as data:
-        if not tasks_only:
-            data["checkouts"].pop(agent, None)
-        for tid in [t for t, c in data["tasks"].items() if c.get("agent") == agent]:
+        had_checkout = not tasks_only and data["checkouts"].pop(agent, None) is not None
+        tids = [t for t, c in data["tasks"].items() if c.get("agent") == agent]
+        for tid in tids:
             del data["tasks"][tid]
+    return had_checkout, tids
+
+
+def release_message(agent, tasks_only, had_checkout, tids):
+    """The one line `release` prints: what it let go, or that there was nothing to release."""
+    if not had_checkout and not tids:
+        return f"Nothing to release: {agent} holds no task claim." if tasks_only else \
+            f"Nothing to release: {agent} holds no checkout or task claim."
+    parts = (["the checkout"] if had_checkout else []) + ([f"the task claim {', '.join(tids)}"] if tids else [])
+    return f"Released {agent}: {' and '.join(parts)}." + (" The checkout stays." if tasks_only else "")
 
 
 def remote_busy(cfg, stale_hours):
@@ -409,7 +421,7 @@ def main():
     elif a.cmd == "free":
         print("\n".join(free_names(a.role, stale)))
     elif a.cmd == "release":
-        release(a.agent, a.tasks_only)
+        print(release_message(a.agent, a.tasks_only, *release(a.agent, a.tasks_only)))
     else:
         with locked() as data:
             for kind in ("checkouts", "tasks"):
