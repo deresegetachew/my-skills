@@ -53,6 +53,7 @@ SETTINGS = {
     "codePaths": ("list", "Folders with code: the Stop check runs only when they changed.", None, None),
     "checkRequires": ("list", "Paths that must exist before the Stop check runs, e.g. [\"node_modules\"].", None, None),
     "checkOutputLines": ("int", "How many lines of a failing check the agent is shown (failures first).", None, None),
+    "checkLogDir": ("str", "Where a check's full output is saved; the agent sees a capped summary and this path.", None, "tmp/checks"),
     "protected": ("list", "Regexes of files an agent may not merge.", None, None),
     "alwaysAllowed": ("list", "Files that are never protected (the plan, the blocked list).", None, None),
     "testPaths": ("list", "Regexes the Factory guard treats as tests.", None, None),

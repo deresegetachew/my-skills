@@ -12,6 +12,7 @@ import os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load, load_from_main  # noqa: E402
+from factory_run_check import write_log  # noqa: E402
 
 
 def git(*a):
@@ -58,8 +59,9 @@ def main():
     except (TypeError, ValueError):
         limit = 40
     if p.returncode != 0:
-        print(f"`{run_cmd}` fails, so CI would fail too. The last lines:\n"
-              + "\n".join(tail(p.stdout + p.stderr, limit)), file=sys.stderr)
+        log = write_log(cfg, "verify", f"$ {run_cmd}\n{p.stdout}{p.stderr}")
+        print(f"`{run_cmd}` fails, so CI would fail too." + (f" Full log: {log}." if log else "")
+              + " The last lines:\n" + "\n".join(tail(p.stdout + p.stderr, limit)), file=sys.stderr)
         return 1
     if git("rev-parse", "HEAD")[1] != head or git("status", "--porcelain", "--untracked-files=all")[1]:
         print("factory verify: the commit or the files changed while it ran; run it again.", file=sys.stderr)
