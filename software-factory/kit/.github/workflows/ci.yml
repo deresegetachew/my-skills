@@ -43,6 +43,8 @@ jobs:
           BRANCH: ${{ github.head_ref }}
           LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
         run: python3 .claude/hooks/factory_guard.py --base "origin/$BASE" --branch "$BRANCH" --labels "$LABELS"
+      - name: Lessons file (at most lessonsCap one-line lessons, each with an example or a link)
+        run: python3 .claude/hooks/factory_lessons.py check
 
   check:
     name: Typecheck, lint, test, build
