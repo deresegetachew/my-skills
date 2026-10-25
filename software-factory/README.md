@@ -34,11 +34,13 @@ release (`factory update`), or, until it migrates, as a git submodule.
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [Watch and talk to an agent: `factory follow`](#watch-and-talk-to-an-agent-factory-follow)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
 - [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
 - [A shared build cache](#a-shared-build-cache)
+- [A sandboxed machine: `factory bootstrap`](#a-sandboxed-machine-factory-bootstrap)
 - [Security notes](#security-notes)
 - [Style guides](#style-guides)
 - [factory.json settings](#factoryjson-settings)
@@ -363,17 +365,19 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
+| `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
 | `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
 | `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
-| `factory settings` | Every setting in `factory.json`: its value here (or the default) and what it does. `settings show <key>` gives its type, default and options; `settings set <key> <value>` changes one, checked against its type; `settings unset <key>` goes back to the default. Then commit the file in a PR. Agents can't run `set` or `unset` |
+| `factory settings` | The interactive menu (in a terminal): browse by section, `/` to search, `?` for the long help of a setting, change, reset, review the diff and save (write the file, or open a pull request). In a pipe it prints the list. Non-interactively: `list [--section S] [--json]`, `get`, `set`, `unset`, `help [<key>]`, `diff`, `validate`, `pr`; `--local` is the same for this machine's own settings. Agents can't change settings. [Details](#factoryjson-settings) |
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing |
+| `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -769,6 +773,56 @@ which tmux session and Remote Control link it has, and when it last produced out
 
 <br>
 
+## Watch and talk to an agent: `factory follow`
+
+An agent's **name** is the only handle. `factory follow haile` opens that agent's live session from your own terminal,
+wherever it runs: on a factory machine you can ssh to, or in the cloud. There is no custom UI: the Claude app, through the
+session's Remote Control link, is the other way in, and `factory follow` is how you find the link.
+
+```sh
+factory remote add dev-pc factory@192.168.2.45    # once: how to reach a machine (the sandbox user), kept on your side
+factory follow                                    # every agent and sub-manager we can find: where, state, task, last ping, link
+factory follow haile                              # attach: type, answer prompts, Esc to interrupt
+factory follow haile --read                       # watch only (tmux attach -r): it cannot type
+factory follow --all                              # one read-only pane per session, tiled, in a local tmux
+factory follow haile --log                        # stream the output without a terminal (Ctrl-C stops)
+factory say haile "check the failing test first"  # one message, as if typed, without attaching
+factory agent haile --detach                      # on the factory machine: start the agent in a detached tmux session
+factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent: follow prints its link
+```
+
+- **Remotes are only "how to reach a machine"**: a name and an ssh target, in this machine's own file (`factory machine
+  show` prints where), never in the project and never on
+  GitHub. Agent issues are readable by anyone who can read the repo, so where an agent runs stays on your side. There is
+  no role field.
+- **How a name is found.** `factory follow <agent>` asks every remote in parallel for its tmux sessions. A session belongs to
+  an agent when it is called `<name>` or `<repo>-<name>` (what `factory agent --detach` and `factory autostart` start), so
+  sessions started by hand work too. The names come from `agents` (and `roles.*.names`) in `factory.json`. If two remotes
+  answer to one name, `follow` refuses and `--on <remote>` picks; unique names across machines is a setup rule.
+- **Sub-managers.** The one-item sub-managers that the dev manager's orchestrator starts are tmux sessions called
+  `<manager>-<item>` (`dev-manager-pr-42`, `manager-issue-7`): they are listed with the agents, with the manager and the item
+  in the task column, and `factory follow dev-manager-pr-42` attaches to one.
+- **The list** shows the session's state from the agent issue when `tasks.source` is `issues` (alive, silent, down, its task
+  and last ping), otherwise `running`; the Remote Control link is read from the session's screen
+  (`claude.ai/code/session_...`, it changes when the session restarts), so you can open the same session from the Claude app on a
+  phone. A cloud agent has no machine: `follow` prints its link instead of attaching. A remote that cannot be reached is named,
+  with the reason, and the others still list.
+- **Detaching is safe**: `Ctrl-b d` detaches, and closing the terminal or losing the connection only detaches, so the agent
+  keeps working. `Ctrl+C` is not detach: it interrupts Claude, and quitting Claude ends the session and drops the agent's
+  claims (it then shows as silent in `factory agents`). Everyone attached sees one screen, shrunk to the smallest terminal: give
+  extra viewers `--read`.
+- **Safe by construction**: every ssh call uses keys only (`BatchMode`) and one shared connection per target
+  (`ControlMaster`, so `follow` stays fast). A target where `sudo -n true` succeeds is refused: use the sandbox user that
+  [`factory bootstrap`](#a-sandboxed-machine-factory-bootstrap) made, never an admin account. A remote name `root@` is refused when
+  you add it. No secret is stored in the remotes.
+- **`say`** types one line (up to 2000 characters, no line breaks or control characters) into that session only, with tmux's
+  literal mode so the text is never read as a key name or command, and appends `time, from, via, agent` to
+  `~/.local/state/software-factory/say.log` on the machine where the agent runs (not the text). It is for the person who owns the
+  machine; never put a secret in it. Agents cannot run `say`, or change the remotes (refused when `FACTORY_AGENT`, `FACTORY_LOOP`
+  or `CLAUDECODE` is set); they may list.
+
+<br>
+
 ## After a reboot: `factory autostart`
 
 After a reboot, a crash or a power loss, part of a factory machine comes back by itself (the CI runners, rootless
@@ -810,7 +864,7 @@ GitHub failure is only a line in the log. `factory autostart status` prints the 
 
 **This machine's settings** are in its own file (`factory machine show` prints where), never in the project:
 `autostart` (true/false), `autostartAgents` (default: the names this machine runs, `factory machine setup`) and
-`autostartReport`. `factory autostart install --agents ...` writes them; `uninstall` turns `autostart` off and removes
+`autostartReport`; `factory settings --local` lists and changes them with `agents` and `remoteControl`. `factory autostart install --agents ...` writes them; `uninstall` turns `autostart` off and removes
 the service, and leaves running agents and the stack alone. Variables the agents need that a service does not have
 (`SOPS_AGE_KEY_FILE` ...) go in `<config>/<repo>.env`, next to the machine file, as `KEY=value` lines.
 
@@ -1002,6 +1056,26 @@ It talks to the agents through markers in PR comments:
 | `<!-- factory-mustfix sha=<head> -->` | Dev manager | Must-fixes for that commit. Makes the PR rework and holds its merge |
 | `<!-- factory-approved sha=<head> -->` | Dev manager | That commit is approved. Clears a must-fix for that commit only |
 | `factory-hold` label | Dev manager | It's reviewing. Agents skip the PR and can't merge it |
+
+**The standing rules are a skill, not a memory (#96).** `/manage-pass` (`kit/.claude/skills/manage-pass/SKILL.md`, linked into
+a project like the other skills) holds everything a fresh session needs: the two-column table of what the manager does
+alone and what it asks the owner first (the one copy; the playbook links to it), the pass order, the exact markers, the hold
+label, the sha-pinned REST merge (`PUT .../pulls/<n>/merge` with `sha`), the CI rule, and the "never" list. The project's own
+additions go in `<roles.dir>/dev-manager/README.md` (or, without a role folder, `<notes>/manager.md`); the skill says to
+read them first. `claude -p "/manage-pass --dry-run"` reads, prints what it would do and writes nothing.
+
+**A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
+cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
+`claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
+read-only git, `Read`/`Grep`/`Glob` and subagents, and denies pushing to main, force-push, editing `.claude/**`, `vendor/**`,
+`CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.py` refuses, and says
+to write an owner-queue ask instead: a merge unless the PR's latest approval marker is `factory-approved sha=<the head being
+merged>`, no must-fix came after it, the merge is pinned to that head and CI is judged green (newest non-skipped run per job
+name, `factory_ci_judge.py`); a merge of a PR the manager opened (a `manager/` branch, or a body with
+`<!-- factory-role role=dev-manager ... -->`: its own PRs wait for the owner); deleting refs, force-pushing and pushing to
+main; `gh api` writes to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks and deploy
+keys; and shell commands that read secrets files. Like `pr-gate.py` it is a guard rail, not a lock: keep branch protection
+and required CI on GitHub.
 
 The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
 session with the repo attached.
@@ -1362,6 +1436,85 @@ changed token or address at their next task.
 
 <br>
 
+## A sandboxed machine: `factory bootstrap`
+
+`factory bootstrap` takes a fresh Ubuntu or Debian machine (systemd) to a state where agents and CI runners run as a
+dedicated, unprivileged user behind a network guard, and ends with `factory doctor --sandbox` green. It is the hand-built
+setup of a factory machine written down as code: reinstalling the machine or adding a third one is two commands and
+three sign-ins. Linux only for now.
+
+```sh
+sudo factory bootstrap machine                 # prints the plan, changes nothing
+sudo factory bootstrap machine --script s.sh   # the same steps as a bash script to read (and run with sudo bash s.sh)
+sudo factory bootstrap machine --apply         # runs them, as root, after a y/N question (--yes: no question)
+sudo -u factory -i                             # or ssh in as that user; then, from the project's checkout:
+factory bootstrap project                      # as the sandbox user, never as root
+```
+
+`factory bootstrap` works before there is a checkout (it runs from where the `factory` script lives); `project` takes
+`--repo URL [--dir PATH]` to clone one, with its submodules.
+
+**Nothing privileged runs by itself.** The machine part and `uninstall` only print their plan unless you pass `--apply`
+and run as root; `--dry-run` is accepted everywhere. Every step has a check, so a second run changes nothing, and every
+system change is written to a manifest (`/var/lib/software-factory/bootstrap.json`) that `status` and `uninstall` use.
+The project part is refused as root. Agents cannot run it: it refuses inside an agent session (`FACTORY_AGENT`, `FACTORY_LOOP` or `CLAUDECODE` set), `status` excepted.
+
+| Part | What it does |
+|---|---|
+| `machine` (root) | Packages (`uidmap`, `slirp4netns`, `dbus-user-session`, `git`, `gh`, `age`, `tmux`, `nftables` ...); `sops` as the release binary with its checksum checked; the user (default `factory`: no password, no sudo, not in the docker group, its home and the admin's home mode 750); subuid/subgid ranges; `loginctl enable-linger`; the network guard; with `--authorized-keys FILE` the given public keys; with `--harden-ssh` key-only SSH and no root login; with `--keep-awake` (the default on a laptop, `--no-keep-awake` to refuse) no sleep, suspend or lid switch |
+| `project` (the user) | Rootless Docker (`dockerd-rootless-setuptool.sh install`, `systemctl --user enable --now docker`); `DOCKER_HOST`, `SOPS_AGE_KEY_FILE` and `PATH` in `~/.bashrc`; `~/.secrets` (700); Node from `.nvmrc` through nvm and `corepack enable`; Claude Code with the official installer; submodules, `.env.local` from `.env.example`, `commands.install`; `factory install-shim`; with `--agents a,b` the machine's agent names; then, after the sign-ins, `commands.stackUp`, the CI runners (`factory ci install`, `--runners N` for `FACTORY_CI_RUNNERS`) and autostart; last, `factory doctor --sandbox` |
+| `status` | The manifest against what is there now; exit 1 when something drifted |
+| `uninstall` | The guard, its unit and rules, the sleep and SSH drop-ins, the saved settings and the manifest. The user, its home, backups and the installed packages stay. `--remove-user` or `--delete-home` remove the account (only one bootstrap created) and need its name typed (`--confirm NAME` for scripts) |
+
+**The human steps stay yours.** `gh auth login`, the Claude login (and its folder-trust prompt for the project) and
+copying the age key are never done by bootstrap. `project` stops after the first part when one is open, prints the exact
+commands and exits 2; run it again after, and it carries on with the runners and autostart. It only checks that they
+exist (`gh auth status`, the credentials file, `sops -d` of the first file under `secrets/`, output discarded). It never
+reads, prints, logs or stores a token or the key.
+
+### Network guard
+
+The default policy: **internet yes; home network no; Tailscale no; other users' files no; no sudo; no docker group.** It is
+an nftables table `factory_guard`, loaded by the systemd unit `factory-net-guard.service`, that matches the sandbox user's
+uid (`meta skuid`):
+
+- DNS only to the resolver, which is read from `/etc/resolv.conf` and `resolvectl dns` (a systemd-resolved stub on
+  127.0.0.53 needs no rule), not hard-coded;
+- `--allow-host ADDR[:PORT]` (repeat) lets one home-network host through, such as a Postgres or a build cache;
+- everything private is dropped with the log prefix `FACTORY-BLOCK `: RFC1918, the Tailscale range 100.64.0.0/10,
+  link-local, and IPv6 ULA and tailnet addresses;
+- loopback ports of other users' services are dropped: `--block-loopback-port PORT` (repeat) plus, at every run, every
+  loopback or wildcard port that a process of another user listens on (`ss -ltnHe`). A service started later is covered the
+  next time `sudo factory bootstrap machine --apply` runs, and `factory doctor --sandbox` fails until then;
+- `--block-inbound-port PORT` drops those ports from other hosts (`FACTORY-INBOUND `);
+- `--egress none` closes the internet too.
+
+The settings are saved in `/etc/software-factory/sandbox.json`, so a re-run converges on them (`user`, `egress`,
+`allowHosts`, `blockLoopbackPorts`, `blockInboundPorts`). Rules are rendered from `hooks/factory_netguard.py`, which is also
+what the tests check.
+
+### `factory doctor --sandbox`
+
+Run it as the sandbox user. Each check prints `ok`, `fix` (with the fix) or `note`:
+
+- identity: the user is the one bootstrap made; no sudo (`sudo -n true` fails); not in the sudo, docker or admin groups;
+  the admin's home and `.ssh` are unreadable; `~/.secrets` is 700;
+- network: GitHub, npm and the Claude API answer; the router, the tailnet, link-local and the blocked local ports do not;
+  `FACTORY-BLOCK` entries appear in the kernel log (a note when this user may not read the log);
+- **local services of other users** (known gap 1): every loopback or wildcard port that another user listens on is in the
+  guard's rules; if not, run the machine step again;
+- **containers** (known gap 2): a container started by this user (`docker run busybox wget` to the router) cannot reach the
+  router either, which is true when Docker is rootless because its traffic leaves through the user's own process;
+- rootless Docker with overlayfs, the `cpu`, `memory` and `pids` cgroup controllers delegated to the user's systemd
+  (the ingest sandbox tests need memory limits), linger on;
+- the CI runner units are active (at least `ci.runners`) and every agent worktree has its submodules checked out.
+
+A user account is a weaker boundary than a VM, and the agents still hold what their job needs inside the sandbox: a `gh`
+token, the age key and the Claude login. Keep the separate GitHub account for agents from [Security notes](#security-notes).
+Not in this version: macOS, a VM mode, creating the GitHub account.
+
+<br>
+
 ## Security notes
 
 - **One GitHub login for everything is the weak spot.** By default the agents use your `gh` login. When the dev manager
@@ -1406,52 +1559,209 @@ Files that don't follow the guide yet go on a legacy list (`structure.legacy`). 
 ## factory.json settings
 
 The template has every key with a short `_about`. Missing keys fall back to the defaults in `factory_config.py`.
-`factory settings` lists them with their values and changes them for you:
+`factory settings` is how you browse, understand and change them without editing JSON. In a terminal it opens a menu
+(plain `input()` and `print()`, no extra packages, so it works over SSH):
 
-```sh
-factory settings                          # every setting, its value here or the default, and what it does
-factory settings show tasks.source        # type, default, value here, options (plan, issues)
-factory settings set maxOpenPRs 5
-factory settings set agents '["ada","grace"]'   # lists and objects as JSON
-factory settings unset maxOpenPRs         # back to the default
+```
+factory settings
+  1  Paths & docs   2  Commands   3  Tests & protected paths   4  PR gate & reviews   5  Agents & loops
+  6  Issues mode    7  Ports & per-agent env   8  CI   9  Design & eval   10  Machine (local)
+Choose a number, /text to search, s to review and save, q to quit >
 ```
 
-`set` and `unset` only write `.claude/factory.json`; commit it on a branch and merge it in a PR (`.claude/` is
-protected). They refuse inside an agent session, and `settings.json` denies them to agents, because the PR gate
-reads these settings.
+Each setting shows its name, current value, default, whether it is overridden and a one-line description:
+`maxOpenPRs   4  (default 3, overridden)`. On a setting, `c` changes it (typed input is checked; lists and objects get
+add, edit and remove one item at a time; regex lists are compiled and can be tested against example paths), `r` resets it
+to the default (the key leaves the file) and `?` shows the long help: what it does, examples, what reads it, and who
+must approve a change (for example, `testPaths` needs the dev manager's `tests-reviewed` label). `/text` searches names
+and descriptions anywhere. `s` shows a unified diff of `.claude/factory.json`, flags the changes that need a review, and
+asks how to save: write the file only, or create a branch `settings/<short-name>`, commit, push and open a pull request
+(a draft or ready) whose body lists each change and the review it needs. Quitting, or the input ending, writes nothing.
 
-| Key | What it sets | Default |
-|---|---|---|
-| `prd`, `plan`, `blocked`, `decisions` | Where the docs live | `docs/PRD.md`, `docs/build-plan.md`, `docs/blocked.md`, `docs/decisions` |
-| `mainBranch` | The main branch | `main` |
-| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `fix` formats and auto-fixes the changed files before the checks (`factory fix`); `stackUp` and `stackHealth` bring the dev stack back at boot ([autostart](#after-a-reboot-factory-autostart)); `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
-| `fixPaths` | Regexes: `commands.fix` gets only changed files matching one of them | empty (every changed file) |
-| `checkOutputLines` | How many lines of a failing Stop check the agent sees: the failing lines first, then the end | 40 |
-| `codePaths` | Folders with code: the Stop check runs when they change | `["src"]` |
-| `checkRequires` | Paths that must exist before the Stop check runs, such as `node_modules` | `[]` |
-| `protected` | Regexes of files an agent may not merge | `CLAUDE.md`, `.claude/`, `.github/`, `.env`, lockfiles |
-| `alwaysAllowed` | Files that are never protected | the plan and the blocked list |
-| `testPaths`, `goldenPaths`, `dependencyManifests` | What the guard treats as tests, expected outputs and manifests | see the template |
-| `maxOpenPRs` | Ready PRs an account may have open at once | 3 |
-| `prSizeWarn` | The guard warns above this many changed lines | 600 |
-| `reviewMarkers` | Where review passes are written | `tmp/reviews` |
-| `reReviewPercent` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or it touches a new file): then it is a full review. 0: always full | 30 |
-| `lessons` | The curated lessons file the builder and the reviewers read first | `.claude/factory/lessons.md` |
-| `lessonsCap` | The most lessons the file may hold; `factory lessons check` (and CI) fail above it, `add` refuses | 40 |
-| `trustedReviewers` | GitHub logins whose approvals count | none: any approval counts |
-| `holdLabel` | The hold label | `factory-hold` |
-| `manager` | `flakes`: names of CI jobs known to fail now and then; `factory prs` says `rerun flake` when only those are red, for the first time on that commit | `[]` |
-| `agents` | The agents' names, in order | the ten names above |
-| `agentEnv`, `portStep` | Per-agent variables, and the port step | `{}`, 10 |
-| `claimStaleHours` | How long a local claim or a pushed task branch holds a task | 6 |
-| `waitMinutes` | How often an idle loop checks for work; 0 exits | 1 |
-| `tasks` | `source` (`plan` or `issues`), `labels`, `staleHours` (3), `pingMinutes` (5), `downMinutes` (30), `heartbeatSeconds` (20), `heartbeatMissMinutes` (12), `releaseDownMinutes` (10), `showWhere` (off) | plan mode |
-| `reviews` | Path regexes for `safety-auditor` and `security-reviewer` | empty |
-| `eval`, `design` | Settings and paths for the eval and design-check skills | off |
-| `styles`, `structure` | Style guides per path, and the structure check's roots and legacy list | none |
-| `notes` | The notes folder | `.claude/factory/notes` |
-| `turbo` | The [shared build cache](#a-shared-build-cache): `api` (its address; empty: off), `team` (default: the repository's name), `bind` (`127.0.0.1`) and `port` (3335) where the server listens, and `secretsCommand`, a command that prints `TURBO_TOKEN=...` lines. The token is never stored here | off |
-| `release` | `repo`: the GitHub repository whose releases `factory update` installs | `deresegetachew/my-skills` |
+The same things work in scripts, tests and CI:
+
+```sh
+factory settings list [--section commands] [--json]   # value, default, overridden, description (JSON has every field)
+factory settings get tasks.source                     # dotted keys; the value as JSON
+factory settings set maxOpenPRs 5
+factory settings set agents '["ada","grace"]'         # lists and objects as JSON
+factory settings unset maxOpenPRs                     # back to the default
+factory settings help [tasks.source]                  # the long help, or the list of sections
+factory settings diff                                 # what the file sets differently from the defaults
+factory settings validate                             # exit 1 with clear messages when a value is wrong
+factory settings pr [--ready]                         # propose the edited file as a pull request (a draft by default)
+factory settings --local set remoteControl off        # the machine scope (below)
+```
+
+`validate` fails on: a regex that does not compile, a `tasks.source` that is not `plan` or `issues`, a duplicate or
+invalid agent name, an integer below its minimum (`maxOpenPRs`, `portStep` ... at least 1), a `prd`, `plan` or
+`decisions` path that does not exist, a bad `models`, `styles` or `agentEnv` value, and `agentEnv` ports that collide
+across the agents' slots. A key that is not a setting is only a warning (probably a typo); it is kept and ignored.
+Saving keeps the file readable: key order and `_about` entries stay, the file's own indent is kept, and the write is
+atomic.
+
+**Only people change settings.** `.claude/` is protected, so a project change reaches main through a pull request.
+`set`, `unset`, `pr`, `--local` changes and saving in the menu refuse inside an agent session (`FACTORY_AGENT`,
+`FACTORY_LOOP` or `CLAUDECODE` is set); `settings.json` denies them and the PR gate blocks them, also inside `bash -c`.
+Reading (`list`, `get`, `help`, `diff`, `validate`) stays allowed. Nothing merges settings by itself: the dev manager or
+the owner merges the pull request.
+
+**Machine scope** (`factory settings --local ...`, section 10 of the menu). Some settings belong to a machine, not the
+project, so they live in its own file outside the repo (`factory machine show` prints where) and are never committed:
+`agents` (the names this machine runs; `FACTORY_AGENTS` overrides), `remoteControl` (start sessions with Remote Control;
+`FACTORY_REMOTE_CONTROL=0|1` overrides), `autostart`, `autostartAgents` and `autostartReport`. The order of precedence
+is the defaults in `factory_config.py`, then the project file, then the machine file (machine keys only), then the
+environment.
+
+**One table describes every setting** (`hooks/factory_settings_schema.py`): key, type, default (read from
+`factory_config.py`), section, short and long help, examples, who reads it, who must approve a change, and how a value is
+checked. The list, `help`, `validate`, the menu and the tables below are all generated from it, so they cannot drift.
+A test fails when the tables below are out of date; refresh them with `factory settings docs --write`. The `_about`
+strings in the template stay readable, but this is the documentation.
+
+<!-- settings:begin -->
+(Generated by `factory settings docs --write` from the settings table in `hooks/factory_settings_schema.py`:
+change the table there, not here. `factory settings help <key>` has the long help for each setting.)
+
+**Paths & docs**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `prd` | str | `"docs/PRD.md"` | Where the PRD lives. Agents read the sections a task points to. |
+| `plan` | str | `"docs/build-plan.md"` | The build plan (plan mode: its unticked lines are the tasks). |
+| `blocked` | str | `"docs/blocked.md"` | The blocked list (plan mode): `- 1.3: needs ...` lines are skipped. |
+| `decisions` | str | `"docs/decisions"` | The folder of numbered decision records. |
+| `numberedDirs` | list | `[]` | More folders of numbered files (migrations): a new file takes a free number. |
+| `mainBranch` | str | `"main"` | The main branch. |
+| `notes` | str | `".claude/factory/notes"` | The folder of project notes for the shared agents and skills. |
+| `usageLog` | str | `"docs/factory-usage.md"` | Where `factory usage --record` appends its rows (commit it to keep the history). |
+| `release.repo` | str | `"deresegetachew/my-skills"` | The GitHub repository whose releases `factory update` installs (owner/name). Default: the factory's own, deresegetachew/my-skills. |
+
+**Commands**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `commands.install` | str | `""` | Installs dependencies in a new worktree (start it with `git submodule update --init`). |
+| `commands.typecheck` | str | `""` | The typecheck CI and the Stop check run. |
+| `commands.lint` | str | `""` | The lint command. |
+| `commands.test` | str | `""` | The full test command. |
+| `commands.build` | str | `""` | The build command. |
+| `commands.smoke` | str | `""` | A quick command proving main still works. |
+| `commands.stackUp` | str | `""` | Brings the dev stack up (Postgres, MinIO ...); `factory resume` runs it at boot. Should return once the stack is started. Empty: no stack at boot. |
+| `commands.stackHealth` | str | `""` | Passes (exit 0) once the stack is healthy; `factory resume` asks until it does. Empty: stackUp is enough. |
+| `commands.agentSetup` | str | `""` | Runs once per loop after the env is set, e.g. to create the slot's database. |
+| `commands.typecheckChanged` | str | `""` | The Stop check's typecheck, for the changed packages only (saves time and tokens). Empty: use commands.typecheck. |
+| `commands.ci` | str | `""` | What CI runs (typecheck, lint, test, build), for `factory verify`; `{base}` is origin/<main>. When set on main, a ready PR needs it passed for its commit. |
+| `commands.fix` | str | `""` | Formats and auto-fixes the files this branch changed, e.g. `prettier --write {files} && eslint --fix {files}` (`{files}` is the quoted list; without it the list is appended). The Stop check and `factory verify` run it first, so agents never spend a turn on style. |
+| `fixPaths` | list | `[]` | Regexes: commands.fix gets only changed files matching one of them. Empty: every changed file. |
+| `commands.testChanged` | str | `""` | The Stop check's tests, for the changed packages only. Empty: use commands.test. |
+| `codePaths` | list | `["src"]` | Folders with code: the Stop check runs only when they changed. |
+| `checkRequires` | list | `[]` | Paths that must exist before the Stop check runs, e.g. ["node_modules"]. |
+| `checkOutputLines` | int | `40` | How many lines of a failing check the agent is shown (failures first). |
+| `checkLogDir` | str | `"tmp/checks"` | Where a check's full output is saved; the agent sees a capped summary and this path. |
+| `styles` | list | `[]` | Style guides per path: [{"paths": [...], "skills": [...], "check": "..."}]. |
+| `structure.roots` | list | `[]` | Folders the structure check (check_structure.py) looks at, when a style uses it. |
+| `structure.legacy` | str | `""` | The list of legacy files the structure check leaves alone (it only shrinks). |
+
+**Tests & protected paths**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `protected` | list | `see `factory settings help protected`` | Regexes of files an agent may not merge. |
+| `alwaysAllowed` | list | `["docs/build-plan.md", "docs/blocked.md"]` | Files that are never protected (the plan, the blocked list). |
+| `testPaths` | list | `see `factory settings help testPaths`` | Regexes the Factory guard treats as tests. |
+| `goldenPaths` | list | `see `factory settings help goldenPaths`` | Regexes the guard treats as expected outputs. |
+| `dependencyManifests` | list | `["(^\|/)package\\.json$"]` | Regexes of dependency manifests (a new dependency needs deps-reviewed). |
+
+**PR gate & reviews**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `maxOpenPRs` | int | `3` | Ready PRs the account may have open at once. About the number of agents + 1. |
+| `prSizeWarn` | int | `600` | The guard warns above this many changed lines. |
+| `reviewMarkers` | str | `"tmp/reviews"` | Where review passes are written. |
+| `reReviewPercent` | int | `30` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review. |
+| `lessons` | str | `".claude/factory/lessons.md"` | The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`). |
+| `lessonsCap` | int | `40` | The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now. |
+| `manager.flakes` | list | `[]` | Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent. |
+| `trustedReviewers` | list | `[]` | GitHub logins whose approvals count. Empty: any. |
+| `holdLabel` | str | `"factory-hold"` | The label the dev manager puts on a PR it is reviewing. |
+| `reviews.safety-auditor.paths` | list | `[]` | Regexes of paths that need the safety auditor. |
+| `reviews.security-reviewer.paths` | list | `[]` | Regexes of paths that need the security reviewer. |
+
+**Agents & loops**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `agents` | list | `see `factory settings help agents`` | The agents' names, in order (lowercase letters, digits, dashes). |
+| `claimStaleHours` | int | `6` | How long a local claim or a pushed task branch holds a task. |
+| `waitMinutes` | int | `1` | How often an idle loop looks for work. 0: it exits instead. |
+| `models` | dict | `{}` | The model per role (builder, manager, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default. |
+
+**Issues mode**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `tasks.source` | one of plan/issues | `"plan"` | Where tasks come from. |
+| `tasks.staleHours` | int | `3` | An in-progress issue with no activity this long counts as stale. |
+| `tasks.pingMinutes` | int | `5` | How often a working agent pings its agent issue, at most. |
+| `tasks.downMinutes` | int | `30` | No ping for this long: the agent counts as down. |
+| `tasks.heartbeatSeconds` | int | `20` | How often the heartbeat daemon (`factory heartbeat`) looks at this machine's agents. It writes to GitHub only on a change, and every pingMinutes as a keepalive. |
+| `tasks.heartbeatMissMinutes` | int | `12` | An agent the daemon writes for counts as silent after this many minutes without a keepalive (instead of downMinutes). |
+| `tasks.releaseDownMinutes` | int | `10` | An agent that is plainly down (its loop or the daemon said so) gets its in-progress issues back to ready by the sweep after this long. |
+| `tasks.showWhere` | bool | `false` | Post the machine, folder, tmux session and Remote Control link on agent issues (anyone who can read the repo sees them). |
+| `tasks.labels` | dict | `see `factory settings help tasks.labels`` | The GitHub labels that mark a task: ready, inProgress, inReview, blocked and the agentPrefix. |
+
+**Ports & per-agent env**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `agentEnv` | dict | `{}` | Per-loop variables: {"API_PORT": "{port:4100}", "DATABASE_URL": "...{suffix}"}. |
+| `portStep` | int | `10` | How far each agent's ports move from the previous agent's. |
+
+**CI**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `ci.name` | str | `""` | The self-hosted runner's name (default `<repo>-ci`). |
+| `ci.label` | str | `""` | The runner label CI jobs ask for (default `<repo>-local`). |
+| `ci.runners` | int | `1` | Heavy runner loops per machine (each with its own Docker); FACTORY_CI_RUNNERS overrides it on one machine. |
+| `ci.light` | bool | `true` | Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`. |
+| `ci.image` | str | `"build"` | The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base. |
+| `ci.caches` | bool | `true` | Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets). |
+| `turbo.api` | str | `""` | The shared Turborepo cache's address, as agents and CI reach it: http://<Tailscale or LAN address>:3335. Empty: no shared cache. `factory turbo install` starts it. |
+| `turbo.team` | str | `""` | The cache's team name (default: the repository's name). |
+| `turbo.bind` | str | `"127.0.0.1"` | The address the cache server listens on, on the machine that runs it. 127.0.0.1 reaches only that machine; use its Tailscale or LAN address for others. |
+| `turbo.port` | int | `3335` | The port the cache server listens on. |
+| `turbo.secretsCommand` | str | `""` | A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins. |
+| `ci.lightLabel` | str | `""` | The light runner's label (default `<repo>-light`). |
+
+**Design & eval**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `eval.command` | str | `""` | The eval command (e.g. `pnpm golden`). Empty: no eval yet. |
+| `eval.baseline` | str | `""` | The eval's baseline file. |
+| `design.references` | str | `""` | The folder of design references. Empty: no design check. |
+| `eval.skill` | str | `"eval"` | The skill that runs the eval. |
+| `eval.metrics` | list | `[]` | The metrics the eval reports. |
+| `eval.mustNotDrop` | list | `[]` | Metrics that must not drop against the baseline, e.g. ["warning recall 100%"]. |
+| `eval.paths` | list | `[]` | Regexes of changed paths that need the eval. |
+| `design.skill` | str | `"design-check"` | The skill that runs the design check. |
+| `design.renders` | str | `""` | The folder of reference renders (images) the design check compares with. |
+| `design.preview` | str | `""` | The command that serves a preview of the built screens. |
+| `design.paths` | list | `[]` | Regexes of changed paths that need the design check. |
+
+**Machine (local)** (`factory settings --local`, not in the project file)
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `agents` | list | `[]` | The agent names this machine runs. Two machines must never share a name. |
+| `remoteControl` | bool | `true` | Start loop and agent sessions with Remote Control, so you can reach them from claude.ai/code or your phone. |
+| `autostart` | bool | `false` | Bring the stack and this machine's agents back after a reboot (`factory autostart`). |
+| `autostartAgents` | list | `[]` | The agents it starts at boot. Empty: the names this machine runs. |
+| `autostartReport` | bool | `true` | Post the boot report on the first started agent's issue (issues mode). |
+<!-- settings:end -->
 
 <br>
 
@@ -1477,7 +1787,11 @@ software-factory/
     .claude/settings.json                 permissions and hooks
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
+    .claude/skills/manage-pass/           the dev manager's standing rules (one page)
+    .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main)
     .claude/hooks/
+      manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
+      factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
       factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
@@ -1497,12 +1811,24 @@ software-factory/
       factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
+      factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
+      factory_remotes.py                  remotes, ssh calls and finding sessions by name
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
       factory_release.py                  `factory version | releases | update | rollback`: the release client
+      factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
+      factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
+      factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
+      factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
+      factory_netguard.py                 renders the nftables rules and the guard's systemd unit
+      factory_sandbox.py                  `factory doctor --sandbox`
       factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
-      factory_settings.py                 `factory settings`: list, show, set and unset factory.json values
+      factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
+      factory_settings_schema.py          the table that describes every setting: help, limits, defaults, README tables
+      factory_settings_store.py           reads and writes factory.json and the machine file (order, indent, atomic)
+      factory_settings_interactive.py     the interactive menu behind `factory settings`
+      factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
       factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
       factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
       factory_guard.py                    the CI guard
