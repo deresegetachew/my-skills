@@ -18,7 +18,8 @@ Build
                          which closes by itself when the task is done). Start it again in another terminal for more agents.
                          FACTORY_AGENTS=haile,tewodros (or factory machine setup): only those names on this machine
   agent <name|N>         open Claude in that agent's own worktree (created the first time), for manual work there.
-                         To run the queue, use loop -i instead (a fresh session per task).
+                         To run the queue, use loop -i instead (a fresh session per task). --detach: in a detached
+                         tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next
   autostart [status|install|uninstall]
@@ -37,6 +38,12 @@ Look
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
+  follow [<agent>] [--read|--log] [--on R] [--all]
+                         watch and talk to an agent by name, on another machine or in the cloud: without a name,
+                         every agent and one-item sub-manager we can find, where it runs and its Remote Control link
+  say <agent> "text"     send one message to that agent's session, as if typed (logged on its machine, without the text)
+  remote [add|cloud|list|remove]
+                         how to reach other machines: add dev-pc factory@192.168.2.45; cloud haile <claude.ai link>
   agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down
   issues [list]          tasks as GitHub issues (tasks.source "issues"): list, show N, stale, setup, new ...
 
@@ -87,6 +94,11 @@ cmd="${1:-help}"; shift || true
 case "$cmd" in
   loop)      exec "$root/factory-loop.sh" "$@" ;;
   agent)
+    # --detach (#106): start the agent in a detached tmux session, which `factory follow <name>` finds from anywhere.
+    detach=0; rest=()
+    for a in "$@"; do if [ "$a" = --detach ]; then detach=1; else rest+=("$a"); fi; done
+    set -- ${rest[@]+"${rest[@]}"}
+    if [ "$detach" = 1 ]; then exec python3 "$hooks/factory_follow.py" detach "$@"; fi
     [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
     who="$1"; shift
     bare=0; [ "$#" = 0 ] && bare=1
@@ -119,6 +131,7 @@ case "$cmd" in
   worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
   machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
+  follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
   autostart) py factory_autostart.py "$@" ;;

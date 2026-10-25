@@ -33,6 +33,7 @@ version of it as a git submodule.
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [Watch and talk to an agent: `factory follow`](#watch-and-talk-to-an-agent-factory-follow)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
@@ -299,6 +300,7 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
+| `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
@@ -648,6 +650,56 @@ current; the task never has to:
 - **Where.** By default the issue says only the agent's slot. With `"tasks": { "showWhere": true }` it also posts
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
+
+<br>
+
+## Watch and talk to an agent: `factory follow`
+
+An agent's **name** is the only handle. `factory follow haile` opens that agent's live session from your own terminal,
+wherever it runs: on a factory machine you can ssh to, or in the cloud. There is no custom UI: the Claude app, through the
+session's Remote Control link, is the other way in, and `factory follow` is how you find the link.
+
+```sh
+factory remote add dev-pc factory@192.168.2.45    # once: how to reach a machine (the sandbox user), kept on your side
+factory follow                                    # every agent and sub-manager we can find: where, state, task, last ping, link
+factory follow haile                              # attach: type, answer prompts, Esc to interrupt
+factory follow haile --read                       # watch only (tmux attach -r): it cannot type
+factory follow --all                              # one read-only pane per session, tiled, in a local tmux
+factory follow haile --log                        # stream the output without a terminal (Ctrl-C stops)
+factory say haile "check the failing test first"  # one message, as if typed, without attaching
+factory agent haile --detach                      # on the factory machine: start the agent in a detached tmux session
+factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent: follow prints its link
+```
+
+- **Remotes are only "how to reach a machine"**: a name and an ssh target, in this machine's own file (`factory machine
+  show` prints where), never in the project and never on
+  GitHub. Agent issues are readable by anyone who can read the repo, so where an agent runs stays on your side. There is
+  no role field.
+- **How a name is found.** `factory follow <agent>` asks every remote in parallel for its tmux sessions. A session belongs to
+  an agent when it is called `<name>` or `<repo>-<name>` (what `factory agent --detach` and `factory autostart` start), so
+  sessions started by hand work too. The names come from `agents` (and `roles.*.names`) in `factory.json`. If two remotes
+  answer to one name, `follow` refuses and `--on <remote>` picks; unique names across machines is a setup rule.
+- **Sub-managers.** The one-item sub-managers that the dev manager's orchestrator starts are tmux sessions called
+  `<manager>-<item>` (`dev-manager-pr-42`, `manager-issue-7`): they are listed with the agents, with the manager and the item
+  in the task column, and `factory follow dev-manager-pr-42` attaches to one.
+- **The list** shows the session's state from the agent issue when `tasks.source` is `issues` (alive, silent, down, its task
+  and last ping), otherwise `running`; the Remote Control link is read from the session's screen
+  (`claude.ai/code/session_...`, it changes when the session restarts), so you can open the same session from the Claude app on a
+  phone. A cloud agent has no machine: `follow` prints its link instead of attaching. A remote that cannot be reached is named,
+  with the reason, and the others still list.
+- **Detaching is safe**: `Ctrl-b d` detaches, and closing the terminal or losing the connection only detaches, so the agent
+  keeps working. `Ctrl+C` is not detach: it interrupts Claude, and quitting Claude ends the session and drops the agent's
+  claims (it then shows as silent in `factory agents`). Everyone attached sees one screen, shrunk to the smallest terminal: give
+  extra viewers `--read`.
+- **Safe by construction**: every ssh call uses keys only (`BatchMode`) and one shared connection per target
+  (`ControlMaster`, so `follow` stays fast). A target where `sudo -n true` succeeds is refused: use the sandbox user that
+  [`factory bootstrap`](#a-sandboxed-machine-factory-bootstrap) made, never an admin account. A remote name `root@` is refused when
+  you add it. No secret is stored in the remotes.
+- **`say`** types one line (up to 2000 characters, no line breaks or control characters) into that session only, with tmux's
+  literal mode so the text is never read as a key name or command, and appends `time, from, via, agent` to
+  `~/.local/state/software-factory/say.log` on the machine where the agent runs (not the text). It is for the person who owns the
+  machine; never put a secret in it. Agents cannot run `say`, or change the remotes (refused when `FACTORY_AGENT`, `FACTORY_LOOP`
+  or `CLAUDECODE` is set); they may list.
 
 <br>
 
@@ -1155,6 +1207,8 @@ software-factory/
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
+      factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
+      factory_remotes.py                  remotes, ssh calls and finding sessions by name
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
       factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
