@@ -414,7 +414,8 @@ def test_agent_status_uses_the_message_states_and_the_issue_carries_an_envelope(
     import factory_agents as fa
     title, body = fa.render("haile", "input-required", "", "2026-10-25T09:00:00Z", machine="m1")
     assert title == "Agent: haile · input-required"
-    assert fa.MARK.search(body).groups()[:2] == ("haile", "input-required")               # the old marker still reads
+    f = fa.fields({"body": body})
+    assert (f["name"], f["status"]) == ("haile", "input-required")               # the old marker still reads
     m = fm.parse_comment({"id": 1, "body": body, "user": {"login": "x"}})
     assert len(m) == 1 and m[0].kind == "status" and m[0].frm == "haile" and m[0].state == "input-required"
     assert m[0].id == "agent-haile"
