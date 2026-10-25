@@ -53,6 +53,10 @@ to undo it.
      the open items, about 15 short lines: every tick re-reads them.
    - **An hourly scheduled task as a backup**, a fresh session with the same rules in its prompt, in case this
      session stops. It skips commits that already carry a review marker, so the two never double-review.
+   **Without a live session (no tokens when idle):** run `factory manage-tick` from cron, launchd or a systemd timer
+   on a machine with the repo (for example every 10 minutes). It runs `factory precheck` in the shell; when that prints
+   `nothing to do` it ends without any model call, and only when there is work does it start one `/manage-pass`
+   session on the manager profile. Prefer this over a session that waits and ticks.
    Check the account's existing scheduled tasks first (`list_triggers`), so you don't duplicate one.
    Scheduled tasks run at most hourly on a clock, so the 10-minute rhythm needs this live session. Better,
    where the account allows it: give the scheduled task a **GitHub trigger** on pull requests (opened,
@@ -256,6 +260,26 @@ Rules you write (decisions, answers, build-plan tasks) get applied literally. Wr
 can, and otherwise with one example that passes and one that fails, taken from the real material. Test a new
 rule on two or three real cases before publishing it. When the coding agent shows a rule misfiring, fix the
 rule; don't defend it.
+
+## Several managers at once
+
+If another dev manager may be running (another machine, another terminal), claim before you act, so neither of you
+does the same thing twice. Everything below is `factory manager-claims ... --manager <your name>`:
+
+- `next` first: it takes `factory-hold` off PRs whose lease ran out, then claims every free PR and unanswered
+  question and prints what you won. Work only on those. A PR or question you did not win is another manager's; skip it.
+- Lost a claim (exit code 3)? Do nothing on that item: no hold, no review, no comment.
+- Won a review: review the head you claimed, post `factory-approved`, `factory-mustfix` or `pr-watch` for it, then
+  `release <pr>` (takes the hold off). Gave up without a marker? `release <pr>` too, so the next manager need not wait.
+- Won a question: post the `factory-answer` (it ends the claim). The lease is `manager.claimMinutes` (default 20); a
+  longer job should be done within it, or claim again with `review <pr>` before it ends.
+- Merge with `merge <pr>`: it needs `factory-approved sha=<head>` for the head and merges that exact sha. "Done by
+  someone else" is a normal answer, not a failure.
+- Before asking the owner, `ask --id <slug> --text "..."`: an ask with that id is posted once, however many managers
+  want to post it.
+
+All managers share one GitHub account, so the name inside the comment is the only identity. Do not use
+`trustedReviewers` to tell managers apart.
 
 ## Several coding loops
 

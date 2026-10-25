@@ -146,10 +146,21 @@ def wait_ready(minutes, cfg):
     return wait_until(check, minutes) or (2, f"no task became ready in {minutes} minutes")
 
 
+def waiting_tasks(comments):
+    """The questions addressed to the dev manager that wait for its answer, oldest first (a question that asks the
+    asker for more information waits for the asker, not for the dev manager)."""
+    return unanswered(fm.fold(fm.messages_of(comments)), fm.DEV_MANAGER)
+
+
+def waiting_questions(what, n, comments):
+    """One line per question addressed to the dev manager that waits for its answer."""
+    return [f"{what} #{n}: question waits for an answer ({t.id} from {t.frm or 'an agent'})" for t in waiting_tasks(comments)]
+
+
 def precheck_items(cfg, prs=None, comments_of=None):
     """What the dev manager has to do right now: [(kind, ref, text)], empty when nothing. Reads GitHub only.
-    kind is review (ref: PR number), question (PR number), agent (name) or stale (issue number). `prs` and `comments_of`
-    (a function: PR number -> its comments) let the orchestrator's watcher share what it has already read."""
+    kind is review (ref: PR number), question (the PR or issue number), agent (name) or stale (issue number). `prs` and
+    `comments_of` (a function: number -> its comments) let the orchestrator's watcher share what it has already read."""
     todo = []
     prs = fi.gh_all("repos/{owner}/{repo}/pulls?state=open") if prs is None else prs
     comments_of = comments_of or (lambda n: fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments"))
@@ -161,11 +172,11 @@ def precheck_items(cfg, prs=None, comments_of=None):
             marks += [m for c in comments for m in WATCHED.findall(c.get("body") or "")]
             if not any(sha.startswith(m) or m.startswith(sha) for m in marks):
                 todo.append(("review", n, f"PR #{n}: commit {sha[:7]} not reviewed yet"))
-        todo += waiting_questions("PR", n, comments)
+        todo += [("question", n, t) for t in waiting_questions("PR", n, comments)]
     for i in fi.gh_all("repos/{owner}/{repo}/issues?state=open"):  # questions on task issues too
         if not i.get("pull_request") and i.get("comments", 1) and "factory:agent" not in fi.names(i):
-            todo += waiting_questions("issue", i["number"],
-                                      fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{i['number']}/comments"))
+            todo += [("question", i["number"], t) for t in
+                     waiting_questions("issue", i["number"], comments_of(i["number"]))]
     if (cfg.get("tasks") or {}).get("source") == "issues":
         import factory_agents
         L = task_labels(cfg)
@@ -185,14 +196,6 @@ def precheck_items(cfg, prs=None, comments_of=None):
 def precheck(cfg):
     """What the dev manager has to do right now, one line each; empty when nothing. Reads GitHub only."""
     return [text for _, _, text in precheck_items(cfg)]
-
-
-def waiting_questions(what, n, comments):
-    """One ("question", number, line) per question addressed to the dev manager that waits for its answer (a
-    question that asks the asker for more information waits for the asker, not for the dev manager)."""
-    thread = fm.fold(fm.messages_of(comments))
-    return [("question", n, f"{what} #{n}: question waits for an answer ({t.id} from {t.frm or 'an agent'})")
-            for t in unanswered(thread, fm.DEV_MANAGER)]
 
 
 def minutes_arg(args, k, default=30):

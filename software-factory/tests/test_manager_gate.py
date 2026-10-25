@@ -272,8 +272,13 @@ def test_the_profile_keeps_every_factory_protecting_deny_of_the_shared_settings_
     shared = json.load(open(os.path.join(KIT, ".claude", "settings.json")))["permissions"]
     assert "Bash(gh api *)" in shared["deny"], "the reason the manager needs its own profile"
     mine = set(load_profile()["permissions"]["deny"])
-    left = [d for d in shared["deny"] if d != "Bash(gh api *)" and d not in mine and not d.startswith(("Bash(gh pr ", "Bash(git push", "Bash(git branch"))]
+    left = [d for d in shared["deny"] if d != "Bash(gh api *)" and d not in mine and not d.startswith(("Bash(gh pr ", "Bash(git push", "Bash(git branch"))
+            and "manager-claims" not in d and "manager_claims" not in d]
     assert left == [], left
+    # a builder may not run the claim commands (#99), but the dev manager is the one who does
+    claims = [d for d in shared["deny"] if "manager-claims" in d or "manager_claims" in d]
+    assert claims and not any(d in mine for d in claims), claims
+    assert "Bash(factory manager-claims*)" in load_profile()["permissions"]["allow"]
     for d in shared["deny"]:
         if d.startswith(("Bash(git push", "Bash(git branch")):
             assert d in mine, d

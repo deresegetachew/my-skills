@@ -19,7 +19,10 @@ GH = r'''#!/usr/bin/env python3
 import json, os, re, sys
 from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs
-f = os.environ["FAKE_DB"]; db = json.load(open(f)); a = sys.argv[1:]
+import fcntl
+f = os.environ["FAKE_DB"]
+lock = open(f + ".lock", "w"); fcntl.flock(lock, fcntl.LOCK_EX)  # sub-managers run side by side: one request at a time
+db = json.load(open(f)); a = sys.argv[1:]
 if a[:1] != ["api"]: sys.exit("fake gh: only gh api")
 rest = a[1:]; method = "GET"; path = None; i = 0; body = None
 while i < len(rest):
@@ -121,7 +124,7 @@ def world(db=None, cfg=None, files=None):
     open(os.path.join(d, "bin", "gh"), "w").write(GH)
     # a fake claude that records its prompt in full and the lease state at the time it ran
     open(os.path.join(d, "bin", "claude"), "w").write(
-        '#!/usr/bin/env bash\nprintf "claude %s\\n" "$(printf "%s" "$*" | tr "\\n" " ")" >> "$LOOP_LOG"\n'
+        '#!/usr/bin/env bash\nline="$(printf "claude %s" "$(printf "%s" "$*" | tr "\\n" " ")")"; tmp="$(mktemp)"; printf "%s\\n" "$line" > "$tmp"; cat "$tmp" >> "$LOOP_LOG"; rm -f "$tmp"\n'
         'printf "%s\\n" "$@" > "$(dirname "$LOOP_LOG")/last-args"\n'
         'if [ -n "${FAKE_CLAUDE_HOOK:-}" ]; then bash "$FAKE_CLAUDE_HOOK" "$@"; exit $?; fi\nexit 0\n')
     return d, work, env
@@ -204,10 +207,10 @@ def test_check_2_an_open_question_is_a_manager_item_until_it_is_answered():
 def test_check_2_also_reads_the_message_envelope_addressed_to_the_dev_manager():
     d, work, env = world(db={"pulls": [pr(5)], "commits": {H: iso(60)},
                              "comments": {"5": [comment(1, f"<!-- pr-watch sha={H} -->", 59),
-                                                comment(2, "<!-- factory-msg kind=question to=dev-manager -->\nWhy?", 20)]}})
+                                                comment(2, "<!-- factory-msg v=1 id=q1abc kind=question from=menelik to=dev-manager state=submitted -->\nWhy?", 20)]}})
     assert "question-5" in watch(work, env)
     put(d, comments={"5": [comment(1, f"<!-- pr-watch sha={H} -->", 59),
-                           comment(2, "<!-- factory-msg kind=question to=product-owner -->\nWhy?", 20)]})
+                           comment(2, "<!-- factory-msg v=1 id=q1abc kind=question from=menelik to=po state=submitted -->\nWhy?", 20)]})
     assert "question-5" not in watch(work, env)
 
 

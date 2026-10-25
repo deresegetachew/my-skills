@@ -553,8 +553,26 @@ def run_ci(root, *args, timeout=900):
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
+def refresh_heartbeat(root):
+    """Restart the heartbeat daemon when it is installed here: it is one long-running process, so it keeps running the
+    code it started with until it is restarted. Says nothing when there is none."""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_heartbeat_service.py")
+    if not os.path.isfile(script):
+        return []
+    p = subprocess.run([sys.executable, script, "restart"], cwd=root, capture_output=True, text=True, timeout=120)
+    if p.returncode != 0:
+        raise FactoryError("services_failed", "restarting the heartbeat daemon failed:\n" + "\n".join("    " + l for l in (p.stdout + p.stderr).strip().splitlines()[-6:]),
+                           "run `factory heartbeat install`, then `factory update` again.")
+    return [l.strip() for l in p.stdout.splitlines() if l.strip()]
+
+
 def refresh_services(root):
     """Reinstall the CI runner services when this machine has some and they are older than the checkout."""
+    lines = refresh_runners(root)
+    return lines + refresh_heartbeat(root)
+
+
+def refresh_runners(root):
     if not os.path.isfile(os.path.join(root, ".claude", "ci", "ci.sh")):
         return ["runner services: this release has none to refresh"]
     rc, out = run_ci(root, "names", timeout=120)
