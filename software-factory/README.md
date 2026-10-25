@@ -4,8 +4,8 @@ Turns a repo into a software factory. Coding agents run on your machine and buil
 from a PRD and a build plan: failing tests first, then the code, then reviewer subagents, then a pull request. A dev
 manager, a Claude session in the cloud, reviews the pull requests, merges them, answers the agents' questions and
 keeps them busy. Hooks, CI and GitHub's branch protection stop the work from merging when it shouldn't. Only
-decisions that really belong to you reach you. The factory itself lives in my-skills, and each project pins one
-version of it as a git submodule.
+decisions that really belong to you reach you. The factory itself lives in my-skills. A project gets it as a numbered
+release (`factory update`), or, until it migrates, as a git submodule.
 
 > **Where the code lives (#112, step 1).** The factory's code (`hooks/`, `ci/`, `factory`, `factory-loop.sh`, `tests/`)
 > now sits directly in `software-factory/`. The old paths under `kit/` (`kit/.claude/hooks/*`, `kit/.claude/ci/*`,
@@ -27,8 +27,9 @@ version of it as a git submodule.
 
 - [Quick start](#quick-start)
 - [How it fits together](#how-it-fits-together)
+- [Updating from releases (`factory update`)](#updating-from-releases)
 - [Installed as a submodule: what's shared and what's yours](#installed-as-a-submodule-whats-shared-and-whats-yours)
-- [Updating the factory](#updating-the-factory)
+- [Updating the factory on the submodule](#updating-the-factory)
 - [The `factory` command](#the-factory-command)
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
@@ -184,6 +185,63 @@ Three ideas make it safe to leave running:
 
 <br>
 
+## Updating from releases
+
+A project on releases has the factory as plain files committed in its repo (`.claude/hooks/`, `.claude/ci/`, `factory`,
+`factory-loop.sh`, and the agents, skills and `settings.json` in `.claude/`), plus one file that says which release they
+are: `.claude/factory/release.json`, the **pin**. Updating is a normal reviewed diff. For the common case you need one
+command:
+
+```
+factory update          # newest release: download, check, install, refresh this machine, verify
+```
+
+| Want | Command |
+|---|---|
+| See where I am | `factory version`: installed release, the one `origin/main` pins, the newest, and what changed since |
+| See what exists | `factory releases` (`--all` for the old ones): tag, date, one-line note, and where you are |
+| Update to the newest | `factory update` |
+| Use a specific release | `factory update v1.4.0` (the `v` is optional; it can be older, too) |
+| Go back | `factory rollback`: the release installed before, from this machine's download cache, no network needed |
+| Catch up after a pull | `factory update` again: the files came with the pull, so it only refreshes this machine's runner services and verifies |
+
+`factory update` does this, in order, and stops at the first problem with `[code] message` and `Fix: ...`:
+
+1. Refuses a dirty working tree (it names the files; it stashes nothing). The only dirty tree it accepts is one that
+   holds just a previous `factory update` you have not committed yet, so running it twice is safe.
+2. Finds the release, downloads the archive and `SHA256SUMS` from GitHub, and checks the archive's SHA-256. A mismatch
+   installs nothing and leaves nothing in the cache. A transfer that stops part way does the same.
+3. Unpacks in memory with every path checked (nothing outside the archive's own folder, no links, no duplicate or
+   unlisted file) and checks every file against the archive's `MANIFEST.json`.
+4. Writes the files into the project, undoing everything if a write fails, removes files the new release dropped, and
+   writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
+   `.gitignore` lines), never over an existing file.
+5. Refreshes this machine: if CI runner services are installed here and older than the files (`factory ci stale`), it
+   runs `factory ci install`, which also rebuilds the runner image.
+6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the Python and shell scripts parse;
+   and the installed runner files are readable by the runner container's user, not writable by others, and match the
+   checkout (`factory ci check`). If any of that fails it exits 1, names each problem and does not say it worked.
+   `factory doctor` runs the same checks.
+7. Prints what changed (old to new, with the release notes' commit titles) and the commands to commit it. **It never
+   commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
+   running `factory update`. Agent sessions cannot run it (the PR gate reads these files).
+
+Where things live: downloads are cached in `~/.cache/software-factory/<repo>/<tag>/` (`FACTORY_CACHE_DIR` moves it).
+`release.repo` in `factory.json` names the repository whose releases are used (default `deresegetachew/my-skills`);
+`GH_TOKEN` is sent if set (rate limits, private forks). A rollback checks the cached archive against the checksum the
+pin recorded, so a replaced cache is refused.
+
+**A project that has no pin keeps working as before.** `factory update` without a pin runs the submodule update
+described [below](#updating-the-factory) until the project migrates. `factory update --release` (or naming a version)
+starts taking releases in a project whose factory files are plain copies; it refuses, and changes nothing, where the
+files are links into the submodule. Moving a project off the submodule is its own reviewed pull request.
+
+**Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
+push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
+`tools/build_release.py`, and publishes it with `SHA256SUMS` and notes.
+
+<br>
+
 ## Installed as a submodule: what's shared and what's yours
 
 ### What the installer does
@@ -244,6 +302,9 @@ files stay in the submodule, and `.claude/` points to them:
 <br>
 
 ## Updating the factory
+
+*This section is for a project still on the submodule. A project with `.claude/factory/release.json` uses
+[releases](#updating-from-releases).*
 
 **The pin.** The project doesn't store my-skills' files. It stores one commit id for `vendor/my-skills` (a
 "gitlink"; `git ls-files -s vendor/my-skills` shows it). The folder is a checkout of that commit. Nothing in my-skills
@@ -308,17 +369,22 @@ version it pins. `factory help` lists everything.
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
 | `factory wait ci <pr>` / `answer <pr>` / `slot` / `ready` `[minutes]` | The other waits, also without tokens: until CI on the PR's head commit has finished, until its `factory-question` comments have a later `factory-answer`, until fewer than `maxOpenPRs` of your PRs are open, until a task is ready. [Waiting](#waiting-without-tokens) |
 | `factory precheck` | For the dev manager: prints `nothing to do` (exit 0), or one line per PR with an unreviewed commit, unanswered question or quiet agent (exit 3). Reads GitHub only |
-| `factory update` | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
+| `factory version` | The installed release, the one `origin/main` pins, the newest, and what changed since. [Releases](#updating-from-releases) |
+| `factory releases [--all]` | The releases that exist, with dates and a one-line note |
+| `factory update [version]` | A project on releases: installs the newest (or that) release, checks its checksum, refreshes this machine's runner services, verifies, and leaves the diff for you to commit. Safe to run twice. Without a pin it is the submodule update below |
+| `factory rollback` | Back to the release installed before (offline, from the download cache), refreshed and verified the same way |
+| `factory update` (no pin) | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
 | `factory ci install` / `uninstall [i]` | Installs `ci.runners` heavy runners and the light lane (again to update or change the number), or removes them (or one: `2`, `light`): LaunchAgents on macOS, systemd `--user` services on Linux. [Lanes](#ci-lanes) · [Linux](#ci-on-linux) |
+| `factory ci stale` / `check` | Are the installed runner copies older than the checkout (exit 3, a line per file), and are they fit to start (readable by the container's user, not writable by others). `factory update` runs both |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
 | `factory ci logs [i] [-f]` | A runner's log: instance 1, or `2`, `light` ... |
 
@@ -1158,6 +1224,7 @@ reads these settings.
 | `eval`, `design` | Settings and paths for the eval and design-check skills | off |
 | `styles`, `structure` | Style guides per path, and the structure check's roots and legacy list | none |
 | `notes` | The notes folder | `.claude/factory/notes` |
+| `release` | `repo`: the GitHub repository whose releases `factory update` installs | `deresegetachew/my-skills` |
 
 <br>
 
@@ -1200,6 +1267,7 @@ software-factory/
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
+      factory_release.py                  `factory version | releases | update | rollback`: the release client
       factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub

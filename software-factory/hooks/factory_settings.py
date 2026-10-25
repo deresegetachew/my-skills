@@ -90,6 +90,7 @@ SETTINGS = {
     "notes": ("str", "The folder of project notes for the shared agents and skills.", None, None),
     "usageLog": ("str", "Where `factory usage --record` appends its rows (commit it to keep the history).", None, "docs/factory-usage.md"),
     "styles": ("list", "Style guides per path: [{\"paths\": [...], \"skills\": [...], \"check\": \"...\"}].", None, None),
+    "release.repo": ("str", "The GitHub repository whose releases `factory update` installs (owner/name). Default: the factory's own, deresegetachew/my-skills.", None, "deresegetachew/my-skills"),
     "ci.name": ("str", "The self-hosted runner's name (default `<repo>-ci`).", None, ""),
     "ci.label": ("str", "The runner label CI jobs ask for (default `<repo>-local`).", None, ""),
     "ci.runners": ("int", "Heavy runner loops per machine (each with its own Docker); FACTORY_CI_RUNNERS overrides it on one machine.", None, 1),

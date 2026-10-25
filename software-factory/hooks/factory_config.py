@@ -84,6 +84,8 @@ DEFAULTS = {
     # The design-check skill: {"references": "design/screens", "renders": "design/screens/png",
     #   "preview": "pnpm --filter web preview", "paths": ["regex", ...]}. Empty references: no design check.
     "design": {},
+    # Where `factory update` finds releases of the factory (#113): {"repo": "owner/name"}. Default: my-skills.
+    "release": {"repo": "deresegetachew/my-skills"},
 }
 
 
