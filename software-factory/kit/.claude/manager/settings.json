@@ -34,7 +34,9 @@
       "Bash(./factory agents*)",
       "Bash(./factory issues *)",
       "Bash(./factory reviews*)",
-      "Bash(./factory status*)"
+      "Bash(./factory status*)",
+      "Bash(factory manager-claims*)",
+      "Bash(./factory manager-claims*)"
     ],
     "deny": [
       "Read(./.env)",
