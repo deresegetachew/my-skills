@@ -1,0 +1,158 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+      "Agent",
+      "Skill",
+      "Bash(gh api *)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr diff*)",
+      "Bash(gh pr checks*)",
+      "Bash(gh issue view*)",
+      "Bash(gh issue list*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git fetch*)",
+      "Bash(git rev-parse*)",
+      "Bash(git ls-remote*)",
+      "Bash(git branch --show-current*)",
+      "Bash(factory precheck*)",
+      "Bash(factory prs*)",
+      "Bash(factory wait *)",
+      "Bash(factory agents*)",
+      "Bash(factory issues *)",
+      "Bash(factory reviews*)",
+      "Bash(factory status*)",
+      "Bash(./factory precheck*)",
+      "Bash(./factory prs*)",
+      "Bash(./factory wait *)",
+      "Bash(./factory agents*)",
+      "Bash(./factory issues *)",
+      "Bash(./factory reviews*)",
+      "Bash(./factory status*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env.*.local)",
+      "Read(./secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(**/id_rsa*)",
+      "Read(**/id_ed25519*)",
+      "Read(~/.ssh/**)",
+      "Read(~/.config/gh/**)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push --no-verify*)",
+      "Bash(git push origin main*)",
+      "Bash(git push * HEAD:main*)",
+      "Bash(git push *:main*)",
+      "Bash(git push * main)",
+      "Bash(git push *refs/heads/main*)",
+      "Bash(git push * +*)",
+      "Bash(git push * -f*)",
+      "Bash(git push * --force*)",
+      "Bash(git push --mirror*)",
+      "Bash(git push * --mirror*)",
+      "Bash(git push * --delete*)",
+      "Bash(git push --delete*)",
+      "Bash(git push -d *)",
+      "Bash(git push * -d *)",
+      "Bash(git branch -D*)",
+      "Bash(git branch -f*)",
+      "Bash(gh alias *)",
+      "Bash(gh pr merge*)",
+      "Edit(./.claude/**)",
+      "Edit(./vendor/**)",
+      "Edit(./CLAUDE.md)",
+      "Edit(./docs/PRD.md)",
+      "Edit(./.mcp.json)",
+      "Write(./.claude/**)",
+      "Write(./vendor/**)",
+      "Write(./CLAUDE.md)",
+      "Write(./docs/PRD.md)",
+      "Write(./.mcp.json)",
+      "Bash(factory settings set*)",
+      "Bash(factory settings unset*)",
+      "Bash(./factory settings set*)",
+      "Bash(./factory settings unset*)",
+      "Bash(*factory_setting*)",
+      "Bash(factory autostart install*)",
+      "Bash(factory autostart uninstall*)",
+      "Bash(./factory autostart install*)",
+      "Bash(./factory autostart uninstall*)",
+      "Bash(*factory_autostart*)",
+      "Bash(factory resume*)",
+      "Bash(./factory resume*)",
+      "Bash(*factory_resume*)",
+      "Bash(factory update*)",
+      "Bash(./factory update*)",
+      "Bash(factory rollback*)",
+      "Bash(./factory rollback*)",
+      "Bash(*factory_release*)",
+      "Bash(factory lessons add*)",
+      "Bash(factory lessons prune*)",
+      "Bash(./factory lessons add*)",
+      "Bash(./factory lessons prune*)",
+      "Bash(*factory_lessons.py add*)",
+      "Bash(*factory_lessons.py prune*)",
+      "Bash(factory settings pr*)",
+      "Bash(./factory settings pr*)",
+      "Bash(factory settings interactive*)",
+      "Bash(./factory settings interactive*)",
+      "Bash(factory settings -i*)",
+      "Bash(./factory settings -i*)",
+      "Bash(factory settings --local*)",
+      "Bash(./factory settings --local*)",
+      "Bash(factory heartbeat install*)",
+      "Bash(factory heartbeat uninstall*)",
+      "Bash(factory heartbeat run*)",
+      "Bash(./factory heartbeat install*)",
+      "Bash(./factory heartbeat uninstall*)",
+      "Bash(./factory heartbeat run*)",
+      "Bash(*factory_heartbeat*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/manager_gate.py",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
