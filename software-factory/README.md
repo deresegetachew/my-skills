@@ -277,6 +277,12 @@ factory update          # newest release: download, check, install, refresh this
 | Go back | `factory rollback`: the release installed before, from this machine's download cache, no network needed |
 | Catch up after a pull | `factory update` again: the files came with the pull, so it only refreshes this machine's runner services and verifies |
 
+**`factory update` and `factory rollback` refuse inside the factory's own repository** (my-skills, found by
+`software-factory/VERSION` and `tools/build_release.py` at the root) with `[factory_repo]`, before anything else and
+without changing a file. The `.claude/` entries there are links into `software-factory/`, and the releases come from
+that repo. The fix: edit the real files in `software-factory/`, then cut a release with `tools/build_release.py`. Every
+other project is unaffected.
+
 `factory update` does this, in order, and stops at the first problem with `[code] message` and `Fix: ...`:
 
 1. Refuses a dirty working tree (it names the files; it stashes nothing). The only dirty tree it accepts is one that

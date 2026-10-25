@@ -284,6 +284,8 @@ case "$cmd" in
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
   update)
+    # Never inside the factory's own repo (my-skills): the releases come from there (#162).
+    py factory_release.py check-own-repo || exit 1
     # A project with a release pin (.claude/factory/release.json), or one that asks (a version, --release), takes the
     # factory from numbered releases (#113). Any other project keeps the submodule update below until it migrates.
     if [ -f .claude/factory/release.json ]; then py factory_release.py update "$@"; exit $?; fi

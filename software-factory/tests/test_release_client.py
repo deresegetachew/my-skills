@@ -637,6 +637,8 @@ def factory_repo_copy():
     os.makedirs(os.path.join(d, "tools"))
     open(os.path.join(d, "software-factory", "VERSION"), "w").write("1.0.0\n")
     open(os.path.join(d, "tools", "build_release.py"), "w").write("# builds the release archive\n")
+    os.makedirs(os.path.join(d, ".claude"))  # my-skills links .claude/hooks to software-factory/hooks
+    os.symlink(os.path.join(SF, "hooks"), os.path.join(d, ".claude", "hooks"))
     commit(d, "my-skills")
     return d
 
@@ -650,7 +652,7 @@ def test_update_and_rollback_refuse_inside_the_factorys_own_repo_and_change_noth
         assert rc == 1 and "[factory_repo]" in out and "Fix:" in out, (args, out)
         assert "software-factory/" in out and "release" in out, (args, out)
     assert snapshot(d) == before and git(d, "status", "--porcelain") == "" and gh.hits == []
-    assert not os.path.exists(os.path.join(d, PIN)) and not os.path.exists(os.path.join(d, ".claude"))
+    assert not os.path.exists(os.path.join(d, PIN))
 
 
 def test_the_release_client_refuses_directly_in_the_factorys_own_repo_even_in_an_agent_session():
