@@ -457,6 +457,7 @@ version it pins. `factory help` lists everything.
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
 | `factory wait ci <pr>` / `answer <pr>` / `slot` / `ready` `[minutes]` | The other waits, also without tokens: until CI on the PR's head commit has finished, until its `factory-question` comments have a later `factory-answer`, until fewer than `maxOpenPRs` of your PRs are open, until a task is ready. [Waiting](#waiting-without-tokens) |
 | `factory precheck` | For the dev manager: prints `nothing to do` (exit 0), or one line per PR with an unreviewed commit, unanswered question or quiet agent (exit 3). Reads GitHub only |
+| `factory manage-tick [--dry-run]` | One dev manager tick without a model when idle: runs the precheck, prints `nothing to do` and ends (no model call) or, when it lists work, starts one `claude -p "/manage-pass"` on the manager profile with the `models.manager` flags. Run it from cron, launchd or a systemd timer. `--dry-run` prints the command and starts nothing |
 | `factory version` | The installed release, the one `origin/main` pins, the newest, and what changed since. [Releases](#updating-from-releases) |
 | `factory releases [--all]` | The releases that exist, with dates and a one-line note |
 | `factory update [version]` | A project on releases: installs the newest (or that) release, checks its checksum, refreshes this machine's runner services, verifies, and leaves the diff for you to commit. Safe to run twice. Without a pin it is the submodule update below |
@@ -696,9 +697,14 @@ minutes. The exit code says what happened:
 
 `factory wait <pr>` is unchanged. Agents and the dev manager never poll inside the conversation (`next-task` and
 [DEV-MANAGER.md](DEV-MANAGER.md) say so). The dev manager's tick starts with `factory precheck` and ends there when it
-prints `nothing to do`: one short command, no review, no reading of state notes. Not yet done: running the precheck
-outside any model, so an idle tick costs nothing at all (a GitHub-event trigger or a cron that starts the session only
-when `precheck` exits 3).
+prints `nothing to do`: one short command, no review, no reading of state notes.
+
+**An idle tick makes no model call.** `factory manage-tick` runs the precheck in the shell and only when it lists work
+starts one `claude -p "/manage-pass"` session (manager profile, `models.manager` flags, project MCP servers only); that
+session ends with the pass. Put it on a timer instead of keeping a session alive to tick, for example
+`*/10 * * * * cd /path/to/project && ./factory manage-tick >> .git/factory-manage-tick.log 2>&1`. Nothing stays open between
+ticks and an idle one costs no tokens. (The orchestrator of #97 will run the same precheck and start one-item
+sub-managers; this command is the single-pass form of it.)
 
 ### Measuring it
 
@@ -2050,6 +2056,7 @@ software-factory/
     factory_config.py                   reads factory.json, with defaults
     wait_for_merge.sh                   waits on a PR without spending tokens
     factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
+    factory_tick.py                     `factory manage-tick`: the precheck, then one manage-pass session only when there is work
     factory_turbo.py                    `factory turbo`: the shared Turborepo cache (status, install, down, env, ci-env)
   ci/                                     `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
                                           compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,
