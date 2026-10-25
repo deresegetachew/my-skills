@@ -35,10 +35,12 @@ release (`factory update`), or, until it migrates, as a git submodule.
 - [Roles: coding agent, dev manager, product owner](#roles)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [Watch and talk to an agent: `factory follow`](#watch-and-talk-to-an-agent-factory-follow)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
 - [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
+- [A sandboxed machine: `factory bootstrap`](#a-sandboxed-machine-factory-bootstrap)
 - [Security notes](#security-notes)
 - [Style guides](#style-guides)
 - [factory.json settings](#factoryjson-settings)
@@ -365,6 +367,7 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
+| `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
 | `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
 | `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
@@ -375,7 +378,8 @@ version it pins. `factory help` lists everything.
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
+| `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -842,6 +846,56 @@ which tmux session and Remote Control link it has, and when it last produced out
 
 <br>
 
+## Watch and talk to an agent: `factory follow`
+
+An agent's **name** is the only handle. `factory follow haile` opens that agent's live session from your own terminal,
+wherever it runs: on a factory machine you can ssh to, or in the cloud. There is no custom UI: the Claude app, through the
+session's Remote Control link, is the other way in, and `factory follow` is how you find the link.
+
+```sh
+factory remote add dev-pc factory@192.168.2.45    # once: how to reach a machine (the sandbox user), kept on your side
+factory follow                                    # every agent and sub-manager we can find: where, state, task, last ping, link
+factory follow haile                              # attach: type, answer prompts, Esc to interrupt
+factory follow haile --read                       # watch only (tmux attach -r): it cannot type
+factory follow --all                              # one read-only pane per session, tiled, in a local tmux
+factory follow haile --log                        # stream the output without a terminal (Ctrl-C stops)
+factory say haile "check the failing test first"  # one message, as if typed, without attaching
+factory agent haile --detach                      # on the factory machine: start the agent in a detached tmux session
+factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent: follow prints its link
+```
+
+- **Remotes are only "how to reach a machine"**: a name and an ssh target, in this machine's own file (`factory machine
+  show` prints where), never in the project and never on
+  GitHub. Agent issues are readable by anyone who can read the repo, so where an agent runs stays on your side. There is
+  no role field.
+- **How a name is found.** `factory follow <agent>` asks every remote in parallel for its tmux sessions. A session belongs to
+  an agent when it is called `<name>` or `<repo>-<name>` (what `factory agent --detach` and `factory autostart` start), so
+  sessions started by hand work too. The names come from `agents` (and `roles.*.names`) in `factory.json`. If two remotes
+  answer to one name, `follow` refuses and `--on <remote>` picks; unique names across machines is a setup rule.
+- **Sub-managers.** The one-item sub-managers that the dev manager's orchestrator starts are tmux sessions called
+  `<manager>-<item>` (`dev-manager-pr-42`, `manager-issue-7`): they are listed with the agents, with the manager and the item
+  in the task column, and `factory follow dev-manager-pr-42` attaches to one.
+- **The list** shows the session's state from the agent issue when `tasks.source` is `issues` (alive, silent, down, its task
+  and last ping), otherwise `running`; the Remote Control link is read from the session's screen
+  (`claude.ai/code/session_...`, it changes when the session restarts), so you can open the same session from the Claude app on a
+  phone. A cloud agent has no machine: `follow` prints its link instead of attaching. A remote that cannot be reached is named,
+  with the reason, and the others still list.
+- **Detaching is safe**: `Ctrl-b d` detaches, and closing the terminal or losing the connection only detaches, so the agent
+  keeps working. `Ctrl+C` is not detach: it interrupts Claude, and quitting Claude ends the session and drops the agent's
+  claims (it then shows as silent in `factory agents`). Everyone attached sees one screen, shrunk to the smallest terminal: give
+  extra viewers `--read`.
+- **Safe by construction**: every ssh call uses keys only (`BatchMode`) and one shared connection per target
+  (`ControlMaster`, so `follow` stays fast). A target where `sudo -n true` succeeds is refused: use the sandbox user that
+  [`factory bootstrap`](#a-sandboxed-machine-factory-bootstrap) made, never an admin account. A remote name `root@` is refused when
+  you add it. No secret is stored in the remotes.
+- **`say`** types one line (up to 2000 characters, no line breaks or control characters) into that session only, with tmux's
+  literal mode so the text is never read as a key name or command, and appends `time, from, via, agent` to
+  `~/.local/state/software-factory/say.log` on the machine where the agent runs (not the text). It is for the person who owns the
+  machine; never put a secret in it. Agents cannot run `say`, or change the remotes (refused when `FACTORY_AGENT`, `FACTORY_LOOP`
+  or `CLAUDECODE` is set); they may list.
+
+<br>
+
 ## After a reboot: `factory autostart`
 
 After a reboot, a crash or a power loss, part of a factory machine comes back by itself (the CI runners, rootless
@@ -1075,6 +1129,26 @@ It talks to the agents through markers in PR comments:
 | `<!-- factory-mustfix sha=<head> -->` | Dev manager | Must-fixes for that commit. Makes the PR rework and holds its merge |
 | `<!-- factory-approved sha=<head> -->` | Dev manager | That commit is approved. Clears a must-fix for that commit only |
 | `factory-hold` label | Dev manager | It's reviewing. Agents skip the PR and can't merge it |
+
+**The standing rules are a skill, not a memory (#96).** `/manage-pass` (`kit/.claude/skills/manage-pass/SKILL.md`, linked into
+a project like the other skills) holds everything a fresh session needs: the two-column table of what the manager does
+alone and what it asks the owner first (the one copy; the playbook links to it), the pass order, the exact markers, the hold
+label, the sha-pinned REST merge (`PUT .../pulls/<n>/merge` with `sha`), the CI rule, and the "never" list. The project's own
+additions go in `<roles.dir>/dev-manager/README.md` (or, without a role folder, `<notes>/manager.md`); the skill says to
+read them first. `claude -p "/manage-pass --dry-run"` reads, prints what it would do and writes nothing.
+
+**A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
+cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
+`claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
+read-only git, `Read`/`Grep`/`Glob` and subagents, and denies pushing to main, force-push, editing `.claude/**`, `vendor/**`,
+`CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.py` refuses, and says
+to write an owner-queue ask instead: a merge unless the PR's latest approval marker is `factory-approved sha=<the head being
+merged>`, no must-fix came after it, the merge is pinned to that head and CI is judged green (newest non-skipped run per job
+name, `factory_ci_judge.py`); a merge of a PR the manager opened (a `manager/` branch, or a body with
+`<!-- factory-role role=dev-manager ... -->`: its own PRs wait for the owner); deleting refs, force-pushing and pushing to
+main; `gh api` writes to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks and deploy
+keys; and shell commands that read secrets files. Like `pr-gate.py` it is a guard rail, not a lock: keep branch protection
+and required CI on GitHub.
 
 The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
 session with the repo attached.
@@ -1336,6 +1410,85 @@ so it is not a security boundary: a job that tries can reach Docker Desktop's VM
 data, the folders Docker Desktop shares (by default all of `/Users`), and services on your Mac's `localhost`. Only
 people who can push to the repository (you and the agents) run code on it. Running the runner in a separate VM is
 the follow-up ([remanual #150](https://github.com/deresegetachew/remanual/issues/150)).
+
+<br>
+
+## A sandboxed machine: `factory bootstrap`
+
+`factory bootstrap` takes a fresh Ubuntu or Debian machine (systemd) to a state where agents and CI runners run as a
+dedicated, unprivileged user behind a network guard, and ends with `factory doctor --sandbox` green. It is the hand-built
+setup of a factory machine written down as code: reinstalling the machine or adding a third one is two commands and
+three sign-ins. Linux only for now.
+
+```sh
+sudo factory bootstrap machine                 # prints the plan, changes nothing
+sudo factory bootstrap machine --script s.sh   # the same steps as a bash script to read (and run with sudo bash s.sh)
+sudo factory bootstrap machine --apply         # runs them, as root, after a y/N question (--yes: no question)
+sudo -u factory -i                             # or ssh in as that user; then, from the project's checkout:
+factory bootstrap project                      # as the sandbox user, never as root
+```
+
+`factory bootstrap` works before there is a checkout (it runs from where the `factory` script lives); `project` takes
+`--repo URL [--dir PATH]` to clone one, with its submodules.
+
+**Nothing privileged runs by itself.** The machine part and `uninstall` only print their plan unless you pass `--apply`
+and run as root; `--dry-run` is accepted everywhere. Every step has a check, so a second run changes nothing, and every
+system change is written to a manifest (`/var/lib/software-factory/bootstrap.json`) that `status` and `uninstall` use.
+The project part is refused as root. Agents cannot run it: it refuses inside an agent session (`FACTORY_AGENT`, `FACTORY_LOOP` or `CLAUDECODE` set), `status` excepted.
+
+| Part | What it does |
+|---|---|
+| `machine` (root) | Packages (`uidmap`, `slirp4netns`, `dbus-user-session`, `git`, `gh`, `age`, `tmux`, `nftables` ...); `sops` as the release binary with its checksum checked; the user (default `factory`: no password, no sudo, not in the docker group, its home and the admin's home mode 750); subuid/subgid ranges; `loginctl enable-linger`; the network guard; with `--authorized-keys FILE` the given public keys; with `--harden-ssh` key-only SSH and no root login; with `--keep-awake` (the default on a laptop, `--no-keep-awake` to refuse) no sleep, suspend or lid switch |
+| `project` (the user) | Rootless Docker (`dockerd-rootless-setuptool.sh install`, `systemctl --user enable --now docker`); `DOCKER_HOST`, `SOPS_AGE_KEY_FILE` and `PATH` in `~/.bashrc`; `~/.secrets` (700); Node from `.nvmrc` through nvm and `corepack enable`; Claude Code with the official installer; submodules, `.env.local` from `.env.example`, `commands.install`; `factory install-shim`; with `--agents a,b` the machine's agent names; then, after the sign-ins, `commands.stackUp`, the CI runners (`factory ci install`, `--runners N` for `FACTORY_CI_RUNNERS`) and autostart; last, `factory doctor --sandbox` |
+| `status` | The manifest against what is there now; exit 1 when something drifted |
+| `uninstall` | The guard, its unit and rules, the sleep and SSH drop-ins, the saved settings and the manifest. The user, its home, backups and the installed packages stay. `--remove-user` or `--delete-home` remove the account (only one bootstrap created) and need its name typed (`--confirm NAME` for scripts) |
+
+**The human steps stay yours.** `gh auth login`, the Claude login (and its folder-trust prompt for the project) and
+copying the age key are never done by bootstrap. `project` stops after the first part when one is open, prints the exact
+commands and exits 2; run it again after, and it carries on with the runners and autostart. It only checks that they
+exist (`gh auth status`, the credentials file, `sops -d` of the first file under `secrets/`, output discarded). It never
+reads, prints, logs or stores a token or the key.
+
+### Network guard
+
+The default policy: **internet yes; home network no; Tailscale no; other users' files no; no sudo; no docker group.** It is
+an nftables table `factory_guard`, loaded by the systemd unit `factory-net-guard.service`, that matches the sandbox user's
+uid (`meta skuid`):
+
+- DNS only to the resolver, which is read from `/etc/resolv.conf` and `resolvectl dns` (a systemd-resolved stub on
+  127.0.0.53 needs no rule), not hard-coded;
+- `--allow-host ADDR[:PORT]` (repeat) lets one home-network host through, such as a Postgres or a build cache;
+- everything private is dropped with the log prefix `FACTORY-BLOCK `: RFC1918, the Tailscale range 100.64.0.0/10,
+  link-local, and IPv6 ULA and tailnet addresses;
+- loopback ports of other users' services are dropped: `--block-loopback-port PORT` (repeat) plus, at every run, every
+  loopback or wildcard port that a process of another user listens on (`ss -ltnHe`). A service started later is covered the
+  next time `sudo factory bootstrap machine --apply` runs, and `factory doctor --sandbox` fails until then;
+- `--block-inbound-port PORT` drops those ports from other hosts (`FACTORY-INBOUND `);
+- `--egress none` closes the internet too.
+
+The settings are saved in `/etc/software-factory/sandbox.json`, so a re-run converges on them (`user`, `egress`,
+`allowHosts`, `blockLoopbackPorts`, `blockInboundPorts`). Rules are rendered from `hooks/factory_netguard.py`, which is also
+what the tests check.
+
+### `factory doctor --sandbox`
+
+Run it as the sandbox user. Each check prints `ok`, `fix` (with the fix) or `note`:
+
+- identity: the user is the one bootstrap made; no sudo (`sudo -n true` fails); not in the sudo, docker or admin groups;
+  the admin's home and `.ssh` are unreadable; `~/.secrets` is 700;
+- network: GitHub, npm and the Claude API answer; the router, the tailnet, link-local and the blocked local ports do not;
+  `FACTORY-BLOCK` entries appear in the kernel log (a note when this user may not read the log);
+- **local services of other users** (known gap 1): every loopback or wildcard port that another user listens on is in the
+  guard's rules; if not, run the machine step again;
+- **containers** (known gap 2): a container started by this user (`docker run busybox wget` to the router) cannot reach the
+  router either, which is true when Docker is rootless because its traffic leaves through the user's own process;
+- rootless Docker with overlayfs, the `cpu`, `memory` and `pids` cgroup controllers delegated to the user's systemd
+  (the ingest sandbox tests need memory limits), linger on;
+- the CI runner units are active (at least `ci.runners`) and every agent worktree has its submodules checked out.
+
+A user account is a weaker boundary than a VM, and the agents still hold what their job needs inside the sandbox: a `gh`
+token, the age key and the Claude login. Keep the separate GitHub account for agents from [Security notes](#security-notes).
+Not in this version: macOS, a VM mode, creating the GitHub account.
 
 <br>
 
@@ -1616,8 +1769,12 @@ software-factory/
     .claude/settings.json                 permissions and hooks
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
+    .claude/skills/manage-pass/           the dev manager's standing rules (one page)
+    .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main)
     .claude/hooks/
       factory_roles.py                    the roles' definitions, role folders (`init-roles`) and `choose`
+      manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
+      factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
       factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
@@ -1637,8 +1794,16 @@ software-factory/
       factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
+      factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
+      factory_remotes.py                  remotes, ssh calls and finding sessions by name
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
       factory_release.py                  `factory version | releases | update | rollback`: the release client
+      factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
+      factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
+      factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
+      factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
+      factory_netguard.py                 renders the nftables rules and the guard's systemd unit
+      factory_sandbox.py                  `factory doctor --sandbox`
       factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
