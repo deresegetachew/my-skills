@@ -82,7 +82,7 @@ def test_a_submodule_project_ends_on_the_release_with_real_files_and_the_unshipp
     assert os.path.islink(os.path.join(d, KEPT)) and os.path.islink(os.path.join(d, ".claude/hooks/custom.py"))
     assert os.path.isfile(os.path.join(d, KEPT, "SKILL.md"))
     assert {k: v for k, v in state(d).items() if k.startswith("vendor")} == before_vendor  # the submodule is not touched
-    assert open(os.path.join(d, ".gitmodules")).read().count("vendor/my-skills") == 1
+    assert "vendor/my-skills" in open(os.path.join(d, ".gitmodules")).read() and ".gitmodules" not in T.git(d, "status", "--porcelain")
     changed = {l[3:] for l in T.git(d, "status", "--porcelain", "--untracked-files=all").splitlines()}
     assert changed <= set(SHIPPED) | {T.PIN}, changed  # only the intended change
     assert KEPT not in changed and ".claude/hooks/custom.py" not in changed
@@ -200,6 +200,9 @@ def test_agents_and_the_factorys_own_repo_are_refused():
 def test_the_factory_command_runs_it_and_help_lists_it():
     gh, _d, env = T.world("1.0.0")
     d = submodule_project()
+    shutil.copy(os.path.join(T.SF, "hooks", "factory_release.py"), os.path.join(d, VENDOR, "hooks", "factory_release.py"))
+    link(d, ".claude/hooks/factory_release.py", VENDOR + "/hooks/factory_release.py")  # the real client, as the submodule has it
+    T.commit(d, "client")
     rc, out = T.run_factory(d, env, "help")
     assert "migrate-to-release" in out, out
     rc, out = T.run_factory(d, env, "migrate-to-release")

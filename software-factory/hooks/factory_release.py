@@ -6,6 +6,7 @@
   factory update [version]     newest release (or the named one): download, check the checksum, install into the
                                project, refresh this machine's runner services, verify. Leaves the change uncommitted.
   factory rollback             back to the release that was installed before (offline, from the download cache)
+  factory migrate-to-release   a project on the my-skills submodule links: replace the links the release owns with real files
 
 The installed factory is committed in the project (decision in #113): hooks/ and ci/ go to .claude/hooks and
 .claude/ci, `factory` and `factory-loop.sh` to the project root, the agents, skills and settings.json to .claude/.
@@ -476,8 +477,8 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
     for target in sorted(engine):
         if is_symlinked(root, target):
             raise FactoryError("linked_install", f"{target} is a link (this project takes the factory from the my-skills submodule).",
-                               "a release does not overwrite links. Move this project off the submodule first (the migration is a separate reviewed pull request); "
-                               "until then keep using `factory update`.")
+                               "a release does not overwrite links. Run `factory migrate-to-release` to move this project off the submodule links "
+                               "(then commit it in a pull request); until then keep using `factory update`.")
     first = not os.path.exists(os.path.join(root, ".claude", "factory.json"))
     old_files = (old_pin or {}).get("files", {})
     backups, written_templates, result = {}, [], {"added": [], "changed": [], "removed": [], "kept_local": []}
@@ -755,12 +756,138 @@ def check_clean(root, pin):
                        "commit them, or put them aside with `git stash -u`, then run it again. Nothing was changed.")
 
 
-def cmd_update(args, rollback=False):
+# --- leaving the submodule (#170) -------------------------------------------------------------------------------------
+
+FACTORY_PLACES = ("factory", "factory-loop.sh", ".claude/hooks", ".claude/ci", ".claude/agents", ".claude/skills", ".claude/settings.json")
+
+
+def has_factory_links(root):
+    """True when a place the factory installs into holds a symlink (cheap: decides before anything is downloaded)."""
+    for place in FACTORY_PLACES:
+        path = os.path.join(root, place)
+        if os.path.islink(path):
+            return True
+        for folder, dirs, files in os.walk(path):
+            if any(os.path.islink(os.path.join(folder, n)) for n in dirs + files):
+                return True
+    return False
+
+
+def first_link(root, rel):
+    parts = rel.split("/")
+    for i in range(len(parts)):
+        if os.path.islink(os.path.join(root, *parts[:i + 1])):
+            return "/".join(parts[:i + 1])
+    return None
+
+
+def keep_unshipped(path, real, rel, engine):
+    """Where a whole folder was a link, the entries the release does not ship stay links into the old folder."""
+    for name in sorted(os.listdir(real)):
+        sub = rel + "/" + name
+        if sub in engine:
+            continue
+        if any(t.startswith(sub + "/") for t in engine):
+            os.mkdir(os.path.join(path, name))
+            keep_unshipped(os.path.join(path, name), os.path.join(real, name), sub, engine)
+        else:
+            os.symlink(os.path.relpath(os.path.join(real, name), path), os.path.join(path, name))
+
+
+def snapshot_for(root, engine, links):
+    """What to put back if the migration fails: the links, the real files the release will overwrite, the paths that
+    are not there yet, and the folders that will have to be made."""
+    saved = [(os.path.join(root, l), "link", os.readlink(os.path.join(root, l))) for l in links]
+    pending = []
+    for target in sorted(engine) + [PIN_PATH]:
+        if first_link(root, target):
+            continue
+        path = os.path.join(root, target)
+        if os.path.isfile(path):
+            saved.append((path, "file", open(path, "rb").read(), os.stat(path).st_mode & 0o7777))
+        elif not os.path.lexists(path):
+            saved.append((path, "absent"))
+            folder = os.path.dirname(path)
+            while folder != root and not os.path.exists(folder) and folder not in pending:
+                pending.append(folder)
+                folder = os.path.dirname(folder)
+    return [(f, "no_folder") for f in sorted(pending, key=len)] + saved  # undone last to first: files, then deep folders, then shallow
+
+
+def restore(saved):
+    for entry in reversed(saved):
+        path, kind = entry[0], entry[1]
+        try:
+            if kind == "no_folder":
+                os.rmdir(path)
+                continue
+            if os.path.islink(path) or os.path.isfile(path):
+                os.remove(path)
+            elif os.path.isdir(path):
+                shutil.rmtree(path)
+            if kind == "link":
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                os.symlink(entry[2], path)
+            elif kind == "file":
+                write_file(path, entry[2], entry[3])
+        except OSError:
+            pass
+
+
+def leave_links(root, files, saved):
+    """Remove the links the release owns (a whole linked folder becomes a real one). Fills `saved` first, so the caller
+    can undo it. Returns the paths replaced."""
+    engine, _templates = plan(files)
+    links = []
+    for target in sorted(engine):
+        l = first_link(root, target)
+        if l and l not in links:
+            links.append(l)
+    if not links:
+        raise FactoryError("nothing_to_migrate", "none of the files this release installs is a link into the submodule.",
+                           "if the factory files are plain copies, run `factory update --release` instead. Nothing was changed.")
+    saved.extend(snapshot_for(root, engine, links))
+    for l in links:
+        path = os.path.join(root, l)
+        real = os.path.realpath(path)
+        os.remove(path)
+        if os.path.isdir(real) and any(t.startswith(l + "/") for t in engine):
+            os.mkdir(path)
+            keep_unshipped(path, real, l, engine)
+    return links
+
+
+def remaining_links(root):
+    found = []
+    for place in FACTORY_PLACES:
+        path = os.path.join(root, place)
+        if os.path.islink(path):
+            found.append(place)
+        for folder, dirs, files in os.walk(path):
+            found += [os.path.relpath(os.path.join(folder, n), root) for n in sorted(dirs + files) if os.path.islink(os.path.join(folder, n))]
+    return found
+
+
+def cmd_update(args, rollback=False, migrate=False):
+    saved = []  # a migration's undo list: whatever fails after the links are gone puts them back
+    try:
+        return run_update(args, rollback, migrate, saved)
+    except BaseException:
+        restore(saved)
+        raise
+
+
+def run_update(args, rollback, migrate, saved):
     root = project_root()
-    command = "rollback" if rollback else "update"
+    command = "rollback" if rollback else "migrate-to-release" if migrate else "update"
     refuse_factory_repo(root)
     refuse_agent()
     pin = read_pin(root)
+    if migrate and pin:
+        raise FactoryError("already_on_release", f"this project is already on release {pin['tag']}.", "use `factory update` to take a newer one.")
+    if migrate and not has_factory_links(root):
+        raise FactoryError("nothing_to_migrate", "no factory file in this project is a link into the submodule.",
+                           "if the factory files are plain copies, run `factory update --release` instead. Nothing was changed.")
     repo = repo_name(root, pin)
     dirty_ok = check_clean(root, pin)
     old_tag = pin["tag"] if pin else None
@@ -789,6 +916,7 @@ def cmd_update(args, rollback=False):
         archive, release = fetch_archive(repo, tag, release, expect)
         files, manifest = unpack(archive, tag)
         archive_sha = sha256_file(archive)
+        replaced = leave_links(root, files, saved) if migrate else []
         installed = install_files(root, files, manifest, tag, archive_sha, pin, repo)
         if same:
             say(f"  {tag} was already installed; {len(drift)} file(s) differed from the pin and were repaired:")
@@ -823,6 +951,17 @@ def cmd_update(args, rollback=False):
     say(f"  checks: the files match the pin, every hook in settings.json exists, the scripts parse, the runner files are readable (verified)")
     changed = git(root, "status", "--porcelain", "--untracked-files=all").stdout.strip()
     say()
+    if migrate:
+        kept = remaining_links(root)
+        say(f"Done. This project is on {tag}, taken from the release and no longer from the submodule links.")
+        say(f"Migrated: {len(replaced)} link(s) replaced by real files"
+            + (f"; kept {len(kept)} link(s) the release does not ship: {', '.join(kept[:6])}" + (" ..." if len(kept) > 6 else "") if kept else "; no link was left"))
+        say("For the pull request:")
+        say("  git checkout -b chore/factory-to-release")
+        say(f"  git add -A && git commit -m \"Move the software factory from the submodule to release {tag}\"")
+        say("Open a pull request with those lines in its body. `.claude/` is protected, so the dev manager or the owner merges it.")
+        say("The submodule stays while a link still points into it. After the merge everyone else runs `git pull` and `factory update`.")
+        return 0
     say(f"Done. This project is on {tag}.")
     if changed:
         say("Nothing is committed for you. Review it, then:")
@@ -843,6 +982,9 @@ def main(argv=None):
     u.add_argument("--release", action="store_true", help="use releases even when the project has no pin yet")
     u.add_argument("--verbose", action="store_true")
     sub.add_parser("rollback").add_argument("--verbose", action="store_true")
+    m = sub.add_parser("migrate-to-release", help="move a project off the my-skills submodule links onto a release")
+    m.add_argument("version", nargs="?")
+    m.add_argument("--verbose", action="store_true")
     sub.add_parser("check-own-repo", help=argparse.SUPPRESS)  # `factory update` asks this before the submodule path
     args = ap.parse_args(argv)
     try:
@@ -853,7 +995,7 @@ def main(argv=None):
         if args.cmd == "check-own-repo":
             refuse_factory_repo(project_root())
             return 0
-        return cmd_update(args, rollback=args.cmd == "rollback")
+        return cmd_update(args, rollback=args.cmd == "rollback", migrate=args.cmd == "migrate-to-release")
     except FactoryError as e:
         print(f"factory {args.cmd}: [{e.code}] {e.message}\nFix: {e.fix}", file=sys.stderr)
         return 1

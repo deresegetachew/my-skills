@@ -317,7 +317,8 @@ pin recorded, so a replaced cache is refused.
 **A project that has no pin keeps working as before.** `factory update` without a pin runs the submodule update
 described [below](#updating-the-factory) until the project migrates. `factory update --release` (or naming a version)
 starts taking releases in a project whose factory files are plain copies; it refuses, and changes nothing, where the
-files are links into the submodule. Moving a project off the submodule is its own reviewed pull request.
+files are links into the submodule. `factory migrate-to-release` moves a project off the submodule links in one step
+(then you commit it in a reviewed pull request).
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
@@ -478,6 +479,7 @@ version it pins. `factory help` lists everything.
 | `factory update [version]` | A project on releases: installs the newest (or that) release, checks its checksum, refreshes this machine's runner services, verifies, and leaves the diff for you to commit. Safe to run twice. Without a pin it is the submodule update below |
 | `factory rollback` | Back to the release installed before (offline, from the download cache), refreshed and verified the same way |
 | `factory update` (no pin) | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
+| `factory migrate-to-release [version]` | A project on the submodule links: replaces the links the release owns (`.claude/hooks`, `ci`, `agents`, `skills`, `settings.json`, `factory`, `factory-loop.sh`) with real files from the release, keeps the links it does not ship (such as the nestjs skills), and prints the pull request steps. Refuses a dirty tree, an agent session and the factory's own repo; if anything fails it puts every link back. Works when `./factory` is itself a link: run `python3 <unpacked release>/hooks/factory_release.py migrate-to-release` |
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
@@ -2243,7 +2245,7 @@ software-factory/
     factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
     factory_remotes.py                  remotes, ssh calls and finding sessions by name
     factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
-    factory_release.py                  `factory version | releases | update | rollback`: the release client
+    factory_release.py                  `factory version | releases | update | rollback | migrate-to-release`: the release client
     factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
     factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
     factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
