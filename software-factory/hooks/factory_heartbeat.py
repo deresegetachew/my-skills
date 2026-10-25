@@ -43,6 +43,7 @@ silent.
   python3 .claude/hooks/factory_heartbeat.py status      is it installed and running, and what it last saw
   python3 .claude/hooks/factory_heartbeat.py install     keep it running: a systemd user service or a LaunchAgent
   python3 .claude/hooks/factory_heartbeat.py uninstall
+  python3 .claude/hooks/factory_heartbeat.py restart     run the files now on disk (`factory update` does it)
 
 `factory autostart install` installs it too (unless --no-heartbeat). One daemon runs per project and machine: a
 second `run` stops with `{code: heartbeat-running}`. A GitHub failure is retried a minute later and never stops it.
@@ -508,11 +509,11 @@ def main(argv):
         return
     if cmd == "status":
         return status()
-    if cmd in ("install", "uninstall"):
+    if cmd in ("install", "uninstall", "restart"):
         import factory_heartbeat_service as service
-        return service.install_cli() if cmd == "install" else service.uninstall_cli()
+        return {"install": service.install_cli, "uninstall": service.uninstall_cli, "restart": service.restart_cli}[cmd]()
     from factory_machine import refuse
-    refuse("unknown-command", f"unknown command {cmd!r}.", "Use status, run, once, install or uninstall.")
+    refuse("unknown-command", f"unknown command {cmd!r}.", "Use status, run, once, install, uninstall or restart.")
 
 
 if __name__ == "__main__":
