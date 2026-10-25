@@ -5,7 +5,10 @@ Read-only: it runs version and status commands, never installs, logs in, decrypt
 `ok`, `fix` (the factory won't work until it's fixed, with the fix) or `note` (worth a look). Exit 1 when any `fix`.
 Checks that don't apply to the project (Node without a package.json, sops without a .sops.yaml) are left out.
 
-  python3 .claude/hooks/factory_doctor.py
+  python3 .claude/hooks/factory_doctor.py [--sandbox]
+
+`--sandbox` adds the checks of a sandboxed factory machine (factory_sandbox.py): run it as the dedicated user that
+`factory bootstrap` made. It runs a few network probes and one container, so it takes longer.
 """
 import json, os, re, shutil, subprocess, sys
 
@@ -222,6 +225,11 @@ def main():
         factory(r, cfg)
         models(r, cfg)
         release(r)
+    if "--sandbox" in sys.argv[1:]:
+        from factory_sandbox import run as sandbox
+        print()
+        print("Sandbox (#105)")
+        sandbox(r, cfg)
     print()
     print(f"{r.fixes} to fix." if r.fixes else "All the checks pass.")
     return 1 if r.fixes else 0

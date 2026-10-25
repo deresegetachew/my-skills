@@ -3,6 +3,11 @@
 #   ./factory <command>        or, with the shim on your PATH (factory install-shim), just: factory <command>
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -uo pipefail
+# `factory bootstrap` sets up a machine, so it works before there is a checkout: it runs from where this script lives.
+if [ "${1:-}" = bootstrap ]; then
+  self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+  exec python3 "$(dirname "$self")/hooks/factory_bootstrap.py" "${@:2}"
+fi
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
 cd "$root"
 hooks="$root/.claude/hooks"
@@ -63,8 +68,14 @@ Check
                          full log path if it fails
   check                  the style checks CI runs (one class per file and so on)
   guard                  the Factory guard CI runs, on the current branch
-  doctor                 check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
-                         agent names) and say how to fix each gap; read-only
+  doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
+                         agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
+                         of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user
+  bootstrap machine|project|all|status|uninstall
+                         set up a sandboxed factory machine: the dedicated user, rootless Docker, the network guard.
+                         `sudo factory bootstrap machine` prints the plan; --apply runs it as root, --script FILE writes it
+                         as a bash script to read first. `project` (as that user) ends with doctor --sandbox. Nothing
+                         privileged runs unless you pass --apply; sign-ins and the age key stay yours
 
 CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
   ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
