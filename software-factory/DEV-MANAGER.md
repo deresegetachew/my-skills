@@ -71,6 +71,13 @@ to undo it.
 
 ## The tick
 
+**Or let the orchestrator tick (#97).** `factory dev-manager loop` on any machine is a loop with no model: it reads GitHub,
+starts one fresh `/manage-pass <item>` session per item that needs a manager (two at a time by default), keeps the thread
+notes, and posts to the issue "Dev manager: needs the owner" what only you can do. Nothing here has to change for it: the
+standing rules, markers and merge gate are the same skill and profile. Setup and settings: README, "Run a manager". The
+`send_later` tick below stays for a cloud session; do not run both against the same repository without leases (the
+orchestrator uses them, `/manage-pass` honours them).
+
 Paste this as the `send_later` message, adjusted to the project, and keep the line about the factory's last
 activity up to date on each tick:
 

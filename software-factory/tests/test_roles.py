@@ -12,7 +12,8 @@ GIT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": 
 
 CLAUDE = r'''#!/usr/bin/env bash
 # Fake claude: logs its arguments; FAKE_CLAUDE_HOOK (a script) may react to the prompt.
-printf 'claude %s\n' "$(printf '%s' "$*" | tr '\n' ' ')" >> "$LOOP_LOG"
+# one write per line: sub-managers run side by side, and a long line printed in pieces can be split by another's
+line="$(printf 'claude %s\n' "$(printf '%s' "$*" | tr '\n' ' ')")"; tmp="$(mktemp)"; printf '%s\n' "$line" > "$tmp"; cat "$tmp" >> "$LOOP_LOG"; rm -f "$tmp"
 if [ -n "${FAKE_CLAUDE_HOOK:-}" ]; then bash "$FAKE_CLAUDE_HOOK" "$@"; exit $?; fi
 exit 0
 '''

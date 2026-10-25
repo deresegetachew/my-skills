@@ -261,6 +261,33 @@ def roles(r, cfg):
         r.fix("role names", f"{', '.join(clash)} is also a coding agent's name: change `roles.<role>.names`")
 
 
+def manager(r, cfg):
+    """The dev-manager orchestrator (#97): its settings profile resolves and every hook script the profile runs exists."""
+    import re as _re
+    path = str(((cfg.get("roles") or {}).get("dev-manager") or {}).get("profile") or ".claude/manager/settings.json")
+    if not os.path.isfile(path):
+        r.note("manager profile", f"{path} doesn't exist, so sub-managers use the project's settings (which deny `gh api`): "
+               "run `factory update`, or set `roles.dev-manager.profile`")
+        return
+    try:
+        profile = json.load(open(path))
+    except (OSError, ValueError) as e:
+        r.fix(path, f"isn't valid JSON ({e})")
+        return
+    missing = []
+    for group in (profile.get("hooks") or {}).values():
+        for entry in group:
+            for h in entry.get("hooks", []):
+                for token in _re.findall(r"[\w./$\"-]+\.py", h.get("command", "")):
+                    script = token.replace('"', "").replace("$CLAUDE_PROJECT_DIR/", "")
+                    if "$" not in script and not os.path.exists(script):
+                        missing.append(script)
+    for script in sorted(set(missing)):
+        r.fix(f"{path}: {script}", "the hook script is missing: run `factory update`")
+    if not missing:
+        r.ok("manager profile: it resolves and its hooks exist")
+
+
 def main():
     if run("git", "rev-parse", "--show-toplevel")[0] != 0:
         print("factory doctor: run it inside the project's git repo.", file=sys.stderr)
@@ -280,6 +307,7 @@ def main():
         factory(r, cfg)
         models(r, cfg)
         roles(r, cfg)
+        manager(r, cfg)
         turbo(r, cfg)
         release(r)
     if "--sandbox" in sys.argv[1:]:

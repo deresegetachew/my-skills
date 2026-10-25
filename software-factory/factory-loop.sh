@@ -71,6 +71,8 @@ if [ "$dry_run" = 1 ]; then
       if next=$(python3 "$hooks/next_task.py"); then
         echo "[$who] next task: $next"; echo "[$who] would run: claude -p \"/next-task ${next%% *}\""
       else echo "[$who] no task is ready: it would wait and look again."; fi ;;
+    dev-manager)
+      python3 "$hooks/factory_orchestrator.py" cycle --name "$who" --dry-run ;;
     *)
       if found=$(python3 "$hooks/factory_roles.py" work "$role" --name "$who"); then
         echo "$found" | sed "s/^/[$who] work: /"
@@ -220,6 +222,13 @@ role_sleep() {
 # When factory_roles.py finds work, one fresh `claude -p` runs the role's skill (`claude` without -p under -i).
 role_pass() {
   local found rc prompt
+  if [ "$role_kind" = orchestrator ]; then
+    # No model here: the orchestrator reads GitHub, posts to the owner queue and starts one-item sub-managers.
+    python3 "$hooks/factory_orchestrator.py" cycle --name "$agent" $([ "$interactive" = 1 ] && echo --interactive); rc=$?
+    stty sane 2>/dev/null
+    [ "$rc" = 0 ] || [ "$rc" = 3 ] || return 1
+    return "$rc"
+  fi
   found="$(python3 "$hooks/factory_roles.py" work "$role" --name "$agent")"; rc=$?
   [ "$rc" = 3 ] && return 3
   [ "$rc" = 0 ] || { echo "[$agent] $found"; return 1; }

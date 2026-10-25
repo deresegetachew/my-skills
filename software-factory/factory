@@ -146,6 +146,9 @@ Maintain
   wait ci|answer <pr> [minutes], wait slot|ready [minutes]
                          the other token-free waits: CI finished, question answered, a PR slot free, a task ready
   precheck               dev manager: "nothing to do" (exit 0) or one line per thing to do (exit 3), without a model
+  watch [--json]         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
+                         approved and green, owner waits, agents down or idle, queued CI): one line each and who it is for
+                         (manager or owner), exit 3 when any, without a model. The orchestrator starts from this
   manage-tick [--dry-run] precheck, then ONE `claude -p "/manage-pass"` only when there is work: an idle tick makes no model
                          call (run it from cron or a timer)
   version                installed release, the one main pins, the newest, and what changed since
@@ -257,6 +260,7 @@ case "$cmd" in
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
   precheck)  py factory_wait.py precheck ;;
+  watch)     py factory_watch.py "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;

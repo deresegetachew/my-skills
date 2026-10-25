@@ -53,8 +53,16 @@ DEFAULTS = {
         "product-owner": {"names": ["mentewab", "eleni", "sabla"], "busyMinutes": 30, "idleMinutes": 60,
                           "profile": ".claude/product-owner/settings.json", "workLabel": "factory:needs-product"},
     },
-    # The dev manager's waits (#102): minutes after a cycle that had work / none (0: the loop exits instead).
-    "manager": {"busyMinutes": 10, "idleMinutes": 30},
+    # The dev manager (#97, #109): `factory dev-manager loop` is an orchestrator with no model. Each cycle it reads
+    # GitHub (factory_watch.py) and starts one one-item sub-manager (`claude -p`) per item that needs a manager, at most
+    # `maxSubManagers` at once, each under a lease of `claimMinutes`. `busyMinutes` / `idleMinutes` are the waits after
+    # a cycle that had work / none (0: the loop exits instead). `deadManMinutes`: work that has waited this long with no
+    # dev-manager activity is reported to the owner. `notify`: the login mentioned in an owner-queue comment so GitHub
+    # tells the owner (empty: the repository owner). `quietMinutes`, `staleMinutes`, `ownerWaitMinutes`,
+    # `agentIdleMinutes`, `ciQueuedMinutes`: the watcher's thresholds. `subManagerMinutes`: a session is stopped after this.
+    "manager": {"busyMinutes": 2, "idleMinutes": 5, "maxSubManagers": 2, "claimMinutes": 20, "deadManMinutes": 30,
+                "notify": "", "quietMinutes": 5, "staleMinutes": 15, "ownerWaitMinutes": 120, "agentIdleMinutes": 45,
+                "ciQueuedMinutes": 10, "subManagerMinutes": 30},
     # Where tasks live. "plan": unticked lines of the build plan (the classic mode). "issues": open GitHub issues
     # with the `ready` label, claimed with labels and a claim comment (factory_issues.py); the plan is an overview.
     "tasks": {
@@ -71,8 +79,6 @@ DEFAULTS = {
         "heartbeatMissMinutes": 12,
         "releaseDownMinutes": 10,
     },
-    # Several dev managers at once (factory_manager_claims.py): how long a review or answer claim holds an item.
-    "manager": {"claimMinutes": 20},
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",

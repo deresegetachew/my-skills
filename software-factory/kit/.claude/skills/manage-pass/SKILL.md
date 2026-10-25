@@ -11,9 +11,26 @@ You are the dev manager. You start with no memory: GitHub is the memory (labels,
 process as it is; you do not change it. One pass reads one list, acts on what needs a manager, and exits. Stay quiet when
 there is nothing to do.
 
-**Arguments.** `/manage-pass` alone is a whole pass. `/manage-pass pr-417` or `/manage-pass question-103` works only on that item
-and then exits (the orchestrator starts one session per item). `--dry-run` anywhere in the arguments means: read
-everything, print what you would do, one line each, and write nothing (no comment, no label, no merge).
+**Arguments.** `/manage-pass` alone is a whole pass. `/manage-pass pr-417`, `/manage-pass question-103`, `/manage-pass agent-menelik`
+or `/manage-pass issue-20` works only on that item and then exits (the orchestrator, `factory dev-manager loop`, starts one
+session per item and does not start another for it while this one runs). `--dry-run` anywhere in the arguments means: read
+everything, print what you would do, one line each, and write nothing (no comment, no label, no merge, no note, no lease).
+
+**When the orchestrator started you.** Your prompt carries a fact sheet for the item (why it is on the list, the PR's head, review
+and CI state, whether the manager opened the PR), your **lease**, and the item's **thread note**. Use them instead of searching
+again, then:
+
+- *Lease.* The orchestrator took a lease on the item for you (`factory-review-claim`, `factory-answer-claim` or
+  `factory-item-claim`, with `manager=<your name>` and `until=`). Another manager holding an unexpired claim on the same item
+  means leave it. Finish inside the lease (`manager.claimMinutes`); do not post claims for other items. The orchestrator ends
+  the lease when you exit.
+- *Thread note.* The note is a comment `<!-- factory-manager-note thread=<ref> status=open -->` on the task issue (on the PR when
+  there is no issue). Before you exit, add one or two lines to it: what you decided and what is still waiting, with the
+  date. Edit it by id, never post a second one: `gh api -X PATCH repos/{owner}/{repo}/issues/comments/<id> -f body=...`
+  (send the whole body, kept marker line first). If the fact sheet says there is none, create it with that marker line.
+  The note is memory for the next session; GitHub's labels and comments stay the truth. Do not put secrets in it.
+- *Owner items.* Items for the owner (a queued CI, a down or idle agent, the manager's own approved PR) are posted by the
+  orchestrator. Do not repeat them; if your item needs the owner, post one `factory-owner-ask` with its own `id`.
 
 ## What you do on your own, and what you ask the owner first
 
