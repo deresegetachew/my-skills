@@ -20,6 +20,10 @@
 # Between tasks it brings its folder to main. When main has a newer factory-loop.sh (after a factory update), it
 # restarts itself with that version, as the same agent in the same folder; no need to stop and start it.
 #
+# After a reboot, `factory resume` (#88) starts it with FACTORY_RESUME=1 in a folder that holds unfinished work: the
+# folder is not moved to main or cleaned for the first task, and FACTORY_RESUME_NOTE (a file) goes into that task's
+# first prompt, so the agent knows it is resuming and where its work and the backup are.
+#
 # Stops when the same task comes up 3 times in a row (stuck), and prints why.
 # Commands Claude needs must be allowed in .claude/settings.json: in this mode nobody can answer a prompt.
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"   # `sh factory-loop.sh` on macOS is POSIX sh; this needs bash
@@ -33,6 +37,7 @@ interactive=0
 if [ "${1:-}" = "--interactive" ] || [ "${1:-}" = "-i" ]; then interactive=1; shift; fi
 limit="${1:-999}"
 
+resume_first="${FACTORY_RESUME:-0}"; unset FACTORY_RESUME  # for this first task only, also after a reload
 if [ -n "${FACTORY_RELOAD_DIR:-}" ]; then
   # Restarted by reload_if_changed: same pid, so the same agent and folder (its checkout claim still holds).
   agent="$FACTORY_RELOAD_AGENT"; dir="$FACTORY_RELOAD_DIR"; unset FACTORY_RELOAD_AGENT FACTORY_RELOAD_DIR
@@ -49,9 +54,13 @@ if [ "$dir" != "$PWD" ]; then
   cd "$dir"
   python3 "$hooks/factory_remote.py" 2>/dev/null | sed "s/^/[$agent] /"  # the repository may have moved on GitHub
   # A reused worktree may be far behind: bring it to main before using its hooks and config.
-  git fetch -q origin && git checkout -q --detach "origin/$main" || {
-    echo "[$agent] Could not check out origin/$main in $dir (uncommitted changes there?). Clean it up, or remove it: git worktree remove $dir"
-    exit 1; }
+  if [ "$resume_first" = 1 ]; then
+    git fetch -q origin || true  # resuming after a restart: stay on the agent's branch with its changes
+  else
+    git fetch -q origin && git checkout -q --detach "origin/$main" || {
+      echo "[$agent] Could not check out origin/$main in $dir (uncommitted changes there?). Clean it up, or remove it: git worktree remove $dir"
+      exit 1; }
+  fi
   [ -f .gitmodules ] && git submodule update --init -q  # skills from my-skills, for example
   install=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("install",""))')
   # Every start, not once: main may have new dependencies since this worktree was last used.
@@ -124,7 +133,12 @@ reload_if_changed() {
 
 last=""; repeats=0
 for ((n = 1; n <= limit; n++)); do
-  tidy
+  if [ "$resume_first" = 1 ]; then
+    echo "[$agent] resuming after a restart: leaving $PWD as it is (branch $(git branch --show-current 2>/dev/null))."
+    resume_first=0
+  else
+    tidy
+  fi
   reload_if_changed $((limit - n + 1))
   # Nothing to do: wait for work instead of exiting (`waitMinutes` in factory.json; 0 = exit as before). While it waits
   # the agent stays registered as idle, so the dev manager doesn't take it for dead. Ctrl-C stops it.
@@ -147,15 +161,21 @@ for ((n = 1; n <= limit; n++)); do
   fi
   echo "=== [$agent] $(date '+%H:%M') task $next ==="
   isolate
+  # The restart note (factory_resume.py) goes into the first prompt only.
+  prompt="/next-task $id"
+  if [ -n "${FACTORY_RESUME_NOTE:-}" ] && [ -f "$FACTORY_RESUME_NOTE" ]; then
+    prompt="$prompt"$'\n\n'"$(cat "$FACTORY_RESUME_NOTE")"
+    rm -f "$FACTORY_RESUME_NOTE"; unset FACTORY_RESUME_NOTE
+  fi
   if [ "$interactive" = 1 ]; then
     echo "[$agent] Talk to it as usual. When the task is done, the session closes by itself."
     python3 "$hooks/factory_claims.py" take-done --agent "$agent" >/dev/null  # no stale mark from an earlier run
     # Remote Control (on by default; FACTORY_REMOTE_CONTROL=0 turns it off): the session also appears at
     # claude.ai/code and in the Claude app, so you can watch it and type into it (/exit included) from your phone.
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then
-      claude "${claude_flags[@]}" --remote-control="$agent $id" "/next-task $id" || true
+      claude "${claude_flags[@]}" --remote-control="$agent $id" "$prompt" || true
     else
-      claude "${claude_flags[@]}" "/next-task $id" || true
+      claude "${claude_flags[@]}" "$prompt" || true
     fi
     stty sane 2>/dev/null
     python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null
@@ -173,7 +193,7 @@ for ((n = 1; n <= limit; n++)); do
     case "$answer" in q|Q|quit|stop|n|N) echo "[$agent] Stopped."; exit 0;; esac
     continue
   else
-    claude "${claude_flags[@]}" -p "/next-task $id" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+    claude "${claude_flags[@]}" -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
   fi
   python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
 done

@@ -46,6 +46,8 @@ SETTINGS = {
     "commands.test": ("str", "The full test command.", None, None),
     "commands.build": ("str", "The build command.", None, None),
     "commands.smoke": ("str", "A quick command proving main still works.", None, None),
+    "commands.stackUp": ("str", "Brings the dev stack up (Postgres, MinIO ...); `factory resume` runs it at boot. Should return once the stack is started. Empty: no stack at boot.", None, ""),
+    "commands.stackHealth": ("str", "Passes (exit 0) once the stack is healthy; `factory resume` asks until it does. Empty: stackUp is enough.", None, ""),
     "commands.agentSetup": ("str", "Runs once per loop after the env is set, e.g. to create the slot's database.", None, ""),
     "commands.typecheckChanged": ("str", "The Stop check's typecheck, for the changed packages only (saves time and tokens). Empty: use commands.typecheck.", None, ""),
     "commands.ci": ("str", "What CI runs (typecheck, lint, test, build), for `factory verify`; `{base}` is origin/<main>. When set on main, a ready PR needs it passed for its commit.", None, ""),
@@ -199,9 +201,27 @@ def cmd_list(data):
             shown = shown[:67] + "..."
         print(f"{key:34} {shown}")
         print(f"{'':34} {about}" + (f" Options: {', '.join(options)}." if options else ""))
+    machine_section()
     other = [k for k in data if not k.startswith("_") and not any(s == k or s.startswith(k + ".") for s in SETTINGS)]
     if other:
         print(f"\nOther keys in {PATH}, kept as they are: {', '.join(other)}")
+
+
+def machine_section():
+    """This machine's own settings (#88): not in factory.json, so not changed with `set`."""
+    try:
+        from factory_machine import autostart_settings, machine_settings, names_file
+        on, names, post = autostart_settings()
+        where = names_file()
+    except (ImportError, SystemExit, OSError):
+        return
+    print(f"\nThis machine only ({where}; `factory autostart install` / `uninstall` change them):")
+    print(f"{'autostart':34} {as_text(on)}")
+    print(f"{'':34} Bring the stack and this machine's agents back after a reboot (factory autostart status).")
+    print(f"{'autostartAgents':34} {as_text(names)}")
+    print(f"{'':34} The agents it starts at boot. Default: the names this machine runs.")
+    print(f"{'autostartReport':34} {as_text(post)}")
+    print(f"{'':34} Post the boot report on the first started agent's issue (issues mode).")
 
 
 def cmd_show(data, key):

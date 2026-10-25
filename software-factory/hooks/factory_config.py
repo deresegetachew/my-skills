@@ -14,8 +14,10 @@ DEFAULTS = {
     # changed packages only (for example `pnpm -s turbo run test --filter=...[origin/main]`). Fewer test lines in
     # the agent's context, and a faster turn.
     # ci: what CI runs, for `factory verify`; when set on main, the PR gate needs it passed for the PR's commit.
+    # stackUp / stackHealth: what `factory resume` runs at boot to bring the dev stack back (for example `pnpm stack:up`),
+    # and an optional command that passes once the stack is healthy (#88).
     "commands": {"typecheck": "", "lint": "", "test": "", "build": "", "smoke": "",
-                 "typecheckChanged": "", "testChanged": "", "ci": ""},
+                 "typecheckChanged": "", "testChanged": "", "ci": "", "stackUp": "", "stackHealth": ""},
     "codePaths": ["src"],
     # How many lines of a failing Stop check the agent sees: the failing lines first, then the end of the output.
     "checkOutputLines": 40,
