@@ -165,6 +165,13 @@ def factory(r, cfg):
              else r.note(what, how))
     except (ImportError, SystemExit):
         pass
+    try:
+        from factory_heartbeat_service import doctor as heartbeat_doctor
+        for level, what, how in heartbeat_doctor(cfg):
+            (r.ok(what + (f": {how}" if how else "")) if level == "ok" else r.fix(what, how) if level == "fix"
+             else r.note(what, how))
+    except (ImportError, SystemExit):
+        pass
     if sys.platform == "darwin":
         r.note("sleep", "keep the Mac awake while agents run (`caffeinate -d` in another tab)")
 

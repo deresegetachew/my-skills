@@ -14,9 +14,20 @@ An agent whose last ping is older than `tasks.downMinutes` (30) counts as down: 
 waits at a prompt nobody answers. The dev manager's `sweep` marks it down and puts its in-progress issues back to
 ready, so a live agent takes them.
 
+With the heartbeat daemon running on a machine (factory_heartbeat.py, #108) the daemon is the one that writes for the
+agents there: it knows whether the process is really alive, and says `waiting` (alive, blocked in a `factory wait`)
+besides `working`, `idle` and `down`, on change plus a keepalive. The hooks then leave the pings and `idle` to it; only
+`register`, a clean `down` and the cloud agents' own pings still write. Its markers carry `hb=1`: a keepalive missed
+for `tasks.heartbeatMissMinutes` (12) counts as silent, not after 30 minutes. The sweep never gives away an issue of an
+agent that is alive on its machine, and also releases the issues of an agent that is plainly `down` for
+`tasks.releaseDownMinutes` (10).
+
+  python3 .claude/hooks/factory_agents.py ls [--json] [--local] [--fresh]
+                                                                every agent: where it runs, its state, task, since when,
+                                                                last seen and follow link (factory_agents_ls.py)
   python3 .claude/hooks/factory_agents.py list                  who is working, idle or down, and since when
   python3 .claude/hooks/factory_agents.py sweep                 mark silent agents down, release their issues
-  python3 .claude/hooks/factory_agents.py register --agent taytu
+  python3 .claude/hooks/factory_agents.py register --agent taytu [--kind dev-manager] [--cloud] [--follow URL]
   python3 .claude/hooks/factory_agents.py ping --agent taytu [--status "working on #42"] [--force]
   python3 .claude/hooks/factory_agents.py down --agent taytu
   python3 .claude/hooks/factory_agents.py hook                  the Claude hook entry (reads the event on stdin)
@@ -32,9 +43,15 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import DEFAULTS, load, task_labels, task_source  # noqa: E402
+import factory_clock  # noqa: E402
 
 LABEL, DOWN_LABEL = "factory:agent", "factory:agent-down"
-MARK = re.compile(r"<!--\s*factory-agent\s+name=([\w.-]+)\s+status=(\w+)\s+ping=(\S+?)(?:\s+machine=([\w-]+))?\s*-->")
+# The hidden marker on an agent's issue: <!-- factory-agent name=taytu status=waiting ping=... machine=... -->. Besides
+# name, status and ping it may carry kind, task, on (what it waits on), since, hb (1: written by the heartbeat daemon),
+# where, session and follow. Older markers have only the first four.
+MARK = re.compile(r"<!--\s*factory-agent\s+(.*?)\s*-->", re.S)
+FIELD_CHARS = re.compile(r"[\w./:?=&%#~+@,-]")
+HOUR = 3600
 
 
 def setting(cfg, key):
@@ -42,7 +59,7 @@ def setting(cfg, key):
 
 
 def now():
-    return datetime.now(timezone.utc).replace(microsecond=0)
+    return datetime.fromtimestamp(factory_clock.now(), timezone.utc).replace(microsecond=0)
 
 
 def iso(t):
@@ -96,18 +113,33 @@ def agent_issues():
     return task_issues(state="all", label=LABEL)
 
 
+def fields(issue):
+    """The key=value pairs of an agent issue's marker ({} when it has none)."""
+    m = MARK.search(issue.get("body") or "")
+    out = {}
+    for pair in (m.group(1).split() if m else []):
+        key, eq, value = pair.partition("=")
+        if eq and re.fullmatch(r"[a-z][\w-]*", key):
+            out[key] = value
+    return out
+
+
+def clean(value):
+    """A marker value: no spaces, no angle brackets, nothing that could close the comment."""
+    return "".join(c for c in str(value) if FIELD_CHARS.fullmatch(c)).replace("--", "-")
+
+
 def name_of(issue):
     """The agent an agent issue belongs to: the marker's name, else the title's (`Agent: <name> · ...`)."""
-    m = MARK.search(issue.get("body") or "")
-    if m:
-        return m.group(1)
+    name = fields(issue).get("name")
+    if name and re.fullmatch(r"[\w.-]+", name):
+        return name
     m = re.match(r"Agent: ([\w.-]+)(\s|$)", issue.get("title") or "")
     return m.group(1) if m else None
 
 
 def last_ping(issue):
-    m = MARK.search(issue.get("body") or "")
-    return m.group(3) if m else ""
+    return fields(issue).get("ping", "")
 
 
 def ranked(issues):
@@ -130,21 +162,27 @@ def find_issue(agent):
     return found[0] if found else None
 
 
-def render(agent, status, detail, started, ping=None, where=None, machine=""):
+def render(agent, status, detail, started, ping=None, where=None, machine="", extra=None):
     where = where or f"slot {os.environ.get('FACTORY_SLOT') or 1}"
-    shown = {"working": detail or "working", "idle": "idle", "down": "down"}[status]
+    shown = {"working": detail or "working", "waiting": detail or "waiting", "idle": "idle", "down": "down"}[status]
     t = iso(ping or now())
-    mark = f" machine={machine}" if machine else ""
-    body = (f"<!-- factory-agent name={agent} status={status} ping={t}{mark} -->\n"
-            f"**Status:** {shown}\n**Last ping:** {t}\n**Started:** {started}\n**Where:** {where}\n\n"
-            "This issue is kept up to date by the agent itself (see factory_agents.py). Don't close it.")
+    pairs = {"machine": machine, **(extra or {})}
+    if status == "down":  # nothing is being done, waited on or followed any more
+        for key in ("task", "on", "since", "session", "follow"):
+            pairs.pop(key, None)
+    marks = "".join(f" {k}={clean(v)}" for k, v in pairs.items() if v not in (None, ""))
+    lines = [f"<!-- factory-agent name={agent} status={status} ping={t}{marks} -->",
+             f"**Status:** {shown}", f"**Last ping:** {t}", f"**Started:** {started}", f"**Where:** {where}"]
+    if pairs.get("follow") and status != "down":
+        lines.append(f"**Follow:** {clean(pairs['follow'])}")
+    body = "\n".join(lines) + ("\n\nThis issue is kept up to date by the agent itself (see factory_agents.py). "
+                              "Don't close it.")
     return f"Agent: {agent} · {shown}", body
 
 
 def machine_of(issue):
     """The machine id in an agent issue's marker; None when it has none (an older kit)."""
-    m = MARK.search(issue.get("body") or "")
-    return m.group(4) if m else None
+    return fields(issue).get("machine") or None
 
 
 def held_elsewhere(cfg, agent, machine):
@@ -160,13 +198,17 @@ def held_elsewhere(cfg, agent, machine):
     return other
 
 
-def update(cfg, agent, status, detail="", create=False):
+def update(cfg, agent, status, detail="", create=False, extra=None, replace_extra=False, number=None):
     """Updates the agent's one issue. Only `register` (create=True) may open a new one, and only when the agent has
     none at all, open or closed: a ping, a turn's end or a session's end that can't find the issue changes nothing.
-    (On 22 Oct a lookup that came back empty made every ping open another issue: 195 copies in two hours.)"""
+    (On 22 Oct a lookup that came back empty made every ping open another issue: 195 copies in two hours.)
+
+    `extra` are marker fields (kind, task, on, since, hb, where, session, follow): they are added to the ones the
+    last write carried, or, with `replace_extra`, they are the whole set (the heartbeat daemon says what is true
+    now). Every write is remembered (when, and how many in the last hour) for the daemon's write budget."""
     from factory_issues import add_labels, gh, remove_label
     seen = recall(agent)
-    n = seen.get("issue")
+    n = number or seen.get("issue")
     if not n:
         i = find_issue(agent)
         if i:
@@ -177,29 +219,45 @@ def update(cfg, agent, status, detail="", create=False):
     # The machine and folder are posted to GitHub only when the project opts in (tasks.showWhere: true).
     where = (f"{socket.gethostname()} · {os.path.basename(os.getcwd())}"
              if (cfg.get("tasks") or {}).get("showWhere") else None)
+    kept = {} if replace_extra else dict(seen.get("extra") or {})
+    kept.update({k: v for k, v in (extra or {}).items() if v not in (None, "")})
+    if kept.get("where") == "cloud":
+        where = "cloud"
     from factory_machine import machine_id
-    title, body = render(agent, status, detail, started, where=where, machine=machine_id())
+    title, body = render(agent, status, detail, started, where=where, machine=machine_id(), extra=kept)
     if n:
         gh("PATCH", f"repos/{{owner}}/{{repo}}/issues/{n}", {"title": title, "body": body, "state": "open"})
     else:
         n = gh("POST", "repos/{owner}/{repo}/issues", {"title": title, "body": body, "labels": [LABEL]})["number"]
     if status == "down":
         add_labels(n, [DOWN_LABEL])
-    else:
+    elif seen.get("status") in (None, "down"):  # a change between live states needs no label call
         remove_label(n, DOWN_LABEL)
-    remember(agent, issue=n, status=status, detail=detail, started=started, ping=time.time())
+    t = factory_clock.now()
+    writes = [w for w in seen.get("writes") or [] if t - w < HOUR] + [t]
+    remember(agent, issue=n, status=status, detail=detail, started=started, ping=t, extra=kept, writes=writes,
+             cand=None, retry=0)
     return n
+
+
+def silent_after(cfg, fields_):
+    """Minutes without a ping after which an agent that isn't down counts as silent: `tasks.downMinutes`, or, for an
+    agent the heartbeat daemon writes for (hb=1), `tasks.heartbeatMissMinutes` (a keepalive missed twice), whichever is less."""
+    limit = float(setting(cfg, "downMinutes"))
+    if fields_.get("hb") == "1":
+        limit = min(limit, float(setting(cfg, "heartbeatMissMinutes")))
+    return limit
 
 
 def state_of(cfg, issue):
     """(name, status, last ping, minutes since) from an agent issue; a silent agent counts as down."""
-    m = MARK.search(issue.get("body") or "")
-    if not m:
+    f = fields(issue)
+    if not (f.get("name") and re.fullmatch(r"\w+", f.get("status") or "") and f.get("ping")):
         return None
-    name, status, ping = m.groups()[:3]
+    name, status, ping = f["name"], f["status"], f["ping"]
     t = datetime.fromisoformat(ping.replace("Z", "+00:00"))
     quiet = (now() - t).total_seconds() / 60
-    if status != "down" and quiet >= float(setting(cfg, "downMinutes")):
+    if status != "down" and quiet >= silent_after(cfg, f):
         status = "silent"
     return name, status, t, quiet
 
@@ -222,10 +280,22 @@ def close_copies(issues):
     return closed
 
 
+def held_in_progress(cfg, name, in_progress):
+    """The numbers of the in-progress issues agent `name` holds, out of `in_progress` (all in-progress task issues)."""
+    L = task_labels(cfg)
+    return [x["number"] for x in in_progress if L["agentPrefix"] + name in {y["name"] for y in x["labels"]}]
+
+
 def sweep(cfg):
     """Close duplicate agent issues, then mark silent agents down and put their in-progress issues back to ready.
-    Only an agent's current issue counts: an old copy that went quiet must never release a live agent's work."""
+    Only an agent's current issue counts: an old copy that went quiet must never release a live agent's work.
+
+    Real liveness decides (#108): an agent the heartbeat daemon on this machine sees alive (working, waiting or idle)
+    is never marked down or released, whatever its issue says. An agent that is plainly `down` (the daemon, its loop
+    or its session said so) gets its in-progress issues back to ready once it has been down for
+    `tasks.releaseDownMinutes`, so a crash does not hold an issue until `factory issues stale` notices."""
     import factory_issues
+    import factory_heartbeat
     L = task_labels(cfg)
     issues = agent_issues()
     done = []
@@ -233,11 +303,25 @@ def sweep(cfg):
     if copies:
         done.append(f"closed {len(copies)} duplicate agent issue{'s' if len(copies) > 1 else ''}: "
                     + ", ".join(f"#{n}" for n in sorted(copies)))
+    in_progress = None
     for i in current(issues):
         st = state_of(cfg, i)
-        if not st or st[1] != "silent":
+        if not st:
             continue
-        name, _, t, quiet = st
+        name, status, t, quiet = st
+        if status == "down":
+            if quiet < float(setting(cfg, "releaseDownMinutes")):
+                continue
+            if in_progress is None:
+                in_progress = factory_issues.task_issues(label=L["inProgress"])
+            held = held_in_progress(cfg, name, in_progress)
+            for n in held:
+                factory_issues.release_issue(cfg, n, f"{name} has been down since {iso(t)}")
+            if held:
+                done.append(f"{name}: down for {quiet:.0f} min, released {', '.join(f'#{n}' for n in held)}")
+            continue
+        if status != "silent" or factory_heartbeat.alive_here(name):
+            continue
         from factory_issues import add_labels, comment, gh
         old = i.get("body") or ""
         started = (re.search(r"\*\*Started:\*\* (\S+)", old) or [None, "?"])[1]
@@ -256,7 +340,8 @@ def sweep(cfg):
 
 
 def hook(cfg):
-    """Claude hook entry: PostToolUse pings (rate-limited, detached), Stop goes idle, SessionEnd goes down."""
+    """Claude hook entry: PostToolUse pings (rate-limited, detached), Stop goes idle, SessionEnd goes down. While the
+    heartbeat daemon runs on this machine it does the pings and the idle (it knows better); SessionEnd still says down."""
     try:
         event = json.load(sys.stdin).get("hook_event_name", "")
     except ValueError:
@@ -264,11 +349,15 @@ def hook(cfg):
     agent = os.environ.get("FACTORY_AGENT")
     if not agent:
         return
+    if event in ("PostToolUse", "Stop"):
+        import factory_heartbeat
+        if factory_heartbeat.managed(agent):
+            return
     seen = recall(agent)
     if event == "PostToolUse":
-        if time.time() - float(seen.get("ping", 0)) < float(setting(cfg, "pingMinutes")) * 60:
+        if factory_clock.now() - float(seen.get("ping", 0)) < float(setting(cfg, "pingMinutes")) * 60:
             return  # pinged recently: no network at all
-        remember(agent, ping=time.time())  # claim this ping slot before the detached call
+        remember(agent, ping=factory_clock.now())  # claim this ping slot before the detached call
         subprocess.Popen([sys.executable, os.path.abspath(__file__), "ping", "--agent", agent, "--force"],
                          start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif event == "Stop" and seen.get("status") != "idle":
@@ -277,20 +366,53 @@ def hook(cfg):
         update(cfg, agent, "down")  # under factory-loop.sh the loop says down when it exits, not per session
 
 
+def reach_args(a):
+    """The marker fields the command line sets: --kind, --cloud (the agent runs in the cloud) and --follow (the link
+    to reach its session). Invalid ones stop with a `{code, message, fix}`."""
+    from factory_machine import refuse
+    extra = {}
+    kind = getattr(a, "kind", None)
+    if kind:
+        if not re.fullmatch(r"[a-z][a-z-]{1,29}", kind):
+            refuse("bad-kind", f"--kind {kind!r} isn't a kind.", "Use lowercase letters and dashes, for example "
+                   "coding-agent, dev-manager or product-owner.")
+        extra["kind"] = kind
+    if getattr(a, "cloud", False):
+        extra["where"] = "cloud"
+    follow = getattr(a, "follow", None)
+    if follow:
+        if not re.fullmatch(r"https://[\w.-]+(/[\w./?=&%#~+@,-]*)?", follow) or "--" in follow:
+            refuse("bad-follow", f"--follow {follow!r} isn't a link I can post.", "Pass the session's https link "
+                   "(the Remote Control link, claude.ai/code/...), with no spaces.")
+        extra["follow"] = follow
+    return extra
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     for c in ("register", "ping", "down"):
         p = sub.add_parser(c)
         p.add_argument("--agent", default=os.environ.get("FACTORY_AGENT"))
+        if c in ("register", "ping"):
+            p.add_argument("--kind", default=None)
+            p.add_argument("--cloud", action="store_true")
+            p.add_argument("--follow", default=None)
         if c == "ping":
             p.add_argument("--status", default=None)
             p.add_argument("--force", action="store_true")
     sub.add_parser("list")
+    ls = sub.add_parser("ls")
+    ls.add_argument("--json", action="store_true")
+    ls.add_argument("--local", action="store_true", help="this machine only: no GitHub")
+    ls.add_argument("--fresh", action="store_true", help="ask GitHub again instead of using the cache")
     sub.add_parser("sweep")
     sub.add_parser("hook")
     a = ap.parse_args()
     cfg = load()
+    if a.cmd == "ls":  # this machine needs no issues mode
+        import factory_agents_ls
+        return factory_agents_ls.run(cfg, as_json=a.json, local_only=a.local, fresh=a.fresh)
     if task_source(cfg) != "issues":
         if a.cmd in ("list", "sweep"):
             print('Agent tracking needs issues mode: "tasks": {"source": "issues"} in .claude/factory.json.')
@@ -303,6 +425,7 @@ def main():
         return
     if a.cmd in ("register", "ping", "down") and not a.agent:
         raise SystemExit("which agent? pass --agent <name> or set FACTORY_AGENT")
+    extra = reach_args(a)
     if a.cmd == "register":
         from factory_machine import machine_id, refuse
         other = held_elsewhere(cfg, a.agent, machine_id())
@@ -311,20 +434,24 @@ def main():
                    "Start this machine's agents under names no other machine uses: "
                    "`factory machine setup <names>`, or set FACTORY_AGENTS.", exit_code=3)
         remember(a.agent, started=iso(now()), issue=None)
-        print(f"#{update(cfg, a.agent, 'idle', create=True)}")
+        print(f"#{update(cfg, a.agent, 'idle', create=True, extra=extra)}")
     elif a.cmd == "down":
         update(cfg, a.agent, "down")
     elif a.cmd == "ping":
+        import factory_heartbeat
+        if not a.force and factory_heartbeat.managed(a.agent):
+            return  # the daemon on this machine writes this agent's state (changes and keepalives)
         seen = recall(a.agent)
         if a.status:
-            status, detail = ("idle", "") if a.status == "idle" else ("working", a.status)
+            status, detail = ("idle", "") if a.status == "idle" else \
+                ("waiting", a.status) if a.status.startswith("waiting") else ("working", a.status)
         else:
             status, detail = seen.get("status") or "idle", seen.get("detail") or ""
             if status == "down":
                 status = "idle"
-        if not a.force and not a.status and time.time() - float(seen.get("ping", 0)) < float(setting(cfg, "pingMinutes")) * 60:
+        if not a.force and not a.status and factory_clock.now() - float(seen.get("ping", 0)) < float(setting(cfg, "pingMinutes")) * 60:
             return
-        update(cfg, a.agent, status, detail)
+        update(cfg, a.agent, status, detail, extra=extra)
     elif a.cmd == "list":
         rows = [(*st, machine_of(i)) for i in current(agent_issues()) for st in [state_of(cfg, i)] if st]
         for name, status, t, quiet, mach in sorted(rows, key=lambda r: r[:4]):
