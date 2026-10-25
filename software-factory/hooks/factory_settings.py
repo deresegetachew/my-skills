@@ -62,6 +62,7 @@ SETTINGS = {
     "maxOpenPRs": ("int", "Ready PRs the account may have open at once. About the number of agents + 1.", None, None),
     "prSizeWarn": ("int", "The guard warns above this many changed lines.", None, None),
     "reviewMarkers": ("str", "Where review passes are written.", None, None),
+    "reReviewPercent": ("int", "A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review.", None, None),
     "trustedReviewers": ("list", "GitHub logins whose approvals count. Empty: any.", None, []),
     "holdLabel": ("str", "The label the dev manager puts on a PR it is reviewing.", None, None),
     "agents": ("list", "The agents' names, in order (lowercase letters, digits, dashes).", None, None),

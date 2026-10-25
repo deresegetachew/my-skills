@@ -69,6 +69,15 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    says how each one was resolved before it records the pass. Asking again without a fix is only for items it marked
    **unsure**. Keep `opus` for its later rounds on this task, and start on `opus` when the diff is over `prSizeWarn`
    lines or touches a `protected` path.
+7. **Re-reviews read only the delta** (#70). Each reviewer records its round (commit, result, findings), and the next
+   round of the same reviewer checks only what changed since: the diff since its last commit, its own findings and
+   your reply. After fixing and committing, and before asking again, save your reply for each finding:
+   `python3 .claude/hooks/factory_rereview.py reply --kind reviewer --text "<what you changed for each finding>"`
+   (`--kind arch` for the `architecture-reviewer`, `safety` and `security` for the auditors). Then ask the subagent as
+   before; it runs `factory_rereview.py prompt` itself and reads the delta. `factory_rereview.py plan --kind reviewer`
+   shows which it will be. A big fix (over `reReviewPercent` of the branch diff), a new file, a rebase or a merge of
+   main makes the next round a full review. The pass the PR gate needs is still the reviewer's marker for the head
+   commit, so the last round always ends on HEAD.
 
 ## 4. Ship it
 

@@ -55,6 +55,7 @@
     "docs/blocked.md"
   ],
   "reviewMarkers": "tmp/reviews",
+  "reReviewPercent": 30,
   "testPaths": [
     "(^|/)__tests__/",
     "\\.(test|spec)\\.[cm]?[jt]sx?$",

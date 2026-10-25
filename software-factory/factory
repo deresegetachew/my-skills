@@ -27,6 +27,8 @@ Look
                          the CI queue and runners, and the tasks; read-only
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
+  rereview plan|prompt|record|reply
+                         incremental re-review: a reviewer's next round reads only the delta since its last one
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
@@ -118,6 +120,7 @@ case "$cmd" in
   release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
+  rereview)  py factory_rereview.py "$@" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
   report)    py factory_report.py "$@" ;;
