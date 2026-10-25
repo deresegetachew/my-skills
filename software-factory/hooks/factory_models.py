@@ -18,6 +18,7 @@ How a value reaches Claude Code (the spike, #94):
     CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 it forces ONE model on every subagent, not one per role.
 
   python3 .claude/hooks/factory_models.py flags <role>      one argument per line, for factory-loop.sh and `factory agent`
+  python3 .claude/hooks/factory_models.py escalate          the model the reviewer is asked again on (models.reviewer.escalateTo, else opus)
   python3 .claude/hooks/factory_models.py table             the effective model per role and what set it (factory doctor)
 """
 import json, os, re, sys
@@ -140,11 +141,14 @@ def main(argv):
         if args:
             print("\n".join(args))
         return 0
+    if argv[:1] == ["escalate"]:  # the model the reviewer is asked again on, after a must-fix or an unsure item
+        print(models.get("reviewer", {}).get("escalateTo") or "opus")
+        return 0
     if argv[:1] == ["table"]:
         for role, model, source in table(models):
             print(f"{role:22} {model:22} {source}")
         return 0
-    print("usage: factory_models.py flags builder|manager|product-owner | table", file=sys.stderr)
+    print("usage: factory_models.py flags builder|manager|product-owner | escalate | table", file=sys.stderr)
     return 2
 
 

@@ -194,6 +194,17 @@ def test_doctor_flags_a_bad_models_value():
     assert p.returncode == 1 and any(l.startswith("fix") and "models" in l for l in p.stdout.splitlines()), p.stdout
 
 
+def test_escalate_prints_the_reviewers_escalation_model_and_opus_when_unset():
+    assert models_py(project({"reviewer": {"model": "sonnet", "escalateTo": "claude-opus-5-5"}}), "escalate").stdout.strip() == "claude-opus-5-5"
+    assert models_py(project(), "escalate").stdout.strip() == "opus"
+    assert models_py(project({"reviewer": {"model": "haiku"}}), "escalate").stdout.strip() == "opus"
+
+
+def test_the_next_task_skill_asks_for_the_escalation_model_from_the_setting():
+    skill = open(os.path.join(KIT, ".claude", "skills", "next-task", "SKILL.md")).read()
+    assert "factory_models.py escalate" in " ".join(skill.split()) and "models.reviewer.escalateTo" in skill
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

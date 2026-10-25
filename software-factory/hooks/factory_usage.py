@@ -5,9 +5,9 @@ this machine. Use it to measure a change to the factory (a cheaper model, less r
   factory usage                       the last 7 days, per task, then the totals
   factory usage --since 2026-10-20 --until 2026-10-24
   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
-  factory usage --by role             per role (coding-agent, dev-manager, product-owner): a session belongs to the
-                                      role named in the `<!-- factory-role role=... -->` line its prompt ends with
-                                      (the role loops add it, #102); a session without one is a coding agent's
+  factory usage --by role             per role: the role named in the `<!-- factory-role role=... -->` line a
+                                      role loop's prompt ends with (#102); else manager (a prompt starting with
+                                      /manage-pass) or builder (every other session)
   factory usage --json                the same as JSON
   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it)
   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
@@ -60,13 +60,17 @@ def replies(path):
                    m.get("model") or "?", u, d.get("cwd") or "")
 
 
+MANAGER_PASS = re.compile(r"/?manage-pass\b")
+
+
 def session_role(path):
-    """The role a session's first prompt names (the loops end it with `<!-- factory-role role=... -->`), else
-    "coding-agent": the builder's prompt carries no marker."""
+    """The role a session's first prompt names (the loops end it with `<!-- factory-role role=... -->`); else
+    'manager' when it starts with `/manage-pass` (older manager starts have no marker), else 'builder': every other
+    session on this project, builders and people alike."""
     try:
         f = open(path, encoding="utf-8")
     except OSError:
-        return "coding-agent"
+        return "builder"
     with f:
         for line in f:
             try:
@@ -78,9 +82,12 @@ def session_role(path):
             content = (d.get("message") or {}).get("content")
             if isinstance(content, list):
                 content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-            m = ROLE.search(content if isinstance(content, str) else "")
-            return m.group(1) if m else "coding-agent"
-    return "coding-agent"
+            content = content if isinstance(content, str) else ""
+            m = ROLE.search(content)
+            if m:
+                return m.group(1)
+            return "manager" if MANAGER_PASS.match(re.sub(r"^\s*<command-(?:message|name)>\s*", "", content)) else "builder"
+    return "builder"
 
 
 def tokens(u):
