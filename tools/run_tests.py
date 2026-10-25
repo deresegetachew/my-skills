@@ -63,10 +63,10 @@ def run_file(path, shard=0, shards=1):
 
 
 def shard_count(path, jobs):
-    """Big files are split so one of them does not set the total time: about 12 tests per process, at most `jobs`."""
+    """Big files are split so one of them does not set the total time: about 8 tests per process, at most `jobs`."""
     with open(path, encoding="utf-8") as f:
         tests = sum(1 for line in f if line.startswith("def test_"))
-    return max(1, min(jobs, -(-tests // 12)))
+    return max(1, min(jobs, -(-tests // 8)))
 
 
 def job_count(argv):
