@@ -254,6 +254,26 @@ can, and otherwise with one example that passes and one that fails, taken from t
 rule on two or three real cases before publishing it. When the coding agent shows a rule misfiring, fix the
 rule; don't defend it.
 
+## Several managers at once
+
+If another dev manager may be running (another machine, another terminal), claim before you act, so neither of you
+does the same thing twice. Everything below is `factory manager-claims ... --manager <your name>`:
+
+- `next` first: it takes `factory-hold` off PRs whose lease ran out, then claims every free PR and unanswered
+  question and prints what you won. Work only on those. A PR or question you did not win is another manager's; skip it.
+- Lost a claim (exit code 3)? Do nothing on that item: no hold, no review, no comment.
+- Won a review: review the head you claimed, post `factory-approved`, `factory-mustfix` or `pr-watch` for it, then
+  `release <pr>` (takes the hold off). Gave up without a marker? `release <pr>` too, so the next manager need not wait.
+- Won a question: post the `factory-answer` (it ends the claim). The lease is `manager.claimMinutes` (default 20); a
+  longer job should be done within it, or claim again with `review <pr>` before it ends.
+- Merge with `merge <pr>`: it needs `factory-approved sha=<head>` for the head and merges that exact sha. "Done by
+  someone else" is a normal answer, not a failure.
+- Before asking the owner, `ask --id <slug> --text "..."`: an ask with that id is posted once, however many managers
+  want to post it.
+
+All managers share one GitHub account, so the name inside the comment is the only identity. Do not use
+`trustedReviewers` to tell managers apart.
+
 ## Several coding loops
 
 When the owner runs more than one `factory-loop.sh`, PRs arrive side by side for neighbouring tasks. Merge them in

@@ -13,7 +13,7 @@ Numbers: create and ready also need every new decision or migration file (`decis
         number that neither main nor another open PR has (factory_numbers.py); the message names the next free one.
 Issues mode (`tasks.source: "issues"`): create also needs the branch's issue (task/<n>-...) open, not blocked, not
         held by another agent, and `Closes #<n>` in the PR body.
-Markers: agents may not post the dev manager's markers (factory-approved, factory-answer, factory-mustfix), add
+Markers: agents may not post the dev manager's markers (factory-approved, factory-answer, factory-mustfix, and the claim markers of factory_manager_claims.py), add
         the review labels or remove the hold label.
 Messages (docs/messages.md): a comment with a `factory-msg` envelope is checked too. An agent posts as itself
         (from= is FACTORY_AGENT), never as kind approval or mustfix, and answers, works on or fails only a question
@@ -50,7 +50,7 @@ MERGE_VALUE_FLAGS = {"-t", "--subject", "-b", "--body", "-F", "--body-file", "-A
                      "--match-head-commit", "-R", "--repo"}
 # Text the gate can't see because the shell would expand it first: $(...), `...`, ${...} and $NAME.
 SHELL_EXPANSION = re.compile(r"\$\(|`|\$\{|\$[A-Za-z_]")
-MARKERS = re.compile(r"<!--\s*factory-(approved|answer|mustfix)\b")
+MARKERS = re.compile(r"<!--\s*factory-(approved|answer|mustfix|review-claim|claim-release|owner-ask)\b")
 REVIEW_LABELS = {"tests-reviewed", "deps-reviewed"}
 SEPARATORS = set(";&|()<>")
 # Prefixes that run the next word as the program, so `env gh pr merge` and `sudo gh ...` are still gh.
@@ -326,7 +326,7 @@ def check_markers(cfg, sub, args):
         block("Agents don't approve pull requests; the dev manager does.")
     text = body_text(flags)
     if MARKERS.search(text):
-        block("Only the dev manager posts factory-approved, factory-answer and factory-mustfix comments. Ask with "
+        block("Only the dev manager posts factory-approved, factory-answer, factory-mustfix, claim and owner-ask comments. Ask with "
               "<!-- factory-question --> instead.")
     check_messages(args, text)
     labels = lambda *n: {x.strip() for v in values(flags, *n) for x in v.split(",")}
