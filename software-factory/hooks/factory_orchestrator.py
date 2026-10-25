@@ -33,7 +33,7 @@ import factory_watch as watch  # noqa: E402
 from factory_config import load, manager_setting, role_names, safe_agent, task_labels  # noqa: E402
 
 OWNER_TITLE = "Dev manager: needs the owner"
-ASK_RX = re.compile(r"<!--\s*factory-owner-ask\s+id=(\S+?)\s*-->")
+ASK_RX = re.compile(r"<!--\s*factory-owner-ask\s+id=([^\s>]+)(?:\s+[^>]*?)?\s*-->")  # for=product may follow
 NOTE_RX = re.compile(r"<!--\s*factory-manager-note\s+thread=(\S+)\s+status=(\w+)\s*-->")
 
 

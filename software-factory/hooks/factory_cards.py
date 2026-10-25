@@ -59,9 +59,7 @@ def cards(cfg, issues, version=None):
         if st:
             name, status, ping, _ = st
             c = card(name, status, fa.machine_of(issue), version, fa.iso(ping))
-            role = fa.role_of(issue)
-            if role != "coding-agent":
-                c["role"] = role  # a dev manager or product owner; a coding agent's card has none
+            c["role"] = fa.role_of(issue)  # the role it runs (coding-agent, dev-manager, product-owner)
             out.append(c)
     return sorted(out, key=lambda c: (c["name"], c["state"]))
 
@@ -72,4 +70,5 @@ def row(c):
     quiet = (datetime.now(timezone.utc) - datetime.fromisoformat(ping.replace("Z", "+00:00"))).total_seconds() / 60 if ping else 0
     when = f"{quiet:.0f} min ago" if quiet < 120 else f"{quiet / 60:.1f} h ago"
     return (f"{c['name']:<12} {c['state']:<8} last ping {ping} ({when})"
-            + (f"  machine {c['machine']}" if c["machine"] else "") + (f"  {c['role']}" if c.get("role") else ""))
+            + (f"  machine {c['machine']}" if c["machine"] else "")
+            + (f"  {c['role']}" if c.get("role") not in (None, "coding-agent") else ""))

@@ -74,6 +74,7 @@ if [ "$dry_run" = 1 ]; then
     dev-manager)
       python3 "$hooks/factory_orchestrator.py" cycle --name "$who" --dry-run ;;
     *)
+      python3 "$hooks/factory_roles.py" digest "$role" | sed "s/^/[$who] /"
       if found=$(python3 "$hooks/factory_roles.py" work "$role" --name "$who"); then
         echo "$found" | sed "s/^/[$who] work: /"
         echo "[$who] would run: claude -p \"$(python3 "$hooks/factory_roles.py" prompt "$role" "$who" | head -1)\""
@@ -188,8 +189,8 @@ isolate() {
   # that went away is dropped. Prints nothing while turbo.api is empty; no token or no answer: local cache only, and
   # it says why. Never stops the loop.
   eval "$(python3 "$hooks/factory_turbo.py" env)" || true
-  # The `models` setting (factory_models.py): --model and --effort for the builder, and --agents for the subagents
-  # whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
+  # The `models` setting (factory_models.py): --model and --effort for the role's session, and --agents for the
+  # subagents whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
   if [ -f "$hooks/factory_models.py" ]; then
     local m
     m="$(python3 "$hooks/factory_models.py" flags "$model_role" 2>&1)" || { echo "[$agent] $m"; exit 1; }

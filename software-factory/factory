@@ -149,6 +149,12 @@ Maintain
   watch [--json]         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
                          approved and green, owner waits, agents down or idle, queued CI): one line each and who it is for
                          (manager or owner), exit 3 when any, without a model. The orchestrator starts from this
+  prd [--open] [--story N] [--json]
+                         progress against the PRD from GitHub: per user story its tasks (a `PRD: US-3` line in the
+                         task) and state, how many stories are done, which have no task. Plain text, read-only
+  signoff ls|add|plan|confirm|result
+                         the sign-off and testing queue: what only a person can check, and test plans for the running
+                         app (proposed, confirmed by the owner, then results recorded)
   manage-tick [--dry-run] precheck, then ONE `claude -p "/manage-pass"` only when there is work: an idle tick makes no model
                          call (run it from cron or a timer)
   version                installed release, the one main pins, the newest, and what changed since
@@ -261,6 +267,8 @@ case "$cmd" in
              esac ;;
   precheck)  py factory_wait.py precheck ;;
   watch)     py factory_watch.py "$@" ;;
+  prd)       py factory_prd.py "$@" ;;
+  signoff)   py factory_signoff.py "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;

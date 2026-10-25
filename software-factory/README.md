@@ -423,6 +423,8 @@ version it pins. `factory help` lists everything.
 | `factory loop [N]` | Starts an agent loop: one fresh, unattended Claude run per task (`claude -p`). `N` caps the number of tasks. Run it again in another terminal for another agent |
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
 | `factory coding-agent\|dev-manager\|product-owner [name\|N] loop [-i] [--once] [--dry-run]` | The three roles, started the same way and run by the same loop. `factory loop` is `factory coding-agent loop`. [Roles](#roles) |
+| `factory prd [--open] [--story N] [--json]` | Progress against the PRD from GitHub: per user story its tasks and state. [Product owner](#the-product-owner-factory-prd-and-the-sign-off-and-testing-queue) |
+| `factory signoff ls\|add\|plan\|confirm\|result` | The sign-off and testing queue: what only a person can check, and test plans for the running app |
 | `factory init-roles [--force]` | Creates the project's role folder (`.claude/factory/roles/<role>/README.md` and `reads.md`) |
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
@@ -763,7 +765,7 @@ between passes. What differs is small:
 | | coding agent | dev manager | product owner |
 |---|---|---|---|
 | Skill a pass runs | `/next-task` | `/manage-pass <item>`, started by the orchestrator once per item | `/product-pass` |
-| Has work when | a task is ready (it claims it) | `factory watch` lists something (the orchestrator, no model) | an open issue or PR has `roles.product-owner.workLabel` |
+| Has work when | a task is ready (it claims it) | `factory watch` lists something (the orchestrator, no model) | an issue or PR has `roles.product-owner.workLabel`, an owner-queue ask is tagged `for=product`, or a test plan or sign-off item waits |
 | Settings | the project's `settings.json` | `roles.dev-manager.profile` | `roles.product-owner.profile` |
 | Model | `models.builder` | `models.manager` | `models.product-owner` |
 | Wait after a pass | `waitMinutes` (inside the loop) | `manager.busyMinutes` (2) / `manager.idleMinutes` (5) | `roles.product-owner.busyMinutes` (30) / `idleMinutes` (60); 0 idle: exit |
@@ -782,6 +784,54 @@ coding agent, so nothing running today changes.
 (`manager=<name>`), and `trustedReviewers` cannot tell roles apart; do not rely on it for that. `factory usage --by
 role` separates the sessions: each pass ends with `<!-- factory-role role=... name=... -->`, and a session without it
 is a coding agent's.
+
+### The product owner: `factory prd` and the sign-off and testing queue
+
+The product owner is the role for what needs the owner's yes: scope, order, the PRD, wording a customer reads, and what
+to test. `factory product-owner loop -i` is the main way in: a session the owner talks to ("chat with the PRD") with the
+PRD, designs and queues loaded through its `reads.md`. Unattended, a pass only **triages**: it writes proposals and a
+digest, and decides nothing. The `product-pass` skill holds the standing rules; the project's `README.md` and `reads.md`
+in `<roles.dir>/product-owner/` hold the product's voice, what the owner decides alone, and where the PRD and designs are.
+There is no custom UI: the owner reads progress and queues as plain text, below.
+
+**What gives the role work** (`factory_roles.py work product-owner`, one line each): an open issue or PR with
+`roles.product-owner.workLabel`; an owner-queue ask tagged `for=product` that nobody has answered; a test plan that waits
+for the owner or for a run; sign-off items. `factory product-owner loop --once --dry-run` prints where the role reads, then
+that list, and the command it would run. It writes nothing.
+
+**Asks for the product owner.** The dev manager writes scope, order and PRD questions to the owner queue as
+`<!-- factory-owner-ask id=<slug> for=product -->`. The product owner replies under it with a proposal (the options and a
+recommendation); the owner's yes comes in a reply there. Asks without the tag stay with the owner.
+
+**`factory prd [--open] [--story N] [--json]`** shows progress against the PRD, computed from GitHub. A story's id is `US-<n>`
+at the start of its heading or list item in the PRD file (`prd` in `factory.json`). A task issue says which stories it serves
+with one line, `PRD: US-3, US-5` (the task template has it). Per story it prints the state (done, in progress, planned, no
+task) and the tasks, then how many stories and tasks are done. It reports a story number two stories share (a task cannot say
+which it means) and tasks that name a story the PRD does not have. A task closed as "not planned" counts for nothing.
+
+```
+docs/PRD.md: 5 stories: 1 done, 1 in progress, 1 planned, 2 with no task. Tasks: 2 of 4 done.
+
+US-1   done         2/2   Upload a manual
+US-2   in progress  0/1   Review the draft guide
+        #12 in progress
+```
+
+**`factory signoff`** is the sign-off and testing queue: one issue, "Sign-off and testing queue" (pin it), made on first use,
+with one comment per item. The state is read from the comments after the item, so nothing is edited.
+
+| Command | What it does |
+|---|---|
+| `factory signoff ls [--all] [--json]` | Open items (all with `--all`), one line each |
+| `factory signoff add <id> --task N --check "..."` | A task's "Done when" needs a person: say how they check it |
+| `factory signoff plan <id> [--task N] (--file F \| --text T)` | A test plan for the running app. It is *proposed*; a revised plan has to be confirmed again |
+| `factory signoff confirm <id> [--by NAME]` | The owner says this is what gets tested |
+| `factory signoff result <id> pass\|fail\|blocked [--note T] [--build REF]` | Record a result. A plan takes one only once it is confirmed; the command refuses otherwise |
+
+The product owner writes the plans from the PRD story and its "Done when"; someone else sets the app up; the owner confirms
+what is tested; results are recorded with who and which build. **How a plan is run is not decided** (a scripted browser,
+or Claude driving a browser: needs a spike). This part keeps the plans, confirmations and results, whichever produces them.
+Markers: `factory-signoff`, `factory-signoff-result`, `factory-testplan`, `factory-testplan-confirm`, `factory-testresult`.
 
 ### The role folder
 
@@ -2144,6 +2194,7 @@ software-factory/
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
+    .claude/skills/product-pass/          the product owner's standing rules (one page)
     .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main)
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
