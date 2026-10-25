@@ -138,6 +138,8 @@ Maintain
   wait ci|answer <pr> [minutes], wait slot|ready [minutes]
                          the other token-free waits: CI finished, question answered, a PR slot free, a task ready
   precheck               dev manager: "nothing to do" (exit 0) or one line per thing to do (exit 3), without a model
+  manage-tick [--dry-run] precheck, then ONE `claude -p "/manage-pass"` only when there is work: an idle tick makes no model
+                         call (run it from cron or a timer)
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
@@ -226,6 +228,7 @@ case "$cmd" in
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
   precheck)  py factory_wait.py precheck ;;
+  manage-tick) py factory_tick.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
   update)
