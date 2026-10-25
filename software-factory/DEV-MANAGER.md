@@ -118,7 +118,10 @@ When `tasks.source` is `"issues"` in `factory.json`, you write the tasks and the
   then number, so the number order is the build order.
 - **Each tick, dead agents first:** `factory agents sweep` marks agents with no ping for `tasks.downMinutes` as down
   and puts their in-progress issues back to ready. Tell the owner in one line which agent went down (once per agent,
-  not every tick). `factory agents` shows who is alive.
+  not every tick). `factory agents` shows who is alive and the machine id each one runs on. Each machine has its own
+  agent names, so a name is one agent on one machine and `sweep` works per name; two machines should never share a
+  name. If `factory agents` or an issue shows one name with two machine ids, tell the owner: one of them must change
+  its names (`factory machine setup`).
 - **Then stale claims of live agents:** `factory issues stale` lists in-progress issues with no activity (issue updates or
   commits on their branch) for `tasks.staleHours`. Before moving one, check the agent really is gone (no recent
   commit, no open PR, no reply to a comment). Then `factory issues release <n> "<agent> went quiet"`: it goes back
