@@ -75,6 +75,10 @@ Stop early when there is nothing to do.
    CLAUDE.md, the decisions and the sources, and check the facts yourself. Escalate only what is the owner's (scope beyond
    the PRD, legal or customer-facing commitments, money and accounts, names and brands, things only a person can get): reply
    `<!-- factory-answer -->` with `needs-owner: <what and why>` and write an owner-queue ask.
+   A line that says *product question ... is unanswered* is a `to=po` question that nobody answered for a level (no product
+   owner runs, or it waited `roles.product-owner.escalateMinutes`): answer it from the PRD if the PRD is clear, as a message
+   `--in-reply-to` the question, and put the answer in the task's "Done when"; if it is a product decision, write an owner-queue
+   ask tagged `for=product` instead. Never speak for the product owner (no `from=po`).
 7. **Owner queue.** Everything in the right-hand column, and everything you cannot decide, goes here. Then exit.
 
 ## Markers (exact formats)

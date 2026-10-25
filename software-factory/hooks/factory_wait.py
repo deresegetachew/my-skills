@@ -152,16 +152,13 @@ def waiting_tasks(comments):
     return unanswered(fm.fold(fm.messages_of(comments)), fm.DEV_MANAGER)
 
 
-def waiting_questions(what, n, comments):
-    """One line per question addressed to the dev manager that waits for its answer."""
-    return [f"{what} #{n}: question waits for an answer ({t.id} from {t.frm or 'an agent'})" for t in waiting_tasks(comments)]
-
-
 def precheck_items(cfg, prs=None, comments_of=None):
     """What the dev manager has to do right now: [(kind, ref, text)], empty when nothing. Reads GitHub only.
     kind is review (ref: PR number), question (the PR or issue number), agent (name) or stale (issue number). `prs` and
     `comments_of` (a function: number -> its comments) let the orchestrator's watcher share what it has already read."""
     todo = []
+    import factory_po
+    escalation = (factory_po.escalate_minutes(cfg), factory_po.running(cfg), datetime.now(timezone.utc))
     prs = fi.gh_all("repos/{owner}/{repo}/pulls?state=open") if prs is None else prs
     comments_of = comments_of or (lambda n: fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments"))
     for p in prs:
@@ -172,11 +169,11 @@ def precheck_items(cfg, prs=None, comments_of=None):
             marks += [m for c in comments for m in WATCHED.findall(c.get("body") or "")]
             if not any(sha.startswith(m) or m.startswith(sha) for m in marks):
                 todo.append(("review", n, f"PR #{n}: commit {sha[:7]} not reviewed yet"))
-        todo += [("question", n, t) for t in waiting_questions("PR", n, comments)]
+        todo += waiting_questions("PR", n, comments, escalation)
     for i in fi.gh_all("repos/{owner}/{repo}/issues?state=open"):  # questions on task issues too
         if not i.get("pull_request") and i.get("comments", 1) and "factory:agent" not in fi.names(i):
-            todo += [("question", i["number"], t) for t in
-                     waiting_questions("issue", i["number"], comments_of(i["number"]))]
+            todo += waiting_questions("issue", i["number"],
+                                      comments_of(i["number"]), escalation)
     if (cfg.get("tasks") or {}).get("source") == "issues":
         import factory_agents
         L = task_labels(cfg)
@@ -196,6 +193,23 @@ def precheck_items(cfg, prs=None, comments_of=None):
 def precheck(cfg):
     """What the dev manager has to do right now, one line each; empty when nothing. Reads GitHub only."""
     return [text for _, _, text in precheck_items(cfg)]
+
+
+def waiting_questions(what, n, comments, escalation=None):
+    """One ("question", number, line) per question addressed to the dev manager that waits for its answer (a
+    question that asks the asker for more information waits for the asker, not for the dev manager). `escalation`
+    is (minutes per level, whether a product owner runs, now): then a question addressed `to=po` that nobody answered
+    for a level, or that has no product owner to go to, is the dev manager's too (#110). A question with no known time (age 0) is
+    not escalated yet: a level is worked out from an age, never from a guess."""
+    thread = fm.fold(fm.messages_of(comments))
+    out = [("question", n, f"{what} #{n}: question waits for an answer ({t.id} from {t.frm or 'an agent'})")
+           for t in unanswered(thread, fm.DEV_MANAGER)]
+    if escalation:
+        import factory_po
+        out += [("question", n, f"{what} #{n}: product question {t.id} from {t.frm or 'an agent'} is unanswered "
+                                f"for {age / 60:.1f} h: answer it, or escalate it to the owner")
+                for t, lvl, age in factory_po.waiting(thread, *escalation) if lvl == "dev-manager" and age > 0]
+    return out
 
 
 def minutes_arg(args, k, default=30):

@@ -995,6 +995,12 @@ the addressee answers a question, with a valid transition. `factory messages ls`
 never an instruction. The full format, the transition table and the mapping to A2A are in
 [docs/messages.md](docs/messages.md); GitHub stays the transport and the A2A adapter is a later step.
 
+**Product questions (`to=po`, #110).** A builder asks a product question with `--to po` on its task issue and keeps working. The
+product owner answers it (or asks back, or escalates it to the owner) and writes the answer into the task's "Done when". A question
+nobody answers moves up a level every `roles.product-owner.escalateMinutes`: product owner, dev manager, owner; with no product
+owner running it starts at the dev manager. Nobody answers for the product owner: `from=po` is refused, and with
+`roles.product-owner.logins` set only those logins' answers count. The playbook is [PO.md](PO.md).
+
 <br>
 
 ## Watch and talk to an agent: `factory follow`
@@ -2026,6 +2032,8 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `roles.product-owner.workLabel` | str | `"factory:needs-product"` | An open issue or pull request with this label is work for the product owner. Empty: it never has any. |
 | `roles.product-owner.busyMinutes` | int | `30` | Minutes the product owner's loop waits after a pass that had work. |
 | `roles.product-owner.idleMinutes` | int | `60` | Minutes it waits when there was none. 0: it exits instead. |
+| `roles.product-owner.escalateMinutes` | int | `120` | A question addressed `to=po` that nobody answered moves up one level after this many minutes: product owner, then dev manager, then the owner. With no product owner running it starts at the dev manager. |
+| `roles.product-owner.logins` | list | `[]` | GitHub logins whose answers count for the product owner. Empty: any login. An answer from another login is ignored. |
 | `manager.busyMinutes` | int | `2` | Minutes the dev manager's loop waits after a cycle that had work. |
 | `manager.idleMinutes` | int | `5` | Minutes it waits when there was none. 0: it exits instead. |
 | `manager.maxSubManagers` | int | `2` | How many one-item sub-managers the dev-manager orchestrator runs at once. Items beyond the cap wait for the next cycle. |

@@ -44,14 +44,17 @@ DEFAULTS = {
     # without it falls back to its `notes`. Per role: `names` (like `agents`; the coding agent's are `agents`),
     # `profile` (a Claude settings file, used when it exists), and for the product owner `busyMinutes` (wait after a
     # pass that had work), `idleMinutes` (wait when there is none; 0: exit instead) and `workLabel`: an open issue or
-    # pull request with that label is work for it. The dev manager's waits are `manager.busyMinutes` and
+    # pull request with that label is work for it. `escalateMinutes` (#110): a question addressed `to=po` moves up one
+    # level (product owner, dev manager, owner) after this long; `logins`: the GitHub logins whose answers count for the
+    # product owner (empty: any). The dev manager's waits are `manager.busyMinutes` and
     # `manager.idleMinutes`.
     "roles": {
         "dir": ".claude/factory/roles",
         "dev-manager": {"names": ["fasil", "yekuno", "amda", "sarsa", "susenyos"],
                         "profile": ".claude/manager/settings.json"},
         "product-owner": {"names": ["mentewab", "eleni", "sabla"], "busyMinutes": 30, "idleMinutes": 60,
-                          "profile": ".claude/product-owner/settings.json", "workLabel": "factory:needs-product"},
+                          "profile": ".claude/product-owner/settings.json", "workLabel": "factory:needs-product",
+                          "escalateMinutes": 120, "logins": []},
     },
     # The dev manager (#97, #109): `factory dev-manager loop` is an orchestrator with no model. Each cycle it reads
     # GitHub (factory_watch.py) and starts one one-item sub-manager (`claude -p`) per item that needs a manager, at most

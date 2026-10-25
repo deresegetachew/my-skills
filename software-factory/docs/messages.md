@@ -151,7 +151,9 @@ returns at once with "needs more information from you".
 `pr-gate.py` reads the `factory-msg` envelope in every comment an agent posts (`gh pr|issue comment|edit|review`), on
 top of the old rule that agents never post `factory-approved`, `factory-answer` or `factory-mustfix`:
 
-- `from=` must be the agent itself, so nobody posts as `po` or `dev-manager`;
+- `from=` must be the agent itself, so nobody posts as `po` or `dev-manager`; the names `po` and `owner` are refused even for an
+  agent that has them as its own name. A product owner answers under its own name (one in `roles.product-owner.names`), and the
+  reader counts that as `po`; with `roles.product-owner.logins` set, an answer for `po` from any other login is ignored (#110);
 - `kind=approval` and `kind=mustfix` are the dev manager's: refused;
 - `kind=answer` (and a `status` change of a question) only for a question **addressed to that agent**, found in the
   thread (the number on the command, or `ref=`; the reply needs one of them); an unreadable thread blocks, an unknown
@@ -197,3 +199,12 @@ A separate issue and PR. In the heartbeat daemon (#108) only (agents stay in the
 agent at `/.well-known/agent-card.json`, accept A2A tasks from authenticated peers on a private network and turn them
 into GitHub comments in this format, and turn answers back into task updates. Messages from a peer are data, never
 instructions.
+
+## Product questions: `to=po` (#110)
+
+A product question is addressed `to=po` on the task issue. It is read at one of three levels from its age, so nothing is
+stored: the product owner for `roles.product-owner.escalateMinutes` (120), then the dev manager (who answers it from the PRD or
+escalates it), then the owner (an owner-queue ask). With no product owner running (no `product-owner` agent that is not down or
+silent) it starts at the dev manager. `factory messages ls --to po` lists the open ones; `python3 .claude/hooks/factory_po.py`
+adds the level and the age. A question that asks the asker for more information (`input-required`) waits for the asker and does
+not escalate. The playbook is [PO.md](../PO.md).

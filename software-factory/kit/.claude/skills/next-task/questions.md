@@ -28,8 +28,12 @@ for you" in a report):
    check), starting with the marker `<!-- factory-question -->`. One question per comment, with the options you see,
    what each would change, and your recommendation. Put the message envelope above it so it has an id and an
    addressee: `factory messages new --kind question --to dev-manager` prints the envelope and the old marker; paste
-   both at the top of the comment (`--to po` for a product question; docs/messages.md). A comment with only the old
-   marker still works.
+   both at the top of the comment (docs/messages.md). A comment with only the old marker still works.
+   **Who gets it:** a *product* question (what should this screen do when X, which of two behaviours is right, a gap
+   in the acceptance criteria) goes `--to po`, on the task issue so the answer lasts; a technical or process question
+   goes `--to dev-manager` (the default). Nobody answers for the product owner but a product owner: the PR gate refuses
+   a message from=po or an answer you post for one. A `to=po` question nobody answers moves up by itself (product
+   owner, then dev manager, then the owner) after `roles.product-owner.escalateMinutes`; you keep working meanwhile.
 2. Don't wait idle. Continue with the parts that don't depend on the answer, or the next task that doesn't.
 3. Check for answers before each task: `gh pr view <n> --comments`. If you have nothing else to do, wait with
    `factory wait answer <n>` instead of checking again yourself. An answer starts with

@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 KINDS = {"dev-manager": "dev-manager", "po": "po"}
+ROLE_KINDS = {"dev-manager": "dev-manager", "product-owner": "po"}  # an agent's role (its issue) decides its kind (#110)
 SKILLS = {
     "coding-agent": ["build-tasks"],
     "dev-manager": ["review-pull-requests", "answer-technical-questions", "answer-process-questions"],
@@ -41,8 +42,8 @@ def factory_version():
         return "unknown"
 
 
-def card(name, state="unknown", machine_id=None, version=None, last_ping=None):
-    kind = kind_of(name)
+def card(name, state="unknown", machine_id=None, version=None, last_ping=None, role=None):
+    kind = ROLE_KINDS.get(role) or kind_of(name)
     machine = kind == "coding-agent" or bool(machine_id)
     return {"name": name, "kind": kind, "skills": list(SKILLS[kind]), "state": state,
             "location": "machine" if machine else "cloud", "machine": machine_id or None,
@@ -58,8 +59,9 @@ def cards(cfg, issues, version=None):
         st = fa.state_of(cfg, issue)
         if st:
             name, status, ping, _ = st
-            c = card(name, status, fa.machine_of(issue), version, fa.iso(ping))
-            c["role"] = fa.role_of(issue)  # the role it runs (coding-agent, dev-manager, product-owner)
+            role = fa.role_of(issue)
+            c = card(name, status, fa.machine_of(issue), version, fa.iso(ping), role)
+            c["role"] = role  # the role it runs (coding-agent, dev-manager, product-owner)
             out.append(c)
     return sorted(out, key=lambda c: (c["name"], c["state"]))
 

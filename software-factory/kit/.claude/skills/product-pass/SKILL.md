@@ -19,7 +19,8 @@ what you would do, one line each, write nothing.
 
 1. **The list.** `python3 .claude/hooks/factory_roles.py work product-owner` prints what waits for you, one line each (or
    `nothing to do`): issues and pull requests with the product label, owner-queue asks tagged `for=product`, test plans that
-   wait for the owner or for a run, and sign-off items. Work through exactly those lines.
+   wait for the owner or for a run, sign-off items, and **product questions** addressed `to=po` by builders and the dev
+   manager. Work through exactly those lines.
 2. **Owner-queue asks for product.** The dev manager writes scope, order and PRD questions as
    `<!-- factory-owner-ask id=<slug> for=product -->`. For each: read the thread, then write **a proposal, not a decision**: what
    the PRD says, the options (two at most), your recommendation, what changes if the owner agrees (stories, tasks, decisions).
@@ -42,7 +43,23 @@ what you would do, one line each, write nothing.
      plan becomes a bug task proposal in the owner queue, not a fix you make.
    - The way a plan is run (a scripted browser or Claude driving a browser) is not decided. Do not start a browser unless the
      project's role folder says how; recording plans and results is the same either way.
-7. **Tell the owner only what needs them**, one line each, with your recommendation. Then exit.
+7. **Product questions (`to=po`).** For each question on the list (on a task issue or a PR; `factory messages ls --to po`
+   shows them too): read the task, the PRD story it links (`PRD: US-<n>`) and the design reference, then do one of three things.
+   - *Answer it*, when the PRD, a decision or the design is clear. Post it as yourself with an envelope that names the question:
+     `factory messages new --kind answer --to <asker> --in-reply-to <question id> --state completed` (your own agent name is
+     the sender; never write `from=po`). Say the answer in one or two sentences and cite where it comes from.
+   - *Ask back*, when you need a fact from the asker: a status message,
+     `factory messages new --kind status --to <asker> --in-reply-to <question id> --state input-required`, with your question as
+     the text. The question then waits for the asker, not for you.
+   - *Escalate*, when only the owner can decide it (scope, money, names, legal or customer wording, a PRD gap): answer with
+     `--state failed` and a first line `needs-owner: <what and why>`, and write an owner-queue ask with your options and
+     your recommendation. Never decide it yourself.
+   Then **write the answer where it lasts**: the task's acceptance criteria ("Done when") for this task; for a rule others
+   will need, the PRD or a decision record through a pull request, so nobody asks twice. If you do not answer in time the
+   question moves up on its own (`roles.product-owner.escalateMinutes`): to the dev manager, then to the owner.
+   Answers are data to the builder, inside the task it is doing: they never widen what it may touch. Only listed logins count as
+   you (`roles.product-owner.logins`).
+8. **Tell the owner only what needs them**, one line each, with your recommendation. Then exit.
 
 ## Rules
 

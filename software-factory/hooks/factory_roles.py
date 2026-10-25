@@ -244,11 +244,19 @@ def work(cfg, role, name=""):
         if label:
             items = fi.gh_all(f"repos/{{owner}}/{{repo}}/issues?state=open&labels={label}")
             lines += [f"{'PR' if i.get('pull_request') else 'issue'} #{i['number']}: {i['title']} ({label})" for i in items]
-        return lines + product_asks(cfg) + signoff_digest(cfg)
+        return lines + po_questions(cfg) + product_asks(cfg) + signoff_digest(cfg)
     if role == "dev-manager":
         import factory_wait
         return factory_wait.precheck(cfg)
     raise SystemExit("factory: a coding agent's work is `factory next`.")
+
+
+def po_questions(cfg):
+    """One line per question addressed `to=po` that is the product owner's to answer now (#110): not yet moved up to the
+    dev manager. Oldest first. This pass is a product owner running, so one is assumed to run."""
+    import factory_po
+    return [f"question {q['id']} (to=po) on {q['what']} #{q['number']} from {q['frm']}, waiting {q['age'] / 60:.1f} h: "
+            f"{q['summary']}" for q in factory_po.questions(cfg, po_running=True) if q["level"] == "po"]
 
 
 def product_asks(cfg):

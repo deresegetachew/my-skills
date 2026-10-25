@@ -177,6 +177,18 @@ def collect(cfg, now=None, info=None):
         elif kind == "stale":
             items.append(make("stale", f"issue-{ref}", text, target=ref, key=f"issue-{ref}"))
 
+    # a product question (`to=po`, #110) that nobody answered for a level moves up: to the dev manager, then to the owner
+    import factory_po
+    for q in factory_po.questions(cfg, comments_of=comments_of, now=now):
+        n = q["number"]
+        about = f"{q['what']} #{n}: product question {q['id']} from {q['frm']}, unanswered for {q['age'] / 60:.1f} h"
+        if q["level"] == "dev-manager" and not any(i["kind"] == "question" and i["target"] == n for i in items):
+            items.append(make("question", f"question-{n}", about + ": answer it, or escalate it to the owner",
+                              since=when(q["since"]), target=n, key=q["id"], lease_kind="answer", pr=n))
+        elif q["level"] == "owner":
+            items.append(make("owner", f"po-question-{q['id']}", about + ": the product owner and the dev manager "
+                              "have not answered", to="owner", since=when(q["since"]), target=n, key=f"po-question-{q['id']}"))
+
     # checks 3, 4 and 5, per pull request
     po_label = str(role_setting(cfg, "product-owner", "workLabel", "") or "")
     for p in prs:
