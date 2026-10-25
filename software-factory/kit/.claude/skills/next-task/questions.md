@@ -26,11 +26,15 @@ for you" in a report):
 1. Post it as a comment on the pull request it concerns (or, if there's no PR yet or you're stuck before the reviewer
    has passed, open a **draft** PR with `gh pr create --draft --title "Question: <topic>"`; drafts skip the reviewer
    check), starting with the marker `<!-- factory-question -->`. One question per comment, with the options you see,
-   what each would change, and your recommendation.
+   what each would change, and your recommendation. Put the message envelope above it so it has an id and an
+   addressee: `factory messages new --kind question --to dev-manager` prints the envelope and the old marker; paste
+   both at the top of the comment (`--to po` for a product question; docs/messages.md). A comment with only the old
+   marker still works.
 2. Don't wait idle. Continue with the parts that don't depend on the answer, or the next task that doesn't.
 3. Check for answers before each task: `gh pr view <n> --comments`. If you have nothing else to do, wait with
    `factory wait answer <n>` instead of checking again yourself. An answer starts with
-   `<!-- factory-answer -->`. Apply it, reply with what you changed, and carry on.
+   `<!-- factory-answer -->` (or an envelope with `kind=answer in-reply-to=<your id>`). Apply it, reply with what you
+   changed, and carry on. `factory messages ls --to <you>` lists what is still open.
 4. Only things the dev manager has marked `needs-owner` wait for a person; for those, keep going around them.
 5. **Not a question:** a fix inside this PR's own scope that `CLAUDE.md`, the style guide or a reviewer's must-fix
    requires (a missed reduced-motion rule, a flaky test you caused, a wrong label). Make it in this PR and say so in

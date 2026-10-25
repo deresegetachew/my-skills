@@ -5,12 +5,15 @@ with one short line. Exit codes: 0 = it happened, 2 = timed out (do other work),
 3 = the PR is closed or merged, 4 = CI never started (billing; see factory_ci.py).
 
   factory_wait.py ci <pr> [minutes]       until every check on the PR's head commit has finished: 0 green, 1 failed
-  factory_wait.py answer <pr> [minutes]   until every `<!-- factory-question -->` on the PR has a later
-                                          `<!-- factory-answer -->` (1 when nothing is asked)
+  factory_wait.py answer <pr> [minutes]   until every question on the PR (a `factory-msg` question or an old
+                                          `<!-- factory-question -->`) is answered: 0 answered, or 0 at once when the
+                                          addressee asked for more information (input-required: your turn), 1 when
+                                          nothing is waiting
   factory_wait.py slot [minutes]          until this account has fewer than `maxOpenPRs` ready PRs open
   factory_wait.py ready [minutes]         until a task is ready to take (issues mode): prints "issue-N title"
   factory_wait.py precheck                for the dev manager: exit 0 and "nothing to do" when no PR has an unreviewed
-                                          commit, no question waits and no agent went quiet; else exit 3, one line each
+                                          commit, no question addressed to the dev manager waits (on a PR or an issue)
+                                          and no agent went quiet; else exit 3, one line each
 
 Waits default to 30 minutes and look every FACTORY_WAIT_START seconds (default 15), growing by half each time up to
 FACTORY_WAIT_MAX seconds (default 60). Everything goes through the GitHub REST API (`gh api`).
@@ -20,11 +23,10 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import factory_issues as fi  # noqa: E402
+import factory_messages as fm  # noqa: E402
 from factory_config import load, task_labels  # noqa: E402
 
-QUESTION = re.compile(r"<!--\s*factory-question\b")
-ANSWER = re.compile(r"<!--\s*factory-answer\b")
-REVIEWED = re.compile(r"<!--\s*(?:factory-approved|factory-mustfix|pr-watch)\s+sha=([0-9a-f]{7,40})")
+WATCHED = re.compile(r"<!--\s*pr-watch\s+sha=([0-9a-f]{7,40})")
 BAD = {"failure", "startup_failure", "timed_out", "cancelled", "action_required", "stale"}
 
 
@@ -84,23 +86,38 @@ def wait_ci(n, minutes):
     return wait_until(check, minutes) or (2, f"PR #{n}: CI still running after {minutes} minutes ({seen.get('last', '?')})")
 
 
-def open_questions(n):
-    """Comments with a question and no later answer, oldest first."""
-    asked = []
-    for c in fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments"):
-        body = c.get("body") or ""
-        if QUESTION.search(body):
-            asked.append(c)
-        elif ANSWER.search(body):
-            asked = []  # the dev manager answers what is open at that point
-    return asked
+def thread_of(n):
+    """The fold (factory_messages.py) of the comments on issue or PR n."""
+    return fm.fold(fm.messages_of(fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments")))
+
+
+def unanswered(thread, to=None):
+    """Open questions still waiting for their addressee (submitted or working), oldest first."""
+    return [t for t in thread.tasks.values() if t.state in ("submitted", "working") and (not to or t.to == to)]
 
 
 def wait_answer(n, minutes):
-    if not open_questions(n):
+    first = thread_of(n)
+    if not any(t.is_open for t in first.tasks.values()):
         return 1, f"PR #{n}: no question is waiting for an answer"
-    got = wait_until(lambda: None if open_questions(n) else (0, f"PR #{n}: answered. Read it: gh api repos/{{owner}}/{{repo}}/issues/{n}/comments"), minutes)
-    return got or (2, f"PR #{n}: still no answer after {minutes} minutes; carry on with other work")
+    ask = [t for t in first.tasks.values() if t.state == "input-required"]
+    if ask and not unanswered(first):
+        return 0, asks_for_more(n, ask)
+
+    def check():
+        thread = thread_of(n)
+        if unanswered(thread):
+            return None
+        ask = [t for t in thread.tasks.values() if t.state == "input-required"]
+        return (0, asks_for_more(n, ask)) if ask else \
+            (0, f"PR #{n}: answered. Read it: gh api repos/{{owner}}/{{repo}}/issues/{n}/comments")
+
+    return wait_until(check, minutes) or (2, f"PR #{n}: still no answer after {minutes} minutes; carry on with other work")
+
+
+def asks_for_more(n, tasks):
+    return (f"PR #{n}: {', '.join(t.id for t in tasks)} needs more information from you (input-required). "
+            f"Read it and reply with the same in-reply-to: gh api repos/{{owner}}/{{repo}}/issues/{n}/comments")
 
 
 def my_ready_prs():
@@ -127,10 +144,21 @@ def wait_ready(minutes, cfg):
     return wait_until(check, minutes) or (2, f"no task became ready in {minutes} minutes")
 
 
+def waiting_tasks(comments):
+    """The questions addressed to the dev manager that wait for its answer, oldest first (a question that asks the
+    asker for more information waits for the asker, not for the dev manager)."""
+    return unanswered(fm.fold(fm.messages_of(comments)), fm.DEV_MANAGER)
+
+
+def waiting_questions(what, n, comments):
+    """One line per question addressed to the dev manager that waits for its answer."""
+    return [f"{what} #{n}: question waits for an answer ({t.id} from {t.frm or 'an agent'})" for t in waiting_tasks(comments)]
+
+
 def precheck_items(cfg, prs=None, comments_of=None):
     """What the dev manager has to do right now: [(kind, ref, text)], empty when nothing. Reads GitHub only.
-    kind is review (ref: PR number), question (PR number), agent (name) or stale (issue number). `prs` and `comments_of`
-    (a function: PR number -> its comments) let the orchestrator's watcher share what it has already read."""
+    kind is review (ref: PR number), question (the PR or issue number), agent (name) or stale (issue number). `prs` and
+    `comments_of` (a function: number -> its comments) let the orchestrator's watcher share what it has already read."""
     todo = []
     prs = fi.gh_all("repos/{owner}/{repo}/pulls?state=open") if prs is None else prs
     comments_of = comments_of or (lambda n: fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments"))
@@ -138,18 +166,15 @@ def precheck_items(cfg, prs=None, comments_of=None):
         n, sha = p["number"], p["head"]["sha"]
         comments = comments_of(n)
         if not p.get("draft"):
-            marks = [m for c in comments for m in REVIEWED.findall(c.get("body") or "")]
+            marks = [v for c in comments for _, v in fm.verdicts(c.get("body") or "") if v]
+            marks += [m for c in comments for m in WATCHED.findall(c.get("body") or "")]
             if not any(sha.startswith(m) or m.startswith(sha) for m in marks):
                 todo.append(("review", n, f"PR #{n}: commit {sha[:7]} not reviewed yet"))
-        asked = []
-        for c in comments:
-            b = c.get("body") or ""
-            if QUESTION.search(b):
-                asked.append(c)
-            elif ANSWER.search(b):
-                asked = []
-        if asked:
-            todo.append(("question", n, f"PR #{n}: question waits for an answer"))
+        todo += [("question", n, t) for t in waiting_questions("PR", n, comments)]
+    for i in fi.gh_all("repos/{owner}/{repo}/issues?state=open"):  # questions on task issues too
+        if not i.get("pull_request") and i.get("comments", 1) and "factory:agent" not in fi.names(i):
+            todo += [("question", i["number"], t) for t in
+                     waiting_questions("issue", i["number"], comments_of(i["number"]))]
     if (cfg.get("tasks") or {}).get("source") == "issues":
         import factory_agents
         L = task_labels(cfg)

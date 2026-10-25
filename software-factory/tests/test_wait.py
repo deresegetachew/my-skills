@@ -118,6 +118,63 @@ def test_a_question_asked_after_an_answer_is_open_again():
     assert wait(d, env, "answer", "7", "0.01")[0] == 2
 
 
+def E(**kw):
+    kw.setdefault("v", "1")
+    return "<!-- factory-msg " + " ".join(f"{k.replace('_', '-')}={v}" for k, v in kw.items()) + " -->"
+
+
+QX = E(id="q1x", kind="question", **{"from": "haile"}, to="dev-manager", state="submitted") + "\nWhich?"
+AX = E(id="a1x", kind="answer", **{"from": "dev-manager"}, to="haile", state="completed", in_reply_to="q1x") + "\nThis one."
+
+
+def test_answer_waits_for_the_answer_that_names_the_question():
+    other = E(id="a2x", kind="answer", **{"from": "dev-manager"}, to="haile", state="completed", in_reply_to="zzz")
+    d, env = world(pulls={"7": pr(7)}, steps_comments=[{"7": [QX]}, {"7": [QX, other]}, {"7": [QX, other, AX]}])
+    rc, out = wait(d, env, "answer", "7", "5")
+    assert rc == 0 and "answered" in out, (rc, out)
+
+
+def test_answer_keeps_waiting_when_only_someone_elses_question_was_answered():
+    po_q = E(id="q2x", kind="question", **{"from": "haile"}, to="po", state="submitted")
+    d, env = world(pulls={"7": pr(7)}, comments={"7": [QX, po_q, AX]})
+    env["FACTORY_WAIT_START"] = "0.01"
+    rc, out = wait(d, env, "answer", "7", "0.01")
+    assert rc == 2, (rc, out)
+
+
+def test_answer_stops_when_the_addressee_asks_for_more_information():
+    ask = E(id="s1x", kind="status", **{"from": "dev-manager"}, to="haile", state="input-required", in_reply_to="q1x") + "\nWhich one?"
+    d, env = world(pulls={"7": pr(7)}, comments={"7": [QX, ask]})
+    rc, out = wait(d, env, "answer", "7")
+    assert rc == 0 and "more information" in out and "q1x" in out, (rc, out)
+
+
+def test_a_failed_question_counts_as_answered_with_its_state_in_the_line():
+    failed = E(id="a1x", kind="answer", **{"from": "dev-manager"}, state="failed", in_reply_to="q1x") + "\nneeds-owner: name"
+    d, env = world(pulls={"7": pr(7)}, steps_comments=[{"7": [QX]}, {"7": [QX, failed]}])
+    rc, out = wait(d, env, "answer", "7", "5")
+    assert rc == 0 and "answered" in out, (rc, out)
+
+
+def test_precheck_lists_questions_for_the_dev_manager_on_prs_and_issues_but_not_for_others():
+    po_q = E(id="q2x", kind="question", **{"from": "haile"}, to="po", state="submitted")
+    d, env = world(pulls={"7": pr(7, sha="abc1234def")}, issues=[{"number": 21, "title": "T", "body": "", "state": "open", "comments": 1,
+                                                                    "labels": [], "updated_at": "2020-01-01T00:00:00Z"}],
+                   comments={"7": ["<!-- factory-approved sha=abc1234 -->", QX, po_q], "21": [QX.replace("q1x", "q3x")]})
+    rc, out = wait(d, env, "precheck")
+    assert rc == 3 and "PR #7: question waits for an answer (q1x from haile)" in out, (rc, out)
+    assert "issue #21: question waits for an answer (q3x from haile)" in out and "q2x" not in out, out
+    answered = [QX, AX]
+    d, env = world(pulls={"7": pr(7, sha="abc1234def")}, comments={"7": ["<!-- factory-approved sha=abc1234 -->", *answered]})
+    assert wait(d, env, "precheck") == (0, "nothing to do")
+
+
+def test_precheck_sees_an_approval_in_the_new_form():
+    ok = E(id="p1x", kind="approval", **{"from": "dev-manager"}, state="completed", sha="abc1234")
+    d, env = world(pulls={"7": pr(7, sha="abc1234def")}, comments={"7": [ok]})
+    assert wait(d, env, "precheck") == (0, "nothing to do")
+
+
 def test_slot_counts_only_my_ready_prs():
     pulls = {"1": pr(1), "2": pr(2), "3": pr(3, draft=True), "4": pr(4, user="other")}
     d, env = world(pulls=pulls, cfg={"maxOpenPRs": 2})

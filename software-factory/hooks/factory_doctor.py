@@ -5,7 +5,10 @@ Read-only: it runs version and status commands, never installs, logs in, decrypt
 `ok`, `fix` (the factory won't work until it's fixed, with the fix) or `note` (worth a look). Exit 1 when any `fix`.
 Checks that don't apply to the project (Node without a package.json, sops without a .sops.yaml) are left out.
 
-  python3 .claude/hooks/factory_doctor.py
+  python3 .claude/hooks/factory_doctor.py [--sandbox]
+
+`--sandbox` adds the checks of a sandboxed factory machine (factory_sandbox.py): run it as the dedicated user that
+`factory bootstrap` made. It runs a few network probes and one container, so it takes longer.
 """
 import json, os, re, shutil, subprocess, sys
 
@@ -173,6 +176,31 @@ def factory(r, cfg):
         r.note("sleep", "keep the Mac awake while agents run (`caffeinate -d` in another tab)")
 
 
+def turbo(r, cfg):
+    """The shared Turborepo cache (#59): only when turbo.api is set. Never runs turbo.secretsCommand (that decrypts)."""
+    from factory_turbo import explain, probe, settings, turbo_json_signs
+    try:
+        s = settings(cfg)
+    except ValueError as e:
+        r.note("shared build cache", str(e))
+        return
+    if not s["api"]:
+        return
+    if os.environ.get("TURBO_TOKEN"):
+        r.ok("shared build cache token: TURBO_TOKEN is set")
+    elif s["secretsCommand"]:
+        r.ok("shared build cache token: from turbo.secretsCommand (not run here; `factory turbo status` runs it)")
+    else:
+        r.note("shared build cache token", "TURBO_TOKEN isn't set and turbo.secretsCommand is empty, so builds use the "
+               "local cache only. `factory turbo status` says how to supply one")
+    state, detail = probe(s["api"], s["team"], None)  # no token: any answer, even a refusal, proves it is there
+    if state in ("ok", "rejected"):
+        r.ok(f"shared build cache answers at {s['api']}")
+    else:
+        r.note("shared build cache", explain(s["api"], state, detail))
+    if os.environ.get("TURBO_REMOTE_CACHE_SIGNATURE_KEY") and turbo_json_signs() is False:
+        r.note("shared build cache signatures", "TURBO_REMOTE_CACHE_SIGNATURE_KEY is set, but turbo.json has no "
+               "\"remoteCache\": {\"signature\": true}, so nothing is signed or checked")
 def release(r):
     """A project that takes the factory from releases (#113): the installed files are the pinned release's, and this
     machine is ready (hooks exist, scripts parse, runner files readable). The same checks `factory update` ends with."""
@@ -280,7 +308,13 @@ def main():
         models(r, cfg)
         roles(r, cfg)
         manager(r, cfg)
+        turbo(r, cfg)
         release(r)
+    if "--sandbox" in sys.argv[1:]:
+        from factory_sandbox import run as sandbox
+        print()
+        print("Sandbox (#105)")
+        sandbox(r, cfg)
     print()
     print(f"{r.fixes} to fix." if r.fixes else "All the checks pass.")
     return 1 if r.fixes else 0

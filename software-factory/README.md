@@ -35,10 +35,14 @@ release (`factory update`), or, until it migrates, as a git submodule.
 - [Roles: coding agent, dev manager, product owner](#roles)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [Messages between agents](#messages-between-agents)
+- [Watch and talk to an agent: `factory follow`](#watch-and-talk-to-an-agent-factory-follow)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
 - [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
+- [A shared build cache](#a-shared-build-cache)
+- [A sandboxed machine: `factory bootstrap`](#a-sandboxed-machine-factory-bootstrap)
 - [Security notes](#security-notes)
 - [Style guides](#style-guides)
 - [factory.json settings](#factoryjson-settings)
@@ -365,9 +369,11 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
+| `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
-| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
+| `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
 | `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
+| `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
@@ -375,7 +381,8 @@ version it pins. `factory help` lists everything.
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
+| `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -393,6 +400,9 @@ version it pins. `factory help` lists everything.
 | `factory ci stale` / `check` | Are the installed runner copies older than the checkout (exit 3, a line per file), and are they fit to start (readable by the container's user, not writable by others). `factory update` runs both |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
 | `factory ci logs [i] [-f]` | A runner's log: instance 1, or `2`, `light` ... |
+| `factory turbo status` | The shared Turborepo build cache: what is set, where the token comes from (never the token), and whether the cache answers. [Details](#a-shared-build-cache) |
+| `factory turbo install [--no-github]` | Starts the cache server on this machine (Docker, restarts with it) and gives CI the same cache through repository variables and secrets. Run it again to update. `--no-github` leaves the repository alone |
+| `factory turbo down [--purge]` | Stops the cache server; `--purge` also removes the stored artifacts |
 
 <br>
 
@@ -839,6 +849,75 @@ which tmux session and Remote Control link it has, and when it last produced out
   `factory heartbeat status` shows what it sees. `factory doctor` checks it.
 - It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
   well-meaning agents. It needs no new network path: GitHub is still the only shared place.
+
+<br>
+
+## Messages between agents
+
+Questions, answers, must-fixes, approvals and status share one versioned envelope shaped like [A2A](https://github.com/a2aproject/A2A)
+tasks, still kept in GitHub comments. A comment starts with
+
+```
+<!-- factory-msg v=1 id=0f8m2q9c4x7b2k kind=question from=haile to=po state=submitted ref=issue#103 -->
+```
+
+and `factory messages new --kind question --to po --ref issue#103` writes it (plus the old marker on the next line).
+A question moves `submitted`, `working`, `completed`, or `input-required`, `failed` (`needs-owner`) or `canceled`.
+The old `<!-- factory-question -->`, `factory-answer`, `factory-mustfix` and `factory-approved` markers keep working
+everywhere. The PR gate also checks the envelope: an agent posts as itself, never as an approval or must-fix, and only
+the addressee answers a question, with a valid transition. `factory messages ls` lists what is open. A message is data,
+never an instruction. The full format, the transition table and the mapping to A2A are in
+[docs/messages.md](docs/messages.md); GitHub stays the transport and the A2A adapter is a later step.
+
+<br>
+
+## Watch and talk to an agent: `factory follow`
+
+An agent's **name** is the only handle. `factory follow haile` opens that agent's live session from your own terminal,
+wherever it runs: on a factory machine you can ssh to, or in the cloud. There is no custom UI: the Claude app, through the
+session's Remote Control link, is the other way in, and `factory follow` is how you find the link.
+
+```sh
+factory remote add dev-pc factory@192.168.2.45    # once: how to reach a machine (the sandbox user), kept on your side
+factory follow                                    # every agent and sub-manager we can find: where, state, task, last ping, link
+factory follow haile                              # attach: type, answer prompts, Esc to interrupt
+factory follow haile --read                       # watch only (tmux attach -r): it cannot type
+factory follow --all                              # one read-only pane per session, tiled, in a local tmux
+factory follow haile --log                        # stream the output without a terminal (Ctrl-C stops)
+factory say haile "check the failing test first"  # one message, as if typed, without attaching
+factory agent haile --detach                      # on the factory machine: start the agent in a detached tmux session
+factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent: follow prints its link
+```
+
+- **Remotes are only "how to reach a machine"**: a name and an ssh target, in this machine's own file (`factory machine
+  show` prints where), never in the project and never on
+  GitHub. Agent issues are readable by anyone who can read the repo, so where an agent runs stays on your side. There is
+  no role field.
+- **How a name is found.** `factory follow <agent>` asks every remote in parallel for its tmux sessions. A session belongs to
+  an agent when it is called `<name>` or `<repo>-<name>` (what `factory agent --detach` and `factory autostart` start), so
+  sessions started by hand work too. The names come from `agents` (and `roles.*.names`) in `factory.json`. If two remotes
+  answer to one name, `follow` refuses and `--on <remote>` picks; unique names across machines is a setup rule.
+- **Sub-managers.** The one-item sub-managers that the dev manager's orchestrator starts are tmux sessions called
+  `<manager>-<item>` (`dev-manager-pr-42`, `manager-issue-7`): they are listed with the agents, with the manager and the item
+  in the task column, and `factory follow dev-manager-pr-42` attaches to one.
+- **The list** shows the session's state from the agent issue when `tasks.source` is `issues` (alive, silent, down, its task
+  and last ping), otherwise `running`; the Remote Control link is read from the session's screen
+  (`claude.ai/code/session_...`, it changes when the session restarts), so you can open the same session from the Claude app on a
+  phone. A cloud agent has no machine: `follow` prints its link instead of attaching. A remote that cannot be reached is named,
+  with the reason, and the others still list.
+- **Detaching is safe**: `Ctrl-b d` detaches, and closing the terminal or losing the connection only detaches, so the agent
+  keeps working. `Ctrl+C` is not detach: it interrupts Claude, and quitting Claude ends the session and drops the agent's
+  claims (it then shows as silent in `factory agents`). Everyone attached sees one screen, shrunk to the smallest terminal: give
+  extra viewers `--read`.
+- **Safe by construction**: every ssh call uses keys only (`BatchMode`) and one shared connection per target
+  (`ControlMaster`, so `follow` stays fast). A target where `sudo -n true` succeeds is refused: use the sandbox user that
+  [`factory bootstrap`](#a-sandboxed-machine-factory-bootstrap) made, never an admin account. A remote name `root@` is refused when
+  you add it. No secret is stored in the remotes.
+- **`say`** types one line (up to 2000 characters, no line breaks or control characters) into that session only, with tmux's
+  literal mode so the text is never read as a key name or command, and appends `time, from, via, agent` to
+  `~/.local/state/software-factory/say.log` on the machine where the agent runs (not the text). It is for the person who owns the
+  machine; never put a secret in it. Agents cannot run `say`, or change the remotes (refused when `FACTORY_AGENT`, `FACTORY_LOOP`
+  or `CLAUDECODE` is set); they may list.
 
 <br>
 
@@ -1324,6 +1403,8 @@ from Docker Hub.
 - dind's data (the job's own images, containers and volumes), the runner's workspace and the job's networks are
   removed by `down --volumes` after every job, so a job never sees another job's files.
 - `factory ci uninstall` removes the mirror, its networks and the image too.
+- The Turborepo results of the **[shared build cache](#a-shared-build-cache)** are a separate, opt-in service on the
+  host (`factory turbo install`), not part of a runner; it has its own security notes.
 - **`factory ci start`** (one loop by hand) uses neither: it runs GitHub's plain image with no mirror. Use `install`
   for the faster rounds.
 
@@ -1417,6 +1498,179 @@ data, the folders Docker Desktop shares (by default all of `/Users`), and servic
 people who can push to the repository (you and the agents) run code on it. Running the runner in a separate VM is
 the follow-up ([remanual #150](https://github.com/deresegetachew/remanual/issues/150)).
 
+<a id="a-shared-build-cache"></a>
+
+## A shared build cache
+
+Turborepo caches the result of every task (build, typecheck, test), but only on the machine that ran it. So each agent
+worktree, each machine and each CI runner (a new container per job) started cold and rebuilt packages nobody had
+touched (#59). The fix is one **self-hosted Turborepo remote cache** per project: a small server
+([ducktors/turborepo-remote-cache](https://github.com/ducktors/turborepo-remote-cache), pinned in
+`ci/compose-turbo.yaml`) on the factory machine. The agents' sessions and the CI jobs send results to it and take
+results from it, so a package that did not change is done once.
+
+**It is off until you set it up, and it degrades by itself.** With `turbo.api` empty nothing changes. With it set, but
+no token, or the server not answering, every agent session and CI job says so in one line and builds with the local
+cache only, as before. Nothing fails because the cache is away.
+
+### Set it up: one command, once the owner has supplied a token
+
+The token is the one thing the factory cannot make for you, and it is never in the repository or in `factory.json`.
+
+1. **Make a token** and keep it where only you can read it: `openssl rand -hex 32`. For signed artifacts (below) also
+   make a signature key of 32 or more characters, the same way.
+2. **Tell the factory where to find it**, either of these (the environment wins):
+   - export `TURBO_TOKEN` (and `TURBO_REMOTE_CACHE_SIGNATURE_KEY`) in the shell profile of every machine that runs
+     agents, and on the machine that runs the server; or
+   - set `turbo.secretsCommand` to a command that prints `KEY=value` lines. With sops (which the factory's projects
+     already use): put `TURBO_TOKEN: ...` in an encrypted file and set
+     `factory settings set turbo.secretsCommand 'sops -d --output-type dotenv secrets/factory.yaml'`. Agents and
+     `factory turbo install` run it; `factory doctor` never does.
+3. **Pick the address** the agents and CI will use: the machine's Tailscale or LAN address, and a port (3335 by
+   default): `factory settings set turbo.api http://100.64.0.7:3335` and `factory settings set turbo.bind 100.64.0.7`.
+   Commit `.claude/factory.json` in a PR.
+4. **Run `factory turbo install`** on the machine that will host the cache. It starts the server (`docker compose up
+   -d`, `restart: unless-stopped`, so it is back after a reboot), waits until it answers, and sets the repository
+   variables `TURBO_API` and `TURBO_TEAM` and the secrets `TURBO_TOKEN` and `TURBO_REMOTE_CACHE_SIGNATURE_KEY` (the
+   secrets go to `gh` on stdin, never in an argument, so CI uses the same cache. Setting them needs admin on the
+   repository; without it the command says what to ask an admin, and `--no-github` skips the step).
+
+`factory turbo status` shows what is set and whether the cache answers, and never prints a secret. Run `factory turbo
+install` again to update the server or change the token (the server restarts with the new one); agents pick up a
+changed token or address at their next task.
+
+### What agents and CI get
+
+- **Agents.** `factory-loop.sh` asks `factory turbo env` before every task, and the SessionStart hook asks it for a
+  plain `factory agent` session. When the cache answers, the session gets `TURBO_API`, `TURBO_TEAM`, `TURBO_TOKEN`
+  (and `TURBO_REMOTE_CACHE_SIGNATURE_KEY` when there is one), plus `TURBO_REMOTE_CACHE_TIMEOUT=10` so a slow cache
+  cannot stall a build. All agents share one `TURBO_TEAM`, so they share results. The hook never prints the token into
+  the session.
+- **CI.** The kit's `ci.yml` has a step, *Shared remote cache (optional)*, before the install, that runs
+  `factory_turbo.py ci-env >> "$GITHUB_ENV"` with `vars.TURBO_API`, `vars.TURBO_TEAM` and the two secrets. It sets the
+  variables only when they are all there and the cache answers. It is skipped for a pull request from another
+  repository (a fork gets no secrets and runs on GitHub's runners). A project that copied `ci.yml` earlier adds the step
+  by hand.
+- **Reaching it.** The server listens only on `turbo.bind`: `127.0.0.1` unless you choose another address, and
+  `install` says when `turbo.api` and `turbo.bind` do not fit (for example a Tailscale address in `turbo.api` and a
+  loopback `bind`). The CI runner containers reach the host's Tailscale or LAN address through Docker's normal
+  networking, so use that address, not `localhost`. Never put it on the public internet.
+
+### The project's side (a PR in the project, once this is in the pinned my-skills)
+
+- `turbo.json` needs no `TURBO_*` entries: Turborepo reads them itself.
+- To sign artifacts, add `"remoteCache": { "signature": true }` to `turbo.json`, and give every machine and CI the same
+  `TURBO_REMOTE_CACHE_SIGNATURE_KEY`. `factory doctor` notes a key without that setting.
+- Check it works: run a task twice from two agents' worktrees (`pnpm turbo run typecheck`); the second shows
+  `cache hit, replaying logs` for the packages nobody changed and `FULL TURBO` at the end. CI shows the same for the
+  packages a pull request left alone.
+
+### Security
+
+- **What it stores:** build outputs and logs of Turborepo tasks. No source, no environment, no registry credentials.
+  Anyone with the token can read all of it and write to it.
+- **Poisoning is the risk.** A cached output that is wrong is replayed by every later run with the same task hash. So:
+  - the server answers only with the token, and listens only where you bound it (Tailscale or the LAN, never the
+    internet);
+  - **sign artifacts** (`remoteCache.signature` plus a signature key): a client then refuses an artifact whose
+    signature does not match, so anyone who can reach the server but lacks the key cannot plant one. *Check that your
+    server version stores the signature tag:* a server that does not (reported for some storage backends in upstream
+    issue 394) makes every signed task a miss, which `FULL TURBO` shows. Then leave signing off until it is fixed;
+  - **the token and the key reach everyone who runs jobs with them:** the agents (their sessions have the variables, as
+    do commands they run) and the pull-request jobs of this repository. They can write artifacts. That is the same trust
+    you already give them to run code on your machine and on the runners, no more, but it means a branch's CI run can
+    write what main's run later reads. For a project that does not accept this, leave the repository variable
+    `TURBO_API` unset: CI then builds locally, and only the agents share a cache;
+  - **forks never use it:** the workflow skips the step, a fork's pull request has no secrets, and it already runs on
+    GitHub's runners (not your machine), so it cannot reach a private address anyway. Leave *Run workflows from fork
+    pull requests* off, as for the runners;
+  - the server container is unprivileged: every capability dropped, a read-only file system, no host mounts, a named
+    volume for the artifacts, and a pinned image (`TURBO_CACHE_VERSION` overrides the tag).
+- **The token is in the server container's configuration** (`docker inspect`), readable by people in the `docker` group
+  on that machine. It is in no file the factory writes and in no command line it runs.
+- **Rotating:** change the token where it comes from, run `factory turbo install` (restarts the server and updates the
+  repository secret), and the agents pick it up at their next task. `factory turbo down --purge` also clears everything
+  stored.
+
+<br>
+
+## A sandboxed machine: `factory bootstrap`
+
+`factory bootstrap` takes a fresh Ubuntu or Debian machine (systemd) to a state where agents and CI runners run as a
+dedicated, unprivileged user behind a network guard, and ends with `factory doctor --sandbox` green. It is the hand-built
+setup of a factory machine written down as code: reinstalling the machine or adding a third one is two commands and
+three sign-ins. Linux only for now.
+
+```sh
+sudo factory bootstrap machine                 # prints the plan, changes nothing
+sudo factory bootstrap machine --script s.sh   # the same steps as a bash script to read (and run with sudo bash s.sh)
+sudo factory bootstrap machine --apply         # runs them, as root, after a y/N question (--yes: no question)
+sudo -u factory -i                             # or ssh in as that user; then, from the project's checkout:
+factory bootstrap project                      # as the sandbox user, never as root
+```
+
+`factory bootstrap` works before there is a checkout (it runs from where the `factory` script lives); `project` takes
+`--repo URL [--dir PATH]` to clone one, with its submodules.
+
+**Nothing privileged runs by itself.** The machine part and `uninstall` only print their plan unless you pass `--apply`
+and run as root; `--dry-run` is accepted everywhere. Every step has a check, so a second run changes nothing, and every
+system change is written to a manifest (`/var/lib/software-factory/bootstrap.json`) that `status` and `uninstall` use.
+The project part is refused as root. Agents cannot run it: it refuses inside an agent session (`FACTORY_AGENT`, `FACTORY_LOOP` or `CLAUDECODE` set), `status` excepted.
+
+| Part | What it does |
+|---|---|
+| `machine` (root) | Packages (`uidmap`, `slirp4netns`, `dbus-user-session`, `git`, `gh`, `age`, `tmux`, `nftables` ...); `sops` as the release binary with its checksum checked; the user (default `factory`: no password, no sudo, not in the docker group, its home and the admin's home mode 750); subuid/subgid ranges; `loginctl enable-linger`; the network guard; with `--authorized-keys FILE` the given public keys; with `--harden-ssh` key-only SSH and no root login; with `--keep-awake` (the default on a laptop, `--no-keep-awake` to refuse) no sleep, suspend or lid switch |
+| `project` (the user) | Rootless Docker (`dockerd-rootless-setuptool.sh install`, `systemctl --user enable --now docker`); `DOCKER_HOST`, `SOPS_AGE_KEY_FILE` and `PATH` in `~/.bashrc`; `~/.secrets` (700); Node from `.nvmrc` through nvm and `corepack enable`; Claude Code with the official installer; submodules, `.env.local` from `.env.example`, `commands.install`; `factory install-shim`; with `--agents a,b` the machine's agent names; then, after the sign-ins, `commands.stackUp`, the CI runners (`factory ci install`, `--runners N` for `FACTORY_CI_RUNNERS`) and autostart; last, `factory doctor --sandbox` |
+| `status` | The manifest against what is there now; exit 1 when something drifted |
+| `uninstall` | The guard, its unit and rules, the sleep and SSH drop-ins, the saved settings and the manifest. The user, its home, backups and the installed packages stay. `--remove-user` or `--delete-home` remove the account (only one bootstrap created) and need its name typed (`--confirm NAME` for scripts) |
+
+**The human steps stay yours.** `gh auth login`, the Claude login (and its folder-trust prompt for the project) and
+copying the age key are never done by bootstrap. `project` stops after the first part when one is open, prints the exact
+commands and exits 2; run it again after, and it carries on with the runners and autostart. It only checks that they
+exist (`gh auth status`, the credentials file, `sops -d` of the first file under `secrets/`, output discarded). It never
+reads, prints, logs or stores a token or the key.
+
+### Network guard
+
+The default policy: **internet yes; home network no; Tailscale no; other users' files no; no sudo; no docker group.** It is
+an nftables table `factory_guard`, loaded by the systemd unit `factory-net-guard.service`, that matches the sandbox user's
+uid (`meta skuid`):
+
+- DNS only to the resolver, which is read from `/etc/resolv.conf` and `resolvectl dns` (a systemd-resolved stub on
+  127.0.0.53 needs no rule), not hard-coded;
+- `--allow-host ADDR[:PORT]` (repeat) lets one home-network host through, such as a Postgres or a build cache;
+- everything private is dropped with the log prefix `FACTORY-BLOCK `: RFC1918, the Tailscale range 100.64.0.0/10,
+  link-local, and IPv6 ULA and tailnet addresses;
+- loopback ports of other users' services are dropped: `--block-loopback-port PORT` (repeat) plus, at every run, every
+  loopback or wildcard port that a process of another user listens on (`ss -ltnHe`). A service started later is covered the
+  next time `sudo factory bootstrap machine --apply` runs, and `factory doctor --sandbox` fails until then;
+- `--block-inbound-port PORT` drops those ports from other hosts (`FACTORY-INBOUND `);
+- `--egress none` closes the internet too.
+
+The settings are saved in `/etc/software-factory/sandbox.json`, so a re-run converges on them (`user`, `egress`,
+`allowHosts`, `blockLoopbackPorts`, `blockInboundPorts`). Rules are rendered from `hooks/factory_netguard.py`, which is also
+what the tests check.
+
+### `factory doctor --sandbox`
+
+Run it as the sandbox user. Each check prints `ok`, `fix` (with the fix) or `note`:
+
+- identity: the user is the one bootstrap made; no sudo (`sudo -n true` fails); not in the sudo, docker or admin groups;
+  the admin's home and `.ssh` are unreadable; `~/.secrets` is 700;
+- network: GitHub, npm and the Claude API answer; the router, the tailnet, link-local and the blocked local ports do not;
+  `FACTORY-BLOCK` entries appear in the kernel log (a note when this user may not read the log);
+- **local services of other users** (known gap 1): every loopback or wildcard port that another user listens on is in the
+  guard's rules; if not, run the machine step again;
+- **containers** (known gap 2): a container started by this user (`docker run busybox wget` to the router) cannot reach the
+  router either, which is true when Docker is rootless because its traffic leaves through the user's own process;
+- rootless Docker with overlayfs, the `cpu`, `memory` and `pids` cgroup controllers delegated to the user's systemd
+  (the ingest sandbox tests need memory limits), linger on;
+- the CI runner units are active (at least `ci.runners`) and every agent worktree has its submodules checked out.
+
+A user account is a weaker boundary than a VM, and the agents still hold what their job needs inside the sandbox: a `gh`
+token, the age key and the Claude login. Keep the separate GitHub account for agents from [Security notes](#security-notes).
+Not in this version: macOS, a VM mode, creating the GitHub account.
+
 <br>
 
 ## Security notes
@@ -1432,8 +1686,8 @@ the follow-up ([remanual #150](https://github.com/deresegetachew/remanual/issues
   secrets out of the repo (`.env.local`, the host's secret store). Agents are denied reading `.env` files.
 - **Agent issues are public to anyone who can read the repo.** They show the slot only, unless you set
   `tasks.showWhere`.
-- **CI:** the kit's workflow has read-only permissions and no secrets, and the guard fails a workflow that uses
-  `pull_request_target`. A self-hosted runner (`factory ci`) runs branch code on your Mac with a privileged
+- **CI:** the kit's workflow has read-only permissions and, unless you set up the [shared build cache](#a-shared-build-cache),
+  no secrets, and the guard fails a workflow that uses `pull_request_target`. A self-hosted runner (`factory ci`) runs branch code on your Mac with a privileged
   container: see [the known risk](#ci-githubs-runners-or-your-own-mac).
 
 <br>
@@ -1653,6 +1907,11 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `ci.light` | bool | `true` | Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`. |
 | `ci.image` | str | `"build"` | The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base. |
 | `ci.caches` | bool | `true` | Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets). |
+| `turbo.api` | str | `""` | The shared Turborepo cache's address, as agents and CI reach it: http://<Tailscale or LAN address>:3335. Empty: no shared cache. `factory turbo install` starts it. |
+| `turbo.team` | str | `""` | The cache's team name (default: the repository's name). |
+| `turbo.bind` | str | `"127.0.0.1"` | The address the cache server listens on, on the machine that runs it. 127.0.0.1 reaches only that machine; use its Tailscale or LAN address for others. |
+| `turbo.port` | int | `3335` | The port the cache server listens on. |
+| `turbo.secretsCommand` | str | `""` | A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins. |
 | `ci.lightLabel` | str | `""` | The light runner's label (default `<repo>-light`). |
 
 **Design & eval**
@@ -1695,6 +1954,7 @@ software-factory/
   SKILL.md                                the skill: set up a project, or act as dev manager
   DEV-MANAGER.md                          the dev manager's playbook
   install.sh                              install into a project (--link with the submodule)
+  docs/messages.md                        the message envelope, states and the A2A mapping
   tests/                                  tests for the gate, issues, the loop and the hooks
   kit/
     factory                               the command line
@@ -1734,8 +1994,16 @@ software-factory/
       factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
+      factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
+      factory_remotes.py                  remotes, ssh calls and finding sessions by name
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
       factory_release.py                  `factory version | releases | update | rollback`: the release client
+      factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
+      factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
+      factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
+      factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
+      factory_netguard.py                 renders the nftables rules and the guard's systemd unit
+      factory_sandbox.py                  `factory doctor --sandbox`
       factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
@@ -1751,8 +2019,9 @@ software-factory/
       factory_config.py                   reads factory.json, with defaults
       wait_for_merge.sh                   waits on a PR without spending tokens
       factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
+      factory_turbo.py                    `factory turbo`: the shared Turborepo cache (status, install, down, env, ci-env)
     .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
-                                          compose.yaml, compose-light.yaml, compose-caches.yaml,
+                                          compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,
                                           runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.py,
                                           ci_status.py
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS

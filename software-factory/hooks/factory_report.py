@@ -21,9 +21,9 @@ from urllib.parse import quote
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import branch_task, load, task_source  # noqa: E402
+import factory_messages as fm  # noqa: E402
 
 CLAIM = re.compile(r"<!--\s*factory-claim\s+agent=([\w.-]+)(?:\s+machine=[\w-]+)?\s*-->")
-MUSTFIX = re.compile(r"<!--\s*factory-mustfix\b")
 
 
 def gh(path):
@@ -73,7 +73,7 @@ def row(p, issues_mode, now):
             "claimToPr": hours(claimed, opened),
             "prToMerge": hours(opened, merged) if merged else (hours(opened, now) if state == "open" else None),
             "claimToMerge": hours(claimed, merged),
-            "rework": sum(1 for c in comments if MUSTFIX.search(c.get("body") or "")),
+            "rework": sum(1 for c in comments if any(k == "mustfix" for k, _ in fm.verdicts(c.get("body") or ""))),
             "ciRuns": len(runs), "ciFailed": sum(1 for r in runs if r.get("conclusion") == "failure")}
 
 
