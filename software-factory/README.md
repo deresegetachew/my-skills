@@ -290,6 +290,7 @@ version it pins. `factory help` lists everything.
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
+| `factory lessons [show\|check\|suggest\|add\|prune]` | The curated lessons file (#72): `show` prints it (the builder and the reviewers read it first), `check` keeps it under `lessonsCap`, `suggest` proposes lessons from recent must-fix comments, review findings and CI failures, `add` and `prune` change it (dev manager only) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
@@ -692,6 +693,33 @@ which prints its instructions for this round:
 is still a file holding HEAD's id and nothing else, so the last round of every reviewer ends on the PR's head commit. A
 round nobody recorded (another machine, a cleaned `tmp/`) simply gets a full review.
 
+**Lessons (#72).** The same mistakes come back across tasks: the dev manager writes the same must-fix, a reviewer flags
+the same problem, CI fails for the same reason. Each repeat costs a review round, a CI run and a fix session, so the
+project keeps one short **lessons file** (`lessons` in `factory.json`, by default `.claude/factory/lessons.md`):
+
+- **Short on purpose.** At most `lessonsCap` (40) lessons, one line each, each with an example or a link (a `code span`, a
+  URL, `#123` or "e.g."): *packages/validators: annotate recursive helpers' return types (e.g. TS7022 in `schema.ts`)*.
+  `factory lessons check` fails on a longer file, a wrapped lesson or one without an example, and CI runs it in the
+  Factory guard job. Adding past the cap is refused until something is pruned.
+- **Read up front.** The builder reads it at the start of a task (`next-task`, step 1) and the four reviewers read it
+  before the diff; the `reviewer` treats a change that repeats a lesson as a must-fix and quotes the lesson.
+  `factory lessons show` prints the lessons and nothing else, so reading it costs a few hundred tokens.
+- **Fed from three sources.** `factory lessons suggest [--last 20] [--min 2]` reads the last N closed task pull
+  requests from GitHub and lists causes that came back on at least `--min` of them: the dev manager's must-fix items
+  (the list items of each `factory-mustfix` comment), CI failures (the job and step that failed, once per PR, from the
+  failed runs on its branch, the data `factory report` counts), and this machine's reviewer findings from
+  `<reviewMarkers>/*.reviews.json` (failing rounds; findings on other machines are not seen). Similar wording is grouped,
+  and what an existing lesson already says is left out. It prints each candidate with its PRs and a ready
+  `factory lessons add "..."` command, and changes nothing.
+- **The dev manager approves.** Agents cannot edit `.claude/`, and `add` and `prune --apply` refuse inside an agent
+  session (and are denied in `settings.json`); the dev manager runs them and merges the change in a pull request. An agent
+  that learns something writes "lesson candidate: ..." in its PR description.
+- **Pruned when enforced.** A lesson a hook, lint rule or check enforces now is dead weight. Tag it
+  `[enforced: path/to/check]`; `factory lessons prune` lists the tagged lessons whose enforcement exists, `--apply` removes
+  them, and `check` warns about a tag that points at nothing.
+- **Measured.** `factory report --since <date>` counts must-fix rounds and failed CI runs per task (#65); fewer repeated
+  rounds after a lesson is added is the test of the lesson.
+
 ### The PR gate
 
 `pr-gate.py` is a PreToolUse hook. It reads every Bash command Claude runs, including compound ones (`;`, `&&`,
@@ -1045,6 +1073,8 @@ reads these settings.
 | `prSizeWarn` | The guard warns above this many changed lines | 600 |
 | `reviewMarkers` | Where review passes are written | `tmp/reviews` |
 | `reReviewPercent` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or it touches a new file): then it is a full review. 0: always full | 30 |
+| `lessons` | The curated lessons file the builder and the reviewers read first | `.claude/factory/lessons.md` |
+| `lessonsCap` | The most lessons the file may hold; `factory lessons check` (and CI) fail above it, `add` refuses | 40 |
 | `trustedReviewers` | GitHub logins whose approvals count | none: any approval counts |
 | `holdLabel` | The hold label | `factory-hold` |
 | `agents` | The agents' names, in order | the ten names above |
@@ -1077,10 +1107,12 @@ software-factory/
     CLAUDE.factory.md                     template for the project's CLAUDE.md
     .claude/factory.json                  template: the project's config
     .claude/factory/notes/                template: the project's notes for the agents
+    .claude/factory/lessons.md            template: the curated lessons file (empty)
     .claude/settings.json                 permissions and hooks
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
     .claude/hooks/
+      factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
       check.py                            Stop: typecheck and tests

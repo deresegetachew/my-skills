@@ -29,6 +29,9 @@ Look
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
                          incremental re-review: a reviewer's next round reads only the delta since its last one
+  lessons [show|check|suggest|add|prune]
+                         the short lessons file builders and reviewers read first; suggest proposes new ones from
+                         recent must-fix comments, review findings and CI failures (add and prune: dev manager)
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
@@ -122,6 +125,7 @@ case "$cmd" in
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
+  lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
   report)    py factory_report.py "$@" ;;

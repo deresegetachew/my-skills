@@ -56,6 +56,8 @@
   ],
   "reviewMarkers": "tmp/reviews",
   "reReviewPercent": 30,
+  "lessons": ".claude/factory/lessons.md",
+  "lessonsCap": 40,
   "testPaths": [
     "(^|/)__tests__/",
     "\\.(test|spec)\\.[cm]?[jt]sx?$",

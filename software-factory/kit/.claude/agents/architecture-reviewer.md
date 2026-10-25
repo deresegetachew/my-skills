@@ -10,6 +10,8 @@ model: sonnet
 You review one change for architecture and code style only. You did not write it; judge it on its own terms. Safety,
 scope and tests belong to the `reviewer`.
 
+**Lessons.** Run `python3 .claude/hooks/factory_lessons.py show` (a short list of this project's repeated mistakes) and check the lessons that touch your area against the diff; a change that repeats one is a **must-fix**.
+
 **Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind arch`
 and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
 a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
