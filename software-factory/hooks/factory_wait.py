@@ -23,7 +23,7 @@ import factory_issues as fi  # noqa: E402
 from factory_config import load, task_labels  # noqa: E402
 
 QUESTION = re.compile(r"<!--\s*factory-question\b")
-ANSWER = re.compile(r"<!--\s*factory-answer\b")
+ANSWER = re.compile(r"<!--\s*factory-answer(?!-)\b")  # not factory-answer-claim
 REVIEWED = re.compile(r"<!--\s*(?:factory-approved|factory-mustfix|pr-watch)\s+sha=([0-9a-f]{7,40})")
 BAD = {"failure", "startup_failure", "timed_out", "cancelled", "action_required", "stale"}
 

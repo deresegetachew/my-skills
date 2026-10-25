@@ -34,6 +34,9 @@ Look
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
                          incremental re-review: a reviewer's next round reads only the delta since its last one
+  manager-claims list|next|review|answer|release|sweep|merge|ask
+                         several dev managers at once: claim a PR or a question with a lease (manager.claimMinutes),
+                         so two managers never review, answer, merge or ask the same thing twice; list shows who holds what
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
@@ -129,6 +132,7 @@ case "$cmd" in
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
+  manager-claims) py factory_manager_claims.py "$@" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
   report)    py factory_report.py "$@" ;;

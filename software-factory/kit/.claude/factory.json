@@ -56,6 +56,7 @@
   ],
   "reviewMarkers": "tmp/reviews",
   "reReviewPercent": 30,
+  "manager": {"claimMinutes": 20},
   "testPaths": [
     "(^|/)__tests__/",
     "\\.(test|spec)\\.[cm]?[jt]sx?$",

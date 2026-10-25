@@ -65,10 +65,15 @@
       "Bash(factory resume*)",
       "Bash(./factory resume*)",
       "Bash(*factory_resume*)",
+      "Bash(factory manager-claims*)",
+      "Bash(./factory manager-claims*)",
+      "Bash(*factory_manager_claims*)",
       "Bash(gh pr review *--approve*)",
       "Bash(gh pr comment *factory-approved*)",
       "Bash(gh pr comment *factory-answer*)",
-      "Bash(gh pr comment *factory-mustfix*)"
+      "Bash(gh pr comment *factory-mustfix*)",
+      "Bash(gh pr comment *factory-review-claim*)",
+      "Bash(gh pr comment *factory-claim-release*)"
     ]
   },
   "hooks": {

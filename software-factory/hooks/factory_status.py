@@ -4,7 +4,8 @@
   Agents     every agent on every machine (issues mode: their agent issues): working, idle, silent or down
   Here       this machine's claims (which local agent holds which folder and task)
   PRs        open pull requests: draft, CI, the reviewer's pass for the head (when the marker is on this machine),
-             the dev manager's hold, must-fix or approval, and "a person merges this one"
+             the dev manager's hold, must-fix or approval, which dev manager has claimed the head for review
+             (a lease, #99), and "a person merges this one"
   CI         runs queued and the oldest one's age, and the self-hosted runners (when GitHub lets us see them)
   Tasks      issues mode: ready (by milestone), in progress, in review, blocked; plan mode: the next task
 
@@ -122,11 +123,14 @@ def pulls(cfg):
     def one(p):
         sha, branch = p["head"]["sha"], p["head"]["ref"]
         labels = {x["name"] for x in p.get("labels", [])}
-        dm = dev_manager(gh(f"repos/{{owner}}/{{repo}}/issues/{p['number']}/comments?per_page=100") or [], sha,
-                         trusted)
+        comments = gh(f"repos/{{owner}}/{{repo}}/issues/{p['number']}/comments?per_page=100") or []
+        dm = dev_manager(comments, sha, trusted)
+        import factory_manager_claims as claims
+        held = claims.review_winner(comments, sha, claims.now_utc())
         return {"number": p["number"], "title": p["title"], "branch": branch, "draft": bool(p.get("draft")),
                 "ci": ci_state(sha), "reviewed": marker(cfg, branch, sha, ".ok"), "hold": hold in labels,
                 "devManager": dm,
+                "claim": {"manager": held["manager"], "until": claims.stamp(held["until"])} if held else None,
                 "personMerges": "a person merges this one" in (p.get("body") or "").lower()}
 
     with ThreadPoolExecutor(8) as pool:  # two calls per PR: side by side, so it stays quick
@@ -193,6 +197,8 @@ def show(s, task_mode="plan"):
         flags.append(f"CI {x['ci']}")
         if x["reviewed"] is not None:
             flags.append("reviewed" if x["reviewed"] else "not reviewed")
+        if x.get("claim"):
+            flags.append(f"claimed by {x['claim']['manager']} until {x['claim']['until'][11:16]} UTC")
         flags += [f for f, on in (("hold", x["hold"]), (x["devManager"], x["devManager"]),
                                   ("a person merges it", x["personMerges"])) if on]
         print(f"  #{x['number']:<5} {x['branch'][:40]:<40} {', '.join(flags)}")

@@ -291,6 +291,7 @@ version it pins. `factory help` lists everything.
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
+| `factory manager-claims list\|next\|review\|answer\|release\|sweep\|merge\|ask` | Several dev managers at once (#99): claim a PR or a question with a lease so two managers never do the same one, and see who holds what. See [Several managers at once](#several-managers-at-once) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory autostart [status\|install\|uninstall]` | Makes this machine bring the factory back after a reboot: the dev stack and its agents, with unfinished work saved and left in place. `status` shows what would start; `install --agents haile,tewodros` turns it on and installs the boot service (systemd user unit with linger, or a LaunchAgent). [Details](#after-a-reboot-factory-autostart) |
@@ -858,6 +859,48 @@ It talks to the agents through markers in PR comments:
 | `<!-- factory-approved sha=<head> -->` | Dev manager | That commit is approved. Clears a must-fix for that commit only |
 | `factory-hold` label | Dev manager | It's reviewing. Agents skip the PR and can't merge it |
 
+### Several managers at once
+
+Two or more managers (any machine) can work one repository without reviewing, answering, merging or asking the same
+thing twice, and a manager that dies mid-review does not block a PR. The protocol is a few comments on GitHub, so it
+needs no server. `factory manager-claims` (`hooks/factory_manager_claims.py`) implements it; every command needs the
+manager's name, `--manager dm-1`.
+
+| Marker | Written by | Meaning |
+|---|---|---|
+| `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` | A manager | "I am reviewing this head until then." A lease |
+| `<!-- factory-answer-claim manager=<name> question=<comment id> until=<ISO time> -->` | A manager | The same for a `factory-question` |
+| `<!-- factory-claim-release manager=<name> sha=<head> -->` (or `question=<id>`) | A manager | "I gave this up before the lease ran out" |
+| `<!-- factory-owner-ask id=<slug> -->` | A manager | One ask on the owner-queue issue, "Dev manager: needs the owner" |
+
+How a review is claimed (`factory manager-claims review <pr>`, or `next` for every free PR and question):
+
+1. A PR whose head has no marker (`factory-approved`, `factory-mustfix`, `pr-watch`) and no unexpired claim by another
+   manager is free. The manager posts a claim with `until` = now + `manager.claimMinutes` (default 20).
+2. It re-reads the comments. The earliest unexpired claim for that head wins, in the order GitHub lists the comments.
+   If it lost, it does nothing more (exit code 3) and moves on.
+3. The winner puts `factory-hold` on, reviews, ends with the usual marker and takes the hold off
+   (`factory manager-claims release <pr>`). A new head commit changes the sha, so the old claim means nothing.
+4. If the manager dies, `until` passes. The next `next` (or `sweep`) takes `factory-hold` off a PR that has had a
+   claim and has none running, and the PR can be claimed again. A hold on a PR nobody ever claimed is the owner's and
+   is left alone. A lease never counts for more than two hours after its comment, whatever `until` says.
+
+A question is claimed the same way (`answer <comment id>`); the `factory-answer` comment ends it. A claim is not an
+answer: `factory wait answer` and `factory precheck` ignore `factory-answer-claim`.
+
+`merge <pr>` merges only a head with `factory-approved sha=<head>` and passes that sha to GitHub, so a second
+manager's merge of an already merged or changed PR is refused by GitHub. The command reads that refusal as "done by
+someone else" (or "the head moved; it needs a new review") and exits 0, not as an error.
+
+`ask --id <slug> --text "..."` posts an ask on the owner-queue issue (created if missing; pin it by hand, the REST API
+cannot) only if no comment there carries that id. If two managers post at once, the earliest stays and the other
+removes its own.
+
+`factory manager-claims list [--json]` and `factory status` show every claim. `claimMinutes` is the setting
+`manager.claimMinutes`. All managers and builders use one GitHub account, so the name lives inside the comment, and
+`trustedReviewers` cannot tell managers apart: nothing here relies on it. Builders cannot post the claim markers
+(PR gate) or run the command (`settings.json`).
+
 The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
 session with the repo attached.
 
@@ -1142,6 +1185,7 @@ software-factory/
     .claude/skills/                       next-task, design-check, eval
     .claude/hooks/
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
+      factory_manager_claims.py           several dev managers at once: review and question claims with a lease
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
       check.py                            Stop: typecheck and tests
       factory_stop.py                     Stop: closes a finished session in `factory loop -i`

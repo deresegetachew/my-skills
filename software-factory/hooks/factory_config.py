@@ -45,6 +45,8 @@ DEFAULTS = {
         "pingMinutes": 5,  # an agent pings its agent issue at most this often while it works
         "downMinutes": 30,  # no ping for this long: the agent counts as down, and the sweep releases its issues
     },
+    # Several dev managers at once (factory_manager_claims.py): how long a review or answer claim holds an item.
+    "manager": {"claimMinutes": 20},
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",
