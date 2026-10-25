@@ -204,10 +204,10 @@ def test_check_2_an_open_question_is_a_manager_item_until_it_is_answered():
 def test_check_2_also_reads_the_message_envelope_addressed_to_the_dev_manager():
     d, work, env = world(db={"pulls": [pr(5)], "commits": {H: iso(60)},
                              "comments": {"5": [comment(1, f"<!-- pr-watch sha={H} -->", 59),
-                                                comment(2, "<!-- factory-msg kind=question to=dev-manager -->\nWhy?", 20)]}})
+                                                comment(2, "<!-- factory-msg v=1 id=q1abc kind=question from=menelik to=dev-manager state=submitted -->\nWhy?", 20)]}})
     assert "question-5" in watch(work, env)
     put(d, comments={"5": [comment(1, f"<!-- pr-watch sha={H} -->", 59),
-                           comment(2, "<!-- factory-msg kind=question to=product-owner -->\nWhy?", 20)]})
+                           comment(2, "<!-- factory-msg v=1 id=q1abc kind=question from=menelik to=po state=submitted -->\nWhy?", 20)]})
     assert "question-5" not in watch(work, env)
 
 
