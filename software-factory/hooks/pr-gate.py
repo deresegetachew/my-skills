@@ -21,6 +21,8 @@ Messages (docs/messages.md): a comment with a `factory-msg` envelope is checked 
         command, else ref=). An envelope of another version is not read, so it passes. With `trustedReviewers` in factory.json, only those GitHub
         logins' approvals count. An approval counts only for the commit it names (`sha=`).
 Pushes: agents may not delete remote branches (`git push <remote> :<branch>` or `+:<branch>`), also inside bash -c.
+Settings: agents may not change the factory's settings (`factory settings set`, `unset`, `pr`, `interactive`, `--local`
+        changes, `docs --write`), also inside bash -c; the read-only ones (list, get, help, diff, validate) pass (#49).
 Wrappers: gh run through a shell, eval, xargs or a package runner (pnpm exec, npx, yarn) can't be checked: refused.
 
 This gate is a guard rail for well-meaning agents, not a security boundary: branch protection and required CI
@@ -65,6 +67,58 @@ GH_IN_TEXT = re.compile(r"(^|[^\w.-])gh\s+(-\S+\s+)*[a-z]")
 # A refspec that deletes a remote branch: `git push origin :task/1-x` or `+:x` (#47).
 GIT_GLOBAL_WITH_VALUE = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path", "--config-env"}
 PUSH_DELETE_IN_TEXT = re.compile(r"(^|[^\w.-])git\b[^;&|]*\bpush\b[^;&|]*\s\+?:")
+
+
+SETTINGS_READ_ONLY = {"list", "ls", "get", "show", "help", "options", "diff", "validate", "docs"}
+SETTINGS_WITH_VALUE = {"--section", "--file"}
+
+
+def settings_change(args):
+    """True when these arguments of `factory settings` would change something: anything but the read-only commands."""
+    if "-i" in args:
+        return True
+    sub, skip = None, False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in SETTINGS_WITH_VALUE:
+            skip = True
+        elif not a.startswith("-"):
+            sub = a
+            break
+    if sub is None:
+        return False  # bare `factory settings` lists (the menu needs a terminal an agent doesn't have)
+    return sub not in SETTINGS_READ_ONLY or (sub == "docs" and "--write" in args)
+
+
+def changes_settings(cmd, depth=0):
+    """True when the command (or a bash -c inside it) runs a `factory settings` command that changes settings."""
+    try:
+        parts = simple_commands(cmd)
+    except ValueError:
+        return bool(re.search(r"factory\s+settings\s+(?!(list|ls|get|show|help|options|diff|validate)\b)", cmd))
+    for tokens in parts:
+        i = 0
+        while i < len(tokens) and (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[i]) or tokens[i] in PREFIXES
+                                   or (i and tokens[i - 1] in PREFIXES and tokens[i].startswith("-"))):
+            i += 1
+        if i >= len(tokens):
+            continue
+        prog, rest = os.path.basename(tokens[i]), tokens[i + 1:]
+        if prog in ("bash", "sh", "zsh", "dash") and "-c" in rest and depth < 3:
+            k = rest.index("-c")
+            if k + 1 < len(rest) and changes_settings(rest[k + 1], depth + 1):
+                return True
+        elif prog == "factory" and rest[:1] == ["settings"]:
+            if settings_change(rest[1:]):
+                return True
+        elif prog.startswith("factory_settings") and settings_change(rest):
+            return True
+        elif prog in ("python", "python3"):
+            for k, t in enumerate(rest):
+                if os.path.basename(t).startswith("factory_settings") and settings_change(rest[k + 1:]):
+                    return True
+    return False
 
 
 def push_deletes(tokens):
@@ -195,6 +249,10 @@ def body_text(flags):
 def main():
     data = json.load(sys.stdin)
     cmd = (data.get("tool_input") or {}).get("command", "") or ""
+    if "settings" in cmd and changes_settings(cmd):
+        block("Agents don't change the factory's settings (`factory settings set`, `unset`, `pr`, `interactive`, "
+              "`--local`, `docs --write`): the PR gate reads them. `factory settings list`, `get`, `help`, `diff` and "
+              "`validate` are fine. Ask the dev manager to change the setting in a pull request.")
     if re.search(r"\bpush\b", cmd) and re.search(r"\bgit\b", cmd):
         try:
             pushes = simple_commands(cmd)

@@ -20,14 +20,12 @@ It runs the process the owner agreed; it doesn't change it on its own (see the n
 column the action is in. If it's on the right, stop and ask the owner: say what you'd change and why, and wait for
 a clear yes. Don't treat a yes for one change as a yes for the next.
 
-| You do it on your own | You ask the owner first |
-|---|---|
-| Review the coding agents' PRs; approve and merge those that pass, within the current scope (a freeze included) | **Any change to the factory:** my-skills, the project's `.claude/`, `settings.json`, permissions, the PR gate, CI workflows |
-| Post must-fixes, answer the agents' questions, add `tests-reviewed` / `deps-reviewed` after reading the change | **Your own working rhythm:** the tick interval (10 minutes with work open, 30 without) and the tick's instructions |
-| Post-merge reviews of anything that merged without you, and one follow-up task for their must-fixes | **Merging your own PRs,** whatever they change |
-| Keep main's CI green: fix a broken build on a branch and merge it | **Scope and order:** new tasks beyond review follow-ups, unblocking, reordering, freezing or lifting a freeze |
-| Tell the owner when a person is needed | **Anything on the owner's computer,** and anything outside the project's repos |
-| | **History:** force-pushing, deleting branches you didn't make, rewriting anything already pushed |
+The table of what you do on your own and what you ask first is one text, kept in the factory's `manage-pass` skill
+([`kit/.claude/skills/manage-pass/SKILL.md`](kit/.claude/skills/manage-pass/SKILL.md), section "What you do on your own, and
+what you ask the owner first"). It is not copied here, so the playbook and the skill cannot drift apart. In short: reviewing
+and merging the coding agents' PRs, must-fixes, answers, post-merge reviews, keeping main's CI green and telling the owner are
+yours; changes to the factory, your own rhythm, merging your own PRs, scope and order, the owner's computer and history are the
+owner's.
 
 When something in the right column would help, write it as a proposal ("this needs your yes: ..."), not as a done
 change. If you find you've already done one without asking, tell the owner at once, say what you changed, and offer
@@ -276,7 +274,10 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
   auditor and reviewer will try. A task that names them passes review in one round instead of several, and
   each round re-reads the branch.
 - `factory settings` shows the knobs: `commands.testChanged` / `typecheckChanged` for a Stop check on the
-  changed packages only, and `checkOutputLines` for how much of a failure the agent sees.
+  changed packages only, and `checkOutputLines` for how much of a failure the agent sees. `factory settings help <key>`
+  explains any of them. A settings change comes as a pull request from a person (`factory settings pr`); its body lists
+  each change and the review it needs (`testPaths`, `goldenPaths` and `dependencyManifests` need `tests-reviewed` or
+  `deps-reviewed`). Agents can't change settings, and you merge those PRs only within the owner's scope.
 Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
 Check spend with `/usage`.
 
