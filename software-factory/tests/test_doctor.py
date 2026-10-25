@@ -16,13 +16,14 @@ def stub(bin_, name, body):
     os.chmod(p, 0o755)
 
 
-def machine(gh_signed_in=True, node="v22.11.0", extra=()):
+def machine(gh_signed_in=True, node="v22.11.0", extra=(), gh=None):
     """A bin folder with git, python3 and the basics linked in, plus stub gh, claude and node."""
     bin_ = tempfile.mkdtemp()
     for tool in ("git", "python3", "bash", "sh", "env", "uname", "dirname", "basename", "cat"):
         if shutil.which(tool):
             os.symlink(shutil.which(tool), os.path.join(bin_, tool))
-    stub(bin_, "gh", "[ \"$1 $2\" = 'auth status' ] && exit %d; exit 0" % (0 if gh_signed_in else 1))
+    # signed out: every gh call fails, as it does with no token (`gh api` too, since #157)
+    stub(bin_, "gh", gh or ("exit 0" if gh_signed_in else "echo 'gh: run gh auth login or set GH_TOKEN' >&2; exit 1"))
     stub(bin_, "claude", "echo '2.1.310 (Claude Code)'")
     if node:
         stub(bin_, "node", f"echo {node}")
@@ -63,6 +64,29 @@ def test_a_good_machine_is_all_ok():
     for what in ("git", "Claude Code", "gh is signed in", "Node v22", "pnpm", ".claude/settings.json", "taytu"):
         assert any(what in l for l in lines(p, "ok")), (what, p.stdout)
     assert "All the checks pass." in p.stdout
+
+
+def test_gh_auth_status_failing_is_no_fix_when_the_api_works():
+    # GH_TOKEN set: `gh auth status` complains, every `gh api` call works (#157)
+    d = project()
+    gh = "[ \"$1 $2\" = 'auth status' ] && { echo 'token scopes missing' >&2; exit 1; }; echo '{}'; exit 0"
+    p = doctor(d, {**machine(gh=gh), "FACTORY_AGENTS": "taytu"})
+    assert p.returncode == 0, p.stdout
+    assert not lines(p, "fix"), p.stdout
+    assert any("gh" in l for l in lines(p, "ok")), p.stdout
+    assert "All the checks pass." in p.stdout
+
+
+def test_a_failing_gh_api_names_the_reason():
+    for err, reason in (("gh: To use GitHub CLI, set GH_TOKEN or run gh auth login", "no token"),
+                        ("gh: Bad credentials (HTTP 401)", "token was refused"),
+                        ("dial tcp: lookup api.github.com: no such host", "can't reach github.com")):
+        d = project()
+        gh = "echo '%s' >&2; exit 1" % err
+        p = doctor(d, {**machine(gh=gh), "FACTORY_AGENTS": "taytu"})
+        assert p.returncode == 1, p.stdout
+        fixes = lines(p, "fix")
+        assert any("GitHub CLI" in l and reason in l for l in fixes), (reason, p.stdout)
 
 
 def test_each_problem_gets_a_one_line_fix():
