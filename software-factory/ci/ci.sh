@@ -829,7 +829,10 @@ cmd_status() {
           echo "$what: installed, but its loop isn't running right now; systemd starts it again within 30 s."
         fi
       elif instance_loaded "$id"; then
-        pid="$(launchctl print "$domain/$I_AGENT" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
+        # Not a pipeline: an awk that stops at the pid line (gawk does) can leave launchctl writing into a closed
+        # pipe, and with pipefail that SIGPIPE ended `status` right after the Mode line.
+        pid="$(launchctl print "$domain/$I_AGENT" 2>/dev/null || true)"
+        pid="$(awk '$1 == "pid" && $2 == "=" { print $3; exit }' <<<"$pid")"
         if [ -n "$pid" ]; then
           echo "$what: running (LaunchAgent $I_AGENT, pid $pid). It starts again by itself after a restart."
         else

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNNER = r"""
@@ -44,7 +45,7 @@ def run_file(path, shard=0, shards=1):
     rel = os.path.relpath(path, ROOT)
     # Output goes to a temp file, not a pipe: a test that leaves a background process behind (a fake loop that
     # sleeps) would hold a pipe open and make this wait for it, but a file does not wait.
-    with tempfile.TemporaryFile("w+") as sink, \
+    with tempfile.TemporaryFile("w+", encoding="utf-8", errors="replace") as sink, \
             tempfile.TemporaryDirectory(prefix="factory-test-", ignore_cleanup_errors=True) as scratch:
         # Files run side by side, so none may write to the real machine-wide places (the machine id, the boot log):
         # each gets its own. A test that wants other folders sets them in its own environment, as before.
@@ -55,10 +56,6 @@ def run_file(path, shard=0, shards=1):
                "TMPDIR": os.path.join(scratch, "tmp"),
                # `pick` waits 2 s after claiming for a simultaneous claim; the tests' claims are made up in advance.
                "FACTORY_CLAIM_SETTLE_SECONDS": "0"}
-        # The tests commit in throwaway repos. A developer's global commit.gpgsign calls a signing helper that fails
-        # under load (and CI has none), so no test commit is signed.
-        n = int(env.get("GIT_CONFIG_COUNT", "0") or 0)
-        env.update({"GIT_CONFIG_COUNT": str(n + 1), f"GIT_CONFIG_KEY_{n}": "commit.gpgsign", f"GIT_CONFIG_VALUE_{n}": "false"})
         os.makedirs(env["TMPDIR"])
         cmd = [sys.executable, "-I", "-c", RUNNER, path] + ([str(shard), str(shards)] if shards > 1 else [])
         try:
@@ -70,6 +67,25 @@ def run_file(path, shard=0, shards=1):
         sink.seek(0)
         out = sink.read() + note
     return rel, code, out, time.time() - start
+
+
+def run_file_safely(path, shard, shards):
+    """run_file, but a problem in the runner itself (no disk, no process) is reported as that file's failure with
+    its traceback, instead of ending the whole run before the other files print anything."""
+    try:
+        return run_file(path, shard, shards)
+    except Exception:  # noqa: BLE001 - any failure here must be shown, not raised
+        return os.path.relpath(path, ROOT), 1, "test runner error:\n" + traceback.format_exc(), 0.0
+
+
+def annotate(rel, out):
+    """On GitHub Actions, put the first lines of a failure in an annotation, which can be read without the log."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    lines = [line for line in out.strip().splitlines() if line.strip()]
+    text = "\n".join(lines[:25])[:1800]
+    text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::error file={rel},title=test failure::{text}", flush=True)
 
 
 def shard_count(path, jobs):
@@ -120,7 +136,7 @@ def main(argv=None):
     done = {}
     start = time.time()
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        futures = {pool.submit(run_file, f, i, shards[f]): f for f in queue for i in range(shards[f])}
+        futures = {pool.submit(run_file_safely, f, i, shards[f]): f for f in queue for i in range(shards[f])}
         # A file's report is printed whole once all its processes have finished, so output never interleaves.
         for future in as_completed(futures):
             path = futures[future]
@@ -135,6 +151,7 @@ def main(argv=None):
                 for _, code, out, _ in results:
                     if code:
                         print(out, flush=True)
+                        annotate(rel, out)
     print(f"{len(files) - len(failed)} of {len(files)} test files passed")
     print(f"{jobs} jobs, {time.time() - start:.0f} s in all")
     return 1 if failed else 0
