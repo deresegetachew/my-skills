@@ -5,6 +5,7 @@ this machine. Use it to measure a change to the factory (a cheaper model, less r
   factory usage                       the last 7 days, per task, then the totals
   factory usage --since 2026-10-20 --until 2026-10-24
   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
+  factory usage --by role             manager (sessions that start with /manage-pass) against builder (all others)
   factory usage --json                the same as JSON
   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it)
   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
@@ -56,6 +57,31 @@ def replies(path):
                    m.get("model") or "?", u, d.get("cwd") or "")
 
 
+MANAGER_PASS = re.compile(r"/?manage-pass\b")
+
+
+def session_role(path):
+    """'manager' when the session's first prompt is the dev manager's `/manage-pass` (how `factory manage-tick` and the
+    manager loop start it), else 'builder': every other session on this project, builders and people alike."""
+    try:
+        f = open(path, encoding="utf-8")
+    except OSError:
+        return "builder"
+    with f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("type") != "user":
+                continue
+            c = (d.get("message") or {}).get("content")
+            if isinstance(c, list):
+                c = " ".join(b.get("text", "") for b in c if isinstance(b, dict))
+            return "manager" if isinstance(c, str) and MANAGER_PASS.match(re.sub(r"^\s*<command-(?:message|name)>\s*", "", c)) else "builder"
+    return "builder"
+
+
 def tokens(u):
     return {"input": int(u.get("input_tokens") or 0), "cache_write": int(u.get("cache_creation_input_tokens") or 0),
             "cache_read": int(u.get("cache_read_input_tokens") or 0), "output": int(u.get("output_tokens") or 0)}
@@ -70,10 +96,11 @@ def when(ts):
 
 def collect(root, base, since, until):
     """{session: {"task": str, "rows": [(kind, model, tokens)]}} for replies between since and until."""
-    seen, sessions = set(), collections.defaultdict(lambda: {"branches": collections.Counter(), "rows": []})
+    seen, sessions = set(), collections.defaultdict(lambda: {"branches": collections.Counter(), "rows": [], "role": "builder"})
     for d in project_dirs(root, base):
         for main in glob.glob(os.path.join(d, "*.jsonl")):
             sid = os.path.basename(main)[:-6]
+            role = session_role(main)
             files = [(main, "main")]
             for sub in glob.glob(os.path.join(d, sid, "subagents", "*.jsonl")):
                 kind = "subagent"
@@ -91,6 +118,7 @@ def collect(root, base, since, until):
                         continue
                     seen.add(mid)
                     s = sessions[sid]
+                    s["role"] = role
                     m = TASK.match(branch)
                     if m and kind == "main":
                         s["branches"][m.group(1).replace("-", ".")] += 1
@@ -98,7 +126,7 @@ def collect(root, base, since, until):
     out = {}
     for sid, s in sessions.items():
         task = s["branches"].most_common(1)[0][0] if s["branches"] else "-"
-        out[sid] = {"task": task, "rows": s["rows"]}
+        out[sid] = {"task": task, "rows": s["rows"], "role": s["role"]}
     return out
 
 
@@ -116,7 +144,7 @@ def summarise(sessions, by):
     total = {"tokens": zero(), "replies": 0, "tasks": set(), "models": collections.Counter()}
     for sid, s in sessions.items():
         for kind, model, t in s["rows"]:
-            key = s["task"] if by == "task" else (kind if by == "agent" else model)
+            key = {"task": s["task"], "agent": kind, "role": s.get("role", "builder")}.get(by, model)
             g = groups[key]
             add(g["tokens"], t)
             g["replies"] += 1
@@ -205,7 +233,7 @@ def main(argv):
     p = argparse.ArgumentParser(prog="factory usage", description="Token use per task, from this machine's logs.")
     p.add_argument("--since", type=day, help="first day (YYYY-MM-DD, UTC); default 7 days ago")
     p.add_argument("--until", type=day, help="day after the last (YYYY-MM-DD, UTC); default tomorrow")
-    p.add_argument("--by", choices=("task", "agent", "model"), default="task")
+    p.add_argument("--by", choices=("task", "agent", "model", "role"), default="task")
     p.add_argument("--json", action="store_true")
     p.add_argument("--record", metavar="LABEL", help="append a summary row to the usage log")
     p.add_argument("--task", help="only the sessions of this task (its id or issue number)")
