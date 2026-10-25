@@ -693,6 +693,17 @@ def test_heartbeat_install_on_linux_writes_a_restarting_user_service_and_starts_
     assert "disable --now proj-factory-heartbeat.service" in A.log(env, "systemctl")
 
 
+def test_heartbeat_restart_restarts_an_installed_service_and_does_nothing_without_one():
+    clone = A.project()
+    env = A.machine(clone)
+    p = A.py(HEARTBEAT, clone, env, "restart")
+    assert p.returncode == 0 and p.stdout == "" and "restart" not in A.log(env, "systemctl"), p
+    assert A.py(HEARTBEAT, clone, env, "install").returncode == 0
+    p = A.py(HEARTBEAT, clone, env, "restart")
+    assert p.returncode == 0 and "Restarted proj-factory-heartbeat.service" in p.stdout, p
+    assert "--user restart proj-factory-heartbeat.service" in A.log(env, "systemctl"), A.log(env, "systemctl")
+
+
 def test_heartbeat_install_on_macos_writes_a_keep_alive_launch_agent():
     import plistlib
     clone = A.project()

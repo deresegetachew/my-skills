@@ -116,6 +116,7 @@ SETTINGS = {s.key: s for s in [
     S('reReviewPercent', 'int', 'gate', "A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review."),
     S('lessons', 'str', 'gate', 'The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`).'),
     S('lessonsCap', 'int', 'gate', 'The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now.'),
+    S('manager.claimMinutes', 'int', 'gate', "How long a dev manager's review or answer claim holds a PR or question before another manager may take it (a lease; it ends sooner when the review marker or the answer is posted)."),
     S('manager.flakes', 'list', 'gate', 'Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent.', default=[]),
     S('artifacts.manifest', 'str', 'paths', "Where `factory artifacts` records each artifact copy kept in the repo: where it came from, when, by whom, and a hash of each file."),
     S('artifacts.dir', 'str', 'paths', "The default folder for an artifact's repo copy: <dir>/<artifact id>."),

@@ -289,10 +289,13 @@ factory update          # newest release: download, check, install, refresh this
    writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
    `.gitignore` lines), never over an existing file.
 5. Refreshes this machine: if CI runner services are installed here and older than the files (`factory ci stale`), it
-   runs `factory ci install`, which also rebuilds the runner image.
+   runs `factory ci install`, which also rebuilds the runner image. If the heartbeat daemon is installed here it is
+   restarted too (`factory heartbeat restart`), because it is one long process that would otherwise keep running the
+   old code.
 6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the Python and shell scripts parse;
    and the installed runner files are readable by the runner container's user, not writable by others, and match the
-   checkout (`factory ci check`). If any of that fails it exits 1, names each problem and does not say it worked.
+   checkout (`factory ci check`, which, when Docker and the runner image are on the machine, also starts the installed
+   entrypoint in the image as the container's own user and parses it). If any of that fails it exits 1, names each problem and does not say it worked.
    `factory doctor` runs the same checks.
 7. Prints what changed (old to new, with the release notes' commit titles) and the commands to commit it. **It never
    commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
@@ -429,6 +432,7 @@ version it pins. `factory help` lists everything.
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
+| `factory manager-claims list\|next\|review\|answer\|release\|sweep\|merge\|ask` | Several dev managers at once (#99): claim a PR or a question with a lease so two managers never do the same one, and see who holds what. See [Several managers at once](#several-managers-at-once) |
 | `factory lessons [show\|check\|suggest\|add\|prune]` | The curated lessons file (#72): `show` prints it (the builder and the reviewers read it first), `check` keeps it under `lessonsCap`, `suggest` proposes lessons from recent must-fix comments, review findings and CI failures, `add` and `prune` change it (dev manager only) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory prs [--json] [--since-days N]` | The one list a dev manager starts a pass from, read-only and REST only: every open PR with its head and age, labels, CI judged by one rule, the newest marker per commit, any review claim and a next action (`review`, `merge`, `wait CI`, `rerun flake`, `waiting for agent`, `owner merges (protected)`, `held by <manager>`, `none`); below them the unanswered questions, owner asks and quiet agents. [Details and the `--json` schema](#the-list-a-manager-starts-from-factory-prs) |
@@ -442,7 +446,7 @@ version it pins. `factory help` lists everything.
 | `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
 | `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
-| `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
+| `factory heartbeat [status\|install\|uninstall\|restart\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
 | `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
@@ -458,6 +462,7 @@ version it pins. `factory help` lists everything.
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
 | `factory wait ci <pr>` / `answer <pr>` / `slot` / `ready` `[minutes]` | The other waits, also without tokens: until CI on the PR's head commit has finished, until its `factory-question` comments have a later `factory-answer`, until fewer than `maxOpenPRs` of your PRs are open, until a task is ready. [Waiting](#waiting-without-tokens) |
 | `factory precheck` | For the dev manager: prints `nothing to do` (exit 0), or one line per PR with an unreviewed commit, unanswered question or quiet agent (exit 3). Reads GitHub only |
+| `factory manage-tick [--dry-run]` | One dev manager tick without a model when idle: runs the precheck, prints `nothing to do` and ends (no model call) or, when it lists work, starts one `claude -p "/manage-pass"` on the manager profile with the `models.manager` flags. Run it from cron, launchd or a systemd timer. `--dry-run` prints the command and starts nothing |
 | `factory version` | The installed release, the one `origin/main` pins, the newest, and what changed since. [Releases](#updating-from-releases) |
 | `factory releases [--all]` | The releases that exist, with dates and a one-line note |
 | `factory update [version]` | A project on releases: installs the newest (or that) release, checks its checksum, refreshes this machine's runner services, verifies, and leaves the diff for you to commit. Safe to run twice. Without a pin it is the submodule update below |
@@ -697,9 +702,14 @@ minutes. The exit code says what happened:
 
 `factory wait <pr>` is unchanged. Agents and the dev manager never poll inside the conversation (`next-task` and
 [DEV-MANAGER.md](DEV-MANAGER.md) say so). A manager pass starts with `factory precheck` and ends there when it
-prints `nothing to do`: one short command, no review, no reading of state notes. Not yet done: running the precheck
-outside any model, so an idle pass costs nothing at all (the orchestrator of `factory dev-manager loop` does exactly that: it starts a
-sub-manager only when `precheck` finds an item).
+prints `nothing to do`: one short command, no review, no reading of state notes.
+
+**An idle tick makes no model call.** `factory manage-tick` runs the precheck in the shell and only when it lists work
+starts one `claude -p "/manage-pass"` session (manager profile, `models.manager` flags, project MCP servers only); that
+session ends with the pass. Put it on a timer instead of keeping a session alive to tick, for example
+`*/10 * * * * cd /path/to/project && ./factory manage-tick >> .git/factory-manage-tick.log 2>&1`. Nothing stays open between
+ticks and an idle one costs no tokens. The orchestrator of `factory dev-manager loop` does the same: it starts a
+sub-manager only when `precheck` finds an item.
 
 ### Measuring it
 
@@ -998,8 +1008,8 @@ which tmux session and Remote Control link it has, and when it last produced out
   folder, machine name and follow link reach GitHub only with `tasks.showWhere`, since agent issues are readable by
   anyone who can read the repo.
 - **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
-  `factory heartbeat install` adds or restarts it alone (a systemd user service, or a LaunchAgent on macOS), and
-  `factory heartbeat status` shows what it sees. `factory doctor` checks it.
+  `factory heartbeat install` adds it alone (a systemd user service, or a LaunchAgent on macOS), and
+  `factory heartbeat restart` restarts it onto the files now on disk (`factory update` does that). `factory heartbeat status` shows what it sees. `factory doctor` checks it.
 - It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
   well-meaning agents. It needs no new network path: GitHub is still the only shared place.
 
@@ -1314,6 +1324,47 @@ It talks to the agents through markers in PR comments:
 | `<!-- factory-approved sha=<head> -->` | Dev manager | That commit is approved. Clears a must-fix for that commit only |
 | `factory-hold` label | Dev manager | It's reviewing. Agents skip the PR and can't merge it |
 
+### Several managers at once
+
+Two or more managers (any machine) can work one repository without reviewing, answering, merging or asking the same
+thing twice, and a manager that dies mid-review does not block a PR. The protocol is a few comments on GitHub, so it
+needs no server. `factory manager-claims` (`hooks/factory_manager_claims.py`) implements it; every command needs the
+manager's name, `--manager dm-1`.
+
+| Marker | Written by | Meaning |
+|---|---|---|
+| `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` | A manager | "I am reviewing this head until then." A lease |
+| `<!-- factory-answer-claim manager=<name> question=<comment id> until=<ISO time> -->` | A manager | The same for a `factory-question` |
+| `<!-- factory-claim-release manager=<name> sha=<head> -->` (or `question=<id>`) | A manager | "I gave this up before the lease ran out" |
+| `<!-- factory-owner-ask id=<slug> -->` | A manager | One ask on the owner-queue issue, "Dev manager: needs the owner" |
+
+How a review is claimed (`factory manager-claims review <pr>`, or `next` for every free PR and question):
+
+1. A PR whose head has no marker (`factory-approved`, `factory-mustfix`, `pr-watch`) and no unexpired claim by another
+   manager is free. The manager posts a claim with `until` = now + `manager.claimMinutes` (default 20).
+2. It re-reads the comments. The earliest unexpired claim for that head wins, in the order GitHub lists the comments.
+   If it lost, it does nothing more (exit code 3) and moves on.
+3. The winner puts `factory-hold` on, reviews, ends with the usual marker and takes the hold off
+   (`factory manager-claims release <pr>`). A new head commit changes the sha, so the old claim means nothing.
+4. If the manager dies, `until` passes. The next `next` (or `sweep`) takes `factory-hold` off a PR that has had a
+   claim and has none running, and the PR can be claimed again. A hold on a PR nobody ever claimed is the owner's and
+   is left alone. A lease never counts for more than two hours after its comment, whatever `until` says.
+
+A question is claimed the same way (`answer <comment id>`); the `factory-answer` comment ends it. A claim is not an
+answer: `factory wait answer` and `factory precheck` ignore `factory-answer-claim`.
+
+`merge <pr>` merges only a head with `factory-approved sha=<head>` and passes that sha to GitHub, so a second
+manager's merge of an already merged or changed PR is refused by GitHub. The command reads that refusal as "done by
+someone else" (or "the head moved; it needs a new review") and exits 0, not as an error.
+
+`ask --id <slug> --text "..."` posts an ask on the owner-queue issue (created if missing; pin it by hand, the REST API
+cannot) only if no comment there carries that id. If two managers post at once, the earliest stays and the other
+removes its own.
+
+`factory manager-claims list [--json]` and `factory status` show every claim. `claimMinutes` is the setting
+`manager.claimMinutes`. All managers and builders use one GitHub account, so the name lives inside the comment, and
+`trustedReviewers` cannot tell managers apart: nothing here relies on it. Builders cannot post the claim markers
+(PR gate) or run the command (`settings.json`).
 **The standing rules are a skill, not a memory (#96).** `/manage-pass` (`kit/.claude/skills/manage-pass/SKILL.md`, linked into
 a project like the other skills) holds everything a fresh session needs: the two-column table of what the manager does
 alone and what it asks the owner first (the one copy; the playbook links to it), the pass order, the exact markers, the hold
@@ -1432,7 +1483,7 @@ an approval of an older commit does not count. Approvals follow the merge gate's
 
 **Review claim.** A `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` comment for the
 current head that has not expired; the earliest one wins. A claim for another commit, or past its `until`, is ignored.
-(The claim protocol itself is #99; this only reads it.)
+(The protocol, with releases and the lease cap, is `factory manager-claims`, which this reads through the same code.)
 
 **Next action**, the first rule that fits:
 
@@ -2005,6 +2056,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `reReviewPercent` | int | `30` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review. |
 | `lessons` | str | `".claude/factory/lessons.md"` | The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`). |
 | `lessonsCap` | int | `40` | The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now. |
+| `manager.claimMinutes` | int | `20` | How long a dev manager's review or answer claim holds a PR or question before another manager may take it (a lease; it ends sooner when the review marker or the answer is posted). |
 | `manager.flakes` | list | `[]` | Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent. |
 | `trustedReviewers` | list | `[]` | GitHub logins whose approvals count. Empty: any. |
 | `holdLabel` | str | `"factory-hold"` | The label the dev manager puts on a PR it is reviewing. |
@@ -2130,6 +2182,7 @@ software-factory/
     manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
     factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
     factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
+    factory_manager_claims.py           several dev managers at once: review and question claims with a lease
     factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
     pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
     check.py                            Stop: typecheck and tests
@@ -2178,6 +2231,7 @@ software-factory/
     factory_config.py                   reads factory.json, with defaults
     wait_for_merge.sh                   waits on a PR without spending tokens
     factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
+    factory_tick.py                     `factory manage-tick`: the precheck, then one manage-pass session only when there is work
     factory_turbo.py                    `factory turbo`: the shared Turborepo cache (status, install, down, env, ci-env)
   ci/                                     `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
                                           compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,

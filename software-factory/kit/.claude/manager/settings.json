@@ -40,7 +40,9 @@
       "Bash(./factory reviews*)",
       "Bash(./factory status*)",
       "Bash(./factory prd*)",
-      "Bash(./factory signoff*)"
+      "Bash(./factory signoff*)",
+      "Bash(factory manager-claims*)",
+      "Bash(./factory manager-claims*)"
     ],
     "deny": [
       "Read(./.env)",
