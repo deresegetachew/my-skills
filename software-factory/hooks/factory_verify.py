@@ -6,6 +6,9 @@ Runs `commands.ci` from .claude/factory.json (for example
 passes on a clean working tree, it records the commit in <reviewMarkers>/<branch>.ci.ok. The PR gate needs that
 mark for `gh pr create` and `gh pr ready` when main's factory.json sets `commands.ci`; drafts don't.
 
+Before it, `commands.fix` formats the changed files (#69); if that changes anything the pass is refused, because
+the commit no longer matches the files: commit the formatting and run it again.
+
   python3 .claude/hooks/factory_verify.py        exit 0: passed (or nothing to run); 1: it fails or can't run
 """
 import os, subprocess, sys
@@ -13,6 +16,7 @@ import os, subprocess, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load, load_from_main  # noqa: E402
 from factory_run_check import write_log  # noqa: E402
+import factory_fix  # noqa: E402
 
 
 def git(*a):
@@ -49,6 +53,14 @@ def main():
     if rc != 0 or dirty:
         print("factory verify: commit your changes first. The pass is recorded for a commit, and these files "
               "aren't in it:\n" + dirty, file=sys.stderr)
+        return 1
+    fix_rc, fix_msg = factory_fix.run(cfg)
+    if fix_rc != 0:
+        print(fix_msg, file=sys.stderr)
+        return 1
+    if fix_msg:
+        print(f"factory verify: {fix_msg}. Commit them and run verify again: CI checks the commit, not the "
+              "working tree.", file=sys.stderr)
         return 1
     head = git("rev-parse", "HEAD")[1]
     run_cmd = cmd.replace("{base}", f"origin/{cfg['mainBranch']}")
