@@ -1,0 +1,1 @@
+../../../software-factory/kit/.claude/skills/next-task/SKILL.md

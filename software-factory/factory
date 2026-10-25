@@ -42,7 +42,7 @@ Build
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
                          start; install --agents haile,tewodros turns it on (systemd user unit with linger, or a LaunchAgent)
   resume [--dry-run]     what autostart runs at boot: stack, then agents; safe to run by hand (running agents are left alone)
-  heartbeat [status|install|uninstall|once|run]
+  heartbeat [status|install|uninstall|restart|once|run]
                          the per-machine daemon that knows what each agent here is really doing (working, waiting in a
                          wait, idle, down) and tells GitHub on a change plus a keepalive. install keeps it running
                          (autostart install does it too); status shows what it sees
@@ -57,6 +57,9 @@ Look
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
                          incremental re-review: a reviewer's next round reads only the delta since its last one
+  manager-claims list|next|review|answer|release|sweep|merge|ask
+                         several dev managers at once: claim a PR or a question with a lease (manager.claimMinutes),
+                         so two managers never review, answer, merge or ask the same thing twice; list shows who holds what
   lessons [show|check|suggest|add|prune]
                          the short lessons file builders and reviewers read first; suggest proposes new ones from
                          recent must-fix comments, review findings and CI failures (add and prune: dev manager)
@@ -160,6 +163,8 @@ Maintain
   handover snapshot [--json]
                          what a manager hands over, read from GitHub: open PRs, tasks, owner asks, what needs a manager
                          now, agents and numbers in use (the runbook is docs/manager-handover.md)
+  manage-tick [--dry-run] precheck, then ONE `claude -p "/manage-pass"` only when there is work: an idle tick makes no model
+                         call (run it from cron or a timer)
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
@@ -251,6 +256,7 @@ case "$cmd" in
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
+  manager-claims) py factory_manager_claims.py "$@" ;;
   lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
@@ -274,6 +280,7 @@ case "$cmd" in
   artifacts) py factory_artifacts.py "$@" ;;
   handover)  py factory_handover.py "$@" ;;
   signoff)   py factory_signoff.py "$@" ;;
+  manage-tick) py factory_tick.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
   update)

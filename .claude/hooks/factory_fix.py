@@ -1,0 +1,1 @@
+../../software-factory/hooks/factory_fix.py

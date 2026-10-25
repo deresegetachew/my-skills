@@ -80,6 +80,7 @@ case " $* " in
   *" build "*) [ -z "${FAKE_DOCKER_BUILD_FAILS:-}" ] || exit 1 ;;
   *" info "*"MemTotal"*) [ -n "${FAKE_DOCKER_MEMTOTAL:-}" ] && echo "$FAKE_DOCKER_MEMTOTAL"; exit 0 ;;
   *" image inspect "*) [ -n "${FAKE_DOCKER_IMAGE_LABELS:-}" ] || exit 1; echo "$FAKE_DOCKER_IMAGE_LABELS"; exit 0 ;;
+  *" run "*) [ -z "${FAKE_DOCKER_RUN_FAILS:-}" ] || { echo "bash: /opt/factory-ci/entrypoint.sh: Permission denied" >&2; exit 126; } ;;
   *" up "*)  # one round: say whether the runner got the given token, then fail registration (code 3)
     [ "${RUNNER_TOKEN:-}" = "given-token" ] && echo "token ok" >>"$FAKE_DB.docker.log"
     echo "name $RUNNER_NAME label $RUNNER_LABEL" >>"$FAKE_DB.docker.log"
@@ -945,6 +946,30 @@ def test_check_passes_on_a_fresh_install_and_names_a_start_script_the_container_
     os.chmod(entry, 0o666)
     rc, out = ci(d, env, "check")
     assert rc == 1 and "entrypoint.sh" in out and "writable" in out, (rc, out)
+
+
+def test_check_starts_the_installed_start_script_in_the_runner_image_as_the_containers_user():
+    d, db, env = linux_project()
+    assert ci(d, env, "install")[0] == 0
+    labels = {**env, "FAKE_DOCKER_IMAGE_LABELS": "node=20 pnpm=9 playwright=none"}
+    open(db + ".docker.log", "w").close()
+    rc, out = ci(d, labels, "check")
+    runs = [l for l in log(db, "docker").splitlines() if " run " in " " + l + " "]
+    assert rc == 0 and len(runs) == 1, (rc, out, runs)
+    entry = os.path.join(names(d, env)["CI_INSTALLED"], "entrypoint.sh")
+    assert f"{entry}:/opt/factory-ci/entrypoint.sh:ro" in runs[0] and "--entrypoint /bin/bash widget-ci-runner:latest -n /opt/factory-ci/entrypoint.sh" in runs[0], runs
+    assert "--user" not in runs[0] and "--network none" in runs[0], runs  # the image's own user, as the service runs it
+    rc, out = ci(d, {**labels, "FAKE_DOCKER_RUN_FAILS": "1"}, "check")
+    assert rc == 1 and "runner container" in out and "Permission denied" in out, (rc, out)
+
+
+def test_check_skips_the_container_probe_when_docker_is_off_or_the_image_is_not_here():
+    d, db, env = linux_project()
+    assert ci(d, env, "install")[0] == 0
+    open(db + ".docker.log", "w").close()
+    assert ci(d, env, "check")[0] == 0  # no image on this machine
+    assert " run " not in log(db, "docker")
+    assert ci(d, {**env, "FAKE_DOCKER_IMAGE_LABELS": "x", "FAKE_DOCKER_UP": "0", "FAKE_DOCKER_RUN_FAILS": "1"}, "check")[0] == 0
 
 
 def test_factory_help_lists_the_ci_commands():

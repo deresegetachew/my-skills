@@ -50,7 +50,7 @@ ENVELOPE = re.compile(r"<!--\s*factory-msg\b(.*?)-->", re.S)
 ATTR = re.compile(r"([A-Za-z][\w-]*)=(\S+)")
 MARKUP = re.compile(r"<!--.*?-->", re.S)
 LEGACY_QUESTION = re.compile(r"<!--\s*factory-question\b")
-LEGACY_ANSWER = re.compile(r"<!--\s*factory-answer\b")
+LEGACY_ANSWER = re.compile(r"<!--\s*factory-answer(?!-)\b")  # not factory-answer-claim
 LEGACY_MUSTFIX = re.compile(r"<!--\s*factory-mustfix\b(?:\s+sha=([0-9a-f]{7,40}))?")
 LEGACY_APPROVED = re.compile(r"<!--\s*factory-approved\b(?:\s+sha=([0-9a-f]{7,40}))?")
 ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz"
