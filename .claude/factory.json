@@ -1,0 +1,58 @@
+{
+  "_about": "my-skills builds itself with its own factory (#112). Only what differs from the defaults is set here; `factory settings` shows the rest. Tests: tools/run_tests.py (also CI). protected: pull requests that touch these paths are merged by the dev manager or the owner. The kit's own files (agents, skills, hooks that guard, CI, the release) are listed one by one so ordinary factory changes can still merge themselves.",
+  "agents": ["menelik", "taytu", "haile"],
+  "tasks": {
+    "source": "issues",
+    "staleHours": 3
+  },
+  "mainBranch": "main",
+  "commands": {
+    "lint": "python3 tools/check_skills.py",
+    "test": "python3 tools/run_tests.py"
+  },
+  "codePaths": [
+    "software-factory",
+    "nestjs-best-practices",
+    "nestjs-clean-code-ddd-hexagonal",
+    "study-notes",
+    "tools"
+  ],
+  "alwaysAllowed": [],
+  "protected": [
+    "^CLAUDE\\.md$",
+    "^\\.claude/",
+    "^\\.github/",
+    "^\\.mcp\\.json$",
+    "^install\\.sh$",
+    "^tools/build_release\\.py$",
+    "^software-factory/VERSION$",
+    "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_config|factory_release|check|factory_stop|factory_session)\\.py$",
+    "^software-factory/kit/\\.claude/(settings\\.json|manager/|agents/|skills/)",
+    "^software-factory/kit/\\.github/",
+    "^software-factory/ci/(ci\\.sh|entrypoint\\.sh|loop\\.sh)$",
+    "\\.env"
+  ],
+  "testPaths": [
+    "(^|/)tests/",
+    "(^|/)test_[^/]*\\.py$"
+  ],
+  "dependencyManifests": [
+    "(^|/)(package\\.json|requirements[^/]*\\.txt|pyproject\\.toml)$"
+  ],
+  "reviews": {
+    "safety-auditor": {
+      "paths": [
+        "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_release)\\.py$",
+        "^software-factory/kit/\\.claude/settings\\.json$",
+        "^tools/build_release\\.py$"
+      ]
+    },
+    "security-reviewer": {
+      "paths": [
+        "^software-factory/hooks/(factory_netguard|factory_sandbox|factory_bootstrap[^/]*|factory_release)\\.py$",
+        "^software-factory/ci/",
+        "^\\.github/workflows/"
+      ]
+    }
+  }
+}

@@ -58,6 +58,7 @@
   ],
   "reviewMarkers": "tmp/reviews",
   "reReviewPercent": 30,
+  "manager": {"claimMinutes": 20},
   "lessons": ".claude/factory/lessons.md",
   "lessonsCap": 40,
   "testPaths": [
