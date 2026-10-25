@@ -729,6 +729,20 @@ def tooled_project(**kw):
     return d, db, env
 
 
+def test_the_start_script_can_be_read_by_the_runner_container_whose_user_is_not_the_owner():
+    # The runner image's user (uid 1001) is not the person who installed, so a 0600 entrypoint.sh gave the container
+    # `/bin/bash: /opt/factory-ci/entrypoint.sh: Permission denied` (exit 126) and no runner ever came online.
+    # It holds no secret (the token comes in the environment), and the folder around it stays 0700.
+    d, db, env = linux_project()
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    n = names(d, env)
+    mode = lambda f: stat.S_IMODE(os.stat(os.path.join(n["CI_INSTALLED"], f)).st_mode)
+    assert mode("entrypoint.sh") & 0o444 == 0o444, oct(mode("entrypoint.sh"))
+    assert mode("entrypoint.sh") & 0o022 == 0, "readable by everyone, writable by no one else"
+    assert stat.S_IMODE(os.stat(n["CI_INSTALLED"]).st_mode) == 0o700
+    assert mode("compose.yaml") == 0o600 and mode("widget-ci") == 0o700
+
 def test_install_builds_the_runner_image_with_the_projects_tools():
     d, db, env = tooled_project()
     rc, out = ci(d, env, "install")

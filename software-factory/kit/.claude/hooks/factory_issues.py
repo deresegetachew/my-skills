@@ -23,8 +23,8 @@ The branch is task/<issue number>-<short-name>, the PR says `Closes #<n>`, and m
   python3 .claude/hooks/factory_issues.py setup                    create the labels
   python3 .claude/hooks/factory_issues.py list                     open task issues and their state
 
-Claims are race-free across machines: a claim is labels plus a `<!-- factory-claim agent=<name> -->` comment, and
-when two agents claim at once the earlier comment wins; the other takes its label off and picks again.
+Claims are race-free across machines: a claim is labels plus a `<!-- factory-claim agent=<name> machine=<id> -->` comment, and
+when two agents claim at once (even with the same name, on two machines) the earlier comment wins; the other takes its label off and picks again.
 Everything goes through the GitHub REST API (`gh api`).
 """
 import argparse, json, os, re, subprocess, sys, time
@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load, task_labels  # noqa: E402
 
-CLAIM = re.compile(r"<!--\s*factory-claim\s+agent=([\w.-]+)\s*-->")
+CLAIM = re.compile(r"<!--\s*factory-claim\s+agent=([\w.-]+)(?:\s+machine=([\w-]+))?\s*-->")
 RELEASE = re.compile(r"<!--\s*factory-release\s+agent=([\w.-]+)\s*-->")
 DEPENDS = re.compile(r"depends on\s+((?:#\d+[\s,and]*)+)", re.I)
 BOX = re.compile(r"^(\s*[-*]\s+\[)([ xX])(\]\s+)", re.M)
@@ -114,18 +114,40 @@ def open_dependencies(issue, open_numbers, looked_up=None):
     return still_open
 
 
-def claim_winner(n):
-    """The agent whose claim comment came first since the last release, or None. Block and release both post a
-    release, so an old claim never outlives them (unblock an issue with `release`, not by editing labels)."""
-    winner = None
+def claims_since_release(n):
+    """[(agent, machine)] for the claim comments since the last release, oldest first. `machine` is None for a claim
+    made before claims carried one."""
+    out = []
     for c in gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments"):
         body = c.get("body") or ""
         if RELEASE.search(body):
-            winner = None
+            out = []
         m = CLAIM.search(body)
-        if m and winner is None:
-            winner = m.group(1)
-    return winner
+        if m:
+            out.append((m.group(1), m.group(2)))
+    return out
+
+
+def claim_winner(n):
+    """(agent, machine) of the claim comment that came first since the last release, or None. Block and release both
+    post a release, so an old claim never outlives them (unblock an issue with `release`, not by editing labels)."""
+    claims = claims_since_release(n)
+    return claims[0] if claims else None
+
+
+def is_me(claim, agent, machine):
+    """Whether a claim (agent, machine) is this agent on this machine. A claim without a machine (an older kit)
+    matches by name alone, as it always did; so does a machine that has no id."""
+    if not claim or claim[0] != agent:
+        return False
+    return not (claim[1] and machine and claim[1] != machine)
+
+
+def own_issue(n, agent, machine):
+    """Whether this agent on this machine may carry on with in-progress issue `n`: the claim that won it is its own.
+    (The winning claim, not the newest comment: a loser's claim comment is newer and must not hide the winner's issue.)"""
+    winner = claim_winner(n)
+    return not winner or is_me(winner, agent, machine)
 
 
 def ready_issues(cfg):
@@ -141,7 +163,10 @@ def ready_issues(cfg):
 def pick(cfg, agent):
     L = task_labels(cfg)
     mine = L["agentPrefix"] + agent
-    own = [i for i in task_issues(label=mine) if L["inProgress"] in names(i)]
+    from factory_machine import machine_id
+    machine = machine_id()
+    # Another machine's agent may have the same name: its issue is its, not ours to resume (#45).
+    own = [i for i in task_issues(label=mine) if L["inProgress"] in names(i) and own_issue(i["number"], agent, machine)]
     if own:
         i = sorted(own, key=order)[0]
         full = waiting_for_slot(cfg, i)
@@ -155,12 +180,15 @@ def pick(cfg, agent):
         n = i["number"]
         add_labels(n, [L["inProgress"], mine])
         remove_label(n, L["ready"])
-        comment(n, f"<!-- factory-claim agent={agent} -->\n**{agent}** is working on this.")
+        where = f" machine={machine}" if machine else ""
+        comment(n, f"<!-- factory-claim agent={agent}{where} -->\n**{agent}** is working on this.")
         time.sleep(2)  # let a simultaneous claim land, then let the earliest comment decide
         winner = claim_winner(n)
-        if winner == agent:
+        if is_me(winner, agent, machine):
             return i
-        remove_label(n, mine)  # someone else was first; their labels stay
+        if not winner or winner[0] != agent:
+            remove_label(n, mine)  # someone else was first; their labels stay
+        # (a winner with our own name on another machine owns that label too: leave it on)
     return None
 
 

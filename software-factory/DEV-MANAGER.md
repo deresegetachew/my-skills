@@ -75,6 +75,9 @@ activity up to date on each tick:
 ```
 [Dev manager tick] Manage <owner>/<repo> for the owner (the coding agent runs `factory loop -i` on his
 machine). Use the REST API (`gh api`), never force-push or push to the main branch.
+0. Run `factory precheck` first. If it prints `nothing to do`, skip to step 7 and do nothing else: no reviews, no
+   extra reads. Otherwise it lists what needs you; work through exactly those. Never wait by checking again in
+   this conversation: use `factory wait ci <pr>` (CI after your fix) or `factory wait answer <pr>`.
 1. Open PRs: for any head commit without a `<!-- pr-watch sha=... -->` comment, review and merge under the
    agreed rules. Give a PR a few minutes after it opens if the coding agent may still be pushing; a clean,
    green PR that says "a person merges this one" is yours. Retarget stacked PRs to main after a merge. Glance
@@ -118,7 +121,10 @@ When `tasks.source` is `"issues"` in `factory.json`, you write the tasks and the
   then number, so the number order is the build order.
 - **Each tick, dead agents first:** `factory agents sweep` marks agents with no ping for `tasks.downMinutes` as down
   and puts their in-progress issues back to ready. Tell the owner in one line which agent went down (once per agent,
-  not every tick). `factory agents` shows who is alive.
+  not every tick). `factory agents` shows who is alive and the machine id each one runs on. Each machine has its own
+  agent names, so a name is one agent on one machine and `sweep` works per name; two machines should never share a
+  name. If `factory agents` or an issue shows one name with two machine ids, tell the owner: one of them must change
+  its names (`factory machine setup`).
 - **Then stale claims of live agents:** `factory issues stale` lists in-progress issues with no activity (issue updates or
   commits on their branch) for `tasks.staleHours`. Before moving one, check the agent really is gone (no recent
   commit, no open PR, no reply to a comment). Then `factory issues release <n> "<agent> went quiet"`: it goes back

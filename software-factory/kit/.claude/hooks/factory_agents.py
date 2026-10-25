@@ -4,7 +4,7 @@
 Each agent has one issue, `Agent: <name> · <status>`, labelled `factory:agent`, so the board and your phone show who
 is alive and what each one does. The agent keeps it current itself:
 
-  start          register: status `idle`, with its machine and folder        (factory-loop.sh, SessionStart hook)
+  start          register: status `idle`, with its machine id (the hostname only with showWhere)       (factory-loop.sh, SessionStart hook)
   takes a task   `working on #42`                                             (next_task.py)
   any tool use   a ping, at most every `tasks.pingMinutes` (5), in the background   (PostToolUse hook)
   turn ends      `idle`                                                       (Stop hook)
@@ -21,6 +21,10 @@ ready, so a live agent takes them.
   python3 .claude/hooks/factory_agents.py down --agent taytu
   python3 .claude/hooks/factory_agents.py hook                  the Claude hook entry (reads the event on stdin)
 
+Each ping marker carries `machine=<id>` (factory_machine.py). `register` refuses, exit 3 and a `{code, message, fix}`
+on stderr, when the open issue of that name was pinged by another machine within `downMinutes`; a marker without a
+machine (an older kit) never blocks.
+
 Hooks never fail or slow a session: errors are ignored, and the tool-use ping runs detached.
 """
 import argparse, json, os, re, socket, subprocess, sys, tempfile, time
@@ -30,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import DEFAULTS, load, task_labels, task_source  # noqa: E402
 
 LABEL, DOWN_LABEL = "factory:agent", "factory:agent-down"
-MARK = re.compile(r"<!--\s*factory-agent\s+name=([\w.-]+)\s+status=(\w+)\s+ping=(\S+)\s*-->")
+MARK = re.compile(r"<!--\s*factory-agent\s+name=([\w.-]+)\s+status=(\w+)\s+ping=(\S+?)(?:\s+machine=([\w-]+))?\s*-->")
 
 
 def setting(cfg, key):
@@ -126,14 +130,34 @@ def find_issue(agent):
     return found[0] if found else None
 
 
-def render(agent, status, detail, started, ping=None, where=None):
+def render(agent, status, detail, started, ping=None, where=None, machine=""):
     where = where or f"slot {os.environ.get('FACTORY_SLOT') or 1}"
     shown = {"working": detail or "working", "idle": "idle", "down": "down"}[status]
     t = iso(ping or now())
-    body = (f"<!-- factory-agent name={agent} status={status} ping={t} -->\n"
+    mark = f" machine={machine}" if machine else ""
+    body = (f"<!-- factory-agent name={agent} status={status} ping={t}{mark} -->\n"
             f"**Status:** {shown}\n**Last ping:** {t}\n**Started:** {started}\n**Where:** {where}\n\n"
             "This issue is kept up to date by the agent itself (see factory_agents.py). Don't close it.")
     return f"Agent: {agent} · {shown}", body
+
+
+def machine_of(issue):
+    """The machine id in an agent issue's marker; None when it has none (an older kit)."""
+    m = MARK.search(issue.get("body") or "")
+    return m.group(4) if m else None
+
+
+def held_elsewhere(cfg, agent, machine):
+    """The other machine's id when `agent`'s open issue was pinged by it within `downMinutes` and isn't down, else
+    None. A marker without a machine (an older kit), a down or silent agent and our own machine all return None."""
+    i = find_issue(agent)
+    if not i or i.get("state") != "open" or not machine:
+        return None
+    st = state_of(cfg, i)
+    other = machine_of(i)
+    if not st or st[1] in ("down", "silent") or not other or other == machine:
+        return None
+    return other
 
 
 def update(cfg, agent, status, detail="", create=False):
@@ -153,7 +177,8 @@ def update(cfg, agent, status, detail="", create=False):
     # The machine and folder are posted to GitHub only when the project opts in (tasks.showWhere: true).
     where = (f"{socket.gethostname()} · {os.path.basename(os.getcwd())}"
              if (cfg.get("tasks") or {}).get("showWhere") else None)
-    title, body = render(agent, status, detail, started, where=where)
+    from factory_machine import machine_id
+    title, body = render(agent, status, detail, started, where=where, machine=machine_id())
     if n:
         gh("PATCH", f"repos/{{owner}}/{{repo}}/issues/{n}", {"title": title, "body": body, "state": "open"})
     else:
@@ -171,7 +196,7 @@ def state_of(cfg, issue):
     m = MARK.search(issue.get("body") or "")
     if not m:
         return None
-    name, status, ping = m.groups()
+    name, status, ping = m.groups()[:3]
     t = datetime.fromisoformat(ping.replace("Z", "+00:00"))
     quiet = (now() - t).total_seconds() / 60
     if status != "down" and quiet >= float(setting(cfg, "downMinutes")):
@@ -217,7 +242,7 @@ def sweep(cfg):
         old = i.get("body") or ""
         started = (re.search(r"\*\*Started:\*\* (\S+)", old) or [None, "?"])[1]
         where = (re.search(r"\*\*Where:\*\* (.+)", old) or [None, "?"])[1]
-        title, body = render(name, "down", "", started, ping=t, where=where)
+        title, body = render(name, "down", "", started, ping=t, where=where, machine=machine_of(i) or "")
         gh("PATCH", f"repos/{{owner}}/{{repo}}/issues/{i['number']}", {"title": title, "body": body})
         add_labels(i["number"], [DOWN_LABEL])
         comment(i["number"], f"No ping for {quiet / 60:.1f} h (since {iso(t)}): marked down.")
@@ -279,6 +304,12 @@ def main():
     if a.cmd in ("register", "ping", "down") and not a.agent:
         raise SystemExit("which agent? pass --agent <name> or set FACTORY_AGENT")
     if a.cmd == "register":
+        from factory_machine import machine_id, refuse
+        other = held_elsewhere(cfg, a.agent, machine_id())
+        if other:  # exit 3: factory-loop.sh stops here instead of running as a second copy of this agent
+            refuse("agent-name-in-use", f"{a.agent} is already running on another machine (machine {other}).",
+                   "Start this machine's agents under names no other machine uses: "
+                   "`factory machine setup <names>`, or set FACTORY_AGENTS.", exit_code=3)
         remember(a.agent, started=iso(now()), issue=None)
         print(f"#{update(cfg, a.agent, 'idle', create=True)}")
     elif a.cmd == "down":
@@ -295,10 +326,10 @@ def main():
             return
         update(cfg, a.agent, status, detail)
     elif a.cmd == "list":
-        rows = [st for st in (state_of(cfg, i) for i in current(agent_issues())) if st]
-        for name, status, t, quiet in sorted(rows):
+        rows = [(*st, machine_of(i)) for i in current(agent_issues()) for st in [state_of(cfg, i)] if st]
+        for name, status, t, quiet, mach in sorted(rows, key=lambda r: r[:4]):
             when = f"{quiet:.0f} min ago" if quiet < 120 else f"{quiet / 60:.1f} h ago"
-            print(f"{name:<12} {status:<8} last ping {iso(t)} ({when})")
+            print(f"{name:<12} {status:<8} last ping {iso(t)} ({when})" + (f"  machine {mach}" if mach else ""))
         if not rows:
             print("no agents have registered yet")
     elif a.cmd == "sweep":

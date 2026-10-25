@@ -1,0 +1,76 @@
+name: Release
+
+# Runs when a version tag is pushed (the owner's call: nothing here tags or publishes by itself).
+# Builds the software-factory archive and publishes a GitHub release: the archive, SHA256SUMS and notes.
+on:
+  push:
+    tags: ['v*']
+
+# Write access to contents is needed to create the release, and only this workflow has it.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history: the tag must be checked against main, and the notes list commits
+
+      - name: Tag must be on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $TAG ($GITHUB_SHA) is not on main. Merge the change to main first, delete this tag, and tag a commit on main."
+            exit 1
+          fi
+
+      - name: Tag must match the manifest version
+        run: |
+          want="v$(tr -d '[:space:]' < software-factory/VERSION)"
+          if [ "$TAG" != "$want" ]; then
+            echo "::error::Tag $TAG does not match software-factory/VERSION ($want). Bump the file in a merged PR, or tag $want."
+            exit 1
+          fi
+
+      - name: Checks and tests
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          python3 tools/check_skills.py
+          python3 tools/run_tests.py
+
+      - name: Build
+        run: python3 tools/build_release.py --out dist --tag "$TAG"
+
+      - name: Verify the checksum
+        run: cd dist && sha256sum -c SHA256SUMS
+
+      - name: Release notes
+        run: |
+          prev="$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)"
+          {
+            echo "Software factory $TAG, built from commit \`$GITHUB_SHA\`."
+            echo
+            echo "Check the download: \`sha256sum -c SHA256SUMS\` (both files in one folder)."
+            echo
+            if [ -n "$prev" ]; then echo "Changes since $prev:"; range="$prev..$TAG"; else echo "Changes (first release):"; range="$TAG"; fi
+            echo
+            git log --no-merges --format='- %s (%h)' "$range" -- software-factory | head -100
+          } > dist/NOTES.md
+
+      - name: Publish
+        run: |
+          flags=""
+          case "$TAG" in *-*) flags="--prerelease" ;; esac
+          gh release create "$TAG" dist/software-factory-*.tar.gz dist/SHA256SUMS \
+            --verify-tag --title "Software factory $TAG" --notes-file dist/NOTES.md $flags

@@ -276,6 +276,7 @@ version it pins. `factory help` lists everything.
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
+| `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
@@ -292,6 +293,8 @@ version it pins. `factory help` lists everything.
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
+| `factory wait ci <pr>` / `answer <pr>` / `slot` / `ready` `[minutes]` | The other waits, also without tokens: until CI on the PR's head commit has finished, until its `factory-question` comments have a later `factory-answer`, until fewer than `maxOpenPRs` of your PRs are open, until a task is ready. [Waiting](#waiting-without-tokens) |
+| `factory precheck` | For the dev manager: prints `nothing to do` (exit 0), or one line per PR with an unreviewed commit, unanswered question or quiet agent (exit 3). Reads GitHub only |
 | `factory update` | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
@@ -339,11 +342,22 @@ and dashes:
 - The first agent works in the project folder. The others get git worktrees in `<project>-agents/<name>`, next to the
   project, created on first use and reused after that.
 - A new loop takes the first name that no live loop on this clone holds. `factory agent 2` means the second name.
-- **Several machines:** give each machine its own names with `FACTORY_AGENTS` in its shell profile, never in
-  `factory.json`. For example `export FACTORY_AGENTS=menelik,taytu` on the Mac and
-  `export FACTORY_AGENTS=haile,tewodros` on the Linux machine. `factory loop` then takes only those names, each
-  with its usual folder, ports and database, so two machines never run the same agent. A name that isn't in
-  `agents` stops the loop with a plain message.
+- **Several machines:** give each machine its own names, never in `factory.json`. Either
+  `export FACTORY_AGENTS=menelik,taytu` in the shell profile, or run `factory machine setup menelik,taytu`, which writes
+  `~/.config/software-factory/<repo>.json` (`{"agents": [...]}`; `<repo>` is the main clone's folder name). The
+  environment variable wins over the file; with neither, every name in `agents` is used, as before. The other machine
+  uses other names (`haile,tewodros`). `factory loop` then takes only those names, each with its usual folder, ports
+  and database. A name that isn't in `agents` stops the loop with a plain message. `factory machine` shows this
+  machine's id and names; `setup` refuses a name another machine has live.
+  - **Machine id.** The first time it's needed a random id is saved in `~/.config/software-factory/machine-id` (never
+    the hostname; `FACTORY_MACHINE_ID` overrides it). It goes into claims
+    (`<!-- factory-claim agent=<name> machine=<id> -->`) and agent pings (`... ping=<time> machine=<id> -->`). If two
+    machines do end up with one name, a claim is won by one machine only (the other keeps the shared label off its
+    own back and picks again), an agent never resumes an in-progress issue whose winning claim came from another
+    machine, and `factory loop` / `register` stop with `{code, message, fix}` (`agent-name-in-use`, exit 3) when the
+    open `Agent: <name>` issue was pinged by another machine within `tasks.downMinutes`. The hostname is posted only
+    with `tasks.showWhere`; `factory agents` shows the machine id. Claims and pings without a machine id (an older
+    kit) are read as before, by name alone.
   A loop holds its name for as long as it runs, however long that is. (Before 22 Oct a loop older than
   `claimStaleHours` lost its name, so a new loop could start as a second menelik.)
 - Each time a loop starts in a worktree, it checks out `origin/main`, copies `.env.local` and `.env.*.local` across
@@ -441,6 +455,14 @@ Most of the cost is what the agents read, not what they write.
   `.env`, aren't compared.
   It remembers this in the git folder (`.git/factory-check-green`, one per worktree), and a failure is never
   remembered. Like the review markers, it's a guard rail: a hand-written file there skips the check.
+- **Quiet checks (`factory run-check <command>`):** runs a check or test command, keeps the full output in
+  `checkLogDir` (default `tmp/checks/<name>.log`; the folder ignores itself, so a log is never an untracked file)
+  and prints one line when it passes. When it fails it prints `checkOutputLines` lines at most (the failing lines
+  first, then the end) and the log path; open the log only if that isn't enough. `--name` names the log, `--lines`
+  overrides the cap, and the exit code is the command's. The Stop check and `factory verify` also save the full
+  output of a failure there and name the file. `next-task` tells agents to run checks this way. To cut noise at the
+  source too, set the `commands` to quiet reporters yourself (for example `pnpm -s`, `vitest --reporter=dot`,
+  `turbo --output-logs=errors-only`, `tsc --pretty false`); the kit doesn't pick them, since it can't know your stack.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
@@ -475,6 +497,27 @@ file's own prompt, tools and description, so the shared file is never edited or 
 `CLAUDE_CODE_SUBAGENT_MODEL` is not used: on its own the agent file's `model:` wins, and with `..._FORCE=1` it
 forces one model on every subagent. `escalateTo` is stored and checked, but the next-task skill still escalates
 the reviewer to Opus by its own wording (not yet read from the setting).
+
+### Waiting without tokens
+
+A Claude session that waits by checking again pays for every check, because each turn re-sends the context. So every
+wait is a shell loop that checks GitHub (REST, `gh api`), pauses 15 seconds and then 22, 33 ... up to 60
+(`FACTORY_WAIT_START`, `FACTORY_WAIT_MAX`), and returns one line only when there is something to do. Default 30
+minutes. The exit code says what happened:
+
+| Exit | Meaning |
+|---|---|
+| 0 | It happened: merged, CI green, answered, slot free, task ready |
+| 1 | `ci`: a check failed (the line names it). `answer`: no question is waiting |
+| 2 | Timed out. Do other work and wait again later |
+| 3 | `ci`: the PR is merged or closed. `precheck`: there is work |
+| 4 | `ci`: GitHub never started the jobs (billing); see `factory_ci.py` |
+
+`factory wait <pr>` is unchanged. Agents and the dev manager never poll inside the conversation (`next-task` and
+[DEV-MANAGER.md](DEV-MANAGER.md) say so). The dev manager's tick starts with `factory precheck` and ends there when it
+prints `nothing to do`: one short command, no review, no reading of state notes. Not yet done: running the precheck
+outside any model, so an idle tick costs nothing at all (a GitHub-event trigger or a cron that starts the session only
+when `precheck` exits 3).
 
 ### Measuring it
 
@@ -549,12 +592,12 @@ Set `"tasks": { "source": "issues" }` in `factory.json`, and run `factory issues
   | `agent:<name>` | Which agent has it |
   | `factory-hold` | The dev manager is reviewing its PR |
 
-- **Claims are race-free across machines.** An agent adds its labels and a `<!-- factory-claim agent=<name> -->`
-  comment, waits 2 seconds, and reads the comments back. The earliest claim since the last
+- **Claims are race-free across machines.** An agent adds its labels and a `<!-- factory-claim agent=<name> machine=<id> -->`
+  comment, waits 2 seconds, and reads the comments back. The earliest claim (name and machine) since the last
   `<!-- factory-release -->` wins; the loser takes its label off and picks again. `block` and `release` both post a
   release, so an old claim never outlives them. Unblock an issue with `factory issues release <n>`, not by editing
   labels.
-- **An agent starts with its own issue.** If it holds one in progress, it carries on with it.
+- **An agent starts with its own issue.** If it holds one in progress (and the claim that won it came from this machine), it carries on with it.
 - **While it works** it ticks the todos (`factory issues tick <n> <index>`), names the branch `task/<n>-<name>`, opens
   the PR with `Closes #<n>` (the gate checks it), and moves the issue to in-review. Merging closes the issue.
 - **Quiet issues.** `factory issues stale` lists in-progress issues with no activity (issue updates or commits on
@@ -1010,6 +1053,7 @@ software-factory/
       factory_session.py                  SessionStart: a plain `claude` session becomes an agent
       factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
       next_task.py                        the next job: rework first, then a free task
+      factory_machine.py                  this machine's id and agent names (outside the repo)
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
@@ -1025,6 +1069,7 @@ software-factory/
       style_checks.py                     CI: each style's check
       factory_config.py                   reads factory.json, with defaults
       wait_for_merge.sh                   waits on a PR without spending tokens
+      factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
     .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
                                           compose.yaml, compose-light.yaml, compose-caches.yaml,
                                           runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.py,

@@ -54,7 +54,8 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    - **Parallel loops:** ports, database names and queues come from the environment (`agentEnv`). Never hard-code a
      port; read the variable and keep today's value as the default.
 3. Test what a user or another module can observe. Run the "Done when" check and the `typecheck`, `lint` and `test`
-   commands until they pass, and keep the output as evidence.
+   commands until they pass, and keep the output as evidence. Run them through `./factory run-check <command>`: it prints one
+   line when they pass, or the first errors and the log path when they fail; open the full log only if that isn't enough.
 4. **Extra reviews:** run `python3 .claude/hooks/factory_reviews.py` and do each line it prints (a skill such as
    `design-check` or the eval, or a subagent such as `safety-auditor` or `security-reviewer`), fixing every must-fix.
    Ask the `safety-auditor` whenever the diff touches what CLAUDE.md calls critical rules, and the

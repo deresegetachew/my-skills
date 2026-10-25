@@ -144,12 +144,13 @@ def factory(r, cfg):
     else:
         r.note("`factory` command", "run `./factory install-shim` once, and add ~/.local/bin to PATH")
     names = cfg.get("agents") or []
-    only = [n.strip() for n in os.environ.get("FACTORY_AGENTS", "").split(",") if n.strip()]
+    from factory_machine import machine_names
+    only = machine_names()
     unknown = [n for n in only if n not in names]
     if unknown:
-        r.fix("FACTORY_AGENTS", f"{', '.join(unknown)} aren't in `agents` in .claude/factory.json ({', '.join(names)})")
+        r.fix("FACTORY_AGENTS / machine names file", f"{', '.join(unknown)} aren't in `agents` in .claude/factory.json ({', '.join(names)})")
     elif only:
-        r.ok(f"this machine runs {', '.join(only)} (FACTORY_AGENTS)")
+        r.ok(f"this machine runs {', '.join(only)} (FACTORY_AGENTS or the machine names file)")
     else:
         r.note("FACTORY_AGENTS", "not set; fine on one machine. With several, give each its own names, for example "
                f"`export FACTORY_AGENTS={','.join(names[:2])}`")
