@@ -274,6 +274,36 @@ def can_move(old, new):
     return old == new or new in TRANSITIONS.get(old, ())
 
 
+_ROLES = None
+
+
+def role_table():
+    """{address: {"names": [...], "logins": [...]}} for the roles a message can be addressed to (`po`, `dev-manager`), from
+    the project's factory.json: the names that role's loops run under, and for the product owner the GitHub logins whose
+    answers count (`roles.product-owner.logins`, empty: any). {} when the config can't be read (then names stand for
+    themselves). Read once per process."""
+    global _ROLES
+    if _ROLES is None:
+        try:
+            from factory_config import load, role_names, role_setting
+            cfg = load()
+            _ROLES = {"po": {"names": role_names(cfg, "product-owner"),
+                             "logins": [str(x) for x in (role_setting(cfg, "product-owner", "logins", []) or [])]},
+                      DEV_MANAGER: {"names": role_names(cfg, "dev-manager"), "logins": []}}
+        except (ImportError, OSError, ValueError, SystemExit):
+            _ROLES = {}
+    return _ROLES
+
+
+def address_of(name):
+    """The address a sender answers for: a product owner's own name (eleni) is `po`, a dev manager's is `dev-manager`;
+    any other name is its own address."""
+    for address, row in role_table().items():
+        if name in row["names"]:
+            return address
+    return name
+
+
 def move_problem(task, m, trusted=()):
     """Why message `m` may not move `task` where it says, or None. Only the addressee answers, works, asks for more
     or fails a question; only the asker cancels it or resumes it after a clarification; a login in `trusted` may
@@ -285,12 +315,19 @@ def move_problem(task, m, trusted=()):
         return f"The question is {task.state}; it can't move to {m.state}."
     if m.state == task.state or (m.login and m.login in trusted):
         return None
-    actor = m.frm or (DEV_MANAGER if m.legacy else "")
+    actor = address_of(m.frm or (DEV_MANAGER if m.legacy else ""))
+    asker = address_of(task.frm)
     if m.state == "canceled":
-        return None if actor == task.frm else f"Only the asker ({task.frm or 'unknown'}) can cancel a question."
+        return None if actor == asker else f"Only the asker ({task.frm or 'unknown'}) can cancel a question."
     if task.state == "input-required" and m.state == "working":
-        return None if actor in (task.frm, task.to) else f"Only {task.frm or 'the asker'} or {task.to} can resume it."
-    return None if actor == task.to else f"This question is addressed to {task.to}, not {actor or 'an unnamed sender'}."
+        return None if actor in (asker, task.to) else f"Only {task.frm or 'the asker'} or {task.to} can resume it."
+    if actor != task.to:
+        return f"This question is addressed to {task.to}, not {actor or 'an unnamed sender'}."
+    logins = role_table().get(actor, {}).get("logins") or []
+    if logins and m.login and m.login not in logins:  # an answer for the product owner from a login nobody listed
+        return (f"Only the logins listed in roles.product-owner.logins ({', '.join(logins)}) answer for {actor}; "
+                f"{m.login} is not one of them, so this is ignored.")
+    return None
 
 
 def fold(messages, trusted=()):
@@ -341,6 +378,8 @@ def check_new(m, thread, me=None):
     manager's), and answer, work on or fail only a question addressed to them; invalid transitions are refused."""
     if me and m.frm != me:
         return f"Post as yourself: from= is {m.frm or 'missing'}, and you are {me}."
+    if me and m.frm in ("po", "owner"):
+        return f"The name {m.frm} stands for a role (the product owner, the owner), not an agent. Post under your own name."
     if m.kind in ("approval", "mustfix"):
         return "Approvals and must-fixes are reserved for the dev manager."
     if thread is not None and m.id in thread.seen:

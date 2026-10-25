@@ -44,7 +44,8 @@ if m and method == "POST":
     db.setdefault("comments", {}).setdefault(m.group(1), []).append(data.get("body", ""))
     save("comment", {"issue": int(m.group(1)), "body": data.get("body", "")}); out({"id": 1})
 if m:
-    rows = [b if isinstance(b, dict) else {"body": b, "created_at": "2026-10-25T10:00:00Z"} for b in db.get("comments", {}).get(m.group(1), [])]
+    rows = [{"id": 1000 * int(m.group(1)) + k, **(b if isinstance(b, dict) else {"body": b, "created_at": "2026-10-25T10:00:00Z"})}
+            for k, b in enumerate(db.get("comments", {}).get(m.group(1), []), 1)]
     out(rows if page == 1 else [])
 out([] if page == 1 else [])
 '''

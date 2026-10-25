@@ -125,6 +125,8 @@ SETTINGS = {s.key: s for s in [
     S('roles.product-owner.workLabel', 'str', 'agents', "An open issue or pull request with this label is work for the product owner. Empty: it never has any."),
     S('roles.product-owner.busyMinutes', 'int', 'agents', "Minutes the product owner's loop waits after a pass that had work."),
     S('roles.product-owner.idleMinutes', 'int', 'agents', "Minutes it waits when there was none. 0: it exits instead."),
+    S('roles.product-owner.escalateMinutes', 'int', 'agents', "A question addressed `to=po` that nobody answered moves up one level after this many minutes: product owner, then dev manager, then the owner. With no product owner running it starts at the dev manager."),
+    S('roles.product-owner.logins', 'list', 'agents', "GitHub logins whose answers count for the product owner. Empty: any login. An answer from another login is ignored."),
     S('manager.busyMinutes', 'int', 'agents', "Minutes the dev manager's loop waits after a cycle that had work."),
     S('manager.idleMinutes', 'int', 'agents', "Minutes it waits when there was none. 0: it exits instead."),
     S('manager.maxSubManagers', 'int', 'agents', "How many one-item sub-managers the dev-manager orchestrator runs at once. Items beyond the cap wait for the next cycle."),
