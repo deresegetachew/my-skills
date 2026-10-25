@@ -124,7 +124,7 @@ def world(db=None, cfg=None, files=None):
     open(os.path.join(d, "bin", "gh"), "w").write(GH)
     # a fake claude that records its prompt in full and the lease state at the time it ran
     open(os.path.join(d, "bin", "claude"), "w").write(
-        '#!/usr/bin/env bash\nprintf "claude %s\\n" "$(printf "%s" "$*" | tr "\\n" " ")" >> "$LOOP_LOG"\n'
+        '#!/usr/bin/env bash\nline="$(printf "claude %s" "$(printf "%s" "$*" | tr "\\n" " ")")"; tmp="$(mktemp)"; printf "%s\\n" "$line" > "$tmp"; cat "$tmp" >> "$LOOP_LOG"; rm -f "$tmp"\n'
         'printf "%s\\n" "$@" > "$(dirname "$LOOP_LOG")/last-args"\n'
         'if [ -n "${FAKE_CLAUDE_HOOK:-}" ]; then bash "$FAKE_CLAUDE_HOOK" "$@"; exit $?; fi\nexit 0\n')
     return d, work, env
