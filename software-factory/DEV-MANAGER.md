@@ -272,7 +272,10 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
   auditor and reviewer will try. A task that names them passes review in one round instead of several, and
   each round re-reads the branch.
 - `factory settings` shows the knobs: `commands.testChanged` / `typecheckChanged` for a Stop check on the
-  changed packages only, and `checkOutputLines` for how much of a failure the agent sees.
+  changed packages only, and `checkOutputLines` for how much of a failure the agent sees. `factory settings help <key>`
+  explains any of them. A settings change comes as a pull request from a person (`factory settings pr`); its body lists
+  each change and the review it needs (`testPaths`, `goldenPaths` and `dependencyManifests` need `tests-reviewed` or
+  `deps-reviewed`). Agents can't change settings, and you merge those PRs only within the owner's scope.
 Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
 Check spend with `/usage`.
 
