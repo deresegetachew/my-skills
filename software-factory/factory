@@ -85,10 +85,22 @@ CI                       local (a self-hosted runner on this machine) or GitHub'
   ci logs [i] [-f]       a runner's log (instance 1 unless you name one)
 
 Settings
-  settings               every setting: its value here (or the default) and what it does
-  settings show <key>    one setting in full: type, default, value here, options
-  settings set <key> <v> change one (checked against its type); unset <key> goes back to the default.
-                         Then commit .claude/factory.json in a pull request. Agents can't run set or unset.
+  settings               the interactive menu in a terminal (browse by section, search with /, ? for help, change,
+                         review the diff, save); in a pipe or script it prints the list. settings interactive: the menu anywhere
+  settings list [--section S] [--json]
+                         every setting: value, default, overridden or not, and what it does
+  settings help [<key>]  the long help for one setting (what reads it, examples, who must approve a change), or the sections
+  settings show <key>    one setting in brief: type, default, value here, options
+  settings get <key>     just the value, as JSON; dotted keys such as tasks.source
+  settings set <key> <v> change one (checked against its type and limits); unset <key> goes back to the default
+  settings diff          what the project file sets differently from the defaults
+  settings validate      exit 1 with clear messages on a bad value (invalid regex, unknown tasks.source, duplicate agent ...)
+  settings pr [--ready]  propose the edited .claude/factory.json as a pull request (a draft by default)
+  settings --local ...   the same for this machine's own settings (agent names, Remote Control, autostart), outside the repo
+  settings docs [--check|--write]
+                         the README's settings tables, generated from the same metadata table
+                         .claude/ is protected, so a project change reaches main through a pull request. Agents can't
+                         run set, unset, pr, interactive or --local changes.
 
 Measure
   usage [--since D] [--by task|agent|model] [--record LABEL]
@@ -170,7 +182,9 @@ case "$cmd" in
     fi
     set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' ${mf[@]+"${mf[@]}"} "$@"
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
-    if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
+    # FACTORY_REMOTE_CONTROL=0|1 wins; else this machine's `remoteControl` setting (factory settings --local); else on.
+    rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(python3 "$dir/.claude/hooks/factory_machine.py" remote 2>/dev/null || echo 1)"
+    if [ "$rc" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
     exec claude "$@" ;;
   worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;

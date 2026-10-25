@@ -300,9 +300,11 @@ for ((n = 1; n <= limit; n++)); do
   if [ "$interactive" = 1 ]; then
     echo "[$agent] Talk to it as usual. When the task is done, the session closes by itself."
     python3 "$hooks/factory_claims.py" take-done --agent "$agent" >/dev/null  # no stale mark from an earlier run
-    # Remote Control (on by default; FACTORY_REMOTE_CONTROL=0 turns it off): the session also appears at
-    # claude.ai/code and in the Claude app, so you can watch it and type into it (/exit included) from your phone.
-    if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then
+    # Remote Control (on by default; FACTORY_REMOTE_CONTROL=0 turns it off, or `factory settings --local set remoteControl
+    # off` on this machine): the session also appears at claude.ai/code and in the Claude app, so you can watch it and
+    # type into it (/exit included) from your phone.
+    rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(python3 "$hooks/factory_machine.py" remote 2>/dev/null || echo 1)"
+    if [ "$rc" = 1 ]; then
       claude "${claude_flags[@]}" --remote-control="$agent $id" "$prompt" || true
     else
       claude "${claude_flags[@]}" "$prompt" || true
