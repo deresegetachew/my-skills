@@ -595,11 +595,11 @@ between passes. What differs is small:
 
 | | coding agent | dev manager | product owner |
 |---|---|---|---|
-| Skill a pass runs | `/next-task` | `/manage-pass` | `/product-pass` |
-| Has work when | a task is ready (it claims it) | `factory precheck` lists something | an open issue or PR has `roles.product-owner.workLabel` |
+| Skill a pass runs | `/next-task` | `/manage-pass <item>`, started by the orchestrator once per item | `/product-pass` |
+| Has work when | a task is ready (it claims it) | `factory watch` lists something (the orchestrator, no model) | an open issue or PR has `roles.product-owner.workLabel` |
 | Settings | the project's `settings.json` | `roles.dev-manager.profile` | `roles.product-owner.profile` |
 | Model | `models.builder` | `models.manager` | `models.product-owner` |
-| Wait after a pass | `waitMinutes` (inside the loop) | `manager.busyMinutes` (10) / `manager.idleMinutes` (30) | `roles.product-owner.busyMinutes` (30) / `idleMinutes` (60); 0 idle: exit |
+| Wait after a pass | `waitMinutes` (inside the loop) | `manager.busyMinutes` (2) / `manager.idleMinutes` (5) | `roles.product-owner.busyMinutes` (30) / `idleMinutes` (60); 0 idle: exit |
 
 Only the coding agent claims a task. Managers and product owners register as live agents (`factory agents` shows the
 role) and keep pinging while they wait, so the sweep does not take a sleeping manager for a dead one. A role's profile
@@ -942,6 +942,66 @@ label, the sha-pinned REST merge (`PUT .../pulls/<n>/merge` with `sha`), the CI 
 additions go in `<roles.dir>/dev-manager/README.md` (or, without a role folder, `<notes>/manager.md`); the skill says to
 read them first. `claude -p "/manage-pass --dry-run"` reads, prints what it would do and writes nothing.
 
+### Run a manager
+
+```
+factory dev-manager [name] loop            the orchestrator, unattended; keep it running (tmux, a VM, factory autostart)
+factory dev-manager [name] loop --once     one cycle, then exit (cron or a systemd timer can run this)
+factory dev-manager [name] loop --dry-run  read GitHub, print what a cycle would do, write nothing
+factory dev-manager [name] loop -i         one item in a session you can type into, with Remote Control (cap 1)
+factory watch [--json]                     the seven checks on their own: one line per item and who it is for
+```
+
+**The orchestrator has no model (#97).** `factory dev-manager loop` is a loop script. Each cycle it runs the seven checks
+(`factory_watch.py`; `factory precheck` is its checks 1, 2 and the quiet agents and issues), reads labels and comments as
+the only truth, and starts a fresh one-item sub-manager for each item that needs a manager: `claude -p "/manage-pass pr-417"`
+on the manager settings profile, with the item's fact sheet and its thread note in the prompt. A sub-manager does its one item
+and exits. The orchestrator never starts a builder, and it never merges or reviews itself.
+
+| # | Check | Goes to | Fires when |
+|---|---|---|---|
+| 1 | an unreviewed head commit | a sub-manager | the PR has no verdict or `pr-watch` for its head, and the commit is older than `manager.quietMinutes` (5) |
+| 2 | an open question | a sub-manager | a `factory-question` (or `factory-msg kind=question to=dev-manager`) has no later answer |
+| 3 | must-fix, red CI, a conflict | a sub-manager | the head was reviewed and the problem is older than `manager.staleMinutes` (15) |
+| 4 | approved and green | a sub-manager to merge; the owner if the manager opened the PR | the verdict names the head and CI is green by the manager's rule |
+| 5 | an owner wait | the owner queue | a PR has had `roles.product-owner.workLabel` or `factory:needs-owner` for `manager.ownerWaitMinutes` (120) |
+| 6 | agents | a sub-manager (silent agent); the owner queue (down, or idle) | a coding agent is silent, down, or idle for `manager.agentIdleMinutes` (45) while tasks are ready |
+| 7 | queued CI | the owner queue | Actions runs queued for `manager.ciQueuedMinutes` (10), with "no runner online" when it can see that |
+
+**Leases.** A sub-manager takes a lease on its item first (a comment: `factory-review-claim manager= sha= until=`,
+`factory-answer-claim`, or `factory-item-claim`) and ends it when it exits. The earliest unexpired claim wins; a claim
+that is not renewed expires after `manager.claimMinutes` (20). Two orchestrators (two machines) therefore never start the
+same item. A new head is a new key. The cap is `manager.maxSubManagers` (2) sub-managers at once, counting the ones this
+orchestrator started and the items other managers hold; the rest wait for the next cycle. `-i` runs one at a time.
+`manager.subManagerMinutes` (30) stops a sub-manager that runs too long. The marker formats are the ones #99 defines;
+`factory_lease.py` is the small module behind them, to be replaced by #99's.
+
+**Thread notes.** The memory of a sub-manager is a comment on the task issue (on the PR when there is no issue):
+`<!-- factory-manager-note thread=issue-20 status=open -->`. The orchestrator opens it when an issue gets
+`factory:in-progress` and marks it `closed` when the issue closes, with no model. The sub-manager reads it from its prompt and
+edits it (`PATCH .../issues/comments/<id>`) before it exits. It is a memory, not a source of truth.
+
+**Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
+`manager.notify` (a login) or, when that is empty, the repository's owner if that is a person. GitHub's own notifications
+reach the phone. An ask has an `id` and is posted once. Items for the owner: the queued CI, a down or idle agent, a PR
+waiting on the product owner, the manager's own approved PR, and the dead-man's switch.
+
+**The dead-man's switch.** If work that needs a manager has waited `manager.deadManMinutes` (30) and no dev manager has
+acted in that time (a verdict, an answer, a watch, an owner ask, a merge, or a "working" ping; taking a lease does not
+count), the orchestrator posts one ask naming the items, so a dead manager is not silent. The same check runs when
+something else runs the cycle: `factory dev-manager loop --once` from cron or a systemd timer works if no machine stays
+logged in:
+
+```
+*/10 * * * * cd /path/to/project && factory dev-manager lead loop --once >> .git/factory-manager/cron.log 2>&1
+```
+
+A scheduled GitHub Actions workflow could run the same check without a machine, but `.github/` is protected, so adding it
+is an owner step; `factory watch --json` is what it would call.
+
+Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<name>.d/<item>.out` (a sub-manager's output).
+`factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist.
+
 **A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
 `claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
@@ -1214,7 +1274,7 @@ reads these settings.
 | `styles`, `structure` | Style guides per path, and the structure check's roots and legacy list | none |
 | `notes` | The notes folder | `.claude/factory/notes` |
 | `roles` | `dir` (the role folder, `.claude/factory/roles`), and per role `names`, `profile`; the product owner also `workLabel`, `busyMinutes`, `idleMinutes` | see [Roles](#roles) |
-| `manager` | `busyMinutes` (10) and `idleMinutes` (30): the dev manager's waits | see [Roles](#roles) |
+| `manager` | `busyMinutes` (2) and `idleMinutes` (5): the orchestrator's waits; `maxSubManagers`, `claimMinutes`, `deadManMinutes`, `notify`, `quietMinutes`, `staleMinutes`, `ownerWaitMinutes`, `agentIdleMinutes`, `ciQueuedMinutes`, `subManagerMinutes` | see [Run a manager](#run-a-manager) |
 
 <br>
 

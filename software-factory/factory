@@ -85,6 +85,9 @@ Maintain
   wait ci|answer <pr> [minutes], wait slot|ready [minutes]
                          the other token-free waits: CI finished, question answered, a PR slot free, a task ready
   precheck               dev manager: "nothing to do" (exit 0) or one line per thing to do (exit 3), without a model
+  watch [--json]         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
+                         approved and green, owner waits, agents down or idle, queued CI): one line each and who it is for
+                         (manager or owner), exit 3 when any, without a model. The orchestrator starts from this
   update [--layout new]  pull the newest my-skills into the project and relink; then commit it in a PR
                          (new: point the links at the factory's own folders instead of kit/)
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
@@ -174,6 +177,7 @@ case "$cmd" in
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
   precheck)  py factory_wait.py precheck ;;
+  watch)     py factory_watch.py "$@" ;;
   update)
     # --layout new|old|auto goes to install.sh: a project that links through kit/ stays on it until it asks for `new`.
     layout=auto

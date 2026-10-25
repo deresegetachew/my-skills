@@ -127,17 +127,20 @@ def wait_ready(minutes, cfg):
     return wait_until(check, minutes) or (2, f"no task became ready in {minutes} minutes")
 
 
-def precheck(cfg):
-    """What the dev manager has to do right now, one line each; empty when nothing. Reads GitHub only."""
+def precheck_items(cfg, prs=None, comments_of=None):
+    """What the dev manager has to do right now: [(kind, ref, text)], empty when nothing. Reads GitHub only.
+    kind is review (ref: PR number), question (PR number), agent (name) or stale (issue number). `prs` and `comments_of`
+    (a function: PR number -> its comments) let the orchestrator's watcher share what it has already read."""
     todo = []
-    prs = fi.gh_all("repos/{owner}/{repo}/pulls?state=open")
+    prs = fi.gh_all("repos/{owner}/{repo}/pulls?state=open") if prs is None else prs
+    comments_of = comments_of or (lambda n: fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments"))
     for p in prs:
         n, sha = p["number"], p["head"]["sha"]
-        comments = fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments")
+        comments = comments_of(n)
         if not p.get("draft"):
             marks = [m for c in comments for m in REVIEWED.findall(c.get("body") or "")]
             if not any(sha.startswith(m) or m.startswith(sha) for m in marks):
-                todo.append(f"PR #{n}: commit {sha[:7]} not reviewed yet")
+                todo.append(("review", n, f"PR #{n}: commit {sha[:7]} not reviewed yet"))
         asked = []
         for c in comments:
             b = c.get("body") or ""
@@ -146,21 +149,26 @@ def precheck(cfg):
             elif ANSWER.search(b):
                 asked = []
         if asked:
-            todo.append(f"PR #{n}: question waits for an answer")
+            todo.append(("question", n, f"PR #{n}: question waits for an answer"))
     if (cfg.get("tasks") or {}).get("source") == "issues":
         import factory_agents
         L = task_labels(cfg)
         for i in factory_agents.current(factory_agents.agent_issues()):
             st = factory_agents.state_of(cfg, i)
             if st and st[1] == "silent":
-                todo.append(f"agent {st[0]} has been silent for {st[3] / 60:.1f} h")
+                todo.append(("agent", st[0], f"agent {st[0]} has been silent for {st[3] / 60:.1f} h"))
         hours = float((cfg.get("tasks") or {}).get("staleHours", 3))
         now = datetime.now(timezone.utc)
         for i in fi.task_issues(label=L["inProgress"]):
             age = (now - fi.last_activity(cfg, i)).total_seconds() / 3600
             if age >= hours and not fi.waiting_for_slot(cfg, i):
-                todo.append(f"#{i['number']} in progress but quiet for {age:.1f} h")
+                todo.append(("stale", i["number"], f"#{i['number']} in progress but quiet for {age:.1f} h"))
     return todo
+
+
+def precheck(cfg):
+    """What the dev manager has to do right now, one line each; empty when nothing. Reads GitHub only."""
+    return [text for _, _, text in precheck_items(cfg)]
 
 
 def minutes_arg(args, k, default=30):

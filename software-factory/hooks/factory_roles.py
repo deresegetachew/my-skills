@@ -6,7 +6,8 @@ A role is started the same way, `factory <role> [name] loop [-i] [--once] [--dry
 differs is written here:
 
   coding-agent   claims a task and runs /next-task on it (today's `factory loop`)
-  dev-manager    runs /manage-pass when `factory precheck` finds something that needs a manager
+  dev-manager    the orchestrator (factory_orchestrator.py), no model: it reads GitHub (factory_watch.py) and starts
+                 one-item sub-managers, each a fresh `claude -p /manage-pass <item>`
   product-owner  runs /product-pass when an issue or pull request carries `roles.product-owner.workLabel`
 
 The project's role folder (`roles.dir`, default `.claude/factory/roles`, committed in the project) holds, per role,
@@ -32,7 +33,7 @@ from factory_config import (DEFAULTS, ROLE_NAMES, load, role_names, role_setting
 ROLE_DEFS = {
     "coding-agent": {"title": "coding agent", "kind": "task", "skill": "next-task", "model": "builder",
                      "notes": "next-task"},
-    "dev-manager": {"title": "dev manager", "kind": "claude", "skill": "manage-pass", "model": "manager",
+    "dev-manager": {"title": "dev manager", "kind": "orchestrator", "skill": "manage-pass", "model": "manager",
                     "notes": "manager"},
     "product-owner": {"title": "product owner", "kind": "claude", "skill": "product-pass", "model": "product-owner",
                       "notes": "product-owner"},
@@ -71,11 +72,13 @@ def context_line(cfg, role):
     return ""
 
 
-def prompt(cfg, role, name, item=""):
+def prompt(cfg, role, name, item="", extra=""):
+    """The prompt a pass starts with: the skill (and the item), `extra` (the dev manager's fact sheet and thread note),
+    the line telling it to read the project's instructions, and the marker `factory usage --by role` reads."""
     d = need(role)
     first = f"/{d['skill']}" + (f" {item}" if item else "")
     ctx = context_line(cfg, role)
-    return "\n\n".join(x for x in (first, ctx, f"<!-- {MARK} role={role} name={name} -->") if x)
+    return "\n\n".join(x for x in (first, extra.strip(), ctx, f"<!-- {MARK} role={role} name={name} -->") if x)
 
 
 # --- reads.md ------------------------------------------------------------------------------------------------------
@@ -214,6 +217,21 @@ def profile_flags(cfg, role):
         raise SystemExit(f"factory: the {role} profile {path} isn't valid JSON ({e}). Fix it, or set "
                          f"`roles.{role}.profile` to another file.")
     return ["--setting-sources", "user", "--settings", json.dumps({**profile, **off}, separators=(",", ":"))]
+
+
+def session_flags(cfg, role):
+    """The `claude` arguments for a session of `role` started from Python (the orchestrator's sub-managers), the same
+    the loop script builds: only the project's MCP servers as main has them, the role's profile, and the model."""
+    import subprocess
+    mcp = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_mcp.py")],
+                         capture_output=True, text=True).stdout.strip() or '{"mcpServers":{}}'
+    flags = ["--mcp-config", mcp, "--strict-mcp-config", *profile_flags(cfg, role)]
+    import factory_models
+    try:
+        flags += factory_models.flags(need(role)["model"], factory_models.validate(cfg.get("models", {})))
+    except ValueError as e:
+        raise SystemExit(f"factory: {e} Fix it with `factory settings set models '<json>'`.")
+    return flags
 
 
 def work(cfg, role, name=""):
