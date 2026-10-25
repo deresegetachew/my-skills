@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
 """Run the software factory's tests without pytest: each tests/test_*.py file in its own process, calling every
-top-level test_* function. Exits 1 if any test fails, so CI goes red."""
+top-level test_* function. Exits 1 if any test fails, so CI goes red.
+
+Files run in parallel (--jobs N, or FACTORY_TEST_JOBS, default min(CPU count, 8)); a file with many tests is split
+over several processes. Each file's report is printed whole when it finishes, so output never interleaves."""
 import glob
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +23,8 @@ mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 bad = 0
 names = sorted(n for n in dir(mod) if n.startswith("test_") and callable(getattr(mod, n)))
+if len(sys.argv) > 3:  # shard i of k: every k-th test, so one big file can run in several processes
+    names = names[int(sys.argv[2])::int(sys.argv[3])]
 for name in names:
     try:
         getattr(mod, name)()
@@ -29,27 +37,96 @@ sys.exit(1 if bad else 0)
 """
 
 
-def main():
+def run_file(path, shard=0, shards=1):
+    """Run one test file (or one shard of it) in its own process. Returns (rel, code, output, seconds)."""
+    start = time.time()
+    rel = os.path.relpath(path, ROOT)
+    # Output goes to a temp file, not a pipe: a test that leaves a background process behind (a fake loop that
+    # sleeps) would hold a pipe open and make this wait for it, but a file does not wait.
+    with tempfile.TemporaryFile("w+") as sink, tempfile.TemporaryDirectory(prefix="factory-test-") as scratch:
+        # Files run side by side, so none may write to the real machine-wide places (the machine id, the boot log):
+        # each gets its own. A test that wants other folders sets them in its own environment, as before.
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "FACTORY_CONFIG_DIR": os.path.join(scratch, "config"),
+               "XDG_STATE_HOME": os.path.join(scratch, "state"),
+               # `pick` waits 2 s after claiming for a simultaneous claim; the tests' claims are made up in advance.
+               "FACTORY_CLAIM_SETTLE_SECONDS": "0"}
+        cmd = [sys.executable, "-I", "-c", RUNNER, path] + ([str(shard), str(shards)] if shards > 1 else [])
+        try:
+            proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT, text=True,
+                                  timeout=600, cwd=ROOT, env=env)
+            code, note = proc.returncode, ""
+        except subprocess.TimeoutExpired:
+            code, note = 1, "timed out after 600 s\n"
+        sink.seek(0)
+        out = sink.read() + note
+    return rel, code, out, time.time() - start
+
+
+def shard_count(path, jobs):
+    """Big files are split so one of them does not set the total time: about 12 tests per process, at most `jobs`."""
+    with open(path, encoding="utf-8") as f:
+        tests = sum(1 for line in f if line.startswith("def test_"))
+    return max(1, min(jobs, -(-tests // 12)))
+
+
+def job_count(argv):
+    """--jobs N beats FACTORY_TEST_JOBS beats min(cpu count, 8)."""
+    value = None
+    for i, arg in enumerate(argv):
+        if arg == "--jobs" and i + 1 < len(argv):
+            value = argv[i + 1]
+        elif arg.startswith("--jobs="):
+            value = arg.split("=", 1)[1]
+    value = value or os.environ.get("FACTORY_TEST_JOBS")
+    try:
+        return max(1, int(value)) if value else min(os.cpu_count() or 1, 8)
+    except ValueError:
+        sys.exit(f"jobs must be a whole number, got {value!r}")
+
+
+def summary_line(results):
+    """One line for a file: the shards' 'N passed, M failed' lines added up, else the last line of the output."""
+    passed = failed = 0
+    for _, code, out, _ in results:
+        last = out.strip().splitlines()[-1] if out.strip() else "no output"
+        found = re.fullmatch(r"(\d+) passed, (\d+) failed", last)
+        if not found:
+            return last
+        passed, failed = passed + int(found.group(1)), failed + int(found.group(2))
+    return f"{passed} passed, {failed} failed"
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
     files = sorted(glob.glob(os.path.join(ROOT, "software-factory", "tests", "test_*.py")))
     if not files:
         print("no test files found")
         return 1
+    jobs = job_count(argv)
+    # Biggest files first: they are the slowest, so starting them early keeps every worker busy to the end.
+    queue = sorted(files, key=lambda f: -os.path.getsize(f))
+    shards = {f: shard_count(f, jobs) for f in files}
     failed = []
-    for path in files:
-        start = time.time()
-        rel = os.path.relpath(path, ROOT)
-        try:
-            proc = subprocess.run([sys.executable, "-I", "-c", RUNNER, path], capture_output=True, text=True,
-                                  timeout=600, cwd=ROOT)
-            out, code = proc.stdout + proc.stderr, proc.returncode
-        except subprocess.TimeoutExpired:
-            out, code = "timed out after 600 s\n", 1
-        last = out.strip().splitlines()[-1] if out.strip() else "no output"
-        print(f"{rel}: {last} ({time.time() - start:.0f} s)")
-        if code:
-            failed.append(rel)
-            print(out)
+    done = {}
+    start = time.time()
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        futures = {pool.submit(run_file, f, i, shards[f]): f for f in queue for i in range(shards[f])}
+        # A file's report is printed whole once all its processes have finished, so output never interleaves.
+        for future in as_completed(futures):
+            path = futures[future]
+            done.setdefault(path, []).append(future.result())
+            if len(done[path]) < shards[path]:
+                continue
+            results = done[path]
+            rel = results[0][0]
+            print(f"{rel}: {summary_line(results)} ({max(r[3] for r in results):.0f} s)", flush=True)
+            if any(r[1] for r in results):
+                failed.append(rel)
+                for _, code, out, _ in results:
+                    if code:
+                        print(out, flush=True)
     print(f"{len(files) - len(failed)} of {len(files)} test files passed")
+    print(f"{jobs} jobs, {time.time() - start:.0f} s in all")
     return 1 if failed else 0
 
 
