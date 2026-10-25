@@ -11,6 +11,11 @@
       -> the first task no other running loop holds, claimed for taytu (factory-loop.sh does this; see
          factory_claims.py). Exit 1 when every open task is done, blocked or held by another loop.
 
+  python3 .claude/hooks/next_task.py --claim taytu --issue 42
+      -> issues mode: claim issue #42 for taytu, only that one, when it is free and its dependencies are done.
+         Taken, blocked or missing: prints {code, message, fix} on stderr, exit 1, nothing changed. This is how a dev
+         manager hands a builder a named task.
+
 Issues mode (`tasks.source: "issues"`): tasks are GitHub issues (factory_issues.py). Rework still comes first; then
 the agent's own in-progress issue, else the next `factory:ready` one, claimed on GitHub: "issue-42 <title>".
 
@@ -62,10 +67,16 @@ def main():
     ap.add_argument("--after", default=None, help="skip tasks up to and including this id")
     ap.add_argument("--claim", default=None, metavar="AGENT", help="claim the task for this loop")
     ap.add_argument("--pid", default=None, help="the loop's process id, with --claim")
+    ap.add_argument("--issue", type=int, default=None, metavar="N",
+                    help="with --claim in issues mode: claim this issue, if it is free and its dependencies are done")
     ap.add_argument("--no-rework", action="store_true", help="plan tasks only, skip PRs with a must-fix")
     a = ap.parse_args()
+    if a.issue and not a.claim:
+        ap.error("--issue needs --claim AGENT")
     cfg = load()
     subprocess.run(["git", "fetch", "-q", "origin", cfg["mainBranch"]], capture_output=True)
+    if a.issue and task_source(cfg) != "issues":
+        ap.error("--issue works only in issues mode (tasks.source: \"issues\")")
     if task_source(cfg) == "issues":
         return issues_mode(cfg, a)
     all_tasks = tasks(read(cfg, cfg["plan"]))
@@ -91,8 +102,23 @@ def main():
         print(f"{tid} {title}")
 
 
+def named_issue(cfg, a):
+    """--claim AGENT --issue N: claim exactly that issue, or refuse with {code, message, fix} and change nothing."""
+    import factory_issues
+    i, err = factory_issues.pick_named(cfg, a.claim, a.issue)
+    if err:
+        print(json.dumps(err), file=sys.stderr)
+        sys.exit(1)
+    subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_agents.py"),
+                    "ping", "--agent", a.claim, "--status", f"working on #{i['number']}"],
+                   capture_output=True, timeout=60)
+    print(json.dumps({"id": f"issue-{i['number']}", "title": i["title"]}) if a.json else f"issue-{i['number']} {i['title']}")
+
+
 def issues_mode(cfg, a):
     import factory_issues
+    if a.issue:
+        return named_issue(cfg, a)
     jobs = [] if a.no_rework else rework(cfg)
     if jobs and a.claim:
         from factory_claims import claim_task

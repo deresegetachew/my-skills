@@ -265,6 +265,50 @@ def test_only_an_agents_newest_issue_counts_and_sweep_closes_the_copies():
     assert state == {1: "open", 2: "closed", 3: "open", 4: "closed"}, state
 
 
+def next_task(d, env, *args):
+    p = subprocess.run([sys.executable, os.path.join(HOOKS, "next_task.py"), *args], cwd=d, env=env,
+                       capture_output=True, text=True)
+    return p.returncode, p.stdout.strip(), p.stderr.strip()
+
+
+def snapshot(db):
+    return json.dumps({k: v for k, v in json.load(open(db)).items() if k != "clock"}, sort_keys=True)  # the fake's clock ticks on reads
+
+
+def test_claim_issue_takes_the_named_issue_and_nothing_else():
+    d, db, env = setup([issue(1, milestone=1), issue(2, milestone=2)])
+    rc, out, err = next_task(d, env, "--claim", "menelik", "--issue", "2")
+    assert (rc, out) == (0, "issue-2 Task 2"), (out, err)
+    assert labels(db, 2) == ["agent:menelik", "factory:in-progress"], labels(db, 2)
+    assert labels(db, 1) == ["factory:ready"], labels(db, 1)
+
+
+def test_claim_issue_refuses_a_taken_issue_and_changes_nothing():
+    d, db, env = setup([issue(1), issue(2, labels=("factory:in-progress", "agent:taytu"))])
+    before = snapshot(db)
+    rc, out, err = next_task(d, env, "--claim", "menelik", "--issue", "2")
+    e = json.loads(err)
+    assert rc == 1 and out == "" and e["code"] == "issue-taken" and e["message"] and e["fix"], (rc, out, err)
+    assert snapshot(db) == before
+
+
+def test_claim_issue_refuses_a_blocked_issue_and_an_open_dependency():
+    d, db, env = setup([issue(1, labels=("factory:ready", "factory:blocked")), issue(2, body="Depends on #3"), issue(3)])
+    before = snapshot(db)
+    for n, code in (("1", "issue-blocked"), ("2", "issue-blocked"), ("9", "issue-not-found")):
+        rc, out, err = next_task(d, env, "--claim", "menelik", "--issue", n)
+        e = json.loads(err)
+        assert rc == 1 and out == "" and e["code"] == code and e["fix"], (n, rc, out, err)
+    assert snapshot(db) == before
+
+
+def test_claim_without_issue_still_claims_the_next_one():
+    d, db, env = setup([issue(1, milestone=2), issue(2, milestone=1)])
+    rc, out, err = next_task(d, env, "--claim", "menelik")
+    assert (rc, out) == (0, "issue-2 Task 2"), (out, err)
+    assert labels(db, 1) == ["factory:ready"], labels(db, 1)
+
+
 if __name__ == "__main__":
     os.environ.pop("FACTORY_AGENT", None)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

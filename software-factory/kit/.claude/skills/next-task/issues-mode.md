@@ -5,7 +5,7 @@ the plan, and the steps in SKILL.md change like this:
 
 | Step | In issues mode |
 |---|---|
-| Pick | `next_task.py` prints `issue-<n> <title>`: your own in-progress issue first, else it claims the next `factory:ready` one on GitHub for you (labels `factory:in-progress` and `agent:<your name>`). `$ARGUMENTS` may be `issue-<n>`. |
+| Pick | `next_task.py` prints `issue-<n> <title>`: your own in-progress issue first, else it claims the next `factory:ready` one on GitHub for you (labels `factory:in-progress` and `agent:<your name>`). `$ARGUMENTS` may be `issue-<n>`. When the dev manager named your issue, claim exactly it: `next_task.py --claim "$AGENT" --issue <n>` (refused with `{code, message, fix}` if taken or blocked; then stop and say so). |
 | Read | `python3 .claude/hooks/factory_issues.py show <n>`: the brief, goals, acceptance criteria, edge cases, todos. The acceptance criteria are the "Done when". |
 | Branch | `task/<n>-<short-name>`, for example `task/42-style-leftovers`. |
 | Todos | Tick each checkbox as you finish it: `factory_issues.py tick <n> <index>` (1-based). The board and the owner's phone show it. |

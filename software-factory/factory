@@ -36,7 +36,7 @@ Build
                          To run the queue, use loop -i instead (a fresh session per task). --detach: in a detached
                          tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
-  next                   the job the factory would hand out next
+  next                   the job the factory would hand out next (`--claim AGENT --issue N` claims that issue)
   autostart [status|install|uninstall]
                          bring this machine back after a reboot: the dev stack (commands.stackUp) and its agents, in
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
