@@ -918,6 +918,41 @@ def test_a_job_never_sees_the_last_jobs_files():
     assert "SAW" not in "".join(jobs)
 
 
+def test_stale_is_quiet_when_no_service_is_installed_and_when_the_copies_match_the_checkout():
+    d, db, env = linux_project()
+    assert ci(d, env, "stale") == (0, "")  # nothing installed here: nothing to refresh
+    assert ci(d, env, "install")[0] == 0
+    assert ci(d, env, "stale") == (0, "")  # just installed: the copies equal the checkout
+
+
+def test_stale_names_a_service_copy_that_is_older_than_the_checkout_and_install_fixes_it():
+    d, db, env = linux_project()
+    assert ci(d, env, "install")[0] == 0
+    installed = names(d, env)["CI_INSTALLED"]
+    open(os.path.join(installed, "compose.yaml"), "a").write("# an older version\n")
+    os.remove(os.path.join(installed, "install-tools.sh"))
+    rc, out = ci(d, env, "stale")
+    assert rc == 3, (rc, out)
+    assert "older" in out and "compose.yaml" in out and "missing" in out and "install-tools.sh" in out, out
+    assert ci(d, env, "install")[0] == 0
+    assert ci(d, env, "stale") == (0, "")
+
+
+def test_check_passes_on_a_fresh_install_and_names_a_start_script_the_container_cannot_read():
+    d, db, env = linux_project()
+    assert ci(d, env, "check")[0] == 0  # nothing installed: nothing to check
+    assert ci(d, env, "install")[0] == 0
+    rc, out = ci(d, env, "check")
+    assert rc == 0, out
+    entry = os.path.join(names(d, env)["CI_INSTALLED"], "entrypoint.sh")
+    os.chmod(entry, 0o600)  # what #111 was: the runner container's user cannot read it
+    rc, out = ci(d, env, "check")
+    assert rc == 1 and "entrypoint.sh" in out and "can't read" in out, (rc, out)
+    os.chmod(entry, 0o666)
+    rc, out = ci(d, env, "check")
+    assert rc == 1 and "entrypoint.sh" in out and "writable" in out, (rc, out)
+
+
 def test_factory_help_lists_the_ci_commands():
     out = subprocess.run(["bash", os.path.join(SF, "factory"), "help"], cwd=project()[0], capture_output=True,
                          text=True).stdout
