@@ -39,6 +39,22 @@ DEFAULTS = {
     # The agents' names, one per loop: the first works in the project folder, the others in
     # <project>-agents/<name>. Labels (`agent:<name>`), claims and logs use them.
     "agents": ["menelik", "taytu", "haile", "tewodros", "yohannes", "zewditu", "lalibela", "ezana", "alula", "abebe"],
+    # Roles other than the coding agent (#102): `factory dev-manager [name] loop`, `factory product-owner [name] loop`.
+    # `dir` is the project's role folder (<dir>/<role>/README.md and reads.md, committed in the project); a project
+    # without it falls back to its `notes`. Per role: `names` (like `agents`; the coding agent's are `agents`),
+    # `profile` (a Claude settings file, used when it exists), and for the product owner `busyMinutes` (wait after a
+    # pass that had work), `idleMinutes` (wait when there is none; 0: exit instead) and `workLabel`: an open issue or
+    # pull request with that label is work for it. The dev manager's waits are `manager.busyMinutes` and
+    # `manager.idleMinutes`.
+    "roles": {
+        "dir": ".claude/factory/roles",
+        "dev-manager": {"names": ["fasil", "yekuno", "amda", "sarsa", "susenyos"],
+                        "profile": ".claude/manager/settings.json"},
+        "product-owner": {"names": ["mentewab", "eleni", "sabla"], "busyMinutes": 30, "idleMinutes": 60,
+                          "profile": ".claude/product-owner/settings.json", "workLabel": "factory:needs-product"},
+    },
+    # The dev manager's waits (#102): minutes after a cycle that had work / none (0: the loop exits instead).
+    "manager": {"busyMinutes": 10, "idleMinutes": 30},
     # Where tasks live. "plan": unticked lines of the build plan (the classic mode). "issues": open GitHub issues
     # with the `ready` label, claimed with labels and a claim comment (factory_issues.py); the plan is an overview.
     "tasks": {
@@ -101,6 +117,24 @@ DEFAULTS = {
 }
 
 
+def merged_section(name, user):
+    """A nested setting (`roles`, `manager`) with the defaults under it: a project that sets one field of one role
+    keeps the rest."""
+    base = DEFAULTS[name]
+    out = {k: (dict(v) if isinstance(v, dict) else v) for k, v in base.items()}
+    if isinstance(user, dict):
+        for key, value in user.items():
+            if isinstance(value, dict) and isinstance(out.get(key), dict):
+                out[key].update(value)
+            else:
+                out[key] = value
+    return out
+
+
+def merged_roles(user):
+    return merged_section("roles", user)
+
+
 def load():
     root = os.environ.get("CLAUDE_PROJECT_DIR", ".")
     os.chdir(root)
@@ -110,6 +144,8 @@ def load():
             user = json.load(f)
         cfg.update({k: v for k, v in user.items() if not k.startswith("_")})
         cfg["commands"] = {**DEFAULTS["commands"], **user.get("commands", {})}
+        cfg["roles"] = merged_roles(user.get("roles"))
+        cfg["manager"] = merged_section("manager", user.get("manager"))
     except FileNotFoundError:
         pass
     return cfg
@@ -140,6 +176,8 @@ def load_from_main(local=None):
     user = json.loads(p.stdout)
     cfg.update({k: v for k, v in user.items() if not k.startswith("_")})
     cfg["commands"] = {**DEFAULTS["commands"], **user.get("commands", {})}
+    cfg["roles"] = merged_roles(user.get("roles"))
+    cfg["manager"] = merged_section("manager", user.get("manager"))
     cfg["mainBranch"] = main  # GitHub's default branch wins over the file's own `mainBranch`
     return cfg
 
@@ -208,3 +246,44 @@ def task_source(cfg):
 def task_labels(cfg):
     return {**DEFAULTS["tasks"]["labels"], **((cfg.get("tasks") or {}).get("labels") or {})}
 
+
+
+ROLE_NAMES = ("coding-agent", "dev-manager", "product-owner")
+
+
+def roles_dir(cfg):
+    """The project's role folder (`roles.dir`), relative to the project root."""
+    return str((cfg.get("roles") or {}).get("dir") or DEFAULTS["roles"]["dir"]).rstrip("/")
+
+
+def role_setting(cfg, role, key, default=None):
+    """One field of a role's `roles.<role>` setting, else its default."""
+    mine = (cfg.get("roles") or {}).get(role)
+    if isinstance(mine, dict) and key in mine:
+        return mine[key]
+    base = DEFAULTS["roles"].get(role)
+    return base.get(key, default) if isinstance(base, dict) else default
+
+
+def role_names(cfg, role):
+    """The names a role's loops take, in order: `agents` for the coding agent, `roles.<role>.names` for the others."""
+    names = (cfg.get("agents") if role == "coding-agent" else role_setting(cfg, role, "names", [])) or []
+    return [safe_agent(n if isinstance(n, str) else "") for n in names]
+
+
+def manager_setting(cfg, key):
+    """One field of the `manager` setting (#97), else its default."""
+    mine = cfg.get("manager")
+    return mine[key] if isinstance(mine, dict) and key in mine else DEFAULTS["manager"][key]
+
+
+def role_wait(cfg, role, kind):
+    """Minutes a loop of `role` waits after a pass: kind is "busy" (the pass had work) or "idle" (it had none; 0 means
+    the loop exits instead). The dev manager's are `manager.busyMinutes` / `manager.idleMinutes`, the product owner's
+    `roles.product-owner.*`; the coding agent waits `waitMinutes` inside its own loop."""
+    key = f"{kind}Minutes"
+    value = manager_setting(cfg, key) if role == "dev-manager" else role_setting(cfg, role, key, 1)
+    try:
+        return max(0.0, float(value))
+    except (TypeError, ValueError):
+        return float(DEFAULTS["manager"][key]) if role == "dev-manager" else 1.0

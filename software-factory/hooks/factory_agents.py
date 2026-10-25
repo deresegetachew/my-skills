@@ -33,10 +33,14 @@ agent that is alive on its machine, and also releases the issues of an agent tha
   python3 .claude/hooks/factory_agents.py list [--json]         who is working, idle or down, and since when (--json: cards)
   python3 .claude/hooks/factory_agents.py card <name>           one agent's card (factory_cards.py), also for dev-manager and po
   python3 .claude/hooks/factory_agents.py sweep                 mark silent agents down, release their issues
-  python3 .claude/hooks/factory_agents.py register --agent taytu [--kind dev-manager] [--cloud] [--follow URL]
+  python3 .claude/hooks/factory_agents.py register --agent taytu [--kind dev-manager] [--cloud] [--follow URL] [--role dev-manager]
   python3 .claude/hooks/factory_agents.py ping --agent taytu [--status "working on #42"] [--force]
   python3 .claude/hooks/factory_agents.py down --agent taytu
   python3 .claude/hooks/factory_agents.py hook                  the Claude hook entry (reads the event on stdin)
+
+Every role registers the same way (#102): a dev manager or a product owner has an agent issue too, with its role in a
+second marker, `<!-- factory-role role=dev-manager -->`, on its own line so an older kit still reads the first one. An
+issue without it is a coding agent's. `FACTORY_ROLE` (set by the loop) gives hooks the role.
 
 Each ping marker carries `machine=<id>` (factory_machine.py). `register` refuses, exit 3 and a `{code, message, fix}`
 on stderr, when the open issue of that name was pinged by another machine within `downMinutes`; a marker without a
@@ -52,6 +56,7 @@ from factory_config import DEFAULTS, load, task_labels, task_source  # noqa: E40
 import factory_clock  # noqa: E402
 
 LABEL, DOWN_LABEL = "factory:agent", "factory:agent-down"
+ROLE_MARK = re.compile(r"<!--\s*factory-role\s+role=([\w-]+)\s*-->")
 # The hidden marker on an agent's issue: <!-- factory-agent name=taytu status=waiting ping=... machine=... -->. Besides
 # name, status and ping it may carry kind, task, on (what it waits on), since, hb (1: written by the heartbeat daemon),
 # where, session and follow. Older markers have only the first four.
@@ -168,7 +173,14 @@ def find_issue(agent):
     return found[0] if found else None
 
 
-def render(agent, status, detail, started, ping=None, where=None, machine="", extra=None):
+def role_of(issue):
+    """The role an agent issue belongs to; a coding agent's when it has no role marker (an older kit)."""
+    m = ROLE_MARK.search(issue.get("body") or "")
+    return m.group(1) if m else "coding-agent"
+
+
+
+def render(agent, status, detail, started, ping=None, where=None, machine="", extra=None, role="coding-agent"):
     where = where or f"slot {os.environ.get('FACTORY_SLOT') or 1}"
     shown = {"working": detail or "working", "waiting": detail or "waiting", "idle": "idle", "down": "down",
              "input-required": f"input-required ({detail})" if detail else "input-required"}[status]
@@ -186,6 +198,8 @@ def render(agent, status, detail, started, ping=None, where=None, machine="", ex
              f"**Status:** {shown}", f"**Last ping:** {t}", f"**Started:** {started}", f"**Where:** {where}"]
     if pairs.get("follow") and status != "down":
         lines.append(f"**Follow:** {clean(pairs['follow'])}")
+    if role and role != "coding-agent":
+        lines.insert(1, f"<!-- factory-role role={role} -->")
     body = "\n".join(lines) + ("\n\nThis issue is kept up to date by the agent itself (see factory_agents.py). "
                               "Don't close it.")
     return f"Agent: {agent} · {shown}", body
@@ -209,7 +223,7 @@ def held_elsewhere(cfg, agent, machine):
     return other
 
 
-def update(cfg, agent, status, detail="", create=False, extra=None, replace_extra=False, number=None):
+def update(cfg, agent, status, detail="", create=False, extra=None, replace_extra=False, number=None, role=None):
     """Updates the agent's one issue. Only `register` (create=True) may open a new one, and only when the agent has
     none at all, open or closed: a ping, a turn's end or a session's end that can't find the issue changes nothing.
     (On 22 Oct a lookup that came back empty made every ping open another issue: 195 copies in two hours.)
@@ -235,7 +249,8 @@ def update(cfg, agent, status, detail="", create=False, extra=None, replace_extr
     if kept.get("where") == "cloud":
         where = "cloud"
     from factory_machine import machine_id
-    title, body = render(agent, status, detail, started, where=where, machine=machine_id(), extra=kept)
+    role = role or seen.get("role") or os.environ.get("FACTORY_ROLE") or "coding-agent"
+    title, body = render(agent, status, detail, started, where=where, machine=machine_id(), extra=kept, role=role)
     if n:
         gh("PATCH", f"repos/{{owner}}/{{repo}}/issues/{n}", {"title": title, "body": body, "state": "open"})
     else:
@@ -247,7 +262,7 @@ def update(cfg, agent, status, detail="", create=False, extra=None, replace_extr
     t = factory_clock.now()
     writes = [w for w in seen.get("writes") or [] if t - w < HOUR] + [t]
     remember(agent, issue=n, status=status, detail=detail, started=started, ping=t, extra=kept, writes=writes,
-             cand=None, retry=0)
+             cand=None, retry=0, role=role)
     return n
 
 
@@ -337,7 +352,7 @@ def sweep(cfg):
         old = i.get("body") or ""
         started = (re.search(r"\*\*Started:\*\* (\S+)", old) or [None, "?"])[1]
         where = (re.search(r"\*\*Where:\*\* (.+)", old) or [None, "?"])[1]
-        title, body = render(name, "down", "", started, ping=t, where=where, machine=machine_of(i) or "")
+        title, body = render(name, "down", "", started, ping=t, where=where, machine=machine_of(i) or "", role=role_of(i))
         gh("PATCH", f"repos/{{owner}}/{{repo}}/issues/{i['number']}", {"title": title, "body": body})
         add_labels(i["number"], [DOWN_LABEL])
         comment(i["number"], f"No ping for {quiet / 60:.1f} h (since {iso(t)}): marked down.")
@@ -405,6 +420,7 @@ def main():
     for c in ("register", "ping", "down"):
         p = sub.add_parser(c)
         p.add_argument("--agent", default=os.environ.get("FACTORY_AGENT"))
+        p.add_argument("--role", default=None, help="coding-agent (default), dev-manager or product-owner")
         if c in ("register", "ping"):
             p.add_argument("--kind", default=None)
             p.add_argument("--cloud", action="store_true")
@@ -447,10 +463,10 @@ def main():
             refuse("agent-name-in-use", f"{a.agent} is already running on another machine (machine {other}).",
                    "Start this machine's agents under names no other machine uses: "
                    "`factory machine setup <names>`, or set FACTORY_AGENTS.", exit_code=3)
-        remember(a.agent, started=iso(now()), issue=None)
-        print(f"#{update(cfg, a.agent, 'idle', create=True, extra=extra)}")
+        remember(a.agent, started=iso(now()), issue=None, **({"role": a.role} if a.role else {}))
+        print(f"#{update(cfg, a.agent, 'idle', create=True, extra=extra, role=a.role)}")
     elif a.cmd == "down":
-        update(cfg, a.agent, "down")
+        update(cfg, a.agent, "down", role=a.role)
     elif a.cmd == "ping":
         import factory_heartbeat
         if not a.force and factory_heartbeat.managed(a.agent):
@@ -469,7 +485,7 @@ def main():
                 status = "working"  # a tool ran since: it is not waiting any more
         if not a.force and not a.status and factory_clock.now() - float(seen.get("ping", 0)) < float(setting(cfg, "pingMinutes")) * 60:
             return
-        update(cfg, a.agent, status, detail, extra=extra)
+        update(cfg, a.agent, status, detail, extra=extra, role=a.role)
     elif a.cmd == "list":
         import factory_cards
         found = factory_cards.cards(cfg, agent_issues())

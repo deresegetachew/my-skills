@@ -5,7 +5,8 @@ this machine. Use it to measure a change to the factory (a cheaper model, less r
   factory usage                       the last 7 days, per task, then the totals
   factory usage --since 2026-10-20 --until 2026-10-24
   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
-  factory usage --by role             manager (sessions that start with /manage-pass) against builder (all others)
+  factory usage --by role             manager (sessions that start with /manage-pass, or end with a `factory-role` line naming
+                                      the dev manager), product-owner (that line names it) against builder (all others)
   factory usage --json                the same as JSON
   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it)
   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
@@ -58,6 +59,10 @@ def replies(path):
 
 
 MANAGER_PASS = re.compile(r"/?manage-pass\b")
+# The role loops end their prompt with `<!-- factory-role role=... name=... -->` (#102). It names the role exactly, so a
+# product owner's session is not counted as a builder's.
+ROLE = re.compile(r"<!--\s*factory-role\s+role=([\w-]+)")
+ROLE_LABEL = {"coding-agent": "builder", "dev-manager": "manager", "product-owner": "product-owner"}
 
 
 def session_role(path):
@@ -78,6 +83,9 @@ def session_role(path):
             c = (d.get("message") or {}).get("content")
             if isinstance(c, list):
                 c = " ".join(b.get("text", "") for b in c if isinstance(b, dict))
+            marked = ROLE.search(c) if isinstance(c, str) else None
+            if marked:
+                return ROLE_LABEL.get(marked.group(1), marked.group(1))
             return "manager" if isinstance(c, str) and MANAGER_PASS.match(re.sub(r"^\s*<command-(?:message|name)>\s*", "", c)) else "builder"
     return "builder"
 

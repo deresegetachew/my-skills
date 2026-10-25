@@ -119,6 +119,11 @@ list_files | while read -r f; do
 done
 # Never change files in the kit itself: with --link it is the project's submodule.
 [ "$link" = 1 ] || chmod +x "$dst"/.claude/hooks/*.py "$dst"/.claude/hooks/*.sh "$dst"/.claude/ci/*.sh "$dst"/factory-loop.sh "$dst"/factory 2>/dev/null || true
+# The role folders (#102): README.md and reads.md per role, from the project's own documents. Never overwritten; a
+# project that was set up before roles existed gets them with `factory init-roles`.
+if [ "$setup" = 1 ] && [ -f "$dst/.claude/hooks/factory_roles.py" ]; then
+  ( cd "$dst" && CLAUDE_PROJECT_DIR="$dst" python3 .claude/hooks/factory_roles.py init | sed 's/^/roles    /' ) || true
+fi
 grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignore"
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 if [ "$setup" = 1 ]; then
