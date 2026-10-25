@@ -92,7 +92,18 @@
       "Bash(*factory_autostart*)",
       "Bash(factory resume*)",
       "Bash(./factory resume*)",
-      "Bash(*factory_resume*)"
+      "Bash(*factory_resume*)",
+      "Bash(factory update*)",
+      "Bash(./factory update*)",
+      "Bash(factory rollback*)",
+      "Bash(./factory rollback*)",
+      "Bash(*factory_release*)",
+      "Bash(factory lessons add*)",
+      "Bash(factory lessons prune*)",
+      "Bash(./factory lessons add*)",
+      "Bash(./factory lessons prune*)",
+      "Bash(*factory_lessons.py add*)",
+      "Bash(*factory_lessons.py prune*)"
     ]
   },
   "hooks": {

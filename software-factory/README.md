@@ -1541,6 +1541,9 @@ software-factory/
       manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
       factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
       factory_roles.py                    the roles' definitions, role folders (`init-roles`) and `choose`
+      factory_watch.py                    the dev manager's seven checks on GitHub (`factory watch`), no model
+      factory_orchestrator.py             `factory dev-manager loop`: cycles, thread notes, owner asks, sub-managers
+      factory_lease.py                    the lease on an item (claim comments), the interface #99 will replace
       factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
