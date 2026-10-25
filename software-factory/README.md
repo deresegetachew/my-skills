@@ -292,6 +292,8 @@ version it pins. `factory help` lists everything.
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
+| `factory wait ci <pr>` / `answer <pr>` / `slot` / `ready` `[minutes]` | The other waits, also without tokens: until CI on the PR's head commit has finished, until its `factory-question` comments have a later `factory-answer`, until fewer than `maxOpenPRs` of your PRs are open, until a task is ready. [Waiting](#waiting-without-tokens) |
+| `factory precheck` | For the dev manager: prints `nothing to do` (exit 0), or one line per PR with an unreviewed commit, unanswered question or quiet agent (exit 3). Reads GitHub only |
 | `factory update` | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
@@ -443,6 +445,27 @@ Most of the cost is what the agents read, not what they write.
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
   otherwise, with short state notes.
+
+### Waiting without tokens
+
+A Claude session that waits by checking again pays for every check, because each turn re-sends the context. So every
+wait is a shell loop that checks GitHub (REST, `gh api`), pauses 15 seconds and then 22, 33 ... up to 60
+(`FACTORY_WAIT_START`, `FACTORY_WAIT_MAX`), and returns one line only when there is something to do. Default 30
+minutes. The exit code says what happened:
+
+| Exit | Meaning |
+|---|---|
+| 0 | It happened: merged, CI green, answered, slot free, task ready |
+| 1 | `ci`: a check failed (the line names it). `answer`: no question is waiting |
+| 2 | Timed out. Do other work and wait again later |
+| 3 | `ci`: the PR is merged or closed. `precheck`: there is work |
+| 4 | `ci`: GitHub never started the jobs (billing); see `factory_ci.py` |
+
+`factory wait <pr>` is unchanged. Agents and the dev manager never poll inside the conversation (`next-task` and
+[DEV-MANAGER.md](DEV-MANAGER.md) say so). The dev manager's tick starts with `factory precheck` and ends there when it
+prints `nothing to do`: one short command, no review, no reading of state notes. Not yet done: running the precheck
+outside any model, so an idle tick costs nothing at all (a GitHub-event trigger or a cron that starts the session only
+when `precheck` exits 3).
 
 ### Measuring it
 
@@ -992,6 +1015,7 @@ software-factory/
       style_checks.py                     CI: each style's check
       factory_config.py                   reads factory.json, with defaults
       wait_for_merge.sh                   waits on a PR without spending tokens
+      factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
     .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
                                           compose.yaml, compose-light.yaml, compose-caches.yaml,
                                           runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.py,

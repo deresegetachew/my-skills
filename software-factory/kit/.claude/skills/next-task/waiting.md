@@ -13,6 +13,11 @@ Read this after shipping a task, or when you have to wait.
   `python3 .claude/hooks/next_task.py --after <id>` for a task that doesn't touch those files, and say so in your
   report. Under `factory-loop.sh`, stop the run instead: the loop skips a task whose branch is on the remote and
   claims the next free one.
+- **Every wait goes through `factory wait`; never poll in the conversation** (each check is a turn that re-sends the
+  whole context). `factory wait ci <pr>` until CI has finished (0 green, 1 failed with the check named),
+  `factory wait answer <pr>` until a `factory-question` is answered, `factory wait slot` until a PR slot frees,
+  `factory wait ready` until a task is ready. Exit 2 means timed out: do other work. Same as `wait_for_merge.sh`
+  for merges.
 - **Work-in-progress cap:** the PR gate won't open a new PR while `maxOpenPRs` of yours are open (all loops
   together). Push the finished branch and stop (under `factory-loop.sh`) or wait on the oldest with
   `wait_for_merge.sh`. Under the loop you don't have to ask anyone to restart you: `next_task.py` waits while your

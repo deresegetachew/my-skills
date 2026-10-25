@@ -28,7 +28,8 @@ for you" in a report):
    check), starting with the marker `<!-- factory-question -->`. One question per comment, with the options you see,
    what each would change, and your recommendation.
 2. Don't wait idle. Continue with the parts that don't depend on the answer, or the next task that doesn't.
-3. Check for answers at each poll and before each task: `gh pr view <n> --comments`. An answer starts with
+3. Check for answers before each task: `gh pr view <n> --comments`. If you have nothing else to do, wait with
+   `factory wait answer <n>` instead of checking again yourself. An answer starts with
    `<!-- factory-answer -->`. Apply it, reply with what you changed, and carry on.
 4. Only things the dev manager has marked `needs-owner` wait for a person; for those, keep going around them.
 5. **Not a question:** a fix inside this PR's own scope that `CLAUDE.md`, the style guide or a reviewer's must-fix
