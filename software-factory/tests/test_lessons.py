@@ -254,7 +254,7 @@ def issues_project(open_prs, branch_ahead=3):
     ready = {"number": 108, "title": "Next", "state": "open", "body": "", "milestone": None,
              "labels": [{"name": "factory:ready"}]}
     answers(db, json={"issues": [mine, ready], "branches": [{"name": "task/107-demo-guides"}],
-                      "pulls": open_prs, "compare/main...task/107-demo-guides": {"ahead_by": branch_ahead},
+                      "pulls": open_prs, "issues/107/comments": [], "compare/main...task/107-demo-guides": {"ahead_by": branch_ahead},
                       "user": {"login": "owner"}, "repos/{owner}/{repo}": {"full_name": "deresegetachew/remanual"}})
     return d, db, env
 

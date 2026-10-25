@@ -22,7 +22,7 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import branch_task, load, task_source  # noqa: E402
 
-CLAIM = re.compile(r"<!--\s*factory-claim\s+agent=([\w.-]+)\s*-->")
+CLAIM = re.compile(r"<!--\s*factory-claim\s+agent=([\w.-]+)(?:\s+machine=[\w-]+)?\s*-->")
 MUSTFIX = re.compile(r"<!--\s*factory-mustfix\b")
 
 

@@ -66,7 +66,14 @@ setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).ge
 wait_minutes=$(python3 -c 'import json;print(int(json.load(open(".claude/factory.json")).get("waitMinutes",1)))' 2>/dev/null || echo 1)
 export FACTORY_INTERACTIVE="$interactive"
 export FACTORY_LOOP=1
-python3 "$hooks/factory_agents.py" register --agent "$agent" >/dev/null 2>&1 || true  # its issue: Agent: <name> · idle
+# Its issue: Agent: <name> · idle. Exit 3: another machine runs this name right now (#45); stop instead of doubling it.
+python3 "$hooks/factory_agents.py" register --agent "$agent" >/dev/null 2>"${TMPDIR:-/tmp}/factory-register.$$"; rc=$?
+if [ "$rc" = 3 ]; then
+  echo "[$agent] $(cat "${TMPDIR:-/tmp}/factory-register.$$")" >&2; rm -f "${TMPDIR:-/tmp}/factory-register.$$"
+  # Not the EXIT trap: it would mark the other machine's agent issue down.
+  trap - EXIT; python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1; exit 1
+fi
+rm -f "${TMPDIR:-/tmp}/factory-register.$$"
 echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
 
 # Between tasks: back to a clean main. In an agent worktree, untracked leftovers go too (ignored files such as

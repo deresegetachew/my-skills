@@ -127,13 +127,14 @@ def stamp(agent, pid, **extra):
 
 def machine_agents(names):
     """The names this machine may run, from FACTORY_AGENTS (comma-separated, set in the machine's shell profile, never
-    committed), so two machines never start the same agent (#48). Empty: every name. A name that isn't in `agents`
+    committed) or else the machine's names file (factory_machine.py, #45), so two machines never start the same agent (#48). Empty: every name. A name that isn't in `agents`
     stops with a plain message."""
-    only = [n.strip() for n in os.environ.get("FACTORY_AGENTS", "").split(",") if n.strip()]
+    from factory_machine import machine_names
+    only = machine_names()
     unknown = [n for n in only if n not in names]
     if unknown:
-        raise SystemExit(f"FACTORY_AGENTS names {', '.join(unknown)}, which aren't agents in .claude/factory.json "
-                         f"({', '.join(names)}).")
+        raise SystemExit(f"FACTORY_AGENTS (or this machine's names file) names {', '.join(unknown)}, which aren't "
+                         f"agents in .claude/factory.json ({', '.join(names)}).")
     return only
 
 

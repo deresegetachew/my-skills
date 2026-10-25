@@ -16,7 +16,7 @@ factory <command>
 Build
   loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into,
                          which closes by itself when the task is done). Start it again in another terminal for more agents.
-                         FACTORY_AGENTS=haile,tewodros: only those names on this machine
+                         FACTORY_AGENTS=haile,tewodros (or factory machine setup): only those names on this machine
   agent <name|N>         open Claude in that agent's own worktree (created the first time), for manual work there.
                          To run the queue, use loop -i instead (a fresh session per task).
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
@@ -29,6 +29,7 @@ Look
   reviews                which extra reviews and checks the current change needs
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
+  machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
   agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down
   issues [list]          tasks as GitHub issues (tasks.source "issues"): list, show N, stale, setup, new ...
 
@@ -103,6 +104,7 @@ case "$cmd" in
     exec claude "$@" ;;
   worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
+  machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
   status)    py factory_status.py "$@" ;;
