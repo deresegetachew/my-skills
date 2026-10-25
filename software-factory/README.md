@@ -999,6 +999,26 @@ It talks to the agents through markers in PR comments:
 | `<!-- factory-approved sha=<head> -->` | Dev manager | That commit is approved. Clears a must-fix for that commit only |
 | `factory-hold` label | Dev manager | It's reviewing. Agents skip the PR and can't merge it |
 
+**The standing rules are a skill, not a memory (#96).** `/manage-pass` (`kit/.claude/skills/manage-pass/SKILL.md`, linked into
+a project like the other skills) holds everything a fresh session needs: the two-column table of what the manager does
+alone and what it asks the owner first (the one copy; the playbook links to it), the pass order, the exact markers, the hold
+label, the sha-pinned REST merge (`PUT .../pulls/<n>/merge` with `sha`), the CI rule, and the "never" list. The project's own
+additions go in `<roles.dir>/dev-manager/README.md` (or, without a role folder, `<notes>/manager.md`); the skill says to
+read them first. `claude -p "/manage-pass --dry-run"` reads, prints what it would do and writes nothing.
+
+**A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
+cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
+`claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
+read-only git, `Read`/`Grep`/`Glob` and subagents, and denies pushing to main, force-push, editing `.claude/**`, `vendor/**`,
+`CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.py` refuses, and says
+to write an owner-queue ask instead: a merge unless the PR's latest approval marker is `factory-approved sha=<the head being
+merged>`, no must-fix came after it, the merge is pinned to that head and CI is judged green (newest non-skipped run per job
+name, `factory_ci_judge.py`); a merge of a PR the manager opened (a `manager/` branch, or a body with
+`<!-- factory-role role=dev-manager ... -->`: its own PRs wait for the owner); deleting refs, force-pushing and pushing to
+main; `gh api` writes to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks and deploy
+keys; and shell commands that read secrets files. Like `pr-gate.py` it is a guard rail, not a lock: keep branch protection
+and required CI on GitHub.
+
 The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
 session with the repo attached.
 
@@ -1529,7 +1549,11 @@ software-factory/
     .claude/settings.json                 permissions and hooks
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
+    .claude/skills/manage-pass/           the dev manager's standing rules (one page)
+    .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main)
     .claude/hooks/
+      manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
+      factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
       factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
