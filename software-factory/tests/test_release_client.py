@@ -223,6 +223,30 @@ def test_first_install_takes_the_newest_full_release_and_records_it_in_the_pin()
     assert "git add" in out and "commit" in out, "the report says how to commit it"
 
 
+def test_a_project_with_its_own_factory_json_gets_the_manager_profile_and_the_next_release_updates_it():
+    gh, d, env = world()
+    gh.add("1.0.0", files={"kit/.claude/manager/settings.json": '{"profile": "1.0.0"}\n'}, date="2026-10-01T10:00:00Z")
+    gh.add("1.1.0", files={"kit/.claude/manager/settings.json": '{"profile": "1.1.0"}\n'}, date="2026-11-01T10:00:00Z")
+    own = os.path.join(d, ".claude", "factory.json")
+    os.makedirs(os.path.dirname(own))
+    open(own, "w").write('{"mainBranch": "trunk"}\n')  # the project already has its own config, so templates are not given
+    commit(d)
+    profile = os.path.join(d, ".claude", "manager", "settings.json")
+    rc, out = fac(d, env, "update", "1.0.0")
+    assert rc == 0, out
+    assert open(profile).read() == '{"profile": "1.0.0"}\n', "an engine file, given even when factory.json exists"
+    assert open(own).read() == '{"mainBranch": "trunk"}\n'
+    assert ".claude/manager/settings.json" in pin(d)["files"], "so verification checks it"
+    commit(d)
+    rc, out = fac(d, env, "update")
+    assert rc == 0, out
+    assert open(profile).read() == '{"profile": "1.1.0"}\n'
+    open(profile, "w").write("{}\n")  # a drifted profile is found and repaired like any engine file
+    commit(d)
+    rc, out = fac(d, env, "update")
+    assert open(profile).read() == '{"profile": "1.1.0"}\n', out
+
+
 def test_update_moves_to_the_newest_release_removes_files_it_dropped_and_leaves_the_projects_own_files():
     gh, d, env = world("1.0.0")
     assert fac(d, env, "update")[0] == 0
