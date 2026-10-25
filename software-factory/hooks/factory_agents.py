@@ -9,6 +9,11 @@ is alive and what each one does. The agent keeps it current itself:
   any tool use   a ping, at most every `tasks.pingMinutes` (5), in the background   (PostToolUse hook)
   turn ends      `idle`                                                       (Stop hook)
   exits          `down`, label `factory:agent-down`                           (loop exit, SessionEnd hook)
+  waits on a question  `input-required` (ping --status input-required): the same word as a question waiting for
+                 more information; the next tool use after the wait puts it back to `working`
+
+The issue body also carries a `factory-msg kind=status` envelope (factory_messages.py, docs/messages.md), so the status
+uses the shared message format and `factory messages ls --kind status` lists it.
 
 An agent whose last ping is older than `tasks.downMinutes` (30) counts as down: it crashed, the laptop slept, or it
 waits at a prompt nobody answers. The dev manager's `sweep` marks it down and puts its in-progress issues back to
@@ -25,7 +30,8 @@ agent that is alive on its machine, and also releases the issues of an agent tha
   python3 .claude/hooks/factory_agents.py ls [--json] [--local] [--fresh]
                                                                 every agent: where it runs, its state, task, since when,
                                                                 last seen and follow link (factory_agents_ls.py)
-  python3 .claude/hooks/factory_agents.py list                  who is working, idle or down, and since when
+  python3 .claude/hooks/factory_agents.py list [--json]         who is working, idle or down, and since when (--json: cards)
+  python3 .claude/hooks/factory_agents.py card <name>           one agent's card (factory_cards.py), also for dev-manager and po
   python3 .claude/hooks/factory_agents.py sweep                 mark silent agents down, release their issues
   python3 .claude/hooks/factory_agents.py register --agent taytu [--kind dev-manager] [--cloud] [--follow URL] [--role dev-manager]
   python3 .claude/hooks/factory_agents.py ping --agent taytu [--status "working on #42"] [--force]
@@ -176,14 +182,19 @@ def role_of(issue):
 
 def render(agent, status, detail, started, ping=None, where=None, machine="", extra=None, role="coding-agent"):
     where = where or f"slot {os.environ.get('FACTORY_SLOT') or 1}"
-    shown = {"working": detail or "working", "waiting": detail or "waiting", "idle": "idle", "down": "down"}[status]
+    shown = {"working": detail or "working", "waiting": detail or "waiting", "idle": "idle", "down": "down",
+             "input-required": f"input-required ({detail})" if detail else "input-required"}[status]
     t = iso(ping or now())
     pairs = {"machine": machine, **(extra or {})}
     if status == "down":  # nothing is being done, waited on or followed any more
         for key in ("task", "on", "since", "session", "follow"):
             pairs.pop(key, None)
     marks = "".join(f" {k}={clean(v)}" for k, v in pairs.items() if v not in (None, ""))
-    lines = [f"<!-- factory-agent name={agent} status={status} ping={t}{marks} -->",
+    # The old marker stays first (older kits read only it); the envelope says the same in the shared message format:
+    # the agent's status is a status message whose id is stable, because the body is rewritten on every ping.
+    import factory_messages as fm
+    envelope = fm.render(fm.Message(id=f"agent-{agent}", kind="status", frm=agent, state=status))
+    lines = [f"<!-- factory-agent name={agent} status={status} ping={t}{marks} -->", envelope,
              f"**Status:** {shown}", f"**Last ping:** {t}", f"**Started:** {started}", f"**Where:** {where}"]
     if pairs.get("follow") and status != "down":
         lines.append(f"**Follow:** {clean(pairs['follow'])}")
@@ -417,7 +428,10 @@ def main():
         if c == "ping":
             p.add_argument("--status", default=None)
             p.add_argument("--force", action="store_true")
-    sub.add_parser("list")
+    ls = sub.add_parser("list")
+    ls.add_argument("--json", action="store_true", help="the agents' cards as JSON")
+    card = sub.add_parser("card")
+    card.add_argument("name")
     ls = sub.add_parser("ls")
     ls.add_argument("--json", action="store_true")
     ls.add_argument("--local", action="store_true", help="this machine only: no GitHub")
@@ -430,7 +444,7 @@ def main():
         import factory_agents_ls
         return factory_agents_ls.run(cfg, as_json=a.json, local_only=a.local, fresh=a.fresh)
     if task_source(cfg) != "issues":
-        if a.cmd in ("list", "sweep"):
+        if a.cmd in ("list", "sweep", "card"):
             print('Agent tracking needs issues mode: "tasks": {"source": "issues"} in .claude/factory.json.')
         return
     if a.cmd == "hook":
@@ -458,24 +472,34 @@ def main():
         if not a.force and factory_heartbeat.managed(a.agent):
             return  # the daemon on this machine writes this agent's state (changes and keepalives)
         seen = recall(a.agent)
-        if a.status:
+        if a.status == "input-required":  # blocked on a question: keeps what it was doing, to show and to go back to
+            status, detail = "input-required", seen.get("detail") or ""
+        elif a.status:
             status, detail = ("idle", "") if a.status == "idle" else \
                 ("waiting", a.status) if a.status.startswith("waiting") else ("working", a.status)
         else:
             status, detail = seen.get("status") or "idle", seen.get("detail") or ""
             if status == "down":
                 status = "idle"
+            elif status == "input-required":
+                status = "working"  # a tool ran since: it is not waiting any more
         if not a.force and not a.status and factory_clock.now() - float(seen.get("ping", 0)) < float(setting(cfg, "pingMinutes")) * 60:
             return
         update(cfg, a.agent, status, detail, extra=extra, role=a.role)
     elif a.cmd == "list":
-        rows = [(*st, machine_of(i), role_of(i)) for i in current(agent_issues()) for st in [state_of(cfg, i)] if st]
-        for name, status, t, quiet, mach, role in sorted(rows, key=lambda r: r[:4]):
-            when = f"{quiet:.0f} min ago" if quiet < 120 else f"{quiet / 60:.1f} h ago"
-            print(f"{name:<12} {status:<8} last ping {iso(t)} ({when})" + (f"  machine {mach}" if mach else "")
-                  + (f"  {role}" if role != "coding-agent" else ""))
-        if not rows:
+        import factory_cards
+        found = factory_cards.cards(cfg, agent_issues())
+        if a.json:
+            print(json.dumps(found, indent=2))
+        for c in ([] if a.json else found):
+            print(factory_cards.row(c))
+        if not found and not a.json:
             print("no agents have registered yet")
+    elif a.cmd == "card":
+        import factory_cards
+        from factory_config import safe_agent
+        found = [c for c in factory_cards.cards(cfg, agent_issues()) if c["name"] == a.name]
+        print(json.dumps(found[0] if found else factory_cards.card(safe_agent(a.name)), indent=2))
     elif a.cmd == "sweep":
         for line in sweep(cfg):
             print(line)

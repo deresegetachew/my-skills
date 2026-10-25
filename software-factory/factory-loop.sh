@@ -182,8 +182,12 @@ isolate() {
     local line
     while IFS= read -r line; do [ -n "$line" ] && claude_flags+=("$line"); done < <(python3 "$hooks/factory_roles.py" claude-flags "$role")
   fi
-  # The `models` setting (factory_models.py): --model and --effort for the role's session, and --agents for the
-  # subagents whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
+  # The shared Turborepo cache (#59), asked for before every task, so a cache that came up later is picked up and one
+  # that went away is dropped. Prints nothing while turbo.api is empty; no token or no answer: local cache only, and
+  # it says why. Never stops the loop.
+  eval "$(python3 "$hooks/factory_turbo.py" env)" || true
+  # The `models` setting (factory_models.py): --model and --effort for the builder, and --agents for the subagents
+  # whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
   if [ -f "$hooks/factory_models.py" ]; then
     local m
     m="$(python3 "$hooks/factory_models.py" flags "$model_role" 2>&1)" || { echo "[$agent] $m"; exit 1; }
