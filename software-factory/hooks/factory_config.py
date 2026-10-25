@@ -13,12 +13,16 @@ DEFAULTS = {
     # typecheckChanged / testChanged: the Stop check runs these instead of typecheck / test when set, for the
     # changed packages only (for example `pnpm -s turbo run test --filter=...[origin/main]`). Fewer test lines in
     # the agent's context, and a faster turn.
+    # fix: a formatter and auto-fixer for the files this branch changed, e.g. `prettier --write {files} && eslint --fix
+    # {files}` (#69). The Stop check and `factory verify` run it first; `factory fix` runs it by hand.
     # ci: what CI runs, for `factory verify`; when set on main, the PR gate needs it passed for the PR's commit.
     # stackUp / stackHealth: what `factory resume` runs at boot to bring the dev stack back (for example `pnpm stack:up`),
     # and an optional command that passes once the stack is healthy (#88).
     "commands": {"typecheck": "", "lint": "", "test": "", "build": "", "smoke": "",
-                 "typecheckChanged": "", "testChanged": "", "ci": "", "stackUp": "", "stackHealth": ""},
+                 "typecheckChanged": "", "testChanged": "", "ci": "", "fix": "", "stackUp": "", "stackHealth": ""},
     "codePaths": ["src"],
+    # Regexes: when set, `commands.fix` gets only changed files matching one of them (empty: every changed file).
+    "fixPaths": [],
     # How many lines of a failing Stop check the agent sees: the failing lines first, then the end of the output.
     "checkOutputLines": 40,
     # Where the full output of a failed check is saved (the agent sees only a capped summary and this path).

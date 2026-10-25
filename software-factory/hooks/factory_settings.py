@@ -51,6 +51,8 @@ SETTINGS = {
     "commands.agentSetup": ("str", "Runs once per loop after the env is set, e.g. to create the slot's database.", None, ""),
     "commands.typecheckChanged": ("str", "The Stop check's typecheck, for the changed packages only (saves time and tokens). Empty: use commands.typecheck.", None, ""),
     "commands.ci": ("str", "What CI runs (typecheck, lint, test, build), for `factory verify`; `{base}` is origin/<main>. When set on main, a ready PR needs it passed for its commit.", None, ""),
+    "commands.fix": ("str", "Formats and auto-fixes the files this branch changed, e.g. `prettier --write {files} && eslint --fix {files}` (`{files}` is the quoted list; without it the list is appended). The Stop check and `factory verify` run it first, so agents never spend a turn on style.", None, ""),
+    "fixPaths": ("list", "Regexes: commands.fix gets only changed files matching one of them. Empty: every changed file.", None, []),
     "commands.testChanged": ("str", "The Stop check's tests, for the changed packages only. Empty: use commands.test.", None, ""),
     "codePaths": ("list", "Folders with code: the Stop check runs only when they changed.", None, None),
     "checkRequires": ("list", "Paths that must exist before the Stop check runs, e.g. [\"node_modules\"].", None, None),
