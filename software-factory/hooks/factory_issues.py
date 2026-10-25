@@ -15,7 +15,7 @@ The branch is task/<issue number>-<short-name>, the PR says `Closes #<n>`, and m
   python3 .claude/hooks/factory_issues.py peek                     the next ready issue, without claiming it
   python3 .claude/hooks/factory_issues.py show 42                  title, labels and body
   python3 .claude/hooks/factory_issues.py tick 42 3                tick the 3rd checkbox (1-based) in the body
-  python3 .claude/hooks/factory_issues.py review 42                in-progress -> in-review (after opening the PR)
+  python3 .claude/hooks/factory_issues.py review 42                in-progress -> in-review (after opening the PR); prints which labels changed
   python3 .claude/hooks/factory_issues.py block 42 "needs the Stripe keys"
   python3 .claude/hooks/factory_issues.py release 42 ["why"]       back to ready, the agent's label off
   python3 .claude/hooks/factory_issues.py stale [--hours 3]        in-progress issues with no activity (dev manager)
@@ -235,6 +235,18 @@ def release_issue(cfg, n, reason=""):
     comment(n, f"<!-- factory-release agent={who} -->\nBack to ready" + (f": {reason}" if reason else "."))
 
 
+def review_issue(cfg, n):
+    """In progress -> in review; returns the one line saying which labels changed."""
+    L = task_labels(cfg)
+    have = names(gh("GET", f"repos/{{owner}}/{{repo}}/issues/{n}"))
+    if L["inReview"] in have and L["inProgress"] not in have:
+        return f"#{n} was already in review: nothing changed."
+    add_labels(n, [L["inReview"]])
+    remove_label(n, L["inProgress"])
+    gone = f", removed {L['inProgress']}" if L["inProgress"] in have else ""
+    return f"#{n} is in review: added {L['inReview']}{gone}."
+
+
 def tick(n, index):
     issue = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{n}")
     body = issue.get("body") or ""
@@ -309,8 +321,7 @@ def main():
     elif a.cmd == "tick":
         tick(a.n, a.index)
     elif a.cmd == "review":
-        add_labels(a.n, [L["inReview"]])
-        remove_label(a.n, L["inProgress"])
+        print(review_issue(cfg, a.n))
     elif a.cmd == "block":
         i = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{a.n}")
         for x in names(i):

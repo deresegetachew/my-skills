@@ -142,7 +142,7 @@ Measure
   report [--since D]     per task, from GitHub: claim to PR to merge, rework rounds and CI runs (failed)
 
 Maintain
-  release <agent>        drop an agent's local claims (taytu ...), for example after a crash
+  release <agent>        drop an agent's local claims (taytu ...), for example after a crash; says what it released or "Nothing to release"
   clean                  remove agent worktrees no agent is using (and with no uncommitted work), and local task
                          branches whose task is done
   wait <pr> [minutes]    wait for a pull request to merge, without spending tokens
