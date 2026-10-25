@@ -3,6 +3,7 @@
 
 - SKILL.md exists, with frontmatter: `name:` matching the folder and a non-empty `description:`.
 - Every .sh parses (bash -n), every .py compiles, every .json loads.
+- No compiled .pyc file is tracked by git (they are rewritten on every run; .gitignore covers them).
 """
 import json, pathlib, py_compile, re, subprocess, sys
 
@@ -36,5 +37,9 @@ for f in root.rglob('*.json'):
     if '.git' in f.parts: continue
     try: json.load(open(f))
     except Exception as e: errors.append(f'{f.relative_to(root)}: invalid JSON: {e}')
+tracked = subprocess.run(['git', 'ls-files', '-z'], cwd=root, capture_output=True, text=True)
+for name in (tracked.stdout.split('\0') if tracked.returncode == 0 else []):
+    if name.endswith('.pyc') or '__pycache__/' in name:
+        errors.append(f'{name}: compiled file is tracked; run: git rm --cached {name}')
 print('\n'.join(errors) if errors else f'ok: {len(skills)} skills checked')
 sys.exit(1 if errors else 0)
