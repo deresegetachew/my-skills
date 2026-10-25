@@ -155,6 +155,9 @@ Maintain
   artifacts pull|status|list
                          the project's artifacts and designs as reviewed copies in the repo, with a manifest of where
                          each came from; status says which copy is older than its artifact
+  handover snapshot [--json]
+                         what a manager hands over, read from GitHub: open PRs, tasks, owner asks, what needs a manager
+                         now, agents and numbers in use (the runbook is docs/manager-handover.md)
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
@@ -266,6 +269,7 @@ case "$cmd" in
   watch)     py factory_watch.py "$@" ;;
   prd)       py factory_prd.py "$@" ;;
   artifacts) py factory_artifacts.py "$@" ;;
+  handover)  py factory_handover.py "$@" ;;
   signoff)   py factory_signoff.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;

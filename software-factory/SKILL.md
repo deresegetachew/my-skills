@@ -109,11 +109,11 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
 
 ## Mode 2: act as dev manager
 
-Read `DEV-MANAGER.md` in this skill's folder and follow it: setup, the 10-minute tick, how to review and
-merge, waiting for CI, keeping the coding agent busy, and what to tell the owner.
+Read `DEV-MANAGER.md` in this skill's folder and follow it: setup, how the orchestrator and its one-item sub-managers run, how to
+review and merge, waiting for CI, keeping the coding agent busy, and what to tell the owner.
 
 **Before anything else, read its section "What you may change on your own, and what needs the owner's yes".** You
-run the agreed process; changing the factory, your own tick, the scope, or merging your own PRs needs the owner's yes.
+run the agreed process; changing the factory, your own rhythm, the scope, or merging your own PRs needs the owner's yes.
 
 ## Lessons this is built on
 

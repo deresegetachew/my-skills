@@ -91,8 +91,10 @@ need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
 5. **Start an agent:** `factory loop -i` (a session per task that you can watch and type into), or `factory loop`
    (unattended). [Which one](#three-ways-to-run-an-agent).
 
-6. **Start the dev manager:** in a Claude session with the repo attached, say "be the dev manager for this repo". It
-   follows [DEV-MANAGER.md](DEV-MANAGER.md).
+6. **Start the dev manager:** `factory dev-manager loop` (an orchestrator that starts a one-item sub-manager per piece of
+   work), or `factory dev-manager loop -i` to work an item in a session you can type into. From the Claude app, reach a
+   running manager through Remote Control; there is no web console. It follows [DEV-MANAGER.md](DEV-MANAGER.md); moving
+   over from the old cloud-session manager is the runbook [docs/manager-handover.md](docs/manager-handover.md).
 
 <br>
 
@@ -204,7 +206,7 @@ software-factory/
   hooks/                        every hook and every `factory_*.py` command, next_task.py, pr-gate.py, check.py ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
   tests/                        the tests (run with tools/run_tests.py at the repo root)
-  docs/                         reference pages (messages.md)
+  docs/                         reference pages (messages.md, manager-handover.md)
   kit/                          what a project is given:
     .claude/agents, skills, manager/, settings.json       Claude Code reads these from the project's .claude/
     .claude/factory.json, factory/notes/, CLAUDE.factory.md, docs/, .github/, .gitignore     templates, copied once
@@ -694,10 +696,10 @@ minutes. The exit code says what happened:
 | 4 | `ci`: GitHub never started the jobs (billing); see `factory_ci.py` |
 
 `factory wait <pr>` is unchanged. Agents and the dev manager never poll inside the conversation (`next-task` and
-[DEV-MANAGER.md](DEV-MANAGER.md) say so). The dev manager's tick starts with `factory precheck` and ends there when it
+[DEV-MANAGER.md](DEV-MANAGER.md) say so). A manager pass starts with `factory precheck` and ends there when it
 prints `nothing to do`: one short command, no review, no reading of state notes. Not yet done: running the precheck
-outside any model, so an idle tick costs nothing at all (a GitHub-event trigger or a cron that starts the session only
-when `precheck` exits 3).
+outside any model, so an idle pass costs nothing at all (the orchestrator of `factory dev-manager loop` does exactly that: it starts a
+sub-manager only when `precheck` finds an item).
 
 ### Measuring it
 
@@ -1392,8 +1394,9 @@ main; `gh api` writes to `.github/` content, branch protection, rulesets, Action
 keys; and shell commands that read secrets files. Like `pr-gate.py` it is a guard rail, not a lock: keep branch protection
 and required CI on GitHub.
 
-The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
-session with the repo attached.
+The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, run `factory dev-manager loop` (or `-i`) on a machine with the factory installed; the handover from a
+cloud-session manager is [docs/manager-handover.md](docs/manager-handover.md), and `factory handover snapshot` prints the
+state to hand over from GitHub.
 
 ### The list a manager starts from: `factory prs`
 
@@ -2115,7 +2118,8 @@ change the table there, not here. `factory settings help <key>` has the long hel
 software-factory/
   README.md                               this page
   SKILL.md                                the skill: set up a project, or act as dev manager
-  DEV-MANAGER.md                          the dev manager's playbook
+  DEV-MANAGER.md                          the dev manager's playbook (orchestrator and one-item sub-managers)
+  docs/manager-handover.md                runbook: from the cloud-session manager to terminal managers
   install.sh                              install into a project (--link with the submodule)
   factory                                 the command line
   factory-loop.sh                         the loop behind `factory loop`
@@ -2210,6 +2214,7 @@ software-factory/
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
       factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
+      factory_handover.py                 `factory handover snapshot`: the state a manager hands over, read from GitHub
       factory_po.py                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
       factory_prd.py                      `factory prd`: progress against the PRD, per user story
       factory_signoff.py                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)
