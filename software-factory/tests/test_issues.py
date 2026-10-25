@@ -4,7 +4,8 @@ import json, os, subprocess, sys, tempfile, textwrap
 from datetime import datetime, timezone
 
 KIT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit")
-HOOKS = os.path.abspath(os.path.join(KIT, ".claude", "hooks"))
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.abspath(os.path.join(SF, "hooks"))
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, re, sys

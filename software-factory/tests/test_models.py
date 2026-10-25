@@ -7,7 +7,7 @@ import json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+HOOKS = os.path.abspath(os.path.join(HERE, "..", "hooks"))
 AGENTS = os.path.join(KIT, ".claude", "agents")
 sys.path.insert(0, HERE)
 import test_mcp_isolation as iso  # noqa: E402  (its stub loop project and fake claude)
@@ -155,7 +155,7 @@ def agent_run(models):
     subprocess.run(["git", "remote", "add", "origin", origin], cwd=d, check=True)
     subprocess.run(["git", "push", "-q", "origin", "HEAD:main"], cwd=d, check=True, capture_output=True)
     env = iso.fake_claude(tempfile.mkdtemp())
-    p = subprocess.run(["bash", os.path.join(KIT, "factory"), "agent", "menelik", "--resume"], cwd=d, env=env,
+    p = subprocess.run(["bash", os.path.join(HERE, "..", "factory"), "agent", "menelik", "--resume"], cwd=d, env=env,
                        capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p
     (args,) = iso.calls(env)

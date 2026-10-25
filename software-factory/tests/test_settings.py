@@ -3,7 +3,7 @@
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HOOKS = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "hooks"))
+HOOKS = os.path.abspath(os.path.join(HERE, "..", "hooks"))
 SETTINGS = os.path.join(HOOKS, "factory_settings.py")
 CHECK = os.path.join(HOOKS, "check.py")
 
@@ -86,7 +86,7 @@ def test_an_agent_session_can_read_but_never_change_settings():
 
 
 def test_agents_are_denied_the_settings_command():
-    rules = json.load(open(os.path.join(HOOKS, "..", "settings.json")))["permissions"]["deny"]
+    rules = json.load(open(os.path.join(HOOKS, "..", "kit", ".claude", "settings.json")))["permissions"]["deny"]
     for rule in ("Bash(factory settings set*)", "Bash(factory settings unset*)", "Bash(*factory_setting*)"):
         assert rule in rules, rule
 

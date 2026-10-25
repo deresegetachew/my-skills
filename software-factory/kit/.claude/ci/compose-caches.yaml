@@ -1,18 +1,1 @@
-# Added to compose.yaml for the heavy runners when ci.caches is on (#60): the one cache that outlives a job, a
-# pull-through mirror of Docker Hub (registry, one per project and machine, started by loop.sh). A job's service
-# images (Postgres ...) come from it after the first pull. It holds public images only, dind checks every layer
-# against its digest, and a job can't push to it. Each instance has its own network to it, so two jobs never
-# share a network (their published service ports stay apart).
-# No pnpm store is shared: a job could write into it, and pnpm doesn't re-check a stored file's hash, so one pull
-# request could plant code that later jobs run (#92 review). Everything else is per job and removed by
-# `down --volumes`: dind's data, the runner's workspace, the job's containers and networks.
-services:
-  dind:
-    command: ['dockerd', '--host=unix:///run/dind/docker.sock', '--group=123',
-              '--registry-mirror=http://${CI_MIRROR:?}:5000', '--insecure-registry=${CI_MIRROR:?}:5000']
-    networks: [default, cache]
-
-networks:
-  cache:
-    external: true
-    name: ${CI_CACHE_NETWORK:?}
+../../../ci/compose-caches.yaml

@@ -5,7 +5,7 @@ the log path, the full output is on disk, and the log never shows up as an untra
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HOOKS = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "hooks"))
+HOOKS = os.path.abspath(os.path.join(HERE, "..", "hooks"))
 ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
        "GIT_COMMITTER_EMAIL": "t@t"}
 for var in ("FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"):

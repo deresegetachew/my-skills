@@ -8,7 +8,8 @@ import json, os, plistlib, stat, subprocess, tempfile, time
 from datetime import datetime, timedelta, timezone
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
-CI = os.path.join(KIT, ".claude", "ci", "ci.sh")
+SF = os.path.dirname(os.path.abspath(KIT))
+CI = os.path.join(SF, "ci", "ci.sh")
 
 # db: {"repo": "acme/Widget" | None, "vars": {...}, "api": {path: json}, "fail": [paths]}. --jq runs real jq.
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -519,11 +520,11 @@ def test_two_runners_and_the_light_lane_get_their_own_projects_names_and_logs():
 
 def test_the_light_runner_has_no_docker_and_is_small():
     import re
-    text = open(os.path.join(KIT, ".claude", "ci", "compose-light.yaml")).read()
+    text = open(os.path.join(SF, "ci", "compose-light.yaml")).read()
     body = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
     assert "dind" not in body and "privileged" not in body and "docker.sock" not in body, body
     assert "RUNNER_DOCKER: '0'" in body and re.search(r"mem_limit: \d+[mg]", body), body
-    entry = open(os.path.join(KIT, ".claude", "ci", "entrypoint.sh")).read()
+    entry = open(os.path.join(SF, "ci", "entrypoint.sh")).read()
     assert 'if [ "${RUNNER_DOCKER:-1}" != 0 ]' in entry
 
 
@@ -772,7 +773,7 @@ def test_a_failed_build_falls_back_to_the_plain_image_and_the_settings_turn_it_a
 
 def test_only_the_registry_mirror_outlives_a_job_and_no_job_shares_a_network_or_a_writable_store():
     import re
-    ci_dir = os.path.join(KIT, ".claude", "ci")
+    ci_dir = os.path.join(SF, "ci")
     caches = open(os.path.join(ci_dir, "compose-caches.yaml")).read()
     base = open(os.path.join(ci_dir, "compose.yaml")).read()
     body = "\n".join(l for l in (caches + base).splitlines() if not l.lstrip().startswith("#"))
@@ -866,7 +867,7 @@ def test_a_job_never_sees_the_last_jobs_files():
 
 
 def test_factory_help_lists_the_ci_commands():
-    out = subprocess.run(["bash", os.path.join(KIT, "factory"), "help"], cwd=project()[0], capture_output=True,
+    out = subprocess.run(["bash", os.path.join(SF, "factory"), "help"], cwd=project()[0], capture_output=True,
                          text=True).stdout
     for c in ("ci status", "ci use local|github", "ci install", "ci uninstall", "ci start | stop", "ci logs"):
         assert c in out, c

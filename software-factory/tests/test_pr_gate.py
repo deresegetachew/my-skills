@@ -4,7 +4,8 @@
 import json, os, subprocess, sys, tempfile
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
-GATE = os.path.join(KIT, ".claude", "hooks", "pr-gate.py")
+SF = os.path.dirname(os.path.abspath(KIT))
+GATE = os.path.join(SF, "hooks", "pr-gate.py")
 HEAD = "a" * 40
 
 # Answers from a scenario file; every call is logged, so a test can see which PR the gate looked at.

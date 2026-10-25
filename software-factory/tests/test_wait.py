@@ -5,9 +5,9 @@
 one per call to the pulls route), so a wait can see CI go from running to green. Sleeps are 0 seconds."""
 import json, os, subprocess, sys, tempfile
 
-KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
-FACTORY = os.path.join(KIT, "factory")
-HOOK = os.path.join(KIT, ".claude", "hooks", "factory_wait.py")
+SF = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+FACTORY = os.path.join(SF, "factory")
+HOOK = os.path.join(SF, "hooks", "factory_wait.py")
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, re, sys
@@ -162,7 +162,7 @@ def test_factory_command_routes_the_new_waits_and_keeps_wait_pr():
     d, env = world(pulls={"7": pr(7)}, runs=[run("a")])
     subprocess.run(["git", "init", "-q", d], check=True)
     # the factory script runs the project's own .claude/hooks, so link the kit's into the temp project
-    os.symlink(os.path.join(KIT, ".claude", "hooks"), f"{d}/.claude/hooks")
+    os.symlink(os.path.join(SF, "hooks"), f"{d}/.claude/hooks")
     p = subprocess.run(["bash", FACTORY, "wait", "ci", "7"], cwd=d, env=env, capture_output=True, text=True)
     assert p.returncode == 0 and "CI green" in p.stdout, (p.returncode, p.stdout, p.stderr)
     p = subprocess.run(["bash", FACTORY, "precheck"], cwd=d, env=env, capture_output=True, text=True)

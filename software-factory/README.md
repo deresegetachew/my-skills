@@ -7,6 +7,12 @@ keeps them busy. Hooks, CI and GitHub's branch protection stop the work from mer
 decisions that really belong to you reach you. The factory itself lives in my-skills, and each project pins one
 version of it as a git submodule.
 
+> **Where the code lives (#112, step 1).** The factory's code (`hooks/`, `ci/`, `factory`, `factory-loop.sh`, `tests/`)
+> now sits directly in `software-factory/`. The old paths under `kit/` (`kit/.claude/hooks/*`, `kit/.claude/ci/*`,
+> `kit/factory`, `kit/factory-loop.sh`) are symlinks to it, so projects that link the old paths keep working until
+> they switch. The agents, skills and `settings.json` stay in `kit/.claude/`. The rest of this page still names the
+> paths as a project sees them.
+
 <br>
 
 ## Contents

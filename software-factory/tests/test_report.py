@@ -6,7 +6,8 @@ from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 
 FAKE_GH = r'''#!/usr/bin/env python3
 import json, os, sys
@@ -71,7 +72,7 @@ def setup(cfg):
 
 
 def report(d, env, *args):
-    return subprocess.run(["bash", os.path.join(KIT, "factory"), "report", *args], cwd=d, env=env,
+    return subprocess.run(["bash", os.path.join(SF, "factory"), "report", *args], cwd=d, env=env,
                           capture_output=True, text=True, timeout=60)
 
 

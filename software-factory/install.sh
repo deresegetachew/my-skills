@@ -36,7 +36,7 @@ is_engine() {
 rel() { python3 -c 'import os,sys;print(os.path.relpath(sys.argv[2], os.path.dirname(sys.argv[1])))' "$1" "$2"; }
 
 cd "$src"
-find . -type f -not -path '*/__pycache__/*' | sort | while read -r f; do
+find . \( -type f -o -type l \) -not -path '*/__pycache__/*' | sort | while read -r f; do  # kit/ holds symlink forwarders to the moved code (#112 step 1), so symlinks count too
   target="$dst/${f#./}"
   mkdir -p "$(dirname "$target")"
   if [ "$link" = 1 ] && is_engine "$f"; then
@@ -55,7 +55,7 @@ find . -type f -not -path '*/__pycache__/*' | sort | while read -r f; do
   elif [ "$setup" = 0 ]; then
     :  # a template the project chose not to keep (or not yet): leave it out
   else
-    cp "$f" "$target"
+    cp -L "$f" "$target"
     echo "added    ${f#./}"
   fi
 done

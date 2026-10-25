@@ -5,7 +5,7 @@
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CHECK = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "hooks", "check.py"))
+CHECK = os.path.abspath(os.path.join(HERE, "..", "hooks", "check.py"))
 ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
        "GIT_COMMITTER_EMAIL": "t@t"}
 for var in ("FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"):
