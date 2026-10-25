@@ -232,9 +232,27 @@ cmd_stale() {
   return 0
 }
 
+# Starts the installed start script the way the service does, in the runner image as the image's own user, and only
+# parses it (`bash -n`), with no network. That is the check #111 needed: mode bits alone do not prove the user can read
+# it. Quiet and passing when Docker is off or the image is not on this machine (nothing to try it in).
+probe_container() {
+  [ -f "$CI_INSTALLED/entrypoint.sh" ] || return 0
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || return 0
+  local image out
+  image="$CI_NAME-runner:latest"
+  docker image inspect "$image" >/dev/null 2>&1 || image="$(sed -n 's/^[[:space:]]*image:[[:space:]]*\${RUNNER_IMAGE:-\(.*\)}[[:space:]]*$/\1/p' "$kit/compose.yaml" | head -1)"
+  [ -n "$image" ] && docker image inspect "$image" >/dev/null 2>&1 || return 0
+  if ! out="$(docker run --rm --network none -v "$CI_INSTALLED/entrypoint.sh:/opt/factory-ci/entrypoint.sh:ro" \
+        --entrypoint /bin/bash "$image" -n /opt/factory-ci/entrypoint.sh 2>&1)"; then
+    echo "the runner container cannot start its entrypoint ($image): ${out:-no output}"
+    return 1
+  fi
+}
+
 # `factory ci check`: exit 0 when the installed services are fit to start, else 1 with a line per problem: a copy
 # that is missing or older than this checkout, a file the runner container's user (not the owner) can't read or
-# that anyone else could change, a start script bash can't parse. Reads files only; it starts nothing.
+# that anyone else could change, a start script bash can't parse, and (when Docker and the runner image are here) a container that cannot read it.
+# It starts no runner.
 cmd_check() {
   if [ -z "$(installed_ids)" ]; then echo "No runner service is installed on $machine."; return 0; fi
   local src dst mode bad=0 line
@@ -251,6 +269,7 @@ cmd_check() {
   if [ -f "$CI_INSTALLED/entrypoint.sh" ] && ! bash -n "$CI_INSTALLED/entrypoint.sh" 2>/dev/null; then
     echo "$CI_INSTALLED/entrypoint.sh doesn't parse"; bad=1
   fi
+  probe_container || bad=1
   [ "$bad" = 0 ] || return 1
   echo "The installed runner files are readable by the container and match this checkout."
 }
