@@ -1,0 +1,1 @@
+../../software-factory/ci/install-tools.sh
