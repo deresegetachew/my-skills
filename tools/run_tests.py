@@ -29,6 +29,15 @@ sys.exit(1 if bad else 0)
 """
 
 
+def hermetic_env():
+    """The tests make their own throwaway repos and commit in them. A developer's global git config may sign every commit
+    through a helper that can fail under load (and CI has none), so no test commit is signed."""
+    env = dict(os.environ)
+    n = int(env.get("GIT_CONFIG_COUNT", "0") or 0)
+    env.update({"GIT_CONFIG_COUNT": str(n + 1), f"GIT_CONFIG_KEY_{n}": "commit.gpgsign", f"GIT_CONFIG_VALUE_{n}": "false"})
+    return env
+
+
 def main():
     files = sorted(glob.glob(os.path.join(ROOT, "software-factory", "tests", "test_*.py")))
     if not files:
@@ -40,7 +49,7 @@ def main():
         rel = os.path.relpath(path, ROOT)
         try:
             proc = subprocess.run([sys.executable, "-I", "-c", RUNNER, path], capture_output=True, text=True,
-                                  timeout=600, cwd=ROOT)
+                                  timeout=600, cwd=ROOT, env=hermetic_env())
             out, code = proc.stdout + proc.stderr, proc.returncode
         except subprocess.TimeoutExpired:
             out, code = "timed out after 600 s\n", 1
