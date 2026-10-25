@@ -411,6 +411,15 @@ def repo_name(root, pin):
     return repo or DEFAULT_REPO
 
 
+def refuse_factory_repo(root):
+    """my-skills builds itself with its own factory: the real files are in software-factory/, and the releases come from
+    here, so a release must never be pulled over them (#162)."""
+    if os.path.isfile(os.path.join(root, "software-factory", "VERSION")) and os.path.isfile(os.path.join(root, "tools", "build_release.py")):
+        raise FactoryError("factory_repo", "this is the factory's own repository, where the releases come from.",
+                           "edit the real files in software-factory/ (never through the .claude links), then cut a release "
+                           "with tools/build_release.py. Nothing was changed.")
+
+
 def refuse_agent():
     for var in AGENT_ENV:
         if var in os.environ:
@@ -749,6 +758,7 @@ def check_clean(root, pin):
 def cmd_update(args, rollback=False):
     root = project_root()
     command = "rollback" if rollback else "update"
+    refuse_factory_repo(root)
     refuse_agent()
     pin = read_pin(root)
     repo = repo_name(root, pin)
@@ -833,12 +843,16 @@ def main(argv=None):
     u.add_argument("--release", action="store_true", help="use releases even when the project has no pin yet")
     u.add_argument("--verbose", action="store_true")
     sub.add_parser("rollback").add_argument("--verbose", action="store_true")
+    sub.add_parser("check-own-repo", help=argparse.SUPPRESS)  # `factory update` asks this before the submodule path
     args = ap.parse_args(argv)
     try:
         if args.cmd == "version":
             return cmd_version(args)
         if args.cmd == "releases":
             return cmd_releases(args)
+        if args.cmd == "check-own-repo":
+            refuse_factory_repo(project_root())
+            return 0
         return cmd_update(args, rollback=args.cmd == "rollback")
     except FactoryError as e:
         print(f"factory {args.cmd}: [{e.code}] {e.message}\nFix: {e.fix}", file=sys.stderr)

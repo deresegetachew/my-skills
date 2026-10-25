@@ -36,7 +36,9 @@ Build
                          To run the queue, use loop -i instead (a fresh session per task). --detach: in a detached
                          tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
-  next                   the job the factory would hand out next (`--claim AGENT --issue N` claims that issue)
+  next                   the job the factory would hand out next. It does not claim it: the last line shows the
+                         command that does (python3 .claude/hooks/next_task.py --claim <agent> --pid $$);
+                         `--claim AGENT --issue N` claims that one issue
   autostart [status|install|uninstall]
                          bring this machine back after a reboot: the dev stack (commands.stackUp) and its agents, in
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
@@ -246,7 +248,7 @@ case "$cmd" in
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
   messages)  py factory_messages.py "${1:-ls}" "${@:2}" ;;
   heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
-  next)      py next_task.py "$@" ;;
+  next)      py next_task.py --note "$@" ;;
   autostart) py factory_autostart.py "$@" ;;
   resume)    py factory_resume.py "$@" ;;
   status)    py factory_status.py "$@" ;;
@@ -284,6 +286,8 @@ case "$cmd" in
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
   update)
+    # Never inside the factory's own repo (my-skills): the releases come from there (#162).
+    py factory_release.py check-own-repo || exit 1
     # A project with a release pin (.claude/factory/release.json), or one that asks (a version, --release), takes the
     # factory from numbered releases (#113). Any other project keeps the submodule update below until it migrates.
     if [ -f .claude/factory/release.json ]; then py factory_release.py update "$@"; exit $?; fi

@@ -277,6 +277,12 @@ factory update          # newest release: download, check, install, refresh this
 | Go back | `factory rollback`: the release installed before, from this machine's download cache, no network needed |
 | Catch up after a pull | `factory update` again: the files came with the pull, so it only refreshes this machine's runner services and verifies |
 
+**`factory update` and `factory rollback` refuse inside the factory's own repository** (my-skills, found by
+`software-factory/VERSION` and `tools/build_release.py` at the root) with `[factory_repo]`, before anything else and
+without changing a file. The `.claude/` entries there are links into `software-factory/`, and the releases come from
+that repo. The fix: edit the real files in `software-factory/`, then cut a release with `tools/build_release.py`. Every
+other project is unaffected.
+
 `factory update` does this, in order, and stops at the first problem with `[code] message` and `Fix: ...`:
 
 1. Refuses a dirty working tree (it names the files; it stashes nothing). The only dirty tree it accepts is one that
@@ -458,7 +464,7 @@ version it pins. `factory help` lists everything.
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
 | `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, GitHub access (a real `gh api user` call; `gh auth status` failing alone is only a note), Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |

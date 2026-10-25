@@ -7,6 +7,7 @@
   Rework comes first: an open PR whose latest must-fix (`<!-- factory-mustfix sha=<head> -->` or a `factory-msg` of kind mustfix) from the dev manager
   names its current head commit (nothing pushed since) is printed as "pr-42 Rework #42: <title> (<branch>)".
   A PR with the `holdLabel` label (default `factory-hold`) is the dev manager's to review: it's never rework.
+  python3 .claude/hooks/next_task.py --note    -> what `factory next` runs: the same line, then "Not claimed. To claim it: ..."
   python3 .claude/hooks/next_task.py --claim taytu --pid 123
       -> the first task no other running loop holds, claimed for taytu (factory-loop.sh does this; see
          factory_claims.py). Exit 1 when every open task is done, blocked or held by another loop.
@@ -69,6 +70,7 @@ def main():
     ap.add_argument("--pid", default=None, help="the loop's process id, with --claim")
     ap.add_argument("--issue", type=int, default=None, metavar="N",
                     help="with --claim in issues mode: claim this issue, if it is free and its dependencies are done")
+    ap.add_argument("--note", action="store_true", help="end a text answer with a line saying nothing was claimed (factory next)")
     ap.add_argument("--no-rework", action="store_true", help="plan tasks only, skip PRs with a must-fix")
     a = ap.parse_args()
     if a.issue and not a.claim:
@@ -100,6 +102,14 @@ def main():
         print(json.dumps({"id": tid, "title": title, "remaining": remaining, "blocked": sorted(blocked)}))
     else:
         print(f"{tid} {title}")
+        note(a)
+
+
+def note(a):
+    """`factory next` only looks: say so, and show the command that claims. Other programs read one line, so only --note adds it."""
+    if a.note and not a.claim:
+        who = os.environ.get("FACTORY_AGENT") or "<your-agent-name>"
+        print(f"Not claimed. To claim it: python3 .claude/hooks/next_task.py --claim {who} --pid $$")
 
 
 def named_issue(cfg, a):
@@ -141,6 +151,8 @@ def issues_mode(cfg, a):
         sys.exit(1)
     tid, title = jobs[0]
     print(json.dumps({"id": tid, "title": title}) if a.json else f"{tid} {title}")
+    if not a.json:
+        note(a)
 
 
 if __name__ == "__main__":

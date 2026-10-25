@@ -629,6 +629,56 @@ def test_a_project_linked_to_the_submodule_cannot_be_overwritten_by_a_release():
     assert os.path.islink(target) and open(os.path.join(d, "vendor", "x.py")).read() == "x\n"
 
 
+def factory_repo_copy():
+    """A copy of my-skills' own layout: the factory's real files, VERSION and the release builder at the root (#162)."""
+    d = tempfile.mkdtemp()
+    git(d, "init", "-q", "-b", "main")
+    os.makedirs(os.path.join(d, "software-factory"))
+    os.makedirs(os.path.join(d, "tools"))
+    open(os.path.join(d, "software-factory", "VERSION"), "w").write("1.0.0\n")
+    open(os.path.join(d, "tools", "build_release.py"), "w").write("# builds the release archive\n")
+    os.makedirs(os.path.join(d, ".claude"))  # my-skills links .claude/hooks to software-factory/hooks
+    os.symlink(os.path.join(SF, "hooks"), os.path.join(d, ".claude", "hooks"))
+    commit(d, "my-skills")
+    return d
+
+
+def test_update_and_rollback_refuse_inside_the_factorys_own_repo_and_change_nothing():
+    gh, _d, env = world("1.0.0")
+    d = factory_repo_copy()
+    before = snapshot(d)
+    for args in (("update",), ("update", "v1.0.0"), ("update", "--release"), ("update", "--layout", "new"), ("rollback",)):
+        rc, out = run_factory(d, env, *args)
+        assert rc == 1 and "[factory_repo]" in out and "Fix:" in out, (args, out)
+        assert "software-factory/" in out and "release" in out, (args, out)
+    assert snapshot(d) == before and git(d, "status", "--porcelain") == "" and gh.hits == []
+    assert not os.path.exists(os.path.join(d, PIN))
+
+
+def test_the_release_client_refuses_directly_in_the_factorys_own_repo_even_in_an_agent_session():
+    gh, _d, env = world("1.0.0")
+    d = factory_repo_copy()
+    for cmd in ("update", "rollback"):
+        rc, out = fac(d, {**env, "FACTORY_AGENT": "haile"}, cmd)
+        assert rc == 1 and "[factory_repo]" in out, (cmd, out)
+    assert git(d, "status", "--porcelain") == "" and gh.hits == []
+
+
+def test_an_ordinary_project_is_not_taken_for_the_factorys_repo():
+    gh, _d, env = world("1.0.0")
+    d = project_with_factory(gh)
+    rc, out = run_factory(d, env, "update")
+    assert "[factory_repo]" not in out and "no my-skills submodule in .gitmodules" in out, out
+    # a project that only has one of the two marker files is an ordinary project too
+    os.makedirs(os.path.join(d, "tools"))
+    open(os.path.join(d, "tools", "build_release.py"), "w").write("x\n")
+    rc, out = run_factory(d, env, "update")
+    assert "[factory_repo]" not in out, out
+    gh2, d2, env2 = world("1.0.0")
+    rc, out = fac(d2, env2, "update")
+    assert rc == 0 and "[factory_repo]" not in out, out
+
+
 def test_the_factory_command_runs_version_releases_update_and_rollback_and_lists_them_in_help():
     gh, _d, env = world("1.0.0", "1.1.0")
     d = project_with_factory(gh)
