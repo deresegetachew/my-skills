@@ -74,8 +74,10 @@ activity up to date on each tick:
 [Dev manager tick] Manage <owner>/<repo> for the owner (the coding agent runs `factory loop -i` on his
 machine). Use the REST API (`gh api`), never force-push or push to the main branch.
 0. Run `factory precheck` first. If it prints `nothing to do`, skip to step 7 and do nothing else: no reviews, no
-   extra reads. Otherwise it lists what needs you; work through exactly those. Never wait by checking again in
-   this conversation: use `factory wait ci <pr>` (CI after your fix) or `factory wait answer <pr>`.
+   extra reads. Otherwise it lists what needs you; work through exactly those. `factory prs` is the one list to
+   work from (each open PR with its head, CI judged by the rule, the newest marker per commit, any review claim
+   and its next action; then unanswered questions and owner asks); `factory prs --json` is the same for scripts.
+   Never wait by checking again in this conversation: use `factory wait ci <pr>` (CI after your fix) or `factory wait answer <pr>`.
 1. Open PRs: for any head commit without a `<!-- pr-watch sha=... -->` comment, review and merge under the
    agreed rules. Give a PR a few minutes after it opens if the coding agent may still be pushing; a clean,
    green PR that says "a person merges this one" is yours. Retarget stacked PRs to main after a merge. Glance
@@ -212,6 +214,9 @@ Wait until **every** check run on the head commit has `status: completed`, then 
 loop that stops as soon as one check finishes will merge with another one still running. Count the jobs:
 a new CI job can arrive with a PR, and older branches won't have it.
 
+`factory prs` judges CI by this rule for you: per job name the newest run that was not skipped decides, so a re-run
+replaces a failure; the PR is green only when every job is.
+
 Flaky test (passes locally, times out once on CI): re-run the failed job once (`POST .../actions/runs/{id}/rerun-failed-jobs`).
 If it flakes again, fix the cause (a longer timeout for a cold start, for example) in a small PR.
 
@@ -265,7 +270,10 @@ Input tokens dominate the bill, not replies, so the big levers are context size 
   auditor and reviewer will try. A task that names them passes review in one round instead of several, and
   each round re-reads the branch.
 - `factory settings` shows the knobs: `commands.testChanged` / `typecheckChanged` for a Stop check on the
-  changed packages only, and `checkOutputLines` for how much of a failure the agent sees.
+  changed packages only, and `checkOutputLines` for how much of a failure the agent sees. `factory settings help <key>`
+  explains any of them. A settings change comes as a pull request from a person (`factory settings pr`); its body lists
+  each change and the review it needs (`testPaths`, `goldenPaths` and `dependencyManifests` need `tests-reviewed` or
+  `deps-reviewed`). Agents can't change settings, and you merge those PRs only within the owner's scope.
 Terse-reply skills such as the community `/caveman` save a little (a few percent at most); they're optional.
 Check spend with `/usage`.
 
