@@ -4,7 +4,7 @@
 
 gh, launchctl, plutil, docker and scutil are fakes on PATH, and HOME is a temp folder, so nothing touches the real
 Mac or GitHub. What launchd and macOS show (Login Items, Activity Monitor) can't be tested here."""
-import json, os, plistlib, re, shutil, stat, subprocess, tempfile, time
+import json, os, plistlib, re, shutil, stat, subprocess, tempfile, threading, time
 from datetime import datetime, timedelta, timezone
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
@@ -80,6 +80,7 @@ case " $* " in
   *" build "*) [ -z "${FAKE_DOCKER_BUILD_FAILS:-}" ] || exit 1 ;;
   *" info "*"MemTotal"*) [ -n "${FAKE_DOCKER_MEMTOTAL:-}" ] && echo "$FAKE_DOCKER_MEMTOTAL"; exit 0 ;;
   *" image inspect "*) [ -n "${FAKE_DOCKER_IMAGE_LABELS:-}" ] || exit 1; echo "$FAKE_DOCKER_IMAGE_LABELS"; exit 0 ;;
+  *" run "*) [ -z "${FAKE_DOCKER_RUN_FAILS:-}" ] || { echo "bash: /opt/factory-ci/entrypoint.sh: Permission denied" >&2; exit 126; } ;;
   *" up "*)  # one round: say whether the runner got the given token, then fail registration (code 3)
     [ "${RUNNER_TOKEN:-}" = "given-token" ] && echo "token ok" >>"$FAKE_DB.docker.log"
     echo "name $RUNNER_NAME label $RUNNER_LABEL" >>"$FAKE_DB.docker.log"
@@ -114,6 +115,9 @@ def project(repo="acme/Widget", ci=None, remote="git@github.com:acme/Widget.git"
            "FAKE_LAUNCHD": os.path.join(root, "launchd")}
     for k in ("XDG_STATE_HOME", "RUNNER_TOKEN"):
         env.pop(k, None)
+    # `factory ci install` runs `git fetch origin main`. The remote here is made up, so make that fail at once and
+    # offline (no ssh, no system git config that rewrites it to https) instead of waiting on a real network call.
+    env.update(GIT_SSH_COMMAND="false", GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0")
     return d, db, env
 
 
@@ -297,6 +301,9 @@ def test_stop_ends_its_own_loop_and_removes_only_this_macs_idle_registrations():
     os.makedirs(n["CI_STATE"]); os.makedirs(n["CI_INSTALLED"])
     open(exe, "w").write("#!/bin/bash\nsleep 60 & wait\n"); os.chmod(exe, 0o700)
     loop = subprocess.Popen(["/bin/bash", exe])
+    # Reap the loop as soon as it dies. A real loop is nobody's child, but this one is ours, and an unreaped child
+    # stays a zombie that `ps` still lists, so `stop` would wait its full 30 s for it to go.
+    threading.Thread(target=loop.wait, daemon=True).start()
     time.sleep(0.3)
     open(os.path.join(n["CI_STATE"], "pid"), "w").write(str(loop.pid))
     runner = lambda i, name, status, busy=False: {"id": i, "name": name, "status": status, "busy": busy}
@@ -599,6 +606,25 @@ def test_use_local_also_sets_the_light_lane_variable_and_install_says_it():
     assert "the repo variable CI_RUNS_ON_LIGHT is [\"self-hosted\",\"widget-light\"]" in out, out
     rc, out = ci(d, env, "use", "github")
     assert "CI_RUNS_ON_LIGHT" not in json.load(open(db))["vars"], out
+
+
+def test_status_shows_the_pid_when_launchctl_goes_on_printing_after_it():
+    # awk must read all of launchctl's output: stopping at the pid line made launchctl die of SIGPIPE when it was
+    # still writing, and with pipefail that ended `status` silently after the Mode line (flaky, faster on fast CPUs).
+    d, db, env = project()
+    assert ci(d, env, "install")[0] == 0
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]'})
+    runs_and_pulls(db, [run("main")])
+    slow = os.path.join(os.path.dirname(env["FAKE_DB"]), "bin", "launchctl")
+    real = open(slow).read()
+    open(slow, "w").write(real.replace('echo "}" ;;', 'echo "}"; sleep 0.3; echo "	more = 1" ;;', 1))
+    # An awk that quits at the first pid line, as gawk does (mawk reads on, which hid this on some machines).
+    quick = os.path.join(os.path.dirname(slow), "awk")
+    open(quick, "w").write("#!/usr/bin/env python3\nimport os, sys\nfor line in sys.stdin:\n    f = line.split()\n"
+                           "    if f[:2] == ['pid', '=']:\n        print(f[2], flush=True); os._exit(0)\n")
+    os.chmod(quick, 0o755)
+    rc, out = ci(d, env, "status")
+    assert rc == 0 and "Runner widget-ci: running (LaunchAgent dev.software-factory.widget-ci, pid 4242)" in out, out
 
 
 def test_status_lists_every_instance_and_logs_takes_one():
@@ -945,6 +971,30 @@ def test_check_passes_on_a_fresh_install_and_names_a_start_script_the_container_
     os.chmod(entry, 0o666)
     rc, out = ci(d, env, "check")
     assert rc == 1 and "entrypoint.sh" in out and "writable" in out, (rc, out)
+
+
+def test_check_starts_the_installed_start_script_in_the_runner_image_as_the_containers_user():
+    d, db, env = linux_project()
+    assert ci(d, env, "install")[0] == 0
+    labels = {**env, "FAKE_DOCKER_IMAGE_LABELS": "node=20 pnpm=9 playwright=none"}
+    open(db + ".docker.log", "w").close()
+    rc, out = ci(d, labels, "check")
+    runs = [l for l in log(db, "docker").splitlines() if " run " in " " + l + " "]
+    assert rc == 0 and len(runs) == 1, (rc, out, runs)
+    entry = os.path.join(names(d, env)["CI_INSTALLED"], "entrypoint.sh")
+    assert f"{entry}:/opt/factory-ci/entrypoint.sh:ro" in runs[0] and "--entrypoint /bin/bash widget-ci-runner:latest -n /opt/factory-ci/entrypoint.sh" in runs[0], runs
+    assert "--user" not in runs[0] and "--network none" in runs[0], runs  # the image's own user, as the service runs it
+    rc, out = ci(d, {**labels, "FAKE_DOCKER_RUN_FAILS": "1"}, "check")
+    assert rc == 1 and "runner container" in out and "Permission denied" in out, (rc, out)
+
+
+def test_check_skips_the_container_probe_when_docker_is_off_or_the_image_is_not_here():
+    d, db, env = linux_project()
+    assert ci(d, env, "install")[0] == 0
+    open(db + ".docker.log", "w").close()
+    assert ci(d, env, "check")[0] == 0  # no image on this machine
+    assert " run " not in log(db, "docker")
+    assert ci(d, {**env, "FAKE_DOCKER_IMAGE_LABELS": "x", "FAKE_DOCKER_UP": "0", "FAKE_DOCKER_RUN_FAILS": "1"}, "check")[0] == 0
 
 
 def test_factory_help_lists_the_ci_commands():

@@ -1,0 +1,1 @@
+../../software-factory/ci/ci.sh

@@ -12,7 +12,8 @@ GIT = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": 
 
 CLAUDE = r'''#!/usr/bin/env bash
 # Fake claude: logs its arguments; FAKE_CLAUDE_HOOK (a script) may react to the prompt.
-printf 'claude %s\n' "$(printf '%s' "$*" | tr '\n' ' ')" >> "$LOOP_LOG"
+# one write per line: sub-managers run side by side, and a long line printed in pieces can be split by another's
+line="$(printf 'claude %s\n' "$(printf '%s' "$*" | tr '\n' ' ')")"; tmp="$(mktemp)"; printf '%s\n' "$line" > "$tmp"; cat "$tmp" >> "$LOOP_LOG"; rm -f "$tmp"
 if [ -n "${FAKE_CLAUDE_HOOK:-}" ]; then bash "$FAKE_CLAUDE_HOOK" "$@"; exit $?; fi
 exit 0
 '''
@@ -77,7 +78,8 @@ def project(cfg=None, db=None, files=None, profile=True):
         os.chmod(os.path.join(bin_, name), 0o755)
     json.dump(db or {}, open(os.path.join(d, "db.json"), "w"))
     env = {**os.environ, **GIT, "PATH": f"{bin_}:{os.environ['PATH']}", "LOOP_LOG": os.path.join(d, "log"),
-           "FAKE_DB": os.path.join(d, "db.json"), "FACTORY_REMOTE_CONTROL": "0", "HOME": d}
+           "FAKE_DB": os.path.join(d, "db.json"), "FACTORY_REMOTE_CONTROL": "0", "HOME": d,
+           "PYTHONDONTWRITEBYTECODE": "1"}  # the hooks run in the work tree: no .pyc may land in it
     for k in ("FACTORY_AGENT", "FACTORY_AGENTS", "FACTORY_ROLE", "FACTORY_NAME", "FACTORY_RELOAD_AGENT",
               "FACTORY_RELOAD_DIR", "FACTORY_RESUME", "CLAUDE_PROJECT_DIR"):
         env.pop(k, None)
@@ -406,7 +408,7 @@ def test_usage_by_role_separates_the_sessions_by_the_marker_in_their_first_promp
     p = factory(work, env, "usage", "--by", "role", "--since", "2026-10-24", "--until", "2026-10-26", "--json")
     assert p.returncode == 0, (p.stdout, p.stderr)
     groups = json.loads(p.stdout)["groups"]
-    assert {k: v["tokens"]["output"] for k, v in groups.items()} == {"dev-manager": 111, "product-owner": 222, "builder": 333}, groups
+    assert {k: v["tokens"]["output"] for k, v in groups.items()} == {"manager": 111, "product-owner": 222, "builder": 333}, groups
 
 
 if __name__ == "__main__":

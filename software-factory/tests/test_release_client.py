@@ -29,7 +29,7 @@ esac
 
 def git(d, *a, check=True):
     p = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", d, *a], capture_output=True, text=True)
-    assert not check or p.returncode == 0, (a, p.stderr)
+    assert not check or p.returncode == 0, (a, p.stdout, p.stderr)
     return p.stdout
 
 
@@ -166,6 +166,10 @@ def fac(d, env, *args):
 
 
 def commit(d, msg="factory"):
+    # The client rewrites files with the archive's fixed times, often with the same size as the old version. Git
+    # trusts a file whose size, times and inode are unchanged (inodes get reused), so on a busy machine `add -A`
+    # could miss the new content. Emptying the index first makes it read every file again.
+    git(d, "rm", "-r", "--cached", "-q", "--ignore-unmatch", ".")
     git(d, "add", "-A")
     git(d, "commit", "-q", "-m", msg)
 
@@ -256,7 +260,8 @@ def test_a_named_release_can_be_installed_newer_or_older_with_or_without_the_v()
     assert rc == 0 and pin(d)["tag"] == "v1.0.0" and "v1.1.0 -> v1.0.0" in out, out
     assert pin(d)["previous"]["tag"] == "v1.1.0"
     commit(d)
-    assert fac(d, env, "update", "v2.0.0")[0] == 0 and pin(d)["tag"] == "v2.0.0"
+    rc, out = fac(d, env, "update", "v2.0.0")
+    assert rc == 0 and pin(d)["tag"] == "v2.0.0", out
 
 
 def test_an_unknown_release_is_refused_with_the_ones_that_exist_and_nothing_changes():
@@ -494,6 +499,42 @@ def test_a_runner_whose_start_script_cannot_be_read_fails_the_verification_and_i
     commit(d)
     rc, out = fac(d, env, "update")
     assert rc == 0 and "verified" in out, out
+
+
+def fake_systemd(env, enabled=True, restart_fails=False):
+    """A systemctl on PATH that says a heartbeat unit is installed (or not) and logs what it is asked."""
+    bin_ = tempfile.mkdtemp()
+    log = os.path.join(bin_, "systemctl.log")
+    body = ('#!/usr/bin/env bash\necho "$*" >>%s\ncase "$2" in\n  show-environment) exit 0 ;;\n  is-enabled) exit %d ;;\n  restart) exit %d ;;\nesac\n'
+            % (log, 0 if enabled else 1, 1 if restart_fails else 0))
+    open(os.path.join(bin_, "systemctl"), "w").write(body)
+    os.chmod(os.path.join(bin_, "systemctl"), 0o755)
+    env.update({"PATH": bin_ + os.pathsep + env["PATH"], "FACTORY_AUTOSTART_PLATFORM": "linux"})
+    return log
+
+
+def test_an_installed_heartbeat_daemon_is_restarted_so_it_does_not_keep_running_the_old_code():
+    gh, d, env = world("1.0.0")
+    log = fake_systemd(env)
+    rc, out = fac(d, env, "update")
+    assert rc == 0, out
+    assert re.search(r"--user restart .*-factory-heartbeat\.service", open(log).read()), open(log).read()
+    assert "Restarted" in out and "heartbeat" in out, out
+
+
+def test_no_heartbeat_daemon_installed_means_nothing_is_restarted_and_nothing_is_said_about_it():
+    gh, d, env = world("1.0.0")
+    log = fake_systemd(env, enabled=False)
+    rc, out = fac(d, env, "update")
+    assert rc == 0 and "restart" not in open(log).read() and "heartbeat" not in out, (out, open(log).read())
+
+
+def test_a_heartbeat_daemon_that_will_not_restart_fails_the_update_with_the_fix():
+    gh, d, env = world("1.0.0")
+    fake_systemd(env, restart_fails=True)
+    rc, out = fac(d, env, "update")
+    assert rc == 1 and "[services_failed]" in out and "factory heartbeat install" in out, out
+    assert "Done." not in out, out
 
 
 def test_verification_catches_a_settings_hook_that_points_at_a_file_that_is_not_there():

@@ -130,7 +130,7 @@ SETTINGS = {s.key: s for s in [
     S('manager.busyMinutes', 'int', 'agents', "Minutes the dev manager's loop waits after a cycle that had work."),
     S('manager.idleMinutes', 'int', 'agents', "Minutes it waits when there was none. 0: it exits instead."),
     S('manager.maxSubManagers', 'int', 'agents', "How many one-item sub-managers the dev-manager orchestrator runs at once. Items beyond the cap wait for the next cycle."),
-    S('manager.claimMinutes', 'int', 'agents', "How long a sub-manager's lease on an item lasts. A manager that dies leaves a claim that expires on its own."),
+    S('manager.claimMinutes', 'int', 'agents', "How long a dev manager's lease on an item lasts: a sub-manager's, or a review or answer claim on a PR or question (it ends sooner when the review marker or the answer is posted). A manager that dies leaves a claim that expires on its own."),
     S('manager.deadManMinutes', 'int', 'agents', "Work that has waited this long with no dev-manager activity (no marker, answer, merge or working heartbeat) is reported to the owner: the dead-man's switch."),
     S('manager.notify', 'str', 'agents', "The GitHub login mentioned in an owner-queue comment, so GitHub notifies the owner's phone. Empty: the repository's owner."),
     S('manager.quietMinutes', 'int', 'agents', "A pull request whose head commit has no review marker is left this long before the watcher counts it (check 1)."),
