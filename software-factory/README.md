@@ -378,7 +378,7 @@ version it pins. `factory help` lists everything.
 | `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
-| `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
+| `factory usage` | Tokens per task (or `--by agent`, `--by model`, `--by role`: manager sessions against builder ones) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
 | `factory settings` | The interactive menu (in a terminal): browse by section, `/` to search, `?` for the long help of a setting, change, reset, review the diff and save (write the file, or open a pull request). In a pipe it prints the list. Non-interactively: `list [--section S] [--json]`, `get`, `set`, `unset`, `help [<key>]`, `diff`, `validate`, `pr`; `--local` is the same for this machine's own settings. Agents can't change settings. [Details](#factoryjson-settings) |
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
@@ -609,8 +609,8 @@ file's own prompt, tools and description, so the shared file is never edited or 
 `python3 .claude/hooks/factory_models.py flags manager` prints the same arguments for the manager's session.
 `factory doctor` prints the effective model per role and what set it. The environment variable
 `CLAUDE_CODE_SUBAGENT_MODEL` is not used: on its own the agent file's `model:` wins, and with `..._FORCE=1` it
-forces one model on every subagent. `escalateTo` is stored and checked, but the next-task skill still escalates
-the reviewer to Opus by its own wording (not yet read from the setting).
+forces one model on every subagent. `escalateTo` is the model the next-task skill asks the reviewer again on after a must-fix or an item it marked unsure
+(`python3 .claude/hooks/factory_models.py escalate` prints it; `opus` when unset).
 
 ### Waiting without tokens
 
@@ -643,6 +643,7 @@ most replies on.
 ```sh
 factory usage                                # the last 7 days, per task
 factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
+factory usage --by role                      # manager (sessions that start with /manage-pass) against builder (all others)
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```
 

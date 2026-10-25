@@ -406,7 +406,7 @@ def test_usage_by_role_separates_the_sessions_by_the_marker_in_their_first_promp
     p = factory(work, env, "usage", "--by", "role", "--since", "2026-10-24", "--until", "2026-10-26", "--json")
     assert p.returncode == 0, (p.stdout, p.stderr)
     groups = json.loads(p.stdout)["groups"]
-    assert {k: v["tokens"]["output"] for k, v in groups.items()} == {"dev-manager": 111, "product-owner": 222, "coding-agent": 333}, groups
+    assert {k: v["tokens"]["output"] for k, v in groups.items()} == {"dev-manager": 111, "product-owner": 222, "builder": 333}, groups
 
 
 if __name__ == "__main__":
