@@ -42,8 +42,8 @@ TASKS = [
 ]
 
 
-def po_project(db=None, cfg=None, prd=PRD):
-    d, work, env = project(db=db or {"issues": TASKS}, cfg=cfg, files={"docs/PRD.md": prd})
+def po_project(db=None, cfg=None, prd=PRD, files=None):
+    d, work, env = project(db=db or {"issues": TASKS}, cfg=cfg, files={"docs/PRD.md": prd, **(files or {})})
     path = os.path.join(d, "bin", "gh")
     open(path, "w").write(fakegh.GH)
     os.chmod(path, 0o755)
