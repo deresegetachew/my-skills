@@ -6,7 +6,9 @@ project task by task, a dev manager reviews and merges, and a project gets the f
 
 What is here (read the part your task is about, not everything):
 
-1. `software-factory/README.md`: how the factory works and every setting. `software-factory/SKILL.md` and
+1. `software-factory/docs/PRD.md`: **read this first.** What the factory is for, the decisions taken, the user stories
+   for each role, what is out of scope and what is later or open. It is the source of truth for scope.
+   `software-factory/README.md`: how the factory works and every setting. `software-factory/SKILL.md` and
    `software-factory/DEV-MANAGER.md`: the skill for setting up a project and the dev manager's rules.
 2. `software-factory/hooks/` (the `factory_*.py` commands and the hooks), `ci/` (runner services), `factory`,
    `factory-loop.sh`, `install.sh`: the factory's code. `software-factory/kit/` holds only what a project gets
@@ -75,7 +77,4 @@ A change that breaks one of these is wrong even if the tests pass.
 
 ## Where the tasks are
 
-The issues are the list, in the order of #114. Open now, in the order to take them: finish #113 (the release client:
-the rest is the migration of a submodule project, which is the owner's call) and #112 (the folders are moved; what
-remains is removing the forwarders after a first release and the project relink), then #94, #102, #99, #97 with #109,
-#98, #100, then #101, #103, #104, #110. Keep that order unless the owner changes #114.
+The issues are the list, in the order of #114. `factory next` shows the next one. Scope is in the PRD.
