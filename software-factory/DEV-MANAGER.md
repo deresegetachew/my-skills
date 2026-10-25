@@ -16,6 +16,8 @@ The dev manager doesn't write the product. It keeps the coding agents busy and t
 - notices when an agent is stuck, silent or idle, and tells the owner;
 - tells the owner only what needs them.
 
+The scope is in the PRD, [`software-factory/docs/PRD.md`](docs/PRD.md). Read it before you judge a scope question, and send scope questions to the owner, as the PRD says.
+
 It runs the process the owner agreed; it doesn't change it on its own (see the next section). It can't type into a coding agent's
 terminal. Its levers are pull requests, comments, issues and the owner queue.
 

@@ -7,6 +7,8 @@ keeps them busy. Hooks, CI and GitHub's branch protection stop the work from mer
 decisions that really belong to you reach you. The factory itself lives in my-skills. A project gets it as a numbered
 release (`factory update`), or, until it migrates, as a git submodule.
 
+The factory's PRD is [`software-factory/docs/PRD.md`](docs/PRD.md). It is the source of truth for scope.
+
 > **Where the code lives (#112, step 1).** The factory's code (`hooks/`, `ci/`, `factory`, `factory-loop.sh`, `tests/`)
 > now sits directly in `software-factory/`. The old paths under `kit/` (`kit/.claude/hooks/*`, `kit/.claude/ci/*`,
 > `kit/factory`, `kit/factory-loop.sh`) are symlinks to it, so projects that link the old paths keep working until
