@@ -62,6 +62,7 @@ def project(cfg=None, db=None, files=None, profile=True):
     os.makedirs(os.path.join(work, "docs"))
     open(os.path.join(work, "docs", "build-plan.md"), "w").write("# Plan\n\n- [ ] **1.1 First task**\n")
     open(os.path.join(work, "CLAUDE.md"), "w").write("rules\n")
+    open(os.path.join(work, ".gitignore"), "w").write("__pycache__/\n")  # as install.sh writes it: a run that writes .pyc files leaves the tree clean
     if profile:
         os.makedirs(os.path.join(work, ".claude", "manager"))
         json.dump({"permissions": {"allow": ["Bash(gh api *)"]}}, open(os.path.join(work, ".claude", "manager", "settings.json"), "w"))

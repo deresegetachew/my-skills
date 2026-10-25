@@ -62,7 +62,8 @@ DEFAULTS = {
     },
     # The dev manager (#97, #109): `factory dev-manager loop` is an orchestrator with no model. Each cycle it reads
     # GitHub (factory_watch.py) and starts one one-item sub-manager (`claude -p`) per item that needs a manager, at most
-    # `maxSubManagers` at once, each under a lease of `claimMinutes`. `busyMinutes` / `idleMinutes` are the waits after
+    # `maxSubManagers` at once, each under a lease of `claimMinutes` (also how long a manager's review or answer claim
+    # holds an item, factory_manager_claims.py). `busyMinutes` / `idleMinutes` are the waits after
     # a cycle that had work / none (0: the loop exits instead). `deadManMinutes`: work that has waited this long with no
     # dev-manager activity is reported to the owner. `notify`: the login mentioned in an owner-queue comment so GitHub
     # tells the owner (empty: the repository owner). `quietMinutes`, `staleMinutes`, `ownerWaitMinutes`,
@@ -86,8 +87,6 @@ DEFAULTS = {
         "heartbeatMissMinutes": 12,
         "releaseDownMinutes": 10,
     },
-    # Several dev managers at once (factory_manager_claims.py): how long a review or answer claim holds an item.
-    "manager": {"claimMinutes": 20},
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",
