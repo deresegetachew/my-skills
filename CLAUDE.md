@@ -60,8 +60,8 @@ A change that breaks one of these is wrong even if the tests pass.
 
 - This repo uses its own factory through links: `./factory`, `./factory-loop.sh` and `.claude/{hooks,ci,agents,skills,
   manager,settings.json}` are relative symlinks into `software-factory/` (made by
-  `bash software-factory/install.sh . --link --layout new`, re-run it when a shared file is added, then `rmdir docs/decisions docs` if it left an empty `docs/` folder:
-  `check_skills.py` fails on a top-level folder that is not a skill). Edit the real
+  `bash software-factory/install.sh . --link --layout new`, re-run it when a shared file is added; it leaves no empty folder behind, which
+  `check_skills.py` would fail on). Edit the real
   files in `software-factory/`, never through a link. Run `./factory doctor` first on a new machine, then
   `./factory loop -i`. Do not run `factory update` here: this repo is where the releases come from.
 - One task is one GitHub issue, labelled `factory:ready`, `factory:in-progress`, `factory:in-review`,
