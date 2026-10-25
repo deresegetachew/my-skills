@@ -64,6 +64,21 @@ def test_the_dev_manager_playbook_reads_the_prd_before_scope_questions_and_sends
     assert "before" in para and "scope" in para and "owner" in para, para
 
 
+def test_the_readme_says_a_migrated_project_keeps_the_submodule_for_the_nestjs_skills_and_the_release_has_none():
+    text = section()
+    m = re.search(r"^\*\*The nestjs skills are not in the release\.\*\*(.*?)(?=^\*\*|^## )", text, re.S | re.M)
+    assert m, "the section needs a 'The nestjs skills are not in the release.' paragraph"
+    para = m.group(1)
+    for need in ("submodule", ".claude/skills/nestjs-", "check_structure.py", "submodules: true", "vendor/my-skills"):
+        assert need in para, need
+    # the claim is true: the nestjs skills are top-level folders, outside software-factory/, which is all a release ships
+    for name in ("nestjs-best-practices", "nestjs-clean-code-ddd-hexagonal"):
+        assert os.path.isdir(os.path.join(SF, "..", name)) and not os.path.exists(os.path.join(SF, name))
+    build = open(os.path.join(SF, "..", "tools", "build_release.py")).read()
+    assert 'SRC = "software-factory"' in build
+    assert not [n for n in os.listdir(os.path.join(SF, "kit", ".claude", "skills")) if n.startswith("nestjs")]
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

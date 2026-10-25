@@ -249,6 +249,14 @@ A project that moves to releases instead needs no `--layout`: `factory update --
 refuses where the files are still links into the submodule, so take the submodule step out first, in its own pull
 request (see [Updating from releases](#updating-from-releases)).
 
+**The nestjs skills are not in the release.** `nestjs-best-practices` and `nestjs-clean-code-ddd-hexagonal` are
+top-level folders of my-skills, outside `software-factory/`, and a release ships only `software-factory/`. A project
+that uses them (remanual) keeps `vendor/my-skills` as a submodule after it moves to releases, for these things only:
+its `.claude/skills/nestjs-*` links, the `check` command in `.claude/factory.json` that runs
+`vendor/my-skills/nestjs-clean-code-ddd-hexagonal/scripts/check_structure.py`, and `submodules: true` on the
+`actions/checkout` steps in its `ci.yml`. Keep them; the factory itself (hooks, CI, agents, `factory`) comes from the
+release. A project that does not use the nestjs skills drops the submodule entirely.
+
 **What is left of the move** (#112):
 
 - The first release is cut by the owner (see "Cutting a release" below). Nothing in the move publishes one.
