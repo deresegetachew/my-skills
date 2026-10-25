@@ -4,7 +4,8 @@ repository, and a finished branch waiting for a PR slot.  python3 software-facto
 import json, os, subprocess, sys, tempfile
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 GATE = os.path.join(HOOKS, "pr-gate.py")
 
 # Answers by path (without "repos/{owner}/{repo}/" and the query): "text" for calls with --jq (the text gh would

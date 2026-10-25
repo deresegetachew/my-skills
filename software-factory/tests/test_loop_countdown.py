@@ -5,6 +5,7 @@ countdown instead of waiting for a key. Runs the real loop on a pseudo-terminal 
 import os, pty, select, shutil, subprocess, tempfile, time
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
+SF = os.path.dirname(os.path.abspath(KIT))
 
 # next_task hands out one task, then nothing (waitMinutes 0 makes the loop exit). take-done prints nothing, so the
 # loop sees a session that ended before its task was done.
@@ -39,7 +40,7 @@ def setup():
     for name in ("factory_claims.py", "factory_env.py", "factory_agents.py", "next_task.py"):
         open(os.path.join(hooks, name), "w").write(STUB)
     open(os.path.join(work, ".claude", "factory.json"), "w").write('{"waitMinutes": 0}')
-    shutil.copy(os.path.join(KIT, "factory-loop.sh"), os.path.join(work, "factory-loop.sh"))
+    shutil.copy(os.path.join(SF, "factory-loop.sh"), os.path.join(work, "factory-loop.sh"))
     sh("git", "add", "-A", cwd=work)
     sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start", cwd=work)
     sh("git", "push", "-q", "origin", "HEAD:main", cwd=work)

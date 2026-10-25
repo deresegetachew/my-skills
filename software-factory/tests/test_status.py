@@ -5,7 +5,8 @@ import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 SHA = "c" * 40
 
 FAKE_GH = r'''#!/usr/bin/env python3
@@ -55,7 +56,7 @@ def setup(scenario, cfg):
 
 
 def status(d, env, *args):
-    return subprocess.run(["bash", os.path.join(KIT, "factory"), "status", *args], cwd=d, env=env,
+    return subprocess.run(["bash", os.path.join(SF, "factory"), "status", *args], cwd=d, env=env,
                           capture_output=True, text=True, timeout=60)
 
 

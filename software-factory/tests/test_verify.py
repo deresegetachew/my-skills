@@ -5,7 +5,8 @@ import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
        "GIT_COMMITTER_EMAIL": "t@t"}
 
@@ -57,7 +58,7 @@ def verify(d):
     env = {**ENV, "PATH": os.path.join(top, "bin") + os.pathsep + ENV["PATH"],
            "MAIN_SETTINGS": main if os.path.exists(main) else ""}
     env.pop("CLAUDE_PROJECT_DIR", None)
-    return subprocess.run(["bash", os.path.join(KIT, "factory"), "verify"], cwd=d, capture_output=True, text=True,
+    return subprocess.run(["bash", os.path.join(SF, "factory"), "verify"], cwd=d, capture_output=True, text=True,
                           env=env, timeout=60)
 
 

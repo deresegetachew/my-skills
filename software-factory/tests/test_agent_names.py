@@ -4,7 +4,7 @@ python3 software-factory/tests/test_agent_names.py"""
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CLAIMS = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "hooks", "factory_claims.py"))
+CLAIMS = os.path.abspath(os.path.join(HERE, "..", "hooks", "factory_claims.py"))
 ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
        "GIT_COMMITTER_EMAIL": "t@t"}
 for var in ("FACTORY_AGENT", "FACTORY_AGENTS", "FACTORY_LOOP", "CLAUDE_PROJECT_DIR"):

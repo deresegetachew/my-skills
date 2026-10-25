@@ -3,7 +3,7 @@
 import json, os, re, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-USAGE = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "hooks", "factory_usage.py"))
+USAGE = os.path.abspath(os.path.join(HERE, "..", "hooks", "factory_usage.py"))
 
 
 def reply(mid, branch, cwd, inp=10, write=100, read=1000, out=50, ts="2026-10-24T10:00:00Z", model="claude-opus-5-5"):

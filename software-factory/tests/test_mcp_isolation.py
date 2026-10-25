@@ -9,7 +9,8 @@ import json, os, pty, select, shutil, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 EMPTY = '{"mcpServers":{}}'
 NO_CONNECTORS = '{"disableClaudeAiConnectors": true}'
 
@@ -61,7 +62,7 @@ def loop_project(mcp=None, worktree_mcp=None):
     open(os.path.join(work, ".claude", "factory.json"), "w").write('{"waitMinutes": 0}')
     if mcp is not None:
         json.dump(mcp, open(os.path.join(work, ".mcp.json"), "w"))
-    shutil.copy(os.path.join(KIT, "factory-loop.sh"), os.path.join(work, "factory-loop.sh"))
+    shutil.copy(os.path.join(SF, "factory-loop.sh"), os.path.join(work, "factory-loop.sh"))
     sh("git", "add", "-A", cwd=work)
     sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start", cwd=work)
     sh("git", "push", "-q", "origin", "HEAD:main", cwd=work)
@@ -201,7 +202,7 @@ def test_factory_agent_starts_claude_isolated_and_passes_its_own_arguments_on():
     sh("git", "push", "-q", "origin", "HEAD:main", cwd=work)
     json.dump(EVIL, open(os.path.join(work, ".mcp.json"), "w"))  # the agent's edit, not on main
     env = fake_claude(d)
-    p = subprocess.run(["bash", os.path.join(KIT, "factory"), "agent", "menelik", "--resume"], cwd=work, env=env,
+    p = subprocess.run(["bash", os.path.join(SF, "factory"), "agent", "menelik", "--resume"], cwd=work, env=env,
                        capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p
     (args,) = calls(env)

@@ -6,7 +6,8 @@ import json, os, subprocess, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 HINT = "factory loop -i"
 
 
@@ -35,7 +36,7 @@ def project():
 
 def agent(*args):
     work, env = project()
-    return subprocess.run(["bash", os.path.join(KIT, "factory"), "agent", *args], cwd=work, env=env,
+    return subprocess.run(["bash", os.path.join(SF, "factory"), "agent", *args], cwd=work, env=env,
                           capture_output=True, text=True, timeout=60)
 
 
@@ -61,7 +62,7 @@ def test_no_name_says_how_to_use_it_and_mentions_the_loop():
 
 
 def test_help_keeps_each_entry_together_and_nothing_recommends_loop_in_one_session():
-    out = subprocess.run(["bash", os.path.join(KIT, "factory"), "help"], cwd=project()[0], capture_output=True,
+    out = subprocess.run(["bash", os.path.join(SF, "factory"), "help"], cwd=project()[0], capture_output=True,
                          text=True).stdout.splitlines()
     for start, follow in (("  loop [-i] [N]", "which closes by itself"), ("  agent <name|N>", "To run the queue")):
         i = next(n for n, l in enumerate(out) if l.startswith(start))

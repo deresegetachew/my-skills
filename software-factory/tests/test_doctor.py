@@ -6,7 +6,8 @@ import json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 
 
 def stub(bin_, name, body):
@@ -46,7 +47,7 @@ def project(files=None, cfg=None):
 
 
 def doctor(d, env):
-    return subprocess.run(["bash", os.path.join(KIT, "factory"), "doctor"], cwd=d, env=env, capture_output=True,
+    return subprocess.run(["bash", os.path.join(SF, "factory"), "doctor"], cwd=d, env=env, capture_output=True,
                           text=True, timeout=60)
 
 

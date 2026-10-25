@@ -4,7 +4,8 @@
 import json, os, re, subprocess, sys, tempfile
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
-HOOKS = os.path.join(KIT, ".claude", "hooks")
+SF = os.path.dirname(os.path.abspath(KIT))
+HOOKS = os.path.join(SF, "hooks")
 SKILL = os.path.join(KIT, ".claude", "skills", "next-task", "SKILL.md")
 REWORK = os.path.join(KIT, ".claude", "skills", "next-task", "rework.md")  # the rework step, split out of SKILL.md (#57)
 

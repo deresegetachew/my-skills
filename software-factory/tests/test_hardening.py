@@ -4,7 +4,7 @@ stop hook never signals a guessed process.  python3 software-factory/tests/test_
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HOOKS = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "hooks"))
+HOOKS = os.path.abspath(os.path.join(HERE, "..", "hooks"))
 sys.path.insert(0, HERE)
 from test_issues import issue, labels, run, setup  # noqa: E402  (the fake gh)
 

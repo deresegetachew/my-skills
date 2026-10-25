@@ -4,8 +4,8 @@ python3 software-factory/tests/test_agent_worktree.py"""
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-HOOKS = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "hooks"))
-FACTORY = os.path.abspath(os.path.join(HERE, "..", "kit", "factory"))
+HOOKS = os.path.abspath(os.path.join(HERE, "..", "hooks"))
+FACTORY = os.path.abspath(os.path.join(HERE, "..", "factory"))
 ENV = {**os.environ, "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "protocol.file.allow",
        "GIT_CONFIG_VALUE_0": "always", "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}

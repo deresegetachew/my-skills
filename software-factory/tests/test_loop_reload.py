@@ -5,6 +5,7 @@ Runs the real loop script in a throwaway repo with stub hooks and a stub `claude
 import os, shutil, subprocess, sys, tempfile, textwrap
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
+SF = os.path.dirname(os.path.abspath(KIT))
 
 STUB = r'''#!/usr/bin/env python3
 import os, sys
@@ -50,7 +51,7 @@ def setup():
     for name in ("factory_claims.py", "factory_env.py", "factory_agents.py", "next_task.py"):
         open(os.path.join(hooks, name), "w").write(STUB)
     open(os.path.join(work, ".claude", "factory.json"), "w").write('{"waitMinutes": 0}')
-    shutil.copy(os.path.join(KIT, "factory-loop.sh"), os.path.join(work, "factory-loop.sh"))
+    shutil.copy(os.path.join(SF, "factory-loop.sh"), os.path.join(work, "factory-loop.sh"))
     sh("git", "add", "-A", cwd=work)
     sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start", cwd=work)
     sh("git", "push", "-q", "origin", "HEAD:main", cwd=work)

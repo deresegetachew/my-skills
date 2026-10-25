@@ -42,6 +42,7 @@
   "protected": [
     "^CLAUDE\\.md$",
     "^\\.claude/",
+    "^software-factory/",
     "^docs/PRD\\.md$",
     "^\\.github/",
     "^\\.mcp\\.json$",

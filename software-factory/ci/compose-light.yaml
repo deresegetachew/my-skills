@@ -1,0 +1,21 @@
+# The light lane's runner (README.md, "CI"): for short jobs that need no Docker, such as the Factory guard. It has
+# no Docker-in-Docker and no Docker socket, so it is small, starts fast, and isn't privileged. Its label is
+# `<repo>-light` (CI_RUNS_ON_LIGHT in the workflow), so heavy jobs never land on it and light ones never wait behind
+# them. One job per registration, then `down -v`, as for the heavy runners.
+
+services:
+  runner:
+    image: ghcr.io/actions/actions-runner:${RUNNER_VERSION:-2.338.0}
+    entrypoint: ['/bin/bash', '/opt/factory-ci/entrypoint.sh']
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      # No Docker here: the entrypoint doesn't wait for one.
+      RUNNER_DOCKER: '0'
+      RUNNER_REPO: ${RUNNER_REPO:?}
+      RUNNER_NAME: ${RUNNER_NAME:?}
+      RUNNER_LABEL: ${RUNNER_LABEL:?}
+      # No value here: taken from the loop's environment for this one `up`, never from a file.
+      RUNNER_TOKEN:
+    volumes:
+      - ./entrypoint.sh:/opt/factory-ci/entrypoint.sh:ro

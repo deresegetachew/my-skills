@@ -1,5 +1,6 @@
 # Paths only the owner merges (keep in sync with "protected" in .claude/factory.json).
 /CLAUDE.md          @<owner>
 /.claude/           @<owner>
+/software-factory/ @<owner>
 /.github/           @<owner>
 /docs/PRD.md        @<owner>
