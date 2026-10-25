@@ -116,6 +116,11 @@ run the agreed process; changing the factory, your own tick, the scope, or mergi
 
 ## Lessons this is built on
 
+(The factory also keeps a short per-project lessons file for the mistakes that repeat, `factory lessons`: the builder and
+the reviewers read it first, `factory lessons suggest` proposes entries from must-fix comments, review findings and CI
+failures, and the dev manager approves them. See README.md, "Lessons".)
+
+
 - **The coding agent should never wait on a person for routine work.** Gate merges on reviewer pass, green
   CI and protected paths, and have the dev manager clear the rest quickly. Stacks of unmerged PRs are the
   main way a factory stalls.

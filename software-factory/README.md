@@ -4,8 +4,8 @@ Turns a repo into a software factory. Coding agents run on your machine and buil
 from a PRD and a build plan: failing tests first, then the code, then reviewer subagents, then a pull request. A dev
 manager, a Claude session in the cloud, reviews the pull requests, merges them, answers the agents' questions and
 keeps them busy. Hooks, CI and GitHub's branch protection stop the work from merging when it shouldn't. Only
-decisions that really belong to you reach you. The factory itself lives in my-skills, and each project pins one
-version of it as a git submodule.
+decisions that really belong to you reach you. The factory itself lives in my-skills. A project gets it as a numbered
+release (`factory update`), or, until it migrates, as a git submodule.
 
 > **Where the code lives (#112, step 1).** The factory's code (`hooks/`, `ci/`, `factory`, `factory-loop.sh`, `tests/`)
 > now sits directly in `software-factory/`. The old paths under `kit/` (`kit/.claude/hooks/*`, `kit/.claude/ci/*`,
@@ -27,8 +27,9 @@ version of it as a git submodule.
 
 - [Quick start](#quick-start)
 - [How it fits together](#how-it-fits-together)
+- [Updating from releases (`factory update`)](#updating-from-releases)
 - [Installed as a submodule: what's shared and what's yours](#installed-as-a-submodule-whats-shared-and-whats-yours)
-- [Updating the factory](#updating-the-factory)
+- [Updating the factory on the submodule](#updating-the-factory)
 - [The `factory` command](#the-factory-command)
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
@@ -185,6 +186,63 @@ Three ideas make it safe to leave running:
 
 <br>
 
+## Updating from releases
+
+A project on releases has the factory as plain files committed in its repo (`.claude/hooks/`, `.claude/ci/`, `factory`,
+`factory-loop.sh`, and the agents, skills and `settings.json` in `.claude/`), plus one file that says which release they
+are: `.claude/factory/release.json`, the **pin**. Updating is a normal reviewed diff. For the common case you need one
+command:
+
+```
+factory update          # newest release: download, check, install, refresh this machine, verify
+```
+
+| Want | Command |
+|---|---|
+| See where I am | `factory version`: installed release, the one `origin/main` pins, the newest, and what changed since |
+| See what exists | `factory releases` (`--all` for the old ones): tag, date, one-line note, and where you are |
+| Update to the newest | `factory update` |
+| Use a specific release | `factory update v1.4.0` (the `v` is optional; it can be older, too) |
+| Go back | `factory rollback`: the release installed before, from this machine's download cache, no network needed |
+| Catch up after a pull | `factory update` again: the files came with the pull, so it only refreshes this machine's runner services and verifies |
+
+`factory update` does this, in order, and stops at the first problem with `[code] message` and `Fix: ...`:
+
+1. Refuses a dirty working tree (it names the files; it stashes nothing). The only dirty tree it accepts is one that
+   holds just a previous `factory update` you have not committed yet, so running it twice is safe.
+2. Finds the release, downloads the archive and `SHA256SUMS` from GitHub, and checks the archive's SHA-256. A mismatch
+   installs nothing and leaves nothing in the cache. A transfer that stops part way does the same.
+3. Unpacks in memory with every path checked (nothing outside the archive's own folder, no links, no duplicate or
+   unlisted file) and checks every file against the archive's `MANIFEST.json`.
+4. Writes the files into the project, undoing everything if a write fails, removes files the new release dropped, and
+   writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
+   `.gitignore` lines), never over an existing file.
+5. Refreshes this machine: if CI runner services are installed here and older than the files (`factory ci stale`), it
+   runs `factory ci install`, which also rebuilds the runner image.
+6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the Python and shell scripts parse;
+   and the installed runner files are readable by the runner container's user, not writable by others, and match the
+   checkout (`factory ci check`). If any of that fails it exits 1, names each problem and does not say it worked.
+   `factory doctor` runs the same checks.
+7. Prints what changed (old to new, with the release notes' commit titles) and the commands to commit it. **It never
+   commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
+   running `factory update`. Agent sessions cannot run it (the PR gate reads these files).
+
+Where things live: downloads are cached in `~/.cache/software-factory/<repo>/<tag>/` (`FACTORY_CACHE_DIR` moves it).
+`release.repo` in `factory.json` names the repository whose releases are used (default `deresegetachew/my-skills`);
+`GH_TOKEN` is sent if set (rate limits, private forks). A rollback checks the cached archive against the checksum the
+pin recorded, so a replaced cache is refused.
+
+**A project that has no pin keeps working as before.** `factory update` without a pin runs the submodule update
+described [below](#updating-the-factory) until the project migrates. `factory update --release` (or naming a version)
+starts taking releases in a project whose factory files are plain copies; it refuses, and changes nothing, where the
+files are links into the submodule. Moving a project off the submodule is its own reviewed pull request.
+
+**Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
+push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
+`tools/build_release.py`, and publishes it with `SHA256SUMS` and notes.
+
+<br>
+
 ## Installed as a submodule: what's shared and what's yours
 
 ### What the installer does
@@ -246,6 +304,9 @@ files stay in the submodule, and `.claude/` points to them:
 
 ## Updating the factory
 
+*This section is for a project still on the submodule. A project with `.claude/factory/release.json` uses
+[releases](#updating-from-releases).*
+
 **The pin.** The project doesn't store my-skills' files. It stores one commit id for `vendor/my-skills` (a
 "gitlink"; `git ls-files -s vendor/my-skills` shows it). The folder is a checkout of that commit. Nothing in my-skills
 reaches a project until the project moves its pin, in a PR.
@@ -292,7 +353,9 @@ version it pins. `factory help` lists everything.
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
+| `factory lessons [show\|check\|suggest\|add\|prune]` | The curated lessons file (#72): `show` prints it (the builder and the reviewers read it first), `check` keeps it under `lessonsCap`, `suggest` proposes lessons from recent must-fix comments, review findings and CI failures, `add` and `prune` change it (dev manager only) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
+| `factory prs [--json] [--since-days N]` | The one list a dev manager starts a pass from, read-only and REST only: every open PR with its head and age, labels, CI judged by one rule, the newest marker per commit, any review claim and a next action (`review`, `merge`, `wait CI`, `rerun flake`, `waiting for agent`, `owner merges (protected)`, `held by <manager>`, `none`); below them the unanswered questions, owner asks and quiet agents. [Details and the `--json` schema](#the-list-a-manager-starts-from-factory-prs) |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory autostart [status\|install\|uninstall]` | Makes this machine bring the factory back after a reboot: the dev stack and its agents, with unfinished work saved and left in place. `status` shows what would start; `install --agents haile,tewodros` turns it on and installs the boot service (systemd user unit with linger, or a LaunchAgent). [Details](#after-a-reboot-factory-autostart) |
 | `factory resume [--dry-run]` | What autostart runs at boot: waits for Docker and the network, runs `commands.stackUp`, starts this machine's agents in detached tmux sessions. Safe to run by hand: running agents are left alone |
@@ -300,7 +363,9 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
-| `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues |
+| `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
+| `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
+| `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
 | `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
@@ -309,17 +374,22 @@ version it pins. `factory help` lists everything.
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
 | `factory wait ci <pr>` / `answer <pr>` / `slot` / `ready` `[minutes]` | The other waits, also without tokens: until CI on the PR's head commit has finished, until its `factory-question` comments have a later `factory-answer`, until fewer than `maxOpenPRs` of your PRs are open, until a task is ready. [Waiting](#waiting-without-tokens) |
 | `factory precheck` | For the dev manager: prints `nothing to do` (exit 0), or one line per PR with an unreviewed commit, unanswered question or quiet agent (exit 3). Reads GitHub only |
-| `factory update` | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
+| `factory version` | The installed release, the one `origin/main` pins, the newest, and what changed since. [Releases](#updating-from-releases) |
+| `factory releases [--all]` | The releases that exist, with dates and a one-line note |
+| `factory update [version]` | A project on releases: installs the newest (or that) release, checks its checksum, refreshes this machine's runner services, verifies, and leaves the diff for you to commit. Safe to run twice. Without a pin it is the submodule update below |
+| `factory rollback` | Back to the release installed before (offline, from the download cache), refreshed and verified the same way |
+| `factory update` (no pin) | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
 | `factory ci install` / `uninstall [i]` | Installs `ci.runners` heavy runners and the light lane (again to update or change the number), or removes them (or one: `2`, `light`): LaunchAgents on macOS, systemd `--user` services on Linux. [Lanes](#ci-lanes) · [Linux](#ci-on-linux) |
+| `factory ci stale` / `check` | Are the installed runner copies older than the checkout (exit 3, a line per file), and are they fit to start (readable by the container's user, not writable by others). `factory update` runs both |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
 | `factory ci logs [i] [-f]` | A runner's log: instance 1, or `2`, `light` ... |
 
@@ -483,6 +553,17 @@ Most of the cost is what the agents read, not what they write.
   output of a failure there and name the file. `next-task` tells agents to run checks this way. To cut noise at the
   source too, set the `commands` to quiet reporters yourself (for example `pnpm -s`, `vitest --reporter=dot`,
   `turbo --output-logs=errors-only`, `tsc --pretty false`); the kit doesn't pick them, since it can't know your stack.
+- **Auto-format before the checks (`commands.fix`, `factory fix`):** set `commands.fix` to your formatter and
+  auto-fixer (for example `prettier --write {files} && eslint --fix {files}`; `{files}` is the quoted list of files,
+  appended when missing). It runs on the **changed files only**: everything that differs from the merge base with main
+  (committed, edited or new and not ignored), minus deleted files, so unrelated files never churn. `fixPaths` (regexes)
+  narrows that to the files the tools understand. The Stop check runs it before typecheck and test, and `factory verify`
+  before `commands.ci`. The agent is told in one line ("formatted 3 files"), never shown a diff. If the fixer exits
+  non-zero, its unfixable findings are shown like a failing check (the failing lines first, `checkOutputLines` in all,
+  and the log). `factory verify` refuses a pass when the fixer changed files, since the commit no longer matches the
+  files: commit them and run it again. The reviewers are told not to comment on anything the fixer handles. A git
+  pre-commit hook was not added: the Stop check and verify cover every path to a pull request without touching
+  `.git/hooks`.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
@@ -651,6 +732,39 @@ current; the task never has to:
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
 
+### The heartbeat daemon
+
+Pinging on tool use cannot tell an agent that is waiting in `factory wait` for 30 minutes from one that has died, and
+it leaves a crashed machine's agents saying `working`. A small daemon, one per machine and project, asks the machine
+instead. Every `tasks.heartbeatSeconds` (20) it checks, locally and for free, each agent that runs here: does a live
+loop or Claude process hold its checkout (the claim), is a `factory wait` or `wait_for_merge.sh` running below it,
+which tmux session and Remote Control link it has, and when it last produced output. From that it derives one state:
+
+| State | Meaning |
+|---|---|
+| `working` | Alive and holds a task |
+| `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge) |
+| `idle` | Alive, no task |
+| `down` | No live process holds its checkout (a killed session, a power cut after a reboot) |
+
+- **Cheap on GitHub.** It always writes its local state file (`factory agents ls` reads that, instantly). GitHub gets
+  one edit of the agent's own issue only when the state changed and lasted a few seconds, plus a keepalive every
+  `tasks.pingMinutes`: at most 12 edits per agent per hour. `down` goes out about one cycle after the process
+  disappeared. With the daemon running, the tool-use pings and the `idle` on turn end are left to it.
+- **The sweep uses it.** `factory agents sweep` never releases the issues of an agent the daemon sees alive, even one
+  waiting for hours. It releases an agent that is really down after `tasks.releaseDownMinutes` (10), and one whose
+  daemon-written keepalive is missing for `tasks.heartbeatMissMinutes` (12), such as a machine that lost power. Without
+  the daemon, everything works as before (30 minutes, `tasks.downMinutes`).
+- **`factory agents ls`** shows this machine from the state file and the other machines and the cloud agents from their
+  agent issues, cached 45 seconds (`--fresh` asks again, `--local` never asks, `--json` for tools). The tmux session,
+  folder, machine name and follow link reach GitHub only with `tasks.showWhere`, since agent issues are readable by
+  anyone who can read the repo.
+- **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
+  `factory heartbeat install` adds or restarts it alone (a systemd user service, or a LaunchAgent on macOS), and
+  `factory heartbeat status` shows what it sees. `factory doctor` checks it.
+- It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
+  well-meaning agents. It needs no new network path: GitHub is still the only shared place.
+
 <br>
 
 ## Messages between agents
@@ -773,6 +887,33 @@ which prints its instructions for this round:
 is still a file holding HEAD's id and nothing else, so the last round of every reviewer ends on the PR's head commit. A
 round nobody recorded (another machine, a cleaned `tmp/`) simply gets a full review.
 
+**Lessons (#72).** The same mistakes come back across tasks: the dev manager writes the same must-fix, a reviewer flags
+the same problem, CI fails for the same reason. Each repeat costs a review round, a CI run and a fix session, so the
+project keeps one short **lessons file** (`lessons` in `factory.json`, by default `.claude/factory/lessons.md`):
+
+- **Short on purpose.** At most `lessonsCap` (40) lessons, one line each, each with an example or a link (a `code span`, a
+  URL, `#123` or "e.g."): *packages/validators: annotate recursive helpers' return types (e.g. TS7022 in `schema.ts`)*.
+  `factory lessons check` fails on a longer file, a wrapped lesson or one without an example, and CI runs it in the
+  Factory guard job. Adding past the cap is refused until something is pruned.
+- **Read up front.** The builder reads it at the start of a task (`next-task`, step 1) and the four reviewers read it
+  before the diff; the `reviewer` treats a change that repeats a lesson as a must-fix and quotes the lesson.
+  `factory lessons show` prints the lessons and nothing else, so reading it costs a few hundred tokens.
+- **Fed from three sources.** `factory lessons suggest [--last 20] [--min 2]` reads the last N closed task pull
+  requests from GitHub and lists causes that came back on at least `--min` of them: the dev manager's must-fix items
+  (the list items of each `factory-mustfix` comment), CI failures (the job and step that failed, once per PR, from the
+  failed runs on its branch, the data `factory report` counts), and this machine's reviewer findings from
+  `<reviewMarkers>/*.reviews.json` (failing rounds; findings on other machines are not seen). Similar wording is grouped,
+  and what an existing lesson already says is left out. It prints each candidate with its PRs and a ready
+  `factory lessons add "..."` command, and changes nothing.
+- **The dev manager approves.** Agents cannot edit `.claude/`, and `add` and `prune --apply` refuse inside an agent
+  session (and are denied in `settings.json`); the dev manager runs them and merges the change in a pull request. An agent
+  that learns something writes "lesson candidate: ..." in its PR description.
+- **Pruned when enforced.** A lesson a hook, lint rule or check enforces now is dead weight. Tag it
+  `[enforced: path/to/check]`; `factory lessons prune` lists the tagged lessons whose enforcement exists, `--apply` removes
+  them, and `check` warns about a tag that points at nothing.
+- **Measured.** `factory report --since <date>` counts must-fix rounds and failed CI runs per task (#65); fewer repeated
+  rounds after a lesson is added is the test of the lesson.
+
 ### The PR gate
 
 `pr-gate.py` is a PreToolUse hook. It reads every Bash command Claude runs, including compound ones (`;`, `&&`,
@@ -881,6 +1022,95 @@ It talks to the agents through markers in PR comments:
 
 The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
 session with the repo attached.
+
+### The list a manager starts from: `factory prs`
+
+`factory prs` is read-only and uses the REST API only (`gh api`; no `gh pr`, no GraphQL, so it works where `gh pr` is
+blocked). A pass reads it first instead of paginating comments and check runs.
+
+```
+Open pull requests (2)
+#12 review: Task 7
+    task/7-x | cccccc1 (14 min) | agent:taytu
+    CI green | no marker for the head (older: factory-approved 0000000) | no claim
+#13 waiting for agent: Task 9
+    task/9-y | dddddd2 (3 h) | draft
+    CI red (lint) | factory-mustfix | no claim
+Questions
+  pr #13 waiting 40 min: https://github.com/o/r/pull/13#issuecomment-1
+Owner asks
+  none waiting
+Agents
+  all agents answering
+```
+
+**CI, judged by one rule.** For each job name, the newest run that was not skipped decides: a re-run replaces a
+failure, and a skipped run decides nothing. The PR gets one state: `red` (a job failed, was cancelled or timed out),
+else `running`, else `queued`, else `green`. `none` means GitHub shows no runs yet; `unknown` means they could not be
+read (the other PRs still show). `notGreen` names the jobs that are not green. `factory status` uses the same rule
+and the same reading of the markers (both come from `factory_prs.py`).
+
+**Markers per commit.** `markers` holds the newest `factory-approved`, `factory-mustfix` or `pr-watch` for each
+commit, oldest first, and `namesHead` says whether it names the current head. Only the head's marker decides:
+an approval of an older commit does not count. Approvals follow the merge gate's rule (only a login in main's
+`trustedReviewers`, when that is set), and a must-fix holds the merge until an approval of the head comes after it.
+
+**Review claim.** A `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` comment for the
+current head that has not expired; the earliest one wins. A claim for another commit, or past its `until`, is ignored.
+(The claim protocol itself is #99; this only reads it.)
+
+**Next action**, the first rule that fits:
+
+| Order | When | Next action |
+|---|---|---|
+| 1 | `factory-hold` is on, and a live claim or no claim exists (an expired claim and no marker for the head makes it a stale hold: it falls through) | `held by <manager>` (the claimant, else `manager`) |
+| 2 | Draft | `waiting for agent` |
+| 3 | CI could not be read | `none`, with an error |
+| 4 | Not an agent PR (the manager's own, or a person's): red, then waiting, then green | `none`; `wait CI`; `owner merges (own PR)` |
+| 5 | A must-fix names the head, or holds the merge | `waiting for agent` |
+| 6 | CI red: every red job is in `manager.flakes` and has run once on this commit | `rerun flake`; otherwise `waiting for agent` |
+| 7 | No marker for the head | `review` (even while CI runs) |
+| 8 | `pr-watch` for the head (reviewed, not approved) | `none` |
+| 9 | Approved, CI not finished | `wait CI` |
+| 10 | Approved, green, protected path changed or the body says "a person merges this one" | `owner merges (protected)` |
+| 11 | Approved, green | `merge` |
+
+An agent PR is one on a `task/<n>-...` branch or with an `agent:<name>` label. All roles share one GitHub account, so
+this is the only way to tell the manager's own PRs from the agents'.
+
+**Below the PRs.** `questions`: open `factory-question` comments with no later `factory-answer`, on open PRs and on
+open issues (issues are searched `--since-days` back, default 14). `ownerAsks`: asks in the open issue titled
+`Dev manager: needs the owner` (comments starting `<!-- factory-owner-ask id=<slug> -->`) that no comment answers; an ask
+is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->`. `agents`:
+agents that are `silent` or `down`, and `staleTasks`: in-progress tasks quiet for `tasks.staleHours` (issues mode only).
+
+**`--json`**, stable for scripts. A part GitHub could not answer is `{"error": "..."}` in its place.
+
+```
+{
+  "generatedAt": "2026-10-25T12:00:00Z",
+  "pulls": [ {
+      "number": 12, "title": "...", "url": "https://github.com/o/r/pull/12", "branch": "task/7-x", "draft": false,
+      "head": {"sha": "<40 hex>", "ageMinutes": 14},                  // age of the head commit
+      "labels": ["factory-hold", "agent:taytu"],
+      "agent": "taytu" | null, "agentPr": true,
+      "ci": {"state": "green|red|running|queued|none|unknown", "notGreen": [{"name": "lint", "state": "red"}], "runs": 3},
+      "markers": [{"kind": "factory-approved|factory-mustfix|pr-watch", "sha": "<hex>" | null, "at": "<ISO>", "namesHead": true}],
+      "headMarker": "factory-approved|factory-mustfix|pr-watch" | null,
+      "gate": "approved|approval stale|must-fix|must-fix (older commit)" | null,   // the merge gate's reading
+      "claim": {"manager": "ana", "until": "<ISO>", "expired": false} | null,
+      "staleHold": false,
+      "protected": true | false | null,                               // null: not looked at (only for a PR that could merge)
+      "next": {"action": "review|merge|wait-ci|rerun-flake|waiting-for-agent|owner-merges|held|none",
+               "text": "review", "reason": "protected|not-agent-pr", "by": "ana", "jobs": ["e2e"], "error": "..."}
+  } ],                                                                 // "reason", "by", "jobs", "error": only when they apply
+  "questions": [{"kind": "pr|issue", "number": 13, "title": "...", "url": "...", "ageMinutes": 40}],
+  "ownerAsks": [{"id": "slug", "issue": 60, "url": "...", "ageMinutes": 300}],
+  "agents": [{"name": "taytu", "status": "silent|down", "minutesAgo": 95}],
+  "staleTasks": [{"number": 7, "title": "...", "quietHours": 4.2}],
+  "note": "..."                                                        // only outside issues mode
+}
+```
 
 <br>
 
@@ -1115,7 +1345,8 @@ reads these settings.
 |---|---|---|
 | `prd`, `plan`, `blocked`, `decisions` | Where the docs live | `docs/PRD.md`, `docs/build-plan.md`, `docs/blocked.md`, `docs/decisions` |
 | `mainBranch` | The main branch | `main` |
-| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `stackUp` and `stackHealth` bring the dev stack back at boot ([autostart](#after-a-reboot-factory-autostart)); `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
+| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `fix` formats and auto-fixes the changed files before the checks (`factory fix`); `stackUp` and `stackHealth` bring the dev stack back at boot ([autostart](#after-a-reboot-factory-autostart)); `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
+| `fixPaths` | Regexes: `commands.fix` gets only changed files matching one of them | empty (every changed file) |
 | `checkOutputLines` | How many lines of a failing Stop check the agent sees: the failing lines first, then the end | 40 |
 | `codePaths` | Folders with code: the Stop check runs when they change | `["src"]` |
 | `checkRequires` | Paths that must exist before the Stop check runs, such as `node_modules` | `[]` |
@@ -1126,17 +1357,21 @@ reads these settings.
 | `prSizeWarn` | The guard warns above this many changed lines | 600 |
 | `reviewMarkers` | Where review passes are written | `tmp/reviews` |
 | `reReviewPercent` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or it touches a new file): then it is a full review. 0: always full | 30 |
+| `lessons` | The curated lessons file the builder and the reviewers read first | `.claude/factory/lessons.md` |
+| `lessonsCap` | The most lessons the file may hold; `factory lessons check` (and CI) fail above it, `add` refuses | 40 |
 | `trustedReviewers` | GitHub logins whose approvals count | none: any approval counts |
 | `holdLabel` | The hold label | `factory-hold` |
+| `manager` | `flakes`: names of CI jobs known to fail now and then; `factory prs` says `rerun flake` when only those are red, for the first time on that commit | `[]` |
 | `agents` | The agents' names, in order | the ten names above |
 | `agentEnv`, `portStep` | Per-agent variables, and the port step | `{}`, 10 |
 | `claimStaleHours` | How long a local claim or a pushed task branch holds a task | 6 |
 | `waitMinutes` | How often an idle loop checks for work; 0 exits | 1 |
-| `tasks` | `source` (`plan` or `issues`), `labels`, `staleHours` (3), `pingMinutes` (5), `downMinutes` (30), `showWhere` (off) | plan mode |
+| `tasks` | `source` (`plan` or `issues`), `labels`, `staleHours` (3), `pingMinutes` (5), `downMinutes` (30), `heartbeatSeconds` (20), `heartbeatMissMinutes` (12), `releaseDownMinutes` (10), `showWhere` (off) | plan mode |
 | `reviews` | Path regexes for `safety-auditor` and `security-reviewer` | empty |
 | `eval`, `design` | Settings and paths for the eval and design-check skills | off |
 | `styles`, `structure` | Style guides per path, and the structure check's roots and legacy list | none |
 | `notes` | The notes folder | `.claude/factory/notes` |
+| `release` | `repo`: the GitHub repository whose releases `factory update` installs | `deresegetachew/my-skills` |
 
 <br>
 
@@ -1159,10 +1394,12 @@ software-factory/
     CLAUDE.factory.md                     template for the project's CLAUDE.md
     .claude/factory.json                  template: the project's config
     .claude/factory/notes/                template: the project's notes for the agents
+    .claude/factory/lessons.md            template: the curated lessons file (empty)
     .claude/settings.json                 permissions and hooks
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
     .claude/hooks/
+      factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
       check.py                            Stop: typecheck and tests
@@ -1173,11 +1410,16 @@ software-factory/
       factory_machine.py                  this machine's id, agent names and autostart settings (outside the repo)
       factory_autostart.py                `factory autostart`: status, install and uninstall of the boot service
       factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
+      factory_heartbeat.py                `factory heartbeat`: the per-machine liveness daemon
+      factory_heartbeat_service.py        install and uninstall of the daemon's service
+      factory_agents_ls.py                `factory agents ls`
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
+      factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
+      factory_release.py                  `factory version | releases | update | rollback`: the release client
       factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub

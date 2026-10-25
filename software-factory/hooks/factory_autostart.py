@@ -2,9 +2,12 @@
 """`factory autostart`: make this machine bring the factory back after every boot (#88).
 
   factory autostart status                        what is set up here and what would start; read-only
-  factory autostart install [--agents a,b]       turn it on for this machine and install the boot service:
-                                                  a systemd user unit (with linger) on Linux, a LaunchAgent on macOS
-  factory autostart uninstall                     remove the service and turn it off; running agents keep running
+  factory autostart install [--agents a,b] [--no-heartbeat]
+                                                  turn it on for this machine and install the boot service:
+                                                  a systemd user unit (with linger) on Linux, a LaunchAgent on macOS.
+                                                  It also installs the heartbeat daemon (factory_heartbeat_service.py,
+                                                  #108), which tells GitHub what each agent is really doing
+  factory autostart uninstall                     remove the services and turn it off; running agents keep running
 
 At boot the service runs `factory resume` (factory_resume.py): it waits for Docker and the network, runs
 `commands.stackUp`, saves any unfinished work of this machine's agents, and starts them in detached tmux sessions
@@ -213,9 +216,33 @@ def install(args, cfg, top):
                   f"  Turn it on once: sudo loginctl enable-linger {user}")
     print(f"This machine starts: {', '.join(names)}. Change the names with `factory autostart install --agents a,b`.")
     print("Check it with `factory autostart status`; bring everything up now, without a reboot, with `factory resume`.")
+    if "--no-heartbeat" in args:
+        print("The heartbeat daemon was not installed (--no-heartbeat): add it with `factory heartbeat install`.")
+    else:
+        install_heartbeat(top)
+
+
+def install_heartbeat(top):
+    """The heartbeat daemon next to the boot service. A failure here is told, not fatal: the boot service is in."""
+    import factory_heartbeat_service as heartbeat
+    try:
+        for line in heartbeat.install(top):
+            print("heartbeat: " + line)
+    except ValueError as e:
+        code, message, fix = e.args[0]
+        print(f"heartbeat: NOT installed ({code}): {message}\n  Fix: {fix}\n  Then: factory heartbeat install")
+
+
+def uninstall_heartbeat():
+    import factory_heartbeat_service as heartbeat
+    try:
+        heartbeat.uninstall()
+    except ValueError as e:
+        print(f"heartbeat: could not remove it: {e.args[0][1]}\n  Fix: {e.args[0][2]}")
 
 
 def uninstall(top):
+    uninstall_heartbeat()
     if platform() == "mac":
         if os.path.exists(plist_file()) or service_state() == "enabled":
             run("launchctl", "bootout", f"{domain()}/{agent_label()}")
@@ -276,6 +303,12 @@ def status(cfg, top):
     health = (cfg.get("commands") or {}).get("stackHealth") or ""
     print("stack: " + (f"`{up}`" + (f", healthy when `{health}` passes" if health else "") if up else
                        "no commands.stackUp is set, so no stack is started (`factory settings set commands.stackUp ...`)"))
+    import factory_heartbeat_service as heartbeat
+    beat = heartbeat.service_state()
+    print("heartbeat: " + {"enabled": "installed (tells GitHub what each agent is really doing; `factory heartbeat status`)",
+                           "not installed": "not installed (`factory heartbeat install` adds it; `factory autostart install` "
+                                            "does too)",
+                           "unknown": "cannot tell (no usable systemctl --user or launchctl)"}[beat])
     print(f"boot report on the agent's issue: {'yes' if post else 'no'} (issues mode only)")
     print(f"agents it would start{'' if on else ' once it is on'}: {', '.join(agents) if agents else 'none'}")
     for agent in agents:
