@@ -92,6 +92,9 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
 1. Plan mode: tick your own task (`- [x]`) on the branch, and no other. Issues mode: see `issues-mode.md`.
 2. Commit in small logical commits, push, and open the PR with `gh pr create`: title `<id>: <task name>`, body with
    what changed, how it was verified (commands and results), what the reviewers raised, and any decision recorded.
+   **If `gh pr create` fails** (GraphQL blocked, as in the dev manager's cloud workspace), open it with REST:
+   `gh api repos/{owner}/{repo}/pulls -f title=... -f head=<branch> -f base=<main> -F body=@file`, and comment with
+   `gh api repos/{owner}/{repo}/issues/<n>/comments -F body=@file` where `gh pr comment` fails.
    Then drop your task claim: `python3 .claude/hooks/factory_claims.py release --agent "$FACTORY_AGENT" --tasks-only`
    (when `FACTORY_AGENT` is set). **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
    `python3 .claude/hooks/factory_usage.py --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
