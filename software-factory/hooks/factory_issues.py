@@ -182,7 +182,7 @@ def pick(cfg, agent):
         remove_label(n, L["ready"])
         where = f" machine={machine}" if machine else ""
         comment(n, f"<!-- factory-claim agent={agent}{where} -->\n**{agent}** is working on this.")
-        time.sleep(2)  # let a simultaneous claim land, then let the earliest comment decide
+        time.sleep(claim_settle_seconds())  # let a simultaneous claim land, then let the earliest comment decide
         winner = claim_winner(n)
         if is_me(winner, agent, machine):
             return i
@@ -190,6 +190,14 @@ def pick(cfg, agent):
             remove_label(n, mine)  # someone else was first; their labels stay
         # (a winner with our own name on another machine owns that label too: leave it on)
     return None
+
+
+def claim_settle_seconds():
+    """How long a claim waits for a simultaneous one to land: 2 s, or FACTORY_CLAIM_SETTLE_SECONDS (the tests set 0)."""
+    try:
+        return max(0.0, float(os.environ.get("FACTORY_CLAIM_SETTLE_SECONDS", "2")))
+    except ValueError:
+        return 2.0
 
 
 def waiting_for_slot(cfg, issue):

@@ -5,9 +5,8 @@ this machine. Use it to measure a change to the factory (a cheaper model, less r
   factory usage                       the last 7 days, per task, then the totals
   factory usage --since 2026-10-20 --until 2026-10-24
   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
-  factory usage --by role             per role: the role named in the `<!-- factory-role role=... -->` line a
-                                      role loop's prompt ends with (#102); else manager (a prompt starting with
-                                      /manage-pass) or builder (every other session)
+  factory usage --by role             manager (sessions that start with /manage-pass, or end with a `factory-role` line naming
+                                      the dev manager), product-owner (that line names it) against builder (all others)
   factory usage --json                the same as JSON
   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it)
   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
@@ -27,7 +26,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load  # noqa: E402
 
 TASK = re.compile(r"^task/(\d+(?:[.-]\d+)*?)-")
-ROLE = re.compile(r"<!--\s*factory-role\s+role=([\w-]+)")
 FIELDS = ("input", "cache_write", "cache_read", "output")
 
 
@@ -61,12 +59,15 @@ def replies(path):
 
 
 MANAGER_PASS = re.compile(r"/?manage-pass\b")
+# The role loops end their prompt with `<!-- factory-role role=... name=... -->` (#102). It names the role exactly, so a
+# product owner's session is not counted as a builder's.
+ROLE = re.compile(r"<!--\s*factory-role\s+role=([\w-]+)")
+ROLE_LABEL = {"coding-agent": "builder", "dev-manager": "manager", "product-owner": "product-owner"}
 
 
 def session_role(path):
-    """The role a session's first prompt names (the loops end it with `<!-- factory-role role=... -->`); else
-    'manager' when it starts with `/manage-pass` (older manager starts have no marker), else 'builder': every other
-    session on this project, builders and people alike."""
+    """'manager' when the session's first prompt is the dev manager's `/manage-pass` (how `factory manage-tick` and the
+    manager loop start it), else 'builder': every other session on this project, builders and people alike."""
     try:
         f = open(path, encoding="utf-8")
     except OSError:
@@ -79,14 +80,13 @@ def session_role(path):
                 continue
             if d.get("type") != "user":
                 continue
-            content = (d.get("message") or {}).get("content")
-            if isinstance(content, list):
-                content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-            content = content if isinstance(content, str) else ""
-            m = ROLE.search(content)
-            if m:
-                return m.group(1)
-            return "manager" if MANAGER_PASS.match(re.sub(r"^\s*<command-(?:message|name)>\s*", "", content)) else "builder"
+            c = (d.get("message") or {}).get("content")
+            if isinstance(c, list):
+                c = " ".join(b.get("text", "") for b in c if isinstance(b, dict))
+            marked = ROLE.search(c) if isinstance(c, str) else None
+            if marked:
+                return ROLE_LABEL.get(marked.group(1), marked.group(1))
+            return "manager" if isinstance(c, str) and MANAGER_PASS.match(re.sub(r"^\s*<command-(?:message|name)>\s*", "", c)) else "builder"
     return "builder"
 
 
@@ -104,12 +104,12 @@ def when(ts):
 
 def collect(root, base, since, until):
     """{session: {"task": str, "rows": [(kind, model, tokens)]}} for replies between since and until."""
-    seen, sessions = set(), collections.defaultdict(lambda: {"branches": collections.Counter(), "rows": []})
+    seen, sessions = set(), collections.defaultdict(lambda: {"branches": collections.Counter(), "rows": [], "role": "builder"})
     for d in project_dirs(root, base):
         for main in glob.glob(os.path.join(d, "*.jsonl")):
             sid = os.path.basename(main)[:-6]
+            role = session_role(main)
             files = [(main, "main")]
-            sessions[sid]["role"] = session_role(main)
             for sub in glob.glob(os.path.join(d, sid, "subagents", "*.jsonl")):
                 kind = "subagent"
                 try:
@@ -126,6 +126,7 @@ def collect(root, base, since, until):
                         continue
                     seen.add(mid)
                     s = sessions[sid]
+                    s["role"] = role
                     m = TASK.match(branch)
                     if m and kind == "main":
                         s["branches"][m.group(1).replace("-", ".")] += 1
@@ -151,7 +152,7 @@ def summarise(sessions, by):
     total = {"tokens": zero(), "replies": 0, "tasks": set(), "models": collections.Counter()}
     for sid, s in sessions.items():
         for kind, model, t in s["rows"]:
-            key = s["task"] if by == "task" else (kind if by == "agent" else s["role"] if by == "role" else model)
+            key = {"task": s["task"], "agent": kind, "role": s.get("role", "builder")}.get(by, model)
             g = groups[key]
             add(g["tokens"], t)
             g["replies"] += 1
