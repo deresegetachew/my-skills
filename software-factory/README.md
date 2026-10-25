@@ -286,10 +286,13 @@ factory update          # newest release: download, check, install, refresh this
    writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
    `.gitignore` lines), never over an existing file.
 5. Refreshes this machine: if CI runner services are installed here and older than the files (`factory ci stale`), it
-   runs `factory ci install`, which also rebuilds the runner image.
+   runs `factory ci install`, which also rebuilds the runner image. If the heartbeat daemon is installed here it is
+   restarted too (`factory heartbeat restart`), because it is one long process that would otherwise keep running the
+   old code.
 6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the Python and shell scripts parse;
    and the installed runner files are readable by the runner container's user, not writable by others, and match the
-   checkout (`factory ci check`). If any of that fails it exits 1, names each problem and does not say it worked.
+   checkout (`factory ci check`, which, when Docker and the runner image are on the machine, also starts the installed
+   entrypoint in the image as the container's own user and parses it). If any of that fails it exits 1, names each problem and does not say it worked.
    `factory doctor` runs the same checks.
 7. Prints what changed (old to new, with the release notes' commit titles) and the commands to commit it. **It never
    commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
@@ -434,7 +437,7 @@ version it pins. `factory help` lists everything.
 | `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
 | `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
-| `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
+| `factory heartbeat [status\|install\|uninstall\|restart\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
 | `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
@@ -834,8 +837,8 @@ which tmux session and Remote Control link it has, and when it last produced out
   folder, machine name and follow link reach GitHub only with `tasks.showWhere`, since agent issues are readable by
   anyone who can read the repo.
 - **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
-  `factory heartbeat install` adds or restarts it alone (a systemd user service, or a LaunchAgent on macOS), and
-  `factory heartbeat status` shows what it sees. `factory doctor` checks it.
+  `factory heartbeat install` adds it alone (a systemd user service, or a LaunchAgent on macOS), and
+  `factory heartbeat restart` restarts it onto the files now on disk (`factory update` does that). `factory heartbeat status` shows what it sees. `factory doctor` checks it.
 - It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
   well-meaning agents. It needs no new network path: GitHub is still the only shared place.
 
