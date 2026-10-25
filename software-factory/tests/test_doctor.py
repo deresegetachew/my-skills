@@ -78,6 +78,33 @@ def test_each_problem_gets_a_one_line_fix():
     assert f"{len(lines(p, 'fix'))} to fix." in p.stdout
 
 
+def pinned(d, content="print(1)\n", changed=False):
+    """Give the project a release pin for one installed file (a project on releases, #113)."""
+    import hashlib
+    rel = ".claude/hooks/factory_demo.py"
+    open(os.path.join(d, rel), "w").write(content + ("# edited\n" if changed else ""))
+    pin = {"schema": "factory-pin/1", "repo": "acme/factory", "tag": "v1.2.0", "version": "1.2.0", "sha256": "0" * 64, "previous": None,
+           "executable": [], "files": {rel: hashlib.sha256(content.encode()).hexdigest()}}
+    os.makedirs(os.path.join(d, ".claude", "factory"), exist_ok=True)
+    json.dump(pin, open(os.path.join(d, ".claude", "factory", "release.json"), "w"))
+
+
+def test_a_project_on_releases_is_ok_when_its_files_match_the_pin():
+    d = project()
+    pinned(d)
+    p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})
+    assert any("factory v1.2.0" in l and "match the pin" in l for l in lines(p, "ok")), p.stdout
+    assert not lines(p, "fix"), p.stdout
+
+
+def test_a_project_on_releases_gets_a_fix_when_a_file_differs_from_the_pin():
+    d = project()
+    pinned(d, changed=True)
+    p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})
+    assert p.returncode == 1, p.stdout
+    assert any("factory_demo.py differs from v1.2.0" in l and "factory update" in l for l in lines(p, "fix")), p.stdout
+
+
 def test_checks_that_dont_apply_are_left_out():
     d = project()  # no package.json, no compose file, no .sops.yaml
     p = doctor(d, machine(node=None))
