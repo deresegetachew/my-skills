@@ -3,7 +3,8 @@
 
 Runs the project's typecheck and test commands (from .claude/factory.json) only when files under
 `codePaths` changed. `commands.typecheckChanged` and `commands.testChanged`, when set, run instead, for the
-changed packages only. Exit 2 sends the failure back to Claude so it fixes it before stopping: the lines that
+changed packages only. Before them it runs `commands.fix` on the changed files (#69, `factory_fix.py`), so style never
+costs a turn; the agent hears "formatted 3 files" and nothing more. Exit 2 sends the failure back to Claude so it fixes it before stopping: the lines that
 name a failure first, then the end of the output, `checkOutputLines` in all.
 
 After a green run it remembers what it checked (HEAD, every tracked change, every untracked file that isn't ignored,
@@ -15,6 +16,7 @@ import hashlib, json, os, re, subprocess, sys
 sys.path.insert(0, os.path.dirname(__file__))
 from factory_config import load  # noqa: E402
 from factory_run_check import excerpt, line_limit, write_log  # noqa: E402
+import factory_fix  # noqa: E402
 
 try:
     data = json.load(sys.stdin)
@@ -30,6 +32,15 @@ if any(not os.path.exists(p) for p in needs):
 paths = [p for p in cfg["codePaths"] if os.path.exists(p)]
 if not paths:
     sys.exit(0)  # no code yet
+
+# Format and auto-fix the files this branch changed, before anything is compared or run. What it did is one line.
+fix_rc, fix_msg = factory_fix.run(cfg)
+if fix_rc != 0:
+    print(fix_msg, file=sys.stderr)
+    sys.exit(2)
+if fix_msg:
+    print(json.dumps({"systemMessage": f"factory: {fix_msg}."}))
+note = f"({fix_msg}.) " if fix_msg else ""
 
 
 def sh(cmd):
@@ -90,7 +101,7 @@ for name in ("typecheck", "test"):
         out = excerpt(text, limit)
         log = write_log(cfg, name, f"$ {cmd}\n{text}")
         more = f" Full log: {log}" if log else ""
-        print(f"`{cmd}` fails. Fix it before finishing:{more}\n" + "\n".join(out), file=sys.stderr)
+        print(f"{note}`{cmd}` fails. Fix it before finishing:{more}\n" + "\n".join(out), file=sys.stderr)
         sys.exit(2)
 try:
     if last_green:

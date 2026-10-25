@@ -40,6 +40,9 @@ Look
   manager-claims list|next|review|answer|release|sweep|merge|ask
                          several dev managers at once: claim a PR or a question with a lease (manager.claimMinutes),
                          so two managers never review, answer, merge or ask the same thing twice; list shows who holds what
+  lessons [show|check|suggest|add|prune]
+                         the short lessons file builders and reviewers read first; suggest proposes new ones from
+                         recent must-fix comments, review findings and CI failures (add and prune: dev manager)
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
@@ -48,6 +51,8 @@ Look
 
 Check
   verify                 run what CI runs (commands.ci) for this commit; a ready PR needs it passed when it's set
+  fix                    format and auto-fix the files this branch changed (commands.fix); the Stop check and
+                         verify run it first, so style never costs a turn
   run-check <command>    run a check or test quietly: one line if it passes, the first errors (capped) and the
                          full log path if it fails
   check                  the style checks CI runs (one class per file and so on)
@@ -58,6 +63,7 @@ Check
 CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
   ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
   ci use local|github    send CI jobs to the self-hosted runners (labels <repo>-local and <repo>-light), or back
+  ci stale | check       are the installed runner copies older than the checkout / fit to start (update runs both)
   ci install             install ci.runners runners and the light lane as <repo>-ci, -2 ... and -light: LaunchAgents
                          on macOS, systemd --user services on Linux (run it again to update or change the number)
   ci uninstall [i]       remove them (or instance i: 2 ... or light), their containers and idle registrations
@@ -83,8 +89,14 @@ Maintain
   wait ci|answer <pr> [minutes], wait slot|ready [minutes]
                          the other token-free waits: CI finished, question answered, a PR slot free, a task ready
   precheck               dev manager: "nothing to do" (exit 0) or one line per thing to do (exit 3), without a model
-  update [--layout new]  pull the newest my-skills into the project and relink; then commit it in a PR
-                         (new: point the links at the factory's own folders instead of kit/)
+  version                installed release, the one main pins, the newest, and what changed since
+  releases [--all]       the releases that exist, with dates and a one-line note
+  update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
+                         machine's runner services and verify; then commit it in a PR. Safe to repeat. --release: start
+                         taking releases in a project that has no pin yet
+  rollback               back to the release installed before (needs no network)
+  update [--layout new]  a project still on the my-skills submodule (no pin yet): pull the newest my-skills and relink;
+                         then commit it in a PR (new: point the links at the factory's own folders instead of kit/)
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
 EOF
 }
@@ -137,6 +149,7 @@ case "$cmd" in
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
   manager-claims) py factory_manager_claims.py "$@" ;;
+  lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
   report)    py factory_report.py "$@" ;;
@@ -144,6 +157,7 @@ case "$cmd" in
                case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
              else py factory_env.py; fi ;;
   verify)    py factory_verify.py "$@" ;;
+  fix)       py factory_fix.py "$@" ;;
   run-check) py factory_run_check.py "$@" ;;
   check)     py style_checks.py ;;
   guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
@@ -153,7 +167,12 @@ case "$cmd" in
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
   precheck)  py factory_wait.py precheck ;;
+  version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
   update)
+    # A project with a release pin (.claude/factory/release.json), or one that asks (a version, --release), takes the
+    # factory from numbered releases (#113). Any other project keeps the submodule update below until it migrates.
+    if [ -f .claude/factory/release.json ]; then py factory_release.py update "$@"; exit $?; fi
+    for a in "$@"; do case "$a" in --release|v[0-9]*|[0-9]*) py factory_release.py update "$@"; exit $? ;; esac; done
     # --layout new|old|auto goes to install.sh: a project that links through kit/ stays on it until it asks for `new`.
     layout=auto
     case "${1:-}" in

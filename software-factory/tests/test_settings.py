@@ -42,6 +42,14 @@ def test_list_shows_values_here_defaults_and_other_keys():
     assert "custom" in p.stdout and "_about" not in p.stdout.split("Other keys")[-1]
 
 
+def test_the_release_repository_is_a_setting_with_a_default_and_can_be_changed():
+    d = project({})
+    p = settings(d, "show", "release.repo")
+    assert p.returncode == 0 and "deresegetachew/my-skills" in p.stdout and "factory update" in p.stdout, p
+    assert settings(d, "set", "release.repo", "acme/factory").returncode == 0
+    assert saved(d)["release"] == {"repo": "acme/factory"}
+
+
 def test_show_names_the_options():
     p = settings(project({}), "show", "tasks.source")
     assert p.returncode == 0 and "plan, issues" in p.stdout and "here: (default)" in p.stdout, p

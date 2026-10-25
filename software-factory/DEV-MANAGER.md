@@ -194,6 +194,22 @@ you first; the owner is the last stop. On every tick:
 - **Stacked PRs** (each based on the previous branch): merge from the bottom; after each merge, `PATCH` the
   next PR's `base` to main and review it in the same tick.
 
+## Keeping the lessons file
+
+The project's lessons file (`factory lessons show`; `lessons` in `factory.json`) is the short list of mistakes that kept
+coming back. The builder and every reviewer read it first, so keep it short and true: at most `lessonsCap` (40) one-line
+lessons, each with an example or a link.
+
+- **When a must-fix repeats,** or an agent's PR description says "lesson candidate: ...", run
+  `python3 .claude/hooks/factory_lessons.py suggest` (read-only; every ten merged PRs is enough). It lists causes that came back
+  on two or more of the last 20 task PRs: must-fix items, CI failing at the same job and step, and the reviewer findings on
+  this machine. Skip a candidate that is a one-off; reword one you keep to a single imperative line with its example, then
+  `python3 .claude/hooks/factory_lessons.py add "<rule>"` and merge the file in a PR.
+- **When something enforces a lesson now** (a hook, a lint rule, a `factory.json` check), tag it `[enforced: <path>]`;
+  `factory_lessons.py prune` proposes removing the tagged ones whose enforcement exists, and `prune --apply` does.
+- **Past the cap, prune or merge;** never raise `lessonsCap` to make room. CI fails a file over the cap.
+- Only you change the file: the agents cannot edit `.claude/`, and `add` and `prune --apply` refuse inside an agent session.
+
 ## Waiting for CI
 
 Wait until **every** check run on the head commit has `status: completed`, then read the conclusions. A

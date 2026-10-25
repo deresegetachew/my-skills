@@ -33,6 +33,10 @@ This file is the core. Open the others in this folder only when they apply:
    files, edge cases, out of scope. Open those, and widen only when they don't answer your question. Search long
    documents (`grep -n`) instead of reading them whole: most of a task's cost is what it reads. Say in one line which
    task you're doing and what "done" means.
+4. **Read the lessons.** `python3 .claude/hooks/factory_lessons.py show` prints this project's short list of repeated
+   mistakes (one line each, with an example). Check your work against it before every push; the reviewers do too.
+   If a person's must-fix or a CI failure teaches something new, say so in the PR description as "lesson candidate:";
+   you cannot edit the file, the dev manager does (`factory lessons suggest`).
 
 A PR with the `factory-hold` label is being reviewed by the dev manager: don't rework or merge it.
 
@@ -56,6 +60,9 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
 3. Test what a user or another module can observe. Run the "Done when" check and the `typecheck`, `lint` and `test`
    commands until they pass, and keep the output as evidence. Run them through `./factory run-check <command>`: it prints one
    line when they pass, or the first errors and the log path when they fail; open the full log only if that isn't enough.
+   Don't spend a turn on formatting or auto-fixable lint findings: when `commands.fix` is set, the Stop check and
+   `./factory verify` run it on the files you changed ("formatted 3 files"); `./factory fix` runs it by hand. If verify
+   says it formatted files, commit them and run it again.
 4. **Extra reviews:** run `python3 .claude/hooks/factory_reviews.py` and do each line it prints (a skill such as
    `design-check` or the eval, or a subagent such as `safety-auditor` or `security-reviewer`), fixing every must-fix.
    Ask the `safety-auditor` whenever the diff touches what CLAUDE.md calls critical rules, and the
