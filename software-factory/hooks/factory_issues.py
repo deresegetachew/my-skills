@@ -248,6 +248,22 @@ def last_activity(cfg, issue):
     return max(datetime.fromisoformat(t.replace("Z", "+00:00")) for t in times)
 
 
+def setup_labels(cfg):
+    """Creates the task, agent and hold labels that are missing; returns the names it created (`factory issues setup`,
+    and `factory init`)."""
+    L = task_labels(cfg)
+    have = {x["name"] for x in gh_all("repos/{owner}/{repo}/labels")}
+    wanted = [(L[k], COLORS[k]) for k in COLORS] + [("factory-hold", "fbca04")]
+    wanted += [("factory:agent", "bfdadc"), ("factory:agent-down", "d4c5f9")]
+    wanted += [(L["agentPrefix"] + n, "c5def5") for n in cfg.get("agents") or []]
+    made = []
+    for name, color in wanted:
+        if name not in have:
+            gh("POST", "repos/{owner}/{repo}/labels", {"name": name, "color": color})
+            made.append(name)
+    return made
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -318,14 +334,8 @@ def main():
         i = gh("POST", "repos/{owner}/{repo}/issues", data)
         print(f"#{i['number']} {i['html_url']}")
     elif a.cmd == "setup":
-        have = {x["name"] for x in gh_all("repos/{owner}/{repo}/labels")}
-        wanted = [(L[k], COLORS[k]) for k in COLORS] + [("factory-hold", "fbca04")]
-        wanted += [("factory:agent", "bfdadc"), ("factory:agent-down", "d4c5f9")]
-        wanted += [(L["agentPrefix"] + n, "c5def5") for n in cfg.get("agents") or []]
-        for name, color in wanted:
-            if name not in have:
-                gh("POST", "repos/{owner}/{repo}/labels", {"name": name, "color": color})
-                print(f"created {name}")
+        for name in setup_labels(cfg):
+            print(f"created {name}")
     elif a.cmd == "list":
         for i in sorted(task_issues(), key=order):
             state = [x for x in names(i) if x.startswith("factory") or x.startswith(L["agentPrefix"])]

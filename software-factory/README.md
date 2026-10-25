@@ -425,6 +425,8 @@ version it pins. `factory help` lists everything.
 | `factory prd [--open] [--story N] [--json]` | Progress against the PRD from GitHub: per user story its tasks and state. [Product owner](#the-product-owner-factory-prd-and-the-sign-off-and-testing-queue) |
 | `factory artifacts pull\|status\|list` | The project's artifacts and designs as reviewed copies in the repo, with a manifest; `status` says which copy is older than its artifact. [Artifacts](#artifacts-and-designs-factory-artifacts) |
 | `factory signoff ls\|add\|plan\|confirm\|result` | The sign-off and testing queue: what only a person can check, and test plans for the running app |
+| `factory init [--dry-run]` | The project's scaffold after `install.sh`: role folders, labels, the owner queue, a starter PRD and the PRD-change PR template; adds nothing twice (see [From an idea to a first milestone](#from-an-idea-to-a-first-milestone)) |
+| `factory prd --stage [--ask vision\|design\|plan]` | Where the project is on the way to a first milestone, and the owner's gates |
 | `factory init-roles [--force]` | Creates the project's role folder (`.claude/factory/roles/<role>/README.md` and `reads.md`) |
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
@@ -825,6 +827,32 @@ The product owner writes the plans from the PRD story and its "Done when"; someo
 what is tested; results are recorded with who and which build. **How a plan is run is not decided** (a scripted browser,
 or Claude driving a browser: needs a spike). This part keeps the plans, confirmations and results, whichever produces them.
 Markers: `factory-signoff`, `factory-signoff-result`, `factory-testplan`, `factory-testplan-confirm`, `factory-testresult`.
+
+### From an idea to a first milestone
+
+The flow the roles make possible, from an empty folder, using only their commands. Nothing lives in a chat session: every
+hand-off is a file in the repository or an issue, pull request or comment on GitHub, so a role started on another machine
+finds it.
+
+| Stage | Who | Command, and what is committed | The owner's gate |
+|---|---|---|---|
+| 0 Start | Owner | `install.sh`, then `factory init`: role folders, labels, the owner queue issue, a starter PRD, the PRD-change PR template. Run again, it adds nothing | |
+| 1 Vision | Product owner | `factory product-owner loop -i`: with nothing queued, `-i` starts a discovery session (`/product-pass discover`) that interviews the owner and writes `docs/PRD.md` with numbered stories | `factory prd --stage --ask vision` |
+| 2 Design | Product owner | design references and the style file in `design/` | `--ask design` (only after the vision is approved) |
+| 3 Plan | Product owner | milestones and task issues (`factory issues new`), each with `PRD: US-<n>` and a "Done when" | `--ask plan` (only after the design is approved) |
+| 4 Hand over | Owner | `factory prd --stage` says when the three are approved and tasks are ready; then `factory dev-manager loop` and `factory coding-agent loop` | |
+| 5, 6 Build, check, learn | Coding agents, dev manager, product owner | PRs and reviews, the sign-off and testing queue, `factory prd`, `factory usage --by role` | reviews as today |
+| 7 Pivot | Product owner | a PRD-change pull request from `.github/PULL_REQUEST_TEMPLATE/prd-change.md` (stories, tasks that move, a decision record), and the task issues changed | the owner's yes on scope and order |
+
+`factory prd --stage` prints the stages, what is done and what the owner has approved. An approval is the owner's reply under
+the ask `stage-<name>` in the owner queue: a first word of yes, approved, ok or go ahead, or the marker `<!-- factory-owner-answer
+id=stage-<name> -->`. Anything else is a question, the stage stays open and the product owner reads it. While the owner is away,
+the stages wait: no role proceeds on its own at a gate. Errors are `{code, message, fix}`.
+
+Tested end to end in `tests/test_flow.py` with fakes (a fake `claude` that runs the session's steps, a fake `gh`): init, the
+three gates, the hand over, a pivot, and a role on a fresh clone. What it cannot test is the interview and the quality of the
+PRD; the owner runs the flow once with a real model. Gaps: the dev manager's plan check (buildability, order, missing "Done when") is not built; and the design stage always
+needs a file in `design/`, so a project with no UI adds a one-line `design/README.md` saying so.
 
 ### Artifacts and designs: `factory artifacts`
 
@@ -2169,6 +2197,8 @@ software-factory/
     factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
     factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
     factory_handover.py                 `factory handover snapshot`: the state a manager hands over, read from GitHub
+    factory_init.py                     `factory init`: the project's scaffold (roles, labels, owner queue, PRD stub)
+    factory_flow.py                     `factory prd --stage`: the flow stages and the owner's gates
     factory_po.py                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
     factory_prd.py                      `factory prd`: progress against the PRD, per user story
     factory_signoff.py                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)
