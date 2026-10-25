@@ -98,7 +98,13 @@ case "$cmd" in
     # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
     # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
     mcp="$(python3 "$dir/.claude/hooks/factory_mcp.py")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
-    set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' "$@"
+    # The `models` setting for the builder (factory_models.py): after the MCP flags, before your own arguments.
+    mf=()
+    if [ -f "$dir/.claude/hooks/factory_models.py" ]; then
+      m="$(python3 "$dir/.claude/hooks/factory_models.py" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }
+      while IFS= read -r line; do [ -n "$line" ] && mf+=("$line"); done <<< "$m"
+    fi
+    set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' ${mf[@]+"${mf[@]}"} "$@"
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
     exec claude "$@" ;;

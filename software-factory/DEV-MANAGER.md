@@ -239,7 +239,9 @@ owner's machine shows which loop holds which task; a claim lapses when its loop 
 Input tokens dominate the bill, not replies, so the big levers are context size and model choice:
 - a fresh context per task (`factory-loop.sh`) instead of one long session;
 - cheaper models for routine subagents (test-writer, first-pass reviews), the strongest for the reviewer
-  and safety audits;
+  and safety audits. The models are a setting: `models` in `.claude/factory.json` sets one per role (builder,
+  manager, each subagent); a role with no entry keeps the agent file's `model:` or Claude Code's default
+  (`factory doctor` shows which). See the README, "Model and effort per role";
 - test output filtered to failures, a short CLAUDE.md with workflows moved into skills;
 - for yourself: skip commits that already carry a pr-watch marker, read each diff once, keep messages short.
 - **Write a brief into each task** (the template's "Brief: read these, not more"): the PRD sections, decisions,

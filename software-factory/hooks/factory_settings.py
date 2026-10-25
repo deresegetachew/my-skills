@@ -69,6 +69,7 @@ SETTINGS = {
     "portStep": ("int", "How far each agent's ports move from the previous agent's.", None, None),
     "claimStaleHours": ("int", "How long a local claim or a pushed task branch holds a task.", None, None),
     "waitMinutes": ("int", "How often an idle loop looks for work. 0: it exits instead.", None, 1),
+    "models": ("dict", "The model per role (builder, manager, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {\"builder\": {\"model\": \"opus\", \"effort\": \"high\"}, \"reviewer\": {\"model\": \"sonnet\", \"escalateTo\": \"opus\"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default.", None, {}),
     "tasks.source": ("enum", "Where tasks come from.", ["plan", "issues"], None),
     "tasks.staleHours": ("int", "An in-progress issue with no activity this long counts as stale.", None, None),
     "tasks.pingMinutes": ("int", "How often a working agent pings its agent issue, at most.", None, None),
@@ -161,6 +162,12 @@ def parse(key, raw):
         raise SystemExit(f"factory settings: `{key}` takes a JSON {kind}, e.g. '{example}'; got {raw!r}.")
     if not isinstance(value, list if kind == "list" else dict):
         raise SystemExit(f"factory settings: `{key}` takes a JSON {kind}.")
+    if key == "models":
+        from factory_models import validate
+        try:
+            validate(value)
+        except ValueError as e:
+            raise SystemExit(f"factory settings: {e}")
     if key == "agents":
         from factory_config import safe_agent
         for name in value:
