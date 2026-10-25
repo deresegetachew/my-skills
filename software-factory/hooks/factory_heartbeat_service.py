@@ -6,6 +6,8 @@ restarts it if it stops.
 
   factory heartbeat install      write the service and start it now (Linux: enable --now, linger on; macOS: bootstrap)
   factory heartbeat uninstall    stop it and remove the service; agents keep running, they just stop being watched
+  factory heartbeat restart      restart the installed service so it runs the files now on disk (`factory update` does this);
+                                 says nothing and does nothing when no service is installed
 
 `factory autostart install` calls install too (unless --no-heartbeat), and `factory autostart uninstall` removes it.
 Names: <repo>-factory-heartbeat.service (Linux) and dev.software-factory.<repo>-heartbeat (macOS), where <repo> is
@@ -138,6 +140,23 @@ def install(top):
     return out
 
 
+def restart():
+    """Restarts the installed service so a daemon started before an update runs the new code. Returns the lines to
+    tell the person: none when no service is installed here. Raises ValueError((code, message, fix))."""
+    if service_state() != "enabled":
+        return []
+    if AS.platform() == "mac":
+        rc, _, err = AS.run("launchctl", "kickstart", "-k", f"{AS.domain()}/{agent_label()}")
+        name = agent_label()
+    else:
+        rc, _, err = AS.run("systemctl", "--user", "restart", unit_name())
+        name = unit_name()
+    if rc != 0:
+        raise ValueError(("restart-failed", f"could not restart {name}: {err[:200]}",
+                          "Run `factory heartbeat install` to write the service again and start it."))
+    return [f"Restarted {name}: it runs the files now on disk."]
+
+
 def uninstall():
     """Stops and removes the service (a no-op when it is not installed). Raises ValueError((code, message, fix))."""
     if AS.platform() == "mac":
@@ -171,6 +190,14 @@ def install_cli():
         refuse(*e.args[0])
 
 
+def restart_cli():
+    try:
+        for line in restart():
+            print(line)
+    except ValueError as e:
+        refuse(*e.args[0])
+
+
 def uninstall_cli():
     top_of_project()
     try:
@@ -196,5 +223,5 @@ def doctor(cfg):
 
 
 if __name__ == "__main__":
-    {"install": install_cli, "uninstall": uninstall_cli}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: refuse(
-        "unknown-command", "unknown command.", "Use install or uninstall (or `factory heartbeat ...`)."))()
+    {"install": install_cli, "uninstall": uninstall_cli, "restart": restart_cli}.get(sys.argv[1] if len(sys.argv) > 1 else "", lambda: refuse(
+        "unknown-command", "unknown command.", "Use install, uninstall or restart (or `factory heartbeat ...`)."))()

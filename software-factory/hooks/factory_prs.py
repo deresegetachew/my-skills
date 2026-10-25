@@ -18,11 +18,11 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import factory_issues as fi  # noqa: E402
+import factory_manager_claims as claims  # noqa: E402
 from factory_config import branch_task, load, load_from_main, task_labels, task_source  # noqa: E402
 
 SHA_IN = re.compile(r"sha=([0-9a-f]{7,40})")
 MARKER = re.compile(r"<!--\s*(factory-approved|factory-mustfix|pr-watch)\b([^>]*?)-->")
-CLAIM = re.compile(r"<!--\s*factory-review-claim\s+manager=([\w.-]+)\s+sha=([0-9a-f]{7,40})\s+until=(\S+?)\s*-->")
 QUESTION = re.compile(r"<!--\s*factory-question\b")
 ANSWER = re.compile(r"<!--\s*factory-answer\b")
 OWNER_ASK = re.compile(r"<!--\s*factory-owner-ask\s+id=([\w.-]+)\s*-->")
@@ -146,17 +146,13 @@ def markers_of(comments, head, trusted):
 
 
 def claim_of(comments, head, now):
-    """(the earliest unexpired review claim for this head or None, whether an expired one exists for it)."""
-    live, expired = [], False
-    for c in comments:
-        for manager, sha, until in CLAIM.findall(c.get("body") or ""):
-            if not names_head(sha, head):
-                continue
-            if parse_time(until) > now:
-                live.append({"manager": manager, "until": until, "expired": False})
-            else:
-                expired = True
-    return (live[0] if live else None), expired
+    """(the review claim that holds this head or None, whether an expired one exists for it). The claim protocol
+    itself (earliest unexpired wins, releases, the lease cap) lives in factory_manager_claims.py (#99)."""
+    held = claims.review_winner(comments, head, now)
+    if held:
+        return {"manager": held["manager"], "until": claims.stamp(held["until"]), "expired": False}, False
+    seen = [m for m in map(claims.parse_marker, comments) if m and m["kind"] == "review" and claims.same_sha(head, m["sha"])]
+    return None, bool(seen)
 
 
 def open_questions(comments):

@@ -223,10 +223,14 @@ def claim(manager, sha, until, at="2020-01-01T01:00:00Z"):
 
 
 def test_an_unexpired_claim_shows_who_and_until_when_and_the_pr_is_held():
-    cs = [claim("ana", SHAS[7], FAR), claim("ben", SHAS[7], FAR, at="2020-01-01T02:00:00Z")]
+    # claims are leases: recent comments, `until` shortly ahead (a claim never counts for long after its comment, #99)
+    from datetime import datetime, timedelta, timezone
+    t = lambda m: (datetime.now(timezone.utc) + timedelta(minutes=m)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    until = t(15)
+    cs = [claim("ana", SHAS[7], until, at=t(-2)), claim("ben", SHAS[7], until, at=t(-1))]
     got, _ = pulls_json(scenario({7: run(7, [check("t")], cs, labels=["factory-hold"])}))
     p = got[7]
-    assert p["claim"] == {"manager": "ana", "until": FAR, "expired": False}, p  # the earliest unexpired claim wins
+    assert p["claim"] == {"manager": "ana", "until": until, "expired": False}, p  # the earliest unexpired claim wins
     assert p["next"]["text"] == "held by ana", p
     assert "factory-hold" in p["labels"]
 
