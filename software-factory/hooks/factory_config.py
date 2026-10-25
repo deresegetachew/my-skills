@@ -48,6 +48,10 @@ DEFAULTS = {
     # level (product owner, dev manager, owner) after this long; `logins`: the GitHub logins whose answers count for the
     # product owner (empty: any). The dev manager's waits are `manager.busyMinutes` and
     # `manager.idleMinutes`.
+    # Artifacts and designs kept as reviewed copies in the repo (#104, `factory artifacts`): `manifest` records where each
+    # came from, `dir` is the default folder for a copy, `fetch` and `info` are commands (empty: off) that export an
+    # artifact into `{out}` and print its title, updated time and version, for `{url}`.
+    "artifacts": {"manifest": "docs/artifacts.json", "dir": "docs/artifacts", "fetch": "", "info": ""},
     "roles": {
         "dir": ".claude/factory/roles",
         "dev-manager": {"names": ["fasil", "yekuno", "amda", "sarsa", "susenyos"],
@@ -58,7 +62,8 @@ DEFAULTS = {
     },
     # The dev manager (#97, #109): `factory dev-manager loop` is an orchestrator with no model. Each cycle it reads
     # GitHub (factory_watch.py) and starts one one-item sub-manager (`claude -p`) per item that needs a manager, at most
-    # `maxSubManagers` at once, each under a lease of `claimMinutes`. `busyMinutes` / `idleMinutes` are the waits after
+    # `maxSubManagers` at once, each under a lease of `claimMinutes` (also how long a manager's review or answer claim
+    # holds an item, factory_manager_claims.py). `busyMinutes` / `idleMinutes` are the waits after
     # a cycle that had work / none (0: the loop exits instead). `deadManMinutes`: work that has waited this long with no
     # dev-manager activity is reported to the owner. `notify`: the login mentioned in an owner-queue comment so GitHub
     # tells the owner (empty: the repository owner). `quietMinutes`, `staleMinutes`, `ownerWaitMinutes`,

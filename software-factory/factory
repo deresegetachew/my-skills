@@ -155,6 +155,9 @@ Maintain
   signoff ls|add|plan|confirm|result
                          the sign-off and testing queue: what only a person can check, and test plans for the running
                          app (proposed, confirmed by the owner, then results recorded)
+  artifacts pull|status|list
+                         the project's artifacts and designs as reviewed copies in the repo, with a manifest of where
+                         each came from; status says which copy is older than its artifact
   manage-tick [--dry-run] precheck, then ONE `claude -p "/manage-pass"` only when there is work: an idle tick makes no model
                          call (run it from cron or a timer)
   version                installed release, the one main pins, the newest, and what changed since
@@ -268,6 +271,7 @@ case "$cmd" in
   precheck)  py factory_wait.py precheck ;;
   watch)     py factory_watch.py "$@" ;;
   prd)       py factory_prd.py "$@" ;;
+  artifacts) py factory_artifacts.py "$@" ;;
   signoff)   py factory_signoff.py "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;

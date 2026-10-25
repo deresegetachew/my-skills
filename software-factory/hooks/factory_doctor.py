@@ -261,6 +261,25 @@ def roles(r, cfg):
         r.fix("role names", f"{', '.join(clash)} is also a coding agent's name: change `roles.<role>.names`")
 
 
+def artifacts(r, cfg):
+    """The artifact copies in the repo (#104): each one exists, is not edited by hand, and is not older than its artifact
+    when the project can say (`artifacts.info`)."""
+    try:
+        import factory_artifacts as fa
+        entries = fa.read_manifest(cfg)["artifacts"]
+    except (ImportError, SystemExit):
+        return
+    for e in entries:
+        state, detail = fa.judge(cfg, e)
+        what = f"artifact {e['id']} ({e['dest']})"
+        if state in ("current", "unknown"):
+            r.ok(f"{what}: {detail}")
+        elif state == "edited":
+            r.note(what, detail + "; put the change in the artifact, or pull again with --force")
+        else:
+            r.fix(what, detail + f"; run `factory artifacts pull {e['url']} {e['dest']}`")
+
+
 def manager(r, cfg):
     """The dev-manager orchestrator (#97): its settings profile resolves and every hook script the profile runs exists."""
     import re as _re
@@ -309,6 +328,7 @@ def main():
         roles(r, cfg)
         manager(r, cfg)
         turbo(r, cfg)
+        artifacts(r, cfg)
         release(r)
     if "--sandbox" in sys.argv[1:]:
         from factory_sandbox import run as sandbox
