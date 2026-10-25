@@ -362,7 +362,9 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
-| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
+| `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
+| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
+| `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
@@ -727,6 +729,39 @@ current; the task never has to:
 - **Where.** By default the issue says only the agent's slot. With `"tasks": { "showWhere": true }` it also posts
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
+
+### The heartbeat daemon
+
+Pinging on tool use cannot tell an agent that is waiting in `factory wait` for 30 minutes from one that has died, and
+it leaves a crashed machine's agents saying `working`. A small daemon, one per machine and project, asks the machine
+instead. Every `tasks.heartbeatSeconds` (20) it checks, locally and for free, each agent that runs here: does a live
+loop or Claude process hold its checkout (the claim), is a `factory wait` or `wait_for_merge.sh` running below it,
+which tmux session and Remote Control link it has, and when it last produced output. From that it derives one state:
+
+| State | Meaning |
+|---|---|
+| `working` | Alive and holds a task |
+| `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge) |
+| `idle` | Alive, no task |
+| `down` | No live process holds its checkout (a killed session, a power cut after a reboot) |
+
+- **Cheap on GitHub.** It always writes its local state file (`factory agents ls` reads that, instantly). GitHub gets
+  one edit of the agent's own issue only when the state changed and lasted a few seconds, plus a keepalive every
+  `tasks.pingMinutes`: at most 12 edits per agent per hour. `down` goes out about one cycle after the process
+  disappeared. With the daemon running, the tool-use pings and the `idle` on turn end are left to it.
+- **The sweep uses it.** `factory agents sweep` never releases the issues of an agent the daemon sees alive, even one
+  waiting for hours. It releases an agent that is really down after `tasks.releaseDownMinutes` (10), and one whose
+  daemon-written keepalive is missing for `tasks.heartbeatMissMinutes` (12), such as a machine that lost power. Without
+  the daemon, everything works as before (30 minutes, `tasks.downMinutes`).
+- **`factory agents ls`** shows this machine from the state file and the other machines and the cloud agents from their
+  agent issues, cached 45 seconds (`--fresh` asks again, `--local` never asks, `--json` for tools). The tmux session,
+  folder, machine name and follow link reach GitHub only with `tasks.showWhere`, since agent issues are readable by
+  anyone who can read the repo.
+- **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
+  `factory heartbeat install` adds or restarts it alone (a systemd user service, or a LaunchAgent on macOS), and
+  `factory heartbeat status` shows what it sees. `factory doctor` checks it.
+- It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
+  well-meaning agents. It needs no new network path: GitHub is still the only shared place.
 
 <br>
 
@@ -1310,7 +1345,7 @@ reads these settings.
 | `agentEnv`, `portStep` | Per-agent variables, and the port step | `{}`, 10 |
 | `claimStaleHours` | How long a local claim or a pushed task branch holds a task | 6 |
 | `waitMinutes` | How often an idle loop checks for work; 0 exits | 1 |
-| `tasks` | `source` (`plan` or `issues`), `labels`, `staleHours` (3), `pingMinutes` (5), `downMinutes` (30), `showWhere` (off) | plan mode |
+| `tasks` | `source` (`plan` or `issues`), `labels`, `staleHours` (3), `pingMinutes` (5), `downMinutes` (30), `heartbeatSeconds` (20), `heartbeatMissMinutes` (12), `releaseDownMinutes` (10), `showWhere` (off) | plan mode |
 | `reviews` | Path regexes for `safety-auditor` and `security-reviewer` | empty |
 | `eval`, `design` | Settings and paths for the eval and design-check skills | off |
 | `styles`, `structure` | Style guides per path, and the structure check's roots and legacy list | none |
@@ -1353,6 +1388,9 @@ software-factory/
       factory_machine.py                  this machine's id, agent names and autostart settings (outside the repo)
       factory_autostart.py                `factory autostart`: status, install and uninstall of the boot service
       factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
+      factory_heartbeat.py                `factory heartbeat`: the per-machine liveness daemon
+      factory_heartbeat_service.py        install and uninstall of the daemon's service
+      factory_agents_ls.py                `factory agents ls`
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
       factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
