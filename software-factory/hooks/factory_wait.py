@@ -193,7 +193,8 @@ def waiting_questions(what, n, comments, escalation=None):
     """One ("question", number, line) per question addressed to the dev manager that waits for its answer (a
     question that asks the asker for more information waits for the asker, not for the dev manager). `escalation`
     is (minutes per level, whether a product owner runs, now): then a question addressed `to=po` that nobody answered
-    for a level, or that has no product owner to go to, is the dev manager's too (#110)."""
+    for a level, or that has no product owner to go to, is the dev manager's too (#110). A question with no known time (age 0) is
+    not escalated yet: a level is worked out from an age, never from a guess."""
     thread = fm.fold(fm.messages_of(comments))
     out = [("question", n, f"{what} #{n}: question waits for an answer ({t.id} from {t.frm or 'an agent'})")
            for t in unanswered(thread, fm.DEV_MANAGER)]
@@ -201,7 +202,7 @@ def waiting_questions(what, n, comments, escalation=None):
         import factory_po
         out += [("question", n, f"{what} #{n}: product question {t.id} from {t.frm or 'an agent'} is unanswered "
                                 f"for {age / 60:.1f} h: answer it, or escalate it to the owner")
-                for t, lvl, age in factory_po.waiting(thread, *escalation) if lvl == "dev-manager"]
+                for t, lvl, age in factory_po.waiting(thread, *escalation) if lvl == "dev-manager" and age > 0]
     return out
 
 
