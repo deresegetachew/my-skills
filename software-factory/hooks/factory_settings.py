@@ -92,6 +92,11 @@ SETTINGS = {
     "ci.light": ("bool", "Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`.", None, True),
     "ci.image": ("str", "The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base.", ["build", "base"], "build"),
     "ci.caches": ("bool", "Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets).", None, True),
+    "turbo.api": ("str", "The shared Turborepo cache's address, as agents and CI reach it: http://<Tailscale or LAN address>:3335. Empty: no shared cache. `factory turbo install` starts it.", None, ""),
+    "turbo.team": ("str", "The cache's team name (default: the repository's name).", None, ""),
+    "turbo.bind": ("str", "The address the cache server listens on, on the machine that runs it. 127.0.0.1 reaches only that machine; use its Tailscale or LAN address for others.", None, "127.0.0.1"),
+    "turbo.port": ("int", "The port the cache server listens on.", None, 3335),
+    "turbo.secretsCommand": ("str", "A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins.", None, ""),
     "ci.lightLabel": ("str", "The light runner's label (default `<repo>-light`).", None, ""),
 }
 

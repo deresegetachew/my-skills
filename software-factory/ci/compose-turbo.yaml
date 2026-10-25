@@ -1,0 +1,42 @@
+# The shared Turborepo remote cache (#59): one small server per project and machine that the agents' sessions and CI
+# jobs all use, so a package nobody changed is built, type-checked and tested once. `factory turbo install` starts it
+# (README.md, "A shared build cache"):
+#   docker compose --file compose-turbo.yaml --project-name <repo>-turbo-cache up -d
+#
+# The token comes from the environment of that command, never from this file: `${TURBO_TOKEN:?...}` stops compose
+# when it is missing. Docker keeps the value in the container's configuration, which only people in the docker group
+# can read. It holds build outputs only, and the server answers only to clients that send the token.
+#
+# Reachable only where the owner chose: it listens on TURBO_CACHE_BIND, 127.0.0.1 unless `turbo.bind` says another
+# address (the machine's Tailscale or LAN address, so other machines and the CI runner containers can reach it).
+# Never on every interface by accident, and no port is opened in front of it.
+#
+# No bind mounts: the artifacts live in a named volume, so `ci.sh`'s copy step has nothing to leave unreadable.
+services:
+  cache:
+    image: ducktors/turborepo-remote-cache:${TURBO_CACHE_VERSION:-2.11.2}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      TURBO_TOKEN: '${TURBO_TOKEN:?the cache token is missing, set TURBO_TOKEN or turbo.secretsCommand (README.md, A shared build cache)}'
+      STORAGE_PROVIDER: local
+      STORAGE_PATH: /data
+      LOG_LEVEL: info
+    ports:
+      - '${TURBO_CACHE_BIND:-127.0.0.1}:${TURBO_CACHE_PORT:-3335}:3000'
+    volumes:
+      - turbo-cache-data:/data
+    # A new named volume belongs to root, so the server runs as root inside the container; with every capability
+    # dropped, a read-only root file system and no new privileges, that is the volume's owner and nothing more.
+    user: '0:0'
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  turbo-cache-data:

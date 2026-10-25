@@ -52,6 +52,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Shared remote cache (optional)
+        # The Turborepo cache of the factory machine, shared with the agents (README.md, "A shared build cache").
+        # Skipped for a pull request from another repository: it gets no secrets and runs on GitHub's runners. With
+        # the repository variables and secrets unset, or the cache not answering, the job builds as it always did.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          TURBO_API: ${{ vars.TURBO_API }}
+          TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+          TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+          TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
+        run: python3 .claude/hooks/factory_turbo.py ci-env >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

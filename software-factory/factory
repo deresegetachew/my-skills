@@ -46,6 +46,11 @@ Check
                          full log path if it fails
   check                  the style checks CI runs (one class per file and so on)
   guard                  the Factory guard CI runs, on the current branch
+  turbo status           the shared Turborepo build cache (#59): what is set, where the token comes from, and whether it
+                         answers. Agents and CI use it when turbo.api and a token are set, and build locally when not
+  turbo install [--no-github]
+                         start the cache server on this machine (Docker) and give CI the same cache (repo variables
+                         and secrets); run it again to update. turbo down [--purge] stops it
   doctor                 check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only
 
@@ -145,6 +150,7 @@ case "$cmd" in
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
   precheck)  py factory_wait.py precheck ;;
+  turbo)     py factory_turbo.py "$@" ;;
   update)
     # --layout new|old|auto goes to install.sh: a project that links through kit/ stays on it until it asks for `new`.
     layout=auto
