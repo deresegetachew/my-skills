@@ -31,7 +31,8 @@ def a_loop():
     script = os.path.join(d, "factory-loop.sh")
     open(script, "w").write("#!/bin/sh\nsleep 60\n")
     os.chmod(script, 0o755)
-    return subprocess.Popen([script])
+    # No pipes of ours inherited: the `sleep` this script leaves behind when killed must not keep a reader waiting.
+    return subprocess.Popen([script], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def checkout(clone, agents=None):

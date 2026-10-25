@@ -166,6 +166,10 @@ def fac(d, env, *args):
 
 
 def commit(d, msg="factory"):
+    # The client rewrites files with the archive's fixed times, often with the same size as the old version. Git
+    # trusts a file whose size, times and inode are unchanged (inodes get reused), so on a busy machine `add -A`
+    # could miss the new content. Emptying the index first makes it read every file again.
+    git(d, "rm", "-r", "--cached", "-q", "--ignore-unmatch", ".")
     git(d, "add", "-A")
     git(d, "commit", "-q", "-m", msg)
 
