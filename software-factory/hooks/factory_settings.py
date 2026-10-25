@@ -77,6 +77,7 @@ SETTINGS = {
     "claimStaleHours": ("int", "How long a local claim or a pushed task branch holds a task.", None, None),
     "waitMinutes": ("int", "How often an idle loop looks for work. 0: it exits instead.", None, 1),
     "models": ("dict", "The model per role (builder, manager, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {\"builder\": {\"model\": \"opus\", \"effort\": \"high\"}, \"reviewer\": {\"model\": \"sonnet\", \"escalateTo\": \"opus\"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default.", None, {}),
+    "manager.flakes": ("list", "Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent.", None, []),
     "tasks.source": ("enum", "Where tasks come from.", ["plan", "issues"], None),
     "tasks.staleHours": ("int", "An in-progress issue with no activity this long counts as stale.", None, None),
     "tasks.pingMinutes": ("int", "How often a working agent pings its agent issue, at most.", None, None),

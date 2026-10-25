@@ -76,8 +76,10 @@ activity up to date on each tick:
 [Dev manager tick] Manage <owner>/<repo> for the owner (the coding agent runs `factory loop -i` on his
 machine). Use the REST API (`gh api`), never force-push or push to the main branch.
 0. Run `factory precheck` first. If it prints `nothing to do`, skip to step 7 and do nothing else: no reviews, no
-   extra reads. Otherwise it lists what needs you; work through exactly those. Never wait by checking again in
-   this conversation: use `factory wait ci <pr>` (CI after your fix) or `factory wait answer <pr>`.
+   extra reads. Otherwise it lists what needs you; work through exactly those. `factory prs` is the one list to
+   work from (each open PR with its head, CI judged by the rule, the newest marker per commit, any review claim
+   and its next action; then unanswered questions and owner asks); `factory prs --json` is the same for scripts.
+   Never wait by checking again in this conversation: use `factory wait ci <pr>` (CI after your fix) or `factory wait answer <pr>`.
 1. Open PRs: for any head commit without a `<!-- pr-watch sha=... -->` comment, review and merge under the
    agreed rules. Give a PR a few minutes after it opens if the coding agent may still be pushing; a clean,
    green PR that says "a person merges this one" is yours. Retarget stacked PRs to main after a merge. Glance
@@ -213,6 +215,9 @@ lessons, each with an example or a link.
 Wait until **every** check run on the head commit has `status: completed`, then read the conclusions. A
 loop that stops as soon as one check finishes will merge with another one still running. Count the jobs:
 a new CI job can arrive with a PR, and older branches won't have it.
+
+`factory prs` judges CI by this rule for you: per job name the newest run that was not skipped decides, so a re-run
+replaces a failure; the PR is green only when every job is.
 
 Flaky test (passes locally, times out once on CI): re-run the failed job once (`POST .../actions/runs/{id}/rerun-failed-jobs`).
 If it flakes again, fix the cause (a longer timeout for a cold start, for example) in a small PR.
