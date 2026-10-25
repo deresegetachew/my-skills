@@ -16,6 +16,7 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 RUNNER = r"""
 import importlib.util, os, sys, traceback
+sys.dont_write_bytecode = True  # -I ignores PYTHONDONTWRITEBYTECODE, and tests import the hooks in this process
 path = sys.argv[1]
 sys.path.insert(0, os.path.dirname(path))
 spec = importlib.util.spec_from_file_location("t", path)
@@ -43,13 +44,18 @@ def run_file(path, shard=0, shards=1):
     rel = os.path.relpath(path, ROOT)
     # Output goes to a temp file, not a pipe: a test that leaves a background process behind (a fake loop that
     # sleeps) would hold a pipe open and make this wait for it, but a file does not wait.
-    with tempfile.TemporaryFile("w+") as sink, tempfile.TemporaryDirectory(prefix="factory-test-") as scratch:
+    with tempfile.TemporaryFile("w+") as sink, \
+            tempfile.TemporaryDirectory(prefix="factory-test-", ignore_cleanup_errors=True) as scratch:
         # Files run side by side, so none may write to the real machine-wide places (the machine id, the boot log):
         # each gets its own. A test that wants other folders sets them in its own environment, as before.
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "FACTORY_CONFIG_DIR": os.path.join(scratch, "config"),
                "XDG_STATE_HOME": os.path.join(scratch, "state"),
+               # The tests make their folders with mkdtemp and never remove them: point that at the scratch folder,
+               # which goes when the file's processes end, so a run leaves nothing behind in /tmp.
+               "TMPDIR": os.path.join(scratch, "tmp"),
                # `pick` waits 2 s after claiming for a simultaneous claim; the tests' claims are made up in advance.
                "FACTORY_CLAIM_SETTLE_SECONDS": "0"}
+        os.makedirs(env["TMPDIR"])
         cmd = [sys.executable, "-I", "-c", RUNNER, path] + ([str(shard), str(shards)] if shards > 1 else [])
         try:
             proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT, text=True,
