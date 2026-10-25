@@ -27,6 +27,10 @@ Build
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
                          start; install --agents haile,tewodros turns it on (systemd user unit with linger, or a LaunchAgent)
   resume [--dry-run]     what autostart runs at boot: stack, then agents; safe to run by hand (running agents are left alone)
+  heartbeat [status|install|uninstall|once|run]
+                         the per-machine daemon that knows what each agent here is really doing (working, waiting in a
+                         wait, idle, down) and tells GitHub on a change plus a keepalive. install keeps it running
+                         (autostart install does it too); status shows what it sees
 
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
@@ -50,7 +54,12 @@ Look
   say <agent> "text"     send one message to that agent's session, as if typed (logged on its machine, without the text)
   remote [add|cloud|list|remove]
                          how to reach other machines: add dev-pc factory@192.168.2.45; cloud haile <claude.ai link>
-  agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down
+  agents ls [--json] [--local] [--fresh]
+                         every agent in one table: kind, where (this machine, another, the cloud), state (working,
+                         waiting, idle, down), task, since, last seen and the link to follow it. This machine is read
+                         live from the heartbeat daemon; the others from GitHub, cached a short while
+  agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down and
+                         gives back the issues of agents that are really down (never of one that is alive and waiting)
   issues [list]          tasks as GitHub issues (tasks.source "issues"): list, show N, stale, setup, new ...
 
 Check
@@ -148,6 +157,7 @@ case "$cmd" in
   machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
   follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
+  heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
   autostart) py factory_autostart.py "$@" ;;
   resume)    py factory_resume.py "$@" ;;
