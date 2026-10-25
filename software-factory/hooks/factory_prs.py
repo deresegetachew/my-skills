@@ -25,7 +25,7 @@ MARKER = re.compile(r"<!--\s*(factory-approved|factory-mustfix|pr-watch)\b([^>]*
 CLAIM = re.compile(r"<!--\s*factory-review-claim\s+manager=([\w.-]+)\s+sha=([0-9a-f]{7,40})\s+until=(\S+?)\s*-->")
 QUESTION = re.compile(r"<!--\s*factory-question\b")
 ANSWER = re.compile(r"<!--\s*factory-answer\b")
-OWNER_ASK = re.compile(r"<!--\s*factory-owner-ask\s+id=([\w.-]+)\s*-->")
+OWNER_ASK = re.compile(r"<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\s*-->")  # for=product may follow
 OWNER_ANSWER = re.compile(r"<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->")
 OWNER_QUEUE_TITLE = "Dev manager: needs the owner"
 PERSON_MERGES = "a person merges this one"

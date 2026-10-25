@@ -22,6 +22,7 @@ a reason). A project without the folder falls back to its `notes` (`<notes>/mana
   factory_roles.py claude-flags <role>         the settings flags for the role's sessions, one per line
   factory_roles.py choose                      ask for a role and a name (factory loop -i); prints "role name"
   factory_roles.py init [--force]              scaffold the role folders (factory init-roles)
+  factory_roles.py digest <role>               the role folder and its reads.md, one line (the dry run prints it)
   factory_roles.py reads [role]                every path in reads.md that does not exist (exit 1 when any)
 """
 import glob, json, os, re, shlex, sys
@@ -169,10 +170,10 @@ def default_reads(cfg, role):
                           ("research", "research notes")],
     }[role]
     lines = [f"- {path} - {why}" for path, why in rows if path and os.path.exists(path)]
-    head = ("# What this role reads\n\n"
-            "One document per line: `path` or `path#section`, then a dash and why. The role's skill reads this list\n"
-            "first and nothing else up front, so a pass does not load the whole PRD or the repo's docs. A section lets\n"
-            "the role `grep -n` for it. `factory doctor` checks that every path exists.\n\n")
+    head = ("# What this role reads\n#\n"
+            "# One document per line: `path` or `path#section`, then a dash and why. The role's skill reads this list\n"
+            "# first and nothing else up front, so a pass does not load the whole PRD or the repo's docs. A section lets\n"
+            "# the role `grep -n` for it. `factory doctor` checks that every path exists. Lines starting with # are notes.\n\n")
     return head + ("\n".join(lines) + "\n" if lines else "- CLAUDE.md - the project's rules\n")
 
 
@@ -238,15 +239,51 @@ def work(cfg, role, name=""):
     """What `role` has to do now, one line each, empty when nothing. Reads GitHub only."""
     if role == "product-owner":
         import factory_issues as fi
+        lines = []
         label = str(role_setting(cfg, role, "workLabel", "") or "")
-        if not label:
-            return []
-        items = fi.gh_all(f"repos/{{owner}}/{{repo}}/issues?state=open&labels={label}")
-        return [f"{'PR' if i.get('pull_request') else 'issue'} #{i['number']}: {i['title']} ({label})" for i in items]
+        if label:
+            items = fi.gh_all(f"repos/{{owner}}/{{repo}}/issues?state=open&labels={label}")
+            lines += [f"{'PR' if i.get('pull_request') else 'issue'} #{i['number']}: {i['title']} ({label})" for i in items]
+        return lines + product_asks(cfg) + signoff_digest(cfg)
     if role == "dev-manager":
         import factory_wait
         return factory_wait.precheck(cfg)
     raise SystemExit("factory: a coding agent's work is `factory next`.")
+
+
+def product_asks(cfg):
+    """One line per owner-queue ask tagged `for=product` that nobody has answered: scope, order, PRD and wording
+    questions the dev manager sends the product owner (`<!-- factory-owner-ask id=<slug> for=product -->`)."""
+    import factory_orchestrator as orch, factory_prs, factory_issues as fi
+    queue = orch.owner_queue(cfg, create=False)
+    if not queue:
+        return []
+    out = []
+    for slug, c in factory_prs.open_owner_asks(fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{queue}/comments")):
+        if re.search(r"<!--\s*factory-owner-ask\b[^>]*\bfor=product\b", c.get("body") or ""):
+            text = re.sub(r"<!--.*?-->", "", c.get("body") or "", flags=re.S).strip().splitlines()
+            out.append(f"owner queue #{queue}, ask {slug} for product: {(text or [''])[0][:100]}")
+    return out
+
+
+def signoff_digest(cfg):
+    import factory_signoff
+    return factory_signoff.digest(cfg)
+
+
+def digest(cfg, role, name=""):
+    """What `factory <role> loop --dry-run` prints besides the work: where the role's instructions are, and whether
+    every document in its reads.md exists. Reads the working tree only."""
+    folder = role_dir(cfg, role)
+    if not folder:
+        note = notes_file(cfg, role)
+        return [f"reads: no role folder at {roles_dir(cfg)}/{role}/" + (f"; falls back to {note}" if note else "")
+                + " (factory init-roles adds it)"]
+    miss = missing_reads(cfg, role)
+    reads = os.path.join(folder, "reads.md")
+    n = len(parse_reads(open(reads, encoding="utf-8").read())) if os.path.isfile(reads) else 0
+    line = f"reads: {folder}/ (README.md, reads.md: {n} document{'s' if n != 1 else ''}"
+    return [line + (f", {len(miss)} missing: {', '.join(miss)})" if miss else ")")]
 
 
 def choose(stdin=None, out=None):
@@ -305,7 +342,7 @@ def main(argv):
                 bad += 1
                 print(f"{role}: {p} (listed in {roles_dir(cfg)}/{role}/reads.md) does not exist")
         sys.exit(1 if bad else 0)
-    elif cmd in ("vars", "names", "nth", "work", "prompt", "claude-flags"):
+    elif cmd in ("vars", "names", "nth", "work", "prompt", "claude-flags", "digest"):
         role = need(rest[0]) and rest[0] if rest else sys.exit(f"usage: factory_roles.py {cmd} <role>")
         if cmd == "vars":
             print(shell_vars(cfg, role))
@@ -321,6 +358,8 @@ def main(argv):
             lines = work(cfg, role)
             print("\n".join(lines) if lines else "nothing to do")
             sys.exit(0 if lines else 3)
+        elif cmd == "digest":
+            print("\n".join(digest(cfg, role)))
         elif cmd == "prompt":
             print(prompt(cfg, role, rest[1] if len(rest) > 1 else "", " ".join(rest[2:])))
         else:

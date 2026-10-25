@@ -11,9 +11,11 @@ labels: ["factory:ready"]
 ## Brief: read these, not more
 
 <!-- What the agent opens first, so it doesn't explore: the PRD stories or sections by heading, the decisions,
-     the design reference, the files and modules it will change, and what's out of scope. -->
+     the design reference, the files and modules it will change, and what's out of scope.
+     The PRD line names the stories this task serves, as `PRD: US-3, US-5` (one line): `factory prd` reads it to show
+     progress per story. A task that serves no story says `PRD: none`. -->
 
-- **PRD:** 
+- **PRD:** US-<n>
 - **Decisions:** 
 - **Design reference:** 
 - **Code:** 

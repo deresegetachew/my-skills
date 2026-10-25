@@ -93,6 +93,10 @@ machine). Use the REST API (`gh api`), never force-push or push to the main bran
    minutes: fix it on that branch (merge main in and resolve), push, wait for CI, merge. Small fixes only;
    big ones or judgement calls go to the owner.
 3. Questions: answer every `<!-- factory-question -->` comment without a later `<!-- factory-answer -->`.
+   `factory messages ls --to dev-manager` lists them across issues and PRs. When a question carries a
+   `factory-msg` envelope, answer with one: `factory messages new --kind answer --in-reply-to <id> --ref pr#<n>`
+   (state `completed`; `failed` when it needs the owner, `input-required` when you need more from the asker),
+   and keep the old marker on the next line. Questions addressed to `po` are the PO's to answer.
    Escalate to the owner only what is theirs (scope, legal, money, names, files or keys), with a recommendation.
    New "Blocked:" PRs or lines in docs/blocked.md: resolve them yourself if you can, otherwise tell the owner.
 4. Idle check: the coding agent's last activity was <time>. If 45+ minutes pass with nothing new and

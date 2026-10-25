@@ -89,6 +89,7 @@ Each marker is the first line of a comment. `<head>` is the full head sha of the
 | `<!-- factory-approved sha=<head> -->` | you | that commit is approved; counts only for that sha |
 | `<!-- pr-watch sha=<head> -->` | you | that commit has been reviewed (ends the review of this head) |
 | `<!-- factory-owner-ask id=<slug> -->` | you | a comment on the owner-queue issue; starts with "this needs your yes: ..." and a recommendation |
+| `<!-- factory-owner-ask id=<slug> for=product -->` | you | the same, for a **product** question (scope, order, the PRD, customer or legal wording, names): the product owner role reads it, writes a proposal under it, and the owner answers there |
 
 - **Hold label.** `factory-hold` (`holdLabel` in `.claude/factory.json`) on a PR you are reviewing stops the agent merging it and
   keeps it from being handed out as rework. Remove it when you finish. Do not hold a PR with a must-fix that lists nothing.
@@ -97,6 +98,9 @@ Each marker is the first line of a comment. `<head>` is the full head sha of the
   or the PR is already merged, treat that as done by someone else, not as an error. After a merge retarget a stacked PR
   with `PATCH .../pulls/<n>` `base=main`.
 - **Labels.** `tests-reviewed` and `deps-reviewed` only after reading the change they excuse.
+- **Product asks.** Scope, order and PRD questions (the right-hand column's "Scope and order", a story that is unclear or
+  repeated, wording a customer will read) go to the owner queue with `for=product` in the marker. Technical and process asks
+  carry no tag. Keep the ask short; the product owner adds the options.
 - **Owner queue ask.** One pinned issue per project, "Dev manager: needs the owner". Before posting, list its comments and check
   none already has your `id=` slug; an ask is posted once. The owner answers in the comment; the next pass reads the reply.
 

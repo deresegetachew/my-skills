@@ -3,6 +3,11 @@
 #   ./factory <command>        or, with the shim on your PATH (factory install-shim), just: factory <command>
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -uo pipefail
+# `factory bootstrap` sets up a machine, so it works before there is a checkout: it runs from where this script lives.
+if [ "${1:-}" = bootstrap ]; then
+  self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+  exec python3 "$(dirname "$self")/hooks/factory_bootstrap.py" "${@:2}"
+fi
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
 cd "$root"
 hooks="$root/.claude/hooks"
@@ -26,7 +31,8 @@ Build
                          from roles.<role>.names; --once runs one pass, --dry-run prints what a pass would do
   init-roles [--force]   create the project's role folders (.claude/factory/roles/<role>/README.md and reads.md)
   agent <name|N>         open Claude in that agent's own worktree (created the first time), for manual work there.
-                         To run the queue, use loop -i instead (a fresh session per task).
+                         To run the queue, use loop -i instead (a fresh session per task). --detach: in a detached
+                         tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next
   autostart [status|install|uninstall]
@@ -55,12 +61,23 @@ Look
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
+  follow [<agent>] [--read|--log] [--on R] [--all]
+                         watch and talk to an agent by name, on another machine or in the cloud: without a name,
+                         every agent and one-item sub-manager we can find, where it runs and its Remote Control link
+  say <agent> "text"     send one message to that agent's session, as if typed (logged on its machine, without the text)
+  remote [add|cloud|list|remove]
+                         how to reach other machines: add dev-pc factory@192.168.2.45; cloud haile <claude.ai link>
   agents ls [--json] [--local] [--fresh]
                          every agent in one table: kind, where (this machine, another, the cloud), state (working,
                          waiting, idle, down), task, since, last seen and the link to follow it. This machine is read
                          live from the heartbeat daemon; the others from GitHub, cached a short while
-  agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down and
-                         gives back the issues of agents that are really down (never of one that is alive and waiting)
+  agents [list|card|sweep]
+                         live agents (issues mode): who is working, idle or down; list --json and card <name> give the
+                         agent cards; sweep marks silent ones down and gives back the issues of agents that are really
+                         down (never of one that is alive and waiting)
+  messages [ls|new]      questions and answers between agents, the dev manager and the PO: ls [--to X] [--state S]
+                         [--ref N] lists what is open across issues and PRs; new --kind question --to po prints the
+                         envelope to paste at the top of a comment (docs/messages.md)
   issues [list]          tasks as GitHub issues (tasks.source "issues"): list, show N, stale, setup, new ...
 
 Check
@@ -71,8 +88,19 @@ Check
                          full log path if it fails
   check                  the style checks CI runs (one class per file and so on)
   guard                  the Factory guard CI runs, on the current branch
-  doctor                 check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
-                         agent names) and say how to fix each gap; read-only
+  turbo status           the shared Turborepo build cache (#59): what is set, where the token comes from, and whether it
+                         answers. Agents and CI use it when turbo.api and a token are set, and build locally when not
+  turbo install [--no-github]
+                         start the cache server on this machine (Docker) and give CI the same cache (repo variables
+                         and secrets); run it again to update. turbo down [--purge] stops it
+  doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
+                         agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
+                         of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user
+  bootstrap machine|project|all|status|uninstall
+                         set up a sandboxed factory machine: the dedicated user, rootless Docker, the network guard.
+                         `sudo factory bootstrap machine` prints the plan; --apply runs it as root, --script FILE writes it
+                         as a bash script to read first. `project` (as that user) ends with doctor --sandbox. Nothing
+                         privileged runs unless you pass --apply; sign-ins and the age key stay yours
 
 CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
   ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
@@ -118,6 +146,12 @@ Maintain
   watch [--json]         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
                          approved and green, owner waits, agents down or idle, queued CI): one line each and who it is for
                          (manager or owner), exit 3 when any, without a model. The orchestrator starts from this
+  prd [--open] [--story N] [--json]
+                         progress against the PRD from GitHub: per user story its tasks (a `PRD: US-3` line in the
+                         task) and state, how many stories are done, which have no task. Plain text, read-only
+  signoff ls|add|plan|confirm|result
+                         the sign-off and testing queue: what only a person can check, and test plans for the running
+                         app (proposed, confirmed by the owner, then results recorded)
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
@@ -155,6 +189,11 @@ case "$cmd" in
     exec env FACTORY_ROLE="$role" FACTORY_NAME="$who" "$root/factory-loop.sh" "$@" ;;
   init-roles) py factory_roles.py init "$@" ;;
   agent)
+    # --detach (#106): start the agent in a detached tmux session, which `factory follow <name>` finds from anywhere.
+    detach=0; rest=()
+    for a in "$@"; do if [ "$a" = --detach ]; then detach=1; else rest+=("$a"); fi; done
+    set -- ${rest[@]+"${rest[@]}"}
+    if [ "$detach" = 1 ]; then exec python3 "$hooks/factory_follow.py" detach "$@"; fi
     [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
     who="$1"; shift
     bare=0; [ "$#" = 0 ] && bare=1
@@ -189,7 +228,9 @@ case "$cmd" in
   worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
   machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
+  follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
+  messages)  py factory_messages.py "${1:-ls}" "${@:2}" ;;
   heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
   autostart) py factory_autostart.py "$@" ;;
@@ -220,6 +261,9 @@ case "$cmd" in
              esac ;;
   precheck)  py factory_wait.py precheck ;;
   watch)     py factory_watch.py "$@" ;;
+  prd)       py factory_prd.py "$@" ;;
+  signoff)   py factory_signoff.py "$@" ;;
+  turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
   update)
     # A project with a release pin (.claude/factory/release.json), or one that asks (a version, --release), takes the

@@ -29,6 +29,8 @@
       "Bash(factory issues *)",
       "Bash(factory reviews*)",
       "Bash(factory status*)",
+      "Bash(factory prd*)",
+      "Bash(factory signoff*)",
       "Bash(./factory precheck*)",
       "Bash(./factory watch*)",
       "Bash(./factory prs*)",
@@ -36,7 +38,9 @@
       "Bash(./factory agents*)",
       "Bash(./factory issues *)",
       "Bash(./factory reviews*)",
-      "Bash(./factory status*)"
+      "Bash(./factory status*)",
+      "Bash(./factory prd*)",
+      "Bash(./factory signoff*)"
     ],
     "deny": [
       "Read(./.env)",

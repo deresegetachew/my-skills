@@ -74,6 +74,7 @@ if [ "$dry_run" = 1 ]; then
     dev-manager)
       python3 "$hooks/factory_orchestrator.py" cycle --name "$who" --dry-run ;;
     *)
+      python3 "$hooks/factory_roles.py" digest "$role" | sed "s/^/[$who] /"
       if found=$(python3 "$hooks/factory_roles.py" work "$role" --name "$who"); then
         echo "$found" | sed "s/^/[$who] work: /"
         echo "[$who] would run: claude -p \"$(python3 "$hooks/factory_roles.py" prompt "$role" "$who" | head -1)\""
@@ -184,6 +185,10 @@ isolate() {
     local line
     while IFS= read -r line; do [ -n "$line" ] && claude_flags+=("$line"); done < <(python3 "$hooks/factory_roles.py" claude-flags "$role")
   fi
+  # The shared Turborepo cache (#59), asked for before every task, so a cache that came up later is picked up and one
+  # that went away is dropped. Prints nothing while turbo.api is empty; no token or no answer: local cache only, and
+  # it says why. Never stops the loop.
+  eval "$(python3 "$hooks/factory_turbo.py" env)" || true
   # The `models` setting (factory_models.py): --model and --effort for the role's session, and --agents for the
   # subagents whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
   if [ -f "$hooks/factory_models.py" ]; then
