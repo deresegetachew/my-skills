@@ -7,6 +7,8 @@ model: opus
 
 **Project notes:** if `<notes>/safety-auditor.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
+**Lessons.** Run `python3 .claude/hooks/factory_lessons.py show` (a short list of this project's repeated mistakes) and check the lessons that touch your area against the diff; a change that repeats one is a **must-fix**.
+
 **Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind safety`
 and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
 a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
