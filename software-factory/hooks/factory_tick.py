@@ -10,9 +10,10 @@ when the pass ends. Run it from cron, launchd, a systemd timer or a loop script 
 alive to tick: the idle ticks are shell only.
 
   --dry-run   print the precheck and the command that would start, start nothing
+A second tick that starts while a pass still runs on this checkout does nothing (a lock in .git).
 Exit: 0 nothing to do, or the session's own exit code; 1 the tick can't run (the line says why and what to do).
 """
-import os, shlex, subprocess, sys
+import fcntl, os, shlex, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import factory_models as fmodels  # noqa: E402
@@ -53,6 +54,13 @@ def tick(args):
         return 1
     if "--dry-run" in args:
         print("would run: " + " ".join(shlex.quote(c) for c in cmd))
+        return 0
+    lock = open(os.path.abspath(subprocess.run(["git", "rev-parse", "--git-path", "factory-manage-tick.lock"],
+                                               capture_output=True, text=True).stdout.strip() or ".factory-manage-tick.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("a manager pass is already running here; this tick starts nothing")
         return 0
     return subprocess.call(cmd)
 

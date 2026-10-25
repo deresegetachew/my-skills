@@ -85,6 +85,17 @@ def test_factory_command_routes_manage_tick():
     assert (p.returncode, p.stdout.strip()) == (0, "nothing to do"), (p.returncode, p.stdout, p.stderr)
 
 
+def test_a_tick_does_not_start_a_second_pass_while_one_runs():
+    import fcntl
+    d, env = project(pulls={"7": pr(7, sha="bbb2222")})
+    held = open(os.path.join(d, ".git", "factory-manage-tick.lock"), "w")
+    fcntl.flock(held, fcntl.LOCK_EX)
+    rc, out, _ = tick(d, env)
+    assert rc == 0 and "already running" in out and calls(d) == [], (rc, out)
+    fcntl.flock(held, fcntl.LOCK_UN)
+    assert tick(d, env)[0] == 0 and len(calls(d)) == 1
+
+
 if __name__ == "__main__":
     tests = [(k, v) for k, v in sorted(globals().items()) if k.startswith("test_")]
     for k, v in tests:
