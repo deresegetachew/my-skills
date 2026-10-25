@@ -15,6 +15,39 @@ Run `/product-pass` alone for a whole pass (non-interactive: triage only). Under
 PRD"): answer from the PRD, show the numbers below, and write down what was decided. `--dry-run` anywhere means: read, print
 what you would do, one line each, write nothing.
 
+## Discovery: from an idea to a first milestone (`/product-pass discover`)
+
+A product owner started with `-i` and nothing queued is at the start of a project (or of a new direction). This is a
+conversation with the owner, one decision at a time, each with your recommendation; you write down what is decided in the
+project, never only in chat. `factory prd --stage` shows where you are and what the owner has approved.
+
+1. **Vision and PRD.** Ask who it is for, what they can do that they could not, what must never break, what is out of scope.
+   Write `docs/PRD.md` (the `prd` path; `factory init` made a stub): vision, users, stories numbered once and never reused
+   (`- US-1: ...`), the rules, out of scope. Commit it in a pull request. Then `factory prd --stage --ask vision`.
+2. **Design.** Only after the vision is approved. Write the design brief from the PRD, the design-system file (STYLE) and the
+   screens that matter into the project's `design/` folder (a reference copy of any artifact: `factory artifacts pull`).
+   Then `factory prd --stage --ask design`.
+3. **Plan.** Only after the design is approved. Cut the stories into milestones and tasks: `factory issues new --title ...
+   --body-file ... --milestone ...`, each from the task template with a `PRD: US-<n>` line, a brief, "Done when" and edge
+   cases. Read `factory prd` until no story lacks a task. The dev manager checking the plan for buildability is not built yet
+   (#96 follow-up): look for dependencies, an order that works, and a "Done when" a test can check. Then `factory prd --stage
+   --ask plan`.
+4. **Stop at the gates.** The owner's yes is a reply under the ask (`yes`, or a comment saying what to change). A reply that is
+   not a yes is a question: answer it, change the document, ask again. When the owner is away you wait; you never proceed on
+   your own at a gate.
+5. **Hand over.** With the three approvals `factory prd --stage` says to start the builders (`factory coding-agent loop`) and
+   the dev manager (`factory dev-manager loop`). Nothing you know may live only in this chat: the PRD, the designs, the
+   issues and the role folder are what the next role reads.
+
+## Pivot: a change of direction
+
+When the sign-off results, test findings, usage or questions say the product should change: propose it to the owner first.
+After the owner's yes, open **one pull request with the PRD-change template** (`.github/PULL_REQUEST_TEMPLATE/prd-change.md`;
+`gh pr create --body-file` it): the stories touched, the tasks that move, a decision record (`docs/decisions/`, next free
+number on main and in open PRs), and the owner's yes. In the same pass change the task issues (new, edited "Done when", frozen
+with `factory-hold`, or closed as not planned) so running agents and the dev manager pick the change up from GitHub. Check `factory prd` shows
+no story used twice and no task naming a missing story.
+
 ## The pass order
 
 1. **The list.** `python3 .claude/hooks/factory_roles.py work product-owner` prints what waits for you, one line each (or

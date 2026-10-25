@@ -2,6 +2,7 @@
 
 The state is a JSON file (FAKE_DB):
   issues    [{number, title, body, state, labels: [{name}], state_reason, pull_request?}]
+  labels, milestones   what `POST labels` and `POST milestones` made
   comments  {"<issue number>": [body or {body, created_at}]}
   pulls     [...]
 Reads answer from it. `POST issues` makes an issue; `POST issues/N/comments` appends a comment. Every call is logged to
@@ -28,9 +29,18 @@ def save(kind, what):
     db.setdefault("posted", []).append({"kind": kind, **what}); json.dump(db, open(path_db, "w"))
 if p == "user": out({"login": "me"})
 if p == "repos/{owner}/{repo}" or p == "repos/{owner}/{repo}/": out({"owner": {"login": "boss", "type": "User"}})
+if p == "labels" and method == "POST":
+    db.setdefault("labels", []).append({"name": data["name"], "color": data.get("color", "")}); save("label", {"name": data["name"]}); out({})
+if p == "labels": out(db.get("labels", []) if page == 1 else [])
+if p == "milestones" and method == "POST":
+    ms = db.setdefault("milestones", []); m = {"number": len(ms) + 1, "title": data["title"]}; ms.append(m); save("milestone", m); out(m)
+if p == "milestones": out(db.get("milestones", []) if page == 1 else [])
 if p == "issues" and method == "POST":
     n = max([i["number"] for i in db.get("issues", [])] + [100]) + 1
-    issue = {"number": n, "title": data.get("title", ""), "body": data.get("body", ""), "state": "open", "labels": []}
+    issue = {"number": n, "title": data.get("title", ""), "body": data.get("body", ""), "state": "open",
+             "labels": [{"name": x} for x in data.get("labels", [])], "html_url": f"https://github.com/o/r/issues/{n}"}
+    if data.get("milestone"):
+        issue["milestone"] = next((m for m in db.get("milestones", []) if m["number"] == data["milestone"]), None)
     db.setdefault("issues", []).append(issue); save("issue", {"number": n, "title": issue["title"]}); out(issue)
 if p == "issues":
     items = db.get("issues", [])
@@ -38,6 +48,8 @@ if p == "issues":
     if st != "all": items = [i for i in items if i.get("state", "open") == st]
     if "labels" in q: items = [i for i in items if q["labels"][0] in [l["name"] for l in i.get("labels", [])]]
     out(items if page == 1 else [])
+m1 = re.fullmatch(r"issues/(\d+)", p)
+if m1 and method == "GET": out(next((i for i in db.get("issues", []) if i["number"] == int(m1.group(1))), {}))
 if p == "pulls": out(db.get("pulls", []) if page == 1 else [])
 m = re.fullmatch(r"issues/(\d+)/comments", p)
 if m and method == "POST":

@@ -78,7 +78,10 @@ if [ "$dry_run" = 1 ]; then
       if found=$(python3 "$hooks/factory_roles.py" work "$role" --name "$who"); then
         echo "$found" | sed "s/^/[$who] work: /"
         echo "[$who] would run: claude -p \"$(python3 "$hooks/factory_roles.py" prompt "$role" "$who" | head -1)\""
-      else echo "[$who] $found"; fi ;;
+      else
+        echo "[$who] $found"
+        [ "$role" != product-owner ] || [ "$interactive" != 1 ] || echo "[$who] with -i and nothing queued it would start a discovery session: claude \"/product-pass discover\""
+      fi ;;
   esac
   exit 0
 fi
@@ -222,7 +225,7 @@ role_sleep() {
 # One pass of a manager or a product owner. Returns 0 (it had work and did it), 3 (nothing to do) or 1 (it failed).
 # When factory_roles.py finds work, one fresh `claude -p` runs the role's skill (`claude` without -p under -i).
 role_pass() {
-  local found rc prompt
+  local found rc prompt discover=0
   if [ "$role_kind" = orchestrator ]; then
     # No model here: the orchestrator reads GitHub, posts to the owner queue and starts one-item sub-managers.
     python3 "$hooks/factory_orchestrator.py" cycle --name "$agent" $([ "$interactive" = 1 ] && echo --interactive); rc=$?
@@ -231,6 +234,11 @@ role_pass() {
     return "$rc"
   fi
   found="$(python3 "$hooks/factory_roles.py" work "$role" --name "$agent")"; rc=$?
+  # A product owner started with -i and nothing queued is the start of a project: a discovery session (vision, design,
+  # plan; #103) instead of "nothing to do". It runs once; the loop does not restart it when you /exit.
+  if [ "$rc" = 3 ] && [ "$interactive" = 1 ] && [ "$role" = product-owner ]; then
+    found="nothing queued: a discovery session"; rc=0; discover=1
+  fi
   [ "$rc" = 3 ] && return 3
   [ "$rc" = 0 ] || { echo "[$agent] $found"; return 1; }
   item="$(printf '%s\n' "$found" | head -1)"
@@ -240,7 +248,7 @@ role_pass() {
   fi
   echo "=== [$agent] $(date '+%H:%M') $role: $item ==="
   isolate
-  prompt="$(python3 "$hooks/factory_roles.py" prompt "$role" "$agent")"
+  prompt="$(python3 "$hooks/factory_roles.py" prompt "$role" "$agent" $([ "$discover" = 1 ] && echo discover))"
   python3 "$hooks/factory_agents.py" ping --agent "$agent" --status "$item" >/dev/null 2>&1 || true
   if [ "$interactive" = 1 ]; then
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then claude "${claude_flags[@]}" --remote-control="$agent" "$prompt"; else claude "${claude_flags[@]}" "$prompt"; fi
@@ -248,6 +256,7 @@ role_pass() {
   else
     claude "${claude_flags[@]}" -p "$prompt"; rc=$?
   fi
+  [ "$discover" = 0 ] || exit "$rc"
   [ "$rc" = 0 ] || return 1
   return 0
 }

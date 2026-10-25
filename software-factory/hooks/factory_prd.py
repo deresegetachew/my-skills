@@ -6,6 +6,7 @@ A task issue says which stories it serves with one line, `PRD: US-3, US-5` (the 
 per story, its tasks and their state, then how much of the PRD is done and what has no task yet.
 
   factory prd [--open] [--story N] [--json]
+  factory prd --stage [--ask vision|design|plan]   where the project is on the way to a first milestone (factory_flow.py)
 
   --open       hide the stories that are done
   --story N    one story, with its title and every task
@@ -124,7 +125,12 @@ def main(argv=None):
     ap.add_argument("--open", action="store_true", help="hide stories that are done")
     ap.add_argument("--story", type=int, help="one story, with its tasks")
     ap.add_argument("--json", action="store_true")
-    a = ap.parse_args(argv)
+    a, extra = ap.parse_known_args(argv)
+    if "--stage" in extra or "--ask" in extra:
+        import factory_flow  # the flow stages and the owner's gates (#103)
+        return factory_flow.main(argv if argv is not None else sys.argv[1:])
+    if extra:
+        ap.error(f"unrecognized arguments: {' '.join(extra)}")
     cfg = load()
     path = cfg.get("prd") or "docs/PRD.md"
     if not os.path.isfile(path):

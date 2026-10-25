@@ -29,6 +29,8 @@ Build
                          the roles, started the same way and run by the same loop (#102). The dev manager is an
                          orchestrator with no model: it watches GitHub and starts one-item sub-managers (#97). Names come
                          from roles.<role>.names; --once runs one pass, --dry-run prints what a pass would do
+  init [--dry-run]       the project's scaffold: role folders, labels, the owner queue, a starter PRD and the PRD-change
+                         PR template; says what it made, adds nothing twice (then the next steps to a first milestone)
   init-roles [--force]   create the project's role folders (.claude/factory/roles/<role>/README.md and reads.md)
   agent <name|N>         open Claude in that agent's own worktree (created the first time), for manual work there.
                          To run the queue, use loop -i instead (a fresh session per task). --detach: in a detached
@@ -149,9 +151,9 @@ Maintain
   watch [--json]         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
                          approved and green, owner waits, agents down or idle, queued CI): one line each and who it is for
                          (manager or owner), exit 3 when any, without a model. The orchestrator starts from this
-  prd [--open] [--story N] [--json]
+  prd [--open] [--story N] [--json] | --stage [--ask vision|design|plan]
                          progress against the PRD from GitHub: per user story its tasks (a `PRD: US-3` line in the
-                         task) and state, how many stories are done, which have no task. Plain text, read-only
+                         task) and state, how many stories are done, which have no task. --stage: the flow from an idea to a first milestone and the owner's gates. Plain text, read-only
   signoff ls|add|plan|confirm|result
                          the sign-off and testing queue: what only a person can check, and test plans for the running
                          app (proposed, confirmed by the owner, then results recorded)
@@ -198,6 +200,7 @@ case "$cmd" in
     shift
     case "$who" in ''|*[!0-9]*) ;; *) who="$(py factory_roles.py nth "$role" "$who")" || exit 1 ;; esac
     exec env FACTORY_ROLE="$role" FACTORY_NAME="$who" "$root/factory-loop.sh" "$@" ;;
+  init)      py factory_init.py "$@" ;;
   init-roles) py factory_roles.py init "$@" ;;
   agent)
     # --detach (#106): start the agent in a detached tmux session, which `factory follow <name>` finds from anywhere.
