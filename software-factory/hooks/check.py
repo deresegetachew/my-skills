@@ -14,6 +14,7 @@ import hashlib, json, os, re, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from factory_config import load  # noqa: E402
+from factory_run_check import excerpt, line_limit, write_log  # noqa: E402
 
 try:
     data = json.load(sys.stdin)
@@ -78,38 +79,18 @@ try:
 except OSError:
     pass
 
-# A line that names a failure: a failed test, an assertion, a compiler error with its file and line.
-FAILURE = re.compile(r"(\bFAIL(ED)?\b|\u2717|\u00d7|\bError\b|\berror TS\d+|AssertionError|\bexpected\b|"
-                     r"Traceback|:\d+:\d+)", re.I)
-
-
-def excerpt(text, limit):
-    """At most `limit` lines: the failing ones first (in order), then the end of the output, without repeats."""
-    lines = [l for l in text.strip().splitlines() if l.strip()]
-    failing = [i for i, l in enumerate(lines) if FAILURE.search(l)][: max(limit // 2, 1)]
-    tail = list(range(max(len(lines) - (limit - len(failing)), 0), len(lines)))
-    keep = sorted(set(failing) | set(tail))[-limit:] if limit > 0 else []
-    out, last = [], None
-    for i in keep:
-        if last is not None and i != last + 1:
-            out.append("...")
-        out.append(lines[i])
-        last = i
-    return out
-
-
-try:  # a bad value must never skip the check (exit 1 would let the turn end)
-    limit = max(int(cfg.get("checkOutputLines") or 40), 1)
-except (TypeError, ValueError):
-    limit = 40
+limit = line_limit(cfg)
 for name in ("typecheck", "test"):
     cmd = cfg["commands"].get(f"{name}Changed") or cfg["commands"].get(name)
     if not cmd:
         continue
     r = sh(cmd)
     if r.returncode != 0:
-        out = excerpt(r.stdout + r.stderr, limit)
-        print(f"`{cmd}` fails. Fix it before finishing:\n" + "\n".join(out), file=sys.stderr)
+        text = r.stdout + r.stderr
+        out = excerpt(text, limit)
+        log = write_log(cfg, name, f"$ {cmd}\n{text}")
+        more = f" Full log: {log}" if log else ""
+        print(f"`{cmd}` fails. Fix it before finishing:{more}\n" + "\n".join(out), file=sys.stderr)
         sys.exit(2)
 try:
     if last_green:

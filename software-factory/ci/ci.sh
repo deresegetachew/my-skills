@@ -190,7 +190,10 @@ copy_files() {
   install -m 600 "$kit/compose-caches.yaml" "$CI_INSTALLED/compose-caches.yaml"
   install -m 600 "$kit/runner.Dockerfile" "$CI_INSTALLED/runner.Dockerfile"
   install -m 600 "$kit/install-tools.sh" "$CI_INSTALLED/install-tools.sh"
-  install -m 600 "$kit/entrypoint.sh" "$CI_INSTALLED/entrypoint.sh"
+  # 0644, not 0600: the runner container's user (uid 1001) is not whoever installed, and bash must read this file
+  # there (a 0600 copy gave "Permission denied", exit 126). It holds no secret: the registration token only ever
+  # comes in the environment. The folder around it is 0700, so no other user on the machine can reach it.
+  install -m 644 "$kit/entrypoint.sh" "$CI_INSTALLED/entrypoint.sh"
 }
 
 on_main_note() {

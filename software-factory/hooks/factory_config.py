@@ -19,6 +19,8 @@ DEFAULTS = {
     "codePaths": ["src"],
     # How many lines of a failing Stop check the agent sees: the failing lines first, then the end of the output.
     "checkOutputLines": 40,
+    # Where the full output of a failed check is saved (the agent sees only a capped summary and this path).
+    "checkLogDir": "tmp/checks",
     "protected": [r"^CLAUDE\.md$", r"^\.claude/", r"^\.github/", r"^\.mcp\.json$", r"\.env",
                   r"(^|/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?)$"],
     "alwaysAllowed": ["docs/build-plan.md", "docs/blocked.md"],
