@@ -268,15 +268,17 @@ def collect(cfg, now=None, info=None):
             if not st:
                 continue
             _, status, t, quiet_min = st
+            since = when(factory_agents.fields(issue).get("since"))  # when it entered this state (the heartbeat writes it)
+            quiet_min = minutes(since, now) if since else 0.0
             if status == "down":
                 items.append(make("owner", f"agent-down-{name}-{t:%Y%m%d%H}", f"agent {name} is down (last ping {t:%H:%M} UTC)",
                                   to="owner", since=t, target=issue["number"], key=f"agent-down-{name}-{t:%Y%m%d%H}"))
             elif status == "idle" and quiet_min >= float(manager_setting(cfg, "agentIdleMinutes")):
                 ready = fi.ready_issues(cfg) if ready is None else ready
                 if ready:
-                    items.append(make("owner", f"agent-idle-{name}-{t:%Y%m%d%H}", f"agent {name} has been idle for "
+                    items.append(make("owner", f"agent-idle-{name}-{now:%Y%m%d}", f"agent {name} has been idle for "
                                       f"{quiet_min:.0f} min while {len(ready)} task(s) are ready", to="owner", since=t,
-                                      target=issue["number"], key=f"agent-idle-{name}-{t:%Y%m%d%H}"))
+                                      target=issue["number"], key=f"agent-idle-{name}-{now:%Y%m%d}"))
 
     # check 7: queued CI
     try:

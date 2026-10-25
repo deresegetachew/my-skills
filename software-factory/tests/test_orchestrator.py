@@ -103,10 +103,11 @@ def bad_run(name="tests"):
     return {"id": 2, "name": name, "status": "completed", "conclusion": "failure"}
 
 
-def agent_issue(n, name, status, ping_ago, role="coding-agent"):
+def agent_issue(n, name, status, ping_ago, role="coding-agent", since_ago=None):
     ping = iso(ping_ago)
+    since = f" since={iso(since_ago)}" if since_ago is not None else ""
     return {"number": n, "state": "open", "title": f"Agent: {name}", "labels": [{"name": "factory:agent"}],
-            "body": f"<!-- factory-agent name={name} status={status} ping={ping} -->\n<!-- factory-role role={role} -->"}
+            "body": f"<!-- factory-agent name={name} status={status} ping={ping}{since} -->\n<!-- factory-role role={role} -->"}
 
 
 def world(db=None, cfg=None, files=None):
@@ -250,12 +251,12 @@ def test_check_5_a_pull_request_that_waited_long_for_the_product_owner_goes_to_t
 
 def test_check_6_a_down_agent_and_an_idle_agent_with_ready_work_go_to_the_owner():
     ready = {"number": 40, "state": "open", "title": "Ready task", "body": "", "labels": [{"name": "factory:ready"}]}
-    d, work, env = world(db={"issues": [agent_issue(11, "menelik", "down", 500), agent_issue(12, "taytu", "idle", 120), ready]})
+    d, work, env = world(db={"issues": [agent_issue(11, "menelik", "down", 500), agent_issue(12, "taytu", "idle", 2, since_ago=120), ready]})
     got = watch(work, env)
     down = next(v for k, v in got.items() if k.startswith("agent-down-menelik"))
     idle = next(v for k, v in got.items() if k.startswith("agent-idle-taytu"))
     assert down["to"] == "owner" and idle["to"] == "owner" and "1 task(s) are ready" in idle["line"], got
-    put(d, issues=[agent_issue(12, "taytu", "idle", 120)])
+    put(d, issues=[agent_issue(12, "taytu", "idle", 2, since_ago=120)])
     assert not [k for k in watch(work, env) if k.startswith("agent-idle")], "an idle agent with nothing ready is fine"
 
 
