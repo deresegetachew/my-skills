@@ -4,7 +4,7 @@
 
 gh, launchctl, plutil, docker and scutil are fakes on PATH, and HOME is a temp folder, so nothing touches the real
 Mac or GitHub. What launchd and macOS show (Login Items, Activity Monitor) can't be tested here."""
-import json, os, plistlib, stat, subprocess, tempfile, time
+import json, os, plistlib, re, shutil, stat, subprocess, tempfile, time
 from datetime import datetime, timedelta, timezone
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
@@ -743,6 +743,52 @@ def test_the_start_script_can_be_read_by_the_runner_container_whose_user_is_not_
     assert mode("entrypoint.sh") & 0o022 == 0, "readable by everyone, writable by no one else"
     assert stat.S_IMODE(os.stat(n["CI_INSTALLED"]).st_mode) == 0o700
     assert mode("compose.yaml") == 0o600 and mode("widget-ci") == 0o700
+
+def mounted_files(installed):
+    """Every file the installed compose files bind-mount into a container (`- ./file:/path[:ro]`)."""
+    found = set()
+    for name in os.listdir(installed):
+        if name.startswith("compose") and name.endswith(".yaml"):
+            found.update(re.findall(r"^\s*-\s+\./([^:\s]+):", open(os.path.join(installed, name)).read(), re.M))
+    return sorted(found)
+
+
+def seen_by_another_user(path):
+    """What a container user who is not the file's owner (the runner image's uid 1001) can do with a bind-mounted file:
+    the others bits decide. (The folder around it does not matter: the Docker daemon mounts the file itself.)"""
+    m = stat.S_IMODE(os.stat(path).st_mode)
+    return {"read": bool(m & 0o004), "write": bool(m & 0o002)}
+
+
+def test_every_file_a_compose_file_mounts_is_readable_and_not_writable_by_the_containers_user():
+    d, db, env = linux_project()
+    rc, out = ci(d, env, "install")
+    assert rc == 0, out
+    installed = names(d, env)["CI_INSTALLED"]
+    mounts = mounted_files(installed)
+    assert "entrypoint.sh" in mounts, mounts  # the parse found the real mounts
+    for f in mounts:
+        assert os.path.isfile(os.path.join(installed, f)), f"compose mounts {f}, but install did not copy it"
+        assert seen_by_another_user(os.path.join(installed, f)) == {"read": True, "write": False}, (f, oct(os.stat(os.path.join(installed, f)).st_mode))
+
+
+def test_a_file_added_to_a_compose_mount_later_is_readable_too_without_touching_the_install_code():
+    d, db, env = linux_project()
+    kit = os.path.join(tempfile.mkdtemp(), "ci")
+    shutil.copytree(os.path.join(SF, "ci"), kit, ignore=shutil.ignore_patterns("__pycache__"))
+    open(os.path.join(kit, "extra.sh"), "w").write("#!/bin/bash\n")
+    os.chmod(os.path.join(kit, "extra.sh"), 0o600)  # as a private checkout or a umask 077 could leave it
+    for yaml in ("compose.yaml", "compose-light.yaml"):
+        text = open(os.path.join(kit, yaml)).read()
+        text = text.replace("      - ./entrypoint.sh:/opt/factory-ci/entrypoint.sh:ro\n",
+                            "      - ./entrypoint.sh:/opt/factory-ci/entrypoint.sh:ro\n      - ./extra.sh:/opt/factory-ci/extra.sh:ro\n")
+        open(os.path.join(kit, yaml), "w").write(text)
+    p = subprocess.run(["bash", os.path.join(kit, "ci.sh"), "install"], cwd=d, env=env, capture_output=True, text=True, timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
+    installed = names(d, env)["CI_INSTALLED"]
+    assert "extra.sh" in mounted_files(installed)
+    assert seen_by_another_user(os.path.join(installed, "extra.sh")) == {"read": True, "write": False}
+
 
 def test_install_builds_the_runner_image_with_the_projects_tools():
     d, db, env = tooled_project()

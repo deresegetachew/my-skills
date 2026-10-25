@@ -11,6 +11,8 @@ mtime are fixed; gzip stores no timestamp or name.
 Writes into --out:
   software-factory-<version>.tar.gz   everything under one folder, software-factory-<version>/
   SHA256SUMS                          `sha256sum -c` format, for the archive
+Tracked symlinks (the forwarders at the old kit/ paths) are stored as regular files with their target's content
+and mode: the archive holds no links, so unpacking it never depends on symlink support.
 The archive holds MANIFEST.json (schema, version, source commit, every file with sha256, size, mode).
 """
 import argparse, gzip, hashlib, io, json, os, re, subprocess, sys, tarfile
@@ -64,17 +66,32 @@ def check_clean(root):
 
 
 def release_files(root):
-    """(path, mode) for each tracked file that goes into the archive, sorted by path."""
+    """(path, mode, source) for each tracked file that goes into the archive, sorted by path. `source` is the file
+    whose bytes are archived. A tracked symlink (the forwarders at the old kit/ paths, #112) is archived as a
+    regular file holding what it points to, so the archive never contains a link; a link that leaves software-factory/
+    or points at something that is not shipped is refused."""
     out = git(root, "ls-files", "-s", "-z", "--", SRC)
-    files = []
+    tracked = {}
     for rec in filter(None, out.split("\0")):
         meta, path = rec.split("\t", 1)
-        mode = meta.split()[0]
-        if mode == "120000":
-            raise ReleaseError("symlink", f"{path} is a symlink.", "release files must be regular files.")
-        if mode == "160000" or path.startswith(EXCLUDE_PREFIXES) or any(p in path.split("/") for p in EXCLUDE_PARTS):
+        tracked[path] = meta.split()[0]
+
+    def shipped(path):
+        return not (path.startswith(EXCLUDE_PREFIXES) or any(p in path.split("/") for p in EXCLUDE_PARTS))
+
+    files = []
+    for path, mode in tracked.items():
+        if mode == "160000" or not shipped(path):
             continue
-        files.append((path, 0o755 if mode == "100755" else 0o644))
+        source = path
+        if mode == "120000":
+            real = os.path.realpath(os.path.join(root, path))
+            source = os.path.relpath(real, os.path.realpath(root)).replace(os.sep, "/")
+            if not source.startswith(SRC + "/") or tracked.get(source) not in ("100644", "100755") or not shipped(source):
+                raise ReleaseError("symlink", f"{path} is a symlink to {source}, which is not a regular file shipped in the release.",
+                                   f"point it at a regular file inside {SRC}/ (not tests/), or remove the link.")
+            mode = tracked[source]
+        files.append((path, 0o755 if mode == "100755" else 0o644, source))
     return sorted(files)
 
 
@@ -86,8 +103,8 @@ def build(root, out_dir, tag=None):
     commit = git(root, "rev-parse", "HEAD").strip()
     top = f"{SRC}-{version}"
     entries, manifest_files = [], []
-    for path, mode in release_files(root):
-        data = open(os.path.join(root, path), "rb").read()
+    for path, mode, source in release_files(root):
+        data = open(os.path.join(root, source), "rb").read()
         rel = path[len(SRC) + 1:]
         entries.append((f"{top}/{rel}", mode, data))
         manifest_files.append({"path": rel, "sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "mode": oct(mode)[2:]})

@@ -12,6 +12,14 @@ version of it as a git submodule.
 > `kit/factory`, `kit/factory-loop.sh`) are symlinks to it, so projects that link the old paths keep working until
 > they switch. The agents, skills and `settings.json` stay in `kit/.claude/`. The rest of this page still names the
 > paths as a project sees them.
+>
+> **Two link layouts (#112, step 2).** `install.sh --link` takes `--layout new|old|auto`. `new` points the project's
+> links straight at `software-factory/hooks/`, `ci/`, `factory` and `factory-loop.sh` (the links stay at
+> `.claude/hooks/...`, so `settings.json` is unchanged); `old` points them through `kit/`, as before. `auto` (the
+> default) leaves a project that already links through `kit/` alone, so a pin bump or a re-run changes nothing in it,
+> and gives any other project `new`. A project switches in one reviewed commit: `factory update --layout new` (or
+> `install.sh . --link --layout new`), then commit the changed links. A copy install (no `--link`) copies real files.
+> A release archive (`tools/build_release.py`) holds real files only: the `kit/` forwarders are stored as copies.
 
 <br>
 
@@ -255,7 +263,7 @@ reaches a project until the project moves its pin, in a PR.
 |---|---|---|
 | `git submodule update --init` | Makes `vendor/my-skills` match the pinned commit (clones it the first time) | No |
 | `git submodule update --remote vendor/my-skills` | Moves the folder to my-skills' newest main | Yes, in your working tree: you commit it |
-| `factory update` | Runs both of the above, lists the new my-skills commits, re-runs `install.sh . --link` to link any new shared files, and tells you to commit. It doesn't commit or push | Yes, like `--remote` |
+| `factory update` | Runs both of the above, lists the new my-skills commits, re-runs `install.sh . --link` to link any new shared files (`--layout new` also switches the links to the new folders), and tells you to commit. It doesn't commit or push | Yes, like `--remote` |
 | `git config submodule.recurse true` | One setting per clone (not committed). After it, `git pull`, `checkout` and `switch` also update the submodule to the pin | No |
 | `git clone --recurse-submodules <url>` | Clones the project with the submodule checked out | No |
 

@@ -194,6 +194,14 @@ copy_files() {
   # there (a 0600 copy gave "Permission denied", exit 126). It holds no secret: the registration token only ever
   # comes in the environment. The folder around it is 0700, so no other user on the machine can reach it.
   install -m 644 "$kit/entrypoint.sh" "$CI_INSTALLED/entrypoint.sh"
+  # The same for every other file a compose file mounts into a container (`- ./file:/path:ro`): copied, and readable
+  # by the container's user, so a mount added to a compose file later cannot be left out or left at 0600 (#111's class).
+  local mounted
+  for mounted in $(sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:[:space:]]*\):.*#\1#p' "$kit"/compose*.yaml | sort -u); do
+    [ -f "$kit/$mounted" ] || die "a compose file mounts $mounted, which is not in $kit."
+    install -m 644 "$kit/$mounted" "$CI_INSTALLED/$mounted"
+  done
+  return 0
 }
 
 on_main_note() {
