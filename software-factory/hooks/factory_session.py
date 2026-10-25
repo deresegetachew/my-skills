@@ -12,7 +12,8 @@ in that agent's folder; to run the queue, use `factory loop -i`, which gives eac
   3. Submodules (`git submodule update --init`), then `commands.install` (worktrees), then `commands.agentSetup`.
   4. Issues mode: registers the agent on GitHub (factory_agents.py), so the dev manager sees it's alive.
   5. Environment: writes `agentEnv` (own ports and database), FACTORY_AGENT and FACTORY_PID to CLAUDE_ENV_FILE, so
-     every command in the session uses them and `/next-task` claims its tasks as this agent.
+     every command in the session uses them and `/next-task` claims its tasks as this agent. When the shared
+     Turborepo cache is set up (turbo.api), its TURBO_* variables go there too (factory_turbo.py).
 
 Under factory-loop.sh (FACTORY_AGENT already set) it only updates the submodules: the loop did the rest.
 """
@@ -97,11 +98,21 @@ def main():
         if sh(cmds["agentSetup"], env=child).returncode != 0:
             notes.append(f"`{cmds['agentSetup']}` failed (is the local stack running?); tests that need it will fail.")
 
+    # The shared Turborepo cache (#59): the address, team and token go to the session's env file, never to the lines
+    # this hook prints (they reach the agent's context). No cache set up, or none answering: nothing, with a note.
+    from factory_turbo import agent_env as turbo_env
+    turbo, turbo_unset, turbo_notes = turbo_env(cfg)
+    notes.extend(turbo_notes)
+
     env_file = os.environ.get("CLAUDE_ENV_FILE")
     if env_file:
         import shlex
         with open(env_file, "a") as f:
             for k, v in env.items():
+                f.write(f"export {k}={shlex.quote(v)}\n")
+            for k in turbo_unset:
+                f.write(f"unset {k}\n")
+            for k, v in turbo.items():
                 f.write(f"export {k}={shlex.quote(v)}\n")
     else:
         notes.append("This Claude version gave the hook no CLAUDE_ENV_FILE, so the slot's variables aren't set: "

@@ -32,6 +32,10 @@ if a[:1] == ["api"] and "/contents/.claude/factory.json" in " ".join(a):
     print(json.dumps(s["main_settings"])); sys.exit(0)
 if a[:1] == ["api"] and "/files" in " ".join(a):
     print("\n".join(s.get("files", ["src/a.ts"]))); sys.exit(0)
+if a[:1] == ["api"] and "/comments" in " ".join(a):
+    if "thread" not in s:
+        sys.exit("gh: no thread")
+    print(json.dumps(s["thread"])); sys.exit(0)
 if a[:1] == ["api"] and "/issues/" in " ".join(a):
     print(json.dumps(s.get("issue", {"state": "open", "labels": []}))); sys.exit(0)
 sys.exit("fake gh: no answer for " + " ".join(a))
@@ -150,6 +154,122 @@ def test_agents_cannot_post_dev_manager_markers_or_touch_review_labels():
               "gh pr review 7 --approve"):
         assert gate(d, env, c)[0] == 2, c
     assert gate(d, env, "gh pr comment 7 --body '<!-- factory-question --> which one?'")[0] == 0
+
+
+def envelope(**kw):
+    kw.setdefault("v", "1")
+    return "<!-- factory-msg " + " ".join(f"{k.replace('_', '-')}={v}" for k, v in kw.items()) + " -->"
+
+
+def post(d, env, text, n="7", cmd="pr"):
+    body = os.path.join(d, "msg.md")
+    open(body, "w").write(text)
+    return gate(d, env, f"gh {cmd} comment {n} --body-file {body}")
+
+
+def thread_of(*messages):
+    return [{"id": i + 1, "body": b, "user": {"login": "me"}} for i, b in enumerate(messages)]
+
+
+QUESTION_TO_HAILE = envelope(id="q1x", kind="question", **{"from": "taytu"}, to="haile", state="submitted", ref="pr#7")
+ANSWER_FROM_HAILE = envelope(id="a1x", kind="answer", **{"from": "haile"}, to="taytu", state="completed",
+                             in_reply_to="q1x", ref="pr#7") + "\nUse blue."
+
+
+def test_an_agent_may_ask_a_question_in_the_new_form():
+    d, env = setup()
+    env["FACTORY_AGENT"] = "haile"
+    q = envelope(id="q9x", kind="question", **{"from": "haile"}, to="po", state="submitted") + "\nWhich colour?"
+    assert post(d, env, q) == (0, ""), post(d, env, q)
+    assert post(d, env, q, n="9", cmd="issue")[0] == 0
+
+
+def test_an_agent_cannot_post_as_someone_else():
+    d, env = setup()
+    env["FACTORY_AGENT"] = "haile"
+    q = envelope(id="q9x", kind="question", **{"from": "po"}, state="submitted")
+    rc, err = post(d, env, q)
+    assert rc == 2 and "yourself" in err, (rc, err)
+
+
+def test_agents_cannot_post_approvals_or_mustfixes_in_the_new_form():
+    d, env = setup()
+    env["FACTORY_AGENT"] = "haile"
+    for kind, state in (("approval", "completed"), ("mustfix", "submitted")):
+        rc, err = post(d, env, envelope(id="m1x", kind=kind, **{"from": "haile"}, state=state, sha="aaaaaaa"))
+        assert rc == 2 and "reserved" in err, (kind, rc, err)
+
+
+def test_an_agent_answers_only_a_question_addressed_to_it():
+    d, env = setup(thread=thread_of(QUESTION_TO_HAILE))
+    env["FACTORY_AGENT"] = "haile"
+    assert post(d, env, ANSWER_FROM_HAILE) == (0, ""), post(d, env, ANSWER_FROM_HAILE)
+    d, env = setup(thread=thread_of(QUESTION_TO_HAILE.replace("to=haile", "to=po")))
+    env["FACTORY_AGENT"] = "haile"
+    rc, err = post(d, env, ANSWER_FROM_HAILE)
+    assert rc == 2 and "addressed to po" in err, (rc, err)
+
+
+def test_a_po_answer_from_an_agent_is_refused():
+    d, env = setup(thread=thread_of(QUESTION_TO_HAILE.replace("to=haile", "to=po")))
+    env["FACTORY_AGENT"] = "haile"
+    forged = ANSWER_FROM_HAILE.replace("from=haile", "from=po")
+    rc, err = post(d, env, forged)
+    assert rc == 2 and "yourself" in err, (rc, err)
+
+
+def test_a_reply_must_name_its_thread_and_a_question_in_it():
+    d, env = setup(thread=thread_of(QUESTION_TO_HAILE))
+    env["FACTORY_AGENT"] = "haile"
+    no_ref = ANSWER_FROM_HAILE.replace(" ref=pr#7", "")
+    body = os.path.join(d, "msg.md")
+    open(body, "w").write(no_ref)
+    rc, err = gate(d, env, f"gh pr comment --body-file {body}")                       # no number and no ref: the thread is unknown
+    assert rc == 2 and "ref=" in err, (rc, err)
+    assert post(d, env, no_ref)[0] == 0                                               # the number on the command names it
+    rc, err = post(d, env, ANSWER_FROM_HAILE.replace("in-reply-to=q1x", "in-reply-to=zzz"))
+    assert rc == 2 and "can't find" in err, (rc, err)
+    rc, err = post(d, env, ANSWER_FROM_HAILE.replace(" in-reply-to=q1x", ""))
+    assert rc == 2 and "in-reply-to" in err, (rc, err)
+    rc, err = post(d, env, ANSWER_FROM_HAILE, n="9")                                  # comments on 9 but ref says pr#7
+    assert rc == 2 and "pr#7" in err, (rc, err)
+
+
+def test_a_thread_gh_cannot_read_fails_closed():
+    d, env = setup()                                                                   # the fake has no thread to give
+    env["FACTORY_AGENT"] = "haile"
+    rc, err = post(d, env, ANSWER_FROM_HAILE)
+    assert rc == 2 and "read" in err, (rc, err)
+
+
+def test_an_invalid_transition_is_refused():
+    done = ANSWER_FROM_HAILE.replace("a1x", "a0x")
+    d, env = setup(thread=thread_of(QUESTION_TO_HAILE, done))
+    env["FACTORY_AGENT"] = "haile"
+    rc, err = post(d, env, ANSWER_FROM_HAILE.replace("state=completed", "state=failed"))
+    assert rc == 2 and "completed" in err, (rc, err)
+    assert post(d, env, done)[0] == 0                                                 # the same message again is a no-op
+
+
+def test_unknown_versions_and_plain_text_pass_and_old_markers_stay_reserved():
+    d, env = setup()
+    env["FACTORY_AGENT"] = "haile"
+    assert post(d, env, envelope(v="2", id="a1x", kind="approval", state="completed"))[0] == 0
+    assert post(d, env, "<!-- factory-answer -->\nx")[0] == 2
+    assert post(d, env, envelope(id="a1x", kind="answer", **{"from": "haile"}, in_reply_to="q1x") + "\n<!-- factory-answer -->")[0] == 2
+
+
+def test_a_merge_honours_a_mustfix_and_an_approval_in_the_new_form():
+    mustfix = {"body": envelope(id="m1x", kind="mustfix", **{"from": "dev-manager"}, state="submitted", sha="aaaaaaa"),
+               "author": {"login": "owner"}}
+    d, env = setup(pr={"comments": [mustfix]})
+    assert gate(d, env, MERGE)[0] == 2
+    ok = {"body": envelope(id="p1x", kind="approval", **{"from": "dev-manager"}, state="completed", sha=HEAD[:7]),
+          "author": {"login": "owner"}}
+    d, env = setup(pr={"comments": [mustfix, ok]})
+    assert gate(d, env, MERGE)[0] == 0
+    d, env = setup(pr={"comments": [mustfix, ok]}, cfg_extra={"trustedReviewers": ["someone-else"]})
+    assert gate(d, env, MERGE)[0] == 2
 
 
 def test_a_mustfix_holds_until_an_approval_of_this_commit():
