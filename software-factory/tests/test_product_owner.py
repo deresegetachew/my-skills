@@ -263,3 +263,16 @@ def test_the_product_owner_profile_may_run_the_prd_and_signoff_commands():
     s = json.load(open(os.path.join(SF, "kit", ".claude", "manager", "settings.json")))["permissions"]["allow"]
     for c in ("factory prd*", "factory signoff*", "./factory prd*", "./factory signoff*"):
         assert f"Bash({c})" in s, c
+
+
+# --- the watcher after the merge of main (it reads the old question markers through factory_wait) --------------------------
+
+def test_the_watcher_still_sees_an_old_style_question_on_a_pull_request():
+    pr = {"number": 7, "title": "x", "draft": False, "head": {"sha": "a" * 40, "ref": "task/5-x"}, "user": {"login": "me"},
+          "labels": []}
+    d, work, env = po_project(db={"pulls": [pr], "issues": [dict(issue(7, "x"), pull_request={})],
+                                  "comments": {"7": ["<!-- factory-question -->\nWhich colour?"]}})
+    p = factory(work, env, "watch", "--json")
+    assert p.returncode in (0, 3), (p.stdout, p.stderr)
+    kinds = [(i["kind"], i["ref"]) for i in json.loads(p.stdout)]
+    assert ("question", "question-7") in kinds, kinds
