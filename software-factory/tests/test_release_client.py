@@ -29,7 +29,7 @@ esac
 
 def git(d, *a, check=True):
     p = subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-C", d, *a], capture_output=True, text=True)
-    assert not check or p.returncode == 0, (a, p.stderr)
+    assert not check or p.returncode == 0, (a, p.stdout, p.stderr)
     return p.stdout
 
 
@@ -166,6 +166,10 @@ def fac(d, env, *args):
 
 
 def commit(d, msg="factory"):
+    # The client rewrites files with the archive's fixed times, often with the same size as the old version. Git
+    # trusts a file whose size, times and inode are unchanged (inodes get reused), so on a busy machine `add -A`
+    # could miss the new content. Emptying the index first makes it read every file again.
+    git(d, "rm", "-r", "--cached", "-q", "--ignore-unmatch", ".")
     git(d, "add", "-A")
     git(d, "commit", "-q", "-m", msg)
 
@@ -256,7 +260,8 @@ def test_a_named_release_can_be_installed_newer_or_older_with_or_without_the_v()
     assert rc == 0 and pin(d)["tag"] == "v1.0.0" and "v1.1.0 -> v1.0.0" in out, out
     assert pin(d)["previous"]["tag"] == "v1.1.0"
     commit(d)
-    assert fac(d, env, "update", "v2.0.0")[0] == 0 and pin(d)["tag"] == "v2.0.0"
+    rc, out = fac(d, env, "update", "v2.0.0")
+    assert rc == 0 and pin(d)["tag"] == "v2.0.0", out
 
 
 def test_an_unknown_release_is_refused_with_the_ones_that_exist_and_nothing_changes():

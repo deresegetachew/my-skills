@@ -146,10 +146,16 @@ def wait_ready(minutes, cfg):
     return wait_until(check, minutes) or (2, f"no task became ready in {minutes} minutes")
 
 
+def waiting_tasks(comments):
+    """The questions addressed to the dev manager that wait for its answer, oldest first (a question that asks the
+    asker for more information waits for the asker, not for the dev manager)."""
+    return unanswered(fm.fold(fm.messages_of(comments)), fm.DEV_MANAGER)
+
+
 def precheck_items(cfg, prs=None, comments_of=None):
     """What the dev manager has to do right now: [(kind, ref, text)], empty when nothing. Reads GitHub only.
-    kind is review (ref: PR number), question (PR number), agent (name) or stale (issue number). `prs` and `comments_of`
-    (a function: PR number -> its comments) let the orchestrator's watcher share what it has already read."""
+    kind is review (ref: PR number), question (the PR or issue number), agent (name) or stale (issue number). `prs` and
+    `comments_of` (a function: number -> its comments) let the orchestrator's watcher share what it has already read."""
     todo = []
     import factory_po
     escalation = (factory_po.escalate_minutes(cfg), factory_po.running(cfg), datetime.now(timezone.utc))
@@ -167,7 +173,7 @@ def precheck_items(cfg, prs=None, comments_of=None):
     for i in fi.gh_all("repos/{owner}/{repo}/issues?state=open"):  # questions on task issues too
         if not i.get("pull_request") and i.get("comments", 1) and "factory:agent" not in fi.names(i):
             todo += waiting_questions("issue", i["number"],
-                                      fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{i['number']}/comments"), escalation)
+                                      comments_of(i["number"]), escalation)
     if (cfg.get("tasks") or {}).get("source") == "issues":
         import factory_agents
         L = task_labels(cfg)

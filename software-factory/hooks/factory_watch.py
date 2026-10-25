@@ -30,13 +30,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import factory_ci_judge as judge  # noqa: E402
 import factory_issues as fi  # noqa: E402
 import factory_lease as lease  # noqa: E402
+import factory_messages as fm  # noqa: E402
 import factory_wait as fw  # noqa: E402
 from factory_config import load, manager_setting, role_setting  # noqa: E402
 
-APPROVED = re.compile(r"<!--\s*factory-approved\s+sha=([0-9a-f]{7,40})")
-MUSTFIX = re.compile(r"<!--\s*factory-mustfix\s+sha=([0-9a-f]{7,40})")
 WATCH = re.compile(r"<!--\s*pr-watch\s+sha=([0-9a-f]{7,40})")
-MSG = re.compile(r"<!--\s*factory-msg\b([^>]*)-->")
 OWNER_LABEL = "factory:needs-owner"
 OWN_BRANCH = re.compile(r"^manager/")
 OWN_BODY = re.compile(r"<!--\s*factory-role\s+role=dev-manager\b")
@@ -54,42 +52,14 @@ def minutes(since, now):
     return (now - since).total_seconds() / 60 if since else 0.0
 
 
-def message_fields(body):
-    m = MSG.search(body or "")
-    return dict(re.findall(r"(\w[\w-]*)=(\S+)", m.group(1))) if m else {}
-
-
-def is_question(body):
-    if fw.QUESTION.search(body or ""):
-        return True
-    f = message_fields(body)
-    return f.get("kind") == "question" and f.get("to", "dev-manager") in ("dev-manager", "manager")
-
-
-def is_answer(body):
-    return bool(fw.ANSWER.search(body or "")) or message_fields(body).get("kind") == "answer"
-
-
-def open_question(comments):
-    """The newest unanswered question comment on a PR, else None (an answer closes every question before it)."""
-    asked = []
-    for c in comments:
-        b = c.get("body") or ""
-        if is_question(b):
-            asked.append(c)
-        elif is_answer(b):
-            asked = []
-    return asked[-1] if asked else None
-
-
 def review_state(comments, head):
-    """("none" | "watch" | "approved" | "mustfix", when) for the head commit: the latest marker that names it."""
+    """("none" | "watch" | "approved" | "mustfix", when) for the head commit: the latest marker that names it (a verdict
+    in a message envelope or the old marker; `pr-watch` ends the review of a head without a verdict)."""
     got = ("none", None)
     for c in comments:
         b = c.get("body") or ""
-        for kind, rx in (("mustfix", MUSTFIX), ("approved", APPROVED), ("watch", WATCH)):
-            m = rx.search(b)
-            if m and (head.startswith(m.group(1)) or m.group(1).startswith(head)):
+        for kind, sha in [(k, v) for k, v in fm.verdicts(b) if v] + [("watch", m) for m in WATCH.findall(b)]:
+            if head.startswith(sha) or sha.startswith(head):
                 if kind == "watch" and got[0] in ("approved", "mustfix"):
                     continue  # the pr-watch marker rides along with a verdict; the verdict is what counts
                 got = (kind, when(c.get("created_at")))
@@ -137,7 +107,8 @@ def last_activity(prs, comments_of, agents, cfg):
 
     for p in prs:
         for c in comments_of(p["number"]):
-            if ACTIVITY.search(c.get("body") or ""):
+            body = c.get("body") or ""
+            if ACTIVITY.search(body) or fm.verdicts(body) or any(m.kind == "answer" for m in fm.parse_comment(c)):
                 see(when(c.get("created_at")))
     for p in fi.gh_all("repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=10")[:10]:
         see(when(p.get("merged_at")))
@@ -191,11 +162,12 @@ def collect(cfg, now=None, info=None):
             items.append(make("review", f"pr-{ref}", text, since=since, target=ref, key=p["head"]["sha"],
                               lease_kind="review", pr=ref))
         elif kind == "question":
-            c = open_question(comments_of(ref))
-            if c is None:
-                continue  # addressed to another role, or answered since the precheck's own reading
-            items.append(make("question", f"question-{ref}", text, since=when(c.get("created_at")), target=ref,
-                              key=c["id"], lease_kind="answer", pr=ref))
+            tasks = fw.waiting_tasks(comments_of(ref))
+            if not tasks:
+                continue
+            q = tasks[0].question
+            items.append(make("question", f"question-{ref}", text, since=when(q.created), target=ref,
+                              key=q.comment_id or tasks[0].id, lease_kind="answer", pr=ref if ref in by_pr else None))
         elif kind == "agent":
             issue = agent_roles.get(ref)
             if issue and fw_role(issue) != "coding-agent":
@@ -204,15 +176,6 @@ def collect(cfg, now=None, info=None):
                               key=f"agent-{ref}"))
         elif kind == "stale":
             items.append(make("stale", f"issue-{ref}", text, target=ref, key=f"issue-{ref}"))
-
-    # a question sent as a message envelope is not one the precheck knows
-    asked = {i["pr"] for i in items if i["kind"] == "question"}
-    for p in prs:
-        c = None if p["number"] in asked else open_question(comments_of(p["number"]))
-        if c is not None and not any(i["pr"] == p["number"] and i["kind"] == "question" for i in items):
-            items.append(make("question", f"question-{p['number']}", f"PR #{p['number']}: question waits for an answer",
-                              since=when(c.get("created_at")), target=p["number"], key=c["id"], lease_kind="answer",
-                              pr=p["number"]))
 
     # a product question (`to=po`, #110) that nobody answered for a level moves up: to the dev manager, then to the owner
     import factory_po

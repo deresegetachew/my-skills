@@ -4,7 +4,7 @@
 
 gh, launchctl, plutil, docker and scutil are fakes on PATH, and HOME is a temp folder, so nothing touches the real
 Mac or GitHub. What launchd and macOS show (Login Items, Activity Monitor) can't be tested here."""
-import json, os, plistlib, re, shutil, stat, subprocess, tempfile, time
+import json, os, plistlib, re, shutil, stat, subprocess, tempfile, threading, time
 from datetime import datetime, timedelta, timezone
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
@@ -115,6 +115,9 @@ def project(repo="acme/Widget", ci=None, remote="git@github.com:acme/Widget.git"
            "FAKE_LAUNCHD": os.path.join(root, "launchd")}
     for k in ("XDG_STATE_HOME", "RUNNER_TOKEN"):
         env.pop(k, None)
+    # `factory ci install` runs `git fetch origin main`. The remote here is made up, so make that fail at once and
+    # offline (no ssh, no system git config that rewrites it to https) instead of waiting on a real network call.
+    env.update(GIT_SSH_COMMAND="false", GIT_CONFIG_NOSYSTEM="1", GIT_TERMINAL_PROMPT="0")
     return d, db, env
 
 
@@ -298,6 +301,9 @@ def test_stop_ends_its_own_loop_and_removes_only_this_macs_idle_registrations():
     os.makedirs(n["CI_STATE"]); os.makedirs(n["CI_INSTALLED"])
     open(exe, "w").write("#!/bin/bash\nsleep 60 & wait\n"); os.chmod(exe, 0o700)
     loop = subprocess.Popen(["/bin/bash", exe])
+    # Reap the loop as soon as it dies. A real loop is nobody's child, but this one is ours, and an unreaped child
+    # stays a zombie that `ps` still lists, so `stop` would wait its full 30 s for it to go.
+    threading.Thread(target=loop.wait, daemon=True).start()
     time.sleep(0.3)
     open(os.path.join(n["CI_STATE"], "pid"), "w").write(str(loop.pid))
     runner = lambda i, name, status, busy=False: {"id": i, "name": name, "status": status, "busy": busy}
@@ -600,6 +606,25 @@ def test_use_local_also_sets_the_light_lane_variable_and_install_says_it():
     assert "the repo variable CI_RUNS_ON_LIGHT is [\"self-hosted\",\"widget-light\"]" in out, out
     rc, out = ci(d, env, "use", "github")
     assert "CI_RUNS_ON_LIGHT" not in json.load(open(db))["vars"], out
+
+
+def test_status_shows_the_pid_when_launchctl_goes_on_printing_after_it():
+    # awk must read all of launchctl's output: stopping at the pid line made launchctl die of SIGPIPE when it was
+    # still writing, and with pipefail that ended `status` silently after the Mode line (flaky, faster on fast CPUs).
+    d, db, env = project()
+    assert ci(d, env, "install")[0] == 0
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]'})
+    runs_and_pulls(db, [run("main")])
+    slow = os.path.join(os.path.dirname(env["FAKE_DB"]), "bin", "launchctl")
+    real = open(slow).read()
+    open(slow, "w").write(real.replace('echo "}" ;;', 'echo "}"; sleep 0.3; echo "	more = 1" ;;', 1))
+    # An awk that quits at the first pid line, as gawk does (mawk reads on, which hid this on some machines).
+    quick = os.path.join(os.path.dirname(slow), "awk")
+    open(quick, "w").write("#!/usr/bin/env python3\nimport os, sys\nfor line in sys.stdin:\n    f = line.split()\n"
+                           "    if f[:2] == ['pid', '=']:\n        print(f[2], flush=True); os._exit(0)\n")
+    os.chmod(quick, 0o755)
+    rc, out = ci(d, env, "status")
+    assert rc == 0 and "Runner widget-ci: running (LaunchAgent dev.software-factory.widget-ci, pid 4242)" in out, out
 
 
 def test_status_lists_every_instance_and_logs_takes_one():
