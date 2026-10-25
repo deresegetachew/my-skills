@@ -723,7 +723,7 @@ most replies on.
 ```sh
 factory usage                                # the last 7 days, per task
 factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
-factory usage --by role                      # manager (sessions that start with /manage-pass) against builder (all others)
+factory usage --by role                      # manager (/manage-pass, or the dev manager marker), product-owner (its marker), builder (all others)
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```
 
@@ -2084,7 +2084,6 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `reReviewPercent` | int | `30` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review. |
 | `lessons` | str | `".claude/factory/lessons.md"` | The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`). |
 | `lessonsCap` | int | `40` | The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now. |
-| `manager.claimMinutes` | int | `20` | How long a dev manager's lease on an item lasts: a review or answer claim, or a sub-manager's hold on the item it works on. A manager that dies leaves a claim that expires on its own; it ends sooner when the review marker or the answer is posted. |
 | `manager.flakes` | list | `[]` | Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent. |
 | `trustedReviewers` | list | `[]` | GitHub logins whose approvals count. Empty: any. |
 | `holdLabel` | str | `"factory-hold"` | The label the dev manager puts on a PR it is reviewing. |
@@ -2108,6 +2107,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `manager.busyMinutes` | int | `2` | Minutes the dev manager's loop waits after a cycle that had work. |
 | `manager.idleMinutes` | int | `5` | Minutes it waits when there was none. 0: it exits instead. |
 | `manager.maxSubManagers` | int | `2` | How many one-item sub-managers the dev-manager orchestrator runs at once. Items beyond the cap wait for the next cycle. |
+| `manager.claimMinutes` | int | `20` | How long a dev manager's lease on an item lasts: a sub-manager's, or a review or answer claim on a PR or question (it ends sooner when the review marker or the answer is posted). A manager that dies leaves a claim that expires on its own. |
 | `manager.deadManMinutes` | int | `30` | Work that has waited this long with no dev-manager activity (no marker, answer, merge or working heartbeat) is reported to the owner: the dead-man's switch. |
 | `manager.notify` | str | `""` | The GitHub login mentioned in an owner-queue comment, so GitHub notifies the owner's phone. Empty: the repository's owner. |
 | `manager.quietMinutes` | int | `5` | A pull request whose head commit has no review marker is left this long before the watcher counts it (check 1). |
@@ -2206,6 +2206,10 @@ software-factory/
   docs/messages.md                        the message envelope, states and the A2A mapping
   tests/                                  tests for the gate, issues, the loop and the hooks
   hooks/
+    factory_watch.py                    the dev manager's seven checks on GitHub (`factory watch`), no model
+    factory_orchestrator.py             `factory dev-manager loop`: cycles, thread notes, owner asks, sub-managers
+    factory_lease.py                    the lease on an item (claim comments), the interface #99 will replace
+    factory_roles.py                    the roles' definitions, role folders (`init-roles`) and `choose`
     manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
     factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
     factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
