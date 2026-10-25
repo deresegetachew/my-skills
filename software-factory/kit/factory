@@ -64,6 +64,9 @@ Maintain
   clean                  remove agent worktrees no agent is using (and with no uncommitted work), and local task
                          branches whose task is done
   wait <pr> [minutes]    wait for a pull request to merge, without spending tokens
+  wait ci|answer <pr> [minutes], wait slot|ready [minutes]
+                         the other token-free waits: CI finished, question answered, a PR slot free, a task ready
+  precheck               dev manager: "nothing to do" (exit 0) or one line per thing to do (exit 3), without a model
   update                 pull the newest my-skills into the project and relink; then commit it in a PR
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
 EOF
@@ -115,7 +118,11 @@ case "$cmd" in
   check)     py style_checks.py ;;
   guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
   doctor)    py factory_doctor.py "$@" ;;
-  wait)      exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes]}" "${2:-30}" ;;
+  wait)      case "${1:-}" in
+               ci|answer|slot|ready) py factory_wait.py "$@" ;;
+               *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
+             esac ;;
+  precheck)  py factory_wait.py precheck ;;
   update)
     sub="$(git config -f .gitmodules --get-regexp 'submodule\..*\.url' | awk '/my-skills/ {split($1, a, "."); print a[2]}' | head -1)"
     [ -n "$sub" ] || { echo "factory: no my-skills submodule in .gitmodules" >&2; exit 1; }

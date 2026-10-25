@@ -75,6 +75,9 @@ activity up to date on each tick:
 ```
 [Dev manager tick] Manage <owner>/<repo> for the owner (the coding agent runs `factory loop -i` on his
 machine). Use the REST API (`gh api`), never force-push or push to the main branch.
+0. Run `factory precheck` first. If it prints `nothing to do`, skip to step 7 and do nothing else: no reviews, no
+   extra reads. Otherwise it lists what needs you; work through exactly those. Never wait by checking again in
+   this conversation: use `factory wait ci <pr>` (CI after your fix) or `factory wait answer <pr>`.
 1. Open PRs: for any head commit without a `<!-- pr-watch sha=... -->` comment, review and merge under the
    agreed rules. Give a PR a few minutes after it opens if the coding agent may still be pushing; a clean,
    green PR that says "a person merges this one" is yours. Retarget stacked PRs to main after a merge. Glance
