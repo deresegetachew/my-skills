@@ -31,6 +31,7 @@ version of it as a git submodule.
 - [Updating the factory](#updating-the-factory)
 - [The `factory` command](#the-factory-command)
 - [Agent loops](#agent-loops)
+- [Roles: coding agent, dev manager, product owner](#roles)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
@@ -288,6 +289,8 @@ version it pins. `factory help` lists everything.
 |---|---|
 | `factory loop [N]` | Starts an agent loop: one fresh, unattended Claude run per task (`claude -p`). `N` caps the number of tasks. Run it again in another terminal for another agent |
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
+| `factory coding-agent\|dev-manager\|product-owner [name\|N] loop [-i] [--once] [--dry-run]` | The three roles, started the same way and run by the same loop. `factory loop` is `factory coding-agent loop`. [Roles](#roles) |
+| `factory init-roles [--force]` | Creates the project's role folder (`.claude/factory/roles/<role>/README.md` and `reads.md`) |
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
@@ -565,6 +568,80 @@ the merge, the rework rounds (the dev manager's must-fix comments), and the CI r
 failed. Then the medians and totals for the merged ones. `--json` gives the same for scripts. It only reads.
 
 <br>
+
+<a id="roles"></a>
+
+## Roles: coding agent, dev manager, product owner
+
+Every role is a factory command you run in a terminal, on any machine, several of each, with a fresh and small session
+per pass (#95, #102):
+
+```
+factory coding-agent  [name|N] loop [-i] [--once] [--dry-run] [N]     (today's `factory loop`, which stays)
+factory dev-manager   [name|N] loop [-i] [--once] [--dry-run]
+factory product-owner [name|N] loop [-i] [--once] [--dry-run]
+```
+
+`name` is one of the role's names (`agents` for coding agents, `roles.dev-manager.names`,
+`roles.product-owner.names`); a number means that position in the list (`factory dev-manager 2 loop` is the second).
+Without a name the loop takes the first one no live loop holds. `--once` runs one pass and exits. `--dry-run` reads
+GitHub, prints what a pass would do and starts, claims, registers and writes nothing. `-i` opens a session you can
+type into, with Remote Control (the Claude app on your phone is the screen).
+
+**One runner.** `factory-loop.sh` runs all three. What is shared is written once: tidy the folder to main, reload when
+main brings a new script, the isolated MCP config, register and ping as a live agent (the agent issue carries the
+role), the stop rule (the same item three times, or three failed passes in a row), interactive mode, and the wait
+between passes. What differs is small:
+
+| | coding agent | dev manager | product owner |
+|---|---|---|---|
+| Skill a pass runs | `/next-task` | `/manage-pass` | `/product-pass` |
+| Has work when | a task is ready (it claims it) | `factory precheck` lists something | an open issue or PR has `roles.product-owner.workLabel` |
+| Settings | the project's `settings.json` | `roles.dev-manager.profile` | `roles.product-owner.profile` |
+| Model | `models.builder` | `models.manager` | `models.product-owner` |
+| Wait after a pass | `waitMinutes` (inside the loop) | `manager.busyMinutes` (10) / `manager.idleMinutes` (30) | `roles.product-owner.busyMinutes` (30) / `idleMinutes` (60); 0 idle: exit |
+
+Only the coding agent claims a task. Managers and product owners register as live agents (`factory agents` shows the
+role) and keep pinging while they wait, so the sweep does not take a sleeping manager for a dead one. A role's profile
+is used only when its file exists; then its sessions read just the user's settings and the profile (the project's own
+`settings.json` denies `gh api`, which the manager and product owner need).
+
+**`factory loop -i` with no role asks.** In a terminal it asks which role (coding agent, dev manager, product owner)
+and which name (a free one, or type one). `factory loop -i dev-manager` or `FACTORY_ROLE=dev-manager` skips the
+question. An unattended `factory loop` (no `-i`, no terminal, scripts, `factory autostart`) never asks and stays a
+coding agent, so nothing running today changes.
+
+**Identity.** All roles share one GitHub account. A marker or claim names the role and name inside its body
+(`manager=<name>`), and `trustedReviewers` cannot tell roles apart; do not rely on it for that. `factory usage --by
+role` separates the sessions: each pass ends with `<!-- factory-role role=... name=... -->`, and a session without it
+is a coding agent's.
+
+### The role folder
+
+Each project has a folder for what its roles need, committed in the project's own repo (the kit stays here):
+
+```
+.claude/factory/roles/          (setting `roles.dir`)
+  coding-agent/   README.md  reads.md
+  dev-manager/    README.md  reads.md
+  product-owner/  README.md  reads.md
+```
+
+- `README.md` is the project's own instructions for the role: what the factory's skill cannot know (known flaky
+  tests, protected paths, numbering rules, who the owner is, the product's voice).
+- `reads.md` lists the documents the role reads, one per line with a reason: `- docs/PRD.md#user-stories - the
+  stories`. The role's skill reads this list first and nothing else up front, so a pass does not load the whole PRD
+  or the repo's docs; a `#section` lets it `grep -n` for the part. The PRD, designs and research stay where they are
+  (`docs/`, `design/`); `reads.md` only points at them.
+- It lives under `.claude/` on purpose: the shared `settings.json` denies agents editing `.claude/**`, so the
+  instructions that govern a role change only through a reviewed pull request.
+- `install.sh` scaffolds it for a new project, `factory init-roles` for an existing one (it never overwrites), and
+  `factory doctor` reports every path in a `reads.md` that does not exist.
+
+**Migrating from `notes`.** The `notes` folder (`<notes>/reviewer.md`, `manager.md`, `next-task.md` ...) keeps working.
+When a role has no folder, its pass is told to read `<notes>/manager.md` (dev manager), `<notes>/product-owner.md`
+or `<notes>/next-task.md` instead. To move: run `factory init-roles`, copy the note's text into the role's
+`README.md`, delete the note, and commit both in one PR. Remanual's `.claude/factory/notes/` needs no change.
 
 ## Tasks
 
@@ -1116,6 +1193,8 @@ reads these settings.
 | `eval`, `design` | Settings and paths for the eval and design-check skills | off |
 | `styles`, `structure` | Style guides per path, and the structure check's roots and legacy list | none |
 | `notes` | The notes folder | `.claude/factory/notes` |
+| `roles` | `dir` (the role folder, `.claude/factory/roles`), and per role `names`, `profile`; the product owner also `workLabel`, `busyMinutes`, `idleMinutes` | see [Roles](#roles) |
+| `manager` | `busyMinutes` (10) and `idleMinutes` (30): the dev manager's waits | see [Roles](#roles) |
 
 <br>
 
@@ -1141,6 +1220,7 @@ software-factory/
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
     .claude/hooks/
+      factory_roles.py                    the roles' definitions, role folders (`init-roles`) and `choose`
       factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
       check.py                            Stop: typecheck and tests

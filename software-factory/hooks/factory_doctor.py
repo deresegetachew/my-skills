@@ -176,6 +176,36 @@ def models(r, cfg):
         r.ok(f"model for {role}: {model} ({source})")
 
 
+def roles(r, cfg):
+    """The role folders (#102): every path in a role's reads.md exists; the names don't clash with coding agents'."""
+    try:
+        import factory_roles as fr
+        from factory_config import roles_dir, role_names
+    except ImportError:
+        return
+    if not any(fr.role_dir(cfg, role) for role in fr.ROLE_DEFS):
+        r.note("role folders", f"{roles_dir(cfg)}/ doesn't exist, so the roles read their `notes` instead: run "
+               "`factory init-roles` to create it, then commit it")
+    else:
+        for role in fr.ROLE_DEFS:
+            folder = fr.role_dir(cfg, role)
+            if not folder:
+                r.note(f"role folder for {role}", f"{roles_dir(cfg)}/{role}/ is missing: run `factory init-roles`")
+                continue
+            reads = os.path.join(folder, "reads.md")
+            if not os.path.isfile(reads):
+                r.fix(f"{reads}", "missing: run `factory init-roles`, or write one (a document per line, with a reason)")
+                continue
+            missing = fr.missing_reads(cfg, role) or []
+            for path in missing:
+                r.fix(f"{reads}: {path}", "does not exist: fix the path, or remove the line")
+            if not missing:
+                r.ok(f"{role} reads.md: every path exists")
+    clash = sorted(set(role_names(cfg, "dev-manager") + role_names(cfg, "product-owner")) & set(cfg.get("agents") or []))
+    if clash:
+        r.fix("role names", f"{', '.join(clash)} is also a coding agent's name: change `roles.<role>.names`")
+
+
 def main():
     if run("git", "rev-parse", "--show-toplevel")[0] != 0:
         print("factory doctor: run it inside the project's git repo.", file=sys.stderr)
@@ -194,6 +224,7 @@ def main():
         project(r, cfg)
         factory(r, cfg)
         models(r, cfg)
+        roles(r, cfg)
     print()
     print(f"{r.fixes} to fix." if r.fixes else "All the checks pass.")
     return 1 if r.fixes else 0

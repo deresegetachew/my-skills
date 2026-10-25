@@ -3,7 +3,7 @@ name: next-task
 description: Pick the next unticked task in the build plan, build it on its own branch with tests, open a pull request, merge it when the gate allows, tick it off, and continue. Use when asked to "do the next task", "continue the build", "go on one by one" or `/next-task all`.
 ---
 
-**Project notes:** if `<notes>/next-task.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
+**Project instructions:** if the project has a role folder (`roles.dir`, by default `.claude/factory/roles`), read `coding-agent/README.md` and then `coding-agent/reads.md` there first, and open only the documents `reads.md` lists that the task needs. Otherwise, if `<notes>/next-task.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
 # Next task
 

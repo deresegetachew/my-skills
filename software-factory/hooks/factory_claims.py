@@ -13,6 +13,11 @@ A claim belongs to a live process: when the pid that made it has exited (or the 
 `task/<id>-...` branch got a commit on the remote within `claimStaleHours` counts as taken too.
 
   python3 .claude/hooks/factory_claims.py checkout --pid $$     -> prints "<agent> <directory>" to work in
+  python3 .claude/hooks/factory_claims.py checkout --pid $$ --role dev-manager [--name lead]
+                                                                -> the same for another role (#102): its names are
+                                                                   `roles.<role>.names`, its folder
+                                                                   `<project>-agents/<name>`. A name belongs to one
+                                                                   loop on a clone, whatever its role.
   python3 .claude/hooks/factory_claims.py release --agent taytu [--tasks-only]
   python3 .claude/hooks/factory_claims.py list
   python3 .claude/hooks/factory_claims.py done --agent taytu --task 3.2       (factory loop -i: close the session)
@@ -25,7 +30,7 @@ next_task.py --claim <agent> --pid <pid> uses `claim_task` below.
 import argparse, contextlib, fcntl, json, os, re, socket, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from factory_config import agent_name, agent_slot, load  # noqa: E402
+from factory_config import agent_name, agent_slot, load, role_names, safe_agent  # noqa: E402
 
 HOST = socket.gethostname()
 
@@ -138,32 +143,70 @@ def machine_agents(names):
     return only
 
 
-def checkout(pid, stale_hours):
+def candidates_for(cfg, main_top, role, name):
+    """([(name, folder)], narrowed) a loop of `role` may take, in order; narrowed says FACTORY_AGENTS (or the machine's
+    names file) cut the list. The first coding agent works in the project folder, every other name in
+    <project>-agents/<name>. `name` picks one."""
+    if role == "coding-agent":
+        names = [agent_name(cfg, n) for n in range(1, max(len(cfg.get("agents") or []), 1) + 1)]
+        found = [(names[0], main_top)] + [(n, os.path.join(main_top + "-agents", n)) for n in names[1:]]
+        only = machine_agents(names)
+        if only:  # this machine's names (FACTORY_AGENTS); each keeps its own slot, folder, ports and database
+            found = [c for c in found if c[0] in only]
+        if name:
+            found = [c for c in found if c[0] == name]
+            if not found:
+                raise SystemExit(f"{name} isn't a coding agent this machine may run: the agents are "
+                                 f"{', '.join(names)} (`agents` in .claude/factory.json; FACTORY_AGENTS narrows them).")
+        return found, bool(only)
+    names = [safe_agent(name)] if name else role_names(cfg, role)
+    clash = [n for n in names if n in (cfg.get("agents") or [])]
+    if clash:
+        raise SystemExit(f"{', '.join(clash)} is a coding agent's name, so a {role} can't use it. Choose another name "
+                         f"(`roles.{role}.names` in .claude/factory.json).")
+    if not names:
+        raise SystemExit(f"{role} has no names: set `roles.{role}.names` in .claude/factory.json, or give one: "
+                         f"factory {role} <name> loop.")
+    return [(n, os.path.join(main_top + "-agents", n)) for n in names], False
+
+
+def checkout(pid, stale_hours, role="coding-agent", name=None):
     """The project folder if no live loop holds it, else this loop's own worktree. Prints and returns it."""
     main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
     with locked() as data:
         cos = data["checkouts"]
         cfg = load()
-        names = [agent_name(cfg, n) for n in range(1, max(len(cfg.get("agents") or []), 1) + 1)]
-        candidates = [(names[0], main_top)] + [
-            (name, os.path.join(main_top + "-agents", name)) for name in names[1:]
-        ]
-        only = machine_agents(names)
-        if only:  # this machine's names (FACTORY_AGENTS); each keeps its own slot, folder, ports and database
-            candidates = [c for c in candidates if c[0] in only]
+        candidates, narrowed = candidates_for(cfg, main_top, role, name)
         for agent, path in candidates:
             if not alive(cos.get(agent), stale_hours, loop=True):
-                cos[agent] = stamp(agent, pid, path=path)
+                cos[agent] = stamp(agent, pid, path=path, role=role)
                 break
         else:
-            if only:
-                raise SystemExit(f"every agent this machine may run ({', '.join(only)}, from FACTORY_AGENTS) already "
+            shown = ", ".join(c[0] for c in candidates)
+            if name:
+                raise SystemExit(f"{name} already has a live loop on this clone: start it under another name "
+                                 f"(factory {role} <name> loop), or stop that one first.")
+            if role != "coding-agent":
+                raise SystemExit(f"every {role} name ({shown}) already has a live loop on this clone; "
+                                 f"add names to `roles.{role}.names` in .claude/factory.json for more, or type one: "
+                                 f"factory {role} <name> loop")
+            if narrowed:
+                raise SystemExit(f"every agent this machine may run ({shown}, from FACTORY_AGENTS) already "
                                  "has a live loop on this clone; add a name to FACTORY_AGENTS for more")
-            raise SystemExit(f"every agent ({', '.join(names)}) already has a live loop on this clone; "
+            raise SystemExit(f"every agent ({shown}) already has a live loop on this clone; "
                              "add names to `agents` in .claude/factory.json for more")
     ensure_worktree(path, main_top)
     print(f"{agent} {path}")
     return agent, path
+
+
+def free_names(role, stale_hours):
+    """The names of `role` no live loop on this clone holds, in order (what a new loop would take)."""
+    main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
+    cfg = load()
+    with locked() as data:
+        cos = data["checkouts"]
+        return [a for a, _ in candidates_for(cfg, main_top, role, None)[0] if not alive(cos.get(a), stale_hours, loop=True)]
 
 
 def ensure_worktree(path, main_top):
@@ -191,10 +234,13 @@ def worktree(who):
     """The folder of agent `who` (a name, or a slot number; 1 is the project folder), created if needed. Prints it."""
     cfg = load()
     n = int(who) if str(who).isdigit() else agent_slot(cfg, str(who))
-    if n is None:
-        raise SystemExit(f"no agent called {who}: the agents are {', '.join(cfg.get('agents') or [])}")
     main_top = os.path.dirname(os.path.abspath(git("rev-parse", "--git-common-dir")))
-    path = main_top if n == 1 else os.path.join(main_top + "-agents", agent_name(cfg, n))
+    if n is None and str(who) in [x for r in ("dev-manager", "product-owner") for x in role_names(cfg, r)]:
+        path = os.path.join(main_top + "-agents", str(who))  # a dev manager's or product owner's folder
+    elif n is None:
+        raise SystemExit(f"no agent called {who}: the agents are {', '.join(cfg.get('agents') or [])}")
+    else:
+        path = main_top if n == 1 else os.path.join(main_top + "-agents", agent_name(cfg, n))
     ensure_worktree(path, main_top)
     print(path)
 
@@ -328,6 +374,10 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("checkout")
     c.add_argument("--pid", required=True)
+    c.add_argument("--role", default="coding-agent", help="coding-agent (default), dev-manager or product-owner")
+    c.add_argument("--name", default=None, help="take this name instead of the first free one")
+    f = sub.add_parser("free", help="the free names of a role, one per line")
+    f.add_argument("--role", default="coding-agent")
     r = sub.add_parser("release")
     r.add_argument("--agent", required=True)
     r.add_argument("--tasks-only", action="store_true", help="keep the checkout, drop the task claim")
@@ -355,7 +405,9 @@ def main():
     elif a.cmd == "clean":
         clean(cfg, stale)
     elif a.cmd == "checkout":
-        checkout(a.pid, stale)
+        checkout(a.pid, stale, a.role, a.name)
+    elif a.cmd == "free":
+        print("\n".join(free_names(a.role, stale)))
     elif a.cmd == "release":
         release(a.agent, a.tasks_only)
     else:
@@ -363,7 +415,8 @@ def main():
             for kind in ("checkouts", "tasks"):
                 for k, v in data[kind].items():
                     state = "live" if alive(v, stale) else "stale"
-                    print(f"{kind[:-1]:8} {k:10} {v.get('agent', ''):9} pid {v.get('pid')} {state} {v.get('path', '')}")
+                    role = f" ({v['role']})" if v.get("role") not in (None, "coding-agent") else ""
+                    print(f"{kind[:-1]:8} {k:10} {v.get('agent', ''):9} pid {v.get('pid')} {state} {v.get('path', '')}{role}")
 
 
 if __name__ == "__main__":
