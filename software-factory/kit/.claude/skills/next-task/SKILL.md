@@ -60,6 +60,9 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
 3. Test what a user or another module can observe. Run the "Done when" check and the `typecheck`, `lint` and `test`
    commands until they pass, and keep the output as evidence. Run them through `./factory run-check <command>`: it prints one
    line when they pass, or the first errors and the log path when they fail; open the full log only if that isn't enough.
+   Don't spend a turn on formatting or auto-fixable lint findings: when `commands.fix` is set, the Stop check and
+   `./factory verify` run it on the files you changed ("formatted 3 files"); `./factory fix` runs it by hand. If verify
+   says it formatted files, commit them and run it again.
 4. **Extra reviews:** run `python3 .claude/hooks/factory_reviews.py` and do each line it prints (a skill such as
    `design-check` or the eval, or a subagent such as `safety-auditor` or `security-reviewer`), fixing every must-fix.
    Ask the `safety-auditor` whenever the diff touches what CLAUDE.md calls critical rules, and the

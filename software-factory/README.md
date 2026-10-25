@@ -482,6 +482,17 @@ Most of the cost is what the agents read, not what they write.
   output of a failure there and name the file. `next-task` tells agents to run checks this way. To cut noise at the
   source too, set the `commands` to quiet reporters yourself (for example `pnpm -s`, `vitest --reporter=dot`,
   `turbo --output-logs=errors-only`, `tsc --pretty false`); the kit doesn't pick them, since it can't know your stack.
+- **Auto-format before the checks (`commands.fix`, `factory fix`):** set `commands.fix` to your formatter and
+  auto-fixer (for example `prettier --write {files} && eslint --fix {files}`; `{files}` is the quoted list of files,
+  appended when missing). It runs on the **changed files only**: everything that differs from the merge base with main
+  (committed, edited or new and not ignored), minus deleted files, so unrelated files never churn. `fixPaths` (regexes)
+  narrows that to the files the tools understand. The Stop check runs it before typecheck and test, and `factory verify`
+  before `commands.ci`. The agent is told in one line ("formatted 3 files"), never shown a diff. If the fixer exits
+  non-zero, its unfixable findings are shown like a failing check (the failing lines first, `checkOutputLines` in all,
+  and the log). `factory verify` refuses a pass when the fixer changed files, since the commit no longer matches the
+  files: commit them and run it again. The reviewers are told not to comment on anything the fixer handles. A git
+  pre-commit hook was not added: the Stop check and verify cover every path to a pull request without touching
+  `.git/hooks`.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
@@ -1122,7 +1133,8 @@ reads these settings.
 |---|---|---|
 | `prd`, `plan`, `blocked`, `decisions` | Where the docs live | `docs/PRD.md`, `docs/build-plan.md`, `docs/blocked.md`, `docs/decisions` |
 | `mainBranch` | The main branch | `main` |
-| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `stackUp` and `stackHealth` bring the dev stack back at boot ([autostart](#after-a-reboot-factory-autostart)); `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
+| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `fix` formats and auto-fixes the changed files before the checks (`factory fix`); `stackUp` and `stackHealth` bring the dev stack back at boot ([autostart](#after-a-reboot-factory-autostart)); `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
+| `fixPaths` | Regexes: `commands.fix` gets only changed files matching one of them | empty (every changed file) |
 | `checkOutputLines` | How many lines of a failing Stop check the agent sees: the failing lines first, then the end | 40 |
 | `codePaths` | Folders with code: the Stop check runs when they change | `["src"]` |
 | `checkRequires` | Paths that must exist before the Stop check runs, such as `node_modules` | `[]` |
