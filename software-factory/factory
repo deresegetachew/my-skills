@@ -149,6 +149,8 @@ Maintain
   watch [--json]         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
                          approved and green, owner waits, agents down or idle, queued CI): one line each and who it is for
                          (manager or owner), exit 3 when any, without a model. The orchestrator starts from this
+  manage-tick [--dry-run] precheck, then ONE `claude -p "/manage-pass"` only when there is work: an idle tick makes no model
+                         call (run it from cron or a timer)
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
@@ -259,6 +261,7 @@ case "$cmd" in
              esac ;;
   precheck)  py factory_wait.py precheck ;;
   watch)     py factory_watch.py "$@" ;;
+  manage-tick) py factory_tick.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;
   version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
   update)

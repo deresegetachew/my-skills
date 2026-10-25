@@ -53,6 +53,10 @@ to undo it.
      the open items, about 15 short lines: every tick re-reads them.
    - **An hourly scheduled task as a backup**, a fresh session with the same rules in its prompt, in case this
      session stops. It skips commits that already carry a review marker, so the two never double-review.
+   **Without a live session (no tokens when idle):** run `factory manage-tick` from cron, launchd or a systemd timer
+   on a machine with the repo (for example every 10 minutes). It runs `factory precheck` in the shell; when that prints
+   `nothing to do` it ends without any model call, and only when there is work does it start one `/manage-pass`
+   session on the manager profile. Prefer this over a session that waits and ticks.
    Check the account's existing scheduled tasks first (`list_triggers`), so you don't duplicate one.
    Scheduled tasks run at most hourly on a clock, so the 10-minute rhythm needs this live session. Better,
    where the account allows it: give the scheduled task a **GitHub trigger** on pull requests (opened,
