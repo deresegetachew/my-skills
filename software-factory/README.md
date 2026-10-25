@@ -1,27 +1,30 @@
 # software-factory
 
-Turns a repo into a software factory. Coding agents run on your machine and build the project one task at a time,
-from a PRD and a build plan: failing tests first, then the code, then reviewer subagents, then a pull request. A dev
-manager, a Claude session in the cloud, reviews the pull requests, merges them, answers the agents' questions and
-keeps them busy. Hooks, CI and GitHub's branch protection stop the work from merging when it shouldn't. Only
-decisions that really belong to you reach you. The factory itself lives in my-skills. A project gets it as a numbered
-release (`factory update`), or, until it migrates, as a git submodule.
+Turns a repo into a software factory. Coding agents run on your machines and build the project one task at a time,
+from a PRD and a task list: failing tests first, then the code, then reviewer subagents, then a pull request. A dev
+manager reviews the pull requests, merges them, answers the agents' questions and keeps them busy. It is a role you run
+in a terminal, like the coding agent: an orchestrator with no model that starts a one-item sub-manager for each piece of
+work. A product owner role takes the product questions. Hooks, CI and GitHub's branch protection stop the work from
+merging when it shouldn't. Only decisions that really belong to you reach you. The factory itself lives in my-skills. A
+project gets it as a numbered release (`factory update`). A project that still has it as a git submodule keeps working
+until it migrates.
 
 The factory's PRD is [`software-factory/docs/PRD.md`](docs/PRD.md). It is the source of truth for scope.
 
-> **Where the code lives (#112, step 1).** The factory's code (`hooks/`, `ci/`, `factory`, `factory-loop.sh`, `tests/`)
-> now sits directly in `software-factory/`. The old paths under `kit/` (`kit/.claude/hooks/*`, `kit/.claude/ci/*`,
-> `kit/factory`, `kit/factory-loop.sh`) are symlinks to it, so projects that link the old paths keep working until
-> they switch. The agents, skills and `settings.json` stay in `kit/.claude/`. The rest of this page still names the
-> paths as a project sees them.
->
-> **Two link layouts (#112, step 2).** `install.sh --link` takes `--layout new|old|auto`. `new` points the project's
-> links straight at `software-factory/hooks/`, `ci/`, `factory` and `factory-loop.sh` (the links stay at
-> `.claude/hooks/...`, so `settings.json` is unchanged); `old` points them through `kit/`, as before. `auto` (the
-> default) leaves a project that already links through `kit/` alone, so a pin bump or a re-run changes nothing in it,
-> and gives any other project `new`. A project switches in one reviewed commit: `factory update --layout new` (or
-> `install.sh . --link --layout new`), then commit the changed links. A copy install (no `--link`) copies real files.
-> A release archive (`tools/build_release.py`) holds real files only: the `kit/` forwarders are stored as copies.
+**Current status** (from the PRD and the releases page, as of `v0.1.0-alpha.1`):
+
+- The only release is `v0.1.0-alpha.1`, a **pre-release** for the sandbox test. `factory update` without a version takes
+  the newest full release and refuses while there is none, so today you name it: `factory update v0.1.0-alpha.1`
+  ([Updating from releases](#updating-from-releases)).
+- The factory's code has moved out of `kit/` into plain folders of `software-factory/`. The old `kit/` paths are
+  forwarders for projects that still link through them ([Where things live](#where-things-live)).
+- Moving a project off the submodule is its own reviewed pull request, and no command does the whole move yet
+  ([Moving a project from the submodule to releases](#moving-a-project-from-the-submodule-to-releases)).
+- There is no custom UI: the Claude app, Remote Control and the plain-text commands (`factory status`, `factory prs`,
+  `factory agents ls`, `factory follow`) are the screen.
+- `factory bootstrap` is Linux only. Bumping the pin for a whole team with one command (`factory update --propose` was
+  only an example) is not built. A chat-tool bridge (Slack or Mattermost) is an idea, not scheduled
+  (PRD, sections 5 and 6).
 
 <br>
 
@@ -31,6 +34,7 @@ The factory's PRD is [`software-factory/docs/PRD.md`](docs/PRD.md). It is the so
 - [How it fits together](#how-it-fits-together)
 - [Where things live](#where-things-live)
 - [Updating from releases (`factory update`)](#updating-from-releases)
+- [Moving a project from the submodule to releases](#moving-a-project-from-the-submodule-to-releases)
 - [Installed as a submodule: what's shared and what's yours](#installed-as-a-submodule-whats-shared-and-whats-yours)
 - [Updating the factory on the submodule](#updating-the-factory)
 - [The `factory` command](#the-factory-command)
@@ -60,43 +64,90 @@ The factory's PRD is [`software-factory/docs/PRD.md`](docs/PRD.md). It is the so
 You need a PRD first. The factory only builds what the PRD and the plan say. On the machine that runs the agents you
 need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
 
-1. **Add my-skills and install the factory**, in the project's folder:
+### 1. Install the factory in the project
+
+From a release (the way to go for a new project):
+
+1. **Download and check the release.** From the [releases page](https://github.com/deresegetachew/my-skills/releases)
+   take `software-factory-<version>.tar.gz` and `SHA256SUMS` into one folder outside the project, run
+   `sha256sum -c SHA256SUMS`, and unpack the archive there.
+2. **Install it.** In the project's folder, in a terminal of your own (an agent session is refused), on a clean tree:
 
    ```bash
-   git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
-   bash vendor/my-skills/software-factory/install.sh . --link
+   python3 <unpacked folder>/hooks/factory_release.py update v0.1.0-alpha.1
    ```
 
-   The installer links the shared files into `.claude/` and copies the templates you fill in
-   ([details](#what-the-installer-does)).
+   The release client uses only the Python standard library, so it can install the first release into a project that
+   has no factory yet. It checks the archive's checksum, writes the shared files (`.claude/hooks`, `.claude/ci`, the
+   agents, the skills, `settings.json`, `factory`, `factory-loop.sh`) as real files, writes the pin
+   `.claude/factory/release.json` and, on a first install, adds the templates you fill in, never over a file that
+   exists. It commits nothing. [What it does, step by step](#updating-from-releases).
 
-2. **Fill in the templates**, or ask Claude to "set up the software factory" (the `software-factory` skill walks
-   through it):
-   - `.claude/factory.json`: commands, paths, protected files, ports. Add `^vendor/my-skills` and `^\.gitmodules$` to
-     `protected`, and start `commands.install` with `git submodule update --init`.
-   - `CLAUDE.md`, from `CLAUDE.factory.md`: the project's rules.
-   - `docs/build-plan.md`: the tasks (or use [GitHub issues](#issues-mode) instead).
-   - `.github/workflows/ci.yml`: your stack's commands. Give every `actions/checkout` step `submodules: true`, because
-     the hooks CI runs are links into the submodule.
+If the project still has my-skills as a submodule, keep it working with `factory update` and move later: see
+[Moving a project from the submodule to releases](#moving-a-project-from-the-submodule-to-releases). To install with the
+submodule instead:
 
-3. **Commit it on a branch, open a PR and merge it.** Then set up [branch protection](#branch-protection-the-real-lock)
-   on main.
+```bash
+git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills
+bash vendor/my-skills/software-factory/install.sh . --link
+```
 
-4. **On your machine, once:**
+The installer links the shared files into `.claude/` and copies the templates you fill in
+([details](#what-the-installer-does)). Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, start
+`commands.install` with `git submodule update --init`, and give every `actions/checkout` step `submodules: true`.
 
-   ```bash
-   ./factory install-shim              # puts a `factory` command in ~/.local/bin
-   git config submodule.recurse true   # so `git pull` also updates vendor/my-skills
-   factory doctor                      # what's missing on this machine, and how to fix it
-   ```
+### 2. Fill in the templates and merge
 
-5. **Start an agent:** `factory loop -i` (a session per task that you can watch and type into), or `factory loop`
-   (unattended). [Which one](#three-ways-to-run-an-agent).
+- `.claude/factory.json`: commands, paths, protected files, ports. `factory settings` is the guided way
+  ([settings](#factoryjson-settings)), or ask Claude to "set up the software factory" (the `software-factory` skill
+  walks through it).
+- `CLAUDE.md`, from `CLAUDE.factory.md`: the project's rules.
+- The tasks: `docs/build-plan.md`, or [GitHub issues](#issues-mode) (`factory issues setup` makes the labels once).
+- `.github/workflows/ci.yml`: your stack's commands.
+- For a project with no PRD scaffold yet, `factory init` adds the role folders, the labels, the owner queue, a starter
+  PRD and the PRD-change PR template, and adds nothing twice ([From an idea to a first milestone](#from-an-idea-to-a-first-milestone)).
 
-6. **Start the dev manager:** `factory dev-manager loop` (an orchestrator that starts a one-item sub-manager per piece of
-   work), or `factory dev-manager loop -i` to work an item in a session you can type into. From the Claude app, reach a
-   running manager through Remote Control; there is no web console. It follows [DEV-MANAGER.md](DEV-MANAGER.md); moving
-   over from the old cloud-session manager is the runbook [docs/manager-handover.md](docs/manager-handover.md).
+Commit it on a branch, open a PR and merge it. Then set up [branch protection](#branch-protection-the-real-lock) on
+main.
+
+### 3. Set up your machine, once
+
+```bash
+./factory install-shim              # puts a `factory` command in ~/.local/bin
+factory doctor                      # what's missing on this machine, and how to fix it
+```
+
+On a project that uses the submodule, also run `git config submodule.recurse true` so `git pull` updates
+`vendor/my-skills`.
+
+### 4. Run the first task
+
+- `factory next` shows the job the factory would hand out next. It claims nothing; its last line shows the command that
+  does.
+- `factory loop -i` starts a coding agent: a fresh session per task that you can watch and type into. `factory loop` is
+  the unattended version. [Which one](#three-ways-to-run-an-agent).
+- The agent writes failing tests, builds, asks the reviewers and opens one pull request with `Closes #<n>`.
+  [How a task is picked](#tasks).
+
+### 5. Start the other roles
+
+Every role is a factory command ([Roles](#roles)):
+
+| Role | Start it with | What it does |
+|---|---|---|
+| Coding agent | `factory loop -i` (or `factory coding-agent loop -i`) | Builds the next task |
+| Dev manager | `factory dev-manager loop` (`-i` for one item in a session you can type into) | Reviews, merges, answers questions. Follows [DEV-MANAGER.md](DEV-MANAGER.md) |
+| Product owner | `factory product-owner loop -i` | Scope, order, the PRD and what to test. Writes proposals; your yes comes in a reply |
+
+`factory loop -i` in a terminal with no role asks which role and which name. From the Claude app, reach a running
+session through Remote Control; there is no web console. Moving over from the old cloud-session manager is the runbook
+[docs/manager-handover.md](docs/manager-handover.md).
+
+### Where to read next
+
+- [The `factory` command](#the-factory-command): every command, in one table.
+- [factory.json settings](#factoryjson-settings): every setting, with its default.
+- [`docs/PRD.md`](docs/PRD.md): what is in scope, what is decided, and what is later.
 
 <br>
 
@@ -106,11 +157,8 @@ need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
 flowchart LR
     owner(["Owner"])
 
-    subgraph cloud["Cloud"]
-        dm["Dev manager<br/>a Claude session, on a timer"]
-    end
-
-    subgraph machine["Owner's machine"]
+    subgraph machine["Owner's machines"]
+        dm["Dev manager<br/>factory dev-manager loop:<br/>an orchestrator with no model,<br/>one sub-manager per item"]
         loop["factory loop, loop -i<br/>or factory agent"]
         subgraph folders["One folder per agent"]
             a1["menelik<br/>project folder"]
@@ -118,8 +166,8 @@ flowchart LR
         end
         hooks["Hooks in every session<br/>SessionStart: factory_session<br/>PreToolUse: pr-gate<br/>PostToolUse: agent ping<br/>Stop: check, factory_stop, idle<br/>SessionEnd: down"]
         subs["Subagents<br/>test-writer, reviewer,<br/>architecture-reviewer,<br/>safety-auditor, security-reviewer"]
-        links[".claude/ links"]
-        vendor["vendor/my-skills<br/>submodule, one pinned commit"]
+        links[".claude/ files<br/>(links, until a project migrates)"]
+        vendor["The factory's files<br/>a release (the pin file),<br/>or vendor/my-skills until a project migrates"]
     end
 
     subgraph github["GitHub"]
@@ -133,12 +181,12 @@ flowchart LR
     myskills[("my-skills repo")]
 
     owner -->|"starts"| loop
-    owner -->|"asks"| dm
+    owner -->|"starts, or reaches through Remote Control"| dm
     loop -->|"a fresh Claude session per task"| folders
     folders --- hooks
     folders --- subs
     hooks -->|"read"| links
-    links -->|"point into"| vendor
+    links -->|"come from"| vendor
     myskills -->|"factory update, in a PR"| vendor
     folders -->|"claim, tick, open PRs"| issues
     hooks -->|"ping"| agentissues
@@ -197,7 +245,7 @@ Three ideas make it safe to leave running:
 
 ## Where things live
 
-The factory's code sits in plain folders of `software-factory/` (#112). `kit/` holds only what a project is given.
+The factory's code sits in plain folders of `software-factory/` (#112): `hooks/`, `ci/`, `factory` and `factory-loop.sh`. `kit/` holds only what a project is given.
 
 ```
 software-factory/
@@ -208,7 +256,7 @@ software-factory/
   hooks/                        every hook and every `factory_*.py` command, next_task.py, pr-gate.py, check.py ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
   tests/                        the tests (run with tools/run_tests.py at the repo root)
-  docs/                         reference pages (messages.md, manager-handover.md)
+  docs/                         reference pages (PRD.md, messages.md, manager-handover.md)
   kit/                          what a project is given:
     .claude/agents, skills, manager/, settings.json       Claude Code reads these from the project's .claude/
     .claude/factory.json, factory/notes/, CLAUDE.factory.md, docs/, .github/, .gitignore     templates, copied once
@@ -259,7 +307,8 @@ release. A project that does not use the nestjs skills drops the submodule entir
 
 **What is left of the move** (#112):
 
-- The first release is cut by the owner (see "Cutting a release" below). Nothing in the move publishes one.
+- The first release exists: `v0.1.0-alpha.1`, a pre-release (see [Updating from releases](#updating-from-releases)). Cutting
+  a release stays the owner's call.
 - Remanual, the first project, then relinks or moves to releases in its own reviewed pull request. That changes
   protected files in that repo, so it is the owner's merge.
 - After remanual has merged, the `kit/` forwarders are removed from my-skills in a pull request of their own, and the
@@ -282,8 +331,8 @@ factory update          # newest release: download, check, install, refresh this
 |---|---|
 | See where I am | `factory version`: installed release, the one `origin/main` pins, the newest, and what changed since |
 | See what exists | `factory releases` (`--all` for the old ones): tag, date, one-line note, and where you are |
-| Update to the newest | `factory update` |
-| Use a specific release | `factory update v1.4.0` (the `v` is optional; it can be older, too) |
+| Update to the newest | `factory update`: the newest full release. A pre-release is used only when you name it |
+| Use a specific release | `factory update v1.4.0` (the `v` is optional; it can be older, too; a pre-release such as `v0.1.0-alpha.1` is taken this way) |
 | Go back | `factory rollback`: the release installed before, from this machine's download cache, no network needed |
 | Catch up after a pull | `factory update` again: the files came with the pull, so it only refreshes this machine's runner services and verifies |
 
@@ -327,9 +376,38 @@ described [below](#updating-the-factory) until the project migrates. `factory up
 starts taking releases in a project whose factory files are plain copies; it refuses, and changes nothing, where the
 files are links into the submodule. Moving a project off the submodule is its own reviewed pull request.
 
+**Which releases exist.** One so far: `v0.1.0-alpha.1`, a pre-release, built from the commit that bumped
+`software-factory/VERSION` to `0.1.0-alpha.1` (#184). A tag with a hyphen is published as a pre-release. Until a full
+release such as `v0.1.0` exists, `factory update` with no version stops with `[no_releases]` and says to name a
+pre-release: `factory update v0.1.0-alpha.1`. `factory releases` lists what exists.
+
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
-`tools/build_release.py`, and publishes it with `SHA256SUMS` and notes.
+`tools/build_release.py`, and publishes it with `SHA256SUMS` and notes. Agents never publish a release or push a tag.
+
+### Moving a project from the submodule to releases
+
+A project that takes the factory from the submodule has its engine files as links. A release does not overwrite links:
+`factory update v0.1.0-alpha.1` (or `--release`) stops with `[linked_install]` and changes nothing. The move is its own
+reviewed pull request, and today most of it is by hand:
+
+1. **Start from a clean main** and make a branch for the move.
+2. **Remove the links the installer made** for the engine files: `.claude/hooks/*`, `.claude/ci/*`, the agents and skills
+   the factory ships, `.claude/settings.json`, `.claude/manager/settings.json`, `factory` and `factory-loop.sh`. By hand;
+   no command does this step yet. Keep your own files (`.claude/factory.json`, `.claude/factory/notes/`, `CLAUDE.md`).
+   Keep the `.claude/skills/nestjs-*` links if you use them (see the next section). Commit the removal on the branch:
+   `factory update` refuses a tree with uncommitted changes (`[dirty_tree]`) when the project has no pin yet.
+3. **Install the release.** `factory` is gone with its link, so run the client from the submodule that is still there:
+   `python3 vendor/my-skills/software-factory/hooks/factory_release.py update v0.1.0-alpha.1`. It writes real files, the
+   pin `.claude/factory/release.json` and no templates over yours.
+4. **Decide about the submodule.** A project that uses the nestjs skills keeps `vendor/my-skills` for them only; a
+   project that does not removes the submodule, its `.gitmodules` entry and the `submodules: true` lines in CI. Both are
+   by hand.
+5. **Check:** `factory doctor` is green, and `factory version` shows the release.
+6. **Commit the install and open the pull request.** `.claude/` and `.gitmodules` are normally in `protected`, so the
+   dev manager or the owner merges it. After that, `factory update` is the only way the factory changes in the project.
+
+Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is the owner's merge.
 
 <br>
 
@@ -471,6 +549,8 @@ version it pins. `factory help` lists everything.
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`, `--by role`: manager sessions against builder ones) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
 | `factory settings` | The interactive menu (in a terminal): browse by section, `/` to search, `?` for the long help of a setting, change, reset, review the diff and save (write the file, or open a pull request). In a pipe it prints the list. Non-interactively: `list [--section S] [--json]`, `get`, `set`, `unset`, `help [<key>]`, `diff`, `validate`, `pr`; `--local` is the same for this machine's own settings. Agents can't change settings. [Details](#factoryjson-settings) |
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
+| `factory fix` | Formats and auto-fixes the files this branch changed (`commands.fix`); the Stop check and `factory verify` run it first, so style never costs a turn |
+| `factory run-check <command>` | Runs a check or test quietly: one line if it passes; if it fails, the first errors (capped by `checkOutputLines`) and the path of the full log |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
 | `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
@@ -480,12 +560,14 @@ version it pins. `factory help` lists everything.
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
 | `factory wait ci <pr>` / `answer <pr>` / `slot` / `ready` `[minutes]` | The other waits, also without tokens: until CI on the PR's head commit has finished, until its `factory-question` comments have a later `factory-answer`, until fewer than `maxOpenPRs` of your PRs are open, until a task is ready. [Waiting](#waiting-without-tokens) |
 | `factory precheck` | For the dev manager: prints `nothing to do` (exit 0), or one line per PR with an unreviewed commit, unanswered question or quiet agent (exit 3). Reads GitHub only |
+| `factory watch [--json]` | For the dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict, approved and green, owner waits, agents down or idle, queued CI), one line each with who it is for (manager or owner); exit 3 when any, no model. [The orchestrator starts from it](#run-a-manager) |
+| `factory handover snapshot [--json]` | What a manager hands over, read from GitHub: open PRs, tasks, owner asks, what needs a manager now, agents and numbers in use. The runbook is [docs/manager-handover.md](docs/manager-handover.md) |
 | `factory manage-tick [--dry-run]` | One dev manager tick without a model when idle: runs the precheck, prints `nothing to do` and ends (no model call) or, when it lists work, starts one `claude -p "/manage-pass"` on the manager profile with the `models.manager` flags. Run it from cron, launchd or a systemd timer. `--dry-run` prints the command and starts nothing |
 | `factory version` | The installed release, the one `origin/main` pins, the newest, and what changed since. [Releases](#updating-from-releases) |
 | `factory releases [--all]` | The releases that exist, with dates and a one-line note |
-| `factory update [version]` | A project on releases: installs the newest (or that) release, checks its checksum, refreshes this machine's runner services, verifies, and leaves the diff for you to commit. Safe to run twice. Without a pin it is the submodule update below |
-| `factory rollback` | Back to the release installed before (offline, from the download cache), refreshed and verified the same way |
-| `factory update` (no pin) | Takes the newest my-skills and relinks. [Then commit it in a PR](#updating-the-factory) |
+| `factory update [version]` | A project on releases: installs the newest full release (or the one you name, a pre-release too), checks its checksum, refreshes this machine's runner services, verifies, and leaves the diff for you to commit. Safe to run twice. `--release` starts taking releases in a project that has no pin yet. Without a pin it is the submodule update below. Refused inside my-skills itself (`[factory_repo]`) and in an agent session |
+| `factory rollback` | Back to the release installed before (offline, from the download cache), refreshed and verified the same way. Refused inside my-skills itself, like `update` |
+| `factory update [--layout new]` (no pin) | A project still on the submodule: takes the newest my-skills and relinks (`--layout new` points the links at the factory's own folders). [Then commit it in a PR](#updating-the-factory) |
 | `factory install-shim` | Installs the `factory` command in `~/.local/bin` |
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
@@ -670,8 +752,9 @@ Most of the cost is what the agents read, not what they write.
   `.git/hooks`.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
-- **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
-  otherwise, with short state notes.
+- **A quieter dev manager:** the orchestrator has no model, so an idle cycle costs no tokens. It waits
+  `manager.busyMinutes` after a cycle with work and `manager.idleMinutes` otherwise, and a sub-manager reads only its one
+  item ([Waiting without tokens](#waiting-without-tokens)).
 
 #### Model and effort per role (`models`)
 
@@ -689,12 +772,13 @@ it; `factory settings set models '<json>'` checks it):
 }
 ```
 
-Roles: `builder`, `manager`, `test-writer`, `reviewer`, `architecture-reviewer`, `safety-auditor`,
-`security-reviewer`. A bad role, an empty model or a bad effort (`low`, `medium`, `high`, `xhigh`, `max`; builder and
-manager only) is rejected. Where the defaults live: the subagents' in `kit/.claude/agents/<name>.md`
+Roles: `builder`, `manager`, `product-owner`, `test-writer`, `reviewer`, `architecture-reviewer`, `safety-auditor`,
+`security-reviewer`. A bad role, an empty model or a bad effort (`low`, `medium`, `high`, `xhigh`, `max`; builder,
+manager and product-owner only) is rejected. Where the defaults live: the subagents' in `kit/.claude/agents/<name>.md`
 (factory-wide); the builder's and the manager's nowhere, so Claude Code's default.
 
-How the values reach Claude Code: `factory loop` and `factory agent` add `--model` and `--effort` for the builder.
+How the values reach Claude Code: `factory loop` and `factory agent` add `--model` and `--effort` for the builder (the
+dev manager's and the product owner's loops do the same for `manager` and `product-owner`).
 For a subagent they add `--agents <json>`, which redefines that agent for the session with your model and the agent
 file's own prompt, tools and description, so the shared file is never edited or shadowed.
 `python3 .claude/hooks/factory_models.py flags manager` prints the same arguments for the manager's session.
@@ -1353,10 +1437,12 @@ account.
 
 ## The dev manager
 
-A Claude session, usually in the cloud, that runs the process the owner agreed. It ticks on a timer, reviews every
-PR (protected ones included), merges, fixes small leftovers, answers questions, sweeps dead agents, writes issues in
-issues mode, and tells you only what needs you. It can't type into an agent's terminal. Its levers are PRs, comments,
-labels, the plan and the blocked list. Changing the factory, the scope or its own rhythm needs your yes.
+A role you run in a terminal, on any machine, that runs the process the owner agreed (`factory dev-manager loop`, see
+[Run a manager](#run-a-manager)). An orchestrator with no model watches GitHub and starts a one-item sub-manager (a
+Claude session) for each thing that needs one. A sub-manager reviews a PR (protected ones included), merges, fixes small
+leftovers, answers a question, sweeps dead agents, writes issues in issues mode, and tells you only what needs you. It
+can't type into an agent's terminal. Its levers are PRs, comments, labels, the plan and the blocked list. Changing the
+factory, the scope or its own rhythm needs your yes.
 
 It talks to the agents through markers in PR comments:
 
@@ -2214,6 +2300,8 @@ software-factory/
   README.md                               this page
   SKILL.md                                the skill: set up a project, or act as dev manager
   DEV-MANAGER.md                          the dev manager's playbook (orchestrator and one-item sub-managers)
+  PO.md                                   the product owner's playbook
+  docs/PRD.md                             the factory's PRD: scope, decisions, user stories, what is later
   docs/manager-handover.md                runbook: from the cloud-session manager to terminal managers
   install.sh                              install into a project (--link with the submodule)
   factory                                 the command line
@@ -2259,6 +2347,11 @@ software-factory/
     factory_netguard.py                 renders the nftables rules and the guard's systemd unit
     factory_sandbox.py                  `factory doctor --sandbox`
     factory_models.py                   the `models` setting: claude flags per role, effective models
+    factory_fix.py                      `factory fix`: format and auto-fix the changed files (`commands.fix`)
+    factory_run_check.py                `factory run-check`: a quiet check with the full log on disk
+    factory_messages.py                 the message envelope (`factory-msg`): build, parse and states (docs/messages.md)
+    factory_cards.py                    agent cards: who an agent is and what it can do, as data
+    factory_clock.py                    the one clock the scripts share; tests can set the time
     factory_reviews.py                  which extra reviews a change needs
     factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
     factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)

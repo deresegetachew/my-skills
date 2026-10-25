@@ -5,12 +5,13 @@ description: Set up and run a "software factory" on a repo, where a coding agent
 
 # Software factory
 
-Two roles, one repo:
+Three roles, one repo (each is a command you run in a terminal; see README.md, "Roles"):
 
 | Role | Runs where | Does |
 |---|---|---|
 | **Coding agent** | Claude Code on a machine with the toolchain: `factory loop -i` (a fresh session per task) | Takes the next build-plan task, writes failing tests (`test-writer`), builds, asks `reviewer` (and `safety-auditor` / `security-reviewer` when relevant), opens a PR, merges it if the gate allows, ticks the task, repeats |
-| **Dev manager** | A Claude session, usually in the cloud | Reviews every PR including protected ones, merges, fixes leftovers, adds tasks, flags blockers and idleness to the owner |
+| **Dev manager** | `factory dev-manager loop` on any machine: an orchestrator with no model that starts a one-item sub-manager per piece of work | Reviews every PR including protected ones, merges, fixes leftovers, adds tasks, flags blockers and idleness to the owner |
+| **Product owner** | `factory product-owner loop -i` | Takes the product questions: scope, order, the PRD and what to test. Writes proposals; the owner decides |
 
 Guard rails live in the repo, not in anyone's memory: `CLAUDE.md` (the rules), `.claude/factory.json`
 (paths, commands, protected files), a Stop hook that won't let a turn end with a broken build, a PreToolUse
@@ -23,14 +24,19 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
 1. **Check the inputs.** The project needs a PRD (user stories plus implementation and testing decisions)
    and should have an architecture note. If there is no PRD, help write one first; the factory builds only
    what the PRD and plan say.
-2. **Install the kit.** Prefer my-skills as a git submodule, so the project runs one pinned version of the factory:
+2. **Install the kit.** Prefer a numbered release: the project runs one pinned version of the factory as real files,
+   committed. Download the release archive and `SHA256SUMS`, check them, unpack, and run
+   `python3 <unpacked folder>/hooks/factory_release.py update <version>` in the project (the only release so far is the
+   pre-release `v0.1.0-alpha.1`, which has to be named). README.md, "Quick start", has the steps. A project that is
+   already on the submodule keeps working and moves later (README.md, "Moving a project from the submodule to
+   releases"). To install with the submodule instead:
    `git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills`, then
    `bash vendor/my-skills/software-factory/install.sh . --link`. The engine (`factory-loop.sh`, `.claude/hooks/*`)
    and every shared file (agents, skills, `settings.json`) become relative links into the submodule. The templates
    (`factory.json`, doc templates, CI) are copied for you to fill in. Project specifics never go in a shared file:
    paths that need the safety auditor, security reviewer, eval or design check go in `factory.json` (`reviews`,
    `eval`, `design`), and the few lines an agent needs that only this project knows go in
-   `.claude/factory/notes/<agent>.md`. Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
+   `.claude/factory/notes/<agent>.md`. With the submodule, add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
    `submodules: true`, and put `git submodule update --init` first in `commands.install`. To take a newer factory
    later, the owner runs `factory update` and commits it in a PR; `git config submodule.recurse true` once per clone
    makes `git pull` update the submodule too (README, "Updating the factory"). Without a submodule,
