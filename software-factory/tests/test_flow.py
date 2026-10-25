@@ -36,8 +36,6 @@ def flow_project():
     path = os.path.join(d, "bin", "gh")
     open(path, "w").write(fakegh.GH)
     os.chmod(path, 0o755)
-    # as install.sh writes it: a run without PYTHONDONTWRITEBYTECODE (CI) leaves .pyc files that `git add -A` must not take
-    open(os.path.join(work, ".gitignore"), "w").write("tmp/\n__pycache__/\n")
     env["FLOW_OUT"] = os.path.join(d, "flow.jsonl")
     open(env["FLOW_OUT"], "w").close()
     return d, work, env
