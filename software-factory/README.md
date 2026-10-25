@@ -293,6 +293,7 @@ version it pins. `factory help` lists everything.
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
 | `factory manager-claims list\|next\|review\|answer\|release\|sweep\|merge\|ask` | Several dev managers at once (#99): claim a PR or a question with a lease so two managers never do the same one, and see who holds what. See [Several managers at once](#several-managers-at-once) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
+| `factory prs [--json] [--since-days N]` | The one list a dev manager starts a pass from, read-only and REST only: every open PR with its head and age, labels, CI judged by one rule, the newest marker per commit, any review claim and a next action (`review`, `merge`, `wait CI`, `rerun flake`, `waiting for agent`, `owner merges (protected)`, `held by <manager>`, `none`); below them the unanswered questions, owner asks and quiet agents. [Details and the `--json` schema](#the-list-a-manager-starts-from-factory-prs) |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory autostart [status\|install\|uninstall]` | Makes this machine bring the factory back after a reboot: the dev stack and its agents, with unfinished work saved and left in place. `status` shows what would start; `install --agents haile,tewodros` turns it on and installs the boot service (systemd user unit with linger, or a LaunchAgent). [Details](#after-a-reboot-factory-autostart) |
 | `factory resume [--dry-run]` | What autostart runs at boot: waits for Docker and the network, runs `commands.stackUp`, starts this machine's agents in detached tmux sessions. Safe to run by hand: running agents are left alone |
@@ -904,6 +905,95 @@ removes its own.
 The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
 session with the repo attached.
 
+### The list a manager starts from: `factory prs`
+
+`factory prs` is read-only and uses the REST API only (`gh api`; no `gh pr`, no GraphQL, so it works where `gh pr` is
+blocked). A pass reads it first instead of paginating comments and check runs.
+
+```
+Open pull requests (2)
+#12 review: Task 7
+    task/7-x | cccccc1 (14 min) | agent:taytu
+    CI green | no marker for the head (older: factory-approved 0000000) | no claim
+#13 waiting for agent: Task 9
+    task/9-y | dddddd2 (3 h) | draft
+    CI red (lint) | factory-mustfix | no claim
+Questions
+  pr #13 waiting 40 min: https://github.com/o/r/pull/13#issuecomment-1
+Owner asks
+  none waiting
+Agents
+  all agents answering
+```
+
+**CI, judged by one rule.** For each job name, the newest run that was not skipped decides: a re-run replaces a
+failure, and a skipped run decides nothing. The PR gets one state: `red` (a job failed, was cancelled or timed out),
+else `running`, else `queued`, else `green`. `none` means GitHub shows no runs yet; `unknown` means they could not be
+read (the other PRs still show). `notGreen` names the jobs that are not green. `factory status` uses the same rule
+and the same reading of the markers (both come from `factory_prs.py`).
+
+**Markers per commit.** `markers` holds the newest `factory-approved`, `factory-mustfix` or `pr-watch` for each
+commit, oldest first, and `namesHead` says whether it names the current head. Only the head's marker decides:
+an approval of an older commit does not count. Approvals follow the merge gate's rule (only a login in main's
+`trustedReviewers`, when that is set), and a must-fix holds the merge until an approval of the head comes after it.
+
+**Review claim.** A `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` comment for the
+current head that has not expired; the earliest one wins. A claim for another commit, or past its `until`, is ignored.
+(The protocol, with releases and the lease cap, is `factory manager-claims`, which this reads through the same code.)
+
+**Next action**, the first rule that fits:
+
+| Order | When | Next action |
+|---|---|---|
+| 1 | `factory-hold` is on, and a live claim or no claim exists (an expired claim and no marker for the head makes it a stale hold: it falls through) | `held by <manager>` (the claimant, else `manager`) |
+| 2 | Draft | `waiting for agent` |
+| 3 | CI could not be read | `none`, with an error |
+| 4 | Not an agent PR (the manager's own, or a person's): red, then waiting, then green | `none`; `wait CI`; `owner merges (own PR)` |
+| 5 | A must-fix names the head, or holds the merge | `waiting for agent` |
+| 6 | CI red: every red job is in `manager.flakes` and has run once on this commit | `rerun flake`; otherwise `waiting for agent` |
+| 7 | No marker for the head | `review` (even while CI runs) |
+| 8 | `pr-watch` for the head (reviewed, not approved) | `none` |
+| 9 | Approved, CI not finished | `wait CI` |
+| 10 | Approved, green, protected path changed or the body says "a person merges this one" | `owner merges (protected)` |
+| 11 | Approved, green | `merge` |
+
+An agent PR is one on a `task/<n>-...` branch or with an `agent:<name>` label. All roles share one GitHub account, so
+this is the only way to tell the manager's own PRs from the agents'.
+
+**Below the PRs.** `questions`: open `factory-question` comments with no later `factory-answer`, on open PRs and on
+open issues (issues are searched `--since-days` back, default 14). `ownerAsks`: asks in the open issue titled
+`Dev manager: needs the owner` (comments starting `<!-- factory-owner-ask id=<slug> -->`) that no comment answers; an ask
+is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->`. `agents`:
+agents that are `silent` or `down`, and `staleTasks`: in-progress tasks quiet for `tasks.staleHours` (issues mode only).
+
+**`--json`**, stable for scripts. A part GitHub could not answer is `{"error": "..."}` in its place.
+
+```
+{
+  "generatedAt": "2026-10-25T12:00:00Z",
+  "pulls": [ {
+      "number": 12, "title": "...", "url": "https://github.com/o/r/pull/12", "branch": "task/7-x", "draft": false,
+      "head": {"sha": "<40 hex>", "ageMinutes": 14},                  // age of the head commit
+      "labels": ["factory-hold", "agent:taytu"],
+      "agent": "taytu" | null, "agentPr": true,
+      "ci": {"state": "green|red|running|queued|none|unknown", "notGreen": [{"name": "lint", "state": "red"}], "runs": 3},
+      "markers": [{"kind": "factory-approved|factory-mustfix|pr-watch", "sha": "<hex>" | null, "at": "<ISO>", "namesHead": true}],
+      "headMarker": "factory-approved|factory-mustfix|pr-watch" | null,
+      "gate": "approved|approval stale|must-fix|must-fix (older commit)" | null,   // the merge gate's reading
+      "claim": {"manager": "ana", "until": "<ISO>", "expired": false} | null,
+      "staleHold": false,
+      "protected": true | false | null,                               // null: not looked at (only for a PR that could merge)
+      "next": {"action": "review|merge|wait-ci|rerun-flake|waiting-for-agent|owner-merges|held|none",
+               "text": "review", "reason": "protected|not-agent-pr", "by": "ana", "jobs": ["e2e"], "error": "..."}
+  } ],                                                                 // "reason", "by", "jobs", "error": only when they apply
+  "questions": [{"kind": "pr|issue", "number": 13, "title": "...", "url": "...", "ageMinutes": 40}],
+  "ownerAsks": [{"id": "slug", "issue": 60, "url": "...", "ageMinutes": 300}],
+  "agents": [{"name": "taytu", "status": "silent|down", "minutesAgo": 95}],
+  "staleTasks": [{"number": 7, "title": "...", "quietHours": 4.2}],
+  "note": "..."                                                        // only outside issues mode
+}
+```
+
 <br>
 
 ## CI: GitHub's runners or your own Mac
@@ -1150,6 +1240,7 @@ reads these settings.
 | `reReviewPercent` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or it touches a new file): then it is a full review. 0: always full | 30 |
 | `trustedReviewers` | GitHub logins whose approvals count | none: any approval counts |
 | `holdLabel` | The hold label | `factory-hold` |
+| `manager` | `flakes`: names of CI jobs known to fail now and then; `factory prs` says `rerun flake` when only those are red, for the first time on that commit | `[]` |
 | `agents` | The agents' names, in order | the ten names above |
 | `agentEnv`, `portStep` | Per-agent variables, and the port step | `{}`, 10 |
 | `claimStaleHours` | How long a local claim or a pushed task branch holds a task | 6 |
@@ -1197,6 +1288,7 @@ software-factory/
       factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
+      factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only

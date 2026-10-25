@@ -30,6 +30,9 @@ Build
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
                          the CI queue and runners, and the tasks; read-only
+  prs [--json]           what a manager decides from, one list: each open PR with its head, CI judged by one rule,
+                         the newest marker per commit, any review claim and the next action; then unanswered questions
+                         and owner asks, and agents gone quiet. Read-only, REST only
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
@@ -127,6 +130,7 @@ case "$cmd" in
   autostart) py factory_autostart.py "$@" ;;
   resume)    py factory_resume.py "$@" ;;
   status)    py factory_status.py "$@" ;;
+  prs)       py factory_prs.py "$@" ;;
   claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
   release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     py factory_claims.py clean ;;

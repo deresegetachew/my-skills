@@ -21,9 +21,10 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load, load_from_main, task_labels, task_source  # noqa: E402
+import factory_manager_claims as claims  # noqa: E402
+from factory_prs import ci_state as judged_ci, claim_of, gate_word, section  # noqa: E402
 
 HOOKS = os.path.dirname(os.path.abspath(__file__))
-SHA_IN = re.compile(r"sha=([0-9a-f]{7,40})")
 
 
 def gh(path):
@@ -39,13 +40,6 @@ def ago(stamp, now):
     t = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
     m = int((now - t).total_seconds() // 60)
     return f"{m} min" if m < 120 else f"{m // 60} h"
-
-
-def section(fn, *a):
-    try:
-        return fn(*a)
-    except (RuntimeError, ValueError, OSError, KeyError, TypeError, SystemExit) as e:  # factory_issues exits on errors
-        return {"error": str(e) or type(e).__name__}
 
 
 def agents(cfg):
@@ -70,25 +64,6 @@ def here():
     return {"claims": [l for l in p.stdout.splitlines() if l.strip()]}
 
 
-def dev_manager(comments, head, trusted):
-    """The dev manager's word on a PR, by the PR gate's rule (pr-gate.py, gate_merge): the last marker counts; an
-    approval only from a trusted login (when `trustedReviewers` is set on main) and only for the head commit."""
-    last, mustfix_sha = None, None
-    for c in comments:
-        body = c.get("body") or ""
-        login = (c.get("user") or c.get("author") or {}).get("login", "")
-        if "<!-- factory-mustfix" in body:
-            last = "mustfix"
-            m = SHA_IN.search(body)
-            mustfix_sha = m.group(1) if m else None
-        elif "<!-- factory-approved" in body and (not trusted or login in trusted):
-            m = re.search(r"factory-approved\s+sha=([0-9a-f]{7,40})", body)
-            last = "approved" if m and head.startswith(m.group(1)) else "stale"
-    if last == "mustfix":  # it holds the merge whatever commit it names, until an approval of the head
-        return "must-fix" if not mustfix_sha or head.startswith(mustfix_sha) else "must-fix (older commit)"
-    return {"approved": "approved", "stale": "approval stale"}.get(last)
-
-
 def marker(cfg, branch, sha, kind):
     path = os.path.join(cfg["reviewMarkers"], branch.replace("/", "_") + kind)
     try:
@@ -99,16 +74,9 @@ def marker(cfg, branch, sha, kind):
 
 
 def ci_state(sha):
-    try:
-        runs = (gh(f"repos/{{owner}}/{{repo}}/commits/{sha}/check-runs?per_page=100") or {}).get("check_runs", [])
-    except RuntimeError:
-        return "unknown"  # this PR's checks couldn't be read; the others still show
-    if not runs:
-        return "none"
-    if any(r.get("status") != "completed" for r in runs):
-        return "running"
-    bad = [r for r in runs if r.get("conclusion") not in ("success", "skipped", "neutral")]
-    return "failed" if bad else "green"
+    """The CI rule of `factory prs` (factory_prs.py), in the words this view has always used."""
+    state = judged_ci(sha)[0]
+    return {"red": "failed"}.get(state, state)
 
 
 def pulls(cfg):
@@ -124,13 +92,12 @@ def pulls(cfg):
         sha, branch = p["head"]["sha"], p["head"]["ref"]
         labels = {x["name"] for x in p.get("labels", [])}
         comments = gh(f"repos/{{owner}}/{{repo}}/issues/{p['number']}/comments?per_page=100") or []
-        dm = dev_manager(comments, sha, trusted)
-        import factory_manager_claims as claims
-        held = claims.review_winner(comments, sha, claims.now_utc())
+        dm = gate_word(comments, sha, trusted)
+        held, _ = claim_of(comments, sha, claims.now_utc())
         return {"number": p["number"], "title": p["title"], "branch": branch, "draft": bool(p.get("draft")),
                 "ci": ci_state(sha), "reviewed": marker(cfg, branch, sha, ".ok"), "hold": hold in labels,
                 "devManager": dm,
-                "claim": {"manager": held["manager"], "until": claims.stamp(held["until"])} if held else None,
+                "claim": {"manager": held["manager"], "until": held["until"]} if held else None,
                 "personMerges": "a person merges this one" in (p.get("body") or "").lower()}
 
     with ThreadPoolExecutor(8) as pool:  # two calls per PR: side by side, so it stays quick
