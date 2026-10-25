@@ -5,6 +5,9 @@ this machine. Use it to measure a change to the factory (a cheaper model, less r
   factory usage                       the last 7 days, per task, then the totals
   factory usage --since 2026-10-20 --until 2026-10-24
   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
+  factory usage --by role             per role (coding-agent, dev-manager, product-owner): a session belongs to the
+                                      role named in the `<!-- factory-role role=... -->` line its prompt ends with
+                                      (the role loops add it, #102); a session without one is a coding agent's
   factory usage --json                the same as JSON
   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it)
   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
@@ -24,6 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load  # noqa: E402
 
 TASK = re.compile(r"^task/(\d+(?:[.-]\d+)*?)-")
+ROLE = re.compile(r"<!--\s*factory-role\s+role=([\w-]+)")
 FIELDS = ("input", "cache_write", "cache_read", "output")
 
 
@@ -56,6 +60,29 @@ def replies(path):
                    m.get("model") or "?", u, d.get("cwd") or "")
 
 
+def session_role(path):
+    """The role a session's first prompt names (the loops end it with `<!-- factory-role role=... -->`), else
+    "coding-agent": the builder's prompt carries no marker."""
+    try:
+        f = open(path, encoding="utf-8")
+    except OSError:
+        return "coding-agent"
+    with f:
+        for line in f:
+            try:
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("type") != "user":
+                continue
+            content = (d.get("message") or {}).get("content")
+            if isinstance(content, list):
+                content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
+            m = ROLE.search(content if isinstance(content, str) else "")
+            return m.group(1) if m else "coding-agent"
+    return "coding-agent"
+
+
 def tokens(u):
     return {"input": int(u.get("input_tokens") or 0), "cache_write": int(u.get("cache_creation_input_tokens") or 0),
             "cache_read": int(u.get("cache_read_input_tokens") or 0), "output": int(u.get("output_tokens") or 0)}
@@ -75,6 +102,7 @@ def collect(root, base, since, until):
         for main in glob.glob(os.path.join(d, "*.jsonl")):
             sid = os.path.basename(main)[:-6]
             files = [(main, "main")]
+            sessions[sid]["role"] = session_role(main)
             for sub in glob.glob(os.path.join(d, sid, "subagents", "*.jsonl")):
                 kind = "subagent"
                 try:
@@ -98,7 +126,7 @@ def collect(root, base, since, until):
     out = {}
     for sid, s in sessions.items():
         task = s["branches"].most_common(1)[0][0] if s["branches"] else "-"
-        out[sid] = {"task": task, "rows": s["rows"]}
+        out[sid] = {"task": task, "rows": s["rows"], "role": s["role"]}
     return out
 
 
@@ -116,7 +144,7 @@ def summarise(sessions, by):
     total = {"tokens": zero(), "replies": 0, "tasks": set(), "models": collections.Counter()}
     for sid, s in sessions.items():
         for kind, model, t in s["rows"]:
-            key = s["task"] if by == "task" else (kind if by == "agent" else model)
+            key = s["task"] if by == "task" else (kind if by == "agent" else s["role"] if by == "role" else model)
             g = groups[key]
             add(g["tokens"], t)
             g["replies"] += 1
@@ -205,7 +233,7 @@ def main(argv):
     p = argparse.ArgumentParser(prog="factory usage", description="Token use per task, from this machine's logs.")
     p.add_argument("--since", type=day, help="first day (YYYY-MM-DD, UTC); default 7 days ago")
     p.add_argument("--until", type=day, help="day after the last (YYYY-MM-DD, UTC); default tomorrow")
-    p.add_argument("--by", choices=("task", "agent", "model"), default="task")
+    p.add_argument("--by", choices=("task", "agent", "model", "role"), default="task")
     p.add_argument("--json", action="store_true")
     p.add_argument("--record", metavar="LABEL", help="append a summary row to the usage log")
     p.add_argument("--task", help="only the sessions of this task (its id or issue number)")

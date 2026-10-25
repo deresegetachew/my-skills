@@ -14,9 +14,17 @@ usage() {
 factory <command>
 
 Build
-  loop [-i] [N]          start an agent loop: one fresh Claude run per task (-i: a session you can type into,
+  loop [-i] [N]          start a coding agent loop: one fresh Claude run per task (-i: a session you can type into,
                          which closes by itself when the task is done). Start it again in another terminal for more agents.
-                         FACTORY_AGENTS=haile,tewodros (or factory machine setup): only those names on this machine
+                         FACTORY_AGENTS=haile,tewodros (or factory machine setup): only those names on this machine.
+                         `loop -i` in a terminal asks which role and name; `loop -i dev-manager` or FACTORY_ROLE skips it
+  coding-agent [name|N] loop [-i] [--once] [--dry-run] [N]
+  dev-manager  [name|N] loop [-i] [--once] [--dry-run]
+  product-owner [name|N] loop [-i] [--once] [--dry-run]
+                         the roles, started the same way and run by the same loop (#102). The dev manager is an
+                         orchestrator with no model: it watches GitHub and starts one-item sub-managers (#97). Names come
+                         from roles.<role>.names; --once runs one pass, --dry-run prints what a pass would do
+  init-roles [--force]   create the project's role folders (.claude/factory/roles/<role>/README.md and reads.md)
   agent <name|N>         open Claude in that agent's own worktree (created the first time), for manual work there.
                          To run the queue, use loop -i instead (a fresh session per task).
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
@@ -85,7 +93,28 @@ EOF
 
 cmd="${1:-help}"; shift || true
 case "$cmd" in
-  loop)      exec "$root/factory-loop.sh" "$@" ;;
+  loop)
+    # A role word (or FACTORY_ROLE) picks the role. `factory loop -i` alone, in a terminal, asks which (#102); an
+    # unattended `factory loop` (no -i, scripts, autostart) stays a coding agent, so nothing running today changes.
+    rest=(); want="${FACTORY_ROLE:-}"; asks=0
+    for a in "$@"; do
+      case "$a" in coding-agent|dev-manager|product-owner) want="$a" ;; -i|--interactive) asks=1; rest+=("$a") ;; *) rest+=("$a") ;; esac
+    done
+    if [ -z "$want" ] && [ "$asks" = 1 ] && [ -t 0 ] && [ -t 2 ]; then
+      pick="$(py factory_roles.py choose)" || exit 1
+      read -r want pickname <<< "$pick"
+      exec env FACTORY_ROLE="$want" FACTORY_NAME="$pickname" "$root/factory-loop.sh" ${rest[@]+"${rest[@]}"}
+    fi
+    [ -n "$want" ] && export FACTORY_ROLE="$want"
+    exec "$root/factory-loop.sh" ${rest[@]+"${rest[@]}"} ;;
+  coding-agent|dev-manager|product-owner)
+    role="$cmd"; who=""
+    if [ -n "${1:-}" ] && [ "$1" != loop ]; then who="$1"; shift; fi
+    [ "${1:-}" = loop ] || { echo "usage: factory $role [name|N] loop [-i] [--once] [--dry-run]" >&2; exit 1; }
+    shift
+    case "$who" in ''|*[!0-9]*) ;; *) who="$(py factory_roles.py nth "$role" "$who")" || exit 1 ;; esac
+    exec env FACTORY_ROLE="$role" FACTORY_NAME="$who" "$root/factory-loop.sh" "$@" ;;
+  init-roles) py factory_roles.py init "$@" ;;
   agent)
     [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
     who="$1"; shift

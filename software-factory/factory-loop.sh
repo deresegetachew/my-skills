@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Fresh-context factory loop: one Claude Code run per task, so every task starts with a clean context
 # (cheaper and more reliable than one long session; state lives in git, the plan and the PRs).
+#
+# One runner for every role (#102): FACTORY_ROLE is coding-agent (the default, and what `factory loop` means),
+# dev-manager or product-owner, and FACTORY_NAME picks a name from the role's list. Use the commands:
+#   factory coding-agent [name] loop [-i] [--once] [--dry-run] [N]      (also: factory loop)
+#   factory dev-manager  [name] loop [-i] [--once] [--dry-run]           the orchestrator, no model (#97)
+#   factory product-owner [name] loop [-i] [--once] [--dry-run]
+# What is shared is written once below (tidy the folder, reload when main changes this script, isolated MCP,
+# register and ping, the 3-failures stop rule, interactive mode with Remote Control, waits between passes). What
+# differs is factory_roles.py's definition: the skill a pass runs, the settings profile, the model, how it decides it
+# has work, and the waits. Only the coding agent claims a task; the others register as live agents.
+#   --once      one pass, then exit          --dry-run   print what a pass would do; start and write nothing
 #   ./factory-loop.sh            run tasks; when none is ready, wait and check again every `waitMinutes` (default 1;
 #                                0 in factory.json makes it exit instead). Ctrl-C stops it
 #   ./factory-loop.sh 5          run at most 5 tasks
@@ -33,16 +44,53 @@ set -uo pipefail
 self_sum=$(cksum < "$0")
 cd "$(git rev-parse --show-toplevel)"
 hooks="$PWD/.claude/hooks"
-interactive=0
-if [ "${1:-}" = "--interactive" ] || [ "${1:-}" = "-i" ]; then interactive=1; shift; fi
-limit="${1:-999}"
+interactive=0; once=0; dry_run=0; limit=999
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --interactive|-i) interactive=1 ;;
+    --once) once=1 ;;
+    --dry-run) dry_run=1 ;;
+    *[!0-9]*|"") echo "factory-loop: unknown option '$1' (use -i, --once, --dry-run or a number of passes)" >&2; exit 1 ;;
+    *) limit="$1" ;;
+  esac
+  shift
+done
+[ "$once" = 1 ] && limit=1
+role="${FACTORY_ROLE:-coding-agent}"; req_name="${FACTORY_NAME:-}"
+case "$role" in coding-agent|dev-manager|product-owner) ;; *)
+  echo "factory-loop: '$role' isn't a role (coding-agent, dev-manager, product-owner)." >&2; exit 1;; esac
+
+# --dry-run: say what one pass would do and stop. Nothing is claimed, registered, started or written.
+if [ "$dry_run" = 1 ]; then
+  who="$req_name"
+  [ -n "$who" ] || who="$(python3 "$hooks/factory_roles.py" names "$role" 2>/dev/null | head -1)"
+  [ -n "$who" ] || who="$role"
+  echo "[$who] $role (dry run): nothing is claimed, registered, started or written."
+  case "$role" in
+    coding-agent)
+      if next=$(python3 "$hooks/next_task.py"); then
+        echo "[$who] next task: $next"; echo "[$who] would run: claude -p \"/next-task ${next%% *}\""
+      else echo "[$who] no task is ready: it would wait and look again."; fi ;;
+    *)
+      if found=$(python3 "$hooks/factory_roles.py" work "$role" --name "$who"); then
+        echo "$found" | sed "s/^/[$who] work: /"
+        echo "[$who] would run: claude -p \"$(python3 "$hooks/factory_roles.py" prompt "$role" "$who" | head -1)\""
+      else echo "[$who] $found"; fi ;;
+  esac
+  exit 0
+fi
 
 resume_first="${FACTORY_RESUME:-0}"; unset FACTORY_RESUME  # for this first task only, also after a reload
 if [ -n "${FACTORY_RELOAD_DIR:-}" ]; then
   # Restarted by reload_if_changed: same pid, so the same agent and folder (its checkout claim still holds).
   agent="$FACTORY_RELOAD_AGENT"; dir="$FACTORY_RELOAD_DIR"; unset FACTORY_RELOAD_AGENT FACTORY_RELOAD_DIR
 else
-  read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$) || exit 1
+  # The coding agent's call is today's; another role names itself and its role, and may ask for a name.
+  if [ "$role" = coding-agent ]; then
+    read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$ ${req_name:+--name "$req_name"}) || exit 1
+  else
+    read -r agent dir < <(python3 "$hooks/factory_claims.py" checkout --pid $$ --role "$role" ${req_name:+--name "$req_name"}) || exit 1
+  fi
 fi
 # On exit: drop the local claims, and say on GitHub that this agent is down (issues mode; a no-op otherwise).
 trap 'python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1; python3 "$hooks/factory_agents.py" down --agent "$agent" >/dev/null 2>&1' EXIT
@@ -62,28 +110,41 @@ if [ "$dir" != "$PWD" ]; then
       exit 1; }
   fi
   [ -f .gitmodules ] && git submodule update --init -q  # skills from my-skills, for example
-  install=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("install",""))')
+  install=""
+  # A manager or a product owner reads and reviews; it builds nothing, so it needs no dependencies installed.
+  [ "$role" = coding-agent ] && install=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("install",""))')
   # Every start, not once: main may have new dependencies since this worktree was last used.
   [ -n "$install" ] && { echo "[$agent] $install"; sh -c "$install" || echo "[$agent] (install failed; tests may fail)"; }
 fi
 hooks="$PWD/.claude/hooks"
 export FACTORY_AGENT="$agent"
 # Own ports, database and queue per loop (agentEnv in factory.json), then the project's per-loop setup.
-eval "$(python3 "$hooks/factory_env.py" --agent "$agent")" || exit 1
-setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("agentSetup",""))')
+setup=""
+if [ "$role" = coding-agent ]; then  # a manager or a product owner has no ports or database of its own
+  eval "$(python3 "$hooks/factory_env.py" --agent "$agent")" || exit 1
+  setup=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("agentSetup",""))')
+fi
 [ -n "$setup" ] && { echo "[$agent] $setup"; sh -c "$setup" || echo "[$agent] (agentSetup failed; tests may fail until it works)"; }
+model_role=builder
+if [ "$role" != coding-agent ]; then eval "$(python3 "$hooks/factory_roles.py" vars "$role")"; model_role="$role_model_role"; fi
 wait_minutes=$(python3 -c 'import json;print(int(json.load(open(".claude/factory.json")).get("waitMinutes",1)))' 2>/dev/null || echo 1)
 export FACTORY_INTERACTIVE="$interactive"
 export FACTORY_LOOP=1
+export FACTORY_ROLE="$role"
 # Its issue: Agent: <name> · idle. Exit 3: another machine runs this name right now (#45); stop instead of doubling it.
-python3 "$hooks/factory_agents.py" register --agent "$agent" >/dev/null 2>"${TMPDIR:-/tmp}/factory-register.$$"; rc=$?
+if [ "$role" = coding-agent ]; then
+  python3 "$hooks/factory_agents.py" register --agent "$agent" >/dev/null 2>"${TMPDIR:-/tmp}/factory-register.$$"; rc=$?
+else
+  python3 "$hooks/factory_agents.py" register --agent "$agent" --role "$role" >/dev/null 2>"${TMPDIR:-/tmp}/factory-register.$$"; rc=$?
+fi
 if [ "$rc" = 3 ]; then
   echo "[$agent] $(cat "${TMPDIR:-/tmp}/factory-register.$$")" >&2; rm -f "${TMPDIR:-/tmp}/factory-register.$$"
   # Not the EXIT trap: it would mark the other machine's agent issue down.
   trap - EXIT; python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1; exit 1
 fi
 rm -f "${TMPDIR:-/tmp}/factory-register.$$"
-echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
+if [ "$role" = coding-agent ]; then echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
+else echo "[$agent] $role working in $PWD"; fi
 
 # Between tasks: back to a clean main. In an agent worktree, untracked leftovers go too (ignored files such as
 # node_modules stay, so no reinstall). Local task branches whose task is ticked on main are deleted.
@@ -112,12 +173,20 @@ isolate() {
   local cfg
   cfg="$(python3 "$hooks/factory_mcp.py")" || cfg='{"mcpServers":{}}'
   [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
-  claude_flags=(--mcp-config "$cfg" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}')
-  # The `models` setting (factory_models.py): --model and --effort for the builder, and --agents for the subagents
-  # whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
+  if [ "$role" = coding-agent ]; then
+    claude_flags=(--mcp-config "$cfg" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}')
+  else
+    # A manager or a product owner runs on its role's settings profile (factory_roles.py): the project's own
+    # settings.json denies `gh api`, which these roles need, so the profile replaces it for their sessions.
+    claude_flags=(--mcp-config "$cfg" --strict-mcp-config)
+    local line
+    while IFS= read -r line; do [ -n "$line" ] && claude_flags+=("$line"); done < <(python3 "$hooks/factory_roles.py" claude-flags "$role")
+  fi
+  # The `models` setting (factory_models.py): --model and --effort for the role's session, and --agents for the
+  # subagents whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
   if [ -f "$hooks/factory_models.py" ]; then
     local m
-    m="$(python3 "$hooks/factory_models.py" flags builder 2>&1)" || { echo "[$agent] $m"; exit 1; }
+    m="$(python3 "$hooks/factory_models.py" flags "$model_role" 2>&1)" || { echo "[$agent] $m"; exit 1; }
     while IFS= read -r line; do [ -n "$line" ] && claude_flags+=("$line"); done <<< "$m"
   fi
 }
@@ -131,7 +200,45 @@ reload_if_changed() {
   if [ "$interactive" = 1 ]; then exec bash ./factory-loop.sh -i "$1"; else exec bash ./factory-loop.sh "$1"; fi
 }
 
-last=""; repeats=0
+# Waits `$1` minutes, still registered as idle: a manager or a product owner that sleeps is not dead (the dev manager's
+# sweep would otherwise mark it down). Ctrl-C stops it.
+role_sleep() {
+  local left
+  left=$(python3 -c 'import sys;print(int(float(sys.argv[1])*60))' "$1")
+  while [ "$left" -gt 0 ]; do
+    python3 "$hooks/factory_agents.py" ping --agent "$agent" --status idle >/dev/null 2>&1 || true
+    local chunk=$((left < 300 ? left : 300))
+    sleep "$chunk"; left=$((left - chunk))
+  done
+}
+
+# One pass of a manager or a product owner. Returns 0 (it had work and did it), 3 (nothing to do) or 1 (it failed).
+# When factory_roles.py finds work, one fresh `claude -p` runs the role's skill (`claude` without -p under -i).
+role_pass() {
+  local found rc prompt
+  found="$(python3 "$hooks/factory_roles.py" work "$role" --name "$agent")"; rc=$?
+  [ "$rc" = 3 ] && return 3
+  [ "$rc" = 0 ] || { echo "[$agent] $found"; return 1; }
+  item="$(printf '%s\n' "$found" | head -1)"
+  if [ "$item" = "$last_item" ]; then repeats=$((repeats + 1)); else repeats=1; last_item="$item"; fi
+  if [ "$repeats" -ge 3 ]; then
+    echo "[$agent] '$item' came up 3 times in a row; stopping so a person can look."; exit 1
+  fi
+  echo "=== [$agent] $(date '+%H:%M') $role: $item ==="
+  isolate
+  prompt="$(python3 "$hooks/factory_roles.py" prompt "$role" "$agent")"
+  python3 "$hooks/factory_agents.py" ping --agent "$agent" --status "$item" >/dev/null 2>&1 || true
+  if [ "$interactive" = 1 ]; then
+    if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then claude "${claude_flags[@]}" --remote-control="$agent" "$prompt"; else claude "${claude_flags[@]}" "$prompt"; fi
+    rc=$?; stty sane 2>/dev/null
+  else
+    claude "${claude_flags[@]}" -p "$prompt"; rc=$?
+  fi
+  [ "$rc" = 0 ] || return 1
+  return 0
+}
+
+last=""; repeats=0; last_item=""; fails=0
 for ((n = 1; n <= limit; n++)); do
   if [ "$resume_first" = 1 ]; then
     echo "[$agent] resuming after a restart: leaving $PWD as it is (branch $(git branch --show-current 2>/dev/null))."
@@ -140,6 +247,20 @@ for ((n = 1; n <= limit; n++)); do
     tidy
   fi
   reload_if_changed $((limit - n + 1))
+  if [ "$role" != coding-agent ]; then
+    role_pass; rc=$?
+    if [ "$rc" = 1 ]; then
+      fails=$((fails + 1))
+      echo "[$agent] (the pass exited with an error; the next one picks up from GitHub)"
+      if [ "$fails" -ge 3 ]; then echo "[$agent] 3 passes failed in a row; stopping so a person can look."; exit 1; fi
+    else fails=0; fi
+    [ "$n" -lt "$limit" ] || break
+    if [ "$rc" = 3 ]; then
+      [ "$role_idle" != 0 ] || { echo "[$agent] Nothing to do; exiting (idleMinutes is 0)."; exit 0; }
+      role_sleep "$role_idle"
+    else role_sleep "$role_busy"; fi
+    continue
+  fi
   # Nothing to do: wait for work instead of exiting (`waitMinutes` in factory.json; 0 = exit as before). While it waits
   # the agent stays registered as idle, so the dev manager doesn't take it for dead. Ctrl-C stops it.
   waited=0

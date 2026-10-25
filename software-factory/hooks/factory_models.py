@@ -2,13 +2,15 @@
 """The `models` setting: which model (and effort) each factory role runs on (#94).
 
   "models": {"builder": {"model": "opus", "effort": "high"}, "manager": {"model": "sonnet"},
+             "product-owner": {"model": "opus"},
              "reviewer": {"model": "sonnet", "escalateTo": "opus"}, "test-writer": {"model": "haiku"}}
 
 No entry for a role = today's behaviour: a subagent keeps the `model:` in its agent file, and the builder and the
 manager keep Claude Code's own default. Nothing changes until a project sets a value.
 
 How a value reaches Claude Code (the spike, #94):
-  - builder, manager: `claude --model <m> --effort <e>`.
+  - builder, manager, product-owner: `claude --model <m> --effort <e>`. They are the coding agent, the dev manager and
+    the product owner (`factory <role> loop`, #102).
   - subagents: `claude --agents <json>` redefines the agent of that name for the session, and beats the project's
     `.claude/agents/<name>.md` (a symlink into the kit, which stays untouched). It replaces the whole definition, so the
     JSON carries the file's own prompt, tools and description with only `model` changed. The env var
@@ -23,7 +25,8 @@ import json, os, re, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 SUBAGENTS = ("test-writer", "reviewer", "architecture-reviewer", "safety-auditor", "security-reviewer")
-ROLES = ("builder", "manager") + SUBAGENTS
+SESSION_ROLES = ("builder", "manager", "product-owner")  # the sessions the loops start; the rest are their subagents
+ROLES = SESSION_ROLES + SUBAGENTS
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:\[\]@/-]*")  # an alias or a full id; never an option-looking word
 AGENTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "agents")
@@ -45,7 +48,7 @@ def validate(models):
             raise ValueError(f"models.{role}: not a role. Roles: {', '.join(ROLES)}.")
         if not isinstance(entry, dict):
             raise ValueError(f'models.{role} takes an object, e.g. {{"model": "sonnet"}}.')
-        allowed = {"model", "effort"} if role in ("builder", "manager") else {"model"}
+        allowed = {"model", "effort"} if role in SESSION_ROLES else {"model"}
         if role == "reviewer":
             allowed = {"model", "escalateTo"}
         for field in entry:
@@ -98,13 +101,13 @@ def agent_flags(models):
 
 def flags(role, models):
     """The `claude` arguments for a session of this role. Empty when the project sets nothing."""
-    entry = models.get(role, {}) if role in ("builder", "manager") else {}
+    entry = models.get(role, {}) if role in SESSION_ROLES else {}
     args = []
     if entry.get("model"):
         args += ["--model", entry["model"]]
     if entry.get("effort"):
         args += ["--effort", entry["effort"]]
-    # Subagents are started by the builder and the manager sessions, so these carry the subagent settings.
+    # Subagents are started by the loops' sessions, so these carry the subagent settings.
     return args + agent_flags(models)
 
 
@@ -113,6 +116,8 @@ def table(models):
     rows = []
     for role in ROLES:
         model = models.get(role, {}).get("model")
+        if role == "product-owner" and not model:
+            continue  # shown once a project gives the product owner a model: before that, nothing changed for it
         if model:
             rows.append((role, model, "setting `models` in .claude/factory.json"))
         elif role in SUBAGENTS:
@@ -130,7 +135,7 @@ def main(argv):
     except ValueError as e:
         print(f"factory: {e} Fix it with `factory settings set models '<json>'`.", file=sys.stderr)
         return 1
-    if argv[:1] == ["flags"] and len(argv) == 2 and argv[1] in ("builder", "manager"):
+    if argv[:1] == ["flags"] and len(argv) == 2 and argv[1] in SESSION_ROLES:
         args = flags(argv[1], models)
         if args:
             print("\n".join(args))
@@ -139,7 +144,7 @@ def main(argv):
         for role, model, source in table(models):
             print(f"{role:22} {model:22} {source}")
         return 0
-    print("usage: factory_models.py flags builder|manager | table", file=sys.stderr)
+    print("usage: factory_models.py flags builder|manager|product-owner | table", file=sys.stderr)
     return 2
 
 
