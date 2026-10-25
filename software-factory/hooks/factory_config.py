@@ -51,6 +51,10 @@ DEFAULTS = {
     # A reviewer's second round reads only the delta since its last round (factory_rereview.py): the limit, as a
     # percent of the branch diff's changed lines, above which it is a full review. 0: always a full review.
     "reReviewPercent": 30,
+    # The curated lessons file (factory_lessons.py): one-line rules the builder and the reviewers read first, and the most
+    # lessons it may hold. `factory lessons suggest` proposes new ones; the dev manager adds them.
+    "lessons": ".claude/factory/lessons.md",
+    "lessonsCap": 40,
     # Style guides per path: [{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal"],
     #   "check": "python3 .claude/hooks/check_structure.py"}]. The architecture reviewer and CI use them.
     "styles": [],

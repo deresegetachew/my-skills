@@ -65,6 +65,8 @@ SETTINGS = {
     "prSizeWarn": ("int", "The guard warns above this many changed lines.", None, None),
     "reviewMarkers": ("str", "Where review passes are written.", None, None),
     "reReviewPercent": ("int", "A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review.", None, None),
+    "lessons": ("str", "The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`).", None, None),
+    "lessonsCap": ("int", "The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now.", None, None),
     "trustedReviewers": ("list", "GitHub logins whose approvals count. Empty: any.", None, []),
     "holdLabel": ("str", "The label the dev manager puts on a PR it is reviewing.", None, None),
     "agents": ("list", "The agents' names, in order (lowercase letters, digits, dashes).", None, None),

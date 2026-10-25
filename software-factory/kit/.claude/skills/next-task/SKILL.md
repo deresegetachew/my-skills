@@ -33,6 +33,10 @@ This file is the core. Open the others in this folder only when they apply:
    files, edge cases, out of scope. Open those, and widen only when they don't answer your question. Search long
    documents (`grep -n`) instead of reading them whole: most of a task's cost is what it reads. Say in one line which
    task you're doing and what "done" means.
+4. **Read the lessons.** `python3 .claude/hooks/factory_lessons.py show` prints this project's short list of repeated
+   mistakes (one line each, with an example). Check your work against it before every push; the reviewers do too.
+   If a person's must-fix or a CI failure teaches something new, say so in the PR description as "lesson candidate:";
+   you cannot edit the file, the dev manager does (`factory lessons suggest`).
 
 A PR with the `factory-hold` label is being reviewed by the dev manager: don't rework or merge it.
 
