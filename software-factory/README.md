@@ -33,6 +33,7 @@ version of it as a git submodule.
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
 - [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
@@ -293,6 +294,8 @@ version it pins. `factory help` lists everything.
 | `factory lessons [show\|check\|suggest\|add\|prune]` | The curated lessons file (#72): `show` prints it (the builder and the reviewers read it first), `check` keeps it under `lessonsCap`, `suggest` proposes lessons from recent must-fix comments, review findings and CI failures, `add` and `prune` change it (dev manager only) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
+| `factory autostart [status\|install\|uninstall]` | Makes this machine bring the factory back after a reboot: the dev stack and its agents, with unfinished work saved and left in place. `status` shows what would start; `install --agents haile,tewodros` turns it on and installs the boot service (systemd user unit with linger, or a LaunchAgent). [Details](#after-a-reboot-factory-autostart) |
+| `factory resume [--dry-run]` | What autostart runs at boot: waits for Docker and the network, runs `commands.stackUp`, starts this machine's agents in detached tmux sessions. Safe to run by hand: running agents are left alone |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
@@ -305,7 +308,7 @@ version it pins. `factory help` lists everything.
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`. Read-only; exits 1 when something needs fixing |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -646,6 +649,63 @@ current; the task never has to:
 - **Where.** By default the issue says only the agent's slot. With `"tasks": { "showWhere": true }` it also posts
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
+
+<br>
+
+## After a reboot: `factory autostart`
+
+After a reboot, a crash or a power loss, part of a factory machine comes back by itself (the CI runners, rootless
+Docker) and part does not: the dev stack is down, and the agents are gone, so their claims go stale and the dev
+manager may hand their issues to someone else. `factory autostart` closes that gap. It is **opt-in per machine**.
+
+```sh
+factory settings set commands.stackUp 'pnpm stack:up'      # once per project, merged in a PR
+factory autostart install --agents haile,tewodros          # on each machine, with its own names
+factory autostart status                                   # what is set up and what would start
+factory resume --dry-run                                   # what a boot would do, now
+```
+
+**What happens at boot.** The service runs `factory resume`, which:
+
+1. waits for Docker (when `commands.stackUp` is set), runs `commands.stackUp`, and waits until `commands.stackHealth`
+   passes (if you set one). Wait times: `FACTORY_RESUME_WAIT` seconds, default 300.
+2. waits for the network (`git ls-remote origin`), then starts each of this machine's agents in a **detached tmux
+   session** named `<repo>-<agent>` (`tmux attach -t proj-haile` shows it; Remote Control is on, as in
+   `factory loop -i`). Each runs `factory loop -i` as that one agent, in its own worktree. A session that is already
+   running is left alone, so running `factory resume` again is safe.
+3. starts an agent **only when its worktree's `.claude/settings.json` resolves** (after `git submodule update
+   --init`), so an agent never runs without the factory's hooks and deny rules (#46). If it does not, that agent is
+   reported `NOT started` with the fix, and the others carry on.
+4. in issues mode, if the agent still holds an in-progress issue, marks it working again on that issue, so the dev
+   manager does not give it away.
+
+**Unfinished work is protected.** Before an agent starts, a worktree with uncommitted changes or unpushed commits is
+saved to `~/.local/state/<repo>-factory/backups/<agent>-<branch>-<time>/`: `changes.patch` (`git diff HEAD`),
+`status.txt`, `unpushed.txt` and `untracked/` (small untracked files). The worktree itself is never reset, cleaned or
+switched: the loop starts with `FACTORY_RESUME=1`, which skips its usual move to `origin/<main>` and its tidy for the
+first task, and the agent's **first prompt** carries a note: it is resuming after an unexpected restart, on this
+branch, with these files changed, backup here; continue your own in-progress issue or PR first.
+
+**The boot report** is one line per component (stack, each agent, each backup) in
+`~/.local/state/<repo>-factory/boot.log`, and in issues mode a comment on the first started agent's issue, so it is
+visible remotely that the machine rebooted. `"autostartReport": false` in the machine file turns the comment off. A
+GitHub failure is only a line in the log. `factory autostart status` prints the last boot's lines.
+
+**This machine's settings** are in its own file (`factory machine show` prints where), never in the project:
+`autostart` (true/false), `autostartAgents` (default: the names this machine runs, `factory machine setup`) and
+`autostartReport`. `factory autostart install --agents ...` writes them; `uninstall` turns `autostart` off and removes
+the service, and leaves running agents and the stack alone. Variables the agents need that a service does not have
+(`SOPS_AGE_KEY_FILE` ...) go in `<config>/<repo>.env`, next to the machine file, as `KEY=value` lines.
+
+| | Linux | macOS |
+|---|---|---|
+| Service | systemd user unit `<repo>-factory-resume.service` (`Type=oneshot`, `KillMode=process`, so the tmux sessions outlive it) | LaunchAgent `dev.software-factory.<repo>-resume` (`RunAtLoad`, `AbandonProcessGroup`) |
+| Runs at | every boot, with **linger** on (`install` turns it on, or prints `sudo loginctl enable-linger <user>`) | every login of that user; use automatic login (or keep the Mac logged in) for a Mac that must come back alone |
+| Also needs | tmux, a reachable `systemctl --user` | tmux |
+
+Each agent's folder must have been opened in Claude Code once by hand (the folder-trust prompt cannot be answered
+unattended). Test coverage uses fake `systemctl`, `launchctl`, `tmux` and `docker`; what systemd and launchd do at a
+real boot is not tested.
 
 <br>
 
@@ -1062,7 +1122,7 @@ reads these settings.
 |---|---|---|
 | `prd`, `plan`, `blocked`, `decisions` | Where the docs live | `docs/PRD.md`, `docs/build-plan.md`, `docs/blocked.md`, `docs/decisions` |
 | `mainBranch` | The main branch | `main` |
-| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
+| `commands` | `install`, `typecheck`, `lint`, `test`, `build`, `smoke`, `agentSetup`; `stackUp` and `stackHealth` bring the dev stack back at boot ([autostart](#after-a-reboot-factory-autostart)); `typecheckChanged` and `testChanged` run in the Stop check instead, for the changed packages only; `ci` is what CI runs, for `factory verify` and the PR gate | empty |
 | `checkOutputLines` | How many lines of a failing Stop check the agent sees: the failing lines first, then the end | 40 |
 | `codePaths` | Folders with code: the Stop check runs when they change | `["src"]` |
 | `checkRequires` | Paths that must exist before the Stop check runs, such as `node_modules` | `[]` |
@@ -1120,7 +1180,9 @@ software-factory/
       factory_session.py                  SessionStart: a plain `claude` session becomes an agent
       factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
       next_task.py                        the next job: rework first, then a free task
-      factory_machine.py                  this machine's id and agent names (outside the repo)
+      factory_machine.py                  this machine's id, agent names and autostart settings (outside the repo)
+      factory_autostart.py                `factory autostart`: status, install and uninstall of the boot service
+      factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
