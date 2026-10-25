@@ -8,7 +8,10 @@ Two machines on one project must never share an agent name. Both live outside th
                     pings, so two machines that use the same name can still be told apart. `FACTORY_MACHINE_ID` overrides it.
   <repo>.json       {"agents": ["haile", "tewodros"]}: the names this machine runs for that project (<repo> is the
                     folder name of the main clone). `FACTORY_AGENTS` (comma-separated) overrides it. With neither,
-                    every name in `agents` in .claude/factory.json is used, as before.
+                    every name in `agents` in .claude/factory.json is used, as before. The same file holds what
+                    `factory autostart` needs (#88): "autostart" (true/false), "autostartAgents" (names; default:
+                    the names above) and "autostartReport" (false: no boot report on the agent's issue).
+  <repo>.env        KEY=value lines `factory resume` loads for the agents it starts at boot (SOPS_AGE_KEY_FILE ...).
 
   python3 .claude/hooks/factory_machine.py id                       print this machine's id
   python3 .claude/hooks/factory_machine.py show                     the id and the names this machine runs
@@ -74,8 +77,46 @@ def repo_key():
     return os.path.basename(os.path.dirname(common))
 
 
+def state_dir():
+    """Where this machine keeps what it writes about the project (the boot log, the backups):
+    `$XDG_STATE_HOME/<repo>-factory`, else `~/.local/state/<repo>-factory`."""
+    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
+    return os.path.join(base, f"{repo_key()}-factory")
+
+
 def names_file():
     return os.path.join(config_dir(), f"{repo_key()}.json")
+
+
+def machine_settings():
+    """Everything in this machine's file for the project (a dict; {} when there is none or it can't be read)."""
+    try:
+        data = json.load(open(names_file()))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_machine_settings(**updates):
+    """Writes `updates` into the machine's file, keeping every other key. Returns the file's path."""
+    data = machine_settings()
+    data.update(updates)
+    path = names_file()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, path)
+    return path
+
+
+def autostart_settings():
+    """(on, agent names, post the boot report) for `factory autostart`. The names are `autostartAgents`, else the
+    names this machine runs."""
+    data = machine_settings()
+    listed = data.get("autostartAgents")
+    names = [str(n).strip() for n in listed if str(n).strip()] if isinstance(listed, list) else machine_names()
+    return data.get("autostart") is True, names, data.get("autostartReport") is not False
 
 
 def machine_names():
@@ -90,14 +131,15 @@ def machine_names():
     return [str(n).strip() for n in listed if str(n).strip()] if isinstance(listed, list) else []
 
 
-def setup(names):
-    from factory_config import load, safe_agent, task_source
-    cfg = load()
+def checked_names(cfg, names, example):
+    """`names` (comma-separated) as a list, each one an agent in factory.json and, in issues mode, not live on another
+    machine. Anything else stops with a `{code, message, fix}`."""
+    from factory_config import safe_agent, task_source
     known = cfg.get("agents") or []
     mine = [safe_agent(n.strip()) for n in names.split(",") if n.strip()]
     if not mine:
         refuse("no-names", "No agent names were given.", "Pass names from `agents` in .claude/factory.json, "
-               "for example: factory machine setup " + ",".join(known[:2]))
+               "for example: " + example + " " + ",".join(known[:2]))
     unknown = [n for n in mine if n not in known]
     if unknown:
         refuse("unknown-agent", f"{', '.join(unknown)} aren't agents in .claude/factory.json ({', '.join(known)}).",
@@ -109,10 +151,13 @@ def setup(names):
             if factory_agents.held_elsewhere(cfg, n, me):
                 refuse("agent-name-in-use", f"{n} is live on another machine right now.",
                        "Choose a name no other machine uses, or stop that agent first.")
-    path = names_file()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump({"agents": mine}, f, indent=2)
+    return mine
+
+
+def setup(names):
+    from factory_config import load
+    mine = checked_names(load(), names, "factory machine setup")
+    path = save_machine_settings(agents=mine)  # keeps the autostart settings in the same file
     print(f"{path}: {', '.join(mine)}")
 
 
@@ -124,6 +169,9 @@ def main():
         print(f"machine id: {machine_id() or '(could not be saved)'}")
         print(f"agents on this machine: {', '.join(machine_names()) or 'every name in factory.json'}")
         print(f"names file: {names_file()}")
+        on, auto, _ = autostart_settings()
+        print(f"autostart: {'on' if on else 'off'}" + (f" ({', '.join(auto)})" if on and auto else "")
+              + "  (factory autostart status)")
     elif cmd == "setup":
         if len(sys.argv) < 3:
             refuse("no-names", "No agent names were given.", "factory machine setup haile,tewodros")
