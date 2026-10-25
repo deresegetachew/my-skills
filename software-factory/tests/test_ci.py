@@ -608,6 +608,25 @@ def test_use_local_also_sets_the_light_lane_variable_and_install_says_it():
     assert "CI_RUNS_ON_LIGHT" not in json.load(open(db))["vars"], out
 
 
+def test_status_shows_the_pid_when_launchctl_goes_on_printing_after_it():
+    # awk must read all of launchctl's output: stopping at the pid line made launchctl die of SIGPIPE when it was
+    # still writing, and with pipefail that ended `status` silently after the Mode line (flaky, faster on fast CPUs).
+    d, db, env = project()
+    assert ci(d, env, "install")[0] == 0
+    update(db, vars={"CI_RUNS_ON": '["self-hosted","widget-local"]'})
+    runs_and_pulls(db, [run("main")])
+    slow = os.path.join(os.path.dirname(env["FAKE_DB"]), "bin", "launchctl")
+    real = open(slow).read()
+    open(slow, "w").write(real.replace('echo "}" ;;', 'echo "}"; sleep 0.3; echo "	more = 1" ;;', 1))
+    # An awk that quits at the first pid line, as gawk does (mawk reads on, which hid this on some machines).
+    quick = os.path.join(os.path.dirname(slow), "awk")
+    open(quick, "w").write("#!/usr/bin/env python3\nimport os, sys\nfor line in sys.stdin:\n    f = line.split()\n"
+                           "    if f[:2] == ['pid', '=']:\n        print(f[2], flush=True); os._exit(0)\n")
+    os.chmod(quick, 0o755)
+    rc, out = ci(d, env, "status")
+    assert rc == 0 and "Runner widget-ci: running (LaunchAgent dev.software-factory.widget-ci, pid 4242)" in out, out
+
+
 def test_status_lists_every_instance_and_logs_takes_one():
     d, db, env = project(ci={"runners": 2})
     assert ci(d, env, "install")[0] == 0
