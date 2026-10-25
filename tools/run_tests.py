@@ -56,10 +56,6 @@ def run_file(path, shard=0, shards=1):
                "TMPDIR": os.path.join(scratch, "tmp"),
                # `pick` waits 2 s after claiming for a simultaneous claim; the tests' claims are made up in advance.
                "FACTORY_CLAIM_SETTLE_SECONDS": "0"}
-        # The tests commit in throwaway repos. A developer's global commit.gpgsign calls a signing helper that fails
-        # under load (and CI has none), so no test commit is signed.
-        n = int(env.get("GIT_CONFIG_COUNT", "0") or 0)
-        env.update({"GIT_CONFIG_COUNT": str(n + 1), f"GIT_CONFIG_KEY_{n}": "commit.gpgsign", f"GIT_CONFIG_VALUE_{n}": "false"})
         os.makedirs(env["TMPDIR"])
         cmd = [sys.executable, "-I", "-c", RUNNER, path] + ([str(shard), str(shards)] if shards > 1 else [])
         try:

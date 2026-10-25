@@ -79,7 +79,7 @@ def project(cfg=None, db=None, files=None, profile=True):
     json.dump(db or {}, open(os.path.join(d, "db.json"), "w"))
     env = {**os.environ, **GIT, "PATH": f"{bin_}:{os.environ['PATH']}", "LOOP_LOG": os.path.join(d, "log"),
            "FAKE_DB": os.path.join(d, "db.json"), "FACTORY_REMOTE_CONTROL": "0", "HOME": d,
-           "PYTHONDONTWRITEBYTECODE": "1"}  # python must not write .pyc into the test work tree
+           "PYTHONDONTWRITEBYTECODE": "1"}  # the hooks run in the work tree: no .pyc may land in it
     for k in ("FACTORY_AGENT", "FACTORY_AGENTS", "FACTORY_ROLE", "FACTORY_NAME", "FACTORY_RELOAD_AGENT",
               "FACTORY_RELOAD_DIR", "FACTORY_RESUME", "CLAUDE_PROJECT_DIR"):
         env.pop(k, None)
