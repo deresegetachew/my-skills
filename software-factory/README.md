@@ -2289,7 +2289,7 @@ software-factory/
     .claude/skills/                       next-task, design-check, eval
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
     .claude/skills/product-pass/          the product owner's standing rules (one page)
-    .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main)
+    .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main); a release installs and updates it
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
 ```

@@ -344,7 +344,7 @@ def classify(rel):
         sub = rel[len("kit/.claude/"):]
         if sub.startswith(("hooks/", "ci/")):
             return None  # the forwarders to the folders above
-        if sub.startswith(("agents/", "skills/")) or sub == "settings.json":
+        if sub.startswith(("agents/", "skills/")) or sub in ("settings.json", "manager/settings.json"):
             return "engine", ".claude/" + sub
         return "template", ".claude/" + sub
     if rel in ("kit/factory", "kit/factory-loop.sh"):
