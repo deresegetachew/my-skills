@@ -176,6 +176,31 @@ def factory(r, cfg):
         r.note("sleep", "keep the Mac awake while agents run (`caffeinate -d` in another tab)")
 
 
+def turbo(r, cfg):
+    """The shared Turborepo cache (#59): only when turbo.api is set. Never runs turbo.secretsCommand (that decrypts)."""
+    from factory_turbo import explain, probe, settings, turbo_json_signs
+    try:
+        s = settings(cfg)
+    except ValueError as e:
+        r.note("shared build cache", str(e))
+        return
+    if not s["api"]:
+        return
+    if os.environ.get("TURBO_TOKEN"):
+        r.ok("shared build cache token: TURBO_TOKEN is set")
+    elif s["secretsCommand"]:
+        r.ok("shared build cache token: from turbo.secretsCommand (not run here; `factory turbo status` runs it)")
+    else:
+        r.note("shared build cache token", "TURBO_TOKEN isn't set and turbo.secretsCommand is empty, so builds use the "
+               "local cache only. `factory turbo status` says how to supply one")
+    state, detail = probe(s["api"], s["team"], None)  # no token: any answer, even a refusal, proves it is there
+    if state in ("ok", "rejected"):
+        r.ok(f"shared build cache answers at {s['api']}")
+    else:
+        r.note("shared build cache", explain(s["api"], state, detail))
+    if os.environ.get("TURBO_REMOTE_CACHE_SIGNATURE_KEY") and turbo_json_signs() is False:
+        r.note("shared build cache signatures", "TURBO_REMOTE_CACHE_SIGNATURE_KEY is set, but turbo.json has no "
+               "\"remoteCache\": {\"signature\": true}, so nothing is signed or checked")
 def release(r):
     """A project that takes the factory from releases (#113): the installed files are the pinned release's, and this
     machine is ready (hooks exist, scripts parse, runner files readable). The same checks `factory update` ends with."""
@@ -224,6 +249,7 @@ def main():
         project(r, cfg)
         factory(r, cfg)
         models(r, cfg)
+        turbo(r, cfg)
         release(r)
     if "--sandbox" in sys.argv[1:]:
         from factory_sandbox import run as sandbox

@@ -27,6 +27,7 @@ release (`factory update`), or, until it migrates, as a git submodule.
 
 - [Quick start](#quick-start)
 - [How it fits together](#how-it-fits-together)
+- [Where things live](#where-things-live)
 - [Updating from releases (`factory update`)](#updating-from-releases)
 - [Installed as a submodule: what's shared and what's yours](#installed-as-a-submodule-whats-shared-and-whats-yours)
 - [Updating the factory on the submodule](#updating-the-factory)
@@ -34,11 +35,13 @@ release (`factory update`), or, until it migrates, as a git submodule.
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [Messages between agents](#messages-between-agents)
 - [Watch and talk to an agent: `factory follow`](#watch-and-talk-to-an-agent-factory-follow)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
 - [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
+- [A shared build cache](#a-shared-build-cache)
 - [A sandboxed machine: `factory bootstrap`](#a-sandboxed-machine-factory-bootstrap)
 - [Security notes](#security-notes)
 - [Style guides](#style-guides)
@@ -187,6 +190,70 @@ Three ideas make it safe to leave running:
 
 <br>
 
+## Where things live
+
+The factory's code sits in plain folders of `software-factory/` (#112). `kit/` holds only what a project is given.
+
+```
+software-factory/
+  factory                       the command line
+  factory-loop.sh               the loop behind `factory loop`
+  install.sh                    puts the factory into a project (links, or copies)
+  VERSION                       the release number (a `vX.Y.Z` tag must match it)
+  hooks/                        every hook and every `factory_*.py` command, next_task.py, pr-gate.py, check.py ...
+  ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
+  tests/                        the tests (run with tools/run_tests.py at the repo root)
+  docs/                         reference pages (messages.md)
+  kit/                          what a project is given:
+    .claude/agents, skills, manager/, settings.json       Claude Code reads these from the project's .claude/
+    .claude/factory.json, factory/notes/, CLAUDE.factory.md, docs/, .github/, .gitignore     templates, copied once
+    factory, factory-loop.sh, .claude/hooks/*, .claude/ci/*     symlink forwarders to the real files above
+```
+
+The `kit/` forwarders exist only so a project that links through `kit/` keeps working until it switches. A release
+archive stores them as plain copies, which the client does not install. Nothing new is added to them.
+
+**What a project sees stays the same.** Claude Code reads agents, skills and `settings.json` from the project's
+`.claude/`, so the project still has `.claude/hooks/`, `.claude/ci/`, `.claude/agents/`, `.claude/skills/`,
+`.claude/settings.json`, `factory` and `factory-loop.sh` at those paths. Only where they come from differs:
+
+| The project takes the factory as | Those paths are | They change by |
+|---|---|---|
+| A release (`.claude/factory/release.json` exists) | real files, committed | `factory update` or `factory rollback`, then a reviewed pull request |
+| The submodule, layout `new` | relative symlinks to `vendor/my-skills/software-factory/hooks/...`, `.../ci/...`, `.../factory` | the pin of `vendor/my-skills`, then `factory update` |
+| The submodule, layout `old` | symlinks through `vendor/my-skills/software-factory/kit/...` (the forwarders): what every project had before the move | the same |
+
+What stays the project's own in every case: `.claude/factory.json`, `.claude/factory/notes/`, `.claude/factory/lessons.md`,
+`CLAUDE.md`, its docs, its CI workflow, and (on releases) the pin file.
+
+**A project on the submodule switches to the `new` layout** in one reviewed pull request:
+
+1. On a clean main, run `factory update --layout new` (it does the same as
+   `bash vendor/my-skills/software-factory/install.sh . --link --layout new` after moving the submodule to my-skills'
+   newest main). Each link is re-pointed from `kit/` to the new folder. The links keep their places in `.claude/`, so
+   `settings.json` and the docs need no change. `--layout auto`, the default, leaves a project that links through
+   `kit/` alone, so a plain `factory update` never switches one by surprise.
+2. Check: `ls -l .claude/hooks` shows `.../software-factory/hooks/...`, and `factory doctor` is green.
+3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the dev manager or the owner
+   merges it. A CI workflow, a `protected` list or a document that names `.claude/hooks/...` needs no change for this
+   step, because those paths did not move.
+4. On a machine that runs the CI runners, `factory update` reinstalls them when their copies are older; if you did not
+   run it, run `factory ci install` once.
+
+A project that moves to releases instead needs no `--layout`: `factory update --release` installs real files. It
+refuses where the files are still links into the submodule, so take the submodule step out first, in its own pull
+request (see [Updating from releases](#updating-from-releases)).
+
+**What is left of the move** (#112):
+
+- The first release is cut by the owner (see "Cutting a release" below). Nothing in the move publishes one.
+- Remanual, the first project, then relinks or moves to releases in its own reviewed pull request. That changes
+  protected files in that repo, so it is the owner's merge.
+- After remanual has merged, the `kit/` forwarders are removed from my-skills in a pull request of their own, and the
+  `--layout old` and `auto` handling in `install.sh` can go with them.
+
+<br>
+
 ## Updating from releases
 
 A project on releases has the factory as plain files committed in its repo (`.claude/hooks/`, `.claude/ci/`, `factory`,
@@ -219,10 +286,13 @@ factory update          # newest release: download, check, install, refresh this
    writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
    `.gitignore` lines), never over an existing file.
 5. Refreshes this machine: if CI runner services are installed here and older than the files (`factory ci stale`), it
-   runs `factory ci install`, which also rebuilds the runner image.
+   runs `factory ci install`, which also rebuilds the runner image. If the heartbeat daemon is installed here it is
+   restarted too (`factory heartbeat restart`), because it is one long process that would otherwise keep running the
+   old code.
 6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the Python and shell scripts parse;
    and the installed runner files are readable by the runner container's user, not writable by others, and match the
-   checkout (`factory ci check`). If any of that fails it exits 1, names each problem and does not say it worked.
+   checkout (`factory ci check`, which, when Docker and the runner image are on the machine, also starts the installed
+   entrypoint in the image as the container's own user and parses it). If any of that fails it exits 1, names each problem and does not say it worked.
    `factory doctor` runs the same checks.
 7. Prints what changed (old to new, with the release notes' commit titles) and the commands to commit it. **It never
    commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
@@ -354,6 +424,7 @@ version it pins. `factory help` lists everything.
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
+| `factory manager-claims list\|next\|review\|answer\|release\|sweep\|merge\|ask` | Several dev managers at once (#99): claim a PR or a question with a lease so two managers never do the same one, and see who holds what. See [Several managers at once](#several-managers-at-once) |
 | `factory lessons [show\|check\|suggest\|add\|prune]` | The curated lessons file (#72): `show` prints it (the builder and the reviewers read it first), `check` keeps it under `lessonsCap`, `suggest` proposes lessons from recent must-fix comments, review findings and CI failures, `add` and `prune` change it (dev manager only) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory prs [--json] [--since-days N]` | The one list a dev manager starts a pass from, read-only and REST only: every open PR with its head and age, labels, CI judged by one rule, the newest marker per commit, any review claim and a next action (`review`, `merge`, `wait CI`, `rerun flake`, `waiting for agent`, `owner merges (protected)`, `held by <manager>`, `none`); below them the unanswered questions, owner asks and quiet agents. [Details and the `--json` schema](#the-list-a-manager-starts-from-factory-prs) |
@@ -366,17 +437,18 @@ version it pins. `factory help` lists everything.
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
 | `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
-| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
-| `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
+| `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
+| `factory heartbeat [status\|install\|uninstall\|restart\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
+| `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
-| `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
+| `factory usage` | Tokens per task (or `--by agent`, `--by model`, `--by role`: manager sessions against builder ones) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
 | `factory settings` | The interactive menu (in a terminal): browse by section, `/` to search, `?` for the long help of a setting, change, reset, review the diff and save (write the file, or open a pull request). In a pipe it prints the list. Non-interactively: `list [--section S] [--json]`, `get`, `set`, `unset`, `help [<key>]`, `diff`, `validate`, `pr`; `--local` is the same for this machine's own settings. Agents can't change settings. [Details](#factoryjson-settings) |
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
 | `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -394,6 +466,9 @@ version it pins. `factory help` lists everything.
 | `factory ci stale` / `check` | Are the installed runner copies older than the checkout (exit 3, a line per file), and are they fit to start (readable by the container's user, not writable by others). `factory update` runs both |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
 | `factory ci logs [i] [-f]` | A runner's log: instance 1, or `2`, `light` ... |
+| `factory turbo status` | The shared Turborepo build cache: what is set, where the token comes from (never the token), and whether the cache answers. [Details](#a-shared-build-cache) |
+| `factory turbo install [--no-github]` | Starts the cache server on this machine (Docker, restarts with it) and gives CI the same cache through repository variables and secrets. Run it again to update. `--no-github` leaves the repository alone |
+| `factory turbo down [--purge]` | Stops the cache server; `--purge` also removes the stored artifacts |
 
 <br>
 
@@ -598,8 +673,8 @@ file's own prompt, tools and description, so the shared file is never edited or 
 `python3 .claude/hooks/factory_models.py flags manager` prints the same arguments for the manager's session.
 `factory doctor` prints the effective model per role and what set it. The environment variable
 `CLAUDE_CODE_SUBAGENT_MODEL` is not used: on its own the agent file's `model:` wins, and with `..._FORCE=1` it
-forces one model on every subagent. `escalateTo` is stored and checked, but the next-task skill still escalates
-the reviewer to Opus by its own wording (not yet read from the setting).
+forces one model on every subagent. `escalateTo` is the model the next-task skill asks the reviewer again on after a must-fix or an item it marked unsure
+(`python3 .claude/hooks/factory_models.py escalate` prints it; `opus` when unset).
 
 ### Waiting without tokens
 
@@ -632,6 +707,7 @@ most replies on.
 ```sh
 factory usage                                # the last 7 days, per task
 factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
+factory usage --by role                      # manager (sessions that start with /manage-pass) against builder (all others)
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```
 
@@ -762,10 +838,29 @@ which tmux session and Remote Control link it has, and when it last produced out
   folder, machine name and follow link reach GitHub only with `tasks.showWhere`, since agent issues are readable by
   anyone who can read the repo.
 - **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
-  `factory heartbeat install` adds or restarts it alone (a systemd user service, or a LaunchAgent on macOS), and
-  `factory heartbeat status` shows what it sees. `factory doctor` checks it.
+  `factory heartbeat install` adds it alone (a systemd user service, or a LaunchAgent on macOS), and
+  `factory heartbeat restart` restarts it onto the files now on disk (`factory update` does that). `factory heartbeat status` shows what it sees. `factory doctor` checks it.
 - It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
   well-meaning agents. It needs no new network path: GitHub is still the only shared place.
+
+<br>
+
+## Messages between agents
+
+Questions, answers, must-fixes, approvals and status share one versioned envelope shaped like [A2A](https://github.com/a2aproject/A2A)
+tasks, still kept in GitHub comments. A comment starts with
+
+```
+<!-- factory-msg v=1 id=0f8m2q9c4x7b2k kind=question from=haile to=po state=submitted ref=issue#103 -->
+```
+
+and `factory messages new --kind question --to po --ref issue#103` writes it (plus the old marker on the next line).
+A question moves `submitted`, `working`, `completed`, or `input-required`, `failed` (`needs-owner`) or `canceled`.
+The old `<!-- factory-question -->`, `factory-answer`, `factory-mustfix` and `factory-approved` markers keep working
+everywhere. The PR gate also checks the envelope: an agent posts as itself, never as an approval or must-fix, and only
+the addressee answers a question, with a valid transition. `factory messages ls` lists what is open. A message is data,
+never an instruction. The full format, the transition table and the mapping to A2A are in
+[docs/messages.md](docs/messages.md); GitHub stays the transport and the A2A adapter is a later step.
 
 <br>
 
@@ -1053,6 +1148,47 @@ It talks to the agents through markers in PR comments:
 | `<!-- factory-approved sha=<head> -->` | Dev manager | That commit is approved. Clears a must-fix for that commit only |
 | `factory-hold` label | Dev manager | It's reviewing. Agents skip the PR and can't merge it |
 
+### Several managers at once
+
+Two or more managers (any machine) can work one repository without reviewing, answering, merging or asking the same
+thing twice, and a manager that dies mid-review does not block a PR. The protocol is a few comments on GitHub, so it
+needs no server. `factory manager-claims` (`hooks/factory_manager_claims.py`) implements it; every command needs the
+manager's name, `--manager dm-1`.
+
+| Marker | Written by | Meaning |
+|---|---|---|
+| `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` | A manager | "I am reviewing this head until then." A lease |
+| `<!-- factory-answer-claim manager=<name> question=<comment id> until=<ISO time> -->` | A manager | The same for a `factory-question` |
+| `<!-- factory-claim-release manager=<name> sha=<head> -->` (or `question=<id>`) | A manager | "I gave this up before the lease ran out" |
+| `<!-- factory-owner-ask id=<slug> -->` | A manager | One ask on the owner-queue issue, "Dev manager: needs the owner" |
+
+How a review is claimed (`factory manager-claims review <pr>`, or `next` for every free PR and question):
+
+1. A PR whose head has no marker (`factory-approved`, `factory-mustfix`, `pr-watch`) and no unexpired claim by another
+   manager is free. The manager posts a claim with `until` = now + `manager.claimMinutes` (default 20).
+2. It re-reads the comments. The earliest unexpired claim for that head wins, in the order GitHub lists the comments.
+   If it lost, it does nothing more (exit code 3) and moves on.
+3. The winner puts `factory-hold` on, reviews, ends with the usual marker and takes the hold off
+   (`factory manager-claims release <pr>`). A new head commit changes the sha, so the old claim means nothing.
+4. If the manager dies, `until` passes. The next `next` (or `sweep`) takes `factory-hold` off a PR that has had a
+   claim and has none running, and the PR can be claimed again. A hold on a PR nobody ever claimed is the owner's and
+   is left alone. A lease never counts for more than two hours after its comment, whatever `until` says.
+
+A question is claimed the same way (`answer <comment id>`); the `factory-answer` comment ends it. A claim is not an
+answer: `factory wait answer` and `factory precheck` ignore `factory-answer-claim`.
+
+`merge <pr>` merges only a head with `factory-approved sha=<head>` and passes that sha to GitHub, so a second
+manager's merge of an already merged or changed PR is refused by GitHub. The command reads that refusal as "done by
+someone else" (or "the head moved; it needs a new review") and exits 0, not as an error.
+
+`ask --id <slug> --text "..."` posts an ask on the owner-queue issue (created if missing; pin it by hand, the REST API
+cannot) only if no comment there carries that id. If two managers post at once, the earliest stays and the other
+removes its own.
+
+`factory manager-claims list [--json]` and `factory status` show every claim. `claimMinutes` is the setting
+`manager.claimMinutes`. All managers and builders use one GitHub account, so the name lives inside the comment, and
+`trustedReviewers` cannot tell managers apart: nothing here relies on it. Builders cannot post the claim markers
+(PR gate) or run the command (`settings.json`).
 **The standing rules are a skill, not a memory (#96).** `/manage-pass` (`kit/.claude/skills/manage-pass/SKILL.md`, linked into
 a project like the other skills) holds everything a fresh session needs: the two-column table of what the manager does
 alone and what it asks the owner first (the one copy; the playbook links to it), the pass order, the exact markers, the hold
@@ -1110,7 +1246,7 @@ an approval of an older commit does not count. Approvals follow the merge gate's
 
 **Review claim.** A `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` comment for the
 current head that has not expired; the earliest one wins. A claim for another commit, or past its `until`, is ignored.
-(The claim protocol itself is #99; this only reads it.)
+(The protocol, with releases and the lease cap, is `factory manager-claims`, which this reads through the same code.)
 
 **Next action**, the first rule that fits:
 
@@ -1241,6 +1377,8 @@ from Docker Hub.
 - dind's data (the job's own images, containers and volumes), the runner's workspace and the job's networks are
   removed by `down --volumes` after every job, so a job never sees another job's files.
 - `factory ci uninstall` removes the mirror, its networks and the image too.
+- The Turborepo results of the **[shared build cache](#a-shared-build-cache)** are a separate, opt-in service on the
+  host (`factory turbo install`), not part of a runner; it has its own security notes.
 - **`factory ci start`** (one loop by hand) uses neither: it runs GitHub's plain image with no mirror. Use `install`
   for the faster rounds.
 
@@ -1333,6 +1471,100 @@ so it is not a security boundary: a job that tries can reach Docker Desktop's VM
 data, the folders Docker Desktop shares (by default all of `/Users`), and services on your Mac's `localhost`. Only
 people who can push to the repository (you and the agents) run code on it. Running the runner in a separate VM is
 the follow-up ([remanual #150](https://github.com/deresegetachew/remanual/issues/150)).
+
+<a id="a-shared-build-cache"></a>
+
+## A shared build cache
+
+Turborepo caches the result of every task (build, typecheck, test), but only on the machine that ran it. So each agent
+worktree, each machine and each CI runner (a new container per job) started cold and rebuilt packages nobody had
+touched (#59). The fix is one **self-hosted Turborepo remote cache** per project: a small server
+([ducktors/turborepo-remote-cache](https://github.com/ducktors/turborepo-remote-cache), pinned in
+`ci/compose-turbo.yaml`) on the factory machine. The agents' sessions and the CI jobs send results to it and take
+results from it, so a package that did not change is done once.
+
+**It is off until you set it up, and it degrades by itself.** With `turbo.api` empty nothing changes. With it set, but
+no token, or the server not answering, every agent session and CI job says so in one line and builds with the local
+cache only, as before. Nothing fails because the cache is away.
+
+### Set it up: one command, once the owner has supplied a token
+
+The token is the one thing the factory cannot make for you, and it is never in the repository or in `factory.json`.
+
+1. **Make a token** and keep it where only you can read it: `openssl rand -hex 32`. For signed artifacts (below) also
+   make a signature key of 32 or more characters, the same way.
+2. **Tell the factory where to find it**, either of these (the environment wins):
+   - export `TURBO_TOKEN` (and `TURBO_REMOTE_CACHE_SIGNATURE_KEY`) in the shell profile of every machine that runs
+     agents, and on the machine that runs the server; or
+   - set `turbo.secretsCommand` to a command that prints `KEY=value` lines. With sops (which the factory's projects
+     already use): put `TURBO_TOKEN: ...` in an encrypted file and set
+     `factory settings set turbo.secretsCommand 'sops -d --output-type dotenv secrets/factory.yaml'`. Agents and
+     `factory turbo install` run it; `factory doctor` never does.
+3. **Pick the address** the agents and CI will use: the machine's Tailscale or LAN address, and a port (3335 by
+   default): `factory settings set turbo.api http://100.64.0.7:3335` and `factory settings set turbo.bind 100.64.0.7`.
+   Commit `.claude/factory.json` in a PR.
+4. **Run `factory turbo install`** on the machine that will host the cache. It starts the server (`docker compose up
+   -d`, `restart: unless-stopped`, so it is back after a reboot), waits until it answers, and sets the repository
+   variables `TURBO_API` and `TURBO_TEAM` and the secrets `TURBO_TOKEN` and `TURBO_REMOTE_CACHE_SIGNATURE_KEY` (the
+   secrets go to `gh` on stdin, never in an argument, so CI uses the same cache. Setting them needs admin on the
+   repository; without it the command says what to ask an admin, and `--no-github` skips the step).
+
+`factory turbo status` shows what is set and whether the cache answers, and never prints a secret. Run `factory turbo
+install` again to update the server or change the token (the server restarts with the new one); agents pick up a
+changed token or address at their next task.
+
+### What agents and CI get
+
+- **Agents.** `factory-loop.sh` asks `factory turbo env` before every task, and the SessionStart hook asks it for a
+  plain `factory agent` session. When the cache answers, the session gets `TURBO_API`, `TURBO_TEAM`, `TURBO_TOKEN`
+  (and `TURBO_REMOTE_CACHE_SIGNATURE_KEY` when there is one), plus `TURBO_REMOTE_CACHE_TIMEOUT=10` so a slow cache
+  cannot stall a build. All agents share one `TURBO_TEAM`, so they share results. The hook never prints the token into
+  the session.
+- **CI.** The kit's `ci.yml` has a step, *Shared remote cache (optional)*, before the install, that runs
+  `factory_turbo.py ci-env >> "$GITHUB_ENV"` with `vars.TURBO_API`, `vars.TURBO_TEAM` and the two secrets. It sets the
+  variables only when they are all there and the cache answers. It is skipped for a pull request from another
+  repository (a fork gets no secrets and runs on GitHub's runners). A project that copied `ci.yml` earlier adds the step
+  by hand.
+- **Reaching it.** The server listens only on `turbo.bind`: `127.0.0.1` unless you choose another address, and
+  `install` says when `turbo.api` and `turbo.bind` do not fit (for example a Tailscale address in `turbo.api` and a
+  loopback `bind`). The CI runner containers reach the host's Tailscale or LAN address through Docker's normal
+  networking, so use that address, not `localhost`. Never put it on the public internet.
+
+### The project's side (a PR in the project, once this is in the pinned my-skills)
+
+- `turbo.json` needs no `TURBO_*` entries: Turborepo reads them itself.
+- To sign artifacts, add `"remoteCache": { "signature": true }` to `turbo.json`, and give every machine and CI the same
+  `TURBO_REMOTE_CACHE_SIGNATURE_KEY`. `factory doctor` notes a key without that setting.
+- Check it works: run a task twice from two agents' worktrees (`pnpm turbo run typecheck`); the second shows
+  `cache hit, replaying logs` for the packages nobody changed and `FULL TURBO` at the end. CI shows the same for the
+  packages a pull request left alone.
+
+### Security
+
+- **What it stores:** build outputs and logs of Turborepo tasks. No source, no environment, no registry credentials.
+  Anyone with the token can read all of it and write to it.
+- **Poisoning is the risk.** A cached output that is wrong is replayed by every later run with the same task hash. So:
+  - the server answers only with the token, and listens only where you bound it (Tailscale or the LAN, never the
+    internet);
+  - **sign artifacts** (`remoteCache.signature` plus a signature key): a client then refuses an artifact whose
+    signature does not match, so anyone who can reach the server but lacks the key cannot plant one. *Check that your
+    server version stores the signature tag:* a server that does not (reported for some storage backends in upstream
+    issue 394) makes every signed task a miss, which `FULL TURBO` shows. Then leave signing off until it is fixed;
+  - **the token and the key reach everyone who runs jobs with them:** the agents (their sessions have the variables, as
+    do commands they run) and the pull-request jobs of this repository. They can write artifacts. That is the same trust
+    you already give them to run code on your machine and on the runners, no more, but it means a branch's CI run can
+    write what main's run later reads. For a project that does not accept this, leave the repository variable
+    `TURBO_API` unset: CI then builds locally, and only the agents share a cache;
+  - **forks never use it:** the workflow skips the step, a fork's pull request has no secrets, and it already runs on
+    GitHub's runners (not your machine), so it cannot reach a private address anyway. Leave *Run workflows from fork
+    pull requests* off, as for the runners;
+  - the server container is unprivileged: every capability dropped, a read-only file system, no host mounts, a named
+    volume for the artifacts, and a pinned image (`TURBO_CACHE_VERSION` overrides the tag).
+- **The token is in the server container's configuration** (`docker inspect`), readable by people in the `docker` group
+  on that machine. It is in no file the factory writes and in no command line it runs.
+- **Rotating:** change the token where it comes from, run `factory turbo install` (restarts the server and updates the
+  repository secret), and the agents pick it up at their next task. `factory turbo down --purge` also clears everything
+  stored.
 
 <br>
 
@@ -1428,8 +1660,8 @@ Not in this version: macOS, a VM mode, creating the GitHub account.
   secrets out of the repo (`.env.local`, the host's secret store). Agents are denied reading `.env` files.
 - **Agent issues are public to anyone who can read the repo.** They show the slot only, unless you set
   `tasks.showWhere`.
-- **CI:** the kit's workflow has read-only permissions and no secrets, and the guard fails a workflow that uses
-  `pull_request_target`. A self-hosted runner (`factory ci`) runs branch code on your Mac with a privileged
+- **CI:** the kit's workflow has read-only permissions and, unless you set up the [shared build cache](#a-shared-build-cache),
+  no secrets, and the guard fails a workflow that uses `pull_request_target`. A self-hosted runner (`factory ci`) runs branch code on your Mac with a privileged
   container: see [the known risk](#ci-githubs-runners-or-your-own-mac).
 
 <br>
@@ -1583,6 +1815,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `reReviewPercent` | int | `30` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review. |
 | `lessons` | str | `".claude/factory/lessons.md"` | The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`). |
 | `lessonsCap` | int | `40` | The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now. |
+| `manager.claimMinutes` | int | `20` | How long a dev manager's review or answer claim holds a PR or question before another manager may take it (a lease; it ends sooner when the review marker or the answer is posted). |
 | `manager.flakes` | list | `[]` | Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent. |
 | `trustedReviewers` | list | `[]` | GitHub logins whose approvals count. Empty: any. |
 | `holdLabel` | str | `"factory-hold"` | The label the dev manager puts on a PR it is reviewing. |
@@ -1629,6 +1862,11 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `ci.light` | bool | `true` | Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`. |
 | `ci.image` | str | `"build"` | The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base. |
 | `ci.caches` | bool | `true` | Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets). |
+| `turbo.api` | str | `""` | The shared Turborepo cache's address, as agents and CI reach it: http://<Tailscale or LAN address>:3335. Empty: no shared cache. `factory turbo install` starts it. |
+| `turbo.team` | str | `""` | The cache's team name (default: the repository's name). |
+| `turbo.bind` | str | `"127.0.0.1"` | The address the cache server listens on, on the machine that runs it. 127.0.0.1 reaches only that machine; use its Tailscale or LAN address for others. |
+| `turbo.port` | int | `3335` | The port the cache server listens on. |
+| `turbo.secretsCommand` | str | `""` | A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins. |
 | `ci.lightLabel` | str | `""` | The light runner's label (default `<repo>-light`). |
 
 **Design & eval**
@@ -1671,10 +1909,66 @@ software-factory/
   SKILL.md                                the skill: set up a project, or act as dev manager
   DEV-MANAGER.md                          the dev manager's playbook
   install.sh                              install into a project (--link with the submodule)
+  factory                                 the command line
+  factory-loop.sh                         the loop behind `factory loop`
+  VERSION                                 the release number
+  docs/messages.md                        the message envelope, states and the A2A mapping
   tests/                                  tests for the gate, issues, the loop and the hooks
-  kit/
-    factory                               the command line
-    factory-loop.sh                       the loop behind `factory loop`
+  hooks/
+    manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
+    factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
+    factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
+    factory_manager_claims.py           several dev managers at once: review and question claims with a lease
+    factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
+    pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
+    check.py                            Stop: typecheck and tests
+    factory_stop.py                     Stop: closes a finished session in `factory loop -i`
+    factory_session.py                  SessionStart: a plain `claude` session becomes an agent
+    factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
+    next_task.py                        the next job: rework first, then a free task
+    factory_machine.py                  this machine's id, agent names and autostart settings (outside the repo)
+    factory_autostart.py                `factory autostart`: status, install and uninstall of the boot service
+    factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
+    factory_heartbeat.py                `factory heartbeat`: the per-machine liveness daemon
+    factory_heartbeat_service.py        install and uninstall of the daemon's service
+    factory_agents_ls.py                `factory agents ls`
+    factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
+    factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
+    factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
+    factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
+    factory_env.py                      per-agent ports and database
+    factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
+    factory_remotes.py                  remotes, ssh calls and finding sessions by name
+    factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
+    factory_release.py                  `factory version | releases | update | rollback`: the release client
+    factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
+    factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
+    factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
+    factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
+    factory_netguard.py                 renders the nftables rules and the guard's systemd unit
+    factory_sandbox.py                  `factory doctor --sandbox`
+    factory_models.py                   the `models` setting: claude flags per role, effective models
+    factory_reviews.py                  which extra reviews a change needs
+    factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
+    factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
+    factory_settings_schema.py          the table that describes every setting: help, limits, defaults, README tables
+    factory_settings_store.py           reads and writes factory.json and the machine file (order, indent, atomic)
+    factory_settings_interactive.py     the interactive menu behind `factory settings`
+    factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
+    factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
+    factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
+    factory_guard.py                    the CI guard
+    style_checks.py                     CI: each style's check
+    factory_config.py                   reads factory.json, with defaults
+    wait_for_merge.sh                   waits on a PR without spending tokens
+    factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
+    factory_turbo.py                    `factory turbo`: the shared Turborepo cache (status, install, down, env, ci-env)
+  ci/                                     `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
+                                          compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,
+                                          runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.py,
+                                          ci_status.py
+  kit/                                    what a project is given (templates, agents, skills, settings); its
+                                          factory, factory-loop.sh, .claude/hooks and .claude/ci are forwarders
     CLAUDE.factory.md                     template for the project's CLAUDE.md
     .claude/factory.json                  template: the project's config
     .claude/factory/notes/                template: the project's notes for the agents
@@ -1684,57 +1978,6 @@ software-factory/
     .claude/skills/                       next-task, design-check, eval
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
     .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main)
-    .claude/hooks/
-      manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
-      factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
-      factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
-      factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
-      pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
-      check.py                            Stop: typecheck and tests
-      factory_stop.py                     Stop: closes a finished session in `factory loop -i`
-      factory_session.py                  SessionStart: a plain `claude` session becomes an agent
-      factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
-      next_task.py                        the next job: rework first, then a free task
-      factory_machine.py                  this machine's id, agent names and autostart settings (outside the repo)
-      factory_autostart.py                `factory autostart`: status, install and uninstall of the boot service
-      factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
-      factory_heartbeat.py                `factory heartbeat`: the per-machine liveness daemon
-      factory_heartbeat_service.py        install and uninstall of the daemon's service
-      factory_agents_ls.py                `factory agents ls`
-      factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
-      factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
-      factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
-      factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
-      factory_env.py                      per-agent ports and database
-      factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
-      factory_remotes.py                  remotes, ssh calls and finding sessions by name
-      factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
-      factory_release.py                  `factory version | releases | update | rollback`: the release client
-      factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
-      factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
-      factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
-      factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
-      factory_netguard.py                 renders the nftables rules and the guard's systemd unit
-      factory_sandbox.py                  `factory doctor --sandbox`
-      factory_models.py                   the `models` setting: claude flags per role, effective models
-      factory_reviews.py                  which extra reviews a change needs
-      factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
-      factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
-      factory_settings_schema.py          the table that describes every setting: help, limits, defaults, README tables
-      factory_settings_store.py           reads and writes factory.json and the machine file (order, indent, atomic)
-      factory_settings_interactive.py     the interactive menu behind `factory settings`
-      factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
-      factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
-      factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
-      factory_guard.py                    the CI guard
-      style_checks.py                     CI: each style's check
-      factory_config.py                   reads factory.json, with defaults
-      wait_for_merge.sh                   waits on a PR without spending tokens
-      factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
-    .claude/ci/                           `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
-                                          compose.yaml, compose-light.yaml, compose-caches.yaml,
-                                          runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.py,
-                                          ci_status.py
     .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
 ```

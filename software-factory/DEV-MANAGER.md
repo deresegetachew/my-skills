@@ -86,6 +86,10 @@ machine). Use the REST API (`gh api`), never force-push or push to the main bran
    minutes: fix it on that branch (merge main in and resolve), push, wait for CI, merge. Small fixes only;
    big ones or judgement calls go to the owner.
 3. Questions: answer every `<!-- factory-question -->` comment without a later `<!-- factory-answer -->`.
+   `factory messages ls --to dev-manager` lists them across issues and PRs. When a question carries a
+   `factory-msg` envelope, answer with one: `factory messages new --kind answer --in-reply-to <id> --ref pr#<n>`
+   (state `completed`; `failed` when it needs the owner, `input-required` when you need more from the asker),
+   and keep the old marker on the next line. Questions addressed to `po` are the PO's to answer.
    Escalate to the owner only what is theirs (scope, legal, money, names, files or keys), with a recommendation.
    New "Blocked:" PRs or lines in docs/blocked.md: resolve them yourself if you can, otherwise tell the owner.
 4. Idle check: the coding agent's last activity was <time>. If 45+ minutes pass with nothing new and
@@ -245,6 +249,26 @@ Rules you write (decisions, answers, build-plan tasks) get applied literally. Wr
 can, and otherwise with one example that passes and one that fails, taken from the real material. Test a new
 rule on two or three real cases before publishing it. When the coding agent shows a rule misfiring, fix the
 rule; don't defend it.
+
+## Several managers at once
+
+If another dev manager may be running (another machine, another terminal), claim before you act, so neither of you
+does the same thing twice. Everything below is `factory manager-claims ... --manager <your name>`:
+
+- `next` first: it takes `factory-hold` off PRs whose lease ran out, then claims every free PR and unanswered
+  question and prints what you won. Work only on those. A PR or question you did not win is another manager's; skip it.
+- Lost a claim (exit code 3)? Do nothing on that item: no hold, no review, no comment.
+- Won a review: review the head you claimed, post `factory-approved`, `factory-mustfix` or `pr-watch` for it, then
+  `release <pr>` (takes the hold off). Gave up without a marker? `release <pr>` too, so the next manager need not wait.
+- Won a question: post the `factory-answer` (it ends the claim). The lease is `manager.claimMinutes` (default 20); a
+  longer job should be done within it, or claim again with `review <pr>` before it ends.
+- Merge with `merge <pr>`: it needs `factory-approved sha=<head>` for the head and merges that exact sha. "Done by
+  someone else" is a normal answer, not a failure.
+- Before asking the owner, `ask --id <slug> --text "..."`: an ask with that id is posted once, however many managers
+  want to post it.
+
+All managers share one GitHub account, so the name inside the comment is the only identity. Do not use
+`trustedReviewers` to tell managers apart.
 
 ## Several coding loops
 

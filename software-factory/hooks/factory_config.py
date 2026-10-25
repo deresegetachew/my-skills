@@ -55,6 +55,8 @@ DEFAULTS = {
         "heartbeatMissMinutes": 12,
         "releaseDownMinutes": 10,
     },
+    # Several dev managers at once (factory_manager_claims.py): how long a review or answer claim holds an item.
+    "manager": {"claimMinutes": 20},
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",
@@ -87,6 +89,10 @@ DEFAULTS = {
     # The eval skill: {"command": "pnpm golden", "baseline": "path", "mustNotDrop": ["warning recall 100%"],
     #   "metrics": ["..."], "paths": ["regex", ...]}. Empty command: no eval yet.
     "eval": {},
+    # The shared Turborepo remote cache (factory_turbo.py, `factory turbo`, #59). api: the address agents and CI use
+    # (empty: off). team: default the repository's name. bind/port: where the server listens on its machine.
+    # secretsCommand: prints TURBO_TOKEN=... lines (the token is never in this file).
+    "turbo": {"api": "", "team": "", "bind": "127.0.0.1", "port": 3335, "secretsCommand": ""},
     # The design-check skill: {"references": "design/screens", "renders": "design/screens/png",
     #   "preview": "pnpm --filter web preview", "paths": ["regex", ...]}. Empty references: no design check.
     "design": {},
