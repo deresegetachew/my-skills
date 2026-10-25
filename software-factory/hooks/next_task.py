@@ -4,7 +4,7 @@
   python3 .claude/hooks/next_task.py           -> "1.3 Validators"   (exit 1 when nothing is left)
   python3 .claude/hooks/next_task.py --json    -> {"id": "1.3", "title": "Validators", "remaining": 7, ...}
   python3 .claude/hooks/next_task.py --after 1.3   -> the next one after 1.3 (to work around a blocked PR)
-  Rework comes first: an open PR whose latest `<!-- factory-mustfix sha=<head> -->` comment from the dev manager
+  Rework comes first: an open PR whose latest must-fix (`<!-- factory-mustfix sha=<head> -->` or a `factory-msg` of kind mustfix) from the dev manager
   names its current head commit (nothing pushed since) is printed as "pr-42 Rework #42: <title> (<branch>)".
   A PR with the `holdLabel` label (default `factory-hold`) is the dev manager's to review: it's never rework.
   python3 .claude/hooks/next_task.py --claim taytu --pid 123
@@ -44,13 +44,13 @@ def rework(cfg):
         except json.JSONDecodeError:
             return []
     out = []
-    marker = re.compile(r"<!--\s*factory-mustfix\s+sha=([0-9a-f]{7,40})\s*-->")
+    import factory_messages as fm
     hold = cfg.get("holdLabel", "factory-hold")
     for pr in sorted(gh("repos/{owner}/{repo}/pulls?state=open&per_page=100"), key=lambda p: p["number"]):
         if any(label.get("name") == hold for label in pr.get("labels", [])):
             continue  # the dev manager is reviewing it: not rework, and nothing for an agent to do
-        shas = [m.group(1) for c in gh(f"repos/{{owner}}/{{repo}}/issues/{pr['number']}/comments?per_page=100")
-                for m in [marker.search(c.get("body") or "")] if m]
+        shas = [sha for c in gh(f"repos/{{owner}}/{{repo}}/issues/{pr['number']}/comments?per_page=100")
+                for kind, sha in fm.verdicts(c.get("body") or "") if kind == "mustfix" and sha]  # either form
         if shas and pr["head"]["sha"].startswith(shas[-1]):
             out.append((f"pr-{pr['number']}", f"Rework #{pr['number']}: {pr['title']} ({pr['head']['ref']})"))
     return out

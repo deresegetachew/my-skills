@@ -63,8 +63,13 @@ Look
                          every agent in one table: kind, where (this machine, another, the cloud), state (working,
                          waiting, idle, down), task, since, last seen and the link to follow it. This machine is read
                          live from the heartbeat daemon; the others from GitHub, cached a short while
-  agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down and
-                         gives back the issues of agents that are really down (never of one that is alive and waiting)
+  agents [list|card|sweep]
+                         live agents (issues mode): who is working, idle or down; list --json and card <name> give the
+                         agent cards; sweep marks silent ones down and gives back the issues of agents that are really
+                         down (never of one that is alive and waiting)
+  messages [ls|new]      questions and answers between agents, the dev manager and the PO: ls [--to X] [--state S]
+                         [--ref N] lists what is open across issues and PRs; new --kind question --to po prints the
+                         envelope to paste at the top of a comment (docs/messages.md)
   issues [list]          tasks as GitHub issues (tasks.source "issues"): list, show N, stale, setup, new ...
 
 Check
@@ -182,6 +187,7 @@ case "$cmd" in
   machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
   follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
+  messages)  py factory_messages.py "${1:-ls}" "${@:2}" ;;
   heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
   autostart) py factory_autostart.py "$@" ;;

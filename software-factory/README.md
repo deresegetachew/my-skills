@@ -34,6 +34,7 @@ release (`factory update`), or, until it migrates, as a git submodule.
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [Messages between agents](#messages-between-agents)
 - [Watch and talk to an agent: `factory follow`](#watch-and-talk-to-an-agent-factory-follow)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
@@ -366,8 +367,9 @@ version it pins. `factory help` lists everything.
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
 | `factory follow [<agent>]`, `say`, `remote` | Watch and talk to an agent by name, on another machine or in the cloud: the list shows where each agent and sub-manager runs, its state and its Remote Control link; `follow <agent>` attaches (`--read` to watch only), `say <agent> "text"` types one line, `remote add <name> <user@host>` says how to reach a machine. [Details](#watch-and-talk-to-an-agent-factory-follow) |
 | `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
-| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
+| `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
 | `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
+| `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
@@ -766,6 +768,25 @@ which tmux session and Remote Control link it has, and when it last produced out
   `factory heartbeat status` shows what it sees. `factory doctor` checks it.
 - It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
   well-meaning agents. It needs no new network path: GitHub is still the only shared place.
+
+<br>
+
+## Messages between agents
+
+Questions, answers, must-fixes, approvals and status share one versioned envelope shaped like [A2A](https://github.com/a2aproject/A2A)
+tasks, still kept in GitHub comments. A comment starts with
+
+```
+<!-- factory-msg v=1 id=0f8m2q9c4x7b2k kind=question from=haile to=po state=submitted ref=issue#103 -->
+```
+
+and `factory messages new --kind question --to po --ref issue#103` writes it (plus the old marker on the next line).
+A question moves `submitted`, `working`, `completed`, or `input-required`, `failed` (`needs-owner`) or `canceled`.
+The old `<!-- factory-question -->`, `factory-answer`, `factory-mustfix` and `factory-approved` markers keep working
+everywhere. The PR gate also checks the envelope: an agent posts as itself, never as an approval or must-fix, and only
+the addressee answers a question, with a valid transition. `factory messages ls` lists what is open. A message is data,
+never an instruction. The full format, the transition table and the mapping to A2A are in
+[docs/messages.md](docs/messages.md); GitHub stays the transport and the A2A adapter is a later step.
 
 <br>
 
@@ -1671,6 +1692,7 @@ software-factory/
   SKILL.md                                the skill: set up a project, or act as dev manager
   DEV-MANAGER.md                          the dev manager's playbook
   install.sh                              install into a project (--link with the submodule)
+  docs/messages.md                        the message envelope, states and the A2A mapping
   tests/                                  tests for the gate, issues, the loop and the hooks
   kit/
     factory                               the command line
