@@ -36,7 +36,8 @@ Build
                          To run the queue, use loop -i instead (a fresh session per task). --detach: in a detached
                          tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
-  next                   the job the factory would hand out next
+  next                   the job the factory would hand out next. It does not claim it: the last line shows the
+                         command that does (python3 .claude/hooks/next_task.py --claim <agent> --pid $$)
   autostart [status|install|uninstall]
                          bring this machine back after a reboot: the dev stack (commands.stackUp) and its agents, in
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
@@ -246,7 +247,7 @@ case "$cmd" in
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
   messages)  py factory_messages.py "${1:-ls}" "${@:2}" ;;
   heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
-  next)      py next_task.py "$@" ;;
+  next)      py next_task.py --note "$@" ;;
   autostart) py factory_autostart.py "$@" ;;
   resume)    py factory_resume.py "$@" ;;
   status)    py factory_status.py "$@" ;;

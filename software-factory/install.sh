@@ -94,7 +94,7 @@ list_files | while read -r f; do
   target="$dst/${f#./}"
   from="$src/${f#./}"
   if [ "$layout" = new ]; then m="$(moved_to "$f")"; [ -z "$m" ] || from="$m"; fi
-  mkdir -p "$(dirname "$target")"
+  # The folder is made only when a file is put in it (#152): a template the project left out must not leave an empty docs/.
   if [ "$link" = 1 ] && is_engine "$f"; then
     want="$(rel "$target" "$from")"
     if [ -L "$target" ] && [ "$(readlink "$target")" = "$want" ]; then
@@ -106,14 +106,14 @@ list_files | while read -r f; do
     elif [ -e "$target" ]; then
       echo "kept     ${f#./} (differs from the kit: link it by hand once the change is in my-skills)"
     else
-      ln -s "$want" "$target"; echo "linked   ${f#./}"
+      mkdir -p "$(dirname "$target")"; ln -s "$want" "$target"; echo "linked   ${f#./}"
     fi
   elif [ -e "$target" ]; then
-    [ "$setup" = 1 ] && echo "kept     ${f#./} (already exists; merge by hand if needed)"
+    if [ "$setup" = 1 ]; then echo "kept     ${f#./} (already exists; merge by hand if needed)"; fi  # not "&&": a false test would end a run with set -e (#152)
   elif [ "$setup" = 0 ]; then
     :  # a template the project chose not to keep (or not yet): leave it out
   else
-    cp -L "$from" "$target"
+    mkdir -p "$(dirname "$target")"; cp -L "$from" "$target"
     echo "added    ${f#./}"
   fi
 done

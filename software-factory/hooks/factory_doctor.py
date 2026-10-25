@@ -60,11 +60,34 @@ def tools(r):
     if not shutil.which("gh"):
         r.fix("GitHub CLI", "install gh (https://cli.github.com), then `gh auth login`")
     else:
-        rc, out, err = run("gh", "auth", "status")
-        if rc == 0:
-            r.ok("gh is signed in")
-        else:
-            r.fix("GitHub CLI", "`gh auth status` fails: run `gh auth login` (or check GH_TOKEN)")
+        gh_access(r)
+
+
+def gh_failure(text):
+    """Why a `gh api` call failed, in a few words, from what gh printed."""
+    t = (text or "").lower()
+    if re.search(r"bad credentials|http 401|requires authentication|token.*(expired|invalid|revoked)", t):
+        return "the token was refused (bad or expired); make a new one and run `gh auth login`, or reset GH_TOKEN"
+    if re.search(r"could not resolve|no such host|dial tcp|timed out|timeout|connection|network|unreachable|proxy|tls|certificate", t):
+        return "can't reach github.com (no network or a proxy in the way); check the connection, then run `factory doctor` again"
+    if re.search(r"gh auth login|gh_token|not logged|no token|authentication", t) or not t:
+        return "no token; run `gh auth login`, or set GH_TOKEN"
+    return "`gh api user` failed (" + t.splitlines()[0][:100] + "); run `gh auth login` or check GH_TOKEN"
+
+
+def gh_access(r):
+    """GitHub access is judged by a real call (#157): `gh auth status` checks more than the factory needs."""
+    rc, out, err = run("gh", "api", "user")
+    if rc != 0:  # a token for an app can't read /user but can read the repo
+        rc2, _, _ = run("gh", "api", "repos/{owner}/{repo}")
+        if rc2 == 0:
+            rc = 0
+    if rc != 0:
+        r.fix("GitHub CLI", "gh can't call the GitHub API: " + gh_failure(err or out))
+        return
+    r.ok("gh is signed in")
+    if run("gh", "auth", "status")[0] != 0:
+        r.note("gh auth status", "it reports a problem, but `gh api` works, so the factory is fine (common with GH_TOKEN)")
 
 
 def node(r):

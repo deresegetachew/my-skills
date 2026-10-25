@@ -194,6 +194,44 @@ def test_factory_update_refuses_an_unknown_layout():
     assert p.returncode == 1 and "--layout takes new, old or auto" in p.stderr
 
 
+REPO = os.path.abspath(os.path.join(SF, ".."))
+
+
+def empty_dirs(d):
+    return sorted(os.path.relpath(r, d) for r, dirs, files in os.walk(d)
+                  if ".git" not in r.split(os.sep) and not dirs and not files)
+
+
+def clean_copy_of_this_repo():
+    d = os.path.join(tempfile.mkdtemp(), "repo")
+    shutil.copytree(REPO, d, symlinks=True, ignore=shutil.ignore_patterns(".git", "__pycache__", "docs"))
+    return d
+
+
+def test_relinking_this_repo_leaves_no_empty_folder_and_check_skills_passes():
+    # #152: the project already has .claude/factory.json, so the docs templates are left out; the folders they
+    # would have sat in must not be made either (check_skills.py fails on a top-level folder that is not a skill).
+    d = clean_copy_of_this_repo()
+    assert not os.path.exists(os.path.join(d, "docs")), "the clean copy starts without docs/"
+    for _ in range(2):  # twice: the second run changes nothing
+        sh("bash", "software-factory/install.sh", ".", "--link", "--layout", "new", cwd=d)
+        assert empty_dirs(d) == [], empty_dirs(d)
+        assert not os.path.exists(os.path.join(d, "docs"))
+        p = sh("python3", "tools/check_skills.py", cwd=d, check=False)
+        assert p.returncode == 0, p.stdout + p.stderr
+
+
+def test_a_setup_project_gets_no_empty_docs_folder_in_either_mode_and_layout():
+    for args in (["--link", "--layout", "new"], ["--link", "--layout", "old"], []):
+        d = project()
+        install(d, *args)  # first run: the templates are copied, docs/ holds files
+        assert os.path.isfile(os.path.join(d, "docs", "build-plan.md")), args
+        shutil.rmtree(os.path.join(d, "docs"))  # the project chose not to keep them
+        install(d, *args)
+        assert not os.path.exists(os.path.join(d, "docs")), args
+        assert empty_dirs(d) == [], (args, empty_dirs(d))
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
