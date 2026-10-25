@@ -26,10 +26,17 @@ Build
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
                          start; install --agents haile,tewodros turns it on (systemd user unit with linger, or a LaunchAgent)
   resume [--dry-run]     what autostart runs at boot: stack, then agents; safe to run by hand (running agents are left alone)
+  heartbeat [status|install|uninstall|once|run]
+                         the per-machine daemon that knows what each agent here is really doing (working, waiting in a
+                         wait, idle, down) and tells GitHub on a change plus a keepalive. install keeps it running
+                         (autostart install does it too); status shows what it sees
 
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
                          the CI queue and runners, and the tasks; read-only
+  prs [--json]           what a manager decides from, one list: each open PR with its head, CI judged by one rule,
+                         the newest marker per commit, any review claim and the next action; then unanswered questions
+                         and owner asks, and agents gone quiet. Read-only, REST only
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
@@ -40,7 +47,12 @@ Look
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
-  agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down
+  agents ls [--json] [--local] [--fresh]
+                         every agent in one table: kind, where (this machine, another, the cloud), state (working,
+                         waiting, idle, down), task, since, last seen and the link to follow it. This machine is read
+                         live from the heartbeat daemon; the others from GitHub, cached a short while
+  agents [list|sweep]    live agents (issues mode): who is working, idle or down; sweep marks silent ones down and
+                         gives back the issues of agents that are really down (never of one that is alive and waiting)
   issues [list]          tasks as GitHub issues (tasks.source "issues"): list, show N, stale, setup, new ...
 
 Check
@@ -137,10 +149,12 @@ case "$cmd" in
   issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
   machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
   agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
+  heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
   next)      py next_task.py "$@" ;;
   autostart) py factory_autostart.py "$@" ;;
   resume)    py factory_resume.py "$@" ;;
   status)    py factory_status.py "$@" ;;
+  prs)       py factory_prs.py "$@" ;;
   claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
   release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     py factory_claims.py clean ;;

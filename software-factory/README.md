@@ -355,6 +355,7 @@ version it pins. `factory help` lists everything.
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
 | `factory lessons [show\|check\|suggest\|add\|prune]` | The curated lessons file (#72): `show` prints it (the builder and the reviewers read it first), `check` keeps it under `lessonsCap`, `suggest` proposes lessons from recent must-fix comments, review findings and CI failures, `add` and `prune` change it (dev manager only) |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
+| `factory prs [--json] [--since-days N]` | The one list a dev manager starts a pass from, read-only and REST only: every open PR with its head and age, labels, CI judged by one rule, the newest marker per commit, any review claim and a next action (`review`, `merge`, `wait CI`, `rerun flake`, `waiting for agent`, `owner merges (protected)`, `held by <manager>`, `none`); below them the unanswered questions, owner asks and quiet agents. [Details and the `--json` schema](#the-list-a-manager-starts-from-factory-prs) |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory autostart [status\|install\|uninstall]` | Makes this machine bring the factory back after a reboot: the dev stack and its agents, with unfinished work saved and left in place. `status` shows what would start; `install --agents haile,tewodros` turns it on and installs the boot service (systemd user unit with linger, or a LaunchAgent). [Details](#after-a-reboot-factory-autostart) |
 | `factory resume [--dry-run]` | What autostart runs at boot: waits for Docker and the network, runs `commands.stackUp`, starts this machine's agents in detached tmux sessions. Safe to run by hand: running agents are left alone |
@@ -362,7 +363,9 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
-| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
+| `factory agents ls [--json] [--local] [--fresh]` | Every agent in one table: kind, where it runs, state (working, waiting, idle, down), task, since, last seen, how to follow it. [Details](#the-heartbeat-daemon) |
+| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues, but never those of an agent that is alive and waiting |
+| `factory heartbeat [status\|install\|uninstall\|once\|run]` | The per-machine daemon that knows what each agent here is really doing. [Details](#the-heartbeat-daemon) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
@@ -731,6 +734,39 @@ current; the task never has to:
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
 
+### The heartbeat daemon
+
+Pinging on tool use cannot tell an agent that is waiting in `factory wait` for 30 minutes from one that has died, and
+it leaves a crashed machine's agents saying `working`. A small daemon, one per machine and project, asks the machine
+instead. Every `tasks.heartbeatSeconds` (20) it checks, locally and for free, each agent that runs here: does a live
+loop or Claude process hold its checkout (the claim), is a `factory wait` or `wait_for_merge.sh` running below it,
+which tmux session and Remote Control link it has, and when it last produced output. From that it derives one state:
+
+| State | Meaning |
+|---|---|
+| `working` | Alive and holds a task |
+| `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge) |
+| `idle` | Alive, no task |
+| `down` | No live process holds its checkout (a killed session, a power cut after a reboot) |
+
+- **Cheap on GitHub.** It always writes its local state file (`factory agents ls` reads that, instantly). GitHub gets
+  one edit of the agent's own issue only when the state changed and lasted a few seconds, plus a keepalive every
+  `tasks.pingMinutes`: at most 12 edits per agent per hour. `down` goes out about one cycle after the process
+  disappeared. With the daemon running, the tool-use pings and the `idle` on turn end are left to it.
+- **The sweep uses it.** `factory agents sweep` never releases the issues of an agent the daemon sees alive, even one
+  waiting for hours. It releases an agent that is really down after `tasks.releaseDownMinutes` (10), and one whose
+  daemon-written keepalive is missing for `tasks.heartbeatMissMinutes` (12), such as a machine that lost power. Without
+  the daemon, everything works as before (30 minutes, `tasks.downMinutes`).
+- **`factory agents ls`** shows this machine from the state file and the other machines and the cloud agents from their
+  agent issues, cached 45 seconds (`--fresh` asks again, `--local` never asks, `--json` for tools). The tmux session,
+  folder, machine name and follow link reach GitHub only with `tasks.showWhere`, since agent issues are readable by
+  anyone who can read the repo.
+- **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
+  `factory heartbeat install` adds or restarts it alone (a systemd user service, or a LaunchAgent on macOS), and
+  `factory heartbeat status` shows what it sees. `factory doctor` checks it.
+- It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
+  well-meaning agents. It needs no new network path: GitHub is still the only shared place.
+
 <br>
 
 ## After a reboot: `factory autostart`
@@ -969,6 +1005,95 @@ It talks to the agents through markers in PR comments:
 
 The full playbook is [DEV-MANAGER.md](DEV-MANAGER.md). To start it, say "be the dev manager for this repo" in a Claude
 session with the repo attached.
+
+### The list a manager starts from: `factory prs`
+
+`factory prs` is read-only and uses the REST API only (`gh api`; no `gh pr`, no GraphQL, so it works where `gh pr` is
+blocked). A pass reads it first instead of paginating comments and check runs.
+
+```
+Open pull requests (2)
+#12 review: Task 7
+    task/7-x | cccccc1 (14 min) | agent:taytu
+    CI green | no marker for the head (older: factory-approved 0000000) | no claim
+#13 waiting for agent: Task 9
+    task/9-y | dddddd2 (3 h) | draft
+    CI red (lint) | factory-mustfix | no claim
+Questions
+  pr #13 waiting 40 min: https://github.com/o/r/pull/13#issuecomment-1
+Owner asks
+  none waiting
+Agents
+  all agents answering
+```
+
+**CI, judged by one rule.** For each job name, the newest run that was not skipped decides: a re-run replaces a
+failure, and a skipped run decides nothing. The PR gets one state: `red` (a job failed, was cancelled or timed out),
+else `running`, else `queued`, else `green`. `none` means GitHub shows no runs yet; `unknown` means they could not be
+read (the other PRs still show). `notGreen` names the jobs that are not green. `factory status` uses the same rule
+and the same reading of the markers (both come from `factory_prs.py`).
+
+**Markers per commit.** `markers` holds the newest `factory-approved`, `factory-mustfix` or `pr-watch` for each
+commit, oldest first, and `namesHead` says whether it names the current head. Only the head's marker decides:
+an approval of an older commit does not count. Approvals follow the merge gate's rule (only a login in main's
+`trustedReviewers`, when that is set), and a must-fix holds the merge until an approval of the head comes after it.
+
+**Review claim.** A `<!-- factory-review-claim manager=<name> sha=<head> until=<ISO time> -->` comment for the
+current head that has not expired; the earliest one wins. A claim for another commit, or past its `until`, is ignored.
+(The claim protocol itself is #99; this only reads it.)
+
+**Next action**, the first rule that fits:
+
+| Order | When | Next action |
+|---|---|---|
+| 1 | `factory-hold` is on, and a live claim or no claim exists (an expired claim and no marker for the head makes it a stale hold: it falls through) | `held by <manager>` (the claimant, else `manager`) |
+| 2 | Draft | `waiting for agent` |
+| 3 | CI could not be read | `none`, with an error |
+| 4 | Not an agent PR (the manager's own, or a person's): red, then waiting, then green | `none`; `wait CI`; `owner merges (own PR)` |
+| 5 | A must-fix names the head, or holds the merge | `waiting for agent` |
+| 6 | CI red: every red job is in `manager.flakes` and has run once on this commit | `rerun flake`; otherwise `waiting for agent` |
+| 7 | No marker for the head | `review` (even while CI runs) |
+| 8 | `pr-watch` for the head (reviewed, not approved) | `none` |
+| 9 | Approved, CI not finished | `wait CI` |
+| 10 | Approved, green, protected path changed or the body says "a person merges this one" | `owner merges (protected)` |
+| 11 | Approved, green | `merge` |
+
+An agent PR is one on a `task/<n>-...` branch or with an `agent:<name>` label. All roles share one GitHub account, so
+this is the only way to tell the manager's own PRs from the agents'.
+
+**Below the PRs.** `questions`: open `factory-question` comments with no later `factory-answer`, on open PRs and on
+open issues (issues are searched `--since-days` back, default 14). `ownerAsks`: asks in the open issue titled
+`Dev manager: needs the owner` (comments starting `<!-- factory-owner-ask id=<slug> -->`) that no comment answers; an ask
+is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->`. `agents`:
+agents that are `silent` or `down`, and `staleTasks`: in-progress tasks quiet for `tasks.staleHours` (issues mode only).
+
+**`--json`**, stable for scripts. A part GitHub could not answer is `{"error": "..."}` in its place.
+
+```
+{
+  "generatedAt": "2026-10-25T12:00:00Z",
+  "pulls": [ {
+      "number": 12, "title": "...", "url": "https://github.com/o/r/pull/12", "branch": "task/7-x", "draft": false,
+      "head": {"sha": "<40 hex>", "ageMinutes": 14},                  // age of the head commit
+      "labels": ["factory-hold", "agent:taytu"],
+      "agent": "taytu" | null, "agentPr": true,
+      "ci": {"state": "green|red|running|queued|none|unknown", "notGreen": [{"name": "lint", "state": "red"}], "runs": 3},
+      "markers": [{"kind": "factory-approved|factory-mustfix|pr-watch", "sha": "<hex>" | null, "at": "<ISO>", "namesHead": true}],
+      "headMarker": "factory-approved|factory-mustfix|pr-watch" | null,
+      "gate": "approved|approval stale|must-fix|must-fix (older commit)" | null,   // the merge gate's reading
+      "claim": {"manager": "ana", "until": "<ISO>", "expired": false} | null,
+      "staleHold": false,
+      "protected": true | false | null,                               // null: not looked at (only for a PR that could merge)
+      "next": {"action": "review|merge|wait-ci|rerun-flake|waiting-for-agent|owner-merges|held|none",
+               "text": "review", "reason": "protected|not-agent-pr", "by": "ana", "jobs": ["e2e"], "error": "..."}
+  } ],                                                                 // "reason", "by", "jobs", "error": only when they apply
+  "questions": [{"kind": "pr|issue", "number": 13, "title": "...", "url": "...", "ageMinutes": 40}],
+  "ownerAsks": [{"id": "slug", "issue": 60, "url": "...", "ageMinutes": 300}],
+  "agents": [{"name": "taytu", "status": "silent|down", "minutesAgo": 95}],
+  "staleTasks": [{"number": 7, "title": "...", "quietHours": 4.2}],
+  "note": "..."                                                        // only outside issues mode
+}
+```
 
 <br>
 
@@ -1315,11 +1440,12 @@ reads these settings.
 | `lessonsCap` | The most lessons the file may hold; `factory lessons check` (and CI) fail above it, `add` refuses | 40 |
 | `trustedReviewers` | GitHub logins whose approvals count | none: any approval counts |
 | `holdLabel` | The hold label | `factory-hold` |
+| `manager` | `flakes`: names of CI jobs known to fail now and then; `factory prs` says `rerun flake` when only those are red, for the first time on that commit | `[]` |
 | `agents` | The agents' names, in order | the ten names above |
 | `agentEnv`, `portStep` | Per-agent variables, and the port step | `{}`, 10 |
 | `claimStaleHours` | How long a local claim or a pushed task branch holds a task | 6 |
 | `waitMinutes` | How often an idle loop checks for work; 0 exits | 1 |
-| `tasks` | `source` (`plan` or `issues`), `labels`, `staleHours` (3), `pingMinutes` (5), `downMinutes` (30), `showWhere` (off) | plan mode |
+| `tasks` | `source` (`plan` or `issues`), `labels`, `staleHours` (3), `pingMinutes` (5), `downMinutes` (30), `heartbeatSeconds` (20), `heartbeatMissMinutes` (12), `releaseDownMinutes` (10), `showWhere` (off) | plan mode |
 | `reviews` | Path regexes for `safety-auditor` and `security-reviewer` | empty |
 | `eval`, `design` | Settings and paths for the eval and design-check skills | off |
 | `styles`, `structure` | Style guides per path, and the structure check's roots and legacy list | none |
@@ -1363,8 +1489,12 @@ software-factory/
       factory_machine.py                  this machine's id, agent names and autostart settings (outside the repo)
       factory_autostart.py                `factory autostart`: status, install and uninstall of the boot service
       factory_resume.py                   `factory resume`: the boot step (stack, backups, agents in tmux)
+      factory_heartbeat.py                `factory heartbeat`: the per-machine liveness daemon
+      factory_heartbeat_service.py        install and uninstall of the daemon's service
+      factory_agents_ls.py                `factory agents ls`
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
+      factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
