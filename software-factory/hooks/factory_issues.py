@@ -177,19 +177,64 @@ def pick(cfg, agent):
             return None
         return i  # carry on with what this agent already holds
     for i in ready_issues(cfg):
-        n = i["number"]
-        add_labels(n, [L["inProgress"], mine])
-        remove_label(n, L["ready"])
-        where = f" machine={machine}" if machine else ""
-        comment(n, f"<!-- factory-claim agent={agent}{where} -->\n**{agent}** is working on this.")
-        time.sleep(claim_settle_seconds())  # let a simultaneous claim land, then let the earliest comment decide
-        winner = claim_winner(n)
-        if is_me(winner, agent, machine):
+        if claim_issue(cfg, agent, i):
             return i
-        if not winner or winner[0] != agent:
-            remove_label(n, mine)  # someone else was first; their labels stay
-        # (a winner with our own name on another machine owns that label too: leave it on)
     return None
+
+
+def claim_issue(cfg, agent, i):
+    """Labels and a claim comment for issue `i`; True when this agent's claim won."""
+    L = task_labels(cfg)
+    mine = L["agentPrefix"] + agent
+    from factory_machine import machine_id
+    machine = machine_id()
+    n = i["number"]
+    add_labels(n, [L["inProgress"], mine])
+    remove_label(n, L["ready"])
+    where = f" machine={machine}" if machine else ""
+    comment(n, f"<!-- factory-claim agent={agent}{where} -->\n**{agent}** is working on this.")
+    time.sleep(claim_settle_seconds())  # let a simultaneous claim land, then let the earliest comment decide
+    winner = claim_winner(n)
+    if is_me(winner, agent, machine):
+        return True
+    if not winner or winner[0] != agent:
+        remove_label(n, mine)  # someone else was first; their labels stay
+    # (a winner with our own name on another machine owns that label too: leave it on)
+    return False
+
+
+def pick_named(cfg, agent, n):
+    """Claim issue #n for the agent: (issue, None) on success, (None, {code, message, fix}) when it can't be claimed.
+    Nothing is changed on a refusal. An issue this agent already holds is returned as it is."""
+    L = task_labels(cfg)
+    mine = L["agentPrefix"] + agent
+    from factory_machine import machine_id
+    i = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{n}", ok_404=True)
+    if not i or i.get("state") != "open" or "pull_request" in i:
+        return None, {"code": "issue-not-found", "message": f"#{n} is not an open task issue.",
+                      "fix": "Check the number with `factory issues` and try again."}
+    have = names(i)
+    if mine in have and L["inProgress"] in have and own_issue(n, agent, machine_id()):
+        return i, None
+    held = [x for x in have if x.startswith(L["agentPrefix"])]
+    if held or L["inProgress"] in have or L["inReview"] in have:
+        who = held[0][len(L["agentPrefix"]):] if held else "another agent"
+        return None, {"code": "issue-taken", "message": f"#{n} is already taken by {who}.",
+                      "fix": "Pick another issue, or ask the dev manager to release it with `factory issues release`."}
+    if L["blocked"] in have:
+        return None, {"code": "issue-blocked", "message": f"#{n} is blocked.",
+                      "fix": "Wait for the dev manager to unblock it, or pick another issue."}
+    open_deps = open_dependencies(i, {x["number"] for x in task_issues()}, {})
+    if open_deps:
+        return None, {"code": "issue-blocked", "message": f"#{n} waits for {', '.join('#' + str(d) for d in open_deps)}.",
+                      "fix": "Build the issues it depends on first, or pick another issue."}
+    if L["ready"] not in have:
+        return None, {"code": "issue-not-ready", "message": f"#{n} is not labelled {L['ready']}.",
+                      "fix": "Ask the dev manager to make it ready, or pick another issue."}
+    if claim_issue(cfg, agent, i):
+        return i, None
+    return None, {"code": "issue-taken", "message": f"Another agent claimed #{n} first.",
+                  "fix": "Pick another issue."}
 
 
 def claim_settle_seconds():

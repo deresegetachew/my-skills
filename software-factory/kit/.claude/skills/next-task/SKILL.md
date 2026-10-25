@@ -26,6 +26,7 @@ This file is the core. Open the others in this folder only when they apply:
    `git submodule update --init` if the repo has a `.gitmodules`. Read `git log --oneline -15`, and run the `smoke`
    command if `factory.json` has one. If main is broken, fixing it is the task.
 2. **Let the script pick:** `python3 .claude/hooks/next_task.py ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}`.
+   If you were told which issue to build, add `--issue <n>` (issues mode) so the claim takes that one and no other.
    Never pick by reading the plan yourself. If `$ARGUMENTS` names a task, under `factory-loop.sh` the loop has
    already claimed it: build only that one. `pr-<n>` means rework (`rework.md`). Respect phase order unless the plan
    says phases overlap.
