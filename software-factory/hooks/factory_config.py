@@ -13,12 +13,16 @@ DEFAULTS = {
     # typecheckChanged / testChanged: the Stop check runs these instead of typecheck / test when set, for the
     # changed packages only (for example `pnpm -s turbo run test --filter=...[origin/main]`). Fewer test lines in
     # the agent's context, and a faster turn.
+    # fix: a formatter and auto-fixer for the files this branch changed, e.g. `prettier --write {files} && eslint --fix
+    # {files}` (#69). The Stop check and `factory verify` run it first; `factory fix` runs it by hand.
     # ci: what CI runs, for `factory verify`; when set on main, the PR gate needs it passed for the PR's commit.
     # stackUp / stackHealth: what `factory resume` runs at boot to bring the dev stack back (for example `pnpm stack:up`),
     # and an optional command that passes once the stack is healthy (#88).
     "commands": {"typecheck": "", "lint": "", "test": "", "build": "", "smoke": "",
-                 "typecheckChanged": "", "testChanged": "", "ci": "", "stackUp": "", "stackHealth": ""},
+                 "typecheckChanged": "", "testChanged": "", "ci": "", "fix": "", "stackUp": "", "stackHealth": ""},
     "codePaths": ["src"],
+    # Regexes: when set, `commands.fix` gets only changed files matching one of them (empty: every changed file).
+    "fixPaths": [],
     # How many lines of a failing Stop check the agent sees: the failing lines first, then the end of the output.
     "checkOutputLines": 40,
     # Where the full output of a failed check is saved (the agent sees only a capped summary and this path).
@@ -68,6 +72,12 @@ DEFAULTS = {
         "staleHours": 3,  # an in-progress issue with no activity for this long goes back to ready (dev manager)
         "pingMinutes": 5,  # an agent pings its agent issue at most this often while it works
         "downMinutes": 30,  # no ping for this long: the agent counts as down, and the sweep releases its issues
+        # The heartbeat daemon (factory_heartbeat.py, #108): how often it looks at this machine's agents, how long a
+        # missed keepalive may last before an agent it writes for counts as silent, and how long an agent that is
+        # plainly down waits before the sweep gives its in-progress issues back.
+        "heartbeatSeconds": 20,
+        "heartbeatMissMinutes": 12,
+        "releaseDownMinutes": 10,
     },
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
@@ -75,6 +85,10 @@ DEFAULTS = {
     # A reviewer's second round reads only the delta since its last round (factory_rereview.py): the limit, as a
     # percent of the branch diff's changed lines, above which it is a full review. 0: always a full review.
     "reReviewPercent": 30,
+    # The curated lessons file (factory_lessons.py): one-line rules the builder and the reviewers read first, and the most
+    # lessons it may hold. `factory lessons suggest` proposes new ones; the dev manager adds them.
+    "lessons": ".claude/factory/lessons.md",
+    "lessonsCap": 40,
     # Style guides per path: [{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal"],
     #   "check": "python3 .claude/hooks/check_structure.py"}]. The architecture reviewer and CI use them.
     "styles": [],
@@ -100,6 +114,8 @@ DEFAULTS = {
     # The design-check skill: {"references": "design/screens", "renders": "design/screens/png",
     #   "preview": "pnpm --filter web preview", "paths": ["regex", ...]}. Empty references: no design check.
     "design": {},
+    # Where `factory update` finds releases of the factory (#113): {"repo": "owner/name"}. Default: my-skills.
+    "release": {"repo": "deresegetachew/my-skills"},
 }
 
 

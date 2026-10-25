@@ -8,6 +8,7 @@
 #   factory ci uninstall [i]       removes them (or instance i: 2, 3 ... or light), their containers and idle registrations
 #   factory ci start | stop        runs one by hand, in the background, until stop or a restart
 #   factory ci logs [i] [-f]       a runner's log (instance 1 unless you name one)
+#   factory ci stale | check       are the installed runner copies older than this checkout / fit to start (factory update runs both)
 #
 # Every name comes from the project (ci_names.py): the runner is `<repo>-ci`, its jobs ask for the label
 # `<repo>-local`, unless "ci" in .claude/factory.json says otherwise. Several machines can run runners with the
@@ -184,24 +185,74 @@ wait_unloaded() {
 copy_files() {
   mkdir -p "$CI_STATE" "$CI_INSTALLED"
   chmod 700 "$CI_STATE" "$CI_INSTALLED"
-  install -m 700 "$kit/loop.sh" "$exe"
-  install -m 600 "$kit/compose.yaml" "$CI_INSTALLED/compose.yaml"
-  install -m 600 "$kit/compose-light.yaml" "$CI_INSTALLED/compose-light.yaml"
-  install -m 600 "$kit/compose-caches.yaml" "$CI_INSTALLED/compose-caches.yaml"
-  install -m 600 "$kit/runner.Dockerfile" "$CI_INSTALLED/runner.Dockerfile"
-  install -m 600 "$kit/install-tools.sh" "$CI_INSTALLED/install-tools.sh"
+  local src dst mode mounted
+  # Fail before copying anything if a compose file mounts a file this checkout does not have.
+  for mounted in $(mounted_files); do
+    [ -f "$kit/$mounted" ] || die "a compose file mounts $mounted, which is not in $kit."
+  done
+  while IFS=$'\t' read -r src dst mode; do
+    install -m "$mode" "$src" "$dst"
+  done < <(service_files)
+  return 0
+}
+
+# Every file a compose file mounts into a container (`- ./file:/path:ro`), one per line.
+mounted_files() { sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:[:space:]]*\):.*#\1#p' "$kit"/compose*.yaml | sort -u; }
+
+# The files `install` copies for the services, one per line: source, installed copy and mode, tab-separated.
+# One list for the copy, `stale` and `check`, so they cannot drift apart.
+service_files() {
+  local f mounted
+  printf '%s\t%s\t%s\n' "$kit/loop.sh" "$exe" 700
+  for f in compose.yaml compose-light.yaml compose-caches.yaml runner.Dockerfile install-tools.sh; do
+    printf '%s\t%s\t%s\n' "$kit/$f" "$CI_INSTALLED/$f" 600
+  done
   # 0644, not 0600: the runner container's user (uid 1001) is not whoever installed, and bash must read this file
   # there (a 0600 copy gave "Permission denied", exit 126). It holds no secret: the registration token only ever
   # comes in the environment. The folder around it is 0700, so no other user on the machine can reach it.
-  install -m 644 "$kit/entrypoint.sh" "$CI_INSTALLED/entrypoint.sh"
-  # The same for every other file a compose file mounts into a container (`- ./file:/path:ro`): copied, and readable
-  # by the container's user, so a mount added to a compose file later cannot be left out or left at 0600 (#111's class).
-  local mounted
-  for mounted in $(sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:[:space:]]*\):.*#\1#p' "$kit"/compose*.yaml | sort -u); do
-    [ -f "$kit/$mounted" ] || die "a compose file mounts $mounted, which is not in $kit."
-    install -m 644 "$kit/$mounted" "$CI_INSTALLED/$mounted"
+  printf '%s\t%s\t%s\n' "$kit/entrypoint.sh" "$CI_INSTALLED/entrypoint.sh" 644
+  # The same for every other file a compose file mounts into a container: copied, and readable by the container's
+  # user, so a mount added to a compose file later cannot be left out or left at 0600 (#111's class).
+  for mounted in $(mounted_files); do
+    case "$mounted" in entrypoint.sh) continue ;; esac
+    printf '%s\t%s\t%s\n' "$kit/$mounted" "$CI_INSTALLED/$mounted" 644
   done
+}
+
+# `factory ci stale`: exit 0 and no output when no service is installed here or its copies equal this checkout;
+# exit 3 with a line per file that is missing or older. `factory update` runs `install` when this says so (#113).
+cmd_stale() {
+  [ -n "$(installed_ids)" ] || return 0
+  local src dst mode stale=0
+  while IFS=$'\t' read -r src dst mode; do
+    if [ ! -f "$dst" ]; then echo "missing  $dst"; stale=1
+    elif ! cmp -s "$src" "$dst"; then echo "older    $dst"; stale=1; fi
+  done < <(service_files)
+  [ "$stale" = 0 ] || return 3
   return 0
+}
+
+# `factory ci check`: exit 0 when the installed services are fit to start, else 1 with a line per problem: a copy
+# that is missing or older than this checkout, a file the runner container's user (not the owner) can't read or
+# that anyone else could change, a start script bash can't parse. Reads files only; it starts nothing.
+cmd_check() {
+  if [ -z "$(installed_ids)" ]; then echo "No runner service is installed on $machine."; return 0; fi
+  local src dst mode bad=0 line
+  while IFS= read -r line; do echo "$line"; bad=1; done < <(cmd_stale || true)
+  while IFS=$'\t' read -r src dst mode; do
+    [ -f "$dst" ] || continue
+    if [ "$mode" = 644 ] && [ -z "$(find "$dst" -maxdepth 0 -perm -004)" ]; then
+      echo "can't read $dst: the runner container's user is not its owner, so it needs mode 644"; bad=1
+    fi
+    if [ -n "$(find "$dst" -maxdepth 0 -perm -002)" ]; then
+      echo "$dst is writable by anyone on this machine; it should be mode $mode"; bad=1
+    fi
+  done < <(service_files)
+  if [ -f "$CI_INSTALLED/entrypoint.sh" ] && ! bash -n "$CI_INSTALLED/entrypoint.sh" 2>/dev/null; then
+    echo "$CI_INSTALLED/entrypoint.sh doesn't parse"; bad=1
+  fi
+  [ "$bad" = 0 ] || return 1
+  echo "The installed runner files are readable by the container and match this checkout."
 }
 
 on_main_note() {
@@ -806,6 +857,8 @@ case "${1:-status}" in
   status) cmd_status ;;
   use) shift; cmd_use "$@" ;;
   install) cmd_install ;;
+  stale) cmd_stale ;;
+  check) cmd_check ;;
   uninstall) shift; cmd_uninstall "$@" ;;
   start) cmd_start ;;
   stop) cmd_stop ;;
