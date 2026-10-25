@@ -427,6 +427,8 @@ Most of the cost is what the agents read, not what they write.
   When the reviewer reports a must-fix, the agent fixes it and the fixed commit is reviewed again on Opus, which says
   how each earlier must-fix was resolved before it records the pass; Opus without a fix is only for items marked
   unsure. A diff over `prSizeWarn` lines, or one that touches a `protected` path, goes to Opus from the start.
+- **A model per role** (`models` in `.claude/factory.json`, below), so two machines never run different builder
+  models by accident.
 - **Read what the task needs.** Every agent reads the PRD sections, decisions and designs the task points to
   and searches long documents, instead of reading them whole. Keep `CLAUDE.md` short and stable (it starts
   every session, and an unchanged start is cheaper to read again); put notes that change often in
@@ -443,6 +445,36 @@ Most of the cost is what the agents read, not what they write.
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
   otherwise, with short state notes.
+
+#### Model and effort per role (`models`)
+
+Without a `models` setting nothing changes: a subagent keeps the `model:` in its kit agent file, and the builder and
+the manager run on Claude Code's own default. A project sets values in its `.claude/factory.json` (the owner commits
+it; `factory settings set models '<json>'` checks it):
+
+```json
+"models": {
+  "builder":  {"model": "opus", "effort": "high"},
+  "manager":  {"model": "sonnet"},
+  "test-writer": {"model": "haiku"},
+  "reviewer": {"model": "sonnet", "escalateTo": "opus"},
+  "architecture-reviewer": {}, "safety-auditor": {}, "security-reviewer": {}
+}
+```
+
+Roles: `builder`, `manager`, `test-writer`, `reviewer`, `architecture-reviewer`, `safety-auditor`,
+`security-reviewer`. A bad role, an empty model or a bad effort (`low`, `medium`, `high`, `xhigh`, `max`; builder and
+manager only) is rejected. Where the defaults live: the subagents' in `kit/.claude/agents/<name>.md`
+(factory-wide); the builder's and the manager's nowhere, so Claude Code's default.
+
+How the values reach Claude Code: `factory loop` and `factory agent` add `--model` and `--effort` for the builder.
+For a subagent they add `--agents <json>`, which redefines that agent for the session with your model and the agent
+file's own prompt, tools and description, so the shared file is never edited or shadowed.
+`python3 .claude/hooks/factory_models.py flags manager` prints the same arguments for the manager's session.
+`factory doctor` prints the effective model per role and what set it. The environment variable
+`CLAUDE_CODE_SUBAGENT_MODEL` is not used: on its own the agent file's `model:` wins, and with `..._FORCE=1` it
+forces one model on every subagent. `escalateTo` is stored and checked, but the next-task skill still escalates
+the reviewer to Opus by its own wording (not yet read from the setting).
 
 ### Measuring it
 
@@ -983,6 +1015,7 @@ software-factory/
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
+      factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
       factory_settings.py                 `factory settings`: list, show, set and unset factory.json values

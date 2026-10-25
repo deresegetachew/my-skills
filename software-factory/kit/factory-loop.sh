@@ -97,6 +97,13 @@ isolate() {
   cfg="$(python3 "$hooks/factory_mcp.py")" || cfg='{"mcpServers":{}}'
   [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
   claude_flags=(--mcp-config "$cfg" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}')
+  # The `models` setting (factory_models.py): --model and --effort for the builder, and --agents for the subagents
+  # whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
+  if [ -f "$hooks/factory_models.py" ]; then
+    local m
+    m="$(python3 "$hooks/factory_models.py" flags builder 2>&1)" || { echo "[$agent] $m"; exit 1; }
+    while IFS= read -r line; do [ -n "$line" ] && claude_flags+=("$line"); done <<< "$m"
+  fi
 }
 # After tidy: if main brought a different factory-loop.sh, carry on with that one. exec keeps the pid, so the
 # agent keeps its name, folder and claims, and the EXIT trap doesn't run (it's still alive). $1 = tasks left.

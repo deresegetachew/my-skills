@@ -157,6 +157,17 @@ def factory(r, cfg):
         r.note("sleep", "keep the Mac awake while agents run (`caffeinate -d` in another tab)")
 
 
+def models(r, cfg):
+    from factory_models import table, validate
+    try:
+        validate(cfg.get("models", {}))
+    except ValueError as e:
+        r.fix("models in .claude/factory.json", f"{e} Fix it with `factory settings set models '<json>'`")
+        return
+    for role, model, source in table(cfg.get("models", {})):
+        r.ok(f"model for {role}: {model} ({source})")
+
+
 def main():
     if run("git", "rev-parse", "--show-toplevel")[0] != 0:
         print("factory doctor: run it inside the project's git repo.", file=sys.stderr)
@@ -174,6 +185,7 @@ def main():
     if cfg:
         project(r, cfg)
         factory(r, cfg)
+        models(r, cfg)
     print()
     print(f"{r.fixes} to fix." if r.fixes else "All the checks pass.")
     return 1 if r.fixes else 0
