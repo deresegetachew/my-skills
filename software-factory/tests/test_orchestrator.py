@@ -19,7 +19,10 @@ GH = r'''#!/usr/bin/env python3
 import json, os, re, sys
 from datetime import datetime, timezone
 from urllib.parse import urlparse, parse_qs
-f = os.environ["FAKE_DB"]; db = json.load(open(f)); a = sys.argv[1:]
+import fcntl
+f = os.environ["FAKE_DB"]
+lock = open(f + ".lock", "w"); fcntl.flock(lock, fcntl.LOCK_EX)  # sub-managers run side by side: one request at a time
+db = json.load(open(f)); a = sys.argv[1:]
 if a[:1] != ["api"]: sys.exit("fake gh: only gh api")
 rest = a[1:]; method = "GET"; path = None; i = 0; body = None
 while i < len(rest):
