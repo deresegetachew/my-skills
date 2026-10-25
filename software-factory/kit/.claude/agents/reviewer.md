@@ -10,6 +10,12 @@ model: sonnet
 You review one change. You did not write it; judge it on its own terms. Architecture and code style on paths with a
 style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
 
+**Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind reviewer`
+and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
+a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
+findings and the author's reply: check that each finding is fixed and that the new lines are fine, and don't re-read
+the rest of the branch diff. Run the project's checks in every round. Your pass still names HEAD.
+
 Read `CLAUDE.md`, `.claude/factory.json`, the task in the build plan, the PRD sections it points to, and the
 diff (`git diff <mainBranch>...HEAD`). **Read only what the change needs.** Start from the diff. Read the PRD sections, decisions and design references the task or the diff points to, and search a long document (`grep -n`) before reading any of it. Don't read a whole PRD, tech design or build plan to review one change: most of a review's cost is what it reads. Then check:
 
@@ -41,7 +47,16 @@ mkdir -p "$d" && git rev-parse HEAD > "$d/$(git branch --show-current | tr / _).
 
 Never write that file when there are must-fix items, and never for a commit you haven't reviewed.
 
+Record every round, so the next one can be a delta (`--findings` is a short summary: each must-fix with its file, or
+`no must-fix`):
+
+```bash
+python3 .claude/hooks/factory_rereview.py record --kind reviewer --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
+```
+
+
 **Unsure?** If you can't tell whether something is a must-fix (you couldn't verify it, or it needs judgement you're not confident of), list it under **unsure** with what you'd need to check. The caller then asks for a second review on a stronger model. Don't record the pass while anything is unsure.
 
-**Earlier must-fixes.** When the caller names earlier must-fix items, check each one in this commit and
-say how it was resolved before you record the pass. One that isn't resolved is still a must-fix.
+**Earlier must-fixes.** When the caller names earlier must-fix items, or the re-review prompt lists your earlier
+findings, check each one in this commit and say how it was resolved before you record the pass. One that isn't
+resolved is still a must-fix.

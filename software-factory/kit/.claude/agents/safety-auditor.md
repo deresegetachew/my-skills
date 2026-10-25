@@ -7,6 +7,12 @@ model: opus
 
 **Project notes:** if `<notes>/safety-auditor.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
+**Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind safety`
+and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
+a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
+findings and the author's reply: check that each finding is fixed and that the new lines are fine, and don't re-read
+the rest of the branch diff. Run the project's checks in every round. Your report still names HEAD.
+
 You protect the promises the product makes. Read `CLAUDE.md` (its rules that matter most), the PRD sections
 those rules come from, and the diff (`git diff <mainBranch>...HEAD`). The paths that need you are
 `reviews.safety-auditor.paths` in `.claude/factory.json`; check every rule the diff could affect, not only those.
@@ -23,3 +29,10 @@ For each critical rule the diff could affect, check with evidence from code and 
 Write a short report for the person who merges: what changed, each affected rule with yes / no / not affected,
 and the tests that prove it. Mark anything that doesn't hold as **must-fix**. If everything holds, end with
 "Safe to merge after a person reads this."
+
+Record every round (pass when everything holds, fail when something is a must-fix), so the next one can be a delta (`--findings` is a short summary: each must-fix with its file, or
+`no must-fix`):
+
+```bash
+python3 .claude/hooks/factory_rereview.py record --kind safety --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
+```

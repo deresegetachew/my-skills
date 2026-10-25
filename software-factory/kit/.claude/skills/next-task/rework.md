@@ -9,7 +9,10 @@ fixed yet.
 2. Fix every must-fix on that branch. Write the failing test first when the finding is a behaviour; don't weaken a
    test to make a finding go away. If you disagree with a finding, reply with your evidence in a
    `<!-- factory-question -->` comment instead of pushing, and stop (step 5).
-3. Run the commands from `factory.json`, ask the `reviewer` subagent (and the auditor the PR needed) for a pass on the
+3. Run the commands from `factory.json`, save your reply for the reviewer's next round
+   (`python3 .claude/hooks/factory_rereview.py reply --kind reviewer --text "<what you changed for each must-fix>"`; it
+   makes that round a delta review when the fix is small; if it says there is no earlier round, carry on: the review is a
+   full one), ask the `reviewer` subagent (and the auditor the PR needed) for a pass on the
    new commit, then push. The push moves the head, so the PR is no longer rework.
 4. Reply on the PR: what changed for each must-fix, with the commit. Post the task's tokens again
    (`python3 .claude/hooks/factory_usage.py --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`).

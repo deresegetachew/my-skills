@@ -289,6 +289,7 @@ version it pins. `factory help` lists everything.
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next, without claiming it |
+| `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
 | `factory status [--json]` | The whole factory at a glance, across machines, read-only: agents from their agent issues (working, idle, silent, down), this machine's claims, open PRs (draft, CI, the reviewer's pass when the marker is on this machine, hold, the dev manager's must-fix or approval by the gate's rule, so an approval of an older commit or from a login not in main's `trustedReviewers` shows as stale or not at all, "a person merges this one"), the CI queue and runners, and the tasks (ready by milestone, in progress, in review, blocked; plan mode: the next task). A section GitHub can't answer says so |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
@@ -673,6 +674,24 @@ and the reviewer checks they ran.
 architecture reviewer to `<branch>.arch.ok` (`reviewMarkers` sets the folder). A pass counts only for that exact
 commit, so any new commit needs a new review.
 
+**Incremental re-review.** After a review finds problems and the agent fixes them, the same reviewer should not read the
+whole diff again. Each reviewer (`reviewer`, `arch`, `safety`, `security`) records its rounds with
+`factory rereview record`: the commit it reviewed, pass or fail, a short findings summary, and the files and changed
+lines of the branch diff at that moment, in `<reviewMarkers>/<branch>.reviews.json` (next to the markers, never in
+them). The agent saves its answer with `factory rereview reply`. The reviewer's first step is `factory rereview prompt`,
+which prints its instructions for this round:
+
+- **delta:** `git diff <last reviewed commit>..HEAD`, the reviewer's own earlier findings and the agent's reply. It checks
+  that each finding is fixed and that the new lines are fine, and does not re-read the rest of the branch diff;
+- **full:** the whole branch diff, with the earlier findings listed for reference. This is the answer for a first round,
+  and when the earlier commit is no longer in the branch's history (rebase or reset), the branch's base moved (main merged
+  in), the change touches a file the earlier round never saw, the delta is more than `reReviewPercent` (default 30) percent
+  of the branch diff's changed lines, or `reReviewPercent` is 0 (the old behaviour).
+
+`factory rereview plan --kind reviewer` prints which it will be, and why, as JSON. The gate is unchanged: the pass marker
+is still a file holding HEAD's id and nothing else, so the last round of every reviewer ends on the PR's head commit. A
+round nobody recorded (another machine, a cleaned `tmp/`) simply gets a full review.
+
 ### The PR gate
 
 `pr-gate.py` is a PreToolUse hook. It reads every Bash command Claude runs, including compound ones (`;`, `&&`,
@@ -1025,6 +1044,7 @@ reads these settings.
 | `maxOpenPRs` | Ready PRs an account may have open at once | 3 |
 | `prSizeWarn` | The guard warns above this many changed lines | 600 |
 | `reviewMarkers` | Where review passes are written | `tmp/reviews` |
+| `reReviewPercent` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or it touches a new file): then it is a full review. 0: always full | 30 |
 | `trustedReviewers` | GitHub logins whose approvals count | none: any approval counts |
 | `holdLabel` | The hold label | `factory-hold` |
 | `agents` | The agents' names, in order | the ten names above |
@@ -1061,6 +1081,7 @@ software-factory/
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
     .claude/hooks/
+      factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
       pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
       check.py                            Stop: typecheck and tests
       factory_stop.py                     Stop: closes a finished session in `factory loop -i`

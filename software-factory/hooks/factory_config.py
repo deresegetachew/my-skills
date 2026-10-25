@@ -46,6 +46,9 @@ DEFAULTS = {
     "claimStaleHours": 6,  # a loop's task claim lapses after this (or when its process exits)
     "prSizeWarn": 600,
     "reviewMarkers": "tmp/reviews",
+    # A reviewer's second round reads only the delta since its last round (factory_rereview.py): the limit, as a
+    # percent of the branch diff's changed lines, above which it is a full review. 0: always a full review.
+    "reReviewPercent": 30,
     # Style guides per path: [{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal"],
     #   "check": "python3 .claude/hooks/check_structure.py"}]. The architecture reviewer and CI use them.
     "styles": [],

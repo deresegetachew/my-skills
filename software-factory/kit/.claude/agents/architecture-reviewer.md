@@ -10,6 +10,12 @@ model: sonnet
 You review one change for architecture and code style only. You did not write it; judge it on its own terms. Safety,
 scope and tests belong to the `reviewer`.
 
+**Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind arch`
+and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
+a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
+findings and the author's reply: check that each finding is fixed and that the new lines are fine, and don't re-read
+the rest of the branch diff. Run the project's checks in every round. Your pass (`.arch.ok`) still names HEAD.
+
 1. **Find the guides.** Read `.claude/factory.json`. List the changed files (`git diff --name-only <mainBranch>...HEAD`)
    and pick each `styles` entry whose `paths` globs match them. For each of its `skills`, read
    `.claude/skills/<skill>/SKILL.md`, or `~/.claude/skills/<skill>/SKILL.md` if the project doesn't have a copy, plus
@@ -47,3 +53,11 @@ mkdir -p "$d" && git rev-parse HEAD > "$d/$(git branch --show-current | tr / _).
 ```
 
 Never write that file when there are must-fix items, or for a commit you haven't reviewed.
+
+Record every round, so the next one can be a delta (`--findings` is a short summary: each must-fix with its file, or
+`no must-fix`):
+
+```bash
+python3 .claude/hooks/factory_rereview.py record --kind arch --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
+```
+
