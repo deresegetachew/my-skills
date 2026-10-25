@@ -35,7 +35,8 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    later, the owner runs `factory update` and commits it in a PR; `git config submodule.recurse true` once per clone
    makes `git pull` update the submodule too (README, "Updating the factory"). Without a submodule,
    `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
-3. **Fill in `.claude/factory.json`:** the doc paths, the install, typecheck, lint, test and build commands,
+3. **Fill in `.claude/factory.json`** (`factory settings` is the guided way: a menu with help for every setting;
+   `factory settings validate` checks the result): the doc paths, the install, typecheck, lint, test and build commands,
    the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges":
    the rules files, CI, lockfiles, migrations, and anything that implements a critical rule (safety logic,
    money, approval gates). Set `testPaths` and `goldenPaths` to where tests and expected outputs live, and

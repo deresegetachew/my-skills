@@ -10,13 +10,16 @@ Two machines on one project must never share an agent name. Both live outside th
                     folder name of the main clone). `FACTORY_AGENTS` (comma-separated) overrides it. With neither,
                     every name in `agents` in .claude/factory.json is used, as before. The same file holds what
                     `factory autostart` needs (#88): "autostart" (true/false), "autostartAgents" (names; default:
-                    the names above) and "autostartReport" (false: no boot report on the agent's issue).
+                    the names above) and "autostartReport" (false: no boot report on the agent's issue), and
+                    "remoteControl" (false: sessions start without Remote Control; FACTORY_REMOTE_CONTROL wins).
+                    `factory settings --local` shows and changes all of them.
   <repo>.env        KEY=value lines `factory resume` loads for the agents it starts at boot (SOPS_AGE_KEY_FILE ...).
 
   python3 .claude/hooks/factory_machine.py id                       print this machine's id
   python3 .claude/hooks/factory_machine.py show                     the id and the names this machine runs
   python3 .claude/hooks/factory_machine.py setup haile,tewodros     write the names file (issues mode: refuses a name
                                                                     another machine has live)
+  python3 .claude/hooks/factory_machine.py remote                   1 or 0: whether sessions start with Remote Control
 Errors are `{code, message, fix}` on stderr.
 """
 import json, os, re, subprocess, sys, uuid
@@ -97,17 +100,32 @@ def machine_settings():
     return data if isinstance(data, dict) else {}
 
 
-def save_machine_settings(**updates):
-    """Writes `updates` into the machine's file, keeping every other key. Returns the file's path."""
-    data = machine_settings()
-    data.update(updates)
+def write_machine_settings(data):
+    """Replaces the machine's file with `data` (atomically). Returns the file's path."""
     path = names_file()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(data, f, indent=2)
+        f.write("\n")
     os.replace(tmp, path)
     return path
+
+
+def save_machine_settings(**updates):
+    """Writes `updates` into the machine's file, keeping every other key. Returns the file's path."""
+    data = machine_settings()
+    data.update(updates)
+    return write_machine_settings(data)
+
+
+def remote_control():
+    """True when sessions should start with Remote Control: FACTORY_REMOTE_CONTROL (1 or 0) wins, else this machine's
+    `remoteControl` setting (`factory settings --local set remoteControl off`), else on."""
+    given = os.environ.get("FACTORY_REMOTE_CONTROL", "")
+    if given:
+        return given == "1"
+    return machine_settings().get("remoteControl") is not False
 
 
 def autostart_settings():
@@ -172,6 +190,8 @@ def main():
         on, auto, _ = autostart_settings()
         print(f"autostart: {'on' if on else 'off'}" + (f" ({', '.join(auto)})" if on and auto else "")
               + "  (factory autostart status)")
+    elif cmd == "remote":
+        print("1" if remote_control() else "0")
     elif cmd == "setup":
         if len(sys.argv) < 3:
             refuse("no-names", "No agent names were given.", "factory machine setup haile,tewodros")
