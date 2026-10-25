@@ -14,7 +14,11 @@ Numbers: create and ready also need every new decision or migration file (`decis
 Issues mode (`tasks.source: "issues"`): create also needs the branch's issue (task/<n>-...) open, not blocked, not
         held by another agent, and `Closes #<n>` in the PR body.
 Markers: agents may not post the dev manager's markers (factory-approved, factory-answer, factory-mustfix), add
-        the review labels or remove the hold label. With `trustedReviewers` in factory.json, only those GitHub
+        the review labels or remove the hold label.
+Messages (docs/messages.md): a comment with a `factory-msg` envelope is checked too. An agent posts as itself
+        (from= is FACTORY_AGENT), never as kind approval or mustfix, and answers, works on or fails only a question
+        addressed to it, with a valid state transition; the question is looked up in the thread (the number on the
+        command, else ref=). An envelope of another version is not read, so it passes. With `trustedReviewers` in factory.json, only those GitHub
         logins' approvals count. An approval counts only for the commit it names (`sha=`).
 Pushes: agents may not delete remote branches (`git push <remote> :<branch>` or `+:<branch>`), also inside bash -c.
 Wrappers: gh run through a shell, eval, xargs or a package runner (pnpm exec, npx, yarn) can't be checked: refused.
@@ -262,15 +266,51 @@ def check_markers(cfg, sub, args):
               "$(...), `...` or $VARIABLES.")
     if sub == "review" and ("--approve" in flags or "-a" in flags):
         block("Agents don't approve pull requests; the dev manager does.")
-    if MARKERS.search(body_text(flags)):
+    text = body_text(flags)
+    if MARKERS.search(text):
         block("Only the dev manager posts factory-approved, factory-answer and factory-mustfix comments. Ask with "
               "<!-- factory-question --> instead.")
+    check_messages(args, text)
     labels = lambda *n: {x.strip() for v in values(flags, *n) for x in v.split(",")}
     hold = cfg.get("holdLabel", "factory-hold")
     if hold in labels("--remove-label"):
         block(f"Only the dev manager removes `{hold}`.")
     if REVIEW_LABELS & labels("--add-label", "-l", "--label"):
         block("Only the dev manager adds the review labels (tests-reviewed, deps-reviewed).")
+
+
+def read_thread(number):
+    rc, out, err = run("gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/issues/{number}/comments")
+    if rc != 0:
+        block(f"I could not read the comments of #{number} to check this message ({err[:200]}). Try again in a moment.")
+    import factory_messages as fm
+    return fm.messages_of(fm.decode_pages(out))
+
+
+def check_messages(args, text):
+    """The reserved senders and the state machine for messages in the new envelope (docs/messages.md): an agent posts as
+    itself; approvals and must-fixes stay the dev manager's; only the addressee answers, works on or fails a question,
+    and a transition must be valid. Envelopes of another version, and plain text, pass: nothing reads them."""
+    import factory_messages as fm
+    found = fm.parse_envelopes(text)
+    if not found:
+        return
+    me = os.environ.get("FACTORY_AGENT") or None
+    _, pos = parse_args(args)
+    number = pos[0] if pos and pos[0].isdigit() else None  # `gh pr comment 7`
+    for m in found:
+        problem = fm.check_new(m, None, me)  # the checks that need no thread
+        if not problem and m.kind in ("answer", "status") and m.in_reply_to:
+            ref = fm.ref_number(m.ref)
+            if number and ref and ref != number:
+                block(f"This message says ref={m.ref} but you are commenting on #{number}. Post the reply in the thread "
+                      "of the question, or fix ref=.")
+            if not (number or ref):
+                block("Say which pull request or issue this reply belongs to: add ref=pr#<n> or ref=issue#<n> to the "
+                      "message, or name the number on the command (gh pr comment <n>).")
+            problem = fm.check_new(m, fm.fold(read_thread(number or ref)), me)
+        if problem:
+            block(problem + " (Messages: docs/messages.md in the software-factory.)")
 
 
 def passed(cfg, branch, sha, kind=".ok"):
@@ -423,16 +463,17 @@ def gate_merge(cfg, args):
     if any(label.get("name") == hold for label in pr.get("labels", [])):
         block(f"The dev manager is reviewing this pull request (label `{hold}`). Leave it open and continue with the "
               "next task: the dev manager approves and merges it, or posts must-fixes, and removes the label.")
+    import factory_messages as fm
     trusted = set(cfg.get("trustedReviewers") or [])
     last = None  # a must-fix holds the merge until an approval of the current head commit comes after it
     for c in pr.get("comments", []):
         body = c.get("body") or ""
         login = (c.get("author") or {}).get("login", "")
-        if "<!-- factory-mustfix" in body:
-            last = "mustfix"
-        elif "<!-- factory-approved" in body and (not trusted or login in trusted):
-            sha = re.search(r"factory-approved\s+sha=([0-9a-f]{7,40})", body)
-            last = "approved" if sha and head.startswith(sha.group(1)) else "stale"
+        for kind, sha in fm.verdicts(body):  # the envelope or the old marker
+            if kind == "mustfix":
+                last = "mustfix"
+            elif not trusted or login in trusted:
+                last = "approved" if sha and head.startswith(sha) else "stale"
     if last == "mustfix":
         block("The dev manager left a must-fix on this pull request (a `<!-- factory-mustfix -->` comment). Fix it, "
               "push, reply on the PR, and leave the merge to the dev manager, who approves with `<!-- factory-approved -->`.")

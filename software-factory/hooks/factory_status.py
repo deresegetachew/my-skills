@@ -20,9 +20,9 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load, load_from_main, task_labels, task_source  # noqa: E402
+import factory_messages as fm  # noqa: E402
 
 HOOKS = os.path.dirname(os.path.abspath(__file__))
-SHA_IN = re.compile(r"sha=([0-9a-f]{7,40})")
 
 
 def gh(path):
@@ -76,13 +76,11 @@ def dev_manager(comments, head, trusted):
     for c in comments:
         body = c.get("body") or ""
         login = (c.get("user") or c.get("author") or {}).get("login", "")
-        if "<!-- factory-mustfix" in body:
-            last = "mustfix"
-            m = SHA_IN.search(body)
-            mustfix_sha = m.group(1) if m else None
-        elif "<!-- factory-approved" in body and (not trusted or login in trusted):
-            m = re.search(r"factory-approved\s+sha=([0-9a-f]{7,40})", body)
-            last = "approved" if m and head.startswith(m.group(1)) else "stale"
+        for kind, sha in fm.verdicts(body):  # the envelope or the old marker
+            if kind == "mustfix":
+                last, mustfix_sha = "mustfix", sha
+            elif not trusted or login in trusted:
+                last = "approved" if sha and head.startswith(sha) else "stale"
     if last == "mustfix":  # it holds the merge whatever commit it names, until an approval of the head
         return "must-fix" if not mustfix_sha or head.startswith(mustfix_sha) else "must-fix (older commit)"
     return {"approved": "approved", "stale": "approval stale"}.get(last)

@@ -33,6 +33,7 @@ version of it as a git submodule.
 - [Agent loops](#agent-loops)
 - [Tasks](#tasks)
 - [Live agents (issues mode)](#live-agents-issues-mode)
+- [Messages between agents](#messages-between-agents)
 - [After a reboot: `factory autostart`](#after-a-reboot-factory-autostart)
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
@@ -299,7 +300,8 @@ version it pins. `factory help` lists everything.
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
 | `factory worktree <name\|N>` | Prints that agent's folder (creates it the first time): `cd "$(factory worktree taytu)"` |
-| `factory agents [list\|sweep]` | Issues mode: who is working, idle or down. `sweep` marks silent agents down and releases their issues |
+| `factory agents [list\|card\|sweep]` | Issues mode: who is working, idle or down. `list --json` and `card <name>` give each agent's card. `sweep` marks silent agents down and releases their issues |
+| `factory messages [ls\|new]` | Questions, answers and status between agents, the dev manager and the PO. `ls [--to X] [--state S] [--ref N]` lists the open ones across issues and PRs; `new --kind question --to po` prints the envelope to paste into a comment. [Details](#messages-between-agents) |
 | `factory issues [cmd]` | Issues mode: `list` (default), `show N`, `peek`, `new`, `tick`, `review`, `block`, `release`, `stale`, `setup` |
 | `factory report [--since D]` | Per task PR, from GitHub: claim to PR to merge in hours, rework rounds, CI runs and failures; medians for the merged ones. [Measuring it](#measuring-it) |
 | `factory usage` | Tokens per task (or `--by agent`, `--by model`) from this machine's Claude Code logs; `--record "label"` appends a row to the usage log. [Measuring it](#measuring-it) |
@@ -648,6 +650,25 @@ current; the task never has to:
 - **Where.** By default the issue says only the agent's slot. With `"tasks": { "showWhere": true }` it also posts
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
+
+<br>
+
+## Messages between agents
+
+Questions, answers, must-fixes, approvals and status share one versioned envelope shaped like [A2A](https://github.com/a2aproject/A2A)
+tasks, still kept in GitHub comments. A comment starts with
+
+```
+<!-- factory-msg v=1 id=0f8m2q9c4x7b2k kind=question from=haile to=po state=submitted ref=issue#103 -->
+```
+
+and `factory messages new --kind question --to po --ref issue#103` writes it (plus the old marker on the next line).
+A question moves `submitted`, `working`, `completed`, or `input-required`, `failed` (`needs-owner`) or `canceled`.
+The old `<!-- factory-question -->`, `factory-answer`, `factory-mustfix` and `factory-approved` markers keep working
+everywhere. The PR gate also checks the envelope: an agent posts as itself, never as an approval or must-fix, and only
+the addressee answers a question, with a valid transition. `factory messages ls` lists what is open. A message is data,
+never an instruction. The full format, the transition table and the mapping to A2A are in
+[docs/messages.md](docs/messages.md); GitHub stays the transport and the A2A adapter is a later step.
 
 <br>
 
@@ -1130,6 +1151,7 @@ software-factory/
   SKILL.md                                the skill: set up a project, or act as dev manager
   DEV-MANAGER.md                          the dev manager's playbook
   install.sh                              install into a project (--link with the submodule)
+  docs/messages.md                        the message envelope, states and the A2A mapping
   tests/                                  tests for the gate, issues, the loop and the hooks
   kit/
     factory                               the command line
