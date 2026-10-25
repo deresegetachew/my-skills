@@ -37,6 +37,7 @@ version of it as a git submodule.
 - [Reviews and gates](#reviews-and-gates)
 - [The dev manager](#the-dev-manager)
 - [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
+- [A sandboxed machine: `factory bootstrap`](#a-sandboxed-machine-factory-bootstrap)
 - [Security notes](#security-notes)
 - [Style guides](#style-guides)
 - [factory.json settings](#factoryjson-settings)
@@ -307,7 +308,8 @@ version it pins. `factory help` lists everything.
 | `factory verify` | Runs what CI runs (`commands.ci`) for the current commit and records a pass; a ready PR needs it when `commands.ci` is set. [Details](#the-pr-gate) |
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing |
+| `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, `gh auth status`, Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -1032,6 +1034,85 @@ the follow-up ([remanual #150](https://github.com/deresegetachew/remanual/issues
 
 <br>
 
+## A sandboxed machine: `factory bootstrap`
+
+`factory bootstrap` takes a fresh Ubuntu or Debian machine (systemd) to a state where agents and CI runners run as a
+dedicated, unprivileged user behind a network guard, and ends with `factory doctor --sandbox` green. It is the hand-built
+setup of a factory machine written down as code: reinstalling the machine or adding a third one is two commands and
+three sign-ins. Linux only for now.
+
+```sh
+sudo factory bootstrap machine                 # prints the plan, changes nothing
+sudo factory bootstrap machine --script s.sh   # the same steps as a bash script to read (and run with sudo bash s.sh)
+sudo factory bootstrap machine --apply         # runs them, as root, after a y/N question (--yes: no question)
+sudo -u factory -i                             # or ssh in as that user; then, from the project's checkout:
+factory bootstrap project                      # as the sandbox user, never as root
+```
+
+`factory bootstrap` works before there is a checkout (it runs from where the `factory` script lives); `project` takes
+`--repo URL [--dir PATH]` to clone one, with its submodules.
+
+**Nothing privileged runs by itself.** The machine part and `uninstall` only print their plan unless you pass `--apply`
+and run as root; `--dry-run` is accepted everywhere. Every step has a check, so a second run changes nothing, and every
+system change is written to a manifest (`/var/lib/software-factory/bootstrap.json`) that `status` and `uninstall` use.
+The project part is refused as root. Agents cannot run it: it refuses inside an agent session (`FACTORY_AGENT`, `FACTORY_LOOP` or `CLAUDECODE` set), `status` excepted.
+
+| Part | What it does |
+|---|---|
+| `machine` (root) | Packages (`uidmap`, `slirp4netns`, `dbus-user-session`, `git`, `gh`, `age`, `tmux`, `nftables` ...); `sops` as the release binary with its checksum checked; the user (default `factory`: no password, no sudo, not in the docker group, its home and the admin's home mode 750); subuid/subgid ranges; `loginctl enable-linger`; the network guard; with `--authorized-keys FILE` the given public keys; with `--harden-ssh` key-only SSH and no root login; with `--keep-awake` (the default on a laptop, `--no-keep-awake` to refuse) no sleep, suspend or lid switch |
+| `project` (the user) | Rootless Docker (`dockerd-rootless-setuptool.sh install`, `systemctl --user enable --now docker`); `DOCKER_HOST`, `SOPS_AGE_KEY_FILE` and `PATH` in `~/.bashrc`; `~/.secrets` (700); Node from `.nvmrc` through nvm and `corepack enable`; Claude Code with the official installer; submodules, `.env.local` from `.env.example`, `commands.install`; `factory install-shim`; with `--agents a,b` the machine's agent names; then, after the sign-ins, `commands.stackUp`, the CI runners (`factory ci install`, `--runners N` for `FACTORY_CI_RUNNERS`) and autostart; last, `factory doctor --sandbox` |
+| `status` | The manifest against what is there now; exit 1 when something drifted |
+| `uninstall` | The guard, its unit and rules, the sleep and SSH drop-ins, the saved settings and the manifest. The user, its home, backups and the installed packages stay. `--remove-user` or `--delete-home` remove the account (only one bootstrap created) and need its name typed (`--confirm NAME` for scripts) |
+
+**The human steps stay yours.** `gh auth login`, the Claude login (and its folder-trust prompt for the project) and
+copying the age key are never done by bootstrap. `project` stops after the first part when one is open, prints the exact
+commands and exits 2; run it again after, and it carries on with the runners and autostart. It only checks that they
+exist (`gh auth status`, the credentials file, `sops -d` of the first file under `secrets/`, output discarded). It never
+reads, prints, logs or stores a token or the key.
+
+### Network guard
+
+The default policy: **internet yes; home network no; Tailscale no; other users' files no; no sudo; no docker group.** It is
+an nftables table `factory_guard`, loaded by the systemd unit `factory-net-guard.service`, that matches the sandbox user's
+uid (`meta skuid`):
+
+- DNS only to the resolver, which is read from `/etc/resolv.conf` and `resolvectl dns` (a systemd-resolved stub on
+  127.0.0.53 needs no rule), not hard-coded;
+- `--allow-host ADDR[:PORT]` (repeat) lets one home-network host through, such as a Postgres or a build cache;
+- everything private is dropped with the log prefix `FACTORY-BLOCK `: RFC1918, the Tailscale range 100.64.0.0/10,
+  link-local, and IPv6 ULA and tailnet addresses;
+- loopback ports of other users' services are dropped: `--block-loopback-port PORT` (repeat) plus, at every run, every
+  loopback or wildcard port that a process of another user listens on (`ss -ltnHe`). A service started later is covered the
+  next time `sudo factory bootstrap machine --apply` runs, and `factory doctor --sandbox` fails until then;
+- `--block-inbound-port PORT` drops those ports from other hosts (`FACTORY-INBOUND `);
+- `--egress none` closes the internet too.
+
+The settings are saved in `/etc/software-factory/sandbox.json`, so a re-run converges on them (`user`, `egress`,
+`allowHosts`, `blockLoopbackPorts`, `blockInboundPorts`). Rules are rendered from `hooks/factory_netguard.py`, which is also
+what the tests check.
+
+### `factory doctor --sandbox`
+
+Run it as the sandbox user. Each check prints `ok`, `fix` (with the fix) or `note`:
+
+- identity: the user is the one bootstrap made; no sudo (`sudo -n true` fails); not in the sudo, docker or admin groups;
+  the admin's home and `.ssh` are unreadable; `~/.secrets` is 700;
+- network: GitHub, npm and the Claude API answer; the router, the tailnet, link-local and the blocked local ports do not;
+  `FACTORY-BLOCK` entries appear in the kernel log (a note when this user may not read the log);
+- **local services of other users** (known gap 1): every loopback or wildcard port that another user listens on is in the
+  guard's rules; if not, run the machine step again;
+- **containers** (known gap 2): a container started by this user (`docker run busybox wget` to the router) cannot reach the
+  router either, which is true when Docker is rootless because its traffic leaves through the user's own process;
+- rootless Docker with overlayfs, the `cpu`, `memory` and `pids` cgroup controllers delegated to the user's systemd
+  (the ingest sandbox tests need memory limits), linger on;
+- the CI runner units are active (at least `ci.runners`) and every agent worktree has its submodules checked out.
+
+A user account is a weaker boundary than a VM, and the agents still hold what their job needs inside the sandbox: a `gh`
+token, the age key and the Claude login. Keep the separate GitHub account for agents from [Security notes](#security-notes).
+Not in this version: macOS, a VM mode, creating the GitHub account.
+
+<br>
+
 ## Security notes
 
 - **One GitHub login for everything is the weak spot.** By default the agents use your `gh` login. When the dev manager
@@ -1156,6 +1237,12 @@ software-factory/
       factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
       factory_env.py                      per-agent ports and database
       factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
+      factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
+      factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
+      factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
+      factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
+      factory_netguard.py                 renders the nftables rules and the guard's systemd unit
+      factory_sandbox.py                  `factory doctor --sandbox`
       factory_models.py                   the `models` setting: claude flags per role, effective models
       factory_reviews.py                  which extra reviews a change needs
       factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
