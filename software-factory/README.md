@@ -1625,6 +1625,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `reReviewPercent` | int | `30` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review. |
 | `lessons` | str | `".claude/factory/lessons.md"` | The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`). |
 | `lessonsCap` | int | `40` | The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now. |
+| `manager.claimMinutes` | int | `20` | How long a dev manager's review or answer claim holds a PR or question before another manager may take it (a lease; it ends sooner when the review marker or the answer is posted). |
 | `manager.flakes` | list | `[]` | Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent. |
 | `trustedReviewers` | list | `[]` | GitHub logins whose approvals count. Empty: any. |
 | `holdLabel` | str | `"factory-hold"` | The label the dev manager puts on a PR it is reviewing. |
