@@ -87,6 +87,19 @@ def test_the_text_report_runs():
     assert p.returncode == 0 and "Per task (2 tasks)" in p.stdout, p
 
 
+def test_by_role_tells_a_manager_session_from_a_builder_session():
+    root, logs = setup()
+    slug = re.sub(r"[^A-Za-z0-9]", "-", root)
+    manager = [json.dumps({"type": "user", "message": {"role": "user", "content": "/manage-pass"}}),
+               reply("mg1", "HEAD", root, out=7), reply("mg2", "HEAD", root, out=7)]
+    open(os.path.join(logs, slug, "s9.jsonl"), "w").write("\n".join(manager) + "\n")
+    cmd = [json.dumps({"type": "user", "message": {"role": "user", "content": "<command-name>/manage-pass</command-name>"}}),
+           reply("mg3", "HEAD", root)]
+    open(os.path.join(logs, slug, "s10.jsonl"), "w").write("\n".join(cmd) + "\n")
+    data = json.loads(usage(root, logs, "--json", "--by", "role").stdout)
+    assert data["groups"]["manager"]["replies"] == 3 and data["groups"]["builder"]["replies"] == 4, data
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
