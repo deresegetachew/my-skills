@@ -441,6 +441,14 @@ Most of the cost is what the agents read, not what they write.
   `.env`, aren't compared.
   It remembers this in the git folder (`.git/factory-check-green`, one per worktree), and a failure is never
   remembered. Like the review markers, it's a guard rail: a hand-written file there skips the check.
+- **Quiet checks (`factory run-check <command>`):** runs a check or test command, keeps the full output in
+  `checkLogDir` (default `tmp/checks/<name>.log`; the folder ignores itself, so a log is never an untracked file)
+  and prints one line when it passes. When it fails it prints `checkOutputLines` lines at most (the failing lines
+  first, then the end) and the log path; open the log only if that isn't enough. `--name` names the log, `--lines`
+  overrides the cap, and the exit code is the command's. The Stop check and `factory verify` also save the full
+  output of a failure there and name the file. `next-task` tells agents to run checks this way. To cut noise at the
+  source too, set the `commands` to quiet reporters yourself (for example `pnpm -s`, `vitest --reporter=dot`,
+  `turbo --output-logs=errors-only`, `tsc --pretty false`); the kit doesn't pick them, since it can't know your stack.
 - **Edge cases in the task:** the issue template asks for the inputs the reviewers will try, so a task passes
   review in one round instead of several.
 - **A quieter dev manager:** ticks every 10 minutes while an agent PR is open or a question waits, every 30
