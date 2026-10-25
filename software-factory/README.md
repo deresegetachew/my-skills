@@ -356,6 +356,7 @@ version it pins. `factory help` lists everything.
 | `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
 | `factory coding-agent\|dev-manager\|product-owner [name\|N] loop [-i] [--once] [--dry-run]` | The three roles, started the same way and run by the same loop. `factory loop` is `factory coding-agent loop`. [Roles](#roles) |
 | `factory prd [--open] [--story N] [--json]` | Progress against the PRD from GitHub: per user story its tasks and state. [Product owner](#the-product-owner-factory-prd-and-the-sign-off-and-testing-queue) |
+| `factory artifacts pull\|status\|list` | The project's artifacts and designs as reviewed copies in the repo, with a manifest; `status` says which copy is older than its artifact. [Artifacts](#artifacts-and-designs-factory-artifacts) |
 | `factory signoff ls\|add\|plan\|confirm\|result` | The sign-off and testing queue: what only a person can check, and test plans for the running app |
 | `factory init-roles [--force]` | Creates the project's role folder (`.claude/factory/roles/<role>/README.md` and `reads.md`) |
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
@@ -756,6 +757,40 @@ The product owner writes the plans from the PRD story and its "Done when"; someo
 what is tested; results are recorded with who and which build. **How a plan is run is not decided** (a scripted browser,
 or Claude driving a browser: needs a spike). This part keeps the plans, confirmations and results, whichever produces them.
 Markers: `factory-signoff`, `factory-signoff-result`, `factory-testplan`, `factory-testplan-confirm`, `factory-testresult`.
+
+### Artifacts and designs: `factory artifacts`
+
+A project's artifacts (a PRD page, a design canvas, a design system, an illustration brief) are written where they are written.
+**The repo holds the reviewed copy, and the roles read that**: a role's `reads.md` names the copy's path like any other
+document (`- docs/artifacts/prd/index.html - the PRD as designed, a copy of an artifact`), and `factory doctor` checks the path
+exists. This works on every machine, with no connector, and keeps a role's context small.
+
+```
+factory artifacts pull <url|id> [dest] [--from DIR] [--title T] [--version V] [--force] [--dry-run]
+factory artifacts status [--json]      per copy: up to date, OLDER than its artifact, edited locally, missing, or can't tell
+factory artifacts list
+```
+
+`pull` copies the artifact's published files into `dest` (default `<artifacts.dir>/<id>`, `docs/artifacts/<id>`) and records the
+copy in the manifest `docs/artifacts.json` (`artifacts.manifest`): the artifact's url and id, title, version or updated time when
+known, where the copy is, who pulled it and when, and a sha256 per file. Commit both in a pull request, like any change to the
+project. A copy someone edited by hand is not overwritten without `--force`; a folder that holds other files is refused; a
+destination outside the project is refused. Where the files come from:
+
+- `artifacts.fetch`, a command that writes the artifact `{url}` into the folder `{out}`; or
+- `--from DIR`, an export made by hand (the way to start today).
+
+`artifacts.info` is a command that prints `{"title", "updated", "version"}` for `{url}`; with it `status` and `factory doctor` say
+which copies are older than their artifact. Without it they say they can't tell. Both settings are empty by default.
+
+**Spike (not done): can a terminal role read artifacts live?** The loop starts every role with `--strict-mcp-config`, an MCP
+config taken from the project's `.mcp.json`, and `disableClaudeAiConnectors: true` (#55), so a role in a terminal has no claude.ai
+connectors. Whether a Claude Code terminal session can list and read artifacts at all, with which tool, whether the isolation
+blocks it, what it costs per turn, and whether a Design artifact's boards and comments can be read as files: **none of this has
+been checked**. The check is small: in a plain terminal session on a development machine, with the owner's login, try to list and
+read one artifact; then repeat under the loop's flags; write the finding in #104. Until then there is no per-role allowlist
+(`roles.<role>.tools` / `roles.<role>.mcp`); layer 2 is built only if the spike says it is possible, default off, and a role
+writing to an artifact would count as publishing (the owner's yes).
 
 ### The role folder
 
@@ -1847,6 +1882,10 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `decisions` | str | `"docs/decisions"` | The folder of numbered decision records. |
 | `numberedDirs` | list | `[]` | More folders of numbered files (migrations): a new file takes a free number. |
 | `mainBranch` | str | `"main"` | The main branch. |
+| `artifacts.manifest` | str | `"docs/artifacts.json"` | Where `factory artifacts` records each artifact copy kept in the repo: where it came from, when, by whom, and a hash of each file. |
+| `artifacts.dir` | str | `"docs/artifacts"` | The default folder for an artifact's repo copy: <dir>/<artifact id>. |
+| `artifacts.fetch` | str | `""` | A command that exports the artifact `{url}` into the folder `{out}`, for `factory artifacts pull`. Empty: pull takes an export made by hand (`--from`). How a terminal session may read an artifact is not settled. |
+| `artifacts.info` | str | `""` | A command that prints JSON {title, updated, version} for the artifact `{url}`, for `factory artifacts status` and `factory doctor`. Empty: they say they can't tell whether a copy is older. |
 | `notes` | str | `".claude/factory/notes"` | The folder of project notes for the shared agents and skills. |
 | `usageLog` | str | `"docs/factory-usage.md"` | Where `factory usage --record` appends its rows (commit it to keep the history). |
 | `release.repo` | str | `"deresegetachew/my-skills"` | The GitHub repository whose releases `factory update` installs (owner/name). Default: the factory's own, deresegetachew/my-skills. |
@@ -2050,6 +2089,7 @@ software-factory/
       factory_agents_ls.py                `factory agents ls`
       factory_claims.py                   lock file: a folder and a task per agent; worktrees; clean
       factory_status.py                   `factory status`: agents, PRs, CI and tasks at a glance, read-only
+      factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
       factory_po.py                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
       factory_prd.py                      `factory prd`: progress against the PRD, per user story
       factory_signoff.py                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)

@@ -48,6 +48,10 @@ DEFAULTS = {
     # level (product owner, dev manager, owner) after this long; `logins`: the GitHub logins whose answers count for the
     # product owner (empty: any). The dev manager's waits are `manager.busyMinutes` and
     # `manager.idleMinutes`.
+    # Artifacts and designs kept as reviewed copies in the repo (#104, `factory artifacts`): `manifest` records where each
+    # came from, `dir` is the default folder for a copy, `fetch` and `info` are commands (empty: off) that export an
+    # artifact into `{out}` and print its title, updated time and version, for `{url}`.
+    "artifacts": {"manifest": "docs/artifacts.json", "dir": "docs/artifacts", "fetch": "", "info": ""},
     "roles": {
         "dir": ".claude/factory/roles",
         "dev-manager": {"names": ["fasil", "yekuno", "amda", "sarsa", "susenyos"],
