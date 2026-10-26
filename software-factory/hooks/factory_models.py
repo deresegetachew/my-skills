@@ -112,6 +112,24 @@ def flags(role, models):
     return args + agent_flags(models)
 
 
+def resolved_default(project_dir="."):
+    """(model, where it came from) as Claude Code would pick it without a call, or None when nothing readable says.
+    Order: ANTHROPIC_MODEL, then the `model` key of the project's .claude/settings.local.json and settings.json, then
+    the user's ~/.claude/settings.json. Reads only that key and never prints another."""
+    if os.environ.get("ANTHROPIC_MODEL", "").strip():
+        return os.environ["ANTHROPIC_MODEL"].strip(), "ANTHROPIC_MODEL in the environment"
+    for path, shown in ((os.path.join(project_dir, ".claude", "settings.local.json"), ".claude/settings.local.json"),
+                        (os.path.join(project_dir, ".claude", "settings.json"), ".claude/settings.json"),
+                        (os.path.join(os.path.expanduser("~"), ".claude", "settings.json"), "~/.claude/settings.json")):
+        try:
+            value = json.load(open(path)).get("model")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if isinstance(value, str) and value.strip():
+            return value.strip(), f"`model` in {shown}"
+    return None
+
+
 def table(models):
     """(role, model, source) per role."""
     rows = []
