@@ -101,7 +101,7 @@ pipes, subshells), and blocks the pull-request commands that aren't ready:
 | Command | Allowed only when |
 |---|---|
 | `gh pr create`, `gh pr new`, `gh pr ready` | The reviewer passed the current commit (and the architecture reviewer, on styled paths). When main's `factory.json` sets `commands.ci`, `factory verify` passed that commit too. Fewer than `maxOpenPRs` of your ready PRs are open. Plan mode: the task isn't ticked or blocked on main. Issues mode: the issue is open, not blocked, not held by another agent, and the body says `Closes #<n>`. Every new decision or migration file (`decisions`, `numberedDirs`) takes a number neither main nor another open PR has; the message names the next free one (`factory_numbers.ts`). Drafts (`--draft`) skip all of this: they're how agents ask questions |
-| `gh pr merge` | The PR is named by number or URL. It has no `factory-hold` label. The latest marker on it isn't a must-fix, and if it's an approval, it names the current head. The command has `--match-head-commit <head>`, so GitHub merges only the commit the gate checked. The reviewer passes (and the architecture reviewer's, on styled paths) are for that head. CI is green (`gh pr checks`); when the jobs never started (GitHub billing or the spending limit), the gate says that isn't a code result, so the agent doesn't push or re-run to chase it (`factory_ci.py`). No protected file changed (all files, past the first 100) |
+| `gh pr merge` | The PR is named by number or URL. It has no `factory-hold` label. The latest marker on it isn't a must-fix, and if it's an approval, it names the current head. The command has `--match-head-commit <head>`, so GitHub merges only the commit the gate checked. The reviewer passes (and the architecture reviewer's, on styled paths) are for that head. CI is green (`gh pr checks`); when the jobs never started (GitHub billing or the spending limit), the gate says that isn't a code result, so the agent doesn't push or re-run to chase it (`factory_ci.ts`). No protected file changed (all files, past the first 100) |
 
 It also blocks:
 
@@ -138,9 +138,9 @@ no reading `.env` files.
 | Hook | What it does |
 |---|---|
 | Stop: `check.ts` | Won't let a turn end while typecheck or tests fail, when code under `codePaths` changed. Skips a rerun when nothing changed since the last green check |
-| Stop: `factory_stop.py` | In `factory loop -i`, closes the session a few seconds after the agent marks its task done |
-| SessionStart: `factory_session.py` | Updates the submodules. For your own sessions, also claims the folder, installs, sets the agent's env and registers it |
-| Post-tool, Stop, SessionEnd: `factory_agents.py hook` | Pings, idle and down on the agent issue (issues mode) |
+| Stop: `factory_stop.ts` | In `factory loop -i`, closes the session a few seconds after the agent marks its task done |
+| SessionStart: `factory_session.ts` | Updates the submodules. For your own sessions, also claims the folder, installs, sets the agent's env and registers it |
+| Post-tool, Stop, SessionEnd: `factory_agents.ts hook` | Pings, idle and down on the agent issue (issues mode) |
 
 ### The Factory guard (CI)
 

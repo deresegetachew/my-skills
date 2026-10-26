@@ -3,7 +3,7 @@
 How agents, the dev manager and the product owner (PO) talk to each other: one structured, versioned envelope for
 questions, answers, must-fixes, approvals and status, shaped like [A2A](https://github.com/a2aproject/A2A) tasks and
 kept in the GitHub comments and issues the factory already uses. Issue #107. The code is
-`hooks/factory_messages.py` (the envelope, the states, `factory messages`) and `hooks/factory_cards.py` (agent cards).
+`hooks/factory_messages.ts` (the envelope, the states, `factory messages`) and `hooks/factory_cards.ts` (agent cards).
 
 GitHub stays the transport: asynchronous, durable, auditable, and it works when a machine or a cloud session is
 offline. Nothing here opens a port or adds a service. An A2A adapter in the heartbeat daemon (#108) is a later step
@@ -111,7 +111,7 @@ well-meaning agents, not a security boundary.
 
 An agent's issue (`Agent: <name> · <status>`) carries a `kind=status` envelope next to the old `factory-agent` marker.
 Its state is `working`, `idle`, `down` or `input-required` (an agent blocked on a question it cannot work around:
-`factory_agents.py ping --agent <name> --status input-required`; the next tool use after the wait puts it back to
+`factory_agents.ts ping --agent <name> --status input-required`; the next tool use after the wait puts it back to
 `working`). The status envelope's id is `agent-<name>` and stays the same, because the issue body is rewritten on every
 ping. `silent` (no ping for `tasks.downMinutes`) is worked out when it is read, not written.
 

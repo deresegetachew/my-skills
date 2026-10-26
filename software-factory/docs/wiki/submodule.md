@@ -29,7 +29,7 @@ reviewed pull request, and today most of it is by hand:
    Keep the `.claude/skills/nestjs-*` links if you use them (see the next section). Commit the removal on the branch:
    `factory update` refuses a tree with uncommitted changes (`[dirty_tree]`) when the project has no pin yet.
 3. **Install the release.** `factory` is gone with its link, so run the client from the submodule that is still there:
-   `python3 vendor/my-skills/software-factory/hooks/factory_release.py update v0.1.0-alpha.1`. It writes real files, the
+   `bun --no-env-file vendor/my-skills/software-factory/hooks/factory_release.ts update <version>`. It writes real files, the
    pin `.claude/factory/release.json` and no templates over yours.
 4. **Decide about the submodule.** A project that uses the nestjs skills keeps `vendor/my-skills` for them only; a
    project that does not removes the submodule, its `.gitmodules` entry and the `submodules: true` lines in CI. Both are

@@ -56,6 +56,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 | D10 | **GitHub is the state and the transport.** Labels, comments and markers carry it; nothing opens a port or adds a service. | #97, wiki/agent-loops.md "Messages between agents" |
 | D11 | **Agents run the agreed process and do not change it** (owner's rule, 21 Oct 2026). Agents cannot edit what governs them: the PR gate, the guard, `settings.json`, agent definitions and `.claude/factory.json` are protected. | DEV-MANAGER.md, my-skills `CLAUDE.md`, `.claude/factory.json` |
 | D12 | **Owner-only actions** (the list below). | #150, #114, `manage-pass` skill, `CLAUDE.md` |
+| D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash; there is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), `CLAUDE.md` |
 
 **Owner-only actions.** An agent or manager writes these as a proposal ("this needs your yes: ...") and waits. A yes for
 one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
@@ -92,7 +93,7 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 
 ### 4.1 Builder (coding agent)
 
-- **B1.** As a builder, I never choose a task by reading the plan: `next_task.py` hands me the next one. Rework on my
+- **B1.** As a builder, I never choose a task by reading the plan: `next_task.ts` hands me the next one. Rework on my
   open pull request (a must-fix naming its head commit) comes first; then a new task, by milestone and then issue
   number, skipping any whose `Depends on` is still open. *Built.* (wiki/agent-loops.md "Tasks")
 - **B2.** As a builder, I claim an issue so that two agents, on one machine or on two, never build the same task. The
@@ -162,7 +163,7 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 - **M11.** As one of several managers, I claim a review or a question with a lease (`factory manager-claims`), so we never
   do the same item twice, and a manager that dies mid-review does not block a PR. *Built.* (#99)
 - **M12.** As a manager, I merge only a head with `factory-approved sha=<head>`, pinned to that sha, with CI judged green,
-  and never a PR I opened myself. My profile and `manager_gate.py` refuse the rest and tell me to write an owner-queue ask
+  and never a PR I opened myself. My profile and `manager_gate.ts` refuse the rest and tell me to write an owner-queue ask
   instead. *Built.* (#96; wiki/dev-manager.md "The dev manager")
 - **M13.** As a manager, I answer the builders' `factory-question` comments from the PRD, `CLAUDE.md`, the decisions and
   the sources, and escalate only what is the owner's (scope, legal or customer-facing, money, names, files or keys) as
@@ -263,10 +264,10 @@ until he agrees them."
 
 - **U1.** As the owner, the factory is delivered as numbered releases built by a workflow in this repo: on a `vX.Y.Z` tag
   it checks the tag is on `main` and matches `software-factory/VERSION`, runs the tests, builds the archive with
-  `tools/build_release.py`, verifies the checksum and publishes with `SHA256SUMS` and notes. *Built.* (#113, #119;
+  `tools/build_release.ts`, verifies the checksum and publishes with `SHA256SUMS` and notes. *Built.* (#113, #119;
   `.github/workflows/release.yml`)
-  One release is published: `v0.1.0-alpha.1`, a pre-release (`VERSION` is `0.1.0-alpha.1`, #184; the releases page lists
-  only it). A tag with a hyphen is a pre-release, so you name it to install it.
+  Three pre-releases are published, `v0.1.0-alpha.1` (#184) to `v0.1.0-alpha.3`; they are the Python factory, and the
+  next release is the first on Bun (D13). A tag with a hyphen is a pre-release, so you name it to install it.
   > Open question: no full release (such as `v0.1.0`) exists yet. Cutting it is the owner's call, and whether it is cut
   > from the current `main` was not answered in #113.
 - **U2.** As anyone, four commands cover the whole lifecycle: `factory version`, `factory releases`, `factory update
@@ -330,7 +331,7 @@ until he agrees them."
   store is shared between jobs, so one PR cannot plant code that a later job runs. *Built.* (#60)
 - **C5.** As everyone, a CI outage (GitHub's billing block, no runner) is reported as an outage, not as a code failure,
   and agents do not push or re-run to chase it. An agent reads why its own CI failed with `factory ci log <pr>`. *Built.*
-  (wiki/reviews-and-gates.md "The PR gate"; `factory_ci.py`; #206)
+  (wiki/reviews-and-gates.md "The PR gate"; `factory_ci.ts`; #206)
 - **C6.** As the owner, `factory ci status` works in both modes and shows where CI runs, the latest runs, the runners and
   runs queued for a long time; `factory ci stale` and `factory ci check` say whether the installed copies are older than
   the checkout and fit to start. *Built.* (#40, #113)
@@ -376,7 +377,7 @@ until he agrees them."
 ## 5. Out of scope
 
 - **A custom UI** of any kind: no web dashboard, no phone queue, no console. (D1; #114)
-- **New dependencies.** The factory is Python 3 standard library and bash. (`CLAUDE.md`)
+- **New dependencies.** The factory is TypeScript on Bun, with Bun and Node built-ins only, and bash. (D13, `CLAUDE.md`)
 - **An agent changing the process.** Agents do not edit the gate, the guard, `settings.json`, agent definitions or
   `.claude/factory.json`, do not publish a release, and do not push to `main`. (D11)
 - **A model in the dev manager's idle loop.** (#97, #109)
@@ -422,20 +423,11 @@ What was discussed:
 > Open question: whether a Slack Marketplace listing is ever wanted (only to distribute the factory to other teams; a
 > private app needs none).
 
-### B. Is Python a performance concern? (open question, not decided)
+### B. Is Python a performance concern? (closed)
 
-Measured, loaded 2-vCPU machine: the test run is dominated by processes the tests start (git, gh, bash, docker): e.g.
-`test_ci` 86 s, 84 s of it in subprocesses, 31 s in one `ci.sh stop` test; Python's own time is small. CI took 5 to 8
-minutes per run. The factory is about 64 Python scripts and 13 shell scripts, standard library only.
-
-- A Rust or Go rewrite would help startup of the hooks (they run on every tool call) and give one binary per platform for
-  releases. It would not remove the git/gh/shell cost, and `ci.sh` and the loop stay shell.
-- Cost: rewriting about 64 scripts and their tests, building per-platform releases, and agents could no longer fix a
-  script by editing it in place.
-- Cheaper levers first: parallel tests (#138, merged), fewer processes per test, faking git/gh in tests, runner caching.
-- Revisit after the first release, with a measurement of hook start time across a real session.
-
-No recorded decision explains the choice of Python; the README only lists it as a requirement.
+Decided by D13 (#252): the factory moved from Python to Bun. The earlier measurement found the test run dominated by the
+processes the tests start (git, gh, bash, docker), not by the language, so the cheaper levers (parallel tests, fewer
+processes per test) still apply.
 
 ### C. Other things that are later or not agreed
 
@@ -467,7 +459,7 @@ No recorded decision explains the choice of Python; the README only lists it as 
 > Open question: the name of the command that bumps the pin for the team (`factory update --propose` was only an example in
 > #113).
 
-> Open question: the PRD's location. #150 names `docs/PRD.md` "or the path the owner picks". `tools/check_skills.py`
+> Open question: the PRD's location. #150 names `docs/PRD.md` "or the path the owner picks". `tools/check_skills.ts`
 > fails on a top-level folder that is not a skill, so this page lives at `software-factory/docs/PRD.md`, next to
 > `messages.md`.
 

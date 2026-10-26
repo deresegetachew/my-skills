@@ -49,7 +49,7 @@
     },
     "security-reviewer": {
       "paths": [
-        "^software-factory/hooks/(factory_netguard|factory_sandbox|factory_bootstrap[^/]*|factory_release)\\.py$",
+        "^software-factory/hooks/(factory_netguard|factory_sandbox|factory_bootstrap[^/]*|factory_release)\\.ts$",
         "^software-factory/ci/",
         "^\\.github/workflows/"
       ]

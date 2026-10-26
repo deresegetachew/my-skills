@@ -228,7 +228,7 @@ changed token or address at their next task.
   cannot stall a build. All agents share one `TURBO_TEAM`, so they share results. The hook never prints the token into
   the session.
 - **CI.** The kit's `ci.yml` has a step, *Shared remote cache (optional)*, before the install, that runs
-  `factory_turbo.py ci-env >> "$GITHUB_ENV"` with `vars.TURBO_API`, `vars.TURBO_TEAM` and the two secrets. It sets the
+  `factory_turbo.ts ci-env >> "$GITHUB_ENV"` with `vars.TURBO_API`, `vars.TURBO_TEAM` and the two secrets. It sets the
   variables only when they are all there and the cache answers. It is skipped for a pull request from another
   repository (a fork gets no secrets and runs on GitHub's runners). A project that copied `ci.yml` earlier adds the step
   by hand.

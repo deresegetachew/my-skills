@@ -42,7 +42,7 @@ A change that breaks one of these is wrong even if the tests pass. The `safety-a
 - CI's Factory guard fails PRs that change existing tests or expected outputs, add `.skip`/`.only` or
   dependencies (until the dev manager labels them reviewed), reuse a decision number, or tick another task.
 - PRs merge themselves when the reviewer passed the latest commit, CI is green and no protected files
-  changed (`.claude/hooks/pr-gate.py`, paths in `.claude/factory.json`). The rest are reviewed and merged by
+  changed (`.claude/hooks/pr-gate.ts`, paths in `.claude/factory.json`). The rest are reviewed and merged by
   the dev manager (a Claude session watching the repo) or a person.
 - UI work is checked with `/design-check`; prompt and model work with `/eval`.
 - Small pull requests, one build-plan task each, with tests that check what a user or another module can

@@ -10,7 +10,7 @@ What is here (read the part your task is about, not everything):
    for each role, what is out of scope and what is later or open. It is the source of truth for scope.
    `software-factory/README.md`: the front page and the wiki's contents; the pages in `software-factory/docs/wiki/` say how the factory works and list every setting. `software-factory/SKILL.md` and
    `software-factory/DEV-MANAGER.md`: the skill for setting up a project and the dev manager's rules.
-2. `software-factory/hooks/` (the `factory_*.py` commands and the hooks), `ci/` (runner services), `factory`,
+2. `software-factory/hooks/` (the `factory_*.ts` commands and the hooks), `ci/` (runner services), `factory`,
    `factory-loop.sh`, `install.sh`: the factory's code. `software-factory/kit/` holds only what a project gets
    copied or linked: agents, skills, `settings.json`, templates. Old `kit/` paths that are symlinks are
    forwarders from the move (#112); do not add new ones.
@@ -59,7 +59,7 @@ A change that breaks one of these is wrong even if the tests pass.
 
 ## Code style
 
-- Python: standard library only, small functions. Bash scripts must pass `bash -n`.
+- TypeScript: strict, no `any`, Bun and Node built-ins only, small functions. Bash scripts must pass `bash -n`.
 - Hooks and commands read settings through `factory_config.ts`; a new setting is added to `factory_settings_schema.ts`
   with its help and default, and to the table on the settings page.
 - A new command appears in `factory help`, the commands table on the wiki's commands page and has a test of its output.
@@ -69,7 +69,7 @@ A change that breaks one of these is wrong even if the tests pass.
 - This repo uses its own factory through links: `./factory`, `./factory-loop.sh` and `.claude/{hooks,ci,agents,skills,
   manager,settings.json}` are relative symlinks into `software-factory/` (made by
   `bash software-factory/install.sh . --link --layout new`, re-run it when a shared file is added; it leaves no empty folder behind, which
-  `check_skills.py` would fail on). Edit the real
+  `check_skills.ts` would fail on). Edit the real
   files in `software-factory/`, never through a link. Run `./factory doctor` first on a new machine, then
   `./factory loop -i`. Do not run `factory update` here: this repo is where the releases come from.
 - One task is one GitHub issue, labelled `factory:ready`, `factory:in-progress`, `factory:in-review`,

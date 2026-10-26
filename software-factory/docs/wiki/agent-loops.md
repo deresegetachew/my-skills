@@ -238,7 +238,7 @@ minutes. The exit code says what happened:
 | 1 | `ci`: a check failed (the line names it). `answer`: no question is waiting |
 | 2 | Timed out. Do other work and wait again later |
 | 3 | `ci`: the PR is merged or closed. `precheck`: there is work |
-| 4 | `ci`: GitHub never started the jobs (billing); see `factory_ci.py` |
+| 4 | `ci`: GitHub never started the jobs (billing); see `factory_ci.ts` |
 
 `factory wait <pr>` is unchanged. Agents and the dev manager never poll inside the conversation (`next-task` and
 [DEV-MANAGER.md](../../DEV-MANAGER.md) say so). A manager pass starts with `factory precheck` and ends there when it
@@ -282,7 +282,7 @@ failed. Then the medians and totals for the merged ones. `--json` gives the same
 <br>
 ## Tasks
 
-An agent never chooses a task by reading the plan. `next_task.py` hands out the next job, in this order:
+An agent never chooses a task by reading the plan. `next_task.ts` hands out the next job, in this order:
 
 1. **Rework.** An open PR whose latest `<!-- factory-mustfix sha=... -->` comment names its current head commit
    becomes `pr-<n>`. The agent checks out that branch, fixes every must-fix, gets a new reviewer pass, pushes and
@@ -345,7 +345,7 @@ current; the task never has to. Only an agent that has registered gets an issue,
 | When | What happens | Who does it |
 |---|---|---|
 | It starts | Registers: status `idle` | the loop, or the SessionStart hook |
-| It takes a task | `working on #42` | `next_task.py` |
+| It takes a task | `working on #42` | `next_task.ts` |
 | It uses any tool | A ping, at most every `tasks.pingMinutes` (default 5), in the background | PostToolUse hook |
 | A turn ends | `idle` | Stop hook |
 | It exits | `down`, label `factory:agent-down` | the loop on exit, or the SessionEnd hook for your own sessions |

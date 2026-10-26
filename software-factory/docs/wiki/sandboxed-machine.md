@@ -27,7 +27,9 @@ factory bootstrap project                      # as the sandbox user, never as r
 ```
 
 `factory bootstrap` works before there is a checkout (it runs from where the `factory` script lives); `project` takes
-`--repo URL [--dir PATH]` to clone one, with its submodules.
+`--repo URL [--dir PATH]` to clone one, with its submodules. Like every factory command it runs on Bun, so the admin
+running it needs Bun first (`curl -fsSL https://bun.sh/install | bash`); the `machine` part then installs Bun in
+`/usr/local/bin` for every user, the sandbox user included.
 
 **Nothing privileged runs by itself.** The machine part and `uninstall` only print their plan unless you pass `--apply`
 and run as root; `--dry-run` is accepted everywhere. Every step has a check, so a second run changes nothing, and every
@@ -36,7 +38,7 @@ The project part is refused as root. Agents cannot run it: it refuses inside an 
 
 | Part | What it does |
 |---|---|
-| `machine` (root) | Packages (`uidmap`, `slirp4netns`, `dbus-user-session`, `git`, `gh`, `age`, `tmux`, `nftables` ...); `sops` as the release binary with its checksum checked; the user (default `factory`: no password, no sudo, not in the docker group, its home and the admin's home mode 750); subuid/subgid ranges; `loginctl enable-linger`; the network guard; with `--authorized-keys FILE` the given public keys; with `--harden-ssh` key-only SSH and no root login; with `--keep-awake` (the default on a laptop, `--no-keep-awake` to refuse) no sleep, suspend or lid switch |
+| `machine` (root) | Packages (`uidmap`, `slirp4netns`, `dbus-user-session`, `git`, `gh`, `age`, `tmux`, `nftables` ...); `sops` and Bun (`/usr/local/bin/bun`) as release binaries with their checksums checked; the user (default `factory`: no password, no sudo, not in the docker group, its home and the admin's home mode 750); subuid/subgid ranges; `loginctl enable-linger`; the network guard; with `--authorized-keys FILE` the given public keys; with `--harden-ssh` key-only SSH and no root login; with `--keep-awake` (the default on a laptop, `--no-keep-awake` to refuse) no sleep, suspend or lid switch |
 | `project` (the user) | Rootless Docker (`dockerd-rootless-setuptool.sh install`, `systemctl --user enable --now docker`); `DOCKER_HOST`, `SOPS_AGE_KEY_FILE` and `PATH` in `~/.bashrc`; `~/.secrets` (700); Node from `.nvmrc` through nvm and `corepack enable`; Claude Code with the official installer; submodules, `.env.local` from `.env.example`, `commands.install`; `factory install-shim`; with `--agents a,b` the machine's agent names; then, after the sign-ins, `commands.stackUp`, the CI runners (`factory ci install`, `--runners N` for `FACTORY_CI_RUNNERS`) and autostart; last, `factory doctor --sandbox` |
 | `status` | The manifest against what is there now; exit 1 when something drifted |
 | `uninstall` | The guard, its unit and rules, the sleep and SSH drop-ins, the saved settings and the manifest. The user, its home, backups and the installed packages stay. `--remove-user` or `--delete-home` remove the account (only one bootstrap created) and need its name typed (`--confirm NAME` for scripts) |
