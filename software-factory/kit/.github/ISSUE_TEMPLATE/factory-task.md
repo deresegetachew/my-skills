@@ -4,6 +4,9 @@ about: One task for a coding agent. The dev manager writes these.
 labels: ["factory:ready"]
 ---
 
+<!-- Put every decision in this text. The agent also reads later comments by people (`factory issues show`),
+     but the text is the one place that is always read first. -->
+
 ## What we're building
 
 <!-- One short paragraph: what, for whom, and why now. Link the PRD story, design reference and decisions. -->

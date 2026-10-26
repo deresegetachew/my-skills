@@ -247,6 +247,71 @@ def test_a_project_with_its_own_factory_json_gets_the_manager_profile_and_the_ne
     assert open(profile).read() == '{"profile": "1.1.0"}\n', out
 
 
+def settings_allow(d):
+    return json.load(open(os.path.join(d, ".claude", "settings.json")))["permissions"]["allow"]
+
+
+def test_a_projects_extra_allow_entries_are_merged_survive_updates_and_are_not_drift():
+    gh, d, env = world()
+    kit = lambda v, allow: {"kit/.claude/settings.json": json.dumps({"permissions": {"allow": allow, "deny": ["Bash(rm *)"]}}) + "\n"}
+    gh.add("1.0.0", files=kit("1.0.0", ["Bash(ls *)"]), date="2026-10-01T10:00:00Z")
+    gh.add("1.1.0", files=kit("1.1.0", ["Bash(ls *)", "Bash(git log*)"]), date="2026-11-01T10:00:00Z")
+    own = os.path.join(d, ".claude", "factory.json")
+    os.makedirs(os.path.dirname(own))
+    open(own, "w").write(json.dumps({"permissions": {"allow": ["Edit(tmp/**)", "Bash(ls *)", "Bash(mkdir -p *)"]}}) + "\n")
+    commit(d)
+    rc, out = fac(d, env, "update", "1.0.0")
+    assert rc == 0, out
+    assert settings_allow(d) == ["Bash(ls *)", "Edit(tmp/**)", "Bash(mkdir -p *)"], "the release's entries, then the project's, no repeats"
+    assert json.load(open(os.path.join(d, ".claude", "settings.json")))["permissions"]["deny"] == ["Bash(rm *)"]
+    rc, out = fac(d, env, "version")
+    assert "the files match the pin" in out, out
+    commit(d)
+    rc, out = fac(d, env, "update")  # the next release keeps the project's entries
+    assert rc == 0, out
+    assert settings_allow(d) == ["Bash(ls *)", "Bash(git log*)", "Edit(tmp/**)", "Bash(mkdir -p *)"]
+    assert "differ" not in fac(d, env, "version")[1]
+    commit(d)
+    settings = os.path.join(d, ".claude", "settings.json")  # an entry added by hand in settings.json is still drift
+    data = json.load(open(settings))
+    data["permissions"]["allow"].append("Bash(curl *)")
+    json.dump(data, open(settings, "w"), indent=2)
+    assert "settings.json differs from v1.1.0" in fac(d, env, "version")[1]
+
+
+def test_an_allow_entry_added_to_factory_json_needs_an_update_to_take_effect_and_doctor_says_so():
+    gh, d, env = world("1.0.0")
+    assert fac(d, env, "update")[0] == 0
+    own = os.path.join(d, ".claude", "factory.json")
+    open(own, "w").write(json.dumps({"permissions": {"allow": ["Edit(tmp/**)"]}}) + "\n")
+    commit(d)
+    rc, out = fac(d, env, "version")
+    assert "Edit(tmp/**)" in out and "differ" in out, out
+    rc, out = fac(d, env, "update")
+    assert rc == 0 and "Edit(tmp/**)" in settings_allow(d), out
+    assert "Edit(tmp/**)" not in fac(d, env, "version")[1]
+
+
+def test_a_bad_allow_list_is_refused_with_a_fix_and_changes_nothing():
+    gh, d, env = world("1.0.0")
+    os.makedirs(os.path.join(d, ".claude"))
+    open(os.path.join(d, ".claude", "factory.json"), "w").write(json.dumps({"permissions": {"allow": "Edit(tmp/**)"}}) + "\n")
+    commit(d)
+    before = snapshot(d)
+    rc, out = fac(d, env, "update")
+    assert rc != 0 and "permissions.allow" in out and "Fix:" in out, out
+    assert snapshot(d) == before
+
+
+def test_the_kits_default_allow_list_has_what_a_headless_coding_agent_needs_and_no_unmatched_or_risky_rules():
+    allow = json.load(open(os.path.join(SF, "kit", ".claude", "settings.json")))["permissions"]["allow"]
+    for entry in ("Edit(tmp/**)", "Bash(cd *)", "Bash(ls *)", "Bash(mkdir -p *)", "Bash(git rev-parse*)"):
+        assert entry in allow, entry
+    assert not [a for a in allow if a.startswith("Write(")], "Claude Code never matches Write(path) rules"
+    assert not [a for a in allow if "python3 -c" in a], "an inline interpreter would let an agent run anything"
+    assert len(allow) == len(set(allow))
+
+
 def test_update_moves_to_the_newest_release_removes_files_it_dropped_and_leaves_the_projects_own_files():
     gh, d, env = world("1.0.0")
     assert fac(d, env, "update")[0] == 0
