@@ -24,9 +24,15 @@ export FACTORY_CI_PLATFORM="$platform"
 if [ "$platform" = linux ]; then machine="this machine"; manager=systemd; else machine="this Mac"; manager=launchd; fi
 
 kit="$(cd "$(dirname "$0")" && pwd)"
+# Run a factory script (<path>.ts) with Bun. --no-env-file: Bun must not load the project's .env into the factory.
+fh() {
+  local s="$1"; shift
+  command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
+  bun --no-env-file "$s.ts" "$@"
+}
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$root"
-eval "$(python3 "$kit/ci_names.py")"
+eval "$(fh "$kit/ci_names")"
 domain="gui/$(id -u)"
 exe="$CI_INSTALLED/$CI_NAME"
 # Which machine a runner is on, in its name (<name>-<host>-<epoch>), so `stop` removes only this machine's.
@@ -866,7 +872,7 @@ print(next((x for x in v if x != "self-hosted"), ""))' "$light_var" 2>/dev/null 
   elif [ "$CI_LIGHT" = 1 ]; then
     light_label="$CI_LIGHT_LABEL"
   fi
-  python3 "$kit/ci_status.py" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
+  fh "$kit/ci_status" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
     ${light_label:+--light-label "$light_label"} ${light_var:+--light-variable-set}
   if [ -n "$local_mode$installed" ] && [ -f "$CI_STATE/runner.log" ]; then
     echo

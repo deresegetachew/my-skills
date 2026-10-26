@@ -227,14 +227,14 @@ def clean_copy_of_this_repo():
 
 def test_relinking_this_repo_leaves_no_empty_folder_and_check_skills_passes():
     # #152: the project already has .claude/factory.json, so the docs templates are left out; the folders they
-    # would have sat in must not be made either (check_skills.py fails on a top-level folder that is not a skill).
+    # would have sat in must not be made either (check_skills.ts fails on a top-level folder that is not a skill).
     d = clean_copy_of_this_repo()
     assert not os.path.exists(os.path.join(d, "docs")), "the clean copy starts without docs/"
     for _ in range(2):  # twice: the second run changes nothing
         sh("bash", "software-factory/install.sh", ".", "--link", "--layout", "new", cwd=d)
         assert empty_dirs(d) == [], empty_dirs(d)
         assert not os.path.exists(os.path.join(d, "docs"))
-        p = sh("python3", "tools/check_skills.py", cwd=d, check=False)
+        p = sh("bun", "--no-env-file", "tools/check_skills.ts", cwd=d, check=False)
         assert p.returncode == 0, p.stdout + p.stderr
 
 

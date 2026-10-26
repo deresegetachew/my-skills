@@ -11,12 +11,20 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - run: python3 tools/check_skills.py
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      - run: bun tools/check_skills.ts
+      - name: Type check
+        working-directory: software-factory
+        run: |
+          bun install
+          bun x tsc --noEmit -p tsconfig.json
       - name: Factory tests
         run: |
           git config --global user.email ci@example.com
           git config --global user.name ci
-          python3 tools/run_tests.py
+          bun tools/run_tests.ts

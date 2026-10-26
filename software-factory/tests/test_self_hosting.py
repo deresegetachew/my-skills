@@ -14,9 +14,9 @@ def config():
 
 def test_the_repo_has_a_claude_md_that_names_the_commands_that_check_it():
     text = open(os.path.join(REPO, "CLAUDE.md")).read()
-    for needle in ("tools/run_tests.py", "tools/check_skills.py", "software-factory/README.md", "factory:ready", "#114"):
+    for needle in ("tools/run_tests.py", "tools/check_skills.ts", "software-factory/README.md", "factory:ready", "#114"):
         assert needle in text, needle
-    assert os.path.isfile(os.path.join(REPO, "tools", "run_tests.py")) and os.path.isfile(os.path.join(REPO, "tools", "check_skills.py"))
+    assert os.path.isfile(os.path.join(REPO, "tools", "run_tests.py")) and os.path.isfile(os.path.join(REPO, "tools", "check_skills.ts"))
 
 
 def test_the_factory_settings_of_this_repo_are_valid_and_take_tasks_from_issues():

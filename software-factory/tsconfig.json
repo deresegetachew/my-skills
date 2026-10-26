@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["bun"]
   },
-  "include": ["hooks", "ci", "tests", "lib", "../tools"]
+  "include": ["hooks", "ci", "tests", "../tools"]
 }

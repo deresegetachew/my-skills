@@ -3,15 +3,21 @@
 #   ./factory <command>        or, with the shim on your PATH (factory install-shim), just: factory <command>
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -uo pipefail
+# Run a factory script (<path>.ts) with Bun. --no-env-file: Bun must not load the project's .env into the factory.
+fh() {
+  local s="$1"; shift
+  command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
+  bun --no-env-file "$s.ts" "$@"
+}
 # `factory bootstrap` sets up a machine, so it works before there is a checkout: it runs from where this script lives.
 if [ "${1:-}" = bootstrap ]; then
   self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
-  exec python3 "$(dirname "$self")/hooks/factory_bootstrap.py" "${@:2}"
+  fh "$(dirname "$self")/hooks/factory_bootstrap" "${@:2}"; exit $?
 fi
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
 cd "$root"
 hooks="$root/.claude/hooks"
-py() { python3 "$hooks/$1" "${@:2}"; }
+py() { fh "$hooks/${1%.py}" "${@:2}"; }
 main() { python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))'; }
 
 usage() {
@@ -218,7 +224,7 @@ case "$cmd" in
     detach=0; rest=()
     for a in "$@"; do if [ "$a" = --detach ]; then detach=1; else rest+=("$a"); fi; done
     set -- ${rest[@]+"${rest[@]}"}
-    if [ "$detach" = 1 ]; then exec python3 "$hooks/factory_follow.py" detach "$@"; fi
+    if [ "$detach" = 1 ]; then fh "$hooks/factory_follow" detach "$@"; exit $?; fi
     [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
     who="$1"; shift
     bare=0; [ "$#" = 0 ] && bare=1
@@ -237,17 +243,17 @@ case "$cmd" in
     fi
     # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
     # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
-    mcp="$(python3 "$dir/.claude/hooks/factory_mcp.py")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
+    mcp="$(fh "$dir/.claude/hooks/factory_mcp")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
     # The `models` setting for the builder (factory_models.py): after the MCP flags, before your own arguments.
     mf=()
-    if [ -f "$dir/.claude/hooks/factory_models.py" ]; then
-      m="$(python3 "$dir/.claude/hooks/factory_models.py" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }
+    if [ -f "$dir/.claude/hooks/factory_models.ts" ]; then
+      m="$(fh "$dir/.claude/hooks/factory_models" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }
       while IFS= read -r line; do [ -n "$line" ] && mf+=("$line"); done <<< "$m"
     fi
     set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' ${mf[@]+"${mf[@]}"} "$@"
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
     # FACTORY_REMOTE_CONTROL=0|1 wins; else this machine's `remoteControl` setting (factory settings --local); else on.
-    rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(python3 "$dir/.claude/hooks/factory_machine.py" remote 2>/dev/null || echo 1)"
+    rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$dir/.claude/hooks/factory_machine" remote 2>/dev/null || echo 1)"
     if [ "$rc" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
     exec claude "$@" ;;
   worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <name|N>}" ;;

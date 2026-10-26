@@ -14,23 +14,28 @@ What is here (read the part your task is about, not everything):
    `factory-loop.sh`, `install.sh`: the factory's code. `software-factory/kit/` holds only what a project gets
    copied or linked: agents, skills, `settings.json`, templates. Old `kit/` paths that are symlinks are
    forwarders from the move (#112); do not add new ones.
-3. `tools/`: `run_tests.py`, `check_skills.py`, `build_release.py` (the release archive).
+3. `tools/`: `run_tests.ts`, `check_skills.ts`, `build_release.ts` (the release archive).
 4. `nestjs-best-practices/`, `nestjs-clean-code-ddd-hexagonal/`, `study-notes/`: separate skills.
 
 ## Test and check
 
-- Everything: `PYTHONDONTWRITEBYTECODE=1 python3 tools/run_tests.py` (runs every `software-factory/tests/test_*.py` in
-  its own process; no pytest). One file: `python3 software-factory/tests/test_<name>.py`. It takes minutes, so run the
-  files for the code you changed while you work, and the whole set before the pull request.
-- `python3 tools/check_skills.py`: each top-level skill folder is well formed, every `.sh` parses, every `.py`
-  compiles, every `.json` loads. A new top-level folder (not starting with a dot) must be a skill with a `SKILL.md`.
-- CI (`.github/workflows/check.yml`) runs both. Restore tracked `.pyc` files and remove temp folders after a run.
+The factory is TypeScript run by Bun (#252). There is no Python in it.
+
+- Everything: `bun tools/run_tests.ts` (every `software-factory/tests/*.test.ts`, each file in its own process). One
+  file: `bun tools/run_tests.ts <name>`. Run the files for the code you changed while you work, and the whole set
+  before the pull request.
+- Types: `cd software-factory && bun install && bun x tsc --noEmit` (strict, no `any`).
+- `bun tools/check_skills.ts`: each top-level skill folder is well formed, every `.sh` parses, every `.ts` parses and
+  uses no `any`, every `.json` loads, and no `.py` file exists. A new top-level folder (not starting with a dot) must
+  be a skill with a `SKILL.md`.
+- CI (`.github/workflows/check.yml`) runs all of these. Remove temp folders after a run.
 
 ## The rules that matter most
 
 A change that breaks one of these is wrong even if the tests pass.
 
-- **No new dependencies.** The factory is Python 3 standard library and bash. No pip, no npm.
+- **No new dependencies.** Bun is the only runtime (plus bash): Bun and Node built-ins only, no npm package at
+  runtime. The dev-only `typescript` and `@types/bun` (for `tsc --noEmit` in CI) are never installed in a project.
 - **Tests are never weakened, skipped or deleted** to make a change pass. Failing tests come first; a bug fix adds
   the test that would have caught it. Tests check what a user or another program can observe (command output, exit
   codes, files written, what a fake `gh` or fake server was asked), never internals.
