@@ -106,6 +106,17 @@ def main_branch(r, cfg):
               f"or change the default branch in the repository's settings on GitHub to {mine}")
 
 
+def origin_main(r, cfg):
+    """origin/<mainBranch> exists (#181): a clone of an empty repo has no fetch setting, so it never does."""
+    from factory_claims import missing_origin_main
+    main = cfg.get("mainBranch") or "main"
+    err = missing_origin_main(main)
+    if err:
+        r.fix(err["code"], f"{err['message']} {err['fix']}")
+    elif run("git", "remote", "get-url", "origin")[0] == 0:
+        r.ok(f"origin/{main} exists")
+
+
 def node(r):
     if not os.path.exists("package.json"):
         return
@@ -443,6 +454,7 @@ def main():
     docker(r)
     if cfg:
         project(r, cfg)
+        origin_main(r, cfg)
         main_branch(r, cfg)
         factory(r, cfg)
         models(r, cfg)
