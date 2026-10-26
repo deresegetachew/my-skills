@@ -54,16 +54,18 @@ Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is
 - **Copies the templates** the first time only (when there's no `.claude/factory.json` yet): `factory.json`, the
   notes folder, `CLAUDE.factory.md`, the docs templates, the CI workflow, the issue template and `CODEOWNERS`. It
   never overwrites a file that's there.
-- **Tells the stack on that first install** (#199, `hooks/factory_stack.py`). A `package.json` means Node: the pnpm
+- **Tells the stack on that first install** (#199, `hooks/factory_stack.ts`). A `package.json` means Node: the pnpm
   `ci.yml` and the `commands.*` of the template stay. No `package.json` and Python files (`pyproject.toml`,
   `setup.py`, `requirements*.txt`, or `tests/test_*.py`) mean Python: `ci.yml` is the Python template
   (`kit/.github/workflows/ci-python.yml.template`, which runs `commands.install` and `commands.test`), the pnpm
   `commands.*` are emptied, `commands.install` is `python3 -m pip install -r requirements.txt` when that file exists,
-  and `commands.test` is `python3 -m unittest discover` only when the tests are unittest-style (otherwise it stays
-  empty and the output says to set it). Anything else keeps the pnpm template and the output names the files to edit.
+  and `commands.test` is `python3 -m unittest discover -s <the folder of the tests>` only when the tests are
+  unittest-style (otherwise it stays empty and the output says to set it). With a test command, the install also adds
+  `Bash(python3 -m unittest*)` and `Bash(./factory run-check*)` to `permissions.allow` in `factory.json` (and to a copied
+  `settings.json`), so an unattended agent can run the tests (#249). Anything else keeps the pnpm template and the output names the files to edit.
   The output says which it chose. An existing `ci.yml` is kept as it is. The first install from a release
   (`factory update <tag>`, no `.claude/factory.json` yet) does the same, with the detector from the release's own
-  `hooks/factory_stack.py`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` does not yet check that the
+  `hooks/factory_stack.ts`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` does not yet check that the
   workflow matches `factory.json` (follow-up of #199).
 - **Adds `tmp/` and `__pycache__/`** to `.gitignore`.
 

@@ -13,6 +13,8 @@ export interface TarInput {
   name: string;
   mode: number;
   data: Uint8Array;
+  /** A symbolic link to this target instead of a file (only tests write one: a release never holds a link). */
+  symlink?: string;
 }
 
 export type TarKind = "file" | "dir" | "symlink" | "hardlink" | "other";
@@ -40,7 +42,7 @@ function putOctal(buf: Uint8Array, offset: number, length: number, value: number
   putString(buf, offset, length, value.toString(8).padStart(length - 1, "0") + "\0");
 }
 
-function header(name: string, mode: number, size: number, type: string, prefix = ""): Uint8Array {
+function header(name: string, mode: number, size: number, type: string, prefix = "", linkname = ""): Uint8Array {
   const h = new Uint8Array(BLOCK);
   putString(h, 0, 100, name);
   putOctal(h, 100, 8, mode);
@@ -50,6 +52,7 @@ function header(name: string, mode: number, size: number, type: string, prefix =
   putOctal(h, 136, 12, 0); // mtime
   h.fill(0x20, 148, 156); // checksum field counts as spaces
   putString(h, 156, 1, type);
+  putString(h, 157, 100, linkname);
   putString(h, 257, 6, "ustar\0");
   putString(h, 263, 2, "00");
   putOctal(h, 329, 8, 0); // devmajor
@@ -93,6 +96,11 @@ export function tarCreate(entries: readonly TarInput[]): Uint8Array {
   const parts: Uint8Array[] = [];
   for (const e of entries) {
     const split = ustarName(e.name);
+    if (e.symlink !== undefined) {
+      if (!split) throw new TarError(`'${e.name}' is too long for a link`);
+      parts.push(header(split[1], e.mode, 0, "2", split[0], e.symlink));
+      continue;
+    }
     if (split) parts.push(header(split[1], e.mode, e.data.length, "0", split[0]));
     else {
       const pax = enc.encode(paxRecord("path", e.name));

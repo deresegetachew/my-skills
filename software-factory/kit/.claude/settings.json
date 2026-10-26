@@ -15,7 +15,6 @@
       "Bash(git fetch*)",
       "Bash(gh pr *)",
       "Bash(docker compose *)",
-      "Bash(python3 .claude/hooks/*)",
       "Bash(bun --no-env-file .claude/hooks/*)",
       "Bash(npm run *)",
       "Bash(npm test*)",

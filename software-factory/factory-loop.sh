@@ -279,7 +279,7 @@ role_pass() {
 # An unattended run in a folder Claude Code does not trust ignores the whole allow list and stalls at its first command
 # (#193), so say so before any tokens are spent. A folder it cannot judge (no ~/.claude.json) goes ahead.
 trust_gate() {
-  [ -f "$hooks/factory_trust.py" ] || return 0
+  [ -f "$hooks/factory_trust.ts" ] || return 0
   local err
   err="$(fh "$hooks/factory_trust" check "$PWD")" || { echo "[$agent] $err"; return 1; }
 }

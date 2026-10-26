@@ -37,7 +37,7 @@ software-factory/
     factory_manager_claims.py           several dev managers at once: review and question claims with a lease
     factory_rereview.ts                 incremental re-review: the delta since a reviewer's last round
     factory_reset_run.py                `factory reset-run`: list and clean what an earlier run left (claims, Agent issues, CI containers, runners, a runs-on variable)
-    factory_stack.py                    the project's stack on a first install (node, python, unknown) and the Python CI's command runner
+    factory_stack.ts                    the project's stack on a first install (node, python, unknown) and the Python CI's command runner
     pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
     check.ts                            Stop: typecheck and tests
     factory_stop.py                     Stop: closes a finished session in `factory loop -i`
@@ -58,7 +58,7 @@ software-factory/
     factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
     factory_remotes.py                  remotes, ssh calls and finding sessions by name
     factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
-    factory_release.py                  `factory version | releases | update | rollback`: the release client
+    factory_release.ts                  `factory version | releases | update | rollback`: the release client
     factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
     factory_bootstrap_core.ts           the steps and actions bootstrap is built from, and the executor
     factory_bootstrap_machine.ts        the root steps: packages, user, subuid, linger, guard, SSH, keep awake

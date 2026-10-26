@@ -70,7 +70,12 @@ moved_to() {
 }
 
 # Relative path from the folder holding $1 (inside the project) to the kit file $2.
-rel() { python3 -c 'import os,sys;print(os.path.relpath(sys.argv[2], os.path.dirname(sys.argv[1])))' "$1" "$2"; }
+# Both are absolute, normalized paths (from `cd ... && pwd`), so this is plain string work, like os.path.relpath.
+rel() {
+  local common="${1%/*}" up=""
+  while [ -n "$common" ] && [ "${2#"$common"/}" = "$2" ]; do common="${common%/*}"; up="../$up"; done
+  printf '%s\n' "$up${2#"$common"/}"
+}
 
 # Layout of the links (see --layout above). Auto: a project that links through kit/ already stays on it.
 if [ "$link" = 1 ] && [ "$layout" = auto ]; then
@@ -104,7 +109,7 @@ list_files() {
 # installed: its CI workflow template stands in for the pnpm one, and `commands.*` are filled in below.
 stack=node
 if [ "$setup" = 1 ]; then
-  stack="$(fh "$here/hooks/factory_stack" detect "$dst" | python3 -c 'import json,sys;print(json.load(sys.stdin)["stack"])')"
+  stack="$(fh "$here/hooks/factory_stack" detect "$dst" | sed -n 's/^  "stack": "\([a-z]*\)",*$/\1/p')"
 fi
 PY_WORKFLOW=./.github/workflows/ci-python.yml.template
 list_files | while read -r f; do

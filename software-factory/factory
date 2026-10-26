@@ -182,7 +182,8 @@ Maintain
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
-                         machine's runner services and verify; then commit it in a PR. Safe to repeat. --release: start
+                         machine's runner services and verify; then commit it in a PR. Safe to repeat. --tasks plan|issues:
+                         on a first install, where tasks come from (written to factory.json; `factory issues setup` is yours to run). --release: start
                          taking releases in a project that has no pin yet. --archive FILE [--sums FILE]: install a release
                          archive from disk (no network; for a rehearsal or an offline machine)
   rollback               back to the release installed before (needs no network)
@@ -301,14 +302,14 @@ case "$cmd" in
   signoff)   py factory_signoff.py "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
-  version|releases|rollback|migrate-to-release) py factory_release.py "$cmd" "$@" ;;
+  version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).
-    py factory_release.py check-own-repo || exit 1
+    fh "$hooks/factory_release" check-own-repo || exit 1
     # A project with a release pin (.claude/factory/release.json), or one that asks (a version, --release), takes the
     # factory from numbered releases (#113). Any other project keeps the submodule update below until it migrates.
-    if [ -f .claude/factory/release.json ]; then py factory_release.py update "$@"; exit $?; fi
-    for a in "$@"; do case "$a" in --release|--archive|--archive=*|v[0-9]*|[0-9]*) py factory_release.py update "$@"; exit $? ;; esac; done
+    if [ -f .claude/factory/release.json ]; then fh "$hooks/factory_release" update "$@"; exit $?; fi
+    for a in "$@"; do case "$a" in --release|--archive|--archive=*|v[0-9]*|[0-9]*) fh "$hooks/factory_release" update "$@"; exit $? ;; esac; done
     # --layout new|old|auto goes to install.sh: a project that links through kit/ stays on it until it asks for `new`.
     layout=auto
     case "${1:-}" in
