@@ -42,6 +42,7 @@ NEEDS = {
     "protected": "the owner's decision: it changes which files an agent may merge",
     "alwaysAllowed": "the owner's decision: it changes which files an agent may merge",
     "trustedReviewers": "the owner's decision: it changes whose approvals count",
+    "permissionMode": "the owner's decision: it changes what an unattended agent may do without asking",
     "permissions.allow": "the owner's decision: it changes what an unattended agent may run without asking",
     "mainBranch": "the owner's decision: the PR gate reads the branch from GitHub, so keep it the same",
     "reviews.safety-auditor.paths": "the owner's decision: it changes which changes get the safety auditor",
@@ -150,6 +151,7 @@ SETTINGS = {s.key: s for s in [
     S('agentEnv', 'dict', 'ports', 'Per-loop variables: {"API_PORT": "{port:4100}", "DATABASE_URL": "...{suffix}"}.'),
     S('portStep', 'int', 'ports', "How far each agent's ports move from the previous agent's."),
     S('claimStaleHours', 'int', 'agents', 'How long a local claim or a pushed task branch holds a task.'),
+    S('permissionMode', 'enum', 'agents', 'How unattended `claude -p` runs get their permissions: acceptEdits (the default) or default (your own Claude Code settings decide).', options=['acceptEdits', 'default']),
     S('waitMinutes', 'int', 'agents', 'How often an idle loop looks for work. 0: it exits instead.', default=1),
     S('models', 'dict', 'agents', 'The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today\'s model: the agent file\'s, or Claude Code\'s default.', default={}),
     S('tasks.source', 'enum', 'issues', 'Where tasks come from.', options=['plan', 'issues']),
@@ -310,6 +312,12 @@ MORE = {
     "claimStaleHours": dict(long="A loop's claim on a task (and a pushed task branch) lapses after this many hours, or "
                                  "when its process exits, so a crashed agent doesn't hold work for ever.",
                             examples=["factory settings set claimStaleHours 6"]),
+    "permissionMode": dict(long="Nobody can answer a permission prompt in an unattended run, so every headless `claude -p` the loops and the dev "
+                                "manager start gets `--permission-mode acceptEdits`: edits inside the project need no answer, and the allow list in "
+                                ".claude/settings.json (plus `permissions.allow` here) covers the commands. Anything not allowed or denied stops the run, "
+                                "so the allow list is the real limit. `default` passes no flag and leaves it to your own Claude Code settings; "
+                                "`factory doctor` says `fix` unless they set a mode. Interactive sessions (`-i`) are not given a mode, since a person answers.",
+                                examples=["factory settings set permissionMode default"]),
     "waitMinutes": dict(long="An idle loop looks for work this often (a token-free wait). 0: it exits instead of waiting.",
                         examples=["factory settings set waitMinutes 1"]),
     "models": dict(long="The model per role: builder, manager, test-writer, reviewer, architecture-reviewer, "

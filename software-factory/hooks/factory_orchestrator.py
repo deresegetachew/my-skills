@@ -273,7 +273,7 @@ def run_sub(cfg, name, ref, interactive=False):
             logfile = os.path.join(state_dir(name), f"{ref}.out")
             with open(logfile, "w", encoding="utf-8") as f:
                 try:
-                    rc = subprocess.run(["claude", *flags, "-p", prompt], env=env, stdout=f, stderr=subprocess.STDOUT,
+                    rc = subprocess.run(["claude", *flags, *roles.permission_flags(cfg), "-p", prompt], env=env, stdout=f, stderr=subprocess.STDOUT,
                                         timeout=limit).returncode
                 except subprocess.TimeoutExpired:
                     out(f"{ref}: stopped after {limit / 60:.0f} minutes (manager.subManagerMinutes)")
@@ -332,7 +332,8 @@ def cycle(cfg, name, dry=False, interactive=False, wait=False):
             continue
         if dry:
             out(f"would start a {'session you can type into' if interactive else 'sub-manager'} for {i['ref']}: {i['line']}")
-            out(f"would run: claude -p \"/manage-pass {i['ref']}\" (manager profile, a lease on {i['target'] or i['ref']})")
+            mode_flags = " ".join(["", *roles.permission_flags(cfg)])
+            out(f"would run: claude -p \"/manage-pass {i['ref']}\" (manager profile{mode_flags}, a lease on {i['target'] or i['ref']})")
             started.append(i["ref"])
             continue
         if interactive:

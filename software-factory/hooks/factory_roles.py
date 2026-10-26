@@ -19,6 +19,7 @@ a reason). A project without the folder falls back to its `notes` (`<notes>/mana
   factory_roles.py nth <role> <N>              the Nth name (so `factory dev-manager 2 loop` means the second)
   factory_roles.py work <role> [--name N]      exit 0 and one line per thing to do, or exit 3 "nothing to do"
   factory_roles.py prompt <role> <name> [arg]  the prompt a pass starts with (ends with a marker for factory usage)
+  factory_roles.py permission-flags            the flags that give a headless run its permissions, one per line
   factory_roles.py claude-flags <role>         the settings flags for the role's sessions, one per line
   factory_roles.py choose                      ask for a role and a name (factory loop -i); prints "role name"
   factory_roles.py init [--force]              scaffold the role folders (factory init-roles)
@@ -220,6 +221,16 @@ def profile_flags(cfg, role):
     return ["--setting-sources", "user", "--settings", json.dumps({**profile, **off}, separators=(",", ":"))]
 
 
+def permission_flags(cfg):
+    """The flags that give an unattended (`claude -p`) run its permissions (#179): `--permission-mode <permissionMode>`,
+    or none when the setting is `default` (the user's own Claude Code settings decide). A value that is not a mode
+    falls back to the default one; `factory settings validate` names it."""
+    mode = cfg.get("permissionMode", DEFAULTS["permissionMode"])
+    if mode == "default":
+        return []
+    return ["--permission-mode", mode if mode in ("acceptEdits",) else DEFAULTS["permissionMode"]]
+
+
 def session_flags(cfg, role):
     """The `claude` arguments for a session of `role` started from Python (the orchestrator's sub-managers), the same
     the loop script builds: only the project's MCP servers as main has them, the role's profile, and the model."""
@@ -331,6 +342,9 @@ def main(argv):
         sys.exit(__doc__)
     cmd, rest = argv[0], argv[1:]
     cfg = load()
+    if cmd == "permission-flags":
+        print("\n".join(permission_flags(cfg)))
+        return
     if cmd == "choose":
         role, name = choose()
         print(role, name)

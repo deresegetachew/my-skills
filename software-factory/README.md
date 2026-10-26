@@ -548,8 +548,12 @@ version it pins. `factory help` lists everything.
 ### Three ways to run an agent
 
 - **`factory loop`**: unattended. Each task is a fresh `claude -p "/next-task <id>"` run. Nobody can answer a
-  permission prompt, so `.claude/settings.json` must allow every command the build needs. Best for long stretches
-  away.
+  permission prompt, so every headless `claude -p` starts with `--permission-mode acceptEdits` (setting
+  `permissionMode`; `default` passes no flag and leaves it to your own Claude Code settings). Edits inside the
+  project then need no answer, and `.claude/settings.json` must allow every command the build needs; a command that
+  is neither allowed nor denied stops the run. Interactive sessions are not given a mode. `--dry-run` shows the flag,
+  and `factory doctor` prints the mode and says `fix` when a headless run would stall (mode `default` with no mode in
+  your own settings, or no rule for `git commit`, `git push`, `gh pr` and the like). Best for long stretches away.
 - **`factory loop -i`**: interactive. Each task opens a Claude session with `/next-task <id>` already started. When
   the agent has opened its PR, it marks the task done and the session closes by itself. The loop then counts down
   10 seconds and starts the next task; type `q` and Enter to stop. If the session ends before the task is done
@@ -2182,6 +2186,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `manager.subManagerMinutes` | int | `30` | A sub-manager session is stopped after this many minutes. |
 | `agents` | list | `see `factory settings help agents`` | The agents' names, in order (lowercase letters, digits, dashes). |
 | `claimStaleHours` | int | `6` | How long a local claim or a pushed task branch holds a task. |
+| `permissionMode` | one of acceptEdits/default | `"acceptEdits"` | How unattended `claude -p` runs get their permissions: acceptEdits (the default) or default (your own Claude Code settings decide). |
 | `waitMinutes` | int | `1` | How often an idle loop looks for work. 0: it exits instead. |
 | `models` | dict | `{}` | The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default. |
 | `permissions.allow` | list | `[]` | Extra Claude Code allow rules for this project, like "Edit(src/**)". `factory update` merges them into .claude/settings.json after the release's own rules. |

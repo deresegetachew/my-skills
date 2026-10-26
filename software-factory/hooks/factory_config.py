@@ -10,6 +10,11 @@ DEFAULTS = {
     # a number neither main nor another open PR has (factory_numbers.py, checked by the PR gate).
     "numberedDirs": [],
     "mainBranch": "main",
+    # How an unattended run (`claude -p`, started by the loops and the dev manager's sub-managers) gets its permissions
+    # (#179): "acceptEdits" passes --permission-mode acceptEdits, so edits inside the project need no answer and the
+    # allow list in .claude/settings.json covers the commands. "default" passes nothing: your own Claude Code
+    # settings decide (`factory doctor` says when a run would then stall).
+    "permissionMode": "acceptEdits",
     # typecheckChanged / testChanged: the Stop check runs these instead of typecheck / test when set, for the
     # changed packages only (for example `pnpm -s turbo run test --filter=...[origin/main]`). Fewer test lines in
     # the agent's context, and a faster turn.
