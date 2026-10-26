@@ -312,6 +312,25 @@ def held_in_progress(cfg, name, in_progress):
     return [x["number"] for x in in_progress if L["agentPrefix"] + name in {y["name"] for y in x["labels"]}]
 
 
+def stale_claims(cfg):
+    """[(issue number, agent, status)] for in-progress task issues held by an agent that is down or silent (#191). The
+    sweep frees these after `tasks.releaseDownMinutes`; until then `factory next` skips them, so it says so."""
+    import factory_issues
+    import factory_heartbeat
+    L = task_labels(cfg)
+    gone = {}
+    for i in current(agent_issues()):
+        st = state_of(cfg, i)
+        if st and st[1] in ("down", "silent") and not factory_heartbeat.alive_here(st[0]):
+            gone[st[0]] = st[1]
+    out = []
+    for x in factory_issues.task_issues(label=L["inProgress"]):
+        for name, status in gone.items():
+            if L["agentPrefix"] + name in {y["name"] for y in x["labels"]}:
+                out.append((x["number"], name, status))
+    return sorted(out)
+
+
 def sweep(cfg):
     """Close duplicate agent issues, then mark silent agents down and put their in-progress issues back to ready.
     Only an agent's current issue counts: an old copy that went quiet must never release a live agent's work.
