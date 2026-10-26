@@ -1,1 +1,0 @@
-../../software-factory/hooks/manager_gate.py
