@@ -238,8 +238,8 @@ def update(cfg, agent, status, detail="", create=False, extra=None, replace_extr
         i = find_issue(agent)
         if i:
             n = i["number"]
-        elif not create:
-            return None
+        elif not create or status == "down":
+            return None  # only a registration opens an issue, and never a down one (#194): an agent that never ran has none
     started = seen.get("started") or iso(now())
     # The machine and folder are posted to GitHub only when the project opts in (tasks.showWhere: true).
     where = (f"{socket.gethostname()} · {os.path.basename(os.getcwd())}"

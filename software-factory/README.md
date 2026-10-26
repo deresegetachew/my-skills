@@ -1054,7 +1054,7 @@ Set `"tasks": { "source": "issues" }` in `factory.json`, and run `factory issues
 ## Live agents (issues mode)
 
 Each agent also has its own issue, titled `Agent: <name> · <status>` and labelled `factory:agent`. The hooks keep it
-current; the task never has to:
+current; the task never has to. Only an agent that has registered gets an issue, and never a `down` one: a name in `agents` that has not run has none.
 
 | When | What happens | Who does it |
 |---|---|---|
