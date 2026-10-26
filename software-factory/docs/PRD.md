@@ -307,8 +307,8 @@ until he agrees them."
   templates and never overwrites an existing file. On a first install it tells the stack (Node with a `package.json`; Python
   from `pyproject.toml`, `setup.py`, `requirements*.txt` or `tests/test_*.py`; otherwise unknown) and chooses the CI
   workflow and `commands.*` to match, from `install.sh` and from a first `factory update <tag>`; an existing `ci.yml` is
-  kept. A `factory doctor` check that the workflow matches `factory.json` is not built (open, #199). *Built,
-  including `factory init` for an empty folder (#148).* (#102, #103, #199)
+  kept. `factory doctor` checks that the workflow matches `factory.json` (#205, #224). *Built,
+  including `factory init` for an empty folder (#148).* (#102, #103, #199, #205)
 - **U13.** As the owner, the machines come back after a reboot: `factory autostart` starts the dev stack and this machine's
   agents in detached tmux sessions. *Built.* (#88)
 
