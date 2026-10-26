@@ -71,7 +71,7 @@ test("unknown kind and detached head are refused with a fix", () => {
 });
 
 test("factory command and help", () => {
-  expect(readFileSync(FACTORY, "utf8").split(/\s+/).join(" ")).toContain('review-pass) py factory_review_pass.py "$@"');
+  expect(readFileSync(FACTORY, "utf8").split(/\s+/).join(" ")).toContain('review-pass) fh "$hooks/factory_review_pass" "$@"');
   const h = sh(["bash", FACTORY, "help"], { env: ENV }).stdout;
   expect(h).toContain("review-pass");
   expect(readmeAndWiki()).toContain("factory review-pass");

@@ -16,6 +16,7 @@
       "Bash(gh pr *)",
       "Bash(docker compose *)",
       "Bash(bun --no-env-file .claude/hooks/*)",
+      "Bash(./factory run-check*)",
       "Bash(npm run *)",
       "Bash(npm test*)",
       "Bash(npm ci*)",
