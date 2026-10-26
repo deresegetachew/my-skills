@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_roles as TR  # noqa: E402
+from wiki_text import readme_and_wiki
 
 SF, HOOKS = TR.SF, os.path.join(TR.SF, "hooks")
 H = "a" * 40
@@ -742,7 +743,7 @@ def test_doctor_checks_the_manager_profile_and_its_hooks():
 
 
 def test_the_orchestrator_is_listed_in_the_loop_scripts_header_and_the_readme():
-    readme = open(os.path.join(SF, "README.md")).read()
+    readme = readme_and_wiki()
     assert "Run a manager" in readme and "factory dev-manager" in readme and "dead-man" in readme.lower()
     assert "manage-pass" in open(os.path.join(SF, "kit", ".claude", "skills", "manage-pass", "SKILL.md")).read()
 

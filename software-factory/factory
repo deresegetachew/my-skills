@@ -139,7 +139,7 @@ Settings
   settings pr [--ready]  propose the edited .claude/factory.json as a pull request (a draft by default)
   settings --local ...   the same for this machine's own settings (agent names, Remote Control, autostart), outside the repo
   settings docs [--check|--write]
-                         the README's settings tables, generated from the same metadata table
+                         the settings page's tables (docs/wiki/settings.md), generated from the same metadata table
                          .claude/ is protected, so a project change reaches main through a pull request. Agents can't
                          run set, unset, pr, interactive or --local changes.
 

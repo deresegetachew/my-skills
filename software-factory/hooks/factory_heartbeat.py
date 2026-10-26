@@ -48,7 +48,7 @@ silent.
 `factory autostart install` installs it too (unless --no-heartbeat). One daemon runs per project and machine: a
 second `run` stops with `{code: heartbeat-running}`. A GitHub failure is retried a minute later and never stops it.
 It runs as the same user as the agents; an agent could stop it or forge its state, which is acceptable for
-well-meaning agents, as the README says of the gate.
+well-meaning agents, as the wiki says of the gate (docs/wiki/reviews-and-gates.md).
 """
 import fcntl, json, os, re, signal, subprocess, sys, time
 from datetime import datetime, timezone

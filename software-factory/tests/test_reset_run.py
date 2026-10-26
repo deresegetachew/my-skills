@@ -3,6 +3,7 @@
 fake docker record every call, so the tests show that the plan changes nothing, that --apply does each step and only this
 project's own, and that a second run finds nothing.  python3 software-factory/tests/test_reset_run.py"""
 import datetime, json, os, socket, subprocess, sys, tempfile
+from wiki_text import readme_and_wiki
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SF = os.path.abspath(os.path.join(HERE, ".."))
@@ -167,7 +168,7 @@ def test_an_unknown_option_is_refused_before_anything_runs():
 def test_the_command_is_in_factory_help_and_the_readme_table():
     help_text = subprocess.run(["bash", os.path.join(SF, "factory"), "help"], capture_output=True, text=True).stdout
     assert "reset-run" in help_text and "--apply" in help_text
-    assert "`factory reset-run [--apply]`" in open(os.path.join(SF, "README.md")).read()
+    assert "`factory reset-run [--apply]`" in readme_and_wiki()
 
 
 if __name__ == "__main__":

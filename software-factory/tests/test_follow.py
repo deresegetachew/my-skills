@@ -6,6 +6,7 @@ The fake ssh runs the remote command on this machine, with the state of the remo
 its tmux sessions, their screens, whether the account has sudo). The fake tmux keeps sessions in files and logs what it was
 asked. Whether a real tmux shows the same screen to everyone is not tested here."""
 import json, os, shutil, subprocess, sys, tempfile
+from wiki_text import readme_and_wiki
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SF = os.path.abspath(os.path.join(HERE, ".."))
@@ -380,7 +381,7 @@ def test_new_files_reach_projects_through_the_old_kit_paths_and_are_documented()
     for name in ("factory_follow", "factory_remotes"):
         link = os.path.join(SF, "kit", ".claude", "hooks", name + ".py")
         assert os.path.islink(link) and os.path.realpath(link) == os.path.join(HOOKS, name + ".py"), name
-    readme = open(os.path.join(SF, "README.md")).read()
+    readme = readme_and_wiki()
     for part in ("factory follow", "factory say", "factory remote add", "--detach", "Remote Control", "sub-manager", "sudo",
                  "ControlMaster", "Ctrl-b d"):
         assert part in readme, part

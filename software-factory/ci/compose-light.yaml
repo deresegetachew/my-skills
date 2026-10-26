@@ -1,4 +1,4 @@
-# The light lane's runner (README.md, "CI"): for short jobs that need no Docker, such as the Factory guard. It has
+# The light lane's runner (docs/wiki/ci.md, "CI"): for short jobs that need no Docker, such as the Factory guard. It has
 # no Docker-in-Docker and no Docker socket, so it is small, starts fast, and isn't privileged. Its label is
 # `<repo>-light` (CI_RUNS_ON_LIGHT in the workflow), so heavy jobs never land on it and light ones never wait behind
 # them. One job per registration, then `down -v`, as for the heavy runners.

@@ -52,8 +52,8 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 | D6 | **The factory's code moves out of `.claude/`** into `software-factory/`, keeping its current names (`hooks/`, `ci/`, `factory`, `factory-loop.sh`, `tests/`). Claude Code's own files (agents, skills, `settings.json`, hooks it must call) stay in `.claude/`. One pull request per step. Remanual's `.claude/ci/*` links change in the same PR as its move. *The names and the guard entry were recorded.* | #112 |
 | D7 | **The dev manager is an orchestrator**: a loop script with no model that starts one-item sub-managers. The long cloud session stops managing and goes back to building my-skills and its factory. Scheduled tasks are paused by the owner and are not part of the design. | #97, #109, #95, #100 |
 | D8 | **Roles are factory commands run in a terminal**, on any machine, several of each, one fresh pass each: `factory coding-agent\|dev-manager\|product-owner [name] loop [-i]`. The role folder is committed in the project at `.claude/factory/roles/`; the PRD, designs and research stay in `docs/` and `design/`. The product owner role is generic, not Remanual-specific. | #95, #102 |
-| D9 | **All roles share one GitHub account.** A marker or claim names the role and name inside its body. `trustedReviewers` cannot tell roles apart. | #95, README "Roles" |
-| D10 | **GitHub is the state and the transport.** Labels, comments and markers carry it; nothing opens a port or adds a service. | #97, README "Messages between agents" |
+| D9 | **All roles share one GitHub account.** A marker or claim names the role and name inside its body. `trustedReviewers` cannot tell roles apart. | #95, wiki/roles.md "Roles" |
+| D10 | **GitHub is the state and the transport.** Labels, comments and markers carry it; nothing opens a port or adds a service. | #97, wiki/agent-loops.md "Messages between agents" |
 | D11 | **Agents run the agreed process and do not change it** (owner's rule, 21 Oct 2026). Agents cannot edit what governs them: the PR gate, the guard, `settings.json`, agent definitions and `.claude/factory.json` are protected. | DEV-MANAGER.md, my-skills `CLAUDE.md`, `.claude/factory.json` |
 | D12 | **Owner-only actions** (the list below). | #150, #114, `manage-pass` skill, `CLAUDE.md` |
 
@@ -61,7 +61,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 
 - **Publishing a release**: bumping `software-factory/VERSION`, tagging `vX.Y.Z` and pushing the tag. Nothing else
-  publishes one (#113, README "Cutting a release", `CLAUDE.md`).
+  publishes one (#113, wiki/updating.md "Cutting a release", `CLAUDE.md`).
 - **Closing issues.** The dev manager may not close them without his yes (#114, handover comment).
 - **Merging protected changes** (paths in `protected` in `.claude/factory.json`, such as `CLAUDE.md`, `.claude/`,
   `.github/`, `install.sh`, the PR gate and the guard) (#150, `CLAUDE.md`).
@@ -79,10 +79,10 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 | Role | What it is | Runs | Source |
 |---|---|---|---|
 | **Owner** | The one human. Decides what is his; reads the owner queue. | Claude app on a phone or PC | #114, #97 |
-| **Coding agent (builder)** | A fresh Claude session per task, named (menelik, taytu, ...). | `factory loop [-i]` on any machine | README "Agent loops" |
+| **Coding agent (builder)** | A fresh Claude session per task, named (menelik, taytu, ...). | `factory loop [-i]` on any machine | wiki/agent-loops.md "Agent loops" |
 | **Dev manager** | Orchestrator (no model) plus one-item sub-managers (a Claude session each). Reviews, merges within the owner's rule, answers questions, sweeps dead agents. | `factory dev-manager loop [-i]` on any machine | #97, #109, #102 |
 | **Product owner (PO)** | Generic role for product questions, the PRD, task order proposals and sign-off. | `factory product-owner loop [-i]` | #101, #110, #102 |
-| **Reviewer subagents** | `reviewer`, `architecture-reviewer`, `safety-auditor`, `security-reviewer`, and the `test-writer`. | Inside a builder's or manager's session | README "Reviews and gates" |
+| **Reviewer subagents** | `reviewer`, `architecture-reviewer`, `safety-auditor`, `security-reviewer`, and the `test-writer`. | Inside a builder's or manager's session | wiki/reviews-and-gates.md "Reviews and gates" |
 | **CI runner** | GitHub's, or the owner's own machine. | `factory ci` | #40 and the issues in section 4.7 |
 
 ## 4. User stories
@@ -91,33 +91,33 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 
 - **B1.** As a builder, I never choose a task by reading the plan: `next_task.py` hands me the next one. Rework on my
   open pull request (a must-fix naming its head commit) comes first; then a new task, by milestone and then issue
-  number, skipping any whose `Depends on` is still open. *Built.* (README "Tasks")
+  number, skipping any whose `Depends on` is still open. *Built.* (wiki/agent-loops.md "Tasks")
 - **B2.** As a builder, I claim an issue so that two agents, on one machine or on two, never build the same task. The
   earliest claim wins; the loser picks again. When a loop run ends, claims that have no branch or pull request are given
-  back, and `factory next` says which issue a down agent still holds. *Built.* (README "Issues mode"; #45, #191, #192)
+  back, and `factory next` says which issue a down agent still holds. *Built.* (wiki/agent-loops.md "Issues mode"; #45, #191, #192)
 - **B3.** As a builder, every task starts in a fresh Claude session, so no task carries the last one's context.
   `factory loop` runs unattended; `factory loop -i` opens a session the owner can watch and type into. An unattended run
   gets `--permission-mode` from the `permissionMode` setting (default `acceptEdits`), `factory doctor` says `fix` when a
   headless run would stall, and a headless loop in a folder Claude Code does not trust stops before it spends tokens.
   *Built.* (#56, #179, #180, #193)
 - **B4.** As a builder, I write failing tests first (`test-writer`), build, ask the reviewers, and open one small pull
-  request with `Closes #<n>` and the tests. *Built.* (README "Reviews and gates"; `CLAUDE.md`)
+  request with `Closes #<n>` and the tests. *Built.* (wiki/reviews-and-gates.md "Reviews and gates"; `CLAUDE.md`)
 - **B5.** As a builder, the PR gate only lets me open a ready PR when the reviewer passed this exact commit, `factory
   verify` passed it (when `commands.ci` is set), and fewer than `maxOpenPRs` of my PRs are open. It blocks with a reason
-  and fails closed. *Built.* (README "The PR gate"; #58)
+  and fails closed. *Built.* (wiki/reviews-and-gates.md "The PR gate"; #58)
 - **B6.** As a builder, I merge my own PR only when the gate allows: reviewer pass for the head, CI green, no
   `factory-hold`, no must-fix after the last approval, no protected file changed. The merge carries
-  `--match-head-commit`. *Built.* (README "The PR gate")
+  `--match-head-commit`. *Built.* (wiki/reviews-and-gates.md "The PR gate")
 - **B7.** As a builder, I ask a question as a `factory-question` comment and keep working on something else while I wait.
-  *Built.* (README "The dev manager"; #107)
+  *Built.* (wiki/dev-manager.md "The dev manager"; #107)
 - **B8.** As a builder, I wait for a PR slot, CI, an answer, a merge or a ready task with a shell loop that costs no
   tokens, and I never poll in the conversation. *Built.* (#71)
 - **B9.** As a builder, I have my own folder, ports and database, and my name is unique across machines; a second machine
-  that takes my name is refused. *Built.* (README "Names and folders"; #45, #48)
+  that takes my name is refused. *Built.* (wiki/agent-loops.md "Names and folders"; #45, #48)
 - **B10.** As a builder, I read only what the task points to, see only failing lines of a failing check, get my changed
   files formatted for me, and read the short lessons file first. *Built.* (#57, #61, #68, #69, #72)
 - **B11.** As a builder, I cannot change what governs me: no edits to `.claude/`, `vendor/`, `CLAUDE.md` or the PRD, no
-  settings changes, no dev manager markers, no `gh api`. *Built.* (README "The PR gate", `settings.json`)
+  settings changes, no dev manager markers, no `gh api`. *Built.* (wiki/reviews-and-gates.md "The PR gate", `settings.json`)
 - **B12.** As a builder, an interrupted machine does not lose my unfinished work: `factory autostart` brings the stack
   and my session back, after saving uncommitted and unpushed work. *Built.* (#88)
 - **B13.** As a builder in a new worktree, my hooks and deny rules load before I run. *Built.* (#46)
@@ -160,12 +160,12 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
   do the same item twice, and a manager that dies mid-review does not block a PR. *Built.* (#99)
 - **M12.** As a manager, I merge only a head with `factory-approved sha=<head>`, pinned to that sha, with CI judged green,
   and never a PR I opened myself. My profile and `manager_gate.py` refuse the rest and tell me to write an owner-queue ask
-  instead. *Built.* (#96; README "The dev manager")
+  instead. *Built.* (#96; wiki/dev-manager.md "The dev manager")
 - **M13.** As a manager, I answer the builders' `factory-question` comments from the PRD, `CLAUDE.md`, the decisions and
   the sources, and escalate only what is the owner's (scope, legal or customer-facing, money, names, files or keys) as
   `needs-owner:` plus an owner-queue ask with a recommendation. *Built.* (DEV-MANAGER.md; `manage-pass`)
 - **M14.** As a manager, I mark dead agents down and put their in-progress issues back to ready (`factory agents sweep`),
-  and release quiet issues after checking the agent is gone. *Built.* (README "Live agents")
+  and release quiet issues after checking the agent is gone. *Built.* (wiki/agent-loops.md "Live agents")
 - **M15.** As the owner, I reach any item the manager is working on with `factory dev-manager loop -i` from any machine
   with the factory installed, or from the Claude app through Remote Control. `factory follow` lists the one-item
   sub-managers next to the agents. *Built (`-i`; `factory follow` lists sessions named `<manager>-<item>`); the orchestrator that starts them is built (#137).* (#97, #106)
@@ -212,7 +212,7 @@ until he agrees them."
 
 - **R1.** As the reviewer, I review every change before its pull request: I run the checks and the Factory guard, check the
   task, the PRD and `CLAUDE.md`, and record a pass for that exact commit with one command, `factory review-pass reviewer|arch`. A new commit needs a new
-  review. *Built.* (README "Reviews and gates"; #197)
+  review. *Built.* (wiki/reviews-and-gates.md "Reviews and gates"; #197)
 - **R2.** As a specialist reviewer, `architecture-reviewer` reviews changes on paths with a style guide, `safety-auditor`
   reviews changes on its listed paths, and `security-reviewer` reviews changes on its listed paths. The PR gate needs the
   architecture pass on styled paths. `factory reviews` lists which extra reviews a change needs. *Built.*
@@ -222,7 +222,7 @@ until he agrees them."
 - **R5.** As the owner, no agent grades its own work. The Factory guard in CI fails a PR that deletes or weakens a test,
   changes a golden output, adds `.skip`/`.only`, adds a dependency, reuses a decision number, ticks another task's box or
   uses `pull_request_target`; only the dev manager adds `tests-reviewed` or `deps-reviewed`, after reading the change.
-  *Built.* (README "The Factory guard")
+  *Built.* (wiki/reviews-and-gates.md "The Factory guard")
 - **R6.** As the owner, subagents use cheaper models where a miss is cheap and the strongest where it is costly: the
   `test-writer`, `architecture-reviewer` and the reviewer's first pass on Sonnet; the `safety-auditor` and
   `security-reviewer` on Opus; a must-fix is re-reviewed on Opus. The `models` setting sets one per role. *Built.* (#82,
@@ -234,12 +234,12 @@ until he agrees them."
 
 - **O1.** As the owner, I run the factory without a UI of ours: the Claude app plus a Remote Control `-i` session, and plain
   text commands. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan. *Decided (D1); the
-  commands are built.* (#114; README "From your phone")
+  commands are built.* (#114; wiki/agent-loops.md "From your phone")
 - **O2.** As the owner, I am told only what needs me, each as one item on the owner-queue issue ("Dev manager: needs the
   owner") with the question, a recommendation and the exact command or step, posted once however many managers want to
   post it. *Built.* (#95; `factory manager-claims ask`)
 - **O3.** As the owner, I can stop any role with Ctrl-C or one command, and every claim it held is dropped. *Built.* (#95,
-  README "Agent loops")
+  wiki/agent-loops.md "Agent loops")
 - **O4.** As the owner, I see the whole factory at a glance, read-only, across machines: `factory status` (agents, claims,
   PRs, CI queue, tasks), `factory agents ls`, `factory prs`, `factory report`, `factory usage`. *Built.* (#64, #65, #108)
 - **O5.** As the owner, I watch and talk to any agent or sub-manager by name from my own terminal, wherever it runs:
@@ -249,9 +249,9 @@ until he agrees them."
   (#114)
 - **O7.** As the owner, branch protection on `main` is the lock, and the PR gate and hooks are guard rails for well-meaning
   agents. Everything is opened under one account, so branch protection requires a pull request with 0 approvals, the CI
-  checks, no force pushes and no bypass. *Built (documented).* (README "Branch protection")
+  checks, no force pushes and no bypass. *Built (documented).* (wiki/reviews-and-gates.md "Branch protection")
 - **O8.** As the owner, secrets never enter the repo or an agent's prompt. Agents are denied reading `.env` files, and
-  the factory never reads, prints or stores a token or key. *Built.* (README "Security notes", "bootstrap")
+  the factory never reads, prints or stores a token or key. *Built.* (wiki/sandboxed-machine.md "Security notes", "bootstrap")
 - **O9.** As the owner, my-skills is built by its own factory: its tasks are issues with the `factory:*` labels, its
   agents and gate are the ones any project gets, and its protected paths include the gate, the guard, `settings.json`,
   the agents, skills and CI. *Built (part of #112); remaining work is in #112.* (#112, #141)
@@ -282,7 +282,7 @@ until he agrees them."
 - **U6.** As a project owner, what stays mine is `.claude/factory.json`, the notes, the lessons file, the roles folder,
   `CLAUDE.md`, my docs and CI workflow; a rule that should change everywhere is changed in my-skills. I never edit a
   shared file in my project. My own allow rules go in `.claude/factory.json` (`permissions.allow`), and `factory update`
-  merges them into the release's `settings.json`. *Built.* (README "Shared and project-owned"; #112, #198)
+  merges them into the release's `settings.json`. *Built.* (wiki/submodule.md "Shared and project-owned"; #112, #198)
 - **U7.** As a project on the submodule, I keep working until I move. I move to the new layout or to releases in one
   reviewed pull request, with no flag day. `factory update --release` refuses where the files are still links. Moving
   Remanual changes protected files there, so it is the owner's merge. *Built (the commands); the migration is owner-led.*
@@ -326,7 +326,7 @@ until he agrees them."
   store is shared between jobs, so one PR cannot plant code that a later job runs. *Built.* (#60)
 - **C5.** As everyone, a CI outage (GitHub's billing block, no runner) is reported as an outage, not as a code failure,
   and agents do not push or re-run to chase it. An agent reads why its own CI failed with `factory ci log <pr>`. *Built.*
-  (README "The PR gate"; `factory_ci.py`; #206)
+  (wiki/reviews-and-gates.md "The PR gate"; `factory_ci.py`; #206)
 - **C6.** As the owner, `factory ci status` works in both modes and shows where CI runs, the latest runs, the runners and
   runs queued for a long time; `factory ci stale` and `factory ci check` say whether the installed copies are older than
   the checkout and fit to start. *Built.* (#40, #113)
@@ -335,13 +335,13 @@ until he agrees them."
 - **C8.** As the owner, I know the risk: the Docker-in-Docker container is privileged and runs the tested branch's code,
   so it is not a security boundary. The mitigations are a private repo, fork PR workflows off, and (recommended on Linux)
   a dedicated user with rootless Docker. Running the runner in a separate VM is the follow-up in Remanual #150. *Built
-  (documented); the VM is open.* (README "The known risk")
+  (documented); the VM is open.* (wiki/ci.md "The known risk")
 
 ### 4.8 Settings
 
 - **S1.** As the owner, one table, `hooks/factory_settings_schema.py`, describes every setting (key, type, default,
-  section, help, who must approve a change), and the list, `help`, `validate`, the menu and the README tables are all
-  generated from it. A test fails when the README tables drift. *Built.* (#49, `CLAUDE.md`)
+  section, help, who must approve a change), and the list, `help`, `validate`, the menu and the tables on the wiki's settings page are all
+  generated from it. A test fails when those tables drift. *Built.* (#49, `CLAUDE.md`)
 - **S2.** As the owner, `factory settings` is a menu in a terminal and a set of commands in scripts: `list`, `get`, `set`,
   `unset`, `help`, `diff`, `validate`, `pr`. `validate` fails with clear messages on a bad value. *Built.* (#49)
 - **S3.** As the owner, only people change settings. `set`, `unset`, `pr` and `--local` refuse inside an agent session, the
@@ -351,8 +351,8 @@ until he agrees them."
   machine file (machine keys only), then the environment. *Built.* (#48, #49)
 - **S5.** As the owner, a project may set a model and effort per role in `models`; a project with no entry behaves as
   before. *Built.* (#94, #117)
-- **S6.** As a new setting's author, I add it to the schema with its help and default and to the README table; a new
-  command appears in `factory help`, the README commands table and has a test of its output. *Built (the rule is in
+- **S6.** As a new setting's author, I add it to the schema with its help and default and to the table on the settings page; a new
+  command appears in `factory help`, the commands table on the wiki's commands page and has a test of its output. *Built (the rule is in
   `CLAUDE.md`).*
 
 ### 4.9 Running it: liveness, messages, cost
@@ -378,10 +378,10 @@ until he agrees them."
 - **A model in the dev manager's idle loop.** (#97, #109)
 - **Scheduled cloud tasks** as part of the design. (#109)
 - **A hard security boundary on the agents' machine.** The gate, hooks and heartbeat are guard rails for well-meaning
-  agents; the lock is GitHub's branch protection, and a separate GitHub account for agents is the recommendation. (README
+  agents; the lock is GitHub's branch protection, and a separate GitHub account for agents is the recommendation. (wiki/sandboxed-machine.md
   "Security notes")
 - **Bootstrap on macOS or as a VM.** `factory bootstrap` is Linux only for now, and does not create the GitHub account.
-  (README "A sandboxed machine")
+  (wiki/sandboxed-machine.md "A sandboxed machine")
 
 ## 6. Later / open
 
@@ -436,7 +436,7 @@ No recorded decision explains the choice of Python; the README only lists it as 
 ### C. Other things that are later or not agreed
 
 - **An A2A adapter** for the message envelope, in the heartbeat daemon. GitHub stays the transport; the adapter is a later
-  step that needs no format change. (README "Messages between agents"; `docs/messages.md`)
+  step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)
 - **Live access to Claude Design and artifacts** from a role's terminal session, per role and off by default, after the
   spike. (#104)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
@@ -484,7 +484,7 @@ PR #39 was a draft PRD, written 22 to 24 Oct, that nobody had reviewed (#114, #1
 
 ## Where to read next
 
-- [README.md](../README.md): the commands, the settings, "Where things live", releases.
+- [README.md](../README.md): the front page, "Where things live" and the contents of the wiki ([docs/wiki/](wiki/): the commands, the settings, releases).
 - [DEV-MANAGER.md](../DEV-MANAGER.md) and `kit/.claude/skills/manage-pass/SKILL.md`: the dev manager's rules.
 - [messages.md](messages.md): the message envelope.
 - Issue #114: the order of work. `factory next` shows the next task.

@@ -45,7 +45,7 @@ The dev manager is **not one long session**. `factory dev-manager loop` is an **
 that needs a manager it starts a **one-item sub-manager**: a fresh, small `claude -p "/manage-pass pr-417"` on the manager's
 settings profile. A sub-manager reads its item's fact sheet and thread note, does that one thing, writes down what it decided,
 and exits. The orchestrator never reviews, merges or answers itself; it posts to the owner queue what only the owner can do, and
-it keeps leases so two managers never take the same item. Details and settings: README, "Run a manager".
+it keeps leases so two managers never take the same item. Details and settings: wiki page docs/wiki/dev-manager.md, "Run a manager".
 
 What this means for you, in practice:
 
@@ -65,7 +65,7 @@ There is no web console. To look at, steer or take over an item:
 
 - On any machine with the factory installed: `factory dev-manager loop -i` runs one item in a session you can type into
   (Remote Control is on, so you can also attach from the Claude app). `factory follow <name>` watches a running manager;
-  `factory say <name> "..."` talks to it (README, "Watch and talk to an agent").
+  `factory say <name> "..."` talks to it (docs/wiki/agent-loops.md, "Watch and talk to an agent").
 - From the Claude app: open the manager's Remote Control session (its name is the manager's) and talk to it there.
 - Plain text, anywhere: `factory prs` (the one list a pass starts from), `factory watch` (what needs whom), `factory agents`
   (who is alive), `factory messages ls` (open questions) and the owner-queue issue.
@@ -307,7 +307,7 @@ what it reads for its one item, not a growing history.
 - A manager pass starts from its fact sheet and thread note, not from the whole repo; keep the role README and `reads.md`
   short, since every item reads them.
 - Pick models per role: `models` in `.claude/factory.json` sets one for the builder, manager, product owner and each subagent;
-  a role with no entry keeps the agent file's `model:` or Claude Code's default (`factory doctor` shows which). See the README,
+  a role with no entry keeps the agent file's `model:` or Claude Code's default (`factory doctor` shows which). See docs/wiki/agent-loops.md,
   "Model and effort per role". Cheaper models for routine subagents, the strongest for the reviewer and safety audits.
 - Check spend with `factory usage --by role` (the sessions are told apart by the marker in their first prompt), `--by agent` and
   `--by task`; `factory usage --record "<what changed>"` keeps a row per measurement in `docs/factory-usage.md`. Take a row before

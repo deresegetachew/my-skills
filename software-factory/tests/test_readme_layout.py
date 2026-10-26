@@ -2,6 +2,7 @@
 """The README's "Where things live" section matches the folders (#112), so it cannot drift from the move.
 python3 software-factory/tests/test_readme_layout.py"""
 import os, re, subprocess
+from wiki_text import readme_and_wiki
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SF = os.path.abspath(os.path.join(HERE, ".."))
@@ -9,7 +10,7 @@ README = open(os.path.join(SF, "README.md")).read()
 
 
 def section():
-    m = re.search(r"^## Where things live\n(.*?)^## ", README, re.S | re.M)
+    m = re.search(r"^## Where things live\n(.*?)(?:^## |\Z)", README, re.S | re.M)
     assert m, "the README has no 'Where things live' section"
     return m.group(1)
 
@@ -39,7 +40,7 @@ def test_the_switch_command_the_section_gives_is_one_the_factory_command_and_ins
 
 
 def test_the_files_in_the_kit_tree_lists_the_hooks_and_ci_folders_beside_kit_not_inside_it():
-    m = re.search(r"software-factory/\n  README\.md .*?\n```", README, re.S)
+    m = re.search(r"software-factory/\n  README\.md .*?\n```", readme_and_wiki(), re.S)
     assert m
     tree = m.group(0)
     assert re.search(r"^  hooks/$", tree, re.M) and re.search(r"^  ci/ ", tree, re.M), tree[:400]
@@ -51,7 +52,7 @@ def test_the_files_in_the_kit_tree_lists_the_hooks_and_ci_folders_beside_kit_not
 
 def test_the_readme_points_at_the_prd_near_the_top_and_the_file_exists():
     assert os.path.isfile(os.path.join(SF, "docs", "PRD.md"))
-    top = README[:README.index("## Contents")]
+    top = README[:README.index("## Wiki")]
     assert "software-factory/docs/PRD.md" in top, "the README intro must link the PRD"
     assert "source of truth" in top
 

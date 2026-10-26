@@ -3,6 +3,7 @@
 GETs. Runs with a fake `gh` on PATH that answers from a JSON file and logs every call.
   python3 software-factory/tests/test_ci_log.py"""
 import json, os, subprocess, sys, tempfile
+from wiki_text import readme_and_wiki
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SF = os.path.abspath(os.path.join(HERE, ".."))
@@ -105,7 +106,7 @@ def test_it_only_reads():
 def test_help_and_readme_list_the_command():
     help_ = subprocess.run(["bash", os.path.join(SF, "factory"), "help"], capture_output=True, text=True).stdout
     assert "ci log" in help_, help_
-    assert "| `factory ci log" in open(os.path.join(SF, "README.md")).read()
+    assert "| `factory ci log" in readme_and_wiki()
 
 
 if __name__ == "__main__":

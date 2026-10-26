@@ -253,7 +253,7 @@ def cmd_status(cfg):
         print("The shared build cache is off: turbo.api is empty.")
         print("Turn it on: pick the address agents and CI will use (this machine's Tailscale or LAN address and port "
               f"{s['port']}), `factory settings set turbo.api http://<address>:{s['port']}`, `factory settings set "
-              "turbo.bind <address>`, then `factory turbo install`. README.md, \"A shared build cache\".")
+              "turbo.bind <address>`, then `factory turbo install`. docs/wiki/ci.md, \"A shared build cache\".")
         return 0
     secrets, where, notes = resolve_secrets(s)
     bad = 0
@@ -270,7 +270,7 @@ def cmd_status(cfg):
         print(f"signature   key found, from {where['TURBO_REMOTE_CACHE_SIGNATURE_KEY']}"
               + ("" if signs is not False else "; but turbo.json has no remoteCache.signature, so nothing is signed"))
     else:
-        print("signature   no key (artifacts are not signed). Optional: README.md, \"A shared build cache\".")
+        print("signature   no key (artifacts are not signed). Optional: docs/wiki/ci.md, \"A shared build cache\".")
     for n in notes:
         print(f"note        {n}")
     if "TURBO_TOKEN" in secrets:

@@ -141,7 +141,7 @@ def test_a_failing_check_shows_the_failures_first_within_the_limit():
 # #49: the interactive `factory settings`, sections, help, diff, validate, --local, saving through a PR.
 
 PR_GATE = os.path.join(HOOKS, "pr-gate.py")
-README = os.path.abspath(os.path.join(HERE, "..", "README.md"))
+README = os.path.abspath(os.path.join(HERE, "..", "docs", "wiki", "settings.md"))  # the page that holds the generated tables (#242)
 TEMPLATE = os.path.abspath(os.path.join(HERE, "..", "kit", ".claude", "factory.json"))
 
 

@@ -4,6 +4,7 @@ import json, os, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_issues import HOOKS, issue, labels, run, setup  # noqa: E402
+from wiki_text import readme_and_wiki
 
 
 def claims(agent, *extra):
@@ -57,7 +58,7 @@ def test_release_of_a_claim_that_is_not_there_says_so():
 
 def test_readme_and_help_describe_the_output():
     sf = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
-    readme = open(os.path.join(sf, "README.md")).read()
+    readme = readme_and_wiki()
     assert "Nothing to release" in readme, "README should show the release output"
     assert "in review: added" in readme, "README should show the review output"
 

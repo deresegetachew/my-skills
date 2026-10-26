@@ -191,7 +191,7 @@ def act(action, **more):
 
 
 def next_action(p, held, runs_by_job, flakes):
-    """One next step for the manager, from what the record already holds (see the README for the order)."""
+    """One next step for the manager, from what the record already holds (see docs/wiki/dev-manager.md for the order)."""
     ci, claim, head = p["ci"], p["claim"], p["headMarker"]
     if held:
         if not (p["staleHold"] and head is None):
@@ -413,7 +413,7 @@ def show(r):
 
 def main():
     ap = argparse.ArgumentParser(description="The list a dev manager starts a pass from. Read-only.")
-    ap.add_argument("--json", action="store_true", help="the same, as JSON for scripts (schema in the README)")
+    ap.add_argument("--json", action="store_true", help="the same, as JSON for scripts (schema in docs/wiki/dev-manager.md)")
     ap.add_argument("--since-days", type=int, default=14,
                     help="how far back to look for unanswered questions on issues (default 14)")
     a = ap.parse_args()

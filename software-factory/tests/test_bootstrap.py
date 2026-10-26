@@ -15,6 +15,7 @@ sys.path.insert(0, HOOKS)
 import factory_bootstrap as B  # noqa: E402
 import factory_bootstrap_machine as M  # noqa: E402
 import factory_netguard as G  # noqa: E402
+from wiki_text import readme_and_wiki
 
 USER = "sbxuser"
 MUTATING = ("apt-get", "adduser", "usermod", "gpasswd", "chmod", "loginctl", "systemctl", "nft", "sshd")
@@ -635,7 +636,7 @@ def test_new_files_reach_projects_through_the_old_kit_paths_and_are_documented()
                  "factory_sandbox", "factory_netguard"):
         link = os.path.join(SF, "kit", ".claude", "hooks", name + ".py")
         assert os.path.islink(link) and os.path.realpath(link) == os.path.join(HOOKS, name + ".py"), name
-    readme = open(os.path.join(SF, "README.md")).read()
+    readme = readme_and_wiki()
     for part in ("factory bootstrap", "--apply", "--script", "doctor --sandbox", "Network guard", "manifest",
                  "gh auth login", "FACTORY-BLOCK"):
         assert part in readme, part

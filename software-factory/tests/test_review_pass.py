@@ -2,6 +2,7 @@
 """`factory review-pass` (#197): a review agent records its pass with one allowed command, and the review agents'
 documented steps use only commands the kit's allow list covers.  python3 software-factory/tests/test_review_pass.py"""
 import fnmatch, json, os, re, subprocess, sys, tempfile
+from wiki_text import readme_and_wiki
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SF = os.path.abspath(os.path.join(HERE, ".."))
@@ -72,7 +73,7 @@ def test_factory_command_and_help():
     assert 'review-pass) py factory_review_pass.py "$@"' in " ".join(open(FACTORY).read().split())
     h = subprocess.run(["bash", FACTORY, "help"], capture_output=True, text=True, env=ENV).stdout
     assert "review-pass" in h
-    assert "factory review-pass" in open(os.path.join(SF, "README.md")).read()
+    assert "factory review-pass" in readme_and_wiki()
 
 
 def allowed():
