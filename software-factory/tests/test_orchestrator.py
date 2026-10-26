@@ -412,6 +412,53 @@ def test_a_pass_that_finds_the_item_gone_starts_nothing():
     assert not prompts(env)
 
 
+def run_sub(work, env, item="pr-5"):
+    return py(work, env, "factory_orchestrator.py", "sub", "--name", "lead", "--item", item)
+
+
+def skip_comments(d, number):
+    return [b for b in posted(d, number) if "factory-manager-skip" in b]
+
+
+def test_a_sub_manager_that_leaves_a_conflicting_pr_without_a_verdict_gets_one_comment_with_the_reason_and_next_step():
+    # #195: PR took a review claim, released it, wrote a note: nothing a person could read on the PR.
+    d, work, env = world(db={"pulls": [pr(5, mergeable_state="dirty")], "commits": {H: iso(60)}})
+    p = run_sub(work, env)
+    assert p.returncode == 0, (p.stdout, p.stderr)
+    skips = skip_comments(d, 5)
+    assert len(skips) == 1, posted(d, 5)
+    text = skips[0]
+    assert f"sha={H}" in text and "did not review" in text, text
+    assert "merge conflict" in text and "Next step" in text and "merge main" in text.lower(), text
+
+
+def test_the_skip_comment_is_not_repeated_for_the_same_head():
+    d, work, env = world(db={"pulls": [pr(5, mergeable_state="dirty")], "commits": {H: iso(60)}})
+    run_sub(work, env)
+    run_sub(work, env)
+    assert len(skip_comments(d, 5)) == 1, posted(d, 5)
+
+
+def test_no_skip_comment_when_the_sub_manager_posted_its_own_verdict():
+    d, work, env = world(db={"pulls": [pr(5, mergeable_state="dirty")], "commits": {H: iso(60)}})
+    hook = os.path.join(d, "hook.py")
+    open(hook, "w").write("import json, os\nf = os.environ['FAKE_DB']; db = json.load(open(f))\n"
+                          "db['comments'].setdefault('5', []).append({'id': 7001, 'body': 'Must-fix: conflict.', 'created_at': '2026-10-26T10:00:00Z'})\n"
+                          "json.dump(db, open(f, 'w'))\n")
+    env["FAKE_CLAUDE_HOOK"] = hook
+    open(os.path.join(d, "hook.sh"), "w").write(f'python3 "{hook}"\n')
+    env["FAKE_CLAUDE_HOOK"] = os.path.join(d, "hook.sh")
+    run_sub(work, env)
+    assert skip_comments(d, 5) == [], posted(d, 5)
+
+
+def test_a_red_ci_skip_names_the_failed_jobs():
+    d, work, env = world(db={"pulls": [pr(5)], "commits": {H: iso(60)}, "checks": {H: [bad_run("tests")]}})
+    run_sub(work, env)
+    text = (skip_comments(d, 5) or [""])[0]
+    assert "CI" in text and "tests" in text and "factory ci log" in text, posted(d, 5)
+
+
 def test_a_failed_sub_manager_leaves_the_pid_file_removed_and_the_lease_released():
     d, work, env = world(db=UNREVIEWED)
     hook = os.path.join(d, "hook.sh")
