@@ -3,6 +3,7 @@
 
   python3 factory_stack.py detect <project>         prints JSON: {stack, reason, commands, notes}
                                                     stack is node (package.json), python, or unknown
+  python3 factory_stack.py lines <project>          prints what the install says about the stack
   python3 factory_stack.py apply <project>          writes the Python `commands.*` into <project>/.claude/factory.json
                                                     (does nothing for node or an unknown stack)
   python3 .claude/hooks/factory_stack.py run <name> runs commands.<name> from .claude/factory.json in the current
@@ -49,16 +50,33 @@ def detect(root):
     return {"stack": "python", "reason": "Python files", "commands": cmds, "notes": notes}
 
 
+def commands_text(text, found):
+    """factory.json's text with a Python stack's `commands.*` written in (unchanged for any other stack)."""
+    if found["stack"] != "python":
+        return text
+    cfg = json.loads(text)
+    cfg.setdefault("commands", {}).update(found["commands"])
+    return json.dumps(cfg, indent=2, ensure_ascii=False) + "\n"
+
+
+def lines(found):
+    """What the install tells the person about the stack it found (the same words from install.sh and the release client)."""
+    if found["stack"] == "python":
+        return ["Stack: Python (no package.json). CI uses the Python workflow, and commands.* in .claude/factory.json were set to match."] \
+            + ["Note: " + n for n in found["notes"]]
+    if found["stack"] == "unknown":
+        return ["Stack: could not tell (no package.json, no Python files). CI keeps the pnpm template.",
+                "Note: edit .github/workflows/ci.yml and the commands in .claude/factory.json to match your project."]
+    return []
+
+
 def apply(root):
     found = detect(root)
-    if found["stack"] != "python":
-        return found
     path = os.path.join(root, ".claude", "factory.json")
-    cfg = json.load(open(path))
-    cfg.setdefault("commands", {}).update(found["commands"])
-    with open(path, "w") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
-        f.write("\n")
+    if found["stack"] == "python":
+        text = commands_text(open(path).read(), found)
+        with open(path, "w") as f:
+            f.write(text)
     return found
 
 
@@ -74,6 +92,9 @@ def run(name):
 def main(argv):
     if len(argv) == 2 and argv[0] in ("detect", "apply"):
         print(json.dumps((detect if argv[0] == "detect" else apply)(argv[1]), indent=2))
+        return 0
+    if len(argv) == 2 and argv[0] == "lines":
+        print("\n".join(lines(detect(argv[1]))))
         return 0
     if len(argv) == 2 and argv[0] == "run":
         return run(argv[1])

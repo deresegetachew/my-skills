@@ -883,6 +883,67 @@ def test_version_mentions_a_prerelease_newer_than_the_newest_full_release():
     assert "Newest     v1.0.0" in out and "v1.1.0-rc.1" in out and "Pre-release" in out, out
 
 
+def stack_world(project_files):
+    """A release that carries the real stack detector, both CI workflows and a pnpm factory.json template."""
+    gh, d, env = world()
+    gh.add("1.0.0", files={
+        "hooks/factory_stack.py": open(os.path.join(SF, "hooks", "factory_stack.py")).read(),
+        "kit/.github/workflows/ci.yml": "name: CI\n# pnpm template\n",
+        "kit/.github/workflows/ci-python.yml.template": "name: CI\n# python template\n",
+        "kit/.claude/factory.json": json.dumps({"commands": {"install": "pnpm install", "test": "pnpm -s test", "build": "pnpm -s build"}}) + "\n"})
+    for rel, body in project_files.items():
+        os.makedirs(os.path.dirname(os.path.join(d, rel)) or d, exist_ok=True)
+        open(os.path.join(d, rel), "w").write(body)
+    commit(d, "the project")
+    return gh, d, env
+
+
+UNITTEST_TESTS = "import unittest\n\nclass T(unittest.TestCase):\n    def test_a(self):\n        pass\n"
+
+
+def test_a_first_release_install_in_a_python_project_gets_the_python_workflow_and_commands():
+    gh, d, env = stack_world({"tests/test_a.py": UNITTEST_TESTS})
+    rc, out = fac(d, env, "update", "v1.0.0")
+    assert rc == 0, out
+    assert "python template" in open(os.path.join(d, ".github/workflows/ci.yml")).read()
+    assert not os.path.exists(os.path.join(d, ".github/workflows/ci-python.yml.template"))
+    c = json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]
+    assert c["test"] == "python3 -m unittest discover" and not c["install"] and not c["build"], c
+    assert "Stack: Python" in out, out
+    # later updates leave the project's workflow and commands alone
+    open(os.path.join(d, ".github/workflows/ci.yml"), "a").write("# mine\n")
+    commit(d)
+    gh.add("1.1.0", files={"hooks/factory_stack.py": open(os.path.join(SF, "hooks", "factory_stack.py")).read()})
+    assert fac(d, env, "update")[0] == 0
+    assert open(os.path.join(d, ".github/workflows/ci.yml")).read().endswith("# mine\n")
+    assert json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]["test"] == "python3 -m unittest discover"
+
+
+def test_a_first_release_install_in_a_node_project_is_unchanged():
+    gh, d, env = stack_world({"package.json": "{}\n", "tests/test_a.py": UNITTEST_TESTS})
+    rc, out = fac(d, env, "update", "v1.0.0")
+    assert rc == 0, out
+    assert "pnpm template" in open(os.path.join(d, ".github/workflows/ci.yml")).read()
+    assert json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]["test"] == "pnpm -s test"
+    assert "Stack:" not in out, out
+
+
+def test_a_first_release_install_in_an_unknown_stack_keeps_pnpm_and_says_what_to_edit():
+    gh, d, env = stack_world({"main.c": "int main(){}\n"})
+    rc, out = fac(d, env, "update", "v1.0.0")
+    assert rc == 0 and "pnpm template" in open(os.path.join(d, ".github/workflows/ci.yml")).read(), out
+    assert "could not tell" in out and ".github/workflows/ci.yml" in out, out
+
+
+def test_a_first_release_install_never_overwrites_an_existing_workflow_or_factory_json():
+    gh, d, env = stack_world({"tests/test_a.py": UNITTEST_TESTS, ".github/workflows/ci.yml": "name: mine\n",
+                              ".claude/factory.json": '{"commands": {"test": "make test"}}\n'})
+    rc, out = fac(d, env, "update", "v1.0.0")
+    assert rc == 0, out
+    assert open(os.path.join(d, ".github/workflows/ci.yml")).read() == "name: mine\n"
+    assert json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]["test"] == "make test"
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

@@ -141,14 +141,8 @@ grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignor
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 if [ "$setup" = 1 ]; then
   echo
-  case "$stack" in
-    python)
-      echo "Stack: Python (no package.json). CI uses the Python workflow, and commands.* in .claude/factory.json were set to match."
-      python3 "$here/hooks/factory_stack.py" apply "$dst" | python3 -c 'import json,sys;[print("Note: "+n) for n in json.load(sys.stdin)["notes"]]' ;;
-    unknown)
-      echo "Stack: could not tell (no package.json, no Python files). CI keeps the pnpm template."
-      echo "Note: edit .github/workflows/ci.yml and the commands in .claude/factory.json to match your project." ;;
-  esac
+  python3 "$here/hooks/factory_stack.py" apply "$dst" >/dev/null  # Python: the commands.* to match
+  python3 "$here/hooks/factory_stack.py" lines "$dst"
   echo "Next: fill in .claude/factory.json, write CLAUDE.md from CLAUDE.factory.md, write docs/build-plan.md."
   echo "Then run ./factory help (and ./factory install-shim once, to type just: factory ...)."
 fi
