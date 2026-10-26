@@ -25,9 +25,9 @@ PROMPT = "/manage-pass"
 
 
 def mcp_flags():
-    """Only the project's MCP servers, from main on the remote (factory_mcp.py); none when it can't say."""
+    """Only the project's MCP servers, from main on the remote (factory_mcp.ts); none when it can't say."""
     here = os.path.dirname(os.path.abspath(__file__))
-    p = subprocess.run([sys.executable, os.path.join(here, "factory_mcp.py")], capture_output=True, text=True, timeout=120)
+    p = subprocess.run(["bun", "--no-env-file", os.path.join(here, "factory_mcp.ts")], capture_output=True, text=True, timeout=120)
     cfg = p.stdout.strip() or '{"mcpServers":{}}'
     return ["--mcp-config", cfg, "--strict-mcp-config"]
 

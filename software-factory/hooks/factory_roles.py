@@ -235,7 +235,7 @@ def session_flags(cfg, role):
     """The `claude` arguments for a session of `role` started from Python (the orchestrator's sub-managers), the same
     the loop script builds: only the project's MCP servers as main has them, the role's profile, and the model."""
     import subprocess
-    mcp = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_mcp.py")],
+    mcp = subprocess.run(["bun", "--no-env-file", os.path.join(os.path.dirname(os.path.abspath(__file__)), "factory_mcp.ts")],
                          capture_output=True, text=True).stdout.strip() or '{"mcpServers":{}}'
     flags = ["--mcp-config", mcp, "--strict-mcp-config", *profile_flags(cfg, role)]
     import factory_models

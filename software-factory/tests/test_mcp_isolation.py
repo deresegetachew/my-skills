@@ -4,7 +4,8 @@ factory-loop.sh (headless and -i) and `factory agent` start gets --strict-mcp-co
 .mcp.json main has on origin (or an empty config), never the worktree's copy, and settings that turn the claude.ai
 connectors off. Runs the real scripts with stub
 hooks and a stub `claude` that records its arguments.
-  python3 software-factory/tests/test_mcp_isolation.py"""
+  python3 software-factory/tests/test_mcp_isolation.py
+The loop tests are in mcp_isolation.test.ts (#252); `factory agent` needs factory_claims, not ported yet."""
 import json, os, pty, select, shutil, subprocess, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -93,94 +94,15 @@ def assert_isolated(args, mcp_config):
     assert json.loads(flag(args, "--settings")) == json.loads(NO_CONNECTORS), args
 
 
-def run_on_a_terminal(work, env, timeout):
-    """factory-loop.sh -i reads /dev/tty, so it runs on a pseudo-terminal. Returns its output."""
-    pid, fd = pty.fork()
-    if pid == 0:
-        os.chdir(work)
-        os.execvpe("bash", ["bash", "./factory-loop.sh", "-i", "1"], env)
-    out, end = b"", time.time() + timeout
-    while time.time() < end:
-        r, _, _ = select.select([fd], [], [], 0.5)
-        if r:
-            try:
-                chunk = os.read(fd, 4096)
-            except OSError:
-                chunk = b""
-            if not chunk:
-                os.waitpid(pid, 0)
-                return out.decode(errors="replace")
-            if b"type q and Enter to stop" in out + chunk:
-                os.write(fd, b"q\n")
-            out += chunk
-        done, _ = os.waitpid(pid, os.WNOHANG)
-        if done:
-            return out.decode(errors="replace")
-    os.kill(pid, 9)
-    os.waitpid(pid, 0)
-    return out.decode(errors="replace")
 
-
-def test_a_headless_loop_run_gets_an_empty_mcp_config_without_a_project_file():
-    work, env = loop_project()
-    p = subprocess.run(["bash", "./factory-loop.sh", "1"], cwd=work, env=env, capture_output=True, text=True,
-                       timeout=60)
-    assert p.returncode == 0, p
-    (args,) = calls(env)
-    assert_isolated(args, EMPTY)
-    assert args[-2:] == ["-p", "/next-task 1.1"], args
-
-
-def headless(work, env):
-    p = subprocess.run(["bash", "./factory-loop.sh", "1"], cwd=work, env=env, capture_output=True, text=True,
-                       timeout=60)
-    assert p.returncode == 0, p
-    (args,) = calls(env)
-    return args
 
 
 DOCS = {"mcpServers": {"docs": {"command": "docs-server"}}}
 EVIL = {"mcpServers": {"github": {"command": "github-mcp-server"}}}
 
 
-def test_a_headless_loop_run_uses_the_mcp_json_main_has():
-    work, env = loop_project(mcp=DOCS)
-    args = headless(work, env)
-    assert_isolated(args, main_copy(work))
-    assert json.load(open(main_copy(work))) == DOCS
 
 
-def test_a_worktree_only_mcp_json_is_never_passed_to_claude():
-    work, env = loop_project(worktree_mcp=EVIL)  # untracked, main has none
-    assert_isolated(headless(work, env), EMPTY)
-    work, env = loop_project(mcp=DOCS, worktree_mcp=EVIL)  # an uncommitted edit: main's copy wins
-    args = headless(work, env)
-    assert_isolated(args, main_copy(work))
-    assert json.load(open(main_copy(work))) == DOCS and "github-mcp-server" not in json.dumps(args)
-
-
-def test_the_worktree_cannot_steer_which_branch_the_config_comes_from():
-    # An agent pushes a branch with its own .mcp.json, then points the worktree at it: an uncommitted `mainBranch`
-    # in .claude/factory.json, and a planted local origin/main ref. main's copy must still win.
-    work, env = loop_project(mcp=DOCS)
-    sh("git", "checkout", "-q", "-b", "task/x", cwd=work)
-    json.dump(EVIL, open(os.path.join(work, ".mcp.json"), "w"))
-    sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qam", "evil", cwd=work)
-    sh("git", "push", "-q", "origin", "task/x", cwd=work)
-    sh("git", "update-ref", "refs/remotes/origin/main", "HEAD", cwd=work)
-    open(os.path.join(work, ".claude", "factory.json"), "w").write('{"waitMinutes": 0, "mainBranch": "task/x"}')
-    args = headless(work, env)
-    assert_isolated(args, main_copy(work))
-    assert json.load(open(main_copy(work))) == DOCS and "github-mcp-server" not in json.dumps(args)
-
-
-def test_an_interactive_loop_session_is_isolated_too():
-    work, env = loop_project()
-    out = run_on_a_terminal(work, env, timeout=45)
-    got = calls(env)
-    assert len(got) == 1, (got, out)
-    assert_isolated(got[0], EMPTY)
-    assert got[0][-1] == "/next-task 1.1", got
 
 
 def test_factory_agent_starts_claude_isolated_and_passes_its_own_arguments_on():

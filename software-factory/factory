@@ -244,7 +244,7 @@ case "$cmd" in
     # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
     # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
     mcp="$(fh "$dir/.claude/hooks/factory_mcp")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
-    # The `models` setting for the builder (factory_models.py): after the MCP flags, before your own arguments.
+    # The `models` setting for the builder (factory_models.ts): after the MCP flags, before your own arguments.
     mf=()
     if [ -f "$dir/.claude/hooks/factory_models.ts" ]; then
       m="$(fh "$dir/.claude/hooks/factory_models" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }

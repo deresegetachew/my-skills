@@ -74,7 +74,7 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
 6. **The reviewer starts on Sonnet, Opus when it finds something.** The `reviewer` runs on Sonnet (`model:` in its
    file); the `safety-auditor` and `security-reviewer` run on Opus. When the reviewer reports a must-fix, fix it and
    commit, then ask the reviewer again with `model: "opus"` on the fixed commit (or the model
-   `python3 .claude/hooks/factory_models.py escalate` prints, when the project sets `models.reviewer.escalateTo`), naming each earlier must-fix; it
+   `bun --no-env-file .claude/hooks/factory_models.ts escalate` prints, when the project sets `models.reviewer.escalateTo`), naming each earlier must-fix; it
    says how each one was resolved before it records the pass. Asking again without a fix is only for items it marked
    **unsure**. Keep `opus` for its later rounds on this task, and start on `opus` when the diff is over `prSizeWarn`
    lines or touches a `protected` path.
@@ -98,7 +98,7 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    `gh api repos/{owner}/{repo}/issues/<n>/comments -F body=@file` where `gh pr comment` fails.
    Then drop your task claim: `python3 .claude/hooks/factory_claims.py release --agent "$FACTORY_AGENT" --tasks-only`
    (when `FACTORY_AGENT` is set). **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
-   `python3 .claude/hooks/factory_usage.py --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
+   `bun --no-env-file .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
    (`<id>` is the issue number in issues mode). Post it even when it finds no replies.
 3. Once CI is green, post the tokens again (the same command), then merge it yourself:
    `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, with the full hash from `git rev-parse HEAD`
