@@ -411,13 +411,27 @@ def artifacts(r, cfg):
             r.fix(what, detail + f"; run `factory artifacts pull {e['url']} {e['dest']}`")
 
 
+def manager_profile_fix(path):
+    """What fixes a missing manager profile. `factory update` at a release that does not carry the file answers "nothing to
+    install" (#172), so a project on such a release is told to look for a newer one."""
+    import factory_release as fr
+    try:
+        pin = fr.read_pin(os.getcwd())
+    except fr.FactoryError:
+        pin = None
+    if pin and path not in (pin.get("files") or {}):
+        return (f"the installed release {pin['tag']} doesn't carry it: see `factory releases` for a newer one and take it with "
+                "`factory update <version>`, or set `roles.dev-manager.profile`")
+    return "run `factory update`, or set `roles.dev-manager.profile`"
+
+
 def manager(r, cfg):
     """The dev-manager orchestrator (#97): its settings profile resolves and every hook script the profile runs exists."""
     import re as _re
     path = str(((cfg.get("roles") or {}).get("dev-manager") or {}).get("profile") or ".claude/manager/settings.json")
     if not os.path.isfile(path):
         r.note("manager profile", f"{path} doesn't exist, so sub-managers use the project's settings (which deny `gh api`): "
-               "run `factory update`, or set `roles.dev-manager.profile`")
+               + manager_profile_fix(path))
         return
     try:
         profile = json.load(open(path))
