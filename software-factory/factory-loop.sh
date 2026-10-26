@@ -262,11 +262,20 @@ role_pass() {
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then claude "${claude_flags[@]}" --remote-control="$agent" "$prompt"; else claude "${claude_flags[@]}" "$prompt"; fi
     rc=$?; stty sane 2>/dev/null
   else
+    trust_gate || exit 1
     claude "${claude_flags[@]}" "${headless_flags[@]}" -p "$prompt"; rc=$?
   fi
   [ "$discover" = 0 ] || exit "$rc"
   [ "$rc" = 0 ] || return 1
   return 0
+}
+
+# An unattended run in a folder Claude Code does not trust ignores the whole allow list and stalls at its first command
+# (#193), so say so before any tokens are spent. A folder it cannot judge (no ~/.claude.json) goes ahead.
+trust_gate() {
+  [ -f "$hooks/factory_trust.py" ] || return 0
+  local err
+  err="$(python3 "$hooks/factory_trust.py" check "$PWD")" || { echo "[$agent] $err"; return 1; }
 }
 
 # Issues mode (#192): when a run ends, the issues this agent claimed that have no pushed branch or pull request go back to
@@ -364,6 +373,7 @@ for ((n = 1; n <= limit; n++)); do
     case "$answer" in q|Q|quit|stop|n|N) echo "[$agent] Stopped."; exit 0;; esac
     continue
   else
+    trust_gate || { python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null; give_back "$id"; exit 1; }
     claude "${claude_flags[@]}" "${headless_flags[@]}" -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
   fi
   python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
