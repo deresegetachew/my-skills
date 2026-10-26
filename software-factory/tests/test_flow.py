@@ -85,7 +85,7 @@ def test_init_makes_the_scaffold_and_a_second_run_adds_and_posts_nothing():
     d, work, env = flow_project()
     p = factory(work, env, "init")
     assert p.returncode == 0, (p.stdout, p.stderr)
-    for want in ("added    .claude/factory/roles/product-owner/README.md", "created  9 labels", "made     owner queue #101",
+    for want in ("added    .claude/factory/roles/product-owner/README.md", "created  11 labels", "made     owner queue #101",
                  "added    docs/PRD.md", "added    .github/PULL_REQUEST_TEMPLATE/prd-change.md", "factory product-owner loop -i"):
         assert want in p.stdout, (want, p.stdout)
     data = db(d)

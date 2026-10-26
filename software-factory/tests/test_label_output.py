@@ -62,6 +62,19 @@ def test_readme_and_help_describe_the_output():
     assert "in review: added" in readme, "README should show the review output"
 
 
+def test_issues_setup_says_what_it_made_and_makes_the_two_review_labels():
+    d, db, env = setup([])
+    json.dump({"issues": [], "labels": [{"name": "factory:ready", "color": "0e8a16"}]}, open(db, "w"))
+    rc, out = run(d, env, "setup")
+    assert rc == 0, out
+    assert "created tests-reviewed" in out and "created deps-reviewed" in out, out
+    assert "already there: factory:ready" in out, out
+    made = {l["name"] for l in json.load(open(db))["labels"]}
+    assert {"tests-reviewed", "deps-reviewed"} <= made, made
+    rc, again = run(d, env, "setup")  # safe to run twice
+    assert rc == 0 and "created" not in again and "already there: tests-reviewed" in again, again
+
+
 if __name__ == "__main__":
     os.environ.pop("FACTORY_AGENT", None)
     for t in [v for k, v in sorted(globals().items()) if k.startswith("test_")]:
