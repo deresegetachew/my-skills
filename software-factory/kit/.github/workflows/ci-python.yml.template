@@ -17,7 +17,7 @@ concurrency:
 permissions:
   contents: read
 
-# Where the jobs run (`factory ci use local|github`, README.md "CI"). Two lanes, each from a repo variable:
+# Where the jobs run (`factory ci use local|github`, docs/wiki/ci.md "CI"). Two lanes, each from a repo variable:
 # - light jobs, the Factory guard (and anything else short that runs on label changes, which are the dev manager's
 #   merge steps): vars.CI_RUNS_ON_LIGHT, for example ["self-hosted","<repo>-light"], a small runner that takes
 #   nothing else, so a 30-second check never waits behind a 15-minute build. Unset: the heavy lane's runners.

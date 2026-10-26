@@ -4,6 +4,7 @@ import os, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_issues import HOOKS, SF, issue, setup  # noqa: E402
+from wiki_text import readme_and_wiki
 
 CLAIM = "python3 .claude/hooks/next_task.py --claim taytu --pid $$"
 
@@ -49,7 +50,7 @@ def test_help_says_next_does_not_claim():
 
 
 def test_readme_says_next_does_not_claim():
-    readme = open(os.path.join(SF, "README.md")).read()
+    readme = readme_and_wiki()
     row = next(l for l in readme.splitlines() if l.startswith("| `factory next`"))
     assert "does not claim" in row and "--claim" in row, row
 

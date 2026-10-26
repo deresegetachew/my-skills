@@ -12,7 +12,7 @@ into the project and keeps a manifest of where each came from, so anyone can tel
   factory artifacts list                the manifest
 
 Two settings tell the factory how to reach an artifact; both are commands, empty by default, because how a terminal session
-may read an artifact is not settled (see "Spike" in the README):
+may read an artifact is not settled (see "Spike" in docs/wiki/roles.md):
   artifacts.fetch   writes the artifact `{url}` into the folder `{out}`; exit 0 when it did
   artifacts.info    prints JSON {"title": ..., "updated": ..., "version": ...} for `{url}`; used by `status` and `doctor`
 With neither, `pull --from DIR` imports an export, and `status` says it can't tell.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# factory ci: the project's CI, on GitHub's runners or on a self-hosted runner on this machine (README.md, "CI").
+# factory ci: the project's CI, on GitHub's runners or on a self-hosted runner on this machine (docs/wiki/ci.md, "CI").
 #
 #   factory ci status              where CI runs (local or github), the latest runs, and the local runner
 #   factory ci use local|github    sends CI jobs to the self-hosted runners, or back to GitHub's
@@ -484,7 +484,7 @@ free_mb() {
     END { if (size) print int(n * size / 1048576) }'
 }
 
-# A rough budget per runner (README.md, "How many runners"): a heavy job with its dind and service containers,
+# A rough budget per runner (docs/wiki/ci.md, "How many runners"): a heavy job with its dind and service containers,
 # and the light runner's 1 GB limit.
 HEAVY_MB=4096
 LIGHT_MB=1024

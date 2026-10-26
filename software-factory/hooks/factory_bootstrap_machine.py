@@ -59,7 +59,7 @@ def check_platform():
     ids = {rel.get("ID", ""), *rel.get("ID_LIKE", "").split()}
     if platform.system() != "Linux" and not ROOT:
         raise BootstrapError("unsupported-os", f"`factory bootstrap` supports Linux for now, not {platform.system()}.",
-                             "Set the machine up by hand (README, 'Security notes'); macOS comes later.")
+                             "Set the machine up by hand (docs/wiki/sandboxed-machine.md, 'Security notes'); macOS comes later.")
     if not ids & {"ubuntu", "debian"}:
         raise BootstrapError("unsupported-os", f"This is {rel.get('PRETTY_NAME') or 'an unknown system'}; bootstrap supports "
                              "Ubuntu and Debian with systemd first.", "Follow the same steps by hand with your package manager.")

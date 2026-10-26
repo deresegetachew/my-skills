@@ -7,6 +7,7 @@ what they were given. The cache itself is a small HTTP server in the test that a
 /v8/artifacts/status. The token below is made up for the test; it must never show up in any output, argument or log."""
 import json, os, re, stat, subprocess, sys, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from wiki_text import readme_and_wiki
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SF = os.path.abspath(os.path.join(HERE, ".."))
@@ -444,7 +445,7 @@ def test_the_new_files_reach_projects_through_the_old_kit_paths_too():
 
 
 def test_the_docs_cover_setup_security_signing_and_the_open_owner_item():
-    readme = read(SF, "README.md")
+    readme = readme_and_wiki()
     for want in ("factory turbo install", "turbo.secretsCommand", "TURBO_REMOTE_CACHE_SIGNATURE_KEY", "Tailscale",
                  "openssl rand", "fork", "FULL TURBO", "remoteCache"):
         assert want in readme, want

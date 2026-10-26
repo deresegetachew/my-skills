@@ -5,7 +5,7 @@ description: Set up and run a "software factory" on a repo, where a coding agent
 
 # Software factory
 
-Three roles, one repo (each is a command you run in a terminal; see README.md, "Roles"):
+Three roles, one repo (each is a command you run in a terminal; see docs/wiki/roles.md, "Roles"):
 
 | Role | Runs where | Does |
 |---|---|---|
@@ -28,7 +28,7 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    committed. Download the release archive and `SHA256SUMS`, check them, unpack, and run
    `python3 <unpacked folder>/hooks/factory_release.py update <version>` in the project (the only release so far is the
    pre-release `v0.1.0-alpha.1`, which has to be named). README.md, "Quick start", has the steps. A project that is
-   already on the submodule keeps working and moves later (README.md, "Moving a project from the submodule to
+   already on the submodule keeps working and moves later (docs/wiki/submodule.md, "Moving a project from the submodule to
    releases"). To install with the submodule instead:
    `git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills`, then
    `bash vendor/my-skills/software-factory/install.sh . --link`. The engine (`factory-loop.sh`, `.claude/hooks/*`)
@@ -39,7 +39,7 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    `.claude/factory/notes/<agent>.md`. With the submodule, add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
    `submodules: true`, and put `git submodule update --init` first in `commands.install`. To take a newer factory
    later, the owner runs `factory update` and commits it in a PR; `git config submodule.recurse true` once per clone
-   makes `git pull` update the submodule too (README, "Updating the factory"). Without a submodule,
+   makes `git pull` update the submodule too (docs/wiki/submodule.md, "Updating the factory"). Without a submodule,
    `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
 3. **Fill in `.claude/factory.json`** (`factory settings` is the guided way: a menu with help for every setting;
    `factory settings validate` checks the result): the doc paths, the install, typecheck, lint, test and build commands,
@@ -125,7 +125,7 @@ run the agreed process; changing the factory, your own rhythm, the scope, or mer
 
 (The factory also keeps a short per-project lessons file for the mistakes that repeat, `factory lessons`: the builder and
 the reviewers read it first, `factory lessons suggest` proposes entries from must-fix comments, review findings and CI
-failures, and the dev manager approves them. See README.md, "Lessons".)
+failures, and the dev manager approves them. See docs/wiki/reviews-and-gates.md, "Lessons".)
 
 
 - **The coding agent should never wait on a person for routine work.** Gate merges on reviewer pass, green

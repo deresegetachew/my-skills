@@ -6,6 +6,7 @@ import json, os, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_release_client import PIN, commit, fac, git, world  # noqa: E402
+from wiki_text import readme_and_wiki
 
 SUB = "vendor/my-skills"
 
@@ -119,7 +120,7 @@ def test_help_and_readme_list_the_command():
     sf = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     helped = subprocess.run(["bash", os.path.join(sf, "factory"), "help"], capture_output=True, text=True).stdout
     assert "migrate-to-release" in helped, helped
-    assert "| `factory migrate-to-release" in open(os.path.join(sf, "README.md")).read()
+    assert "| `factory migrate-to-release" in readme_and_wiki()
 
 
 if __name__ == "__main__":

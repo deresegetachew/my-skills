@@ -13,10 +13,10 @@
   factory settings validate              exit 1 with clear messages when a value is wrong (usable in CI)
   factory settings pr [--ready]          propose the edited .claude/factory.json as a pull request (a draft by default)
   factory settings docs [--check|--write] [--file F]
-                                         the README's settings tables, generated from the metadata table
+                                         the settings page's tables (docs/wiki/settings.md), generated from the metadata table
   factory settings --local ...           the same commands for this machine's own settings (outside the repo)
 
-The table that describes every setting is factory_settings_schema.py; the list, help, validate, the menu and the README
+The table that describes every setting is factory_settings_schema.py; the list, help, validate, the menu and the settings page
 all come from it. `set`, `unset`, `pr` and saving in the menu only write files: `.claude/` is protected, so a project
 change goes to main through a pull request. Only people change settings: inside an agent session (FACTORY_AGENT,
 FACTORY_LOOP or CLAUDECODE set) they refuse, because the PR gate itself reads these settings.
@@ -235,7 +235,7 @@ def cmd_validate(data, local):
 
 
 def cmd_docs(flags, values):
-    path = values.get("--file") or os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "README.md")
+    path = values.get("--file") or os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "docs", "wiki", "settings.md")
     block = f"{schema.README_BEGIN}\n{schema.markdown()}\n{schema.README_END}"
     if not ("--check" in flags or "--write" in flags):
         print(block)

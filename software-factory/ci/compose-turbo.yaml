@@ -1,6 +1,6 @@
 # The shared Turborepo remote cache (#59): one small server per project and machine that the agents' sessions and CI
 # jobs all use, so a package nobody changed is built, type-checked and tested once. `factory turbo install` starts it
-# (README.md, "A shared build cache"):
+# (docs/wiki/ci.md, "A shared build cache"):
 #   docker compose --file compose-turbo.yaml --project-name <repo>-turbo-cache up -d
 #
 # The token comes from the environment of that command, never from this file: `${TURBO_TOKEN:?...}` stops compose
@@ -19,7 +19,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: '3000'
-      TURBO_TOKEN: '${TURBO_TOKEN:?the cache token is missing, set TURBO_TOKEN or turbo.secretsCommand (README.md, A shared build cache)}'
+      TURBO_TOKEN: '${TURBO_TOKEN:?the cache token is missing, set TURBO_TOKEN or turbo.secretsCommand (docs/wiki/ci.md, A shared build cache)}'
       STORAGE_PROVIDER: local
       STORAGE_PATH: /data
       LOG_LEVEL: info
