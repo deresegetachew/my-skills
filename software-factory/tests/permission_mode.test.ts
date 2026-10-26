@@ -1,13 +1,14 @@
 // How an unattended run gets its permissions (#179): every headless `claude -p` the factory starts carries
 // `--permission-mode <permissionMode>` (default acceptEdits, so edits inside the project need no answer and the allow list
-// in settings.json covers the commands), the dry runs show it, interactive sessions are left alone, and the setting is
-// checked. (The `factory doctor` cases stay in test_permission_mode.py until factory_doctor is ported.)
+// in settings.json covers the commands), the dry runs show it, interactive sessions are left alone, the setting is
+// checked, and `factory doctor` prints the mode and says `fix` when a headless run would stall.
 import { expect, test } from "bun:test";
 import { copyFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { calls, type Env, flag, loopProject, runOnATerminal } from "./loop_support.ts";
 import { claudeCalls, factory, project } from "./roles_support.ts";
-import { HOOKS, runHook, sh, tmp, write } from "./support.ts";
+import { doctor as runDoctor, hookLine, lines, machine, project as doctorProject } from "./doctor_support.ts";
+import { HOOKS, type Proc, runHook, sh, tmp, write } from "./support.ts";
 
 /** The stub project of the MCP isolation tests, with the real role and config modules the loop asks for the flags. */
 function loopProjectWithRoles(): [string, Env] {
@@ -84,4 +85,37 @@ test("a bad mode is refused with the options", () => {
   const p = runHook("factory_settings", ["validate"], { cwd: d });
   expect(p.code).not.toBe(0);
   expect(p.out).toContain("acceptEdits");
+});
+
+const ALLOW = ["Bash(git fetch*)", "Bash(git add*)", "Bash(git commit*)", "Bash(git push*)", "Bash(gh pr *)"];
+
+function doctor(cfg: Record<string, unknown>, allow: string[] = ALLOW, homeSettings?: unknown): Proc {
+  const d = doctorProject({}, { agents: ["taytu"], ...cfg });
+  write(join(d, ".claude", "settings.json"), JSON.stringify({
+    hooks: { PreToolUse: [{ hooks: [{ type: "command", command: hookLine("pr-gate") }] }] }, permissions: { allow } }));
+  const env = { ...machine(), FACTORY_AGENTS: "taytu" };
+  if (homeSettings !== undefined) write(join(env.HOME as string, ".claude", "settings.json"), JSON.stringify(homeSettings));
+  return runDoctor(d, env);
+}
+
+test("doctor prints the effective mode for unattended runs", () => {
+  const p = doctor({});
+  expect(lines(p, "ok").some((l) => l.includes("unattended runs") && l.includes("acceptEdits")), p.stdout).toBe(true);
+  expect(lines(p, "fix").filter((l) => l.toLowerCase().includes("permission")), p.stdout).toEqual([]);
+});
+
+test("doctor says fix when the allow list lacks a command the loop needs", () => {
+  let p = doctor({}, ["Bash(git fetch*)"]);
+  const fixes = lines(p, "fix").filter((l) => l.includes("git commit") || l.includes("git push"));
+  expect(fixes.length > 0 && fixes[0]!.includes("factory.json") && fixes[0]!.includes("permissions.allow"), p.stdout).toBe(true);
+  p = doctor({ permissions: { allow: ["Bash(git commit*)", "Bash(git add*)", "Bash(git push*)", "Bash(gh pr *)"] } }, ["Bash(git fetch*)"]);
+  expect(lines(p, "fix").filter((l) => l.includes("git commit")), "rules the project lists in factory.json count").toEqual([]);
+});
+
+test("doctor says fix for mode default unless the users own settings set one", () => {
+  let p = doctor({ permissionMode: "default" });
+  expect(lines(p, "fix").some((l) => l.includes("permissionMode") && l.includes("acceptEdits")), p.stdout).toBe(true);
+  p = doctor({ permissionMode: "default" }, ALLOW, { permissions: { defaultMode: "acceptEdits" } });
+  expect(lines(p, "fix").filter((l) => l.toLowerCase().includes("permission")), p.stdout).toEqual([]);
+  expect(lines(p, "ok").some((l) => l.includes("unattended runs") && l.includes("acceptEdits")), p.stdout).toBe(true);
 });

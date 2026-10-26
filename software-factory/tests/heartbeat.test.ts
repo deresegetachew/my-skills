@@ -4,9 +4,9 @@
 // A fake `gh` (it also logs every call), a fake `tmux`, and real processes standing in for a loop and for its
 // `factory wait` child. Time is fake: FACTORY_NOW moves by hand, so hours of daemon cycles take a moment. The Python
 // test ran a cycle in its own process with the world's environment; here a short Bun process does it, with the same
-// environment, folder and clock. (test_doctor_notes_a_missing_daemon_and_agents_cannot_install_or_stop_it stays in
-// test_heartbeat.py until factory_doctor is ported.)
+// environment, folder and clock.
 import { afterEach, expect, test } from "bun:test";
+import * as D from "./doctor_support.ts";
 import { existsSync, renameSync, symlinkSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, join } from "node:path";
@@ -829,4 +829,18 @@ test("help and settings know the heartbeat", () => {
   expect(out).toContain("agents ls");
   const shown = sh(["bash", join(SF, "factory"), "settings"], { cwd: d, env }).stdout;
   for (const key of ["tasks.heartbeatSeconds", "tasks.heartbeatMissMinutes", "tasks.releaseDownMinutes"]) expect(shown).toContain(key);
+});
+
+test("doctor notes a missing daemon and agents cannot install or stop it", () => {
+  const deny = (JSON.parse(read(join(SF, "kit", ".claude", "settings.json"))) as { permissions: { deny: string[] } }).permissions.deny;
+  for (const rule of ["Bash(factory heartbeat install*)", "Bash(factory heartbeat uninstall*)",
+    "Bash(./factory heartbeat install*)", "Bash(./factory heartbeat uninstall*)", "Bash(*factory_heartbeat*)"]) {
+    expect(deny).toContain(rule);
+  }
+  let d = D.project({}, { agents: ["menelik", "taytu"], tasks: { source: "issues" } });
+  let p = D.doctor(d, { ...D.machine(), FACTORY_AGENTS: "taytu" });
+  expect(D.lines(p, "note").some((l) => l.includes("heartbeat") && l.includes("factory heartbeat install")), p.stdout).toBe(true);
+  d = D.project(); // plan mode: nothing reports to GitHub, so nothing to say
+  p = D.doctor(d, { ...D.machine(), FACTORY_AGENTS: "taytu" });
+  expect(p.stdout).not.toContain("heartbeat");
 });

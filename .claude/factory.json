@@ -1,5 +1,5 @@
 {
-  "_about": "my-skills builds itself with its own factory (#112). Only what differs from the defaults is set here; `factory settings` shows the rest. Tests: tools/run_tests.py (also CI). protected: pull requests that touch these paths are merged by the dev manager or the owner. The kit's own files (agents, skills, hooks that guard, CI, the release) are listed one by one so ordinary factory changes can still merge themselves.",
+  "_about": "my-skills builds itself with its own factory (#112). Only what differs from the defaults is set here; `factory settings` shows the rest. Tests: bun tools/run_tests.ts (also CI). protected: pull requests that touch these paths are merged by the dev manager or the owner. The kit's own files (agents, skills, hooks that guard, CI, the release) are listed one by one so ordinary factory changes can still merge themselves.",
   "agents": ["menelik", "taytu", "haile"],
   "tasks": {
     "source": "issues",
@@ -7,8 +7,8 @@
   },
   "mainBranch": "main",
   "commands": {
-    "lint": "python3 tools/check_skills.py",
-    "test": "python3 tools/run_tests.py"
+    "lint": "bun tools/check_skills.ts",
+    "test": "bun tools/run_tests.ts"
   },
   "codePaths": [
     "software-factory",

@@ -1,15 +1,14 @@
 // `factory autostart` and `factory resume` (#88): a machine brings the stack and its agents back after a reboot,
 // without losing unfinished work. tmux, docker, systemctl, loginctl, launchctl, plutil and gh are fakes on PATH; HOME
 // and the config and state folders are temp folders. What systemd and launchd do at a real boot can't be tested here.
-// (test_help_doctor_and_settings_know_about_autostart stays in test_autostart.py until factory_doctor and
-// factory_settings are ported.)
 import { expect, test } from "bun:test";
+import * as D from "./doctor_support.ts";
 import { existsSync, readdirSync, renameSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { type Env, GIT, hook, log, machine, machineFile, NAMES, parsePlist, project, sessions, shOk, state } from "./autostart_support.ts";
 import { FAKE_GH, issue } from "./issues_support.ts";
 import { loopRepo } from "./loop_support.ts";
-import { KIT, read, sh, write, writeExe } from "./support.ts";
+import { KIT, read, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 function bootLog(env: Env): string {
   try {
@@ -470,4 +469,28 @@ test("agents cannot install or run autostart", () => {
     "Bash(*factory_autostart*)", "Bash(factory resume*)", "Bash(./factory resume*)", "Bash(*factory_resume*)"]) {
     expect(deny).toContain(rule);
   }
+});
+
+test("help doctor and settings know about autostart", () => {
+  const d = D.project();
+  let env: Record<string, string> = D.machine({ extra: ["tmux"] });
+  const out = sh(["bash", join(SF, "factory"), "help"], { cwd: d, env }).stdout;
+  expect(out).toContain("autostart");
+  expect(out).toContain("resume");
+  // off: a note that says how to turn it on
+  let p = D.doctor(d, env);
+  expect(D.lines(p, "note").some((l) => l.includes("autostart") && l.includes("factory autostart install")), p.stdout).toBe(true);
+  // on, but no tmux and no service: fixes that say what to do
+  const cfg = tmp();
+  write(join(cfg, basename(d) + ".json"), JSON.stringify({ autostart: true, autostartAgents: ["menelik"] }));
+  env = { ...D.machine(), FACTORY_CONFIG_DIR: cfg, FACTORY_AUTOSTART_PLATFORM: "linux" };
+  p = D.doctor(d, env);
+  const fixes = D.lines(p, "fix").join("\n");
+  expect(fixes.includes("tmux") && fixes.includes("factory autostart install"), p.stdout).toBe(true);
+  // settings lists the stack commands and this machine's autostart
+  const senv = { ...process.env, FACTORY_CONFIG_DIR: cfg };
+  const listed = sh(["bash", join(SF, "factory"), "settings"], { cwd: d, env: senv }).stdout;
+  for (const want of ["commands.stackUp", "commands.stackHealth", "autostart", "autostartAgents"]) expect(listed).toContain(want);
+  const shown = sh(["bash", join(SF, "factory"), "settings", "show", "commands.stackUp"], { cwd: d, env: senv });
+  expect(shown.code === 0 && shown.stdout.toLowerCase().includes("stack"), shown.out).toBe(true);
 });

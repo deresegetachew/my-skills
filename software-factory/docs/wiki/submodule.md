@@ -65,7 +65,7 @@ Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is
   `settings.json`), so an unattended agent can run the tests (#249). Anything else keeps the pnpm template and the output names the files to edit.
   The output says which it chose. An existing `ci.yml` is kept as it is. The first install from a release
   (`factory update <tag>`, no `.claude/factory.json` yet) does the same, with the detector from the release's own
-  `hooks/factory_stack.ts`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` does not yet check that the
+  `hooks/factory_stack.ts`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` runs a Python `commands.test` once and fails with `no-tests-ran` when it ran 0 tests (#244). It does not yet check that the
   workflow matches `factory.json` (follow-up of #199).
 - **Adds `tmp/` and `__pycache__/`** to `.gitignore`.
 

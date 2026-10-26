@@ -5,10 +5,6 @@
 // ip and journalctl are fakes on PATH that keep their state in files; system paths live under a temp root (setRoot).
 // What apt, systemd and nftables really do on a machine can't be tested here. `factory bootstrap` runs in this process
 // (main), with its output captured, as the Python test did.
-//
-// test_after_the_sign_ins_the_runners_and_autostart_are_installed_and_doctor_runs and
-// test_doctor_sandbox_is_wired_into_the_doctor_and_the_factory_command stay in test_bootstrap.py until factory_doctor
-// is ported: the first ends with `factory doctor --sandbox`'s own output, the second reads factory_doctor's source.
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -300,6 +296,21 @@ test("the project part without a checkout asks for a repo", async () => {
   expect(out).toContain("git clone --recurse-submodules https://github.com/acme/app.git");
 });
 
+test("after the sign ins the runners and autostart are installed and doctor runs", async () => {
+  const m = new Machine();
+  m.rootUser = false;
+  addUserTools(m);
+  write(join(m.state, "gh-login"), "");
+  write(join(process.env.HOME as string, ".claude", ".credentials.json"), "{}");
+  const repo = projectRepo(m, {});
+  process.chdir(repo);
+  const [, out, err] = await m.run("project", "--user", USER, "--agents", "haile", "--runners", "2");
+  const calls = m.logged("factory").join(" ");
+  expect(calls.includes("ci install") && calls.includes("autostart install --agents haile"), out + err).toBe(true);
+  expect(out.includes("Sandbox (#105)") || out.includes("Sandbox"), out + err).toBe(true);
+  expect(out.includes("claude") && out.includes("ok    GitHub, Claude and the age key are in place"), out + err).toBe(true);
+});
+
 // ---- doctor --sandbox -------------------------------------------------------------------------------------------------
 
 const uid = (): number => (process.getuid ? process.getuid() : 0);
@@ -392,11 +403,14 @@ test("missing cgroup controllers linger and runners each get a fix", async () =>
 // ---- the factory command and the docs ------------------------------------------------------------------------------------
 
 test("factory bootstrap help works outside a repo", () => {
-  // The bootstrap half of test_doctor_sandbox_is_wired_into_the_doctor_and_the_factory_command (the doctor half stays in
-  // test_bootstrap.py until factory_doctor is ported).
   const p = sh(["bash", join(SF, "factory"), "bootstrap", "help"], { cwd: tmp(), env: { ...process.env, GIT_CEILING_DIRECTORIES: "/" } });
   expect(p.code, p.stderr).toBe(0);
   expect(p.stdout).toContain("factory bootstrap machine");
+});
+
+test("doctor sandbox is wired into the doctor and the factory command", () => {
+  const text = readFileSync(join(HOOKS, "factory_doctor.ts"), "utf8");
+  expect(text.includes("--sandbox") && text.includes("factory_sandbox")).toBe(true);
 });
 
 test("factory help lists bootstrap and the sandbox option", () => {
