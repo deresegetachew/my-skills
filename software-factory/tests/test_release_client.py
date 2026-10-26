@@ -848,6 +848,41 @@ def test_a_release_built_from_this_repo_installs_into_a_project_and_passes_the_v
     assert fac(d, env, "update")[0] == 0 and "differ" not in fac(d, env, "version")[1]
 
 
+def only_a_prerelease():
+    gh, d, env = world()
+    gh.add("0.1.0-alpha.1", pre=True)
+    return gh, d, env
+
+
+def test_with_only_a_prerelease_update_names_it_in_the_fix():
+    gh, d, env = only_a_prerelease()
+    rc, out = fac(d, env, "update")
+    assert rc != 0 and "no_releases" in out, out
+    assert "factory update v0.1.0-alpha.1" in out, out  # the exact command that works
+    assert fac(d, env, "update", "v0.1.0-alpha.1")[0] == 0  # and it does
+
+
+def test_with_no_release_at_all_the_fix_still_says_to_ask_the_owner():
+    gh, d, env = world()
+    rc, out = fac(d, env, "update")
+    assert rc != 0 and "no_releases" in out and "ask the owner" in out and "v0" not in out, out
+
+
+def test_version_shows_the_prerelease_when_there_is_no_full_release():
+    gh, d, env = only_a_prerelease()
+    rc, out = fac(d, env, "version")
+    assert rc == 0 and "pre-release" in out and "v0.1.0-alpha.1" in out and "factory update v0.1.0-alpha.1" in out, out
+    rc, out = fac(d, env, "version", "--json")
+    assert json.loads(out)["prerelease"]["tag"] == "v0.1.0-alpha.1", out
+
+
+def test_version_mentions_a_prerelease_newer_than_the_newest_full_release():
+    gh, d, env = world("1.0.0")
+    gh.add("1.1.0-rc.1", pre=True)
+    rc, out = fac(d, env, "version")
+    assert "Newest     v1.0.0" in out and "v1.1.0-rc.1" in out and "Pre-release" in out, out
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):

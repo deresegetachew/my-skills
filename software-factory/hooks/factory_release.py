@@ -147,6 +147,10 @@ def list_releases(repo):
 def newest(releases):
     full = [r for r in releases if not r["pre"]]
     if not full:
+        pre = next((r["tag"] for r in releases if r["pre"]), None)
+        if pre:
+            raise FactoryError("no_releases", f"there is no full release yet, only the pre-release {pre} (pre-releases are only used when named).",
+                               f"install the pre-release by naming it: `factory update {pre}`.")
         raise FactoryError("no_releases", "there is no published release yet (pre-releases are only used when named).",
                            "ask the owner to cut one, or name a pre-release: `factory update v1.0.0-rc.1`.")
     return full[0]
@@ -724,7 +728,7 @@ def changes_between(releases, old_tag, new_tag):
 def cmd_version(args):
     root = project_root()
     pin = read_pin(root)
-    info = {"installed": None, "pinned": None, "newest": None, "submodule": None}
+    info = {"installed": None, "pinned": None, "newest": None, "prerelease": None, "submodule": None}
     emit = (lambda text="": None) if args.json else print  # --json prints only the JSON
     emit("Software factory")
     if pin:
@@ -750,6 +754,11 @@ def cmd_version(args):
         emit(f"  Newest     {newest_release['tag']}  ({newest_release['date']})")
     except FactoryError as e:
         emit(f"  Newest     unknown ({e.message.rstrip('.')})")
+    # A pre-release newer than the newest full release is never installed unasked: show it, and how to take it.
+    pre = next((r for r in releases if r["pre"] and (not newest_release or sort_key(r["tag"]) > sort_key(newest_release["tag"]))), None)
+    if pre:
+        info["prerelease"] = {"tag": pre["tag"], "date": pre["date"]}
+        emit(f"  Pre-release {pre['tag']}  ({pre['date']}); take it by naming it: factory update {pre['tag']}")
     if args.json:
         print(json.dumps(info, indent=2, sort_keys=True))
         return 0

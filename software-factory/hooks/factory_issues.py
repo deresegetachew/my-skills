@@ -17,6 +17,7 @@ The branch is task/<issue number>-<short-name>, the PR says `Closes #<n>`, and m
   python3 .claude/hooks/factory_issues.py tick 42 3                tick the 3rd checkbox (1-based) in the body
   python3 .claude/hooks/factory_issues.py review 42                in-progress -> in-review (after opening the PR); prints which labels changed
   python3 .claude/hooks/factory_issues.py block 42 "needs the Stripe keys"
+  python3 .claude/hooks/factory_issues.py give-back --agent taytu  release the claims that have no branch or PR (the loop, #192)
   python3 .claude/hooks/factory_issues.py release 42 ["why"]       back to ready, the agent's label off
   python3 .claude/hooks/factory_issues.py stale [--hours 3]        in-progress issues with no activity (dev manager)
   python3 .claude/hooks/factory_issues.py new --title T --body-file F [--milestone "Phase 3"] [--label L ...]
@@ -300,6 +301,30 @@ def release_issue(cfg, n, reason=""):
     comment(n, f"<!-- factory-release agent={who} -->\nBack to ready" + (f": {reason}" if reason else "."))
 
 
+def give_back(cfg, agent):
+    """After a run ends (#192): the issues this agent claimed that have no pushed branch, no open pull request and are not
+    in review go back to ready, so a failed or cancelled run leaves no claim on GitHub. Returns the lines to print."""
+    L = task_labels(cfg)
+    from factory_machine import machine_id
+    machine = machine_id()
+    held = [i for i in task_issues(label=L["agentPrefix"] + agent)
+            if L["inProgress"] in names(i) and own_issue(i["number"], agent, machine)]
+    if not held:
+        return [f"Nothing to give back: {agent} holds no in-progress issue."]
+    branches = [b["name"] for b in gh_all("repos/{owner}/{repo}/branches")]
+    heads = [p["head"]["ref"] for p in gh_all("repos/{owner}/{repo}/pulls?state=open")]
+    out = []
+    for i in sorted(held, key=order):
+        n = i["number"]
+        pushed = [b for b in branches + heads if b.startswith(f"task/{n}-")]
+        if pushed:
+            out.append(f"kept #{n}: {pushed[0]} is on GitHub, so the work carries on from there.")
+        else:
+            release_issue(cfg, n, "the run ended with no pull request")
+            out.append(f"released #{n}: the run ended with no branch or pull request, so it is ready again.")
+    return out
+
+
 def review_issue(cfg, n):
     """In progress -> in review; returns the one line saying which labels changed."""
     L = task_labels(cfg)
@@ -363,6 +388,7 @@ def main():
     r = sub.add_parser("review"); r.add_argument("n", type=int)
     b = sub.add_parser("block"); b.add_argument("n", type=int); b.add_argument("reason")
     rl = sub.add_parser("release"); rl.add_argument("n", type=int); rl.add_argument("reason", nargs="?", default="")
+    gb = sub.add_parser("give-back"); gb.add_argument("--agent", required=True)
     st = sub.add_parser("stale"); st.add_argument("--hours", type=float)
     nw = sub.add_parser("new"); nw.add_argument("--title", required=True); nw.add_argument("--body-file", required=True)
     nw.add_argument("--milestone"); nw.add_argument("--label", action="append", default=[])
@@ -400,6 +426,8 @@ def main():
         # A block ends the claim too, so whoever takes it after the unblock wins it (factory-release).
         held = [x[len(L["agentPrefix"]):] for x in names(i) if x.startswith(L["agentPrefix"])]
         comment(a.n, f"<!-- factory-release agent={held[0] if held else 'none'} -->\n**Blocked:** {a.reason}")
+    elif a.cmd == "give-back":
+        print("\n".join(give_back(cfg, a.agent)))
     elif a.cmd == "release":
         release_issue(cfg, a.n, a.reason)
     elif a.cmd == "stale":
