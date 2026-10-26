@@ -332,7 +332,8 @@ def cycle(cfg, name, dry=False, interactive=False, wait=False):
             continue
         if dry:
             out(f"would start a {'session you can type into' if interactive else 'sub-manager'} for {i['ref']}: {i['line']}")
-            out(f"would run: claude -p \"/manage-pass {i['ref']}\" (manager profile{" ".join(["", *roles.permission_flags(cfg)])}, a lease on {i['target'] or i['ref']})")
+            mode_flags = " ".join(["", *roles.permission_flags(cfg)])
+            out(f"would run: claude -p \"/manage-pass {i['ref']}\" (manager profile{mode_flags}, a lease on {i['target'] or i['ref']})")
             started.append(i["ref"])
             continue
         if interactive:
