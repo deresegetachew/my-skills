@@ -210,6 +210,21 @@ def free_names(role, stale_hours):
         return [a for a, _ in candidates_for(cfg, main_top, role, None)[0] if not alive(cos.get(a), stale_hours, loop=True)]
 
 
+REFSPEC_FIX = "git config --add remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*' && git fetch origin"
+
+
+def missing_origin_main(main):
+    """{code, message, fix} when the repository has an `origin` remote but no `origin/<main>` (#181), else None. Cloning
+    an empty repo sets no fetch refspec, so the first push never makes a remote-tracking branch."""
+    if not git("remote", "get-url", "origin"):
+        return None  # no origin at all: a local-only project, nothing to say here
+    if subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{main}"], capture_output=True).returncode == 0:
+        return None
+    return {"code": "no-origin-main", "message": f"There is no origin/{main} in this clone, so the factory has no branch to "
+            "start an agent's folder from. Cloning an empty repository leaves no fetch setting for origin.",
+            "fix": f"Run: {REFSPEC_FIX}"}
+
+
 def ensure_worktree(path, main_top):
     """Create the worktree at `path` from origin/<main> if it doesn't exist, with the local env files copied."""
     if path == main_top or os.path.isdir(path):
@@ -217,6 +232,10 @@ def ensure_worktree(path, main_top):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     cfg = load()
     subprocess.run(["git", "fetch", "-q", "origin", cfg["mainBranch"]], check=False)
+    err = missing_origin_main(cfg["mainBranch"])
+    if err:
+        print(json.dumps(err), file=sys.stderr)
+        sys.exit(1)
     subprocess.run(["git", "worktree", "add", "--detach", path, f"origin/{cfg['mainBranch']}"], check=True,
                    stdout=subprocess.DEVNULL)
     # The kit's files in .claude/ are links into a submodule (vendor/my-skills): without it they point at nothing,
