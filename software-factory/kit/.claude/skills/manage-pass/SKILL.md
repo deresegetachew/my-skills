@@ -70,7 +70,12 @@ Stop early when there is nothing to do.
    new dependency: it exists on the registry, is maintained and is the one intended; then `deps-reviewed`. Spot-check claims
    against sources (a PR that says text was copied word for word: open the source and compare).
 5. **Verdict.** Approve and merge, or post must-fixes. One comment per reviewed commit: the verdict, must-fix items with file
-   and line, follow-ups in a line each, and the markers below.
+   and line, follow-ups in a line each, and the markers below. Post it with the REST API. Never `gh pr comment` or `gh pr review` (this profile does not allow them, and nobody can approve a
+   prompt):
+   `gh api -X POST repos/{owner}/{repo}/issues/<n>/comments -f body="<marker line>  <short verdict>"` for a short one. For a
+   longer one, write the body to `tmp/manager-<n>.md` with the Write tool (the only file this profile may write), then
+   `gh api -X POST repos/{owner}/{repo}/issues/<n>/comments -F body=@tmp/manager-<n>.md`. Never a heredoc or `echo >`: the
+   gate cannot read them. A verdict that is never posted is a review that did not happen: the next pass starts it again.
 6. **Answer questions.** Every `<!-- factory-question -->` without a later `<!-- factory-answer -->`. Answer from the PRD,
    CLAUDE.md, the decisions and the sources, and check the facts yourself. Escalate only what is the owner's (scope beyond
    the PRD, legal or customer-facing commitments, money and accounts, names and brands, things only a person can get): reply
@@ -127,6 +132,9 @@ must-fix or a fix for the owner.
 - Never message the owner on a quiet pass. When unsure, write an owner-queue ask instead of acting.
 - Never read secrets files (`.env*`, `secrets/`, keys).
 - Use the REST API (`gh api`); GraphQL may be blocked.
+- Run one command per Bash call. No `;`, `&&`, `|`, `$(...)`, backticks or variables: the profile allows each command on its
+  own, and one part that is not allowed blocks the whole line. To read a PR's CI failure use `gh run view <id> --log-failed`;
+  to read the tree use `git merge-base`, `git merge-tree`, `git ls-tree` and `git cat-file` (each on its own).
 
 ## Tokens
 
