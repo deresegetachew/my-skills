@@ -264,6 +264,15 @@ role_pass() {
   return 0
 }
 
+# Issues mode (#192): when a run ends, the issues this agent claimed that have no pushed branch or pull request go back to
+# ready on GitHub, and the loop prints which it released and which it kept. A failed or cancelled run leaves no claim.
+give_back() {
+  case "$1" in issue-*) ;; *) return 0 ;; esac
+  local said
+  if said=$(python3 "$hooks/factory_issues.py" give-back --agent "$agent" 2>&1); then echo "$said" | sed "s/^/[$agent] /"
+  else echo "[$agent] Could not give the claim back. Free it by hand: factory issues release ${1#issue-}"; fi
+}
+
 last=""; repeats=0; last_item=""; fails=0
 for ((n = 1; n <= limit; n++)); do
   if [ "$resume_first" = 1 ]; then
@@ -307,6 +316,7 @@ for ((n = 1; n <= limit; n++)); do
     exit 1
   fi
   echo "=== [$agent] $(date '+%H:%M') task $next ==="
+  case "$id" in issue-*) echo "[$agent] claimed issue #${id#issue-} (this run claims this one only)" ;; esac
   isolate
   # The restart note (factory_resume.py) goes into the first prompt only.
   prompt="/next-task $id"
@@ -328,6 +338,7 @@ for ((n = 1; n <= limit; n++)); do
     fi
     stty sane 2>/dev/null
     python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null
+    give_back "$id"
     finished="$(python3 "$hooks/factory_claims.py" take-done --agent "$agent")"
     if [ -n "$finished" ]; then
       # The agent finished and the Stop hook closed the session: go on unless you say stop.
@@ -345,4 +356,5 @@ for ((n = 1; n <= limit; n++)); do
     claude "${claude_flags[@]}" "${headless_flags[@]}" -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
   fi
   python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
+  give_back "$id"
 done
