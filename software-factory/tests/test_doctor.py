@@ -129,6 +129,16 @@ def test_a_project_on_releases_gets_a_fix_when_a_file_differs_from_the_pin():
     assert any("factory_demo.py differs from v1.2.0" in l and "factory update" in l for l in lines(p, "fix")), p.stdout
 
 
+def test_doctor_says_to_update_when_factory_json_allows_a_rule_settings_json_lacks_and_is_quiet_once_it_has_it():
+    d = project(cfg={"agents": ["taytu"], "permissions": {"allow": ["Edit(tmp/**)"]}})
+    pinned(d)
+    p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})
+    assert any("Edit(tmp/**)" in l and "factory update" in l for l in lines(p, "fix")), p.stdout
+    json.dump({"permissions": {"allow": ["Edit(tmp/**)"]}}, open(os.path.join(d, ".claude", "settings.json"), "w"))
+    p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})
+    assert not [l for l in lines(p, "fix") if "Edit(tmp" in l], p.stdout
+
+
 def test_checks_that_dont_apply_are_left_out():
     d = project()  # no package.json, no compose file, no .sops.yaml
     p = doctor(d, machine(node=None))
