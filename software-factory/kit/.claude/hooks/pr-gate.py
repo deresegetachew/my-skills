@@ -1,1 +1,0 @@
-../../../hooks/pr-gate.py

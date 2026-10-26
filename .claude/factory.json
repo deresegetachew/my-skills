@@ -24,9 +24,9 @@
     "^\\.github/",
     "^\\.mcp\\.json$",
     "^install\\.sh$",
-    "^tools/build_release\\.py$",
+    "^tools/build_release\\.ts$",
     "^software-factory/VERSION$",
-    "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_config|factory_release|check|factory_stop|factory_session)\\.py$",
+    "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_config|factory_release|check|factory_stop|factory_session)\\.ts$",
     "^software-factory/kit/\\.claude/(settings\\.json|manager/|agents/|skills/)",
     "^software-factory/kit/\\.github/",
     "^software-factory/ci/(ci\\.sh|entrypoint\\.sh|loop\\.sh)$",
@@ -42,9 +42,9 @@
   "reviews": {
     "safety-auditor": {
       "paths": [
-        "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_release)\\.py$",
+        "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_release)\\.ts$",
         "^software-factory/kit/\\.claude/settings\\.json$",
-        "^tools/build_release\\.py$"
+        "^tools/build_release\\.ts$"
       ]
     },
     "security-reviewer": {

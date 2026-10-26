@@ -285,43 +285,6 @@ def test_a_check_that_cannot_be_read_does_not_stop_the_others():
     assert "pr-5" in watch(work, env)
 
 
-# --- leases ----------------------------------------------------------------------------------------------------------
-
-def lease_script(work, env, *args):
-    code = ("import sys, json; sys.path.insert(0, %r); import factory_lease as L; "
-            "r = L.acquire(5, 'review', %r, sys.argv[1], 20); print(json.dumps(r and {k: str(v) for k, v in r.items()}))" % (HOOKS, H))
-    return subprocess.run([sys.executable, "-c", code, *args], cwd=work, env=env, capture_output=True, text=True)
-
-
-def test_the_earliest_unexpired_claim_wins_and_the_loser_ends_its_own():
-    d, work, env = world(db={"pulls": [pr(5)], "comments": {"5": []}})
-    first = lease_script(work, env, "alpha")
-    assert json.loads(first.stdout)["holder"] == "alpha", (first.stdout, first.stderr)
-    second = lease_script(work, env, "beta")
-    assert json.loads(second.stdout) is None, "beta must not take what alpha holds"
-    again = lease_script(work, env, "alpha")
-    assert json.loads(again.stdout)["holder"] == "alpha", "holding it already is fine"
-    claims = [b for b in posted(d, 5) if "-claim " in b]
-    assert len(claims) == 1 and "manager=alpha" in claims[0], claims
-
-
-def test_an_expired_claim_is_taken_over_and_a_new_head_is_a_different_key():
-    old = f"<!-- factory-review-claim manager=alpha sha={H} until={iso(5)} -->"
-    d, work, env = world(db={"pulls": [pr(5)], "comments": {"5": [comment(1, old, 30)]}})
-    assert json.loads(lease_script(work, env, "beta").stdout)["holder"] == "beta"
-    other = f"<!-- factory-review-claim manager=alpha sha={H2} until={(datetime.now(timezone.utc) + timedelta(minutes=9)).strftime('%Y-%m-%dT%H:%M:%SZ')} -->"
-    put(d, comments={"5": [comment(1, other, 1)]})
-    assert json.loads(lease_script(work, env, "beta").stdout)["holder"] == "beta", "alpha's claim is on another head"
-
-
-def test_release_ends_a_lease_early():
-    d, work, env = world(db={"pulls": [pr(5)], "comments": {"5": []}})
-    code = ("import sys; sys.path.insert(0, %r); import factory_lease as L; r = L.acquire(5, 'review', %r, 'alpha', 20); "
-            "L.release(r); L.release(r); print(L.holder(5, 'review', %r))" % (HOOKS, H, H))
-    p = subprocess.run([sys.executable, "-c", code], cwd=work, env=env, capture_output=True, text=True)
-    assert p.stdout.strip() == "None", (p.stdout, p.stderr)
-
-
 # --- the cycle: sub-managers ------------------------------------------------------------------------------------------
 
 def order_of(work, env):
@@ -727,7 +690,7 @@ def test_factory_watch_prints_one_line_per_item_and_exits_3():
 
 
 def test_every_new_hook_has_a_forwarder_and_the_profile_allows_factory_watch():
-    for f in ("factory_lease.py", "factory_watch.py", "factory_orchestrator.py"):
+    for f in ("factory_watch.py", "factory_orchestrator.py"):  # factory_lease.ts is a Bun script: no forwarder (#252)
         link = os.path.join(SF, "kit", ".claude", "hooks", f)
         assert os.path.islink(link) and os.path.exists(link), f
     allow = json.load(open(os.path.join(SF, "kit", ".claude", "manager", "settings.json")))["permissions"]["allow"]

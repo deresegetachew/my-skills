@@ -1,0 +1,1 @@
+../../software-factory/hooks/factory_reset_run.ts

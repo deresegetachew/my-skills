@@ -1,1 +1,0 @@
-../../../hooks/factory_reset_run.py
