@@ -535,6 +535,7 @@ version it pins. `factory help` lists everything.
 | `factory ci status` | Where CI runs (local or github), the latest runs on main and open PRs, and the local runner. [CI](#ci-githubs-runners-or-your-own-mac) |
 | `factory ci use local\|github` | Sends CI jobs to the self-hosted runners with the project's label, or back to GitHub's |
 | `factory ci install` / `uninstall [i]` | Installs `ci.runners` heavy runners and the light lane (again to update or change the number), or removes them (or one: `2`, `light`): LaunchAgents on macOS, systemd `--user` services on Linux. [Lanes](#ci-lanes) · [Linux](#ci-on-linux) |
+| `factory ci log <pr or run>` | Prints the failed job's log trimmed to the failing step (timestamps off, about 80 lines at most), for a pull request number or a workflow run id. Read-only (`gh api` GETs only), so an agent can see why its own CI failed without `gh run view --log-failed`. `No failed job found` when CI passed or is still running. An agent runs `python3 .claude/hooks/factory_ci_log.py <number>`, which the kit's existing `Bash(python3 .claude/hooks/*)` allow rule covers |
 | `factory ci stale` / `check` | Are the installed runner copies older than the checkout (exit 3, a line per file), and are they fit to start (readable by the container's user, not writable by others). `factory update` runs both |
 | `factory ci start` / `stop` | Runs the runner once by hand, in the background, until `stop` or a restart |
 | `factory ci logs [i] [-f]` | A runner's log: instance 1, or `2`, `light` ... |
@@ -552,7 +553,7 @@ version it pins. `factory help` lists everything.
   permission prompt, so every headless `claude -p` starts with `--permission-mode acceptEdits` (setting
   `permissionMode`; `default` passes no flag and leaves it to your own Claude Code settings). Edits inside the
   project then need no answer, and `.claude/settings.json` must allow every command the build needs; a command that
-  is neither allowed nor denied stops the run. Interactive sessions are not given a mode. `--dry-run` shows the flag,
+  is neither allowed nor denied stops the run. Interactive sessions are not given a mode. Before an unattended run starts, the loop checks that Claude Code trusts the folder (it ignores the whole allow list in one it does not); if not, it prints a `{code, message, fix}` naming the folder to open once with `claude`, starts nothing and stops. A folder it cannot judge (no `~/.claude.json`) goes ahead. `--dry-run` shows the flag,
   and `factory doctor` prints the mode and says `fix` when a headless run would stall (mode `default` with no mode in
   your own settings, or no rule for `git commit`, `git push`, `gh pr` and the like). Best for long stretches away.
 - **`factory loop -i`**: interactive. Each task opens a Claude session with `/next-task <id>` already started. When
@@ -1507,6 +1508,11 @@ orchestrator started and the items other managers hold; the rest wait for the ne
 `<!-- factory-manager-note thread=issue-20 status=open -->`. The orchestrator opens it when an issue gets
 `factory:in-progress` and marks it `closed` when the issue closes, with no model. The sub-manager reads it from its prompt and
 edits it (`PATCH .../issues/comments/<id>`) before it exits. It is a memory, not a source of truth.
+
+**A pull request the manager did not review.** When a sub-manager takes a review or fix item for a pull request and ends with no
+comment of its own, the orchestrator leaves one (no model): `<!-- factory-manager-skip sha=<head> -->`, *Dev manager NAME looked
+at this pull request and did not review it*, the reason (a draft, a merge conflict, red CI with the failed jobs, CI not finished,
+or no reason given) and the next step. Once per head commit. Claims, releases and the thread note do not count as a comment.
 
 **Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
 `manager.notify` (a login) or, when that is empty, the repository's owner if that is a person. GitHub's own notifications
