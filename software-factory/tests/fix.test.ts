@@ -1,6 +1,5 @@
 // Auto-format and auto-fix the changed files before the checks (#69): `commands.fix` runs on the files this branch
 // changed and no others, the agent hears one line, the Stop check and `factory verify` run it first.
-// (The test that `factory settings` lists the fix settings stays in test_fix.py until factory_settings is ported.)
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -228,4 +227,13 @@ test("reviewers are told not to comment on what the fixer handles", () => {
     expect(t, name).toContain("Formatting is not your job");
     expect(t, name).toContain("commands.fix");
   }
+});
+
+test("the fix settings are listed in the template and the registry", () => {
+  const tpl = JSON.parse(readFileSync(join(KIT, ".claude", "factory.json"), "utf8")) as { commands: { fix: string }; fixPaths: unknown[] };
+  expect(tpl.commands.fix).toBe("");
+  expect(tpl.fixPaths).toEqual([]);
+  const out = runHook("factory_settings", [], { cwd: tmp(), env: ENV }).stdout;
+  expect(out).toContain("commands.fix");
+  expect(out).toContain("fixPaths");
 });

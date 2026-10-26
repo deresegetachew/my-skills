@@ -36,7 +36,7 @@ reviewed pull request, and today most of it is by hand:
    by hand.
 5. **Check:** `factory doctor` is green, and `factory version` shows the release.
 6. **Commit the install and open the pull request.** `.claude/` and `.gitmodules` are normally in `protected`, so the
-   dev manager or the owner merges it. After that, `factory update` is the only way the factory changes in the project.
+   owner merges it. After that, `factory update` is the only way the factory changes in the project.
 
 Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is the owner's merge.
 

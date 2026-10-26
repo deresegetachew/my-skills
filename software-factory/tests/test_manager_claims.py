@@ -2,7 +2,7 @@
 """Several dev managers at once (#99): review and question claims with a lease, a stale hold cleaned, a merge that
 GitHub refuses because someone else got there first, and owner-queue asks posted once. A fake `gh` keeps one
 repository in a JSON file (with a lock, so two managers can really race); the managers are the real command.
-The rest is in manager_claims.test.ts (#252); these two stay until factory_wait and factory_settings are ported.
+The rest is in manager_claims.test.ts (#252); this one stays until factory_wait is ported.
 python3 software-factory/tests/test_manager_claims.py"""
 import json, os, subprocess, sys, tempfile, threading
 from datetime import datetime, timedelta, timezone
@@ -190,11 +190,3 @@ def test_a_claim_is_not_mistaken_for_an_answer_by_the_waiting_code():
 
 def approved(head=HEAD):
     return comment(f"<!-- factory-approved sha={head[:7]} -->", 3)
-
-
-def test_factory_settings_know_the_claim_minutes():
-    r = Repo([pull(5)], {5: [comment(claim_text("dm-1", HEAD, 15), 1)]}, cfg={"reviewMarkers": "tmp/reviews"})
-    s = r.factory("settings", "show", "manager.claimMinutes")
-    assert s.returncode == 0 and "20" in s.stdout, (s.stdout, s.stderr)
-
-

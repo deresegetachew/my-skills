@@ -1,6 +1,5 @@
 // `factory prs`: the one list a dev manager starts a pass from (#98), against a fake `gh` that answers from a scenario
 // (recorded-style REST replies) and logs every call.
-// (test_settings_lists_the_flake_list stays in test_prs.py until factory_settings is ported.)
 import { expect, test } from "bun:test";
 import { readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -364,4 +363,11 @@ test("asks tagged for product are read by the dev manager side too", () => {
   const ask = (slug: string, tag = ""): string => `<!-- factory-owner-ask id=${slug}${tag ? " " + tag : ""} -->\nthis needs your yes: renumber the PRD stories?`;
   expect(OWNER_ASK.exec(ask("renumber", "for=product"))?.[1]).toBe("renumber");
   expect(OWNER_ASK.exec(ask("plain"))?.[1]).toBe("plain");
+});
+
+test("settings lists the flake list", () => {
+  const [d, env] = project(scenario({}));
+  const p = sh([process.execPath, "--no-env-file", join(HOOKS, "factory_settings.ts"), "show", "manager.flakes"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("manager.flakes");
 });

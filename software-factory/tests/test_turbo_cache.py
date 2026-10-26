@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The shared self-hosted Turborepo remote cache (#59): the checks left in Python until factory_settings and factory_doctor
-are ported (#252); everything else is in turbo_cache.test.ts. Original summary:: the compose file, `factory turbo`, the environment agents and
+"""The shared self-hosted Turborepo remote cache (#59): the checks left in Python until factory_doctor
+is ported (#252); everything else is in turbo_cache.test.ts. Original summary:: the compose file, `factory turbo`, the environment agents and
 CI get, and what happens without a token or when the cache is down.  python3 software-factory/tests/test_turbo_cache.py
 
 Docker cannot run in the tests, so the compose file is checked as text and `docker` and `gh` are fakes on PATH that log
@@ -98,19 +98,6 @@ def log(env, suffix):
 def nowhere_leaks(p, env):
     everything = p.stdout + p.stderr + log(env, ".docker") + log(env, ".gh")
     assert TOKEN not in everything and SIGKEY not in everything, "a secret was printed or passed as an argument"
-
-
-def test_the_turbo_settings_are_listed_with_defaults_and_checked():
-    d, env = project()
-    out = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_settings.py")], cwd=d, env=env,
-                         capture_output=True, text=True).stdout
-    for key in ("turbo.api", "turbo.team", "turbo.bind", "turbo.port", "turbo.secretsCommand"):
-        assert key in out, key
-    set_ = lambda *a: subprocess.run([sys.executable, os.path.join(HOOKS, "factory_settings.py"), "set", *a], cwd=d,
-                                     env=env, capture_output=True, text=True)
-    assert set_("turbo.port", "3400").returncode == 0
-    assert set_("turbo.port", "many").returncode != 0
-    assert json.load(open(os.path.join(d, ".claude", "factory.json")))["turbo"] == {"port": 3400}
 
 
 def d_marker():

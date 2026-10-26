@@ -163,8 +163,10 @@ export function exists(path: string): boolean {
 
 /** JSON text the way Python's json.dumps writes it: ", " and ": " between items (or `indent`), non-ASCII escaped
  * unless `ensureAscii` is false. Use it where a file or an output line must stay the same as before the port. */
-export function pyDumps(value: unknown, opts: { indent?: number; sortKeys?: boolean; ensureAscii?: boolean } = {}): string {
+export function pyDumps(value: unknown, opts: { indent?: number | string; sortKeys?: boolean; ensureAscii?: boolean } = {}): string {
   const ascii = opts.ensureAscii ?? true;
+  // `indent` as in Python: a number of spaces, or the string to indent with (a tab).
+  const unit = typeof opts.indent === "string" ? opts.indent : " ".repeat(opts.indent ?? 0);
   const str = (s: string): string => {
     const j = JSON.stringify(s);
     return ascii ? j.replace(/[\u007f-\uffff]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")) : j;
@@ -174,8 +176,8 @@ export function pyDumps(value: unknown, opts: { indent?: number; sortKeys?: bool
     if (typeof v === "string") return str(v);
     if (typeof v === "boolean") return v ? "true" : "false";
     if (typeof v === "number") return Number.isFinite(v) ? String(v) : v > 0 ? "Infinity" : Number.isNaN(v) ? "NaN" : "-Infinity";
-    const pad = opts.indent !== undefined ? "\n" + " ".repeat(opts.indent * (level + 1)) : "";
-    const end = opts.indent !== undefined ? "\n" + " ".repeat(opts.indent * level) : "";
+    const pad = opts.indent !== undefined ? "\n" + unit.repeat(level + 1) : "";
+    const end = opts.indent !== undefined ? "\n" + unit.repeat(level) : "";
     const sep = opts.indent !== undefined ? "," : ", ";
     if (Array.isArray(v)) {
       if (!v.length) return "[]";

@@ -261,7 +261,7 @@ case "$cmd" in
   worktree)  fh "$hooks/factory_claims" worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    fh "$hooks/factory_issues" "${1:-list}" "${@:2}" ;;
   machine)   fh "$hooks/factory_machine" "${1:-show}" "${@:2}" ;;
-  follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
+  follow|say|remote)  fh "$hooks/factory_follow" "$cmd" "$@" ;;
   agents)    fh "$hooks/factory_agents" "${1:-list}" "${@:2}" ;;
   messages)  fh "$hooks/factory_messages" "${1:-ls}" "${@:2}" ;;
   heartbeat) fh "$hooks/factory_heartbeat" "${1:-status}" "${@:2}" ;;
@@ -279,7 +279,7 @@ case "$cmd" in
   reset-run)   fh "$hooks/factory_reset_run" "$@" ;;
   manager-claims) fh "$hooks/factory_manager_claims" "$@" ;;
   lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
-  settings)  py factory_settings.py "$@" ;;
+  settings)  fh "$hooks/factory_settings" "$@" ;;
   usage)     py factory_usage.py "$@" ;;
   report)    fh "$hooks/factory_report" "$@" ;;
   env)       if [ -n "${1:-}" ]; then
@@ -298,7 +298,7 @@ case "$cmd" in
   precheck)  fh "$hooks/factory_wait" precheck ;;
   watch)     py factory_watch.py "$@" ;;
   prd)       py factory_prd.py "$@" ;;
-  artifacts) py factory_artifacts.py "$@" ;;
+  artifacts) fh "$hooks/factory_artifacts" "$@" ;;
   handover)  py factory_handover.py "$@" ;;
   signoff)   fh "$hooks/factory_signoff" "$@" ;;
   manage-tick) fh "$hooks/factory_tick" "$@" ;;

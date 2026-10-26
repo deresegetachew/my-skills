@@ -55,16 +55,16 @@ software-factory/
     factory_prs.ts                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
     factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
     factory_env.py                      per-agent ports and database
-    factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
-    factory_remotes.py                  remotes, ssh calls and finding sessions by name
+    factory_follow.ts                   `factory follow`, `say`, `remote` and `agent --detach`
+    factory_remotes.ts                  remotes, ssh calls and finding sessions by name
     factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
     factory_release.ts                  `factory version | releases | update | rollback`: the release client
-    factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
+    factory_bootstrap.ts                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
     factory_bootstrap_core.ts           the steps and actions bootstrap is built from, and the executor
     factory_bootstrap_machine.ts        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
-    factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
+    factory_bootstrap_project.ts        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
     factory_netguard.ts                 renders the nftables rules and the guard's systemd unit
-    factory_sandbox.py                  `factory doctor --sandbox`
+    factory_sandbox.ts                  `factory doctor --sandbox`
     factory_models.ts                   the `models` setting: claude flags per role, effective models
     factory_fix.ts                      `factory fix`: format and auto-fix the changed files (`commands.fix`)
     factory_run_check.ts                `factory run-check`: a quiet check with the full log on disk
@@ -73,13 +73,13 @@ software-factory/
     factory_clock.py                    the one clock the scripts share; tests can set the time
     factory_reviews.ts                  which extra reviews a change needs
     factory_report.ts                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
-    factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
-    factory_settings_schema.py          the table that describes every setting: help, limits, defaults, README tables
-    factory_settings_store.py           reads and writes factory.json and the machine file (order, indent, atomic)
-    factory_settings_interactive.py     the interactive menu behind `factory settings`
-    factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
+    factory_settings.ts                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
+    factory_settings_schema.ts          the table that describes every setting: help, limits, defaults, README tables
+    factory_settings_store.ts           reads and writes factory.json and the machine file (order, indent, atomic)
+    factory_settings_interactive.ts     the interactive menu behind `factory settings`
+    factory_settings_save.ts            `factory settings pr`: branch, commit, push and open the pull request
     factory_usage.ts                    `factory usage`: tokens per task from the local Claude Code logs
-    factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
+    factory_artifacts.ts                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
     factory_handover.py                 `factory handover snapshot`: the state a manager hands over, read from GitHub
     factory_init.py                     `factory init`: the project's scaffold (roles, labels, owner queue, PRD stub)
     factory_flow.py                     `factory prd --stage`: the flow stages and the owner's gates

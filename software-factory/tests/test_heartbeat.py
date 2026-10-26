@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The heartbeat daemon (#108): the checks left in Python until factory_doctor and factory_settings are ported (#252);
+"""The heartbeat daemon (#108): the check left in Python until factory_doctor is ported (#252);
 everything else is in heartbeat.test.ts.  python3 software-factory/tests/test_heartbeat.py"""
 import json, os, subprocess, sys
 
@@ -22,16 +22,6 @@ def test_doctor_notes_a_missing_daemon_and_agents_cannot_install_or_stop_it():
     d = D.project()  # plan mode: nothing reports to GitHub, so nothing to say
     p = D.doctor(d, {**D.machine(), "FACTORY_AGENTS": "taytu"})
     assert not any("heartbeat" in l for l in p.stdout.splitlines()), p.stdout
-
-
-def test_help_and_settings_know_the_heartbeat():
-    d = D.project()
-    env = D.machine()
-    out = subprocess.run(["bash", FACTORY, "help"], cwd=d, env=env, capture_output=True, text=True).stdout
-    assert "heartbeat" in out and "agents ls" in out, out
-    shown = subprocess.run(["bash", FACTORY, "settings"], cwd=d, env=env, capture_output=True, text=True).stdout
-    for key in ("tasks.heartbeatSeconds", "tasks.heartbeatMissMinutes", "tasks.releaseDownMinutes"):
-        assert key in shown, (key, shown)
 
 
 if __name__ == "__main__":

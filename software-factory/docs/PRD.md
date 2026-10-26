@@ -68,6 +68,9 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
   > Open question: README, DEV-MANAGER.md and `CLAUDE.md` say "the dev manager or the owner" merges protected changes,
   > and DEV-MANAGER.md says the dev manager reviews and merges protected PRs too. `factory prs` says
   > `owner merges (protected)`, and #150 lists protected merges as owner-only. Which is it? This page follows #150.
+  > Decided for `.claude/` (#247): a change under `.claude/` (a `factory settings pr`, permissions, `settings.json`,
+  > the agents' definitions) is merged by the owner, never by the dev manager; the settings help, `factory settings pr`,
+  > the `manage-pass` skill, DEV-MANAGER.md and CODEOWNERS say so.
 - **Scope and task order**: adding tasks beyond review follow-ups, unblocking, reordering, freezing (the order is
   issue #114) (`manage-pass` skill, #114).
 - **Any change to the factory**, the dev manager's own rhythm, merging a manager's own pull requests, anything on the
@@ -282,7 +285,8 @@ until he agrees them."
 - **U6.** As a project owner, what stays mine is `.claude/factory.json`, the notes, the lessons file, the roles folder,
   `CLAUDE.md`, my docs and CI workflow; a rule that should change everywhere is changed in my-skills. I never edit a
   shared file in my project. My own allow rules go in `.claude/factory.json` (`permissions.allow`), and `factory update`
-  merges them into the release's `settings.json`. *Built.* (wiki/submodule.md "Shared and project-owned"; #112, #198)
+  merges them into the release's `settings.json`; `factory settings pr` writes them there in the same pull request, so a
+  new rule applies after one owner merge (#251). *Built.* (wiki/submodule.md "Shared and project-owned"; #112, #198)
 - **U7.** As a project on the submodule, I keep working until I move. I move to the new layout or to releases in one
   reviewed pull request, with no flag day. `factory update --release` refuses where the files are still links. Moving
   Remanual changes protected files there, so it is the owner's merge. *Built (the commands); the migration is owner-led.*
@@ -339,7 +343,7 @@ until he agrees them."
 
 ### 4.8 Settings
 
-- **S1.** As the owner, one table, `hooks/factory_settings_schema.py`, describes every setting (key, type, default,
+- **S1.** As the owner, one table, `hooks/factory_settings_schema.ts`, describes every setting (key, type, default,
   section, help, who must approve a change), and the list, `help`, `validate`, the menu and the tables on the wiki's settings page are all
   generated from it. A test fails when those tables drift. *Built.* (#49, `CLAUDE.md`)
 - **S2.** As the owner, `factory settings` is a menu in a terminal and a set of commands in scripts: `list`, `get`, `set`,

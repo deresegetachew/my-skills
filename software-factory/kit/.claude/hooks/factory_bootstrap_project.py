@@ -1,1 +1,0 @@
-../../../hooks/factory_bootstrap_project.py
