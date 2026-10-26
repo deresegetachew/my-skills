@@ -90,6 +90,22 @@ def gh_access(r):
         r.note("gh auth status", "it reports a problem, but `gh api` works, so the factory is fine (common with GH_TOKEN)")
 
 
+def main_branch(r, cfg):
+    """One main branch (#196): the PR gate reads GitHub's default branch, the loop reads the file's `mainBranch`.
+    They must agree, or the loop checks out a branch that has no factory files. Skipped when gh can't say."""
+    rc, out, _ = run("gh", "repo", "view", "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name")
+    default = out.splitlines()[0].strip() if rc == 0 and out else ""
+    if not re.fullmatch(r"[\w./-]+", default):
+        return
+    mine = cfg.get("mainBranch") or "main"
+    if mine == default:
+        r.ok(f"mainBranch {mine} is GitHub's default branch")
+    else:
+        r.fix("main-branch-differs", f"mainBranch in .claude/factory.json is {mine}, but GitHub's default branch is "
+              f"{default}, and the PR gate reads {default}. Fix: run `factory settings set mainBranch {default}`, "
+              f"or change the default branch in the repository's settings on GitHub to {mine}")
+
+
 def node(r):
     if not os.path.exists("package.json"):
         return
@@ -392,6 +408,7 @@ def main():
     docker(r)
     if cfg:
         project(r, cfg)
+        main_branch(r, cfg)
         factory(r, cfg)
         models(r, cfg)
         permissions(r, cfg)

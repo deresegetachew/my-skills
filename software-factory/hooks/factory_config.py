@@ -124,6 +124,9 @@ DEFAULTS = {
     # The eval skill: {"command": "pnpm golden", "baseline": "path", "mustNotDrop": ["warning recall 100%"],
     #   "metrics": ["..."], "paths": ["regex", ...]}. Empty command: no eval yet.
     "eval": {},
+    # Allow rules the project adds to .claude/settings.json (#198). The release owns that file, so `factory update`
+    # merges these in after the release's own entries; doctor and `factory version` do not count them as drift.
+    "permissions": {"allow": []},
     # The shared Turborepo remote cache (factory_turbo.py, `factory turbo`, #59). api: the address agents and CI use
     # (empty: off). team: default the repository's name. bind/port: where the server listens on its machine.
     # secretsCommand: prints TURBO_TOKEN=... lines (the token is never in this file).

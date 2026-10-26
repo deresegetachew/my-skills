@@ -43,6 +43,7 @@ NEEDS = {
     "alwaysAllowed": "the owner's decision: it changes which files an agent may merge",
     "trustedReviewers": "the owner's decision: it changes whose approvals count",
     "permissionMode": "the owner's decision: it changes what an unattended agent may do without asking",
+    "permissions.allow": "the owner's decision: it changes what an unattended agent may run without asking",
     "mainBranch": "the owner's decision: the PR gate reads the branch from GitHub, so keep it the same",
     "reviews.safety-auditor.paths": "the owner's decision: it changes which changes get the safety auditor",
     "reviews.security-reviewer.paths": "the owner's decision: it changes which changes get the security reviewer",
@@ -161,6 +162,7 @@ SETTINGS = {s.key: s for s in [
     S('tasks.heartbeatMissMinutes', 'int', 'issues', 'An agent the daemon writes for counts as silent after this many minutes without a keepalive (instead of downMinutes).'),
     S('tasks.releaseDownMinutes', 'int', 'issues', 'An agent that is plainly down (its loop or the daemon said so) gets its in-progress issues back to ready by the sweep after this long.'),
     S('tasks.showWhere', 'bool', 'issues', 'Post the machine, folder, tmux session and Remote Control link on agent issues (anyone who can read the repo sees them).', default=False),
+    S('permissions.allow', 'list', 'agents', 'Extra Claude Code allow rules for this project, like "Edit(src/**)". `factory update` merges them into .claude/settings.json after the release\'s own rules.'),
     S('reviews.safety-auditor.paths', 'list', 'gate', 'Regexes of paths that need the safety auditor.'),
     S('reviews.security-reviewer.paths', 'list', 'gate', 'Regexes of paths that need the security reviewer.'),
     S('eval.command', 'str', 'design', 'The eval command (e.g. `pnpm golden`). Empty: no eval yet.', default=''),
@@ -291,6 +293,12 @@ MORE = {
                              examples=['factory settings set trustedReviewers \'["your-login"]\'']),
     "holdLabel": dict(long="While the dev manager reviews a PR it puts this label on it. Agents skip held PRs (no "
                            "rework) and can't merge them.", examples=["factory settings set holdLabel factory-hold"]),
+    "permissions.allow": dict(long="The release owns .claude/settings.json, so a rule added there by hand is drift and the next `factory update` "
+                                    "replaces it. List the project's extra allow rules here instead: `factory update` adds them after the release's "
+                                    "own, and `factory doctor` says to run it when one is missing. Use `Edit(path/**)` for files (Claude Code "
+                                    "never matches `Write(path)` rules) and `Bash(command *)` for commands. Deny rules still win. Review each rule: "
+                                    "an unattended loop can run what it allows.",
+                                    examples=['factory settings set permissions.allow \'["Edit(src/**)", "Bash(make test*)"]\'']),
     "reviews.safety-auditor.paths": dict(long="A diff touching these paths needs the safety auditor's pass before the PR "
                                               "gate opens. Use it for the rules your CLAUDE.md says must never break.",
                                          examples=['factory settings set reviews.safety-auditor.paths \'["^packages/warnings/"]\'']),

@@ -443,6 +443,14 @@ other project is unaffected.
    commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
    running `factory update`. Agent sessions cannot run it (the PR gate reads these files).
 
+**Your own allow rules.** `.claude/settings.json` belongs to the release: a rule typed into it by hand is drift
+(`factory doctor` says `fix`), and the next `factory update` replaces it. List the project's extra allow rules in
+`.claude/factory.json` instead, as `"permissions": {"allow": ["Edit(src/**)", "Bash(make test*)"]}`. `factory update`
+adds them after the release's own rules and records the merged file in the pin, so they are not drift and survive every
+update. A rule in `factory.json` that `settings.json` does not have yet is reported with `run factory update`. Use
+`Edit(path/**)` for files (Claude Code never matches `Write(path)` rules). Deny rules always win. Changing the list is a
+protected change: it goes through a pull request the dev manager or owner merges.
+
 Where things live: downloads are cached in `~/.cache/software-factory/<repo>/<tag>/` (`FACTORY_CACHE_DIR` moves it).
 `release.repo` in `factory.json` names the repository whose releases are used (default `deresegetachew/my-skills`);
 `GH_TOKEN` is sent if set (rate limits, private forks). A rollback checks the cached archive against the checksum the
@@ -508,7 +516,7 @@ version it pins. `factory help` lists everything.
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
 | `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, GitHub access (a real `gh api user` call; `gh auth status` failing alone is only a note), Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, GitHub access (a real `gh api user` call; `gh auth status` failing alone is only a note), Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, that `mainBranch` is GitHub's default branch (a fix otherwise: the loop and the PR gate must read the same branch), on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash. Prints one line, such as `Released taytu: the checkout and the task claim issue-5.`, or `Nothing to release: haile holds no checkout or task claim.` |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -2181,6 +2189,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `permissionMode` | one of acceptEdits/default | `"acceptEdits"` | How unattended `claude -p` runs get their permissions: acceptEdits (the default) or default (your own Claude Code settings decide). |
 | `waitMinutes` | int | `1` | How often an idle loop looks for work. 0: it exits instead. |
 | `models` | dict | `{}` | The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default. |
+| `permissions.allow` | list | `[]` | Extra Claude Code allow rules for this project, like "Edit(src/**)". `factory update` merges them into .claude/settings.json after the release's own rules. |
 
 **Issues mode**
 

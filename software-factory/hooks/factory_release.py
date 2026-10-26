@@ -447,9 +447,52 @@ def is_symlinked(root, rel):
     return False
 
 
+SETTINGS_REL = ".claude/settings.json"
+
+
+def project_allow(root):
+    """The allow entries the project adds in .claude/factory.json (`permissions.allow`, #198). The release owns
+    settings.json, so these are merged in when it is installed instead of being typed into it by hand."""
+    cfg = read_json(os.path.join(root, ".claude", "factory.json")) or {}
+    perms = cfg.get("permissions") if isinstance(cfg, dict) else None
+    allow = perms.get("allow", []) if isinstance(perms, dict) else []
+    if not isinstance(allow, list) or not all(isinstance(a, str) and a.strip() for a in allow):
+        raise FactoryError("bad_allow_list", "`permissions.allow` in .claude/factory.json must be a list of rule strings, like \"Edit(tmp/**)\".",
+                           "fix that list (`factory settings help permissions.allow` shows an example), then run it again. Nothing was changed.")
+    return [a.strip() for a in allow]
+
+
+def with_allow(data, extras):
+    """The release's settings.json bytes with the project's allow entries added after the release's own (no repeats)."""
+    if not extras:
+        return data
+    try:
+        doc = json.loads(data.decode("utf-8"))
+    except ValueError:
+        return data  # verification reports a settings.json that is not JSON
+    allow = doc.setdefault("permissions", {}).setdefault("allow", [])
+    new = [e for e in dict.fromkeys(extras) if e not in allow]
+    if not new:
+        return data
+    allow.extend(new)
+    return (json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def allow_problems(root):
+    """Allow entries the project asks for that settings.json does not have yet (an update puts them there)."""
+    try:
+        extras = project_allow(root)
+        have = json.load(open(os.path.join(root, SETTINGS_REL))).get("permissions", {}).get("allow", [])
+    except (FactoryError, OSError, ValueError, AttributeError):
+        return []
+    return [f"{e} is in permissions.allow in .claude/factory.json but not in {SETTINGS_REL}" for e in extras if e not in have]
+
+
 def pinned_problems(root, pin):
-    """Why the files on disk are not what the pin says: missing, changed, or not executable. Empty when they match."""
-    bad = []
+    """Why the files on disk are not what the pin says: missing, changed, or not executable. Empty when they match.
+    The pin's hash of settings.json is of the release's own part plus the project's allow entries, so those entries
+    are not drift; an entry in factory.json that settings.json lacks is."""
+    bad = allow_problems(root)
     for rel, sha in sorted(pin["files"].items()):
         path = os.path.join(root, rel)
         if not os.path.isfile(path):
@@ -479,6 +522,7 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
                                "a release does not overwrite links. Move this project off the submodule first (the migration is a separate reviewed pull request); "
                                "until then keep using `factory update`.")
     first = not os.path.exists(os.path.join(root, ".claude", "factory.json"))
+    extras, merged = project_allow(root), {}
     old_files = (old_pin or {}).get("files", {})
     backups, written_templates, result = {}, [], {"added": [], "changed": [], "removed": [], "kept_local": []}
 
@@ -493,6 +537,9 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
     try:
         for target in sorted(engine):
             data, mode = files[engine[target]]
+            if target == SETTINGS_REL:
+                data = with_allow(data, extras)
+                merged[target] = data
             path = os.path.join(root, target)
             exists = os.path.isfile(path)
             current = open(path, "rb").read() if exists else None
@@ -536,7 +583,7 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
                             else (old_pin or {}).get("previous")),
                "templates": sorted(set((old_pin or {}).get("templates", [])) | set(written_templates)),
                "executable": sorted(t for t in engine if files[engine[t]][1] & 0o111),
-               "files": {t: sha256_bytes(files[engine[t]][0]) for t in sorted(engine)}}
+               "files": {t: sha256_bytes(merged.get(t, files[engine[t]][0])) for t in sorted(engine)}}
         path = os.path.join(root, PIN_PATH)
         remember(path)
         write_file(path, (json.dumps(pin, indent=2, sort_keys=True) + "\n").encode(), 0o644)
