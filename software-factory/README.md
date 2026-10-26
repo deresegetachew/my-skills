@@ -443,6 +443,14 @@ other project is unaffected.
    commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
    running `factory update`. Agent sessions cannot run it (the PR gate reads these files).
 
+**Your own allow rules.** `.claude/settings.json` belongs to the release: a rule typed into it by hand is drift
+(`factory doctor` says `fix`), and the next `factory update` replaces it. List the project's extra allow rules in
+`.claude/factory.json` instead, as `"permissions": {"allow": ["Edit(src/**)", "Bash(make test*)"]}`. `factory update`
+adds them after the release's own rules and records the merged file in the pin, so they are not drift and survive every
+update. A rule in `factory.json` that `settings.json` does not have yet is reported with `run factory update`. Use
+`Edit(path/**)` for files (Claude Code never matches `Write(path)` rules). Deny rules always win. Changing the list is a
+protected change: it goes through a pull request the dev manager or owner merges.
+
 Where things live: downloads are cached in `~/.cache/software-factory/<repo>/<tag>/` (`FACTORY_CACHE_DIR` moves it).
 `release.repo` in `factory.json` names the repository whose releases are used (default `deresegetachew/my-skills`);
 `GH_TOKEN` is sent if set (rate limits, private forks). A rollback checks the cached archive against the checksum the
@@ -2176,6 +2184,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `claimStaleHours` | int | `6` | How long a local claim or a pushed task branch holds a task. |
 | `waitMinutes` | int | `1` | How often an idle loop looks for work. 0: it exits instead. |
 | `models` | dict | `{}` | The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default. |
+| `permissions.allow` | list | `[]` | Extra Claude Code allow rules for this project, like "Edit(src/**)". `factory update` merges them into .claude/settings.json after the release's own rules. |
 
 **Issues mode**
 
