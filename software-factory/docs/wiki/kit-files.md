@@ -59,12 +59,12 @@ software-factory/
     factory_remotes.ts                  remotes, ssh calls and finding sessions by name
     factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
     factory_release.py                  `factory version | releases | update | rollback`: the release client
-    factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
+    factory_bootstrap.ts                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
     factory_bootstrap_core.ts           the steps and actions bootstrap is built from, and the executor
     factory_bootstrap_machine.ts        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
-    factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
+    factory_bootstrap_project.ts        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
     factory_netguard.ts                 renders the nftables rules and the guard's systemd unit
-    factory_sandbox.py                  `factory doctor --sandbox`
+    factory_sandbox.ts                  `factory doctor --sandbox`
     factory_models.ts                   the `models` setting: claude flags per role, effective models
     factory_fix.ts                      `factory fix`: format and auto-fix the changed files (`commands.fix`)
     factory_run_check.ts                `factory run-check`: a quiet check with the full log on disk
