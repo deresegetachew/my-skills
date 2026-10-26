@@ -353,6 +353,8 @@ def classify(rel):
         return "template", ".claude/" + sub
     if rel in ("kit/factory", "kit/factory-loop.sh"):
         return None
+    if rel.endswith(".yml.template"):
+        return None  # a CI template install.sh chooses from (ci-python.yml.template), not a workflow to install
     if rel.startswith("kit/"):
         return "template", rel[len("kit/"):]
     return None
