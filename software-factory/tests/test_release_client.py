@@ -887,7 +887,6 @@ def stack_world(project_files):
     """A release that carries the real stack detector, both CI workflows and a pnpm factory.json template."""
     gh, d, env = world()
     gh.add("1.0.0", files={
-        "hooks/factory_stack.py": open(os.path.join(SF, "hooks", "factory_stack.py")).read(),
         "kit/.github/workflows/ci.yml": "name: CI\n# pnpm template\n",
         "kit/.github/workflows/ci-python.yml.template": "name: CI\n# python template\n",
         "kit/.claude/factory.json": json.dumps({"commands": {"install": "pnpm install", "test": "pnpm -s test", "build": "pnpm -s build"}}) + "\n"})
@@ -913,10 +912,22 @@ def test_a_first_release_install_in_a_python_project_gets_the_python_workflow_an
     # later updates leave the project's workflow and commands alone
     open(os.path.join(d, ".github/workflows/ci.yml"), "a").write("# mine\n")
     commit(d)
-    gh.add("1.1.0", files={"hooks/factory_stack.py": open(os.path.join(SF, "hooks", "factory_stack.py")).read()})
+    gh.add("1.1.0")
     assert fac(d, env, "update")[0] == 0
     assert open(os.path.join(d, ".github/workflows/ci.yml")).read().endswith("# mine\n")
     assert json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]["test"] == "python3 -m unittest discover"
+
+
+def test_code_in_a_release_is_never_run_by_the_update():
+    marker = os.path.join(tempfile.mkdtemp(), "ran")
+    gh, d, env = stack_world({"tests/test_a.py": UNITTEST_TESTS})
+    gh.add("1.0.1", files={"kit/.github/workflows/ci.yml": "name: CI\n# pnpm template\n",
+                           "kit/.github/workflows/ci-python.yml.template": "name: CI\n# python template\n",
+                           "hooks/factory_stack.py": "open(%r, 'w').write('x')\ndef detect(root):\n    open(%r, 'w').write('x')\n" % (marker, marker)})
+    rc, out = fac(d, env, "update", "v1.0.1")
+    assert rc == 0, out
+    assert not os.path.exists(marker), "the release's own factory_stack.py ran during the update"
+    assert "python template" in open(os.path.join(d, ".github/workflows/ci.yml")).read()  # the client's own detector decided
 
 
 def test_a_first_release_install_in_a_node_project_is_unchanged():

@@ -17,7 +17,7 @@ Stdlib only, so it also installs the first release into a project that has no fa
 
 Every error is `[code] message` and `Fix: ...`. Tests point FACTORY_RELEASE_API at a local fake of GitHub's API.
 """
-import argparse, hashlib, http.client, json, os, re, shutil, subprocess, sys, tarfile, tempfile, types, urllib.error, urllib.parse, urllib.request, zlib
+import argparse, hashlib, http.client, json, os, re, shutil, subprocess, sys, tarfile, tempfile, urllib.error, urllib.parse, urllib.request, zlib
 
 DEFAULT_REPO = "deresegetachew/my-skills"
 PIN_PATH = ".claude/factory/release.json"
@@ -523,18 +523,32 @@ PYTHON_CI_TEMPLATE = "kit/.github/workflows/ci-python.yml.template"
 PYTHON_CI_TARGET = ".github/workflows/ci.yml"
 
 
-def stack_module(files):
-    """hooks/factory_stack.py from the unpacked archive (the same detector install.sh uses), or None for an older release."""
-    if "hooks/factory_stack.py" not in files:
+def stack_module():
+    """The stack detector beside this client (never code from the archive: a release is only written, not run, until a
+    person has reviewed the pull request). On a first install the client runs from the checksum-checked archive, so
+    the file is next to it; later it is the project's own reviewed copy. None when it is missing."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isfile(os.path.join(here, "factory_stack.py")):
         return None
-    mod = types.ModuleType("factory_stack_from_release")
-    exec(compile(files["hooks/factory_stack.py"][0].decode(), "factory_stack.py", "exec"), mod.__dict__)
-    return mod
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import factory_stack
+    return factory_stack
 
 
-def detect_stack(root, files):
-    mod = stack_module(files)
-    return mod.detect(root) if mod else {"stack": "node", "reason": "no detector in this release", "commands": {}, "notes": []}
+NO_DETECTOR = {"stack": "unknown", "reason": "no detector beside the release client", "commands": {}, "notes": []}
+UNKNOWN_LINES = ["Stack: could not tell (no package.json, no Python files). CI keeps the pnpm template.",
+                 "Note: edit .github/workflows/ci.yml and the commands in .claude/factory.json to match your project."]
+
+
+def detect_stack(root):
+    mod = stack_module()
+    return mod.detect(root) if mod else NO_DETECTOR
+
+
+def stack_lines(found):
+    mod = stack_module()
+    return mod.lines(found) if mod else UNKNOWN_LINES
 
 
 def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
@@ -585,15 +599,15 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
                     os.rmdir(folder)
                     folder = os.path.dirname(folder)
         if first:
-            found = detect_stack(root, files)
+            found = detect_stack(root)
             result["stack"] = found
             for target in sorted(templates):
                 data, mode = files[templates[target]]
                 path = os.path.join(root, target)
                 if found["stack"] == "python" and target == PYTHON_CI_TARGET and PYTHON_CI_TEMPLATE in files:
                     data = files[PYTHON_CI_TEMPLATE][0]  # the Python workflow stands in for the pnpm one
-                elif target == ".claude/factory.json" and stack_module(files):
-                    data = stack_module(files).commands_text(data.decode(), found).encode()
+                elif target == ".claude/factory.json" and found["stack"] == "python" and stack_module():
+                    data = stack_module().commands_text(data.decode(), found).encode()
                 if target == ".gitignore":
                     remember(path)
                     have = open(path).read() if os.path.isfile(path) else ""
@@ -890,8 +904,8 @@ def cmd_update(args, rollback=False):
                 say("    (the release notes need the network; `factory releases` shows them later)")
         total = len(installed["added"]) + len(installed["changed"]) + len(installed["removed"])
         say(f"  Installed {tag}: {len(installed['added'])} new, {len(installed['changed'])} changed, {len(installed['removed'])} removed file(s).")
-        if installed.get("stack") and stack_module(files):
-            for line in stack_module(files).lines(installed["stack"]):
+        if installed.get("stack"):
+            for line in stack_lines(installed["stack"]):
                 say("  " + line)
         for t in installed["removed"][:8]:
             say(f"    removed {t}")
