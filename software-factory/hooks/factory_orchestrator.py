@@ -237,6 +237,51 @@ def running(name):
     return alive
 
 
+# --- a skipped pull request --------------------------------------------------------------------------------------------
+
+SKIP_RX = re.compile(r"<!--\s*factory-manager-skip\s+sha=(\w+)\s*-->")
+BOOKKEEPING = re.compile(r"<!--\s*factory-(?:review-claim|claim-release|manager-note|answer-claim|item-claim)\b")
+
+
+def skip_reason(pr_obj, head):
+    """(reason, next step) for a pull request the sub-manager left without a verdict, from facts alone."""
+    if pr_obj.get("draft"):
+        return "it is a draft", "Mark it ready for review when the work is done; the manager looks at it then."
+    if pr_obj.get("mergeable_state") == "dirty":
+        return ("it has a merge conflict with the main branch",
+                "Merge main into the branch (or rebase it) and push; the manager reviews the new commit.")
+    verdict, jobs = watch.ci_state(head)
+    if verdict == "failed":
+        return (f"CI failed ({', '.join(jobs)})",
+                "Fix the failing job (`factory ci log <pr number>` shows why) and push; the manager reviews the new commit.")
+    if verdict != "green":
+        return "CI has not finished", "The manager looks again when CI is done; nothing to do until then."
+    return ("the session ended without a review or a reason",
+            "The next pass looks at it again; if it ends the same way, the owner is asked.")
+
+
+def leave_verdict(cfg, name, item, before, out):
+    """A sub-manager that took a pull request and ended with no comment of its own leaves one (#195): what it saw, why it
+    did not review, and the next step. Once per head commit. Returns True when it posted."""
+    pr = item.get("pr")
+    if not pr or item.get("kind") not in ("review", "fix"):
+        return False
+    p = fi.gh("GET", f"repos/{{owner}}/{{repo}}/pulls/{pr}") or {}
+    head = (p.get("head") or {}).get("sha", "")
+    if p.get("state", "open") != "open" or not head:
+        return False
+    comments = fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{pr}/comments")
+    if any(c["id"] not in before and not BOOKKEEPING.search(c.get("body") or "") for c in comments):
+        return False  # it said something itself
+    if any((SKIP_RX.search(c.get("body") or "") or [None, None])[1] == head for c in comments):
+        return False  # already said so for this head
+    reason, step = skip_reason(p, head)
+    fi.comment(pr, f"<!-- factory-manager-skip sha={head} -->\n**Dev manager {name} looked at this pull request and did not "
+                   f"review it.** Reason: {reason}.\n\nNext step: {step}")
+    out(f"pr-{pr}: left a comment saying why it was not reviewed ({reason})")
+    return True
+
+
 # --- one sub-manager ---------------------------------------------------------------------------------------------------
 
 def run_sub(cfg, name, ref, interactive=False):
@@ -263,6 +308,7 @@ def run_sub(cfg, name, ref, interactive=False):
         flags = roles.session_flags(cfg, "dev-manager")
         env = {**os.environ, "FACTORY_AGENT": name, "FACTORY_ROLE": "dev-manager", "FACTORY_LOOP": "1", "FACTORY_ITEM": ref}
         limit = float(manager_setting(cfg, "subManagerMinutes")) * 60
+        before = {c["id"] for c in fi.gh_all(f"repos/{{owner}}/{{repo}}/issues/{item['pr']}/comments")} if item.get("pr") else set()
         out(f"{ref}: starting a {'session you can type into' if interactive else 'sub-manager'} ({item['line']})")
         if interactive:
             args = ["claude", *flags]
@@ -279,6 +325,10 @@ def run_sub(cfg, name, ref, interactive=False):
                     out(f"{ref}: stopped after {limit / 60:.0f} minutes (manager.subManagerMinutes)")
                     rc = 1
         out(f"{ref}: the session ended ({'ok' if rc == 0 else f'exit {rc}'})")
+        try:
+            leave_verdict(cfg, name, item, before, out)
+        except Exception as e:  # a missing reason must not turn a finished session into a failure
+            out(f"{ref}: could not leave the reason on the pull request ({e})")
         return 0 if rc == 0 else 1
     finally:
         lease.release(held)

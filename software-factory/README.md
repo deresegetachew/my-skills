@@ -1509,6 +1509,11 @@ orchestrator started and the items other managers hold; the rest wait for the ne
 `factory:in-progress` and marks it `closed` when the issue closes, with no model. The sub-manager reads it from its prompt and
 edits it (`PATCH .../issues/comments/<id>`) before it exits. It is a memory, not a source of truth.
 
+**A pull request the manager did not review.** When a sub-manager takes a review or fix item for a pull request and ends with no
+comment of its own, the orchestrator leaves one (no model): `<!-- factory-manager-skip sha=<head> -->`, *Dev manager NAME looked
+at this pull request and did not review it*, the reason (a draft, a merge conflict, red CI with the failed jobs, CI not finished,
+or no reason given) and the next step. Once per head commit. Claims, releases and the thread note do not count as a comment.
+
 **Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
 `manager.notify` (a login) or, when that is empty, the repository's owner if that is a person. GitHub's own notifications
 reach the phone. An ask has an `id` and is posted once. Items for the owner: the queued CI, a down or idle agent, a PR
