@@ -6,6 +6,8 @@
   factory update [version]     newest release (or the named one): download, check the checksum, install into the
                                project, refresh this machine's runner services, verify. Leaves the change uncommitted.
   factory rollback             back to the release that was installed before (offline, from the download cache)
+  factory migrate-to-release   a project linked to the my-skills submodule: replace the links the release owns with the
+                               release's files, keep the links it does not ship, print the steps for the pull request
 
 The installed factory is committed in the project (decision in #113): hooks/ and ci/ go to .claude/hooks and
 .claude/ci, `factory` and `factory-loop.sh` to the project root, the agents, skills and settings.json to .claude/.
@@ -551,10 +553,15 @@ def stack_lines(found):
     return mod.lines(found) if mod else UNKNOWN_LINES
 
 
-def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
-    """Write the release into the project. Returns {added, changed, removed, kept_local}; undoes its work on a failure."""
+def install_files(root, files, manifest, tag, archive_sha, old_pin, repo, migrate=False):
+    """Write the release into the project. Returns {added, changed, removed, kept_local}; undoes its work on a failure.
+    With `migrate`, a file that is a link into the my-skills submodule is replaced by the release's file (the link is put
+    back on a failure); any other link, and a link in a parent folder, still refuses."""
     engine, templates = plan(files)
     for target in sorted(engine):
+        if migrate and os.path.islink(os.path.join(root, target)) and not is_symlinked(root, os.path.dirname(target)) \
+                and into_submodule(root, target):
+            continue
         if is_symlinked(root, target):
             raise FactoryError("linked_install", f"{target} is a link (this project takes the factory from the my-skills submodule).",
                                "a release does not overwrite links. Move this project off the submodule first (the migration is a separate reviewed pull request); "
@@ -562,11 +569,13 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
     first = not os.path.exists(os.path.join(root, ".claude", "factory.json"))
     extras, merged = project_allow(root), {}
     old_files = (old_pin or {}).get("files", {})
-    backups, written_templates, result = {}, [], {"added": [], "changed": [], "removed": [], "kept_local": []}
+    backups, written_templates, result = {}, [], {"added": [], "changed": [], "removed": [], "kept_local": [], "unlinked": []}
 
     def remember(path):
         if path not in backups:
-            if os.path.lexists(path):
+            if os.path.islink(path):
+                backups[path] = ("link", os.readlink(path))
+            elif os.path.lexists(path):
                 with open(path, "rb") as f:
                     backups[path] = (f.read(), os.stat(path).st_mode & 0o7777)
             else:
@@ -579,6 +588,10 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
                 data = with_allow(data, extras)
                 merged[target] = data
             path = os.path.join(root, target)
+            if migrate and os.path.islink(path):
+                remember(path)
+                os.remove(path)  # the link goes; the submodule's file is never written through
+                result["unlinked"].append(target)
             exists = os.path.isfile(path)
             current = open(path, "rb").read() if exists else None
             if current == data and (os.stat(path).st_mode & 0o111 != 0) == bool(mode & 0o111):
@@ -636,6 +649,10 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
             try:
                 if saved is None:
                     remove(path)
+                elif saved[0] == "link":
+                    remove(path)
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    os.symlink(saved[1], path)
                 else:
                     write_file(path, saved[0], saved[1])
             except OSError:
@@ -851,6 +868,100 @@ def check_clean(root, pin):
                        "commit them, or put them aside with `git stash -u`, then run it again. Nothing was changed.")
 
 
+def submodule_paths(root):
+    """The paths of the my-skills submodule(s) in .gitmodules (empty when there is none)."""
+    p = git(root, "config", "-f", ".gitmodules", "--get-regexp", r"submodule\..*\.(path|url)", check=False)
+    paths = set()
+    for line in p.stdout.splitlines():
+        if "my-skills" in line:
+            key = line.split(None, 1)[0].rsplit(".", 1)[0]
+            q = git(root, "config", "-f", ".gitmodules", "--get", key + ".path", check=False).stdout.strip()
+            if q:
+                paths.add(q)
+    return sorted(paths)
+
+
+def into_submodule(root, rel):
+    """Is the link at `rel` one that points into the my-skills submodule?"""
+    target = os.path.realpath(os.path.join(root, rel))
+    subs = [os.path.realpath(os.path.join(root, q)) for q in submodule_paths(root)]
+    if subs:
+        return any(target.startswith(q + os.sep) for q in subs)
+    return os.sep + "software-factory" + os.sep in target
+
+
+def submodule_links(root):
+    """The links in .claude/ and the two entry points that point into the submodule, as project-relative paths."""
+    found = []
+    for rel in ("factory", "factory-loop.sh"):
+        if os.path.islink(os.path.join(root, rel)) and into_submodule(root, rel):
+            found.append(rel)
+    for folder, dirs, names in os.walk(os.path.join(root, ".claude")):
+        for n in names + dirs:
+            path = os.path.join(folder, n)
+            rel = os.path.relpath(path, root)
+            if os.path.islink(path) and into_submodule(root, rel):
+                found.append(rel)
+    return sorted(found)
+
+
+def cmd_migrate(args):
+    """Take a submodule-linked project onto a release (#170). Refuses a dirty tree and changes nothing on a refusal;
+    the install undoes itself on a failure. It runs nothing from the release: files are only written."""
+    root = project_root()
+    refuse_factory_repo(root)
+    refuse_agent()
+    pin = read_pin(root)
+    if pin:
+        say(f"factory migrate-to-release\n  This project is already on {pin['tag']}; nothing to migrate.")
+        return 0
+    links = submodule_links(root)
+    if not links:
+        raise FactoryError("nothing_to_migrate", "no file in this project is a link into the my-skills submodule.",
+                           "to take the factory from a release without a submodule, run `factory update --release`. Nothing was changed.")
+    check_clean(root, None)
+    repo = repo_name(root, None)
+    releases = []
+    if args.version:
+        tag, release = normalize_tag(args.version), None
+    else:
+        releases = list_releases(repo)
+        release = newest(releases)
+        tag = release["tag"]
+    say("factory migrate-to-release" + (f"  ({repo})" if args.verbose else ""))
+    archive, release = fetch_archive(repo, tag, release, None)
+    files, manifest = unpack(archive, tag)
+    installed = install_files(root, files, manifest, tag, sha256_file(archive), None, repo, migrate=True)
+    engine, _ = plan(files)
+    kept = [l for l in links if l not in engine]
+    say(f"  Replaced {len(installed['unlinked'])} link(s) with {tag}'s files; installed {len(installed['added'])} new, "
+        f"{len(installed['changed'])} changed file(s).")
+    for t in installed["unlinked"][:8]:
+        say(f"    unlinked {t}")
+    for t in kept[:8]:
+        say(f"    kept link {t} (this release does not ship it)")
+    new_pin = read_pin(root)
+    say("This machine")
+    for line in refresh_services(root):
+        say("  " + line)
+    problems = verify_machine(root, new_pin)
+    if problems:
+        raise FactoryError("verification_failed", f"{tag} is installed here, but the checks after it failed:\n" + "\n".join("    - " + p for p in problems),
+                           "fix what the lines above say (each names the file), then run `factory update`; it is safe to repeat.")
+    say("  checks: the files match the pin, every hook in settings.json exists, the scripts parse, the runner files are readable (verified)")
+    say()
+    say(f"Done. This project is on {tag}. Nothing is committed for you. The steps for the pull request:")
+    say(f"  1. git add -A && git commit -m \"Take the software factory from release {tag}, not the submodule\"")
+    subs = submodule_paths(root)
+    if kept:
+        say(f"  2. The submodule stays: {len(kept)} link(s) still point into it ({', '.join(kept[:3])}{', ...' if len(kept) > 3 else ''}).")
+    elif subs:
+        for q in subs:
+            say(f"  2. When you no longer need the submodule {q}: git submodule deinit -f {q} && git rm -f {q} && rm -rf .git/modules/{q}")
+    say("  3. Open the pull request. Everyone else runs `git pull`, then `factory update` from then on.")
+    return 0
+
+
 def cmd_update(args, rollback=False):
     root = project_root()
     command = "rollback" if rollback else "update"
@@ -942,6 +1053,9 @@ def main(argv=None):
     u.add_argument("--release", action="store_true", help="use releases even when the project has no pin yet")
     u.add_argument("--verbose", action="store_true")
     sub.add_parser("rollback").add_argument("--verbose", action="store_true")
+    m = sub.add_parser("migrate-to-release")
+    m.add_argument("version", nargs="?")
+    m.add_argument("--verbose", action="store_true")
     sub.add_parser("check-own-repo", help=argparse.SUPPRESS)  # `factory update` asks this before the submodule path
     args = ap.parse_args(argv)
     try:
@@ -952,6 +1066,8 @@ def main(argv=None):
         if args.cmd == "check-own-repo":
             refuse_factory_repo(project_root())
             return 0
+        if args.cmd == "migrate-to-release":
+            return cmd_migrate(args)
         return cmd_update(args, rollback=args.cmd == "rollback")
     except FactoryError as e:
         print(f"factory {args.cmd}: [{e.code}] {e.message}\nFix: {e.fix}", file=sys.stderr)

@@ -179,6 +179,8 @@ Maintain
                          machine's runner services and verify; then commit it in a PR. Safe to repeat. --release: start
                          taking releases in a project that has no pin yet
   rollback               back to the release installed before (needs no network)
+  migrate-to-release     a project linked to the my-skills submodule: replace the links the release owns with the
+                         release's files, keep the others, print the pull-request steps (refuses a dirty tree)
   update [--layout new]  a project still on the my-skills submodule (no pin yet): pull the newest my-skills and relink;
                          then commit it in a PR (new: point the links at the factory's own folders instead of kit/)
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
@@ -292,7 +294,7 @@ case "$cmd" in
   signoff)   py factory_signoff.py "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;
   turbo)     py factory_turbo.py "$@" ;;
-  version|releases|rollback) py factory_release.py "$cmd" "$@" ;;
+  version|releases|rollback|migrate-to-release) py factory_release.py "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).
     py factory_release.py check-own-repo || exit 1
