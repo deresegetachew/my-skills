@@ -290,7 +290,7 @@ case "$cmd" in
   run-check) py factory_run_check.py "$@" ;;
   check)     py style_checks.py ;;
   guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
-  doctor)    py factory_doctor.py "$@" ;;
+  doctor)    fh "$hooks/factory_doctor" "$@" ;;
   wait)      case "${1:-}" in
                ci|answer|slot|ready) py factory_wait.py "$@" ;;
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;

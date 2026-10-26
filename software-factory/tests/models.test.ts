@@ -1,7 +1,6 @@
 // The `models` setting: a model (and effort) per role, in factory.json (#94). A role with no entry behaves as before.
 // The values must reach the `claude` command line: --model and --effort for the builder (loop) and the manager,
 // --agents for a subagent (the one mechanism that overrides a kit agent file per role; see factory_models.ts).
-// (`factory doctor` with this setting is checked in test_models.py until factory_doctor is ported.)
 import { expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -193,4 +192,30 @@ test("factory agent passes the models setting before the users own arguments", (
 test("factory agent with no models adds nothing", () => {
   const args = agentRun(undefined);
   for (const f of ["--model", "--effort", "--agents"]) expect(args).not.toContain(f);
+});
+
+// --- `factory doctor` with the setting ---------------------------------------------------------------------------
+
+function doctorRun(d: string) {
+  return runBun(join(HOOKS, "factory_doctor.ts"), [], { cwd: d, env: personEnv() });
+}
+
+test("doctor shows the effective model per role and where it came from", () => {
+  const d = project({ builder: { model: "opus" }, reviewer: { model: "haiku" } });
+  const p = doctorRun(d);
+  const out = p.stdout.split("\n").filter((l) => l.includes("model for"));
+  const by: Record<string, string> = {};
+  for (const l of out) by[(l.split("model for ")[1] as string).split(":")[0] as string] = l;
+  expect(Object.keys(by).sort(), out.join("\n")).toEqual(["builder", "manager", ...SUBAGENTS].sort());
+  expect(by.builder!.includes("opus") && by.builder!.includes("setting"), by.builder).toBe(true);
+  expect(by.manager!, by.manager).toContain("Claude Code default");
+  expect(by.reviewer!.includes("haiku") && by.reviewer!.includes("setting"), by.reviewer).toBe(true);
+  expect(by["safety-auditor"]!.includes("opus") && by["safety-auditor"]!.includes("agent file"), by["safety-auditor"]).toBe(true);
+  expect(by["test-writer"]!.includes("sonnet") && by["test-writer"]!.includes("agent file"), by["test-writer"]).toBe(true);
+});
+
+test("doctor flags a bad models value", () => {
+  const d = project({ builder: { model: "" } });
+  const p = doctorRun(d);
+  expect(p.code === 1 && p.stdout.split("\n").some((l) => l.startsWith("fix") && l.includes("models")), p.stdout).toBe(true);
 });

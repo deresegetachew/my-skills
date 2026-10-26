@@ -57,7 +57,7 @@ software-factory/
     factory_env.py                      per-agent ports and database
     factory_follow.ts                   `factory follow`, `say`, `remote` and `agent --detach`
     factory_remotes.ts                  remotes, ssh calls and finding sessions by name
-    factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
+    factory_doctor.ts                   `factory doctor`: checks a machine and project, read-only
     factory_release.ts                  `factory version | releases | update | rollback`: the release client
     factory_bootstrap.ts                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
     factory_bootstrap_core.ts           the steps and actions bootstrap is built from, and the executor

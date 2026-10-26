@@ -4,7 +4,7 @@
 // Docker cannot run in the tests, so the compose file is checked as text and `docker` and `gh` are fakes on PATH that
 // log what they were given. The cache itself is a small HTTP server (its own process) that answers like the real
 // one's /v8/artifacts/status. The token below is made up for the test; it must never show up in any output, argument
-// or log. (The doctor tests stay in test_turbo_cache.py until factory_doctor is ported.)
+// or log.
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, lstatSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -442,4 +442,28 @@ test("the turbo settings are listed with defaults and checked", () => {
   expect(settings("set", "turbo.port", "3400").code).toBe(0);
   expect(settings("set", "turbo.port", "many").code).not.toBe(0);
   expect(JSON.parse(read(join(d, ".claude", "factory.json"))).turbo).toEqual({ port: 3400 });
+});
+
+// ---------- factory doctor ----------
+function doctorRun(d: string, env: Env): Proc {
+  return runHook("factory_doctor", [], { cwd: d, env, timeoutMs: 120_000 });
+}
+
+test("doctor notes an unreachable cache never fails on it and never runs the secrets command", () => {
+  if (existsSync(marker())) rmSync(marker());
+  const [d, env] = project({ api: "http://127.0.0.1:9", secretsCommand: `touch ${marker()}` });
+  const p = doctorRun(d, env);
+  const ls = p.stdout.split("\n").filter((l) => l.toLowerCase().includes("turbo") && l.toLowerCase().includes("cache"));
+  expect(ls.some((l) => l.startsWith("note") && l.includes("can't be reached")), p.stdout).toBe(true);
+  expect(p.stdout.split("\n").some((l) => l.startsWith("fix") && l.toLowerCase().includes("turbo")), p.stdout).toBe(false);
+  expect(existsSync(marker()), "doctor never decrypts or runs the owner's secrets command").toBe(false);
+});
+
+test("doctor says when turbo json does not sign artifacts but a key is set", () => {
+  const cache = serve();
+  const [d, env] = project({ api: cache.url });
+  write(join(d, "turbo.json"), '{"tasks": {}}');
+  const p = doctorRun(d, { ...env, TURBO_REMOTE_CACHE_SIGNATURE_KEY: SIGKEY });
+  expect(p.stdout, p.stdout).toMatch(/note .*signature/);
+  expect(p.stdout).not.toContain(SIGKEY);
 });

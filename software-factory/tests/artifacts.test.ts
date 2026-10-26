@@ -1,8 +1,7 @@
 // The project's artifacts and designs as reviewed copies in the repo (#104): `factory artifacts pull|status|list` and
 // the manifest. Runs the real factory in a throwaway project (a bare origin and a clone with the hooks copied in). The
 // fetcher and the version lookup are fake commands (shell scripts the test writes), so nothing here talks to a network.
-// (test_doctor_flags_a_copy_that_is_older_than_its_artifact_or_missing and
-// test_a_role_reads_md_names_an_artifact_through_its_repo_copy stay in test_artifacts.py until factory_doctor is ported.)
+// The doctor's checks of the copies, and a role's reads.md naming a copy, are at the end.
 import { expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -218,4 +217,31 @@ test("list and an empty project", () => {
   expect(out).toContain("SMWHUKAEcqo6VtbTzYrTZj");
   expect(out).toContain("MVP PRD");
   expect(out).toContain("docs/prd");
+});
+
+// --- factory doctor -------------------------------------------------------------------------------------------------
+
+function doctor(work: string, env: Env): Proc {
+  return sh(["bash", "./factory", "doctor"], { cwd: work, env, timeoutMs: 90_000 });
+}
+
+test("doctor flags a copy that is older than its artifact or missing", () => {
+  const [, work, env] = artProject();
+  art(work, env, ["pull", URL, "docs/prd"]);
+  const ok = doctor(work, env);
+  expect(ok.stdout.includes("artifact SMWHUKAEcqo6VtbTzYrTZj") && ok.stdout.includes("up to date"), ok.stdout).toBe(true);
+  const old = doctor(work, { ...env, VERSION: "9", UPDATED: "2026-10-25T00:00:00Z" });
+  expect(old.stdout.includes("OLDER than the artifact") && old.stdout.includes("factory artifacts pull"), old.stdout).toBe(true);
+});
+
+test("a role reads md names an artifact through its repo copy", () => {
+  const [, work, env] = artProject();
+  write(join(work, ".claude", "factory", "roles", "product-owner", "reads.md"),
+    "- docs/prd/index.html - the PRD as designed (a copy of an artifact)\n");
+  const before = doctor(work, env).stdout;
+  expect(before.includes("docs/prd/index.html") && before.includes("does not exist"), before).toBe(true); // not pulled yet
+  art(work, env, ["pull", URL, "docs/prd"]);
+  const after = doctor(work, env).stdout;
+  expect(after).not.toContain("fix   .claude/factory/roles/product-owner/reads.md: docs/prd/index.html");
+  expect(after).toContain("ok    product-owner reads.md: every path exists");
 });
