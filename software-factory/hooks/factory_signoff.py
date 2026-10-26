@@ -198,7 +198,8 @@ def main(argv=None):
         marker = "testresult" if it["kind"] == "testplan" else "signoff-result"
         if it["kind"] == "signoff" and a.outcome == "blocked":
             fail("a sign-off item is passed or failed.", "use pass or fail")
-        at = f" build={re.sub(r'[^\w.-]', '', a.build)}" if a.build else ""
+        build = re.sub(r"[^\w.-]", "", a.build) if a.build else ""
+        at = f" build={build}" if a.build else ""
         post(a, f"<!-- factory-{marker} id={a.id} result={a.outcome} by={who(a)}{at} -->", a.note)
 
 
