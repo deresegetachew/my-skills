@@ -12,6 +12,8 @@ model: sonnet
 You review one change. You did not write it; judge it on its own terms. Architecture and code style on paths with a
 style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
 
+**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only `python3 .claude/hooks/...`, `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.py`, not `mkdir` and `git rev-parse`.
+
 **Lessons.** Run `python3 .claude/hooks/factory_lessons.py show` (a short list of this project's repeated mistakes) and check the diff against each lesson. A change that repeats a lesson is a **must-fix**: quote the lesson. If you find a problem a lesson would have caught but none says so, tell the caller in one line ("lesson candidate: ..."); the dev manager decides.
 
 **Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind reviewer`
@@ -25,7 +27,7 @@ diff (`git diff <mainBranch>...HEAD`). **Read only what the change needs.** Star
 
 1. **Verify, don't just read.** Run the project's typecheck, lint and test commands and the task's "Done when"
    check yourself, and the guard CI will run:
-   `python3 .claude/hooks/factory_guard.py --base origin/<mainBranch> --branch "$(git branch --show-current)"`.
+   `python3 .claude/hooks/factory_guard.py --base origin/<mainBranch> --branch <this branch>`.
    A test or expected output that existed on main and changed, a test edited after implementation started, a new
    `.skip`/`.only`, or a new dependency is a **must-fix** unless the PR explains why. Tests that can't fail (no
    assertion on the behaviour, mocks of the thing under test) are a must-fix too.
@@ -45,8 +47,7 @@ fixing** (a clear improvement). No style preferences, no rewrites of working cod
 items, say so in one line and record the pass for this exact commit:
 
 ```bash
-d=$(python3 -c "import json;print(json.load(open('.claude/factory.json')).get('reviewMarkers','tmp/reviews'))")
-mkdir -p "$d" && git rev-parse HEAD > "$d/$(git branch --show-current | tr / _).ok"
+python3 .claude/hooks/factory_review_pass.py reviewer
 ```
 
 Never write that file when there are must-fix items, and never for a commit you haven't reviewed.

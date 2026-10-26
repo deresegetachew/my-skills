@@ -59,6 +59,8 @@ Look
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
                          incremental re-review: a reviewer's next round reads only the delta since its last one
+  review-pass reviewer|arch
+                         a review agent records its pass for the current commit (what the PR gate reads); one command
   manager-claims list|next|review|answer|release|sweep|merge|ask
                          several dev managers at once: claim a PR or a question with a lease (manager.claimMinutes),
                          so two managers never review, answer, merge or ask the same thing twice; list shows who holds what
@@ -258,6 +260,7 @@ case "$cmd" in
   clean)     py factory_claims.py clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
+  review-pass) py factory_review_pass.py "$@" ;;
   manager-claims) py factory_manager_claims.py "$@" ;;
   lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
   settings)  py factory_settings.py "$@" ;;
