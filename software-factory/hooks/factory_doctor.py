@@ -258,6 +258,12 @@ def trust(r, cfg):
             return
 
 
+def ci(r, cfg):
+    """CI, the runners and the agents' leftovers (#205): factory_doctor_ci.py. Read-only; needs GitHub to answer."""
+    import factory_doctor_ci
+    factory_doctor_ci.checks(r, cfg)
+
+
 def factory(r, cfg):
     if shutil.which("factory"):
         r.ok("`factory` is on your PATH")
@@ -445,6 +451,7 @@ def main():
         models(r, cfg)
         permissions(r, cfg)
         trust(r, cfg)
+        ci(r, cfg)
         roles(r, cfg)
         manager(r, cfg)
         turbo(r, cfg)

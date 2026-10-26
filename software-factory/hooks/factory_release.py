@@ -353,6 +353,8 @@ def classify(rel):
         return "template", ".claude/" + sub
     if rel in ("kit/factory", "kit/factory-loop.sh"):
         return None
+    if rel.endswith(".yml.template"):
+        return None  # a CI template install.sh chooses from (ci-python.yml.template), not a workflow to install
     if rel.startswith("kit/"):
         return "template", rel[len("kit/"):]
     return None
@@ -517,6 +519,38 @@ def write_file(path, data, mode):
     os.replace(tmp, path)
 
 
+PYTHON_CI_TEMPLATE = "kit/.github/workflows/ci-python.yml.template"
+PYTHON_CI_TARGET = ".github/workflows/ci.yml"
+
+
+def stack_module():
+    """The stack detector beside this client (never code from the archive: a release is only written, not run, until a
+    person has reviewed the pull request). On a first install the client runs from the checksum-checked archive, so
+    the file is next to it; later it is the project's own reviewed copy. None when it is missing."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.isfile(os.path.join(here, "factory_stack.py")):
+        return None
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import factory_stack
+    return factory_stack
+
+
+NO_DETECTOR = {"stack": "unknown", "reason": "no detector beside the release client", "commands": {}, "notes": []}
+UNKNOWN_LINES = ["Stack: could not tell (no package.json, no Python files). CI keeps the pnpm template.",
+                 "Note: edit .github/workflows/ci.yml and the commands in .claude/factory.json to match your project."]
+
+
+def detect_stack(root):
+    mod = stack_module()
+    return mod.detect(root) if mod else NO_DETECTOR
+
+
+def stack_lines(found):
+    mod = stack_module()
+    return mod.lines(found) if mod else UNKNOWN_LINES
+
+
 def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
     """Write the release into the project. Returns {added, changed, removed, kept_local}; undoes its work on a failure."""
     engine, templates = plan(files)
@@ -565,9 +599,15 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo):
                     os.rmdir(folder)
                     folder = os.path.dirname(folder)
         if first:
+            found = detect_stack(root)
+            result["stack"] = found
             for target in sorted(templates):
                 data, mode = files[templates[target]]
                 path = os.path.join(root, target)
+                if found["stack"] == "python" and target == PYTHON_CI_TARGET and PYTHON_CI_TEMPLATE in files:
+                    data = files[PYTHON_CI_TEMPLATE][0]  # the Python workflow stands in for the pnpm one
+                elif target == ".claude/factory.json" and found["stack"] == "python" and stack_module():
+                    data = stack_module().commands_text(data.decode(), found).encode()
                 if target == ".gitignore":
                     remember(path)
                     have = open(path).read() if os.path.isfile(path) else ""
@@ -864,6 +904,9 @@ def cmd_update(args, rollback=False):
                 say("    (the release notes need the network; `factory releases` shows them later)")
         total = len(installed["added"]) + len(installed["changed"]) + len(installed["removed"])
         say(f"  Installed {tag}: {len(installed['added'])} new, {len(installed['changed'])} changed, {len(installed['removed'])} removed file(s).")
+        if installed.get("stack"):
+            for line in stack_lines(installed["stack"]):
+                say("  " + line)
         for t in installed["removed"][:8]:
             say(f"    removed {t}")
         for t in installed["kept_local"][:8]:

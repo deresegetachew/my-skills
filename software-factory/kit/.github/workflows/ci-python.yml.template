@@ -1,0 +1,66 @@
+# Software factory CI: the pull-request gate merges only when these checks are green.
+# The Python version of the template: install.sh chose it because the project has Python files and no package.json.
+# It runs what .claude/factory.json says (commands.install, commands.test), so edit those, not this file.
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+
+concurrency:
+  # A label change re-runs only the Factory guard, in its own group so it can't cancel a code run.
+  group: ci-${{ github.ref }}-${{ contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && 'label' || 'code' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Where the jobs run (`factory ci use local|github`, README.md "CI"). Two lanes, each from a repo variable:
+# - light jobs, the Factory guard (and anything else short that runs on label changes, which are the dev manager's
+#   merge steps): vars.CI_RUNS_ON_LIGHT, for example ["self-hosted","<repo>-light"], a small runner that takes
+#   nothing else, so a 30-second check never waits behind a 15-minute build. Unset: the heavy lane's runners.
+# - heavy jobs (install, tests): vars.CI_RUNS_ON, for example ["self-hosted","<repo>-local"].
+# Neither set: GitHub's runners. A pull request from another repository (a fork) always runs on GitHub's runners.
+
+jobs:
+  guard:
+    # The factory guard: test and golden-file edits, skips, new dependencies, decision numbers, task ticks.
+    # It runs here, where the coding agent can't edit around it. The dev manager clears reviewable findings with
+    # the `tests-reviewed` / `deps-reviewed` labels.
+    name: Factory guard
+    if: github.event_name == 'pull_request'
+    # The light lane.
+    runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '"ubuntu-latest"' || vars.CI_RUNS_ON_LIGHT || vars.CI_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - env:
+          # Passed through env, never inlined into the script: branch names and labels are untrusted text.
+          BASE: ${{ github.base_ref }}
+          BRANCH: ${{ github.head_ref }}
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        run: python3 .claude/hooks/factory_guard.py --base "origin/$BASE" --branch "$BRANCH" --labels "$LABELS"
+      - name: Lessons file (at most lessonsCap one-line lessons, each with an example or a link)
+        run: python3 .claude/hooks/factory_lessons.py check
+
+  check:
+    name: Install, test
+    if: ${{ !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
+    # The heavy lane.
+    runs-on: ${{ fromJSON(github.event.pull_request && github.event.pull_request.head.repo.full_name != github.repository && '"ubuntu-latest"' || vars.CI_RUNS_ON || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Install (commands.install in .claude/factory.json)
+        run: python3 .claude/hooks/factory_stack.py run install
+      - name: Style checks (styles[].check in .claude/factory.json)
+        run: python3 .claude/hooks/style_checks.py
+      - name: Test (commands.test in .claude/factory.json)
+        run: python3 .claude/hooks/factory_stack.py run test

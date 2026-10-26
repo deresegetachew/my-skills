@@ -517,7 +517,7 @@ version it pins. `factory help` lists everything.
 | `factory check` | Runs the style checks CI runs (`styles[].check`) |
 | `factory guard` | Runs the Factory guard on the current branch against `origin/<main>` (without labels) |
 | `factory bootstrap machine\|project\|all\|status\|uninstall` | Set up a sandboxed factory machine: the dedicated user, rootless Docker and the network guard. The plan is printed first; `--apply` (as root) runs the privileged steps, `--script FILE` writes them as a bash script. Ends with `factory doctor --sandbox`. [Details](#a-sandboxed-machine-factory-bootstrap) |
-| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, GitHub access (a real `gh api user` call; `gh auth status` failing alone is only a note), Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, that `origin/<mainBranch>` exists (a clone of an empty repo has no fetch setting; the fix is printed), that `mainBranch` is GitHub's default branch (a fix otherwise: the loop and the PR gate must read the same branch), on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), whether Claude Code trusts the project folder and each agent worktree (it ignores the whole allow list in a folder it does not trust; doctor only reads the flag in `~/.claude.json`, never writes it or prints the file), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
+| `factory doctor` | Checks this machine and project and prints `ok`, `fix` (with the fix) or `note` per line: git, Python, Claude Code, GitHub access (a real `gh api user` call; `gh auth status` failing alone is only a note), Node against `.nvmrc` and the `packageManager` (when there's a `package.json`), Docker and whether it's rootless (when there's a compose file), the submodules, `.claude/settings.json`, that `origin/<mainBranch>` exists (a clone of an empty repo has no fetch setting; the fix is printed), that `mainBranch` is GitHub's default branch (a fix otherwise: the loop and the PR gate must read the same branch), on a project with a release pin the same checks `factory update` ends with, `.env.local`, sops and `SOPS_AGE_KEY_FILE` (when there's a `.sops.yaml`; it never decrypts or prints a secret), whether Claude Code trusts the project folder and each agent worktree (it ignores the whole allow list in a folder it does not trust; doctor only reads the flag in `~/.claude.json`, never writes it or prints the file), CI (only `gh api` reads: the `CI_RUNS_ON` and `CI_RUNS_ON_LIGHT` variables and whether a runner with that label is online, whether the newest run on the main branch is green, in-progress issues held by a down agent and Agent issues for names that are not configured, and a workflow whose pnpm/Node steps or commands do not match `factory.json`), the shim and `FACTORY_AGENTS`, and autostart (tmux, the boot service, linger). and the shared build cache when `turbo.api` is set (a note when it can't be reached; it never runs `turbo.secretsCommand`). Read-only; exits 1 when something needs fixing. `--sandbox` adds the checks of a bootstrapped machine |
 | `factory release <agent>` | Drops an agent's local claims, for example after a crash. Prints one line, such as `Released taytu: the checkout and the task claim issue-5.`, or `Nothing to release: haile holds no checkout or task claim.` |
 | `factory clean` | Removes agent worktrees no live agent uses and that have no uncommitted work, and local task branches whose task is done |
 | `factory wait <pr> [minutes]` | Waits for a PR to merge (default 30 minutes), polling GitHub once a minute, without spending tokens |
@@ -553,7 +553,7 @@ version it pins. `factory help` lists everything.
   permission prompt, so every headless `claude -p` starts with `--permission-mode acceptEdits` (setting
   `permissionMode`; `default` passes no flag and leaves it to your own Claude Code settings). Edits inside the
   project then need no answer, and `.claude/settings.json` must allow every command the build needs; a command that
-  is neither allowed nor denied stops the run. Interactive sessions are not given a mode. `--dry-run` shows the flag,
+  is neither allowed nor denied stops the run. Interactive sessions are not given a mode. Before an unattended run starts, the loop checks that Claude Code trusts the folder (it ignores the whole allow list in one it does not); if not, it prints a `{code, message, fix}` naming the folder to open once with `claude`, starts nothing and stops. A folder it cannot judge (no `~/.claude.json`) goes ahead. `--dry-run` shows the flag,
   and `factory doctor` prints the mode and says `fix` when a headless run would stall (mode `default` with no mode in
   your own settings, or no rule for `git commit`, `git push`, `gh pr` and the like). Best for long stretches away.
 - **`factory loop -i`**: interactive. Each task opens a Claude session with `/next-task <id>` already started. When
@@ -2294,6 +2294,7 @@ software-factory/
     factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
     factory_manager_claims.py           several dev managers at once: review and question claims with a lease
     factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
+    factory_stack.py                    the project's stack on a first install (node, python, unknown) and the Python CI's command runner
     pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
     check.py                            Stop: typecheck and tests
     factory_stop.py                     Stop: closes a finished session in `factory loop -i`
@@ -2419,6 +2420,17 @@ Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is
 - **Copies the templates** the first time only (when there's no `.claude/factory.json` yet): `factory.json`, the
   notes folder, `CLAUDE.factory.md`, the docs templates, the CI workflow, the issue template and `CODEOWNERS`. It
   never overwrites a file that's there.
+- **Tells the stack on that first install** (#199, `hooks/factory_stack.py`). A `package.json` means Node: the pnpm
+  `ci.yml` and the `commands.*` of the template stay. No `package.json` and Python files (`pyproject.toml`,
+  `setup.py`, `requirements*.txt`, or `tests/test_*.py`) mean Python: `ci.yml` is the Python template
+  (`kit/.github/workflows/ci-python.yml.template`, which runs `commands.install` and `commands.test`), the pnpm
+  `commands.*` are emptied, `commands.install` is `python3 -m pip install -r requirements.txt` when that file exists,
+  and `commands.test` is `python3 -m unittest discover` only when the tests are unittest-style (otherwise it stays
+  empty and the output says to set it). Anything else keeps the pnpm template and the output names the files to edit.
+  The output says which it chose. An existing `ci.yml` is kept as it is. The first install from a release
+  (`factory update <tag>`, no `.claude/factory.json` yet) does the same, with the detector from the release's own
+  `hooks/factory_stack.py`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` does not yet check that the
+  workflow matches `factory.json` (follow-up of #199).
 - **Adds `tmp/` and `__pycache__/`** to `.gitignore`.
 
 Without `--link` (`bash install.sh <project dir>`), it copies everything instead, for a project without the
