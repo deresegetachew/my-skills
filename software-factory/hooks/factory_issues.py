@@ -13,7 +13,7 @@ The branch is task/<issue number>-<short-name>, the PR says `Closes #<n>`, and m
   python3 .claude/hooks/factory_issues.py pick --agent taytu      the agent's own in-progress issue, else claim the
                                                                    next ready one: prints "issue-42 <title>"
   python3 .claude/hooks/factory_issues.py peek                     the next ready issue, without claiming it
-  python3 .claude/hooks/factory_issues.py show 42                  title, labels and body
+  python3 .claude/hooks/factory_issues.py show 42                  title, labels, body, then the people's comments
   python3 .claude/hooks/factory_issues.py tick 42 3                tick the 3rd checkbox (1-based) in the body
   python3 .claude/hooks/factory_issues.py review 42                in-progress -> in-review (after opening the PR); prints which labels changed
   python3 .claude/hooks/factory_issues.py block 42 "needs the Stripe keys"
@@ -81,6 +81,26 @@ def remove_label(n, label):
 
 def comment(n, body):
     gh("POST", f"repos/{{owner}}/{{repo}}/issues/{n}/comments", {"body": body})
+
+
+# Comments the factory writes about its own work (claims, reviews, usage ...). `show` leaves them out; a person's
+# comment, and a question or answer that carries words, is read as part of the task.
+FACTORY_NOISE = re.compile(r"^\s*<!--\s*factory-(?:claim|release|approved|mustfix|review-claim|claim-release|"
+                           r"answer-claim|item-claim|usage|agent|role|manager-note)\b")
+
+
+def human_comments(n):
+    """The comments on issue n that people wrote, oldest first (a decision may live in one: #204)."""
+    return [c for c in gh_all(f"repos/{{owner}}/{{repo}}/issues/{n}/comments")
+            if (c.get("body") or "").strip() and not FACTORY_NOISE.match(c["body"])]
+
+
+def show_text(n, i):
+    text = f"#{n} {i['title']}  [{', '.join(sorted(names(i)))}]  {i['state']}\n\n{i.get('body') or ''}"
+    for c in human_comments(n):
+        who = (c.get("user") or {}).get("login") or "someone"
+        text += f"\n\n--- comment by {who} ---\n{c['body'].strip()}"
+    return text
 
 
 def task_issues(state="open", label=None):
@@ -362,7 +382,7 @@ def main():
         print(f"issue-{ready[0]['number']} {ready[0]['title']}")
     elif a.cmd == "show":
         i = gh("GET", f"repos/{{owner}}/{{repo}}/issues/{a.n}")
-        print(f"#{a.n} {i['title']}  [{', '.join(sorted(names(i)))}]  {i['state']}\n\n{i.get('body') or ''}")
+        print(show_text(a.n, i))
     elif a.cmd == "tick":
         tick(a.n, a.index)
     elif a.cmd == "review":
