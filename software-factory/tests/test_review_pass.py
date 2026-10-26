@@ -104,7 +104,7 @@ def test_pass_commands_are_documented_and_pr_body_dir_is_allowed():
     for name, kind in (("reviewer.md", "reviewer"), ("architecture-reviewer.md", "arch")):
         assert f"python3 .claude/hooks/factory_review_pass.py {kind}" in agent_commands(name)
     s = json.load(open(os.path.join(KIT, "settings.json")))["permissions"]["allow"]
-    assert "Edit(./tmp/**)" in s and "Write(./tmp/**)" in s
+    assert "Edit(tmp/**)" in s
 
 
 if __name__ == "__main__":

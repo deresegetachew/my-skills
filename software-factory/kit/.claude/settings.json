@@ -21,8 +21,7 @@
       "Bash(npm ci*)",
       "Bash(git branch --show-current*)",
       "Bash(git merge origin/*)",
-      "Edit(./tmp/**)",
-      "Write(./tmp/**)"
+      "Edit(tmp/**)"
     ],
     "deny": [
       "Read(./.env)",
