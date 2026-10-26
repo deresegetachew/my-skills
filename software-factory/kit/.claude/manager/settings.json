@@ -140,7 +140,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/manager_gate.py",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/manager_gate.ts",
             "timeout": 60
           }
         ]

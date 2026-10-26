@@ -1,1 +1,0 @@
-../../../hooks/manager_gate.py
