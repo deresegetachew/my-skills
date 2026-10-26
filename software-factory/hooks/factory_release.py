@@ -591,7 +591,36 @@ def stack_lines(found):
     return mod.lines(found) if mod else UNKNOWN_LINES
 
 
-def install_files(root, files, manifest, tag, archive_sha, old_pin, repo, migrate=False):
+TASK_SOURCES = ("plan", "issues")
+
+
+def check_tasks(value):
+    """`--tasks` is plan or issues (#245); anything else is refused before any work is done."""
+    if value is not None and value not in TASK_SOURCES:
+        raise FactoryError("bad_tasks", f"--tasks takes plan or issues, not '{value}'.",
+                           "use `--tasks plan` (the build plan, docs/build-plan.md) or `--tasks issues` (GitHub issues). Nothing was changed.")
+
+
+def with_tasks(data, value):
+    """factory.json's text with tasks.source set (the install's own change, written once, on a first install)."""
+    cfg = json.loads(data.decode("utf-8"))
+    cfg.setdefault("tasks", {})["source"] = value
+    return (json.dumps(cfg, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def tasks_lines(value):
+    """What a first install says about where the tasks come from."""
+    if value == "issues":
+        return ["Tasks: from GitHub issues (tasks.source is issues in .claude/factory.json). Next: run `factory issues setup` to make the "
+                "labels. The install does not run it, because it writes to GitHub."]
+    if value == "plan":
+        return ["Tasks: from the build plan (docs/build-plan.md; tasks.source is plan). For GitHub issues, run `factory settings set "
+                "tasks.source issues`, then `factory issues setup` for the labels."]
+    return ["Tasks: from the build plan (docs/build-plan.md). For GitHub issues: run again with --tasks issues, or "
+            "`factory settings set tasks.source issues`, then `factory issues setup` for the labels."]
+
+
+def install_files(root, files, manifest, tag, archive_sha, old_pin, repo, migrate=False, tasks=None):
     """Write the release into the project. Returns {added, changed, removed, kept_local}; undoes its work on a failure.
     With `migrate`, a file that is a link into the my-skills submodule is replaced by the release's file (the link is put
     back on a failure); any other link, and a link in a parent folder, still refuses."""
@@ -659,6 +688,8 @@ def install_files(root, files, manifest, tag, archive_sha, old_pin, repo, migrat
                     data = files[PYTHON_CI_TEMPLATE][0]  # the Python workflow stands in for the pnpm one
                 elif target == ".claude/factory.json" and found["stack"] == "python" and stack_module():
                     data = stack_module().commands_text(data.decode(), found).encode()
+                if target == ".claude/factory.json" and tasks:
+                    data = with_tasks(data, tasks)
                 if target == ".gitignore":
                     remember(path)
                     have = open(path).read() if os.path.isfile(path) else ""
@@ -1003,6 +1034,7 @@ def cmd_migrate(args):
 def cmd_update(args, rollback=False):
     root = project_root()
     command = "rollback" if rollback else "update"
+    check_tasks(getattr(args, "tasks", None))
     refuse_factory_repo(root)
     refuse_agent()
     pin = read_pin(root)
@@ -1039,7 +1071,7 @@ def cmd_update(args, rollback=False):
         archive, release = (local, None) if local else fetch_archive(repo, tag, release, expect)
         files, manifest = unpack(archive, tag)
         archive_sha = sha256_file(archive)
-        installed = install_files(root, files, manifest, tag, archive_sha, pin, repo)
+        installed = install_files(root, files, manifest, tag, archive_sha, pin, repo, tasks=getattr(args, "tasks", None))
         if same:
             say(f"  {tag} was already installed; {len(drift)} file(s) differed from the pin and were repaired:")
             for d in drift[:8]:
@@ -1063,6 +1095,10 @@ def cmd_update(args, rollback=False):
         if installed.get("stack"):
             for line in stack_lines(installed["stack"]):
                 say("  " + line)
+            for line in tasks_lines(getattr(args, "tasks", None)):
+                say("  " + line)
+        elif getattr(args, "tasks", None):
+            say(f"  note: --tasks {args.tasks} only applies to a first install; here, run `factory settings set tasks.source {args.tasks}`.")
         for t in installed["removed"][:8]:
             say(f"    removed {t}")
         for t in installed["kept_local"][:8]:
@@ -1102,6 +1138,7 @@ def main(argv=None):
     u.add_argument("--release", action="store_true", help="use releases even when the project has no pin yet")
     u.add_argument("--archive", help="install this release archive (software-factory-X.Y.Z.tar.gz) instead of downloading it")
     u.add_argument("--sums", help="the SHA256SUMS file for --archive (default: the one beside the archive)")
+    u.add_argument("--tasks", help="on a first install: where tasks come from, plan (the build plan) or issues (GitHub issues)")
     u.add_argument("--verbose", action="store_true")
     sub.add_parser("rollback").add_argument("--verbose", action="store_true")
     m = sub.add_parser("migrate-to-release")

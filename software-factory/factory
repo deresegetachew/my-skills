@@ -176,7 +176,8 @@ Maintain
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
-                         machine's runner services and verify; then commit it in a PR. Safe to repeat. --release: start
+                         machine's runner services and verify; then commit it in a PR. Safe to repeat. --tasks plan|issues:
+                         on a first install, where tasks come from (written to factory.json; `factory issues setup` is yours to run). --release: start
                          taking releases in a project that has no pin yet. --archive FILE [--sums FILE]: install a release
                          archive from disk (no network; for a rehearsal or an offline machine)
   rollback               back to the release installed before (needs no network)
