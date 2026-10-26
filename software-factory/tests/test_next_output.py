@@ -54,6 +54,37 @@ def test_readme_says_next_does_not_claim():
     assert "does not claim" in row and "--claim" in row, row
 
 
+def agent_issue(n, name, status, ping="2020-01-01T00:00:00Z"):
+    body = f"<!-- factory-agent name={name} status={status} ping={ping} -->\n**Started:** x\n**Where:** y"
+    return issue(n, labels=("factory:agent",), body=body)
+
+
+def test_factory_next_says_which_issue_a_down_agent_still_holds_and_how_to_free_it():
+    # #191: the agent is down, its claim stays, and `next` skipped the issue without a word.
+    d, env = project([issue(3, labels=("factory:in-progress", "agent:menelik")), issue(7),
+                      agent_issue(9, "menelik", "down")])
+    p = subprocess.run(["bash", os.path.join(SF, "factory"), "next"], cwd=d, env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and p.stdout.splitlines()[0] == "issue-7 Task 7", p
+    assert "#3" in p.stderr and "menelik" in p.stderr and "down" in p.stderr, p.stderr
+    assert "factory issues release 3" in p.stderr, p.stderr
+
+
+def test_a_live_agents_claim_is_not_called_stale():
+    d, env = project([issue(3, labels=("factory:in-progress", "agent:menelik")), issue(7),
+                      agent_issue(9, "menelik", "working", ping="2999-01-01T00:00:00Z")])
+    p = subprocess.run(["bash", os.path.join(SF, "factory"), "next"], cwd=d, env=env, capture_output=True, text=True)
+    assert p.returncode == 0 and "release" not in p.stderr, p.stderr
+
+
+def test_the_dry_run_says_it_too():
+    d, env = project([issue(3, labels=("factory:in-progress", "agent:menelik")), issue(7),
+                      agent_issue(9, "menelik", "down")])
+    p = subprocess.run(["bash", os.path.join(SF, "factory-loop.sh"), "--once", "--dry-run"],
+                       cwd=d, env={**env, "FACTORY_ROLE": "coding-agent", "FACTORY_NAME": "taytu"}, capture_output=True, text=True)
+    out = p.stdout + p.stderr
+    assert "factory issues release 3" in out and "issue-7" in out, out
+
+
 if __name__ == "__main__":
     for t in [v for k, v in sorted(globals().items()) if k.startswith("test_")]:
         t()
