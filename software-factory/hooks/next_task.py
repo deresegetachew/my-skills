@@ -125,10 +125,22 @@ def named_issue(cfg, a):
     print(json.dumps({"id": f"issue-{i['number']}", "title": i["title"]}) if a.json else f"issue-{i['number']} {i['title']}")
 
 
+def say_stale_claims(cfg):
+    """On stderr, one line per in-progress issue whose agent is down: `next` skips it, and this says why (#191)."""
+    try:
+        import factory_agents
+        for n, name, status in factory_agents.stale_claims(cfg):
+            print(f"Skipped #{n}: {name} still holds it and is {status}. Free it with `factory issues release {n}` "
+                  f"(or `factory agents sweep` does it once {name} has been down long enough).", file=sys.stderr)
+    except (Exception, SystemExit):
+        pass  # a hint only: never stop the pick for it
+
+
 def issues_mode(cfg, a):
     import factory_issues
     if a.issue:
         return named_issue(cfg, a)
+    say_stale_claims(cfg)
     jobs = [] if a.no_rework else rework(cfg)
     if jobs and a.claim:
         from factory_claims import claim_task
