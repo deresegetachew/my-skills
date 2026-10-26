@@ -151,7 +151,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 10
           }
         ]
@@ -162,7 +162,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]

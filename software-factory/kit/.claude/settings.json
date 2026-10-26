@@ -16,6 +16,7 @@
       "Bash(gh pr *)",
       "Bash(docker compose *)",
       "Bash(python3 .claude/hooks/*)",
+      "Bash(bun --no-env-file .claude/hooks/*)",
       "Bash(npm run *)",
       "Bash(npm test*)",
       "Bash(npm ci*)",
@@ -118,12 +119,12 @@
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.py",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.ts",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]
@@ -146,7 +147,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_session.py",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_session.ts",
             "timeout": 600
           }
         ]
@@ -157,7 +158,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 10
           }
         ]
@@ -168,7 +169,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]

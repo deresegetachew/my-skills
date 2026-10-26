@@ -10,7 +10,7 @@ Read this after shipping a task, or when you have to wait.
   ("I'll check back in 30 minutes") wastes the whole wait. When the next task depends on an unmerged PR (it changes
   the same files, or the plan stacks on it), run `.claude/hooks/wait_for_merge.sh <n> 30`. It polls GitHub every
   minute without using model tokens and returns as soon as the PR merges (exit 0). If it times out (exit 2), take
-  `python3 .claude/hooks/next_task.py --after <id>` for a task that doesn't touch those files, and say so in your
+  `bun --no-env-file .claude/hooks/next_task.ts --after <id>` for a task that doesn't touch those files, and say so in your
   report. Under `factory-loop.sh`, stop the run instead: the loop skips a task whose branch is on the remote and
   claims the next free one.
 - **Every wait goes through `factory wait`; never poll in the conversation** (each check is a turn that re-sends the
@@ -20,10 +20,10 @@ Read this after shipping a task, or when you have to wait.
   for merges.
 - **Work-in-progress cap:** the PR gate won't open a new PR while `maxOpenPRs` of yours are open (all loops
   together). Push the finished branch and stop (under `factory-loop.sh`) or wait on the oldest with
-  `wait_for_merge.sh`. Under the loop you don't have to ask anyone to restart you: `next_task.py` waits while your
+  `wait_for_merge.sh`. Under the loop you don't have to ask anyone to restart you: `next_task.ts` waits while your
   issue's branch is pushed and the cap is full, and gives you the issue again as soon as a slot frees, so the next
   session only opens the PR. **In an interactive loop**, end that session the usual way so the loop can wait:
-  `python3 .claude/hooks/factory_claims.py done --agent "$FACTORY_AGENT" --task <id>`, then one line,
+  `bun --no-env-file .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task <id>`, then one line,
   `Task <id> pushed; its PR waits for a slot.` Keep the issue (don't release it): the loop gives it back to you.
 - **CI that never ran:** when every job fails at once with no steps, run `python3 .claude/hooks/factory_ci.py <head
   commit>`. If it says GitHub didn't start the jobs (billing or the spending limit), that's not about your code:
@@ -35,7 +35,7 @@ Read this after shipping a task, or when you have to wait.
 - **Interactive loop** (`FACTORY_INTERACTIVE=1`, from `factory loop -i`): the owner may be at the terminal. You may
   ask them short questions there, but decisions still go in the PR or a decision file, so the next fresh session sees
   them. When the task is done (PR opened, claim dropped), mark it done with
-  `python3 .claude/hooks/factory_claims.py done --agent "$FACTORY_AGENT" --task <id>` and end with one line:
+  `bun --no-env-file .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task <id>` and end with one line:
   `Task <id> done: <PR link>.` The session then closes by itself and the loop starts the next task. Don't start
   another task in this session.
 - Stop and report only when every remaining task is blocked, a "Done when" check or CI fails in a way you can't fix,

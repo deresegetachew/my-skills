@@ -2,6 +2,7 @@
 // Bun built-ins and node:* modules only; no npm package.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { dlopen, FFIType } from "bun:ffi";
 
 /** A stop with a message (like Python's `raise SystemExit("text")`) or a bare exit code (`SystemExit(2)`).
  * Thrown, not exited, so a caller (or a test) can catch it; `runMain` prints the message and exits. */
@@ -118,7 +119,7 @@ export function run(cmd: string[], opts: RunOptions = {}): RunResult {
 
 /** Is this program on the PATH? (shutil.which) */
 export function which(program: string): string | null {
-  return Bun.which(program);
+  return Bun.which(program, { PATH: process.env.PATH ?? "" });
 }
 
 /** `gh <args>`; returns the result, never throws. */
@@ -283,4 +284,114 @@ export function shSplit(line: string): string[] {
   if (q) throw new Error("No closing quotation");
   if (has || cur) out.push(cur);
   return out;
+}
+
+/** The command that runs a factory script with this Bun (Python's [sys.executable, script]): .env loading off. */
+export function bunCmd(script: string): string[] {
+  return [process.execPath, "--no-env-file", script];
+}
+
+// flock(2) through bun:ffi (Bun built-in), for the lock files Python took with fcntl.flock. The lock belongs to the
+// open file: it goes when the file is closed or the process ends.
+const LOCK_EX = 2;
+const LOCK_NB = 4;
+type FlockFn = (fd: number, op: number) => number;
+let flockFn: FlockFn | null = null;
+function libcFlock(): FlockFn {
+  if (!flockFn) {
+    const lib = dlopen(process.platform === "darwin" ? "libSystem.B.dylib" : "libc.so.6", {
+      flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+    });
+    flockFn = (fd, op) => lib.symbols.flock(fd, op) as number;
+  }
+  return flockFn;
+}
+
+/** Take an exclusive lock on an open file descriptor. `wait` false: return false at once when another holds it. */
+export function flock(fd: number, wait = true): boolean {
+  return libcFlock()(fd, wait ? LOCK_EX : LOCK_EX | LOCK_NB) === 0;
+}
+
+/** Python's plistlib.dumps (XML, keys sorted) for the plain values a LaunchAgent needs: strings, numbers, booleans,
+ * lists and dictionaries. */
+export function plistDumps(value: unknown): string {
+  const esc = (s: string): string => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const enc = (v: unknown, level: number): string[] => {
+    const pad = "\t".repeat(level);
+    if (typeof v === "boolean") return [pad + (v ? "<true/>" : "<false/>")];
+    if (typeof v === "number") return [pad + (Number.isInteger(v) ? `<integer>${v}</integer>` : `<real>${v}</real>`)];
+    if (typeof v === "string") return [pad + `<string>${esc(v)}</string>`];
+    if (Array.isArray(v)) return v.length ? [pad + "<array>", ...v.flatMap((x) => enc(x, level + 1)), pad + "</array>"] : [pad + "<array/>"];
+    if (v && typeof v === "object") {
+      const keys = Object.keys(v).sort();
+      if (!keys.length) return [pad + "<dict/>"];
+      return [pad + "<dict>", ...keys.flatMap((k) => [pad + `\t<key>${esc(k)}</key>`, ...enc((v as Record<string, unknown>)[k], level + 1)]), pad + "</dict>"];
+    }
+    throw new Error(`plist: unsupported value ${String(v)}`);
+  };
+  return ['<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">', ...enc(value, 0), "</plist>", ""].join("\n");
+}
+
+export type ParsedArgs = Record<string, string | boolean | string[] | undefined>;
+
+/** What one subcommand (or a whole script) takes, for `parseArgs`: argparse's add_argument in short.
+ * `valued`: options that take a value (`--agent X` or `--agent=X`); `flags`: store_true options; `multi`: options
+ * that may repeat (action="append"); `positionals`: names in order, a trailing `?` makes one optional;
+ * `required`: options that must be given. Values are keyed by the option without its dashes. */
+export interface ArgSpec {
+  valued?: string[];
+  flags?: string[];
+  multi?: string[];
+  positionals?: string[];
+  required?: string[];
+}
+
+/** A small argparse: on a mistake it prints `usage` and `<prog>: error: ...` on stderr and exits 2, as argparse did. */
+export function parseArgs(args: string[], spec: ArgSpec, prog: string, usage: string): ParsedArgs {
+  const fail2 = (text: string): never => {
+    process.stderr.write(`${usage}\n${prog}: error: ${text}\n`);
+    throw new Exit(2);
+  };
+  const valued = [...(spec.valued ?? []), ...(spec.multi ?? [])];
+  const out: ParsedArgs = {};
+  for (const m of spec.multi ?? []) out[m.replace(/^-+/, "")] = [];
+  const pos: string[] = [];
+  let onlyPositionals = false;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string;
+    if (onlyPositionals) {
+      pos.push(a);
+      continue;
+    }
+    if (a === "--") {
+      onlyPositionals = true;
+      continue;
+    }
+    const eq = a.startsWith("--") ? a.indexOf("=") : -1;
+    const key = eq > 0 ? a.slice(0, eq) : a;
+    if (valued.includes(key)) {
+      const v = eq > 0 ? a.slice(eq + 1) : args[++i];
+      if (v === undefined) fail2(`argument ${key}: expected one argument`);
+      const name = key.replace(/^-+/, "");
+      if ((spec.multi ?? []).includes(key)) (out[name] as string[]).push(v as string);
+      else out[name] = v;
+    } else if ((spec.flags ?? []).includes(a)) out[a.replace(/^-+/, "")] = true;
+    else if (a.startsWith("-") && a !== "-" && !/^-\d/.test(a)) fail2(`unrecognized arguments: ${a}`);
+    else pos.push(a);
+  }
+  const names = spec.positionals ?? [];
+  if (pos.length > names.length) fail2(`unrecognized arguments: ${pos.slice(names.length).join(" ")}`);
+  names.forEach((p, i) => (out[p.replace(/\?$/, "")] = pos[i]));
+  const missing = [...(spec.required ?? []).filter((r) => out[r.replace(/^-+/, "")] === undefined),
+    ...names.filter((p) => !p.endsWith("?") && out[p] === undefined)];
+  if (missing.length) fail2(`the following arguments are required: ${missing.join(", ")}`);
+  return out;
+}
+
+/** Python's urllib.parse.quote(text, safe=""): every byte but letters, digits and _.-~ percent-encoded. */
+export function pyQuote(text: string, safe = ""): string {
+  return encodeURIComponent(text).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())
+    .replace(/%([0-9A-F]{2})/g, (all, hex: string) => (safe.includes(String.fromCharCode(parseInt(hex, 16))) ? String.fromCharCode(parseInt(hex, 16)) : all));
 }

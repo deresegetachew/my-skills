@@ -19,7 +19,7 @@ fixed yet.
    Don't merge it: the PR gate holds a PR with a must-fix until the dev manager approves the new commit.
 5. Then stop (under `factory-loop.sh`) or go back to step 1. **In an interactive loop** (`FACTORY_INTERACTIVE=1`),
    stopping means marking the rework done, exactly like a new task:
-   `python3 .claude/hooks/factory_claims.py done --agent "$FACTORY_AGENT" --task pr-<n>`, then end with one line,
+   `bun --no-env-file .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task pr-<n>`, then end with one line,
    `Rework on #<n> pushed: <PR link>.` The session closes by itself and the loop goes on. Don't wait in the session
    for the review: it comes back as a new must-fix (another pass) or an approval, and nobody may be at the terminal
    to type `/exit`.

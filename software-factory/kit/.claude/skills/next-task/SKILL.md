@@ -25,7 +25,7 @@ This file is the core. Open the others in this folder only when they apply:
 1. **Start routine:** `git fetch origin && git checkout --detach origin/<mainBranch>`, then
    `git submodule update --init` if the repo has a `.gitmodules`. Read `git log --oneline -15`, and run the `smoke`
    command if `factory.json` has one. If main is broken, fixing it is the task.
-2. **Let the script pick:** `python3 .claude/hooks/next_task.py ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}`.
+2. **Let the script pick:** `bun --no-env-file .claude/hooks/next_task.ts ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}`.
    If you were told which issue to build, add `--issue <n>` (issues mode) so the claim takes that one and no other.
    Never pick by reading the plan yourself. If `$ARGUMENTS` names a task, under `factory-loop.sh` the loop has
    already claimed it: build only that one. `pr-<n>` means rework (`rework.md`). Respect phase order unless the plan
@@ -96,7 +96,7 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    **If `gh pr create` fails** (GraphQL blocked, as in the dev manager's cloud workspace), open it with REST:
    `gh api repos/{owner}/{repo}/pulls -f title=... -f head=<branch> -f base=<main> -F body=@tmp/pr.md`, and comment with
    `gh api repos/{owner}/{repo}/issues/<n>/comments -F body=@file` where `gh pr comment` fails.
-   Then drop your task claim: `python3 .claude/hooks/factory_claims.py release --agent "$FACTORY_AGENT" --tasks-only`
+   Then drop your task claim: `bun --no-env-file .claude/hooks/factory_claims.ts release --agent "$FACTORY_AGENT" --tasks-only`
    (when `FACTORY_AGENT` is set). **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
    `python3 .claude/hooks/factory_usage.py --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
    (`<id>` is the issue number in issues mode). Post it even when it finds no replies.

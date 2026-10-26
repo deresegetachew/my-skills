@@ -24,7 +24,7 @@
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
 # (the first uses this folder, the others a git worktree in <project>-agents/<name>) and claims each task in
-# a shared lock file before building it, so no two loops build the same task (.claude/hooks/factory_claims.py).
+# a shared lock file before building it, so no two loops build the same task (.claude/hooks/factory_claims.ts).
 # Loops on other machines see each other's task/<id>-... branches on the remote and skip those tasks too.
 # Parallel loops pay off when the plan has tasks that don't build on each other; the dev manager merges in order.
 #
@@ -123,7 +123,7 @@ if [ "$dir" != "$PWD" ]; then
   fi
   [ -f .gitmodules ] && git submodule update --init -q  # skills from my-skills, for example
   # A worktree cut from a branch without the factory has no settings or hooks (#189): say so once, don't poll on errors.
-  if [ ! -f .claude/factory.json ] || [ ! -f "$PWD/.claude/hooks/next_task.py" ]; then
+  if [ ! -f .claude/factory.json ] || [ ! -f "$PWD/.claude/hooks/next_task.ts" ]; then
     printf '{"code":"no-factory","message":"%s has no .claude/factory.json or hooks, so there is no factory to run here.","fix":"Merge the install pull request into %s, or start the loop from a branch that has the factory."}\n' "$PWD" "$main" >&2
     exit 1
   fi
@@ -344,7 +344,7 @@ for ((n = 1; n <= limit; n++)); do
   echo "=== [$agent] $(date '+%H:%M') task $next ==="
   case "$id" in issue-*) echo "[$agent] claimed issue #${id#issue-} (this run claims this one only)" ;; esac
   isolate
-  # The restart note (factory_resume.py) goes into the first prompt only.
+  # The restart note (factory_resume.ts) goes into the first prompt only.
   prompt="/next-task $id"
   if [ -n "${FACTORY_RESUME_NOTE:-}" ] && [ -f "$FACTORY_RESUME_NOTE" ]; then
     prompt="$prompt"$'\n\n'"$(cat "$FACTORY_RESUME_NOTE")"

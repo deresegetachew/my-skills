@@ -35,7 +35,7 @@ A change that breaks one of these is wrong even if the tests pass. The `safety-a
 ## How to work (software factory)
 
 - To build: `factory loop -i` (a fresh session per task that you can type into) or `factory loop` (unattended). The next task comes from
-  `python3 .claude/hooks/next_task.py`, never from reading the plan by eye. Tests come first from `test-writer`
+  `bun --no-env-file .claude/hooks/next_task.ts`, never from reading the plan by eye. Tests come first from `test-writer`
   and are read-only once implementation starts; `reviewer` passes each commit before its PR.
 - Questions go to the dev manager as PR comments starting with `<!-- factory-question -->`; keep working around
   them. Wait for a merge with `.claude/hooks/wait_for_merge.sh <n>`, never with a timed pause.

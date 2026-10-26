@@ -43,7 +43,7 @@ Build
                          tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next. It does not claim it: the last line shows the
-                         command that does (python3 .claude/hooks/next_task.py --claim <agent> --pid $$);
+                         command that does (bun --no-env-file .claude/hooks/next_task.ts --claim <agent> --pid $$);
                          `--claim AGENT --issue N` claims that one issue
   autostart [status|install|uninstall]
                          bring this machine back after a reboot: the dev stack (commands.stackUp) and its agents, in
@@ -228,7 +228,7 @@ case "$cmd" in
     [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
     who="$1"; shift
     bare=0; [ "$#" = 0 ] && bare=1
-    dir="$(py factory_claims.py worktree "$who")" || exit 1
+    dir="$(fh "$hooks/factory_claims" worktree "$who")" || exit 1
     name="$(basename "$dir")"; [ "$dir" = "$root" ] && name="$who"
     echo "$name: $dir"
     # One session for many tasks grows with each one (#56): the loop gives every task a fresh context instead.
@@ -256,21 +256,21 @@ case "$cmd" in
     rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$dir/.claude/hooks/factory_machine" remote 2>/dev/null || echo 1)"
     if [ "$rc" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
     exec claude "$@" ;;
-  worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <name|N>}" ;;
-  issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
-  machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
+  worktree)  fh "$hooks/factory_claims" worktree "${1:?usage: factory worktree <name|N>}" ;;
+  issues)    fh "$hooks/factory_issues" "${1:-list}" "${@:2}" ;;
+  machine)   fh "$hooks/factory_machine" "${1:-show}" "${@:2}" ;;
   follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
-  agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
-  messages)  py factory_messages.py "${1:-ls}" "${@:2}" ;;
-  heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
-  next)      py next_task.py --note "$@" ;;
-  autostart) py factory_autostart.py "$@" ;;
-  resume)    py factory_resume.py "$@" ;;
+  agents)    fh "$hooks/factory_agents" "${1:-list}" "${@:2}" ;;
+  messages)  fh "$hooks/factory_messages" "${1:-ls}" "${@:2}" ;;
+  heartbeat) fh "$hooks/factory_heartbeat" "${1:-status}" "${@:2}" ;;
+  next)      fh "$hooks/next_task" --note "$@" ;;
+  autostart) fh "$hooks/factory_autostart" "$@" ;;
+  resume)    fh "$hooks/factory_resume" "$@" ;;
   status)    py factory_status.py "$@" ;;
   prs)       py factory_prs.py "$@" ;;
-  claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
-  release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
-  clean)     py factory_claims.py clean ;;
+  claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
+  release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;
+  clean)     fh "$hooks/factory_claims" clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
   review-pass) py factory_review_pass.py "$@" ;;
@@ -300,7 +300,7 @@ case "$cmd" in
   handover)  py factory_handover.py "$@" ;;
   signoff)   py factory_signoff.py "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;
-  turbo)     py factory_turbo.py "$@" ;;
+  turbo)     fh "$hooks/factory_turbo" "$@" ;;
   version|releases|rollback|migrate-to-release) py factory_release.py "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).
