@@ -463,8 +463,8 @@ files are links into the submodule. Moving a project off the submodule is its ow
 
 **Which releases exist.** One so far: `v0.1.0-alpha.1`, a pre-release, built from the commit that bumped
 `software-factory/VERSION` to `0.1.0-alpha.1` (#184). A tag with a hyphen is published as a pre-release. Until a full
-release such as `v0.1.0` exists, `factory update` with no version stops with `[no_releases]` and says to name a
-pre-release: `factory update v0.1.0-alpha.1`. `factory releases` lists what exists.
+release such as `v0.1.0` exists, `factory update` with no version stops with `[no_releases]`, names the pre-release that exists and
+says to take it by name: `factory update v0.1.0-alpha.1`. `factory version` shows a pre-release newer than the newest full one on its own line. `factory releases` lists what exists.
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
