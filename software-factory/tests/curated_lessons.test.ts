@@ -1,8 +1,6 @@
 // The curated lessons file (#72): a short list of one-line rules the builder and the reviewers read first, fed by
 // must-fix comments, reviewer findings and CI failures, kept under a cap and pruned when something enforces a rule.
 // Runs `factory lessons ...` in a scratch project with a fake `gh`.
-// (The `factory settings show lessons` check and DEV-MANAGER's mention stay in test_curated_lessons.py until
-// factory_settings is ported.)
 import { expect, test } from "bun:test";
 import { mkdirSync, readdirSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
@@ -271,6 +269,11 @@ test("the lessons file is a setting", () => {
   const [d, env] = project(null, { lessons: "docs/lessons.md" });
   write(join(d, "docs", "lessons.md"), "- Elsewhere, e.g. `x`\n");
   expect(run(d, env, ["show"]).stdout).toContain("Elsewhere");
+  for (const key of ["lessons", "lessonsCap"]) {
+    const p = sh([process.execPath, "--no-env-file", join(HOOKS, "factory_settings.ts"), "show", key], { cwd: d, env });
+    expect(p.code, p.out).toBe(0);
+    expect(p.stdout).toContain(key);
+  }
 });
 
 test("the builder and every reviewer read the lessons first", () => {

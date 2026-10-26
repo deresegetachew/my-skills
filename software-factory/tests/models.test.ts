@@ -1,13 +1,12 @@
 // The `models` setting: a model (and effort) per role, in factory.json (#94). A role with no entry behaves as before.
 // The values must reach the `claude` command line: --model and --effort for the builder (loop) and the manager,
 // --agents for a subagent (the one mechanism that overrides a kit agent file per role; see factory_models.ts).
-// (`factory settings`, `factory agent` and `factory doctor` with this setting are checked in test_models.py until those
-// scripts are ported.)
+// (`factory doctor` with this setting is checked in test_models.py until factory_doctor is ported.)
 import { expect, test } from "bun:test";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { calls, flag, loopProject } from "./loop_support.ts";
-import { HOOKS, KIT, read, runBun, sh, tmp, write } from "./support.ts";
+import { calls, fakeClaude, flag, loopProject } from "./loop_support.ts";
+import { HOOKS, KIT, read, runBun, SF, sh, tmp, write } from "./support.ts";
 
 const AGENTS = join(KIT, ".claude", "agents");
 const SUBAGENTS = ["test-writer", "reviewer", "architecture-reviewer", "safety-auditor", "security-reviewer"];
@@ -121,4 +120,77 @@ test("the next-task skill asks for the escalation model from the setting", () =>
   const skill = read(join(KIT, ".claude", "skills", "next-task", "SKILL.md"));
   expect(skill.split(/\s+/).filter(Boolean).join(" ")).toContain("factory_models.ts escalate");
   expect(skill).toContain("models.reviewer.escalateTo");
+});
+
+// --- `factory settings` and `factory agent` with the setting -------------------------------------------------------
+
+function personEnv(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  for (const name of ["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"]) delete env[name];
+  return env;
+}
+
+function settings(d: string, ...args: string[]) {
+  return runBun(join(HOOKS, "factory_settings.ts"), args, { cwd: d, env: personEnv() });
+}
+
+test("settings show models documents the shape", () => {
+  const p = settings(project(), "show", "models");
+  expect(p.code, p.out).toBe(0);
+  for (const word of ["builder", "manager", "test-writer", "reviewer", "architecture-reviewer", "safety-auditor",
+    "security-reviewer", "effort", "escalateTo"]) expect(p.stdout).toContain(word);
+  expect(settings(project()).stdout).toContain("factory settings");
+  expect(settings(project()).stdout).toContain("models");
+});
+
+test("set accepts a good value and rejects a bad role an empty model and a bad effort", () => {
+  let d = project();
+  const good = { builder: { model: "opus", effort: "high" }, reviewer: { model: "sonnet", escalateTo: "opus" },
+    "architecture-reviewer": {} };
+  const p = settings(d, "set", "models", JSON.stringify(good));
+  expect(p.code, p.out).toBe(0);
+  expect(JSON.parse(read(join(d, ".claude", "factory.json"))).models).toEqual(good);
+  for (const bad of [{ janitor: { model: "opus" } }, { builder: { model: "" } }, { builder: { model: "--dangerous" } },
+    { builder: { model: "opus", effort: "turbo" } }, { "test-writer": { effort: "high" } },
+    { builder: { escalateTo: "opus" } }, { builder: "opus" }, ["builder"]]) {
+    d = project();
+    const q = settings(d, "set", "models", JSON.stringify(bad));
+    expect(q.code, JSON.stringify(bad)).not.toBe(0);
+    expect(q.stderr, JSON.stringify(bad)).toContain("models");
+    expect("models" in JSON.parse(read(join(d, ".claude", "factory.json"))), JSON.stringify(bad)).toBe(false);
+  }
+});
+
+function agentRun(models?: unknown): string[] {
+  const d = project(models);
+  const must = (cmd: string[], cwd?: string): void => {
+    const p = sh(cmd, { cwd });
+    if (p.code !== 0) throw new Error(`${cmd.join(" ")}: ${p.out}`);
+  };
+  must(["git", "add", "-A"], d);
+  must(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "s"], d);
+  const origin = d + "-origin.git";
+  must(["git", "init", "-q", "--bare", "-b", "main", origin]);
+  must(["git", "remote", "add", "origin", origin], d);
+  must(["git", "push", "-q", "origin", "HEAD:main"], d);
+  const env = fakeClaude(tmp());
+  const p = sh(["bash", join(SF, "factory"), "agent", "menelik", "--resume"], { cwd: d, env, timeoutMs: 60_000 });
+  expect(p.code, p.out).toBe(0);
+  const got = calls(env);
+  expect(got.length).toBe(1);
+  return got[0] as string[];
+}
+
+test("factory agent passes the models setting before the users own arguments", () => {
+  const args = agentRun({ builder: { model: "opus", effort: "low" }, reviewer: { model: "haiku" } });
+  expect(flag(args, "--model")).toBe("opus");
+  expect(flag(args, "--effort")).toBe("low");
+  expect(JSON.parse(flag(args, "--agents")).reviewer.model).toBe("haiku");
+  expect(args.at(-1)).toBe("--resume");
+  expect(args.indexOf("--model")).toBeLessThan(args.indexOf("--resume"));
+});
+
+test("factory agent with no models adds nothing", () => {
+  const args = agentRun(undefined);
+  for (const f of ["--model", "--effort", "--agents"]) expect(args).not.toContain(f);
 });

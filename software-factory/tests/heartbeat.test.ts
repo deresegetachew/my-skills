@@ -4,17 +4,16 @@
 // A fake `gh` (it also logs every call), a fake `tmux`, and real processes standing in for a loop and for its
 // `factory wait` child. Time is fake: FACTORY_NOW moves by hand, so hours of daemon cycles take a moment. The Python
 // test ran a cycle in its own process with the world's environment; here a short Bun process does it, with the same
-// environment, folder and clock. (test_doctor_notes_a_missing_daemon_and_agents_cannot_install_or_stop_it and
-// test_help_and_settings_know_the_heartbeat stay in test_heartbeat.py until factory_doctor and factory_settings are
-// ported.)
+// environment, folder and clock. (test_doctor_notes_a_missing_daemon_and_agents_cannot_install_or_stop_it stays in
+// test_heartbeat.py until factory_doctor is ported.)
 import { afterEach, expect, test } from "bun:test";
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, renameSync, symlinkSync } from "node:fs";
 import { hostname } from "node:os";
 import { basename, join } from "node:path";
 import * as H from "../hooks/factory_heartbeat.ts";
 import { type Env, hook as autostartHook, log as aLog, machine, parsePlist, project } from "./autostart_support.ts";
 import { FAKE_GH, type IssueRow, issue, setup } from "./issues_support.ts";
-import { HOOKS, type Proc, read, runHook, sh, tmp, write, writeExe } from "./support.ts";
+import { HOOKS, type Proc, read, runHook, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 const FAKE_TMUX = `#!/bin/sh
 case "$1" in
@@ -816,4 +815,18 @@ test("autostart installs and removes the heartbeat with the boot service unless 
   expect(p.code, p.out).toBe(0);
   expect(existsSync(unitPath(env, "proj-factory-heartbeat.service"))).toBe(false);
   expect(autostartHook("factory_autostart", clone, env, "status").stdout).toContain("factory heartbeat install");
+});
+
+test("help and settings know the heartbeat", () => {
+  const d = tmp();
+  sh(["git", "init", "-q", "-b", "main", d]);
+  write(join(d, ".claude", "factory.json"), JSON.stringify({ agents: ["menelik", "taytu"] }));
+  symlinkSync(HOOKS, join(d, ".claude", "hooks"));
+  const env: Env = { ...process.env, FACTORY_CONFIG_DIR: join(d, "machine-config") };
+  for (const k of ["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE", "CLAUDE_PROJECT_DIR"]) delete env[k];
+  const out = sh(["bash", join(SF, "factory"), "help"], { cwd: d, env }).stdout;
+  expect(out).toContain("heartbeat");
+  expect(out).toContain("agents ls");
+  const shown = sh(["bash", join(SF, "factory"), "settings"], { cwd: d, env }).stdout;
+  for (const key of ["tasks.heartbeatSeconds", "tasks.heartbeatMissMinutes", "tasks.releaseDownMinutes"]) expect(shown).toContain(key);
 });

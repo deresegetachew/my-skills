@@ -40,11 +40,12 @@ A change that breaks one of these is wrong even if the tests pass.
   the test that would have caught it. Tests check what a user or another program can observe (command output, exit
   codes, files written, what a fake `gh` or fake server was asked), never internals.
 - **Agents cannot change what governs them.** The PR gate, the guard, `settings.json`, the agents' definitions and
-  `.claude/factory.json` are protected: a pull request that touches them is listed as such and is merged by the dev
-  manager or the owner, not by the agent that wrote it.
+  `.claude/factory.json` are protected: a pull request that touches them is listed as such and is never merged by the
+  agent that wrote it. A change under `.claude/` (settings, permissions, the agents' definitions) is merged by the owner
+  (#247).
 - **Publishing is the owner's call.** Never publish a release or push a tag, and never push to `main`.
 - **Settings docs are generated.** The tables in `software-factory/docs/wiki/settings.md` come from
-  `hooks/factory_settings_schema.py`; a test fails when they drift. Change the schema, then update the table.
+  `hooks/factory_settings_schema.ts`; a test fails when they drift. Change the schema, then update the table.
 - **A copied file gets the modes its reader needs** (#111): anything copied for a service or a container is readable
   by that user and not writable by others, with a test.
 - **Safe to run twice, and nothing half done.** Installers and updaters check first, change nothing on a refusal,
@@ -59,7 +60,7 @@ A change that breaks one of these is wrong even if the tests pass.
 ## Code style
 
 - Python: standard library only, small functions. Bash scripts must pass `bash -n`.
-- Hooks and commands read settings through `factory_config.py`; a new setting is added to `factory_settings_schema.py`
+- Hooks and commands read settings through `factory_config.ts`; a new setting is added to `factory_settings_schema.ts`
   with its help and default, and to the table on the settings page.
 - A new command appears in `factory help`, the commands table on the wiki's commands page and has a test of its output.
 

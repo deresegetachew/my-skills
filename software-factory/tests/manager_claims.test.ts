@@ -1,8 +1,8 @@
 // Several dev managers at once (#99): review and question claims with a lease, a stale hold cleaned, a merge that
 // GitHub refuses because someone else got there first, and owner-queue asks posted once. A fake `gh` keeps one
 // repository in a JSON file (with a lock, so two managers can really race); the managers are the real command.
-// (Two checks stay in test_manager_claims.py until factory_wait and factory_settings are ported: `factory precheck`
-// does not take a claim for an answer, and `factory settings show manager.claimMinutes`.)
+// (One check stays in test_manager_claims.py until factory_wait is ported: `factory precheck` does not take a claim
+// for an answer.)
 import { expect, test } from "bun:test";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -214,6 +214,13 @@ test("claim minutes comes from the manager setting", () => {
   expect(r.run("review", "5", "--manager", "dm-1")[0]).toBe(0);
   const mins = (untilOf(r.comments(5)[0]?.body) - Date.now()) / 60_000;
   expect(mins >= 6 && mins <= 8, String(mins)).toBe(true);
+});
+
+test("factory settings know the claim minutes", () => {
+  const r = new Repo([pull(5)], { 5: [comment(claimText("dm-1", HEAD, 15), 1)] }, [], { reviewMarkers: "tmp/reviews" });
+  const s = r.factory("settings", "show", "manager.claimMinutes");
+  expect(s.code, s.out).toBe(0);
+  expect(s.stdout).toContain("20");
 });
 
 test("an unexpired claim by another manager is respected and nothing is posted", () => {

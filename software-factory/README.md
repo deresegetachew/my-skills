@@ -147,7 +147,8 @@ flowchart TB
 ```
 
 Files that govern the agents themselves (the gate, the settings, the agent definitions) are on a protected list.
-A change to them is never merged by the agent that wrote it. The dev manager or you merges it.
+A change to them is never merged by the agent that wrote it. The dev manager or you merges it, except a change under
+`.claude/` (the settings, the permissions, the agents' definitions): only you merge that.
 
 <br>
 ## Where the machines and GitHub meet
@@ -375,7 +376,7 @@ What stays the project's own in every case: `.claude/factory.json`, `.claude/fac
    `settings.json` and the docs need no change. `--layout auto`, the default, leaves a project that links through
    `kit/` alone, so a plain `factory update` never switches one by surprise.
 2. Check: `ls -l .claude/hooks` shows `.../software-factory/hooks/...`, and `factory doctor` is green.
-3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the dev manager or the owner
+3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the owner
    merges it. A CI workflow, a `protected` list or a document that names `.claude/hooks/...` needs no change for this
    step, because those paths did not move.
 4. On a machine that runs the CI runners, `factory update` reinstalls them when their copies are older; if you did not

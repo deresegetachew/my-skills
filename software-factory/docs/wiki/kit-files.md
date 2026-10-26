@@ -73,11 +73,11 @@ software-factory/
     factory_clock.py                    the one clock the scripts share; tests can set the time
     factory_reviews.ts                  which extra reviews a change needs
     factory_report.ts                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
-    factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
-    factory_settings_schema.py          the table that describes every setting: help, limits, defaults, README tables
-    factory_settings_store.py           reads and writes factory.json and the machine file (order, indent, atomic)
-    factory_settings_interactive.py     the interactive menu behind `factory settings`
-    factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
+    factory_settings.ts                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
+    factory_settings_schema.ts          the table that describes every setting: help, limits, defaults, README tables
+    factory_settings_store.ts           reads and writes factory.json and the machine file (order, indent, atomic)
+    factory_settings_interactive.ts     the interactive menu behind `factory settings`
+    factory_settings_save.ts            `factory settings pr`: branch, commit, push and open the pull request
     factory_usage.ts                    `factory usage`: tokens per task from the local Claude Code logs
     factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
     factory_handover.py                 `factory handover snapshot`: the state a manager hands over, read from GitHub

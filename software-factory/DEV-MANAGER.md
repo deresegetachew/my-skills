@@ -10,7 +10,8 @@ factory dev-manager [name] loop -i       one item in a session you can type into
 
 The dev manager doesn't write the product. It keeps the coding agents busy and their output safe:
 
-- reviews every pull request, including the protected ones the coding agents may not merge, and merges them;
+- reviews every pull request, including the protected ones the coding agents may not merge, and merges them, except a
+  change under `.claude/` (settings, permissions, the agents' definitions), which only the owner merges (#247);
 - answers the agents' technical and process questions;
 - turns gaps it finds into tasks (with the owner's yes for scope), so the coding agents do the work with their own tools;
 - notices when an agent is stuck, silent or idle, and tells the owner;
@@ -318,7 +319,8 @@ what it reads for its one item, not a growing history.
   changed packages only, and `checkOutputLines` for how much of a failure the agent sees. `factory settings help <key>`
   explains any of them. A settings change comes as a pull request from a person (`factory settings pr`); its body lists
   each change and the review it needs (`testPaths`, `goldenPaths` and `dependencyManifests` need `tests-reviewed` or
-  `deps-reviewed`). Agents can't change settings, and you merge those PRs only within the owner's scope.
+  `deps-reviewed`). Agents can't change settings, and you never merge those PRs: they change `.claude/`, so the owner
+  merges them (#247). Review them and say what you found.
 - **Tokens on every PR.** Agents post a `<!-- factory-usage task=<n> -->` comment with the task's tokens per subagent when they
   open the PR and again before it merges. Read it before you merge: a task far above the usual is worth a line in your review
   (what it read, how many rounds). If it's missing, ask for it in the review; it isn't a must-fix.

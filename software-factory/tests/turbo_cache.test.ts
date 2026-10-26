@@ -4,8 +4,7 @@
 // Docker cannot run in the tests, so the compose file is checked as text and `docker` and `gh` are fakes on PATH that
 // log what they were given. The cache itself is a small HTTP server (its own process) that answers like the real
 // one's /v8/artifacts/status. The token below is made up for the test; it must never show up in any output, argument
-// or log. (The settings and doctor tests stay in test_turbo_cache.py until factory_settings and factory_doctor are
-// ported.)
+// or log. (The doctor tests stay in test_turbo_cache.py until factory_doctor is ported.)
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, lstatSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -433,4 +432,14 @@ test("the docs cover setup security signing and the open owner item", () => {
   const readme = readmeAndWiki();
   for (const want of ["factory turbo install", "turbo.secretsCommand", "TURBO_REMOTE_CACHE_SIGNATURE_KEY", "Tailscale",
     "openssl rand", "fork", "FULL TURBO", "remoteCache"]) expect(readme).toContain(want);
+});
+
+test("the turbo settings are listed with defaults and checked", () => {
+  const [d, env] = project();
+  const settings = (...a: string[]): Proc => runHook("factory_settings", a, { cwd: d, env });
+  const out = settings().stdout;
+  for (const key of ["turbo.api", "turbo.team", "turbo.bind", "turbo.port", "turbo.secretsCommand"]) expect(out).toContain(key);
+  expect(settings("set", "turbo.port", "3400").code).toBe(0);
+  expect(settings("set", "turbo.port", "many").code).not.toBe(0);
+  expect(JSON.parse(read(join(d, ".claude", "factory.json"))).turbo).toEqual({ port: 3400 });
 });
