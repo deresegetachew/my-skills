@@ -116,6 +116,11 @@ if [ "$dir" != "$PWD" ]; then
       exit 1; }
   fi
   [ -f .gitmodules ] && git submodule update --init -q  # skills from my-skills, for example
+  # A worktree cut from a branch without the factory has no settings or hooks (#189): say so once, don't poll on errors.
+  if [ ! -f .claude/factory.json ] || [ ! -f "$PWD/.claude/hooks/next_task.py" ]; then
+    printf '{"code":"no-factory","message":"%s has no .claude/factory.json or hooks, so there is no factory to run here.","fix":"Merge the install pull request into %s, or start the loop from a branch that has the factory."}\n' "$PWD" "$main" >&2
+    exit 1
+  fi
   install=""
   # A manager or a product owner reads and reviews; it builds nothing, so it needs no dependencies installed.
   [ "$role" = coding-agent ] && install=$(python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("commands",{}).get("install",""))')
@@ -149,7 +154,7 @@ if [ "$rc" = 3 ]; then
   trap - EXIT; python3 "$hooks/factory_claims.py" release --agent "$agent" >/dev/null 2>&1; exit 1
 fi
 rm -f "${TMPDIR:-/tmp}/factory-register.$$"
-if [ "$role" = coding-agent ]; then echo "[$agent] working in $PWD (slot ${FACTORY_SLOT:-1})"
+if [ "$role" = coding-agent ]; then echo "[$agent] working in $PWD ${FACTORY_SLOT:+(slot $FACTORY_SLOT)}"
 else echo "[$agent] $role working in $PWD"; fi
 
 # Between tasks: back to a clean main. In an agent worktree, untracked leftovers go too (ignored files such as
@@ -300,6 +305,12 @@ for ((n = 1; n <= limit; n++)); do
   # the agent stays registered as idle, so the dev manager doesn't take it for dead. Ctrl-C stops it.
   waited=0
   until next=$(python3 "$hooks/next_task.py" --claim "$agent" --pid $$); do
+    task_rc=$?
+    # --once is one pass: look once, say so and stop (a crash exits with its own code), never wait and poll.
+    if [ "$once" = 1 ]; then
+      if [ "$task_rc" = 1 ]; then echo "[$agent] Nothing ready (every task is done, blocked or taken); --once stops here."; exit 0; fi
+      echo "[$agent] The task lookup failed (exit $task_rc); --once stops here." >&2; exit "$task_rc"
+    fi
     [ "$wait_minutes" -gt 0 ] 2>/dev/null || {
       echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }
     [ "$waited" = 0 ] && echo "[$agent] $(date '+%H:%M') nothing ready (every task is done, blocked or taken). Checking again every $wait_minutes min; Ctrl-C stops."
