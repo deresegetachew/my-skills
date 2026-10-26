@@ -1,1 +1,0 @@
-../../../hooks/factory_settings_schema.py

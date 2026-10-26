@@ -1,11 +1,11 @@
 // Incremental re-review (#70): a reviewer's second round reads only what changed since its last pass, with its own
 // earlier findings and the author's reply; a big or wide change, or a rewritten history, goes back to a full review.
 // The PR gate's marker is untouched.
-// (One check stays in test_rereview.py until factory_settings is ported: the reReviewPercent setting in the registry.)
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { passed } from "../hooks/pr-gate.ts";
+import { defaultOf, SETTINGS } from "../hooks/factory_settings.ts";
 import { KIT, runHook, SF, sh, tmp, write as put } from "./support.ts";
 
 const ENV: Record<string, string | undefined> = {
@@ -253,4 +253,9 @@ test("the factory command runs it and no forwarder is left for it", () => {
   expect(existsSync(join(SF, "hooks", "factory_rereview.ts"))).toBe(true);
   expect(existsSync(join(KIT, ".claude", "hooks", "factory_rereview.py"))).toBe(false);
   expect(readFileSync(join(SF, "factory"), "utf8")).toContain("factory_rereview");
+});
+
+test("the setting is known", () => {
+  expect("reReviewPercent" in SETTINGS).toBe(true);
+  expect(defaultOf("reReviewPercent")).toBe(30);
 });

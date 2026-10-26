@@ -279,7 +279,7 @@ case "$cmd" in
   reset-run)   fh "$hooks/factory_reset_run" "$@" ;;
   manager-claims) fh "$hooks/factory_manager_claims" "$@" ;;
   lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
-  settings)  py factory_settings.py "$@" ;;
+  settings)  fh "$hooks/factory_settings" "$@" ;;
   usage)     py factory_usage.py "$@" ;;
   report)    fh "$hooks/factory_report" "$@" ;;
   env)       if [ -n "${1:-}" ]; then

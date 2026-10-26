@@ -3,6 +3,7 @@
 `--permission-mode <permissionMode>` (default acceptEdits, so edits inside the project need no answer and the allow list
 in settings.json covers the commands), the dry runs show it, interactive sessions are left alone, and `factory doctor`
 prints the mode and says `fix` when a headless run would stall.
+The `permissionMode` validation case is in permission_mode.test.ts (#252); these need factory_roles and factory_doctor.
   python3 software-factory/tests/test_permission_mode.py"""
 import json, os, shutil, subprocess, sys, tempfile
 
@@ -70,12 +71,6 @@ def test_the_dev_managers_dry_run_shows_the_mode():
     d, work, env = roles.project(db=roles.UNREVIEWED)
     p = roles.factory(work, env, "dev-manager", "lead", "loop", "--once", "--dry-run")
     assert "--permission-mode acceptEdits" in p.stdout, p.stdout
-
-
-def test_a_bad_mode_is_refused_with_the_options():
-    d = doc.project(cfg={"agents": ["taytu"], "permissionMode": "bypassPermissions"})
-    p = subprocess.run([sys.executable, os.path.join(doc.HOOKS, "factory_settings.py"), "validate"], cwd=d, capture_output=True, text=True)
-    assert p.returncode != 0 and "acceptEdits" in p.stdout + p.stderr, (p.stdout, p.stderr)
 
 
 # --- factory doctor ---------------------------------------------------------------------------------------------------

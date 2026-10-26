@@ -43,7 +43,7 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
 3. **Fill in `.claude/factory.json`** (`factory settings` is the guided way: a menu with help for every setting;
    `factory settings validate` checks the result): the doc paths, the install, typecheck, lint, test and build commands,
-   the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges":
+   the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges" (a change under `.claude/`: only the owner):
    the rules files, CI, lockfiles, migrations, and anything that implements a critical rule (safety logic,
    money, approval gates). Set `testPaths` and `goldenPaths` to where tests and expected outputs live, and
    `smoke` to a quick command that proves main works.

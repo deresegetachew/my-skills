@@ -67,7 +67,9 @@ other project is unaffected.
 adds them after the release's own rules and records the merged file in the pin, so they are not drift and survive every
 update. A rule in `factory.json` that `settings.json` does not have yet is reported with `run factory update`. Use
 `Edit(path/**)` for files (Claude Code never matches `Write(path)` rules). Deny rules always win. Changing the list is a
-protected change: it goes through a pull request the dev manager or owner merges.
+protected change: it goes through a pull request the owner merges. `factory settings set permissions.allow ...` and
+`factory settings pr` put the merged rules into `.claude/settings.json` in that same pull request, so a new rule applies
+once the owner merges it, with no second pull request (#251).
 
 Where things live: downloads are cached in `~/.cache/software-factory/<repo>/<tag>/` (`FACTORY_CACHE_DIR` moves it).
 `release.repo` in `factory.json` names the repository whose releases are used (default `deresegetachew/my-skills`);

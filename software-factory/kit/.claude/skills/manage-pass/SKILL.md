@@ -133,6 +133,8 @@ must-fix or a fix for the owner.
 
 - Never merge without a `factory-approved sha=<head>` for exactly the head you merge, with CI judged green as above.
 - Never merge a pull request you opened, or one from a `manager/` branch. Yours wait for the owner (an owner-queue ask).
+- Never merge a pull request that changes the project's `.claude/` (a `factory settings pr`, permissions, `settings.json`,
+  the agents' definitions): the owner merges it. Review it, then write an owner-queue ask that names it.
 - Never `@copilot` or `@<agent>`, or mention anyone. The only mention is the owner's login in an owner-queue ask, and only when
   `manager.notify` names one.
 - Never add a label that does not exist; never force-push, delete refs, or push to main; never touch `.github/` content or

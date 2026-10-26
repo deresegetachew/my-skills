@@ -21,7 +21,7 @@ def test_the_repo_has_a_claude_md_that_names_the_commands_that_check_it():
 
 def test_the_factory_settings_of_this_repo_are_valid_and_take_tasks_from_issues():
     env = {**os.environ, "CLAUDE_PROJECT_DIR": REPO}
-    p = subprocess.run([sys.executable, os.path.join(SF, "hooks", "factory_settings.py"), "validate"], cwd=REPO, env=env,
+    p = subprocess.run(["bun", "--no-env-file", os.path.join(SF, "hooks", "factory_settings.ts"), "validate"], cwd=REPO, env=env,
                        capture_output=True, text=True)
     assert p.returncode == 0 and "valid" in p.stdout, p.stdout + p.stderr
     cfg = config()
