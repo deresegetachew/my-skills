@@ -145,6 +145,39 @@ def test_it_never_prints_a_secret():
     assert "AGE-SECRET-KEY" not in p.stdout + p.stderr
 
 
+def default_branch_gh(name):
+    """A gh stub that answers `gh repo view` with GitHub's default branch and succeeds on everything else."""
+    return f'case "$1" in repo) echo {name};; esac; exit 0'
+
+
+def test_a_main_branch_that_differs_from_githubs_default_is_a_fix():
+    d = project(cfg={"agents": ["taytu"], "mainBranch": "alpha-test"})
+    p = doctor(d, {**machine(gh=default_branch_gh("main")), "FACTORY_AGENTS": "taytu"})
+    assert p.returncode == 1, p.stdout
+    fixes = lines(p, "fix")
+    assert any("main-branch-differs" in l and "alpha-test" in l and "main" in l
+               and "default branch" in l and "factory settings set mainBranch main" in l for l in fixes), p.stdout
+
+
+def test_a_main_branch_that_matches_githubs_default_is_ok():
+    d = project(cfg={"agents": ["taytu"], "mainBranch": "alpha-test"})
+    p = doctor(d, {**machine(gh=default_branch_gh("alpha-test")), "FACTORY_AGENTS": "taytu"})
+    assert p.returncode == 0, p.stdout
+    assert any("mainBranch" in l and "alpha-test" in l for l in lines(p, "ok")), p.stdout
+
+
+def test_an_unset_main_branch_is_judged_as_main():
+    d = project(cfg={"agents": ["taytu"]})
+    p = doctor(d, {**machine(gh=default_branch_gh("trunk")), "FACTORY_AGENTS": "taytu"})
+    assert any("main-branch-differs" in l for l in lines(p, "fix")), p.stdout
+
+
+def test_a_default_branch_gh_cannot_tell_is_no_fix():
+    d = project(cfg={"agents": ["taytu"], "mainBranch": "alpha-test"})
+    p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})  # gh prints nothing
+    assert not any("main-branch" in l for l in lines(p, "fix")), p.stdout
+
+
 if __name__ == "__main__":
     for k, v in sorted(globals().items()):
         if k.startswith("test_"):
