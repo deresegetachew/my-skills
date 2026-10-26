@@ -1525,6 +1525,12 @@ stay unavailable. It may also run `gh run view`, `git merge-base`, `git merge-tr
 command per call. `factory doctor` replays every command the skill names against the profile and says `fix` for one that
 would prompt.
 
+**Closing a pull request.** A superseded or obsolete pull request that a factory agent opened (a `task/...` branch in this
+repository, or the manager's own branch) is closed by the dev manager: a comment with the reason and the commit that
+supersedes it, then `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -f state=closed`. One opened by the owner or anyone
+else, or from a fork, is an owner-queue ask. `manager_gate.py` refuses the close of any other pull request and says to write
+the ask; it never allows a merge by this path, and `gh pr close` stays unavailable.
+
 **Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
 `manager.notify` (a login) or, when that is empty, the repository's owner if that is a person. GitHub's own notifications
 reach the phone. An ask has an `id` and is posted once. Items for the owner: the queued CI, a down or idle agent, a PR
