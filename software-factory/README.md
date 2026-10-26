@@ -552,7 +552,7 @@ version it pins. `factory help` lists everything.
   permission prompt, so every headless `claude -p` starts with `--permission-mode acceptEdits` (setting
   `permissionMode`; `default` passes no flag and leaves it to your own Claude Code settings). Edits inside the
   project then need no answer, and `.claude/settings.json` must allow every command the build needs; a command that
-  is neither allowed nor denied stops the run. Interactive sessions are not given a mode. `--dry-run` shows the flag,
+  is neither allowed nor denied stops the run. Interactive sessions are not given a mode. Before an unattended run starts, the loop checks that Claude Code trusts the folder (it ignores the whole allow list in one it does not); if not, it prints a `{code, message, fix}` naming the folder to open once with `claude`, starts nothing and stops. A folder it cannot judge (no `~/.claude.json`) goes ahead. `--dry-run` shows the flag,
   and `factory doctor` prints the mode and says `fix` when a headless run would stall (mode `default` with no mode in
   your own settings, or no rule for `git commit`, `git push`, `gh pr` and the like). Best for long stretches away.
 - **`factory loop -i`**: interactive. Each task opens a Claude session with `/next-task <id>` already started. When
