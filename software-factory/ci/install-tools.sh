@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs once while runner.Dockerfile builds (as root). See that file for the three versions.
+# Runs once while runner.Dockerfile builds (as root), with Bun on the PATH. See that file for the three versions.
 set -euo pipefail
 
 arch="$(dpkg --print-architecture)"
@@ -8,13 +8,13 @@ case "$arch" in amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; *) node_arch="
 if [ -n "${NODE_VERSION:-}" ]; then
   want="${NODE_VERSION#v}"
   # "24" or "24.1": the newest release with that prefix; "24.1.0": exactly that one.
-  version="$(curl -fsSL https://nodejs.org/dist/index.json | python3 -c '
-import json, sys
-want = sys.argv[1].split(".")
-for r in json.load(sys.stdin):
-    v = r["version"].lstrip("v").split(".")
-    if v[:len(want)] == want:
-        print(".".join(v)); break' "$want")"
+  version="$(curl -fsSL https://nodejs.org/dist/index.json | bun --no-env-file -e '
+const want = (process.argv.at(-1) ?? "").split(".");
+const releases = JSON.parse(await Bun.stdin.text()) as { version: string }[];
+for (const r of releases) {
+  const v = r.version.replace(/^v+/, "").split(".");
+  if (want.every((w, i) => v[i] === w)) { console.log(v.join(".")); break; }
+}' "$want")"
   [ -n "$version" ] || { echo "No Node release matches $NODE_VERSION" >&2; exit 1; }
   dir="/opt/hostedtoolcache/node/$version/$node_arch"
   mkdir -p "$dir"
