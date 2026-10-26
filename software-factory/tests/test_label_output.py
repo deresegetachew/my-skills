@@ -3,7 +3,7 @@
 import json, os, subprocess, sys, tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from test_issues import HOOKS, issue, run, setup  # noqa: E402
+from test_issues import HOOKS, issue, labels, run, setup  # noqa: E402
 
 
 def claims(agent, *extra):
@@ -73,6 +73,39 @@ def test_issues_setup_says_what_it_made_and_makes_the_two_review_labels():
     assert {"tests-reviewed", "deps-reviewed"} <= made, made
     rc, again = run(d, env, "setup")  # safe to run twice
     assert rc == 0 and "created" not in again and "already there: tests-reviewed" in again, again
+
+
+def test_give_back_releases_a_claim_with_no_branch_or_pull_request_and_says_so():
+    # #192: the run claimed #1 and #2, built only #2, and both stayed in progress on GitHub.
+    d, db, env = setup([issue(1, labels=("factory:in-progress", "agent:taytu")),
+                        issue(2, labels=("factory:in-progress", "agent:taytu")),
+                        issue(3, labels=("factory:in-progress", "agent:menelik"))])
+    rc, out = run(d, env, "give-back", "--agent", "taytu")
+    assert rc == 0, out
+    assert "released #1" in out and "released #2" in out and "#3" not in out, out
+    assert "factory issues release" not in out
+    assert labels(db, 1) == ["factory:ready"] and labels(db, 2) == ["factory:ready"], (labels(db, 1), labels(db, 2))
+    assert labels(db, 3) == ["agent:menelik", "factory:in-progress"]  # another agent's claim is left alone
+
+
+def test_give_back_keeps_a_claim_that_has_a_pushed_branch_a_pull_request_or_is_in_review():
+    d, db, env = setup([issue(1, labels=("factory:in-progress", "agent:taytu")),
+                        issue(2, labels=("factory:in-progress", "agent:taytu")),
+                        issue(3, labels=("factory:in-review", "agent:taytu"))])
+    state = json.load(open(db))
+    state["branches"] = [{"name": "task/1-thing", "commit": {"sha": "a"}}]
+    state["pulls"] = [{"number": 9, "head": {"ref": "task/2-other"}, "state": "open"}]
+    json.dump(state, open(db, "w"))
+    rc, out = run(d, env, "give-back", "--agent", "taytu")
+    assert rc == 0 and "released" not in out, out
+    assert "kept #1" in out and "kept #2" in out, out
+    assert labels(db, 1) == ["agent:taytu", "factory:in-progress"]
+
+
+def test_give_back_with_nothing_held_says_so():
+    d, db, env = setup([issue(1)])
+    rc, out = run(d, env, "give-back", "--agent", "taytu")
+    assert rc == 0 and out == "Nothing to give back: taytu holds no in-progress issue.", out
 
 
 if __name__ == "__main__":
