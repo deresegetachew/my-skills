@@ -114,6 +114,9 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 - **B12.** As a builder, an interrupted machine does not lose my unfinished work: `factory autostart` brings the stack
   and my session back, after saving uncommitted and unpushed work. *Built.* (#88)
 - **B13.** As a builder in a new worktree, my hooks and deny rules load before I run. *Built.* (#46)
+- **B14.** As a builder, `factory issues show N` prints the task's text and then the people's comments on it, so a decision
+  posted after the issue was written reaches me. Factory marker comments (claim, approved, mustfix ...) are left out.
+  The owner puts decisions into the issue text, and later comments are read too. (#204)
 
 ### 4.2 Dev manager (orchestrator and one-item sub-managers)
 
