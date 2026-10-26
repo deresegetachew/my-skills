@@ -276,9 +276,14 @@ def leave_verdict(cfg, name, item, before, out):
     if any((SKIP_RX.search(c.get("body") or "") or [None, None])[1] == head for c in comments):
         return False  # already said so for this head
     reason, step = skip_reason(p, head)
-    fi.comment(pr, f"<!-- factory-manager-skip sha={head} -->\n**Dev manager {name} looked at this pull request and did not "
-                   f"review it.** Reason: {reason}.\n\nNext step: {step}")
+    failed = reason.startswith("the session ended")  # nothing a person or CI will change: do not restart this head
+    fi.comment(pr, f"<!-- factory-manager-skip sha={head} -->\n" + (f"<!-- factory-review-failed sha={head} -->\n" if failed else "")
+               + f"**Dev manager {name} looked at this pull request and did not review it.** Reason: {reason}.\n\nNext step: {step}")
     out(f"pr-{pr}: left a comment saying why it was not reviewed ({reason})")
+    if failed:
+        post_ask(cfg, name, f"review-failed-{pr}-{head[:7]}", f"PR #{pr} at {head[:7]}: the dev manager's session ended without a "
+                 "verdict, so this commit is skipped until it changes. Read " + os.path.join(state_dir(name), f"pr-{pr}.out") + ", then review it "
+                 "yourself or push a new commit.", out)
     return True
 
 
@@ -364,6 +369,8 @@ def cycle(cfg, name, dry=False, interactive=False, wait=False):
                        f"{quiet}: {', '.join(refs)}. A fresh sub-manager is being started for each; if this repeats, check "
                        f"that `factory dev-manager loop` is running and read .git/factory-manager/{name}.log.", out) or did
     cap = 1 if interactive else max(1, int(manager_setting(cfg, "maxSubManagers")))
+    if len(managers) > cap:  # a place is scarce: a commit whose CI is green is reviewed before one that cannot be merged yet (#202)
+        managers.sort(key=lambda i: 0 if i["kind"] == "review" and watch.ci_state(i["lease"][1])[0] == "green" else 1)
     alive = [] if dry else running(name)
     foreign = 0
     started, procs = [], []
