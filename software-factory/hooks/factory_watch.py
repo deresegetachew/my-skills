@@ -274,7 +274,19 @@ def collect(cfg, now=None, info=None):
 
     if info is not None:
         info["activity"] = last_activity(prs, comments_of, agent_roles, cfg)
-    return sorted(items, key=lambda i: (ORDER[i["kind"]], i["since"] or now))
+    dead = 4 * float(manager_setting(cfg, "deadManMinutes"))  # 2 hours by default
+
+    def tier(i):
+        """0 for a task PR whose CI is green (#201), and for anything that has already waited four times `deadManMinutes`, so a docs PR
+        is never starved; 1 for the rest. It only orders items of the same kind."""
+        pr = by_pr.get(i.get("pr"))
+        if not pr:
+            return 1
+        if i["since"] and minutes(i["since"], now) >= dead:
+            return 0
+        return 0 if issue_of(pr) and ci_state(pr["head"]["sha"])[0] == "green" else 1
+
+    return sorted(items, key=lambda i: (ORDER[i["kind"]], tier(i), i["since"] or now))
 
 
 def fw_role(issue):

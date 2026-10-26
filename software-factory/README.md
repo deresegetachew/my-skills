@@ -1245,6 +1245,18 @@ real boot is not tested.
 
 ## Reviews and gates
 
+### Who merges a green task pull request
+
+One rule, no setting. **The builder merges its own task pull request** when the gate allows it: the reviewer passed that
+commit, CI is green, no `protected` path changed and the dev manager has no hold or must-fix on it. **A person merges it
+(the owner, per CODEOWNERS)** when a protected path changed, or when the pull request says "A person merges this one".
+**The dev manager** reviews and merges everything else, and it is the one that picks up a pull request the builder left
+open (CI was red, or the run ended): `factory dev-manager loop` lists every open, non-draft pull request whose head has
+no review mark. A builder that did not merge ends its final message with the pull request number, why, and
+`factory dev-manager loop` as the thing that carries it on. The dev manager's queue puts task pull requests with green CI
+ahead of docs and other pull requests of the same kind; one that has waited four times `manager.deadManMinutes` (two hours
+by default) goes by age, so nothing is starved.
+
 ### The subagents
 
 | Subagent | When | What it does |

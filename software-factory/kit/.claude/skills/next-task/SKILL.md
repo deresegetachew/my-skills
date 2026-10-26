@@ -107,6 +107,9 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    no protected file changed and the dev manager has no hold or must-fix on it. If it says a person must merge it,
    end the PR body with "A person merges this one: <why>", leave it open and carry on. If another worktree has the
    main branch, `git checkout --detach origin/<mainBranch>` is fine.
+   **If you did not merge** (CI is red, the gate said no, a person merges it, or the run is ending), do not say you will
+   merge it later: nobody is left to do that. End your final message with `PR #<n> is open and not merged: <why>.
+   The dev manager carries it on: start it with `factory dev-manager loop` if it is not running.`
 
 ## 5. Continue or stop
 
