@@ -92,7 +92,7 @@ def test_the_playbook_is_rewritten_around_the_orchestrator_and_keeps_the_owners_
     for line in (l for l in dm.splitlines() if "send_later" in l):  # only as history or a warning, never an instruction
         assert "woke itself" in line or "do not also run" in line, line
     assert "The rule (owner, 21 Oct 2026)" in dm and "kit/.claude/skills/manage-pass/SKILL.md" in dm
-    assert "factory_lessons.py suggest" in dm
+    assert "factory_lessons.ts suggest" in dm
 
 
 if __name__ == "__main__":

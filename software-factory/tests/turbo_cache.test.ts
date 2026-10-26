@@ -356,8 +356,8 @@ test("ci env prints github env lines only when everything is there and the cache
   let p = turbo(d, env, ["ci-env"], { TURBO_API: cache.url, TURBO_TEAM: "widget", TURBO_TOKEN: TOKEN });
   const lines = Object.fromEntries(p.stdout.trim().split("\n").map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]));
   expect(p.code).toBe(0);
-  expect(lines).toEqual({ TURBO_API: cache.url, TURBO_TEAM: "widget", TURBO_TOKEN: TOKEN,
-    TURBO_REMOTE_CACHE_TIMEOUT: lines.TURBO_REMOTE_CACHE_TIMEOUT });
+  expect(Object.keys(lines).sort()).toEqual(["TURBO_API", "TURBO_REMOTE_CACHE_TIMEOUT", "TURBO_TEAM", "TURBO_TOKEN"]);
+  expect([lines.TURBO_API, lines.TURBO_TEAM, lines.TURBO_TOKEN]).toEqual([cache.url, "widget", TOKEN]);
   p = turbo(d, env, ["ci-env"], { TURBO_API: cache.url, TURBO_TEAM: "widget", TURBO_TOKEN: TOKEN, TURBO_REMOTE_CACHE_SIGNATURE_KEY: SIGKEY });
   expect(p.stdout.split("\n")).toContain(`TURBO_REMOTE_CACHE_SIGNATURE_KEY=${SIGKEY}`);
 });

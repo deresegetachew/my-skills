@@ -41,8 +41,12 @@ export function fail(code: string, message: string, fix: string): never {
 }
 
 /** Run a script's main function: an Exit prints its text and exits with its code, a FactoryError prints its JSON,
- * anything else prints the stack and exits 1. The returned number (if any) is the exit code. */
-export async function runMain(fn: () => unknown): Promise<never> {
+ * anything else prints the stack and exits 1. The returned number (if any) is the exit code.
+ *
+ * It sets process.exitCode and lets the process end by itself rather than calling process.exit: with stdout a pipe,
+ * process.exit drops whatever is still queued past the first 64 KB (a long `factory rereview prompt` lost its end).
+ * So nothing may run after it: call it last, and leave no timer or child running. */
+export async function runMain(fn: () => unknown): Promise<void> {
   let code = 0;
   try {
     const r = await fn();
@@ -50,8 +54,7 @@ export async function runMain(fn: () => unknown): Promise<never> {
   } catch (e) {
     code = reportError(e);
   }
-  await flush();
-  process.exit(code);
+  process.exitCode = code;
 }
 
 export function reportError(e: unknown): number {
@@ -65,10 +68,6 @@ export function reportError(e: unknown): number {
   }
   process.stderr.write((e instanceof Error ? (e.stack ?? e.message) : String(e)) + "\n");
   return 1;
-}
-
-async function flush(): Promise<void> {
-  await new Promise<void>((resolve) => (process.stdout.write("") ? resolve() : process.stdout.once("drain", resolve)));
 }
 
 export interface RunOptions {
@@ -394,4 +393,18 @@ export function parseArgs(args: string[], spec: ArgSpec, prog: string, usage: st
 export function pyQuote(text: string, safe = ""): string {
   return encodeURIComponent(text).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())
     .replace(/%([0-9A-F]{2})/g, (all, hex: string) => (safe.includes(String.fromCharCode(parseInt(hex, 16))) ? String.fromCharCode(parseInt(hex, 16)) : all));
+}
+
+/** Python's int() on a setting: a whole number from a number (truncated), a bool or a string of digits; null when
+ * Python would raise (TypeError, ValueError). For `int(cfg.get("x") or 40)` style reads. */
+export function pyInt(value: unknown): number | null {
+  if (typeof value === "boolean") return value ? 1 : 0;
+  if (typeof value === "number") return Number.isFinite(value) ? Math.trunc(value) : null;
+  if (typeof value === "string" && /^\s*[+-]?\d+(_\d+)*\s*$/.test(value)) return Number(value.replace(/_/g, ""));
+  return null;
+}
+
+/** Run a command line in a shell (subprocess.run(cmd, shell=True, capture_output=True, text=True)). */
+export function shell(cmd: string, opts: RunOptions = {}): RunResult {
+  return run(["/bin/sh", "-c", cmd], opts);
 }

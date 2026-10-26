@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The fixes from the 22 Oct lessons: free decision and migration numbers, CI that never started, a moved
-repository, and a finished branch waiting for a PR slot.  python3 software-factory/tests/test_lessons.py"""
+repository (now in remote.test.ts, #252), and a finished branch waiting for a PR slot.  python3 software-factory/tests/test_lessons.py"""
 import json, os, subprocess, sys, tempfile
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
@@ -96,12 +96,6 @@ def gate(d, env, command):
     return p.returncode, p.stderr
 
 
-def numbers(d, env):
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_numbers.py")], cwd=d, env=env,
-                       capture_output=True, text=True)
-    return p.returncode, p.stdout + p.stderr
-
-
 CREATE = "gh pr create --title x --body 'Closes #1'"
 
 
@@ -125,23 +119,6 @@ def test_a_number_another_open_pr_took_is_refused():
                       "pulls/145/files": "docs/decisions/0045-home-page.md"})
     rc, err = gate(d, env, CREATE)
     assert rc == 2 and "0042-reader.md in #127" in err and "Rename it to 0046" in err, err
-
-
-def test_migrations_count_when_configured_and_this_branch_own_pr_is_not_a_clash():
-    d, db, env = project(["apps/api/migrations/0008_a.sql"], ["apps/api/migrations/0009_b.sql"],
-                         cfg={"numberedDirs": ["apps/api/migrations"]})
-    answers(db, text={"pulls": "144\ttask/1-x\n150\ttask/9-y", "pulls/144/files": "apps/api/migrations/0009_b.sql",
-                      "pulls/150/files": "apps/api/migrations/0009_other.sql"})
-    rc, out = numbers(d, env)
-    assert rc == 1 and "0009_other.sql in #150" in out and "Rename it to 0010" in out, out
-    answers(db, text={"pulls": "144\ttask/1-x"})  # only this branch's own PR: free
-    assert numbers(d, env)[0] == 0
-
-
-def test_two_new_files_with_one_number_in_a_branch_are_refused():
-    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-b.md", "docs/decisions/0002-c.md"])
-    rc, out = numbers(d, env)
-    assert rc == 1 and "in this branch" in out and "Rename it to 0003" in out, out
 
 
 def test_a_draft_skips_the_number_check():
@@ -202,42 +179,6 @@ if a[:1] != ["api"]:''', 1)
                   "check-runs/1/annotations": [{"message": BILLING}]})
     rc, err = gate(d, env, f"gh pr merge 7 --squash --match-head-commit {head}")
     assert rc == 2 and "CI didn't run on this commit" in err, err
-
-
-# --- a moved repository ----------------------------------------------------------------------------------------
-
-def remote(d, env, *args):
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_remote.py"), *args], cwd=d, env=env,
-                       capture_output=True, text=True)
-    return p.returncode, p.stdout
-
-
-def test_a_remote_to_a_moved_repository_is_pointed_at_its_new_name():
-    d, db, env = project([], [])
-    git(d, "remote", "set-url", "origin", "https://github.com/remanual-org/remanual.git")
-    answers(db, text={"repos/remanual-org/remanual": "deresegetachew/remanual"})
-    assert remote(d, env, "--check")[0] == 1
-    assert git(d, "config", "--get", "remote.origin.url") == "https://github.com/remanual-org/remanual.git"  # --check changes nothing
-    rc, out = remote(d, env)
-    assert rc == 0 and "now points at https://github.com/deresegetachew/remanual.git" in out, out
-    assert git(d, "config", "--get", "remote.origin.url") == "https://github.com/deresegetachew/remanual.git"
-
-
-def test_ssh_remotes_keep_their_form_and_a_current_remote_is_left_alone():
-    d, db, env = project([], [])
-    git(d, "remote", "set-url", "origin", "git@github.com:old/app.git")
-    answers(db, text={"repos/old/app": "new/app"})
-    remote(d, env)
-    assert git(d, "config", "--get", "remote.origin.url") == "git@github.com:new/app.git"
-    answers(db, text={"repos/new/app": "new/app"})
-    assert remote(d, env) == (0, "")
-
-
-def test_no_answer_from_github_changes_nothing():
-    d, db, env = project([], [])
-    git(d, "remote", "set-url", "origin", "https://github.com/old/app")
-    assert remote(d, env) == (0, "")
-    assert git(d, "config", "--get", "remote.origin.url") == "https://github.com/old/app"
 
 
 # --- a finished branch waiting for a PR slot --------------------------------------------------------------------
@@ -320,28 +261,6 @@ def test_a_reused_pid_of_another_program_does_not_hold_a_name():
 def test_other_accounts_prs_do_not_fill_this_accounts_slots():
     d, db, env = issues_project([pr(115, "a", by="someone-else"), pr(144, "b", by="someone-else")])
     assert pick(d, env)[1] == "issue-107 Demo guides"
-
-
-def test_a_rename_that_keeps_its_number_is_not_a_new_number():
-    d, db, env = project(["docs/decisions/0001-a.md", "docs/decisions/0002-old-title.md"], [])
-    git(d, "mv", "docs/decisions/0002-old-title.md", "docs/decisions/0002-new-title.md")
-    git(d, "commit", "-qm", "retitle")
-    assert numbers(d, env)[0] == 0
-    answers(db, text={"pulls": "150\ttask/9-y",
-                      "pulls/150/files": "docs/decisions/0002-retitled.md\tdocs/decisions/0002-old-title.md"})
-    assert numbers(d, env)[0] == 0  # another PR retitling a decision takes no number either
-
-
-def test_a_number_merged_to_main_meanwhile_counts_without_a_manual_fetch():
-    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-mine.md"])
-    other = tempfile.mkdtemp()
-    subprocess.run(["git", "clone", "-q", git(d, "config", "--get", "remote.origin.url"), other], check=True)
-    git(other, "config", "user.email", "t@t"); git(other, "config", "user.name", "t")
-    os.makedirs(os.path.join(other, "docs", "decisions"), exist_ok=True)
-    open(os.path.join(other, "docs", "decisions", "0002-theirs.md"), "w").write("x")
-    git(other, "add", "-A"); git(other, "commit", "-qm", "theirs"); git(other, "push", "-q", "origin", "HEAD:main")
-    rc, out = numbers(d, env)  # this checkout never fetched since: the check does
-    assert rc == 1 and "0002-theirs.md on main" in out and "Rename it to 0003" in out, out
 
 
 def test_a_timed_out_job_next_to_billing_is_a_real_result():
@@ -428,16 +347,6 @@ def test_a_fork_pr_with_the_same_branch_name_is_not_this_branchs_pr():
     json.dump(data, open(db, "w"))
     rc, out, err = pick(d, env)
     assert out == "none" and "waits for a pull-request slot" in err, (out, err)
-
-
-def test_numbers_skip_only_this_repos_own_pr():
-    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-mine.md"])
-    answers(db, text={"pulls": "201\ttask/1-x\tstranger/fork\tme/app",
-                      "pulls/201/files": "docs/decisions/0002-theirs.md"})
-    rc, out = numbers(d, env)
-    assert rc == 1 and "0002-theirs.md in #201" in out, out
-    answers(db, text={"pulls": "144\ttask/1-x\tme/app\tme/app"})
-    assert numbers(d, env)[0] == 0
 
 
 def test_a_task_waiting_for_a_slot_is_not_stale():

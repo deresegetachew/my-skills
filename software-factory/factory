@@ -244,7 +244,7 @@ case "$cmd" in
     # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
     # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
     mcp="$(fh "$dir/.claude/hooks/factory_mcp")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
-    # The `models` setting for the builder (factory_models.py): after the MCP flags, before your own arguments.
+    # The `models` setting for the builder (factory_models.ts): after the MCP flags, before your own arguments.
     mf=()
     if [ -f "$dir/.claude/hooks/factory_models.ts" ]; then
       m="$(fh "$dir/.claude/hooks/factory_models" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }
@@ -342,7 +342,7 @@ EOF
     chmod +x "$bin/factory"
     echo "Installed $bin/factory."
     case ":$PATH:" in *":$bin:"*) ;; *) echo "Add it to your PATH, for example in ~/.zshrc:  export PATH=\"\$HOME/.local/bin:\$PATH\"";; esac ;;
-  ci)        if [ "${1:-}" = log ]; then py factory_ci_log.py "${@:2}"; else exec bash "$root/.claude/ci/ci.sh" "$@"; fi ;;
+  ci)        if [ "${1:-}" = log ]; then fh "$hooks/factory_ci_log" "${@:2}"; else exec bash "$root/.claude/ci/ci.sh" "$@"; fi ;;
   help|-h|--help) usage ;;
   *) echo "factory: unknown command '$cmd'" >&2; usage >&2; exit 1 ;;
 esac

@@ -1,1 +1,0 @@
-../../software-factory/hooks/style_checks.py
