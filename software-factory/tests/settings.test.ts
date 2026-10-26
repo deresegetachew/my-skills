@@ -336,7 +336,7 @@ test("the machine scope has its own file outside the project", () => {
   expect(settings(d, ["--local", "set", "autostart", "true"], env).code).toBe(0);
   const machine = machineFiles(env);
   expect(machine.length).toBe(1);
-  expect(readJson(machine[0] as string)).toEqual({ agents: ["grace", "haile"], remoteControl: false, autostart: true });
+  expect(readJson<Record<string, unknown>>(machine[0] as string)).toEqual({ agents: ["grace", "haile"], remoteControl: false, autostart: true });
   expect(saved(d)).toEqual({ agents: ["ada", "grace", "haile"] }); // the project file is untouched
   expect(settings(d, ["--local", "get", "agents"], env).stdout.trim()).toBe('["grace", "haile"]');
   const rows = Object.fromEntries((JSON.parse(settings(d, ["--local", "list", "--json"], env).stdout) as Row[]).map((r) => [r.key, r]));
