@@ -234,6 +234,19 @@ def test_a_ping_or_a_turns_end_never_opens_an_agent_issue():
     assert count_agent_issues(db) == 0
 
 
+def test_no_path_opens_an_agent_issue_for_an_agent_that_never_registered():
+    # #194: `Agent: fasil · down` appeared for names that never ran. Only `register` makes an issue, and never a down one.
+    d, db, env = setup([issue(1)])
+    code = ("import sys; sys.path.insert(0, %r)\nimport factory_agents as FA\nfrom factory_config import load\n"
+            "cfg = load()\nfor status in ('down', 'idle', 'working'):\n"
+            "    FA.update(cfg, 'fasil', status, create=(status == 'down'))\n" % HOOKS)
+    p = subprocess.run([sys.executable, "-c", code], cwd=d, env={**env, "CLAUDE_PROJECT_DIR": d}, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert count_agent_issues(db) == 0, json.load(open(db))["issues"]
+    agents(d, env, "register", "--agent", "menelik")
+    assert count_agent_issues(db) == 1  # a real registration still opens its one issue
+
+
 def test_register_reuses_the_agents_issue_even_a_closed_one():
     d, db, env = setup([agent_issue(5, "menelik", "2026-10-22T10:00:00Z", state="closed")])
     rc, out = agents(d, env, "register", "--agent", "menelik")
