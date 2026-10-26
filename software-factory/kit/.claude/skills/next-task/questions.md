@@ -13,7 +13,7 @@ decision the docs leave open), don't guess:
 
 Small gaps the docs don't cover: choose the simplest option that fits the PRD, write it down as
 `<decisions>/NNNN-title.md`, and carry on. A number must be free on main **and** in every open PR (other agents' PRs
-take numbers too). Run `python3 .claude/hooks/factory_numbers.py` before you open the PR: it lists any clash with the
+take numbers too). Run `bun --no-env-file .claude/hooks/factory_numbers.ts` before you open the PR: it lists any clash with the
 next free number. The PR gate runs the same check and won't open the PR until the numbers are free. Migrations
 (`numberedDirs` in `.claude/factory.json`) follow the same rule.
 

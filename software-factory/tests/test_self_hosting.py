@@ -33,7 +33,7 @@ def test_what_governs_the_agents_is_protected_and_the_notes_folder_exists():
     import re
     cfg = config()
     for path in ("CLAUDE.md", ".claude/factory.json", ".github/workflows/check.yml", "software-factory/hooks/pr-gate.py",
-                 "software-factory/hooks/factory_guard.py", "software-factory/kit/.claude/settings.json",
+                 "software-factory/hooks/factory_guard.ts", "software-factory/kit/.claude/settings.json",
                  "software-factory/kit/.claude/agents/reviewer.md", "tools/build_release.py", "software-factory/VERSION"):
         assert any(re.search(rx, path) for rx in cfg["protected"]), path
     assert not any(re.search(rx, "software-factory/hooks/factory_doctor.py") for rx in cfg["protected"])  # ordinary code can self-merge

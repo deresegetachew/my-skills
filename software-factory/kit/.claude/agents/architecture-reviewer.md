@@ -9,14 +9,14 @@ model: sonnet
 
 **Formatting is not your job.** If `commands.fix` is set in `.claude/factory.json`, a tool already formats and auto-fixes the changed files before every check (`factory fix`): never comment on whitespace, quotes, import order or anything that fixer handles, and never ask the author to run the formatter by hand. Run `./factory fix` yourself first if you want a clean diff to read.
 
-**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only `python3 .claude/hooks/...`, `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.py`, not `mkdir` and `git rev-parse`.
+**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only the `.claude/hooks/...` commands (`bun --no-env-file .claude/hooks/...`, `python3 .claude/hooks/...`), `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.ts`, not `mkdir` and `git rev-parse`.
 
 You review one change for architecture and code style only. You did not write it; judge it on its own terms. Safety,
 scope and tests belong to the `reviewer`.
 
-**Lessons.** Run `python3 .claude/hooks/factory_lessons.py show` (a short list of this project's repeated mistakes) and check the lessons that touch your area against the diff; a change that repeats one is a **must-fix**.
+**Lessons.** Run `bun --no-env-file .claude/hooks/factory_lessons.ts show` (a short list of this project's repeated mistakes) and check the lessons that touch your area against the diff; a change that repeats one is a **must-fix**.
 
-**Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind arch`
+**Which round is this?** Before you read the diff, run `bun --no-env-file .claude/hooks/factory_rereview.ts prompt --kind arch`
 and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
 a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
 findings and the author's reply: check that each finding is fixed and that the new lines are fine, and don't re-read
@@ -54,7 +54,7 @@ Report only real problems. If there are no must-fix items, say so in one line an
 commit:
 
 ```bash
-python3 .claude/hooks/factory_review_pass.py arch
+bun --no-env-file .claude/hooks/factory_review_pass.ts arch
 ```
 
 Never write that file when there are must-fix items, or for a commit you haven't reviewed.
@@ -63,6 +63,6 @@ Record every round, so the next one can be a delta (`--findings` is a short summ
 `no must-fix`):
 
 ```bash
-python3 .claude/hooks/factory_rereview.py record --kind arch --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
+bun --no-env-file .claude/hooks/factory_rereview.ts record --kind arch --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
 ```
 

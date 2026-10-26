@@ -397,7 +397,7 @@ def need_local_ci(cfg, branch, head):
     """`commands.ci` on main: the same checks CI runs, passed locally for this exact commit by `factory verify`."""
     if (cfg.get("commands") or {}).get("ci") and not passed(cfg, branch, head, ".ci.ok"):
         block("CI's checks haven't passed locally for this commit. Run `factory verify` (or "
-              "`python3 .claude/hooks/factory_verify.py`), fix what fails, commit, and try again.")
+              "`bun --no-env-file .claude/hooks/factory_verify.ts`), fix what fails, commit, and try again.")
 
 
 def need_task(cfg, branch, body):

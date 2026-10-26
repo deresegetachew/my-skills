@@ -5,7 +5,7 @@ import json, os, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 HOOKS = os.path.abspath(os.path.join(HERE, "..", "hooks"))
 SETTINGS = os.path.join(HOOKS, "factory_settings.py")
-CHECK = os.path.join(HOOKS, "check.py")
+CHECK = os.path.join(HOOKS, "check.ts")
 
 
 def project(cfg=None):
@@ -106,7 +106,7 @@ def stop_check(d, commands, out_lines=None):
         cfg["checkOutputLines"] = out_lines
     json.dump(cfg, open(os.path.join(d, ".claude", "factory.json"), "w"))
     open(os.path.join(d, "src", "a.ts"), "w").write("x")  # an untracked change under codePaths
-    return subprocess.run([sys.executable, CHECK], cwd=d, input="{}", capture_output=True, text=True,
+    return subprocess.run(["bun", "--no-env-file", CHECK], cwd=d, input="{}", capture_output=True, text=True,
                           env={**person_env(), "CLAUDE_PROJECT_DIR": d})
 
 
