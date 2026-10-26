@@ -32,9 +32,9 @@ factory update          # newest release: download, check, install, refresh this
 | Catch up after a pull | `factory update` again: the files came with the pull, so it only refreshes this machine's runner services and verifies |
 
 **`factory update` and `factory rollback` refuse inside the factory's own repository** (my-skills, found by
-`software-factory/VERSION` and `tools/build_release.py` at the root) with `[factory_repo]`, before anything else and
+`software-factory/VERSION` and `tools/build_release.ts` at the root) with `[factory_repo]`, before anything else and
 without changing a file. The `.claude/` entries there are links into `software-factory/`, and the releases come from
-that repo. The fix: edit the real files in `software-factory/`, then cut a release with `tools/build_release.py`. Every
+that repo. The fix: edit the real files in `software-factory/`, then cut a release with `tools/build_release.ts`. Every
 other project is unaffected.
 
 `factory update` does this, in order, and stops at the first problem with `[code] message` and `Fix: ...`:
@@ -52,7 +52,7 @@ other project is unaffected.
    runs `factory ci install`, which also rebuilds the runner image. If the heartbeat daemon is installed here it is
    restarted too (`factory heartbeat restart`), because it is one long process that would otherwise keep running the
    old code.
-6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the Python and shell scripts parse;
+6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the TypeScript and shell scripts parse;
    and the installed runner files are readable by the runner container's user, not writable by others, and match the
    checkout (`factory ci check`, which, when Docker and the runner image are on the machine, also starts the installed
    entrypoint in the image as the container's own user and parses it). If any of that fails it exits 1, names each problem and does not say it worked.
@@ -81,14 +81,19 @@ described [below](submodule.md#updating-the-factory) until the project migrates.
 starts taking releases in a project whose factory files are plain copies; it refuses, and changes nothing, where the
 files are links into the submodule. Moving a project off the submodule is its own reviewed pull request.
 
-**Which releases exist.** One so far: `v0.1.0-alpha.1`, a pre-release, built from the commit that bumped
-`software-factory/VERSION` to `0.1.0-alpha.1` (#184). A tag with a hyphen is published as a pre-release. Until a full
+**Which releases exist.** Pre-releases so far: `v0.1.0-alpha.1` (#184) to `v0.1.0-alpha.3`, each built from the
+commit that bumped `software-factory/VERSION`. They are the old Python factory; later releases are Bun (#252). A tag with a hyphen is published as a pre-release. Until a full
 release such as `v0.1.0` exists, `factory update` with no version stops with `[no_releases]`, names the pre-release that exists and
 says to take it by name: `factory update v0.1.0-alpha.1`. `factory version` shows a pre-release newer than the newest full one on its own line. `factory releases` lists what exists.
 
+**From the old Python release to Bun.** A project on `v0.1.0-alpha.3` updates with `factory update` as before. The
+machine needs Bun first (`curl -fsSL https://bun.sh/install | bash`; `factory doctor` checks it). On that one update
+the old Python client cannot restart the heartbeat daemon, so if the daemon runs on the machine, run
+`factory heartbeat restart` once afterwards. Later updates restart it themselves.
+
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
-`tools/build_release.py`, and publishes it with `SHA256SUMS` and notes. Agents never publish a release or push a tag.
+`tools/build_release.ts`, and publishes it with `SHA256SUMS` and notes. Agents never publish a release or push a tag.
 
 <br>
 

@@ -12,7 +12,7 @@ model: sonnet
 You review one change. You did not write it; judge it on its own terms. Architecture and code style on paths with a
 style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
 
-**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only the `.claude/hooks/...` commands (`bun --no-env-file .claude/hooks/...`, `python3 .claude/hooks/...`), `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.ts`, not `mkdir` and `git rev-parse`.
+**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only the `.claude/hooks/...` commands (`bun --no-env-file .claude/hooks/...`), `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.ts`, not `mkdir` and `git rev-parse`.
 
 **Lessons.** Run `bun --no-env-file .claude/hooks/factory_lessons.ts show` (a short list of this project's repeated mistakes) and check the diff against each lesson. A change that repeats a lesson is a **must-fix**: quote the lesson. If you find a problem a lesson would have caught but none says so, tell the caller in one line ("lesson candidate: ..."); the dev manager decides.
 

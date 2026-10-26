@@ -9,7 +9,7 @@ model: sonnet
 
 **Formatting is not your job.** If `commands.fix` is set in `.claude/factory.json`, a tool already formats and auto-fixes the changed files before every check (`factory fix`): never comment on whitespace, quotes, import order or anything that fixer handles, and never ask the author to run the formatter by hand. Run `./factory fix` yourself first if you want a clean diff to read.
 
-**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only the `.claude/hooks/...` commands (`bun --no-env-file .claude/hooks/...`, `python3 .claude/hooks/...`), `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.ts`, not `mkdir` and `git rev-parse`.
+**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only the `.claude/hooks/...` commands (`bun --no-env-file .claude/hooks/...`), `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.ts`, not `mkdir` and `git rev-parse`.
 
 You review one change for architecture and code style only. You did not write it; judge it on its own terms. Safety,
 scope and tests belong to the `reviewer`.

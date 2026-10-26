@@ -135,7 +135,7 @@ would prompt.
 **Closing a pull request.** A superseded or obsolete pull request that a factory agent opened (a `task/...` branch in this
 repository, or the manager's own branch) is closed by the dev manager: a comment with the reason and the commit that
 supersedes it, then `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -f state=closed`. One opened by the owner or anyone
-else, or from a fork, is an owner-queue ask. `manager_gate.py` refuses the close of any other pull request and says to write
+else, or from a fork, is an owner-queue ask. `manager_gate.ts` refuses the close of any other pull request and says to write
 the ask; it never allows a merge by this path, and `gh pr close` stays unavailable.
 
 **Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
@@ -163,10 +163,10 @@ Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<n
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
 `claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
 read-only git, `Read`/`Grep`/`Glob` and subagents, and denies pushing to main, force-push, editing `.claude/**`, `vendor/**`,
-`CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.py` refuses, and says
+`CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.ts` refuses, and says
 to write an owner-queue ask instead: a merge unless the PR's latest approval marker is `factory-approved sha=<the head being
 merged>`, no must-fix came after it, the merge is pinned to that head and CI is judged green (newest non-skipped run per job
-name, `factory_ci_judge.py`); a merge of a PR the manager opened (a `manager/` branch, or a body with
+name, `factory_ci_judge.ts`); a merge of a PR the manager opened (a `manager/` branch, or a body with
 `<!-- factory-role role=dev-manager ... -->`: its own PRs wait for the owner); deleting refs, force-pushing and pushing to
 main; `gh api` writes to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks and deploy
 keys; and shell commands that read secrets files. Like `pr-gate.ts` it is a guard rail, not a lock: keep branch protection

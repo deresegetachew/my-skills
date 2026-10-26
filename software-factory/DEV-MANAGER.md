@@ -127,7 +127,7 @@ the reasoning behind it. A sub-manager works on exactly its item. Run by hand (`
 An agent may merge its own PR as soon as the gate allows. To stop that while you review, put the **`factory-hold`**
 label on the PR (`holdLabel` in `factory.json`; create the label in the repo once). With the label on:
 - the PR gate refuses the agent's merge;
-- `next_task.py` doesn't hand the PR out as rework, so the agents carry on with other tasks.
+- `next_task.ts` doesn't hand the PR out as rework, so the agents carry on with other tasks.
 
 When you're done, remove the label, and either approve (`<!-- factory-approved sha=<head> -->`, then merge) or post
 `<!-- factory-mustfix sha=<head> -->` with the must-fixes, which makes it rework. Don't hold a PR with a must-fix
@@ -196,7 +196,7 @@ envelope; docs/messages.md). They come to you first for technical and process qu
 - **Spot-check claims against sources.** If a PR says text was copied word for word from a document, open
   the document and compare (for PDFs: `pdftoppm -f N -l N -r 80 -png file.pdf out`, then look at the image).
 - **Must-fix comments start with `<!-- factory-mustfix sha=<head> -->`** (the head commit you reviewed). That
-  marker is how the coding agent finds rework: `next_task.py` hands out a PR whose latest must-fix names its
+  marker is how the coding agent finds rework: `next_task.ts` hands out a PR whose latest must-fix names its
   current head before any new task, and the agent's next push clears it. Without the marker, a must-fix waits
   until someone notices.
   It also holds the merge: `pr-gate.ts` refuses the agent's `gh pr merge` while the latest marker on the PR is a
@@ -205,7 +205,7 @@ envelope; docs/messages.md). They come to you first for technical and process qu
   `--match-head-commit <head>`. With `trustedReviewers: ["<your login>"]` in factory.json, only your approvals
   count; that's worth it once the agents use their own GitHub account. The gate is a guard rail, not a lock:
   keep branch protection with the CI checks required on main.
-- **Unblock an issue with `factory_issues.py release <n> "<reason>"`**, not by editing labels: release (and block)
+- **Unblock an issue with `factory_issues.ts release <n> "<reason>"`**, not by editing labels: release (and block)
   post a `factory-release` marker, so an old claim from before the block can't win the issue again.
 - **One comment per reviewed commit**: verdict (merge / needs changes / needs the owner), must-fix items with
   file and line, follow-ups in a line each, and the marker `<!-- pr-watch sha=<head sha> -->`. The marker is
