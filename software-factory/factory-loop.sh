@@ -69,7 +69,7 @@ if [ "$dry_run" = 1 ]; then
   case "$role" in
     coding-agent)
       if next=$(python3 "$hooks/next_task.py"); then
-        echo "[$who] next task: $next"; echo "[$who] would run: claude -p \"/next-task ${next%% *}\""
+        echo "[$who] next task: $next"; echo "[$who] would run: claude -p \"/next-task ${next%% *}\" ($(python3 "$hooks/factory_roles.py" permission-flags | paste -sd' ' - | sed 's/^$/no permission flag: your own Claude Code settings decide/'))"
       else echo "[$who] no task is ready: it would wait and look again."; fi ;;
     dev-manager)
       python3 "$hooks/factory_orchestrator.py" cycle --name "$who" --dry-run ;;
@@ -77,7 +77,7 @@ if [ "$dry_run" = 1 ]; then
       python3 "$hooks/factory_roles.py" digest "$role" | sed "s/^/[$who] /"
       if found=$(python3 "$hooks/factory_roles.py" work "$role" --name "$who"); then
         echo "$found" | sed "s/^/[$who] work: /"
-        echo "[$who] would run: claude -p \"$(python3 "$hooks/factory_roles.py" prompt "$role" "$who" | head -1)\""
+        echo "[$who] would run: claude -p \"$(python3 "$hooks/factory_roles.py" prompt "$role" "$who" | head -1)\" ($(python3 "$hooks/factory_roles.py" permission-flags | paste -sd' ' - | sed 's/^$/no permission flag: your own Claude Code settings decide/'))"
       else
         echo "[$who] $found"
         [ "$role" != product-owner ] || [ "$interactive" != 1 ] || echo "[$who] with -i and nothing queued it would start a discovery session: claude \"/product-pass discover\""
@@ -191,6 +191,9 @@ isolate() {
   # The shared Turborepo cache (#59), asked for before every task, so a cache that came up later is picked up and one
   # that went away is dropped. Prints nothing while turbo.api is empty; no token or no answer: local cache only, and
   # it says why. Never stops the loop.
+  # Unattended runs (-p) get --permission-mode from the `permissionMode` setting (#179); interactive ones are not given one.
+  headless_flags=()
+  while IFS= read -r line; do [ -n "$line" ] && headless_flags+=("$line"); done < <(python3 "$hooks/factory_roles.py" permission-flags)
   eval "$(python3 "$hooks/factory_turbo.py" env)" || true
   # The `models` setting (factory_models.py): --model and --effort for the role's session, and --agents for the
   # subagents whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
@@ -254,7 +257,7 @@ role_pass() {
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then claude "${claude_flags[@]}" --remote-control="$agent" "$prompt"; else claude "${claude_flags[@]}" "$prompt"; fi
     rc=$?; stty sane 2>/dev/null
   else
-    claude "${claude_flags[@]}" -p "$prompt"; rc=$?
+    claude "${claude_flags[@]}" "${headless_flags[@]}" -p "$prompt"; rc=$?
   fi
   [ "$discover" = 0 ] || exit "$rc"
   [ "$rc" = 0 ] || return 1
@@ -339,7 +342,7 @@ for ((n = 1; n <= limit; n++)); do
     case "$answer" in q|Q|quit|stop|n|N) echo "[$agent] Stopped."; exit 0;; esac
     continue
   else
-    claude "${claude_flags[@]}" -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+    claude "${claude_flags[@]}" "${headless_flags[@]}" -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
   fi
   python3 "$hooks/factory_claims.py" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
 done

@@ -10,7 +10,7 @@ Checks that don't apply to the project (Node without a package.json, sops withou
 `--sandbox` adds the checks of a sandboxed factory machine (factory_sandbox.py): run it as the dedicated user that
 `factory bootstrap` made. It runs a few network probes and one container, so it takes longer.
 """
-import json, os, re, shutil, subprocess, sys
+import fnmatch, json, os, re, shutil, subprocess, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from factory_config import load  # noqa: E402
@@ -163,6 +163,52 @@ def project(r, cfg):
     install = cfg["commands"].get("install") or ""
     if "pnpm" in install and not os.path.isdir("node_modules"):
         r.note("node_modules", f"not installed yet: run `{install}`")
+
+
+# What an unattended coding-agent run does on every task; each needs an allow rule or it stops and waits for an answer.
+LOOP_COMMANDS = ("git fetch origin", "git add .", "git commit -m x", "git push origin task/x", "gh pr create")
+STALL_FREE_MODES = ("acceptEdits", "bypassPermissions", "dontAsk")
+
+
+def read_json(path):
+    try:
+        with open(os.path.expanduser(path)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def allows(rules, command):
+    for rule in rules:
+        m = re.fullmatch(r"Bash\((.*)\)", rule) if isinstance(rule, str) else None
+        if m and fnmatch.fnmatchcase(command, m.group(1)):
+            return True
+    return False
+
+
+def permissions(r, cfg):
+    """How an unattended run gets its permissions (#179): the mode its `claude -p` starts with, and whether the allow
+    list covers the commands every task runs. A headless run cannot answer a prompt, so anything missing stalls it."""
+    mode = cfg.get("permissionMode", "acceptEdits")
+    if mode == "acceptEdits":
+        r.ok("permissions for unattended runs: --permission-mode acceptEdits (permissionMode)")
+    else:
+        mine = (read_json("~/.claude/settings.json").get("permissions") or {}).get("defaultMode")
+        if mine in STALL_FREE_MODES:
+            r.ok(f"permissions for unattended runs: no flag is passed; your Claude Code settings set {mine}")
+        else:
+            r.fix("permissionMode in .claude/factory.json", "it is `default` and your own Claude Code settings set no permission mode, so "
+                  "an unattended run stops at the first edit it needs approved: run `factory settings set permissionMode acceptEdits`")
+    text = open(".claude/settings.json").read() if os.path.exists(".claude/settings.json") else ""
+    if ".claude/hooks/pr-gate.py" not in text:
+        return  # not the factory's settings.json (or none): there is no allow list to judge
+    have = list((read_json(".claude/settings.json").get("permissions") or {}).get("allow") or [])
+    have += list((cfg.get("permissions") or {}).get("allow") or [])
+    missing = [c for c in LOOP_COMMANDS if not allows(have, c)]
+    if missing:
+        r.fix("allow list for unattended runs", f"no rule allows {', '.join('`' + c + '`' for c in missing)}, so a headless run stops there "
+              "waiting for an answer: add rules such as `Bash(git commit*)` to `permissions.allow` in .claude/factory.json "
+              "(or to .claude/settings.json in a project that takes the kit by link)")
 
 
 def factory(r, cfg):
@@ -348,6 +394,7 @@ def main():
         project(r, cfg)
         factory(r, cfg)
         models(r, cfg)
+        permissions(r, cfg)
         roles(r, cfg)
         manager(r, cfg)
         turbo(r, cfg)
