@@ -323,6 +323,37 @@ def test_release_ends_a_lease_early():
 
 # --- the cycle: sub-managers ------------------------------------------------------------------------------------------
 
+def order_of(work, env):
+    p = py(work, env, "factory_watch.py", "--json")
+    return [i["ref"] for i in json.loads(p.stdout)]
+
+
+def test_a_task_pr_with_green_ci_comes_before_older_docs_prs():
+    # #201: docs PRs #5 and #15 came first, so task PR #23 waited: "waiting for a free place".
+    H3 = "c" * 40
+    d, work, env = world(db={
+        "pulls": [pr(5, sha=H, ref="docs/readme"), pr(15, sha=H2, ref="docs/guide"), pr(23, sha=H3, ref="task/2-thing")],
+        "commits": {H: iso(70), H2: iso(60), H3: iso(40)},
+        "checks": {H: [ok_run()], H2: [ok_run()], H3: [ok_run()]}})
+    assert order_of(work, env) == ["pr-23", "pr-5", "pr-15"], order_of(work, env)
+
+
+def test_a_task_pr_with_red_ci_does_not_jump_the_queue():
+    H3 = "c" * 40
+    d, work, env = world(db={
+        "pulls": [pr(5, sha=H, ref="docs/readme"), pr(23, sha=H3, ref="task/2-thing")],
+        "commits": {H: iso(120), H3: iso(40)}, "checks": {H: [ok_run()], H3: [bad_run()]}})
+    assert order_of(work, env) == ["pr-5", "pr-23"], order_of(work, env)
+
+
+def test_a_docs_pr_that_waited_four_times_deadManMinutes_is_not_starved_by_task_prs():
+    H3 = "c" * 40
+    d, work, env = world(db={
+        "pulls": [pr(5, sha=H, ref="docs/readme"), pr(23, sha=H3, ref="task/2-thing")],
+        "commits": {H: iso(300), H3: iso(40)}, "checks": {H: [ok_run()], H3: [ok_run()]}})
+    assert order_of(work, env) == ["pr-5", "pr-23"], order_of(work, env)
+
+
 def test_a_cycle_starts_one_sub_manager_per_item_with_the_profile_the_item_and_the_role_marker():
     d, work, env = world(db=UNREVIEWED)
     p = cycle(work, env, "--wait")
