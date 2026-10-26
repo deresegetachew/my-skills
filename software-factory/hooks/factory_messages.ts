@@ -337,7 +337,7 @@ let ROLES: Record<string, RoleRow> | null = null;
 
 /** {address: {names, logins}} for the roles a message can be addressed to (`po`, `dev-manager`), from the project's
  * factory.json: the names that role's loops run under, and for the product owner the GitHub logins whose answers
- * count (`roles.product-owner.logins`, empty: any). {} when the config can't be read (then names stand for
+ * count (`roles.product-owner.logins`; when empty, every login counts). {} when the config can't be read (then names stand for
  * themselves). Read once per process. */
 export function roleTable(): Record<string, RoleRow> {
   if (ROLES === null) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A clone of an empty repo has no fetch refspec, so no origin/main (#181). The claims hook and `factory doctor` say so
-with {code, message, fix} instead of a traceback.  python3 software-factory/tests/test_no_origin_main.py"""
+"""A clone of an empty repo has no fetch refspec, so no origin/main (#181). `factory doctor` says so (the claims hook's
+check is in no_origin_main.test.ts, #252).  python3 software-factory/tests/test_no_origin_main.py"""
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,24 +27,6 @@ def clone_without_refspec():
     sh("git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "first", cwd=work)
     sh("git", "push", "-q", "origin", "main", cwd=work)  # pushed, but nothing tracks it
     return work
-
-
-def test_a_worktree_without_origin_main_gives_code_message_fix_and_no_traceback():
-    work = clone_without_refspec()
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_claims.py"), "worktree", "taytu"], cwd=work,
-                       env={**os.environ, "CLAUDE_PROJECT_DIR": work}, capture_output=True, text=True)
-    assert p.returncode == 1, (p.stdout, p.stderr)
-    assert "Traceback" not in p.stderr and "CalledProcessError" not in p.stderr, p.stderr
-    e = json.loads(p.stderr.strip().splitlines()[-1])
-    assert e["code"] == "no-origin-main" and "origin/main" in e["message"] and FIX in e["fix"], e
-
-
-def test_the_worktree_is_made_once_the_refspec_is_there():
-    work = clone_without_refspec()
-    sh("git", "config", "--add", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*", cwd=work)
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_claims.py"), "worktree", "taytu"], cwd=work,
-                       env={**os.environ, "CLAUDE_PROJECT_DIR": work}, capture_output=True, text=True)
-    assert p.returncode == 0 and p.stdout.strip().endswith("work-agents/taytu"), (p.stdout, p.stderr)
 
 
 def test_doctor_names_the_missing_origin_main():

@@ -293,7 +293,7 @@ All managers share one GitHub account, so the name inside the comment is the onl
 
 When the owner runs more than one `factory-loop.sh`, PRs arrive side by side for neighbouring tasks. Merge them in
 plan order when one builds on another; when a later PR conflicts after an earlier merge, ask its branch to merge the main
-branch in, never to rebase (force pushes are blocked) (or fix the conflict yourself if the loop has moved on). `python3 .claude/hooks/factory_claims.py list` on the
+branch in, never to rebase (force pushes are blocked) (or fix the conflict yourself if the loop has moved on). `bun --no-env-file .claude/hooks/factory_claims.ts list` on the
 owner's machine shows which loop holds which task; a claim lapses when its loop exits or after `claimStaleHours`.
 
 ## Token use

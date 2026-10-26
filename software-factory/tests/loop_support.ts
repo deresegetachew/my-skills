@@ -102,7 +102,7 @@ import { basename } from "node:path";
 const name = basename(import.meta.path);
 const args = process.argv.slice(2);
 if (process.env.LOOP_LOG) appendFileSync(process.env.LOOP_LOG, name + " " + args.join(" ") + "\n");
-if (name === "factory_claims.ts" && args[0] === "checkout") console.log("solo", process.cwd());
+if (name === "factory_claims.ts" && args[0] === "checkout") console.log(process.env.STUB_AGENT || "solo", process.env.LOOP_WT || process.cwd());
 if (name === "next_task.ts") {
   const state = process.env.LOOP_STATE as string;
   const n = existsSync(state) ? Number(readFileSync(state, "utf8")) : 0;

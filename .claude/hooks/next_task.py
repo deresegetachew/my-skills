@@ -1,1 +1,0 @@
-../../software-factory/hooks/next_task.py

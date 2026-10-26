@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """The fixes from the 22 Oct lessons: free decision and migration numbers, CI that never started, a moved
-repository (now in remote.test.ts, #252), and a finished branch waiting for a PR slot.  python3 software-factory/tests/test_lessons.py"""
+repository (now in remote.test.ts, #252); the claims and issues lessons (a branch waiting for a PR slot, a loop keeps
+its name) are in claims_lessons.test.ts.  python3 software-factory/tests/test_lessons.py"""
 import json, os, subprocess, sys, tempfile
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
@@ -181,88 +182,6 @@ if a[:1] != ["api"]:''', 1)
     assert rc == 2 and "CI didn't run on this commit" in err, err
 
 
-# --- a finished branch waiting for a PR slot --------------------------------------------------------------------
-
-def pick(d, env):
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_issues.py"), "pick", "--agent", "taytu"],
-                       cwd=d, env=env, capture_output=True, text=True)
-    return p.returncode, p.stdout.strip(), p.stderr.strip()
-
-
-def issues_project(open_prs, branch_ahead=3):
-    d, db, env = project([], [], cfg={"tasks": {"source": "issues"}, "agents": ["menelik", "taytu"], "maxOpenPRs": 2})
-    mine = {"number": 107, "title": "Demo guides", "state": "open", "body": "", "milestone": None,
-            "labels": [{"name": "factory:in-progress"}, {"name": "agent:taytu"}]}
-    ready = {"number": 108, "title": "Next", "state": "open", "body": "", "milestone": None,
-             "labels": [{"name": "factory:ready"}]}
-    answers(db, json={"issues": [mine, ready], "branches": [{"name": "task/107-demo-guides"}],
-                      "pulls": open_prs, "issues/107/comments": [], "compare/main...task/107-demo-guides": {"ahead_by": branch_ahead},
-                      "user": {"login": "owner"}, "repos/{owner}/{repo}": {"full_name": "deresegetachew/remanual"}})
-    return d, db, env
-
-
-def pr(n, ref, draft=False, by="owner"):
-    return {"number": n, "head": {"ref": ref}, "draft": draft, "user": {"login": by}}
-
-
-def test_a_pushed_branch_waits_quietly_while_the_cap_is_full():
-    d, db, env = issues_project([pr(115, "a"), pr(144, "b")])
-    rc, out, err = pick(d, env)
-    assert out == "none" and "#107 is ready on its branch and waits for a pull-request slot (2 of 2 open: #115, #144)" in err, (out, err)
-    assert "issues/108/labels" not in open(db + ".log").read()  # it took no new work meanwhile
-
-
-def test_the_issue_comes_back_once_a_slot_frees_or_a_draft_does_not_count():
-    d, db, env = issues_project([pr(115, "a"), pr(144, "b", draft=True)])
-    assert pick(d, env)[1] == "issue-107 Demo guides"
-
-
-def test_a_branch_still_being_built_is_not_waiting():
-    d, db, env = issues_project([pr(115, "a"), pr(144, "b")], branch_ahead=0)
-    assert pick(d, env)[1] == "issue-107 Demo guides"
-
-
-# --- a long-running loop keeps its name -------------------------------------------------------------------------
-
-def checkout(d, env, pid):
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_claims.py"), "checkout", "--pid", str(pid)],
-                       cwd=d, env=env, capture_output=True, text=True)
-    return p.stdout.split()[0] if p.returncode == 0 else p.stderr
-
-
-def test_a_loop_running_longer_than_claim_stale_hours_keeps_its_name():
-    d, db, env = project([], [], cfg={"agents": ["menelik", "taytu"], "claimStaleHours": 6})
-    # A stand-in for menelik's loop, still at its "next task in 10 s" prompt after 7 hours.
-    loop = subprocess.Popen(["bash", "-c", "exec -a factory-loop.sh sleep 60"])
-    try:
-        assert checkout(d, env, loop.pid) == "menelik"
-        claims = os.path.join(git(d, "rev-parse", "--absolute-git-dir"), "factory", "claims.json")
-        data = json.load(open(claims))
-        data["checkouts"]["menelik"]["at"] -= 7 * 3600
-        json.dump(data, open(claims, "w"))
-        assert checkout(d, env, os.getpid()) == "taytu"  # the second loop, not a second menelik
-    finally:
-        loop.kill()
-        loop.wait()
-    assert checkout(d, env, os.getpid()) in ("menelik",)  # menelik's loop ended: its name is free again
-
-
-def test_a_reused_pid_of_another_program_does_not_hold_a_name():
-    d, db, env = project([], [], cfg={"agents": ["menelik", "taytu"]})
-    other = subprocess.Popen(["sleep", "60"])
-    try:
-        assert checkout(d, env, other.pid) == "menelik"
-        assert checkout(d, env, os.getpid()) == "menelik"  # `sleep` is no loop: the old claim doesn't count
-    finally:
-        other.kill()
-        other.wait()
-
-
-def test_other_accounts_prs_do_not_fill_this_accounts_slots():
-    d, db, env = issues_project([pr(115, "a", by="someone-else"), pr(144, "b", by="someone-else")])
-    assert pick(d, env)[1] == "issue-107 Demo guides"
-
-
 def test_a_timed_out_job_next_to_billing_is_a_real_result():
     d, db, env = project([], [])
     runs = {"total_count": 2, "check_runs": [{"id": 1, "conclusion": "failure"}, {"id": 2, "conclusion": "timed_out"}]}
@@ -278,33 +197,6 @@ def test_more_runs_than_one_page_is_treated_as_a_real_result():
     assert ci(env) == (0, "")
 
 
-def test_only_a_loop_or_claude_by_its_program_holds_a_name():
-    sys.path.insert(0, HOOKS)
-    from factory_claims import is_loop
-    procs = [subprocess.Popen(["bash", "-c", "exec -a factory-loop.sh sleep 30"]),
-             subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "/home/claude/factory-loop.sh"])]
-    try:
-        assert is_loop(procs[0].pid)
-        assert not is_loop(procs[1].pid)  # "claude" and "factory-loop" only as arguments don't count
-    finally:
-        for p in procs:
-            p.kill(); p.wait()
-
-
-def test_a_loop_in_a_folder_with_spaces_is_still_a_loop():
-    sys.path.insert(0, HOOKS)
-    from factory_claims import is_loop
-    d = os.path.join(tempfile.mkdtemp(), "My Projects", "app")
-    os.makedirs(d)
-    script = os.path.join(d, "factory-loop.sh")
-    open(script, "w").write("sleep 30\n")
-    loop = subprocess.Popen(["bash", script, "-i"])
-    try:
-        assert is_loop(loop.pid)
-    finally:
-        loop.kill(); loop.wait()
-
-
 def test_a_token_in_a_remote_url_is_never_printed():
     d, db, env = project([], [])
     git(d, "remote", "set-url", "origin", "https://x-access-token:SECRET123@github.com/old/app.git")
@@ -316,19 +208,6 @@ def test_a_token_in_a_remote_url_is_never_printed():
     assert git(d, "config", "--get", "remote.origin.url") == "https://x-access-token:SECRET123@github.com/new/app.git"
 
 
-def test_the_loop_script_is_the_shells_first_argument():
-    sys.path.insert(0, HOOKS)
-    from factory_claims import runs_loop_script
-    spaced = os.path.join(tempfile.mkdtemp(), "My Projects", "app")
-    os.makedirs(spaced)
-    open(os.path.join(spaced, "factory-loop.sh"), "w").write("")
-    for args, want in [("factory-loop.sh -i", True), ("./factory-loop.sh", True), ("/x/factory-loop.sh 5", True),
-                       ("-x factory-loop.sh", True), (f"{spaced}/factory-loop.sh -i", True),
-                       ("/tmp/worker.sh /tmp/factory-loop.sh", False), ("worker.sh factory-loop.sh", False),
-                       ("-c echo factory-loop.sh", False), ("/no such/dir/factory-loop.sh -i", False), ("", False)]:
-        assert runs_loop_script(args) is want, (args, want)
-
-
 def test_a_failed_commit_status_next_to_billing_is_a_real_result():
     d, db, env = project([], [])
     answers(db, json={"commits/abc/check-runs": {"total_count": 1, "check_runs": [{"id": 1, "conclusion": "failure"}]},
@@ -337,28 +216,6 @@ def test_a_failed_commit_status_next_to_billing_is_a_real_result():
     assert ci(env) == (0, "")
     answers(db, json={"commits/abc/status": {"total_count": 0, "statuses": []}})
     assert ci(env)[0] == 3
-
-
-def test_a_fork_pr_with_the_same_branch_name_is_not_this_branchs_pr():
-    d, db, env = issues_project([pr(115, "a"), pr(144, "b"), pr(200, "task/107-demo-guides")])
-    data = json.load(open(db))
-    data["json"]["pulls"][2]["head"]["repo"] = {"full_name": "stranger/fork"}
-    data["json"]["repos/{owner}/{repo}"] = {"full_name": "deresegetachew/remanual"}
-    json.dump(data, open(db, "w"))
-    rc, out, err = pick(d, env)
-    assert out == "none" and "waits for a pull-request slot" in err, (out, err)
-
-
-def test_a_task_waiting_for_a_slot_is_not_stale():
-    d, db, env = issues_project([pr(115, "a"), pr(144, "b")])
-    data = json.load(open(db))
-    data["json"]["issues"][0]["updated_at"] = "2020-01-01T00:00:00Z"
-    data["json"]["branches"][0]["commit"] = {"sha": "c1"}
-    data["json"]["commits/c1"] = {"commit": {"committer": {"date": "2020-01-01T00:00:00Z"}}}
-    json.dump(data, open(db, "w"))
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_issues.py"), "stale"], cwd=d, env=env,
-                       capture_output=True, text=True)
-    assert "#107" not in p.stdout, p.stdout + p.stderr
 
 
 if __name__ == "__main__":

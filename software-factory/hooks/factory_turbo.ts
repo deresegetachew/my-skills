@@ -202,9 +202,11 @@ export function probe(api: string, team: string, token: string, timeout = 3): Pr
     }
     const make = url.protocol === "https:" ? httpsRequest : httpRequest;
     let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const finish = (r: [ProbeState, string]): void => {
       if (!settled) {
         settled = true;
+        if (timer) clearTimeout(timer);
         done(r);
       }
     };
@@ -221,6 +223,11 @@ export function probe(api: string, team: string, token: string, timeout = 3): Pr
         finish(["down", "TimeoutError"]);
       });
       req.on("error", (e) => finish(["down", errorName(e)]));
+      // The socket timeout does not cover every connect (an address nothing answers): a hard limit too.
+      timer = setTimeout(() => {
+        req.destroy();
+        finish(["down", "TimeoutError"]);
+      }, timeout * 1000);
       req.end();
     } catch (e) {
       finish(["down", errorName(e)]);
