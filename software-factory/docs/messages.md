@@ -205,6 +205,6 @@ instructions.
 A product question is addressed `to=po` on the task issue. It is read at one of three levels from its age, so nothing is
 stored: the product owner for `roles.product-owner.escalateMinutes` (120), then the dev manager (who answers it from the PRD or
 escalates it), then the owner (an owner-queue ask). With no product owner running (no `product-owner` agent that is not down or
-silent) it starts at the dev manager. `factory messages ls --to po` lists the open ones; `python3 .claude/hooks/factory_po.py`
+silent) it starts at the dev manager. `factory messages ls --to po` lists the open ones; `bun --no-env-file .claude/hooks/factory_po.ts`
 adds the level and the age. A question that asks the asker for more information (`input-required`) waits for the asker and does
 not escalate. The playbook is [PO.md](../PO.md).

@@ -291,16 +291,16 @@ case "$cmd" in
   guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
   doctor)    py factory_doctor.py "$@" ;;
   wait)      case "${1:-}" in
-               ci|answer|slot|ready) py factory_wait.py "$@" ;;
+               ci|answer|slot|ready) fh "$hooks/factory_wait" "$@" ;;
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
-  precheck)  py factory_wait.py precheck ;;
+  precheck)  fh "$hooks/factory_wait" precheck ;;
   watch)     py factory_watch.py "$@" ;;
   prd)       py factory_prd.py "$@" ;;
   artifacts) py factory_artifacts.py "$@" ;;
   handover)  py factory_handover.py "$@" ;;
   signoff)   py factory_signoff.py "$@" ;;
-  manage-tick) py factory_tick.py "$@" ;;
+  manage-tick) fh "$hooks/factory_tick" "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
   version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
