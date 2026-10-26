@@ -259,7 +259,7 @@ case "$cmd" in
   worktree)  fh "$hooks/factory_claims" worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    fh "$hooks/factory_issues" "${1:-list}" "${@:2}" ;;
   machine)   fh "$hooks/factory_machine" "${1:-show}" "${@:2}" ;;
-  follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
+  follow|say|remote)  fh "$hooks/factory_follow" "$cmd" "$@" ;;
   agents)    fh "$hooks/factory_agents" "${1:-list}" "${@:2}" ;;
   messages)  fh "$hooks/factory_messages" "${1:-ls}" "${@:2}" ;;
   heartbeat) fh "$hooks/factory_heartbeat" "${1:-status}" "${@:2}" ;;
@@ -296,7 +296,7 @@ case "$cmd" in
   precheck)  py factory_wait.py precheck ;;
   watch)     py factory_watch.py "$@" ;;
   prd)       py factory_prd.py "$@" ;;
-  artifacts) py factory_artifacts.py "$@" ;;
+  artifacts) fh "$hooks/factory_artifacts" "$@" ;;
   handover)  py factory_handover.py "$@" ;;
   signoff)   py factory_signoff.py "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;

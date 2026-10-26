@@ -55,8 +55,8 @@ software-factory/
     factory_prs.py                      `factory prs`: the manager's one list; the CI rule and marker reading `status` shares
     factory_issues.py                   tasks as GitHub issues: pick, claim, tick, block, release, stale
     factory_env.py                      per-agent ports and database
-    factory_follow.py                   `factory follow`, `say`, `remote` and `agent --detach`
-    factory_remotes.py                  remotes, ssh calls and finding sessions by name
+    factory_follow.ts                   `factory follow`, `say`, `remote` and `agent --detach`
+    factory_remotes.ts                  remotes, ssh calls and finding sessions by name
     factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
     factory_release.py                  `factory version | releases | update | rollback`: the release client
     factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
@@ -79,7 +79,7 @@ software-factory/
     factory_settings_interactive.py     the interactive menu behind `factory settings`
     factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
     factory_usage.ts                    `factory usage`: tokens per task from the local Claude Code logs
-    factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
+    factory_artifacts.ts                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
     factory_handover.py                 `factory handover snapshot`: the state a manager hands over, read from GitHub
     factory_init.py                     `factory init`: the project's scaffold (roles, labels, owner queue, PRD stub)
     factory_flow.py                     `factory prd --stage`: the flow stages and the owner's gates
