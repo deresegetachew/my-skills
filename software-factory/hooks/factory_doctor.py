@@ -332,13 +332,22 @@ def release(r):
 
 
 def models(r, cfg):
-    from factory_models import table, validate
+    from factory_models import resolved_default, table, validate
     try:
         validate(cfg.get("models", {}))
     except ValueError as e:
         r.fix("models in .claude/factory.json", f"{e} Fix it with `factory settings set models '<json>'`")
         return
     for role, model, source in table(cfg.get("models", {})):
+        if model == "Claude Code default" and role in ("builder", "manager"):
+            found = resolved_default()
+            if found:
+                r.ok(f"model for {role}: Claude Code default, which resolves to {found[0]} ({found[1]}; no call was made)")
+            else:
+                r.note(f"model for {role}", "Claude Code default, and I can't tell which model that is without a call (no ANTHROPIC_MODEL and no `model` "
+                       "in its settings), so the cost of a run can change between runs: pin one with "
+                       f"`factory settings set models '{{\"{role}\":{{\"model\":\"<name>\"}}}}'` (it sets the whole `models` setting)")
+            continue
         r.ok(f"model for {role}: {model} ({source})")
 
 
