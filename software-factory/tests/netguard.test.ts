@@ -7,7 +7,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import * as M from "../hooks/factory_bootstrap_machine.ts";
 import { BootstrapError, Context, shellOf } from "../hooks/factory_bootstrap_core.ts";
 import * as G from "../hooks/factory_netguard.ts";
-import { runHook, tmp, write, writeExe } from "./support.ts";
+import { runHook, sh, tmp, write, writeExe } from "./support.ts";
+import { dirname, join } from "node:path";
 
 test("the guard rules have the uid the resolver the allow list and the blocked ports", () => {
   const text = G.renderRules(1001, ["192.168.2.1"], ["192.168.2.10:5432"], ["3000", "45876"], ["4100-4199", "5440"]);
@@ -90,6 +91,46 @@ test("sops is installed only when its checksum matches", async () => {
   }
 });
 
+test("bun is installed from its release zip only when the checksum matches (#252)", async () => {
+  // a release zip shaped like Bun's: bun-linux-x64/bun inside
+  const dir = tmp();
+  writeExe(join(dir, "bun-linux-x64", "bun"), "#!/bin/sh\necho 1.4.4\n");
+  const z = sh(["zip", "-q", "-r", "bun-linux-x64.zip", "bun-linux-x64"], { cwd: dir });
+  expect(z.code, z.out).toBe(0);
+  const zip = new Uint8Array(readFileSync(join(dir, "bun-linux-x64.zip")));
+  const sum = createHash("sha256").update(zip).digest("hex");
+  const asked: string[] = [];
+  const fake = (good: boolean): M.Fetcher => async (url: string) => {
+    asked.push(url);
+    if (url.endsWith("SHASUMS256.txt")) return new TextEncoder().encode(`${"1".repeat(64)}  bun-darwin-x64.zip\n${good ? sum : "0".repeat(64)}  bun-linux-x64.zip\n`);
+    return zip;
+  };
+  const savedRoot = M.ROOT;
+  M.setRoot(tmp());
+  M.setMachine(() => "x86_64");
+  try {
+    M.setFetcher(fake(false));
+    let err: unknown = null;
+    try {
+      await M.installBun("1.4.4");
+    } catch (e) {
+      err = e;
+    }
+    expect((err as BootstrapError).code).toBe("checksum");
+    expect(existsSync(M.P("/usr/local/bin/bun"))).toBe(false);
+    expect(asked).toContain("https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip");
+    M.setFetcher(fake(true));
+    await M.installBun("1.4.4");
+    expect(readFileSync(M.P("/usr/local/bin/bun"), "utf8")).toBe("#!/bin/sh\necho 1.4.4\n");
+    expect(statSync(M.P("/usr/local/bin/bun")).mode & 0o777).toBe(0o755);
+    expect(existsSync(M.P("/usr/local/bin/bun.zip"))).toBe(false);
+  } finally {
+    M.setFetcher();
+    M.setMachine();
+    M.setRoot(savedRoot);
+  }
+});
+
 test("the machine steps plan as shell text with the uid variable, the user and the guard", () => {
   const base = tmp();
   const bin = `${base}/bin`;
@@ -111,7 +152,7 @@ test("the machine steps plan as shell text with the uid variable, the user and t
   try {
     const steps = M.steps({ user: "sbxuser", egress: "internet", allow_hosts: ["192.168.2.10:5432"], block_loopback_ports: ["3000"],
       block_inbound_ports: [], harden_ssh: true, keep_awake: false });
-    expect(steps.map((s) => s.id)).toEqual(["packages", "sops", "user", "isolate", "subids", "linger", "sandbox-config", "net-guard", "ssh-hardening"]);
+    expect(steps.map((s) => s.id)).toEqual(["packages", "bun", "sops", "user", "isolate", "subids", "linger", "sandbox-config", "net-guard", "ssh-hardening"]);
     expect(steps.every((s) => s.privileged)).toBe(true);
     const ctx = new Context("sbxuser", false);
     const text = steps.flatMap((s) => s.actions.map((a) => shellOf(a, ctx))).join("\n");
@@ -130,6 +171,29 @@ test("the machine steps plan as shell text with the uid variable, the user and t
   } finally {
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);
+    M.setRoot(savedRoot);
+  }
+});
+
+test("a Bun only in someone's home folder does not count as installed for the factory user (#252)", () => {
+  const savedRoot = M.ROOT;
+  const savedPath = process.env.PATH;
+  M.setRoot(tmp());
+  try {
+    // the Bun running these tests sits in a home folder (~/.bun/bin, as Bun's installer puts it) when it does
+    const ownBin = dirname(process.execPath);
+    process.env.PATH = ownBin;
+    expect(M.bunForEveryone()).toBe(!/^\/(home|root|Users)\//.test(ownBin));
+    const shared = join(tmp(), "usr-bin");
+    writeExe(join(shared, "bun"), "#!/bin/sh\n");
+    process.env.PATH = shared;
+    expect(M.bunForEveryone()).toBe(true); // a shared folder (here a temp folder) counts
+    process.env.PATH = "/nonexistent";
+    expect(M.bunForEveryone()).toBe(false);
+    write(M.P("/usr/local/bin/bun"), "x");
+    expect(M.bunForEveryone()).toBe(true);
+  } finally {
+    process.env.PATH = savedPath;
     M.setRoot(savedRoot);
   }
 });

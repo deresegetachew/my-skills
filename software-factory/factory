@@ -17,7 +17,6 @@ fi
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
 cd "$root"
 hooks="$root/.claude/hooks"
-py() { fh "$hooks/${1%.py}" "${@:2}"; }
 # One value of .claude/factory.json (`setting mainBranch main`, `setting commands.install ""`): the default when the key
 # is missing; fails when the file is missing or not JSON.
 setting() {
@@ -280,23 +279,23 @@ case "$cmd" in
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
   release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     fh "$hooks/factory_claims" clean ;;
-  reviews)   py factory_reviews.py "$@" ;;
-  rereview)  py factory_rereview.py "$@" ;;
-  review-pass) py factory_review_pass.py "$@" ;;
+  reviews)   fh "$hooks/factory_reviews" "$@" ;;
+  rereview)  fh "$hooks/factory_rereview" "$@" ;;
+  review-pass) fh "$hooks/factory_review_pass" "$@" ;;
   reset-run)   fh "$hooks/factory_reset_run" "$@" ;;
   manager-claims) fh "$hooks/factory_manager_claims" "$@" ;;
-  lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
+  lessons)   fh "$hooks/factory_lessons" "${1:-show}" "${@:2}" ;;
   settings)  fh "$hooks/factory_settings" "$@" ;;
-  usage)     py factory_usage.py "$@" ;;
+  usage)     fh "$hooks/factory_usage" "$@" ;;
   report)    fh "$hooks/factory_report" "$@" ;;
   env)       if [ -n "${1:-}" ]; then
-               case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
-             else py factory_env.py; fi ;;
-  verify)    py factory_verify.py "$@" ;;
-  fix)       py factory_fix.py "$@" ;;
-  run-check) py factory_run_check.py "$@" ;;
-  check)     py style_checks.py ;;
-  guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
+               case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; fh "$hooks/factory_env" --agent "$a"
+             else fh "$hooks/factory_env"; fi ;;
+  verify)    fh "$hooks/factory_verify" "$@" ;;
+  fix)       fh "$hooks/factory_fix" "$@" ;;
+  run-check) fh "$hooks/factory_run_check" "$@" ;;
+  check)     fh "$hooks/style_checks" ;;
+  guard)     fh "$hooks/factory_guard" --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
   doctor)    fh "$hooks/factory_doctor" "$@" ;;
   wait)      case "${1:-}" in
                ci|answer|slot|ready) fh "$hooks/factory_wait" "$@" ;;

@@ -59,7 +59,7 @@ is_engine() {
   esac
 }
 
-# Is $1 (a path in kit/, like ./.claude/hooks/x.py) code that moved out of kit/ (#112)? Then its real file is at $2.
+# Is $1 (a path in kit/, like ./.claude/hooks/x.ts) code that moved out of kit/ (#112)? Then its real file is at $2.
 moved_to() {
   case "$1" in
     ./.claude/hooks/*) [ -f "$here/hooks/${1#./.claude/hooks/}" ] && echo "$here/hooks/${1#./.claude/hooks/}" ;;
@@ -86,7 +86,7 @@ if [ "$link" = 1 ] && [ "$layout" = auto ]; then
 fi
 [ "$link" = 1 ] || layout=new  # a copy always takes the real files
 
-# The files to install, as paths inside kit/ (./.claude/hooks/x.py, ./factory ...), one per line. In the new layout
+# The files to install, as paths inside kit/ (./.claude/hooks/x.ts, ./factory ...), one per line. In the new layout
 # the forwarders in kit/ are replaced by what is really in hooks/, ci/ and the two entry points, so a file added
 # there needs no forwarder to reach a project.
 list_files() {
@@ -157,7 +157,7 @@ grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignor
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 if [ "$setup" = 1 ]; then
   echo
-  fh "$here/hooks/factory_stack" apply "$dst" >/dev/null  # Python: the commands.* to match
+  fh "$here/hooks/factory_stack" apply "$dst" >/dev/null  # a Python project: the commands.* to match
   fh "$here/hooks/factory_stack" lines "$dst"
   echo "Next: fill in .claude/factory.json, write CLAUDE.md from CLAUDE.factory.md, write docs/build-plan.md."
   echo "Then run ./factory help (and ./factory install-shim once, to type just: factory ...)."

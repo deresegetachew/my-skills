@@ -77,6 +77,8 @@ export function newMachine(state: Record<string, string>): { env: Env; root: str
     if (found) symlinkSync(found, join(bin, tool));
   }
   for (const [name, body] of Object.entries(FAKES)) writeExe(join(bin, name), "#!/bin/bash\n" + body + "\n");
+  // a machine where Bun is already installed for every user (the "bun" step is then done; netguard.test.ts tests it)
+  symlinkSync(process.execPath, join(bin, "bun"));
   write(join(root, "etc", "os-release"), 'ID=ubuntu\nID_LIKE=debian\nPRETTY_NAME="Ubuntu 24.04"\n');
   write(join(root, "etc", "resolv.conf"), "nameserver 127.0.0.53\n");
   const env: Env = { PATH: `${bin}:${dirname(process.execPath)}`, FAKE_STATE: st, FAKE_LOG: log, FAKE_ROOT: root,

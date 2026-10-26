@@ -4,7 +4,7 @@
 // machine that stays awake. Ubuntu and Debian with systemd. Nothing runs from here: `steps()` only reads the machine
 // (`id`, `ss`, `resolvectl`, the os-release file) and returns the list.
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, machine as cpu, type as osType } from "node:os";
 import { dirname, join } from "node:path";
 import { BootstrapError, Call, getpwnam, Mkdir, probe, Run, Step, Write } from "./factory_bootstrap_core.ts";
@@ -17,8 +17,8 @@ export let ROOT = process.env.FACTORY_BOOTSTRAP_ROOT ?? "";
 export function setRoot(root: string): void {
   ROOT = root;
 }
-export const PACKAGES = ["uidmap", "slirp4netns", "dbus-user-session", "git", "python3", "gh", "age", "tmux", "curl",
-  "ca-certificates", "nftables"];
+export const PACKAGES = ["uidmap", "slirp4netns", "dbus-user-session", "git", "gh", "age", "tmux", "curl",
+  "ca-certificates", "nftables", "unzip"];
 export const PRIVILEGE_GROUPS = ["sudo", "docker", "wheel", "admin", "lxd"];
 export const SUBID_COUNT = 65536;
 
@@ -189,6 +189,61 @@ export async function installSops(): Promise<void> {
   renameSync(dest + ".tmp", dest);
 }
 
+/** The Bun the factory runs on (#252), for every user of this machine: the same version as the Bun running this bootstrap,
+ * from Bun's own GitHub release, its checksum checked against the release's SHASUMS256.txt, into /usr/local/bin/bun.
+ * Nothing is installed when the checksum differs. */
+export async function installBun(version: string = Bun.version): Promise<void> {
+  const arch = ({ x86_64: "x64", aarch64: "aarch64" } as Record<string, string>)[machineName()];
+  if (!arch) throw new BootstrapError("unsupported-cpu", `No Bun release for ${machineName()}.`, "Install Bun by hand: https://bun.sh");
+  const get = async (url: string): Promise<Uint8Array> => {
+    try {
+      return await fetcher(url);
+    } catch (e) {
+      throw new BootstrapError("download", `Could not download ${url} (${e instanceof Error ? e.message : String(e)}).`,
+        "Check the internet connection, then run the command again.");
+    }
+  };
+  const base = `https://github.com/oven-sh/bun/releases/download/bun-v${version}`;
+  const name = `bun-linux-${arch}.zip`;
+  const zip = await get(`${base}/${name}`);
+  const sums = new TextDecoder().decode(await get(`${base}/SHASUMS256.txt`));
+  let want = "";
+  for (const l of sums.split(/\r\n|\r|\n/)) {
+    const w = l.split(/\s+/).filter(Boolean);
+    if (w.length && w[w.length - 1] === name) {
+      want = w[0] as string;
+      break;
+    }
+  }
+  if (!want || createHash("sha256").update(zip).digest("hex") !== want) {
+    throw new BootstrapError("checksum", `The Bun download does not match its published checksum (${name}).`,
+      "Nothing was installed. Try again later, or install Bun by hand: https://bun.sh");
+  }
+  const dest = P("/usr/local/bin/bun");
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest + ".zip", zip);
+  try {
+    const p = Bun.spawnSync(["unzip", "-p", dest + ".zip", `bun-linux-${arch}/bun`], { stdout: "pipe", stderr: "pipe" });
+    if (p.exitCode !== 0 || !p.stdout.length) {
+      throw new BootstrapError("unzip", `Could not unpack ${name} (${p.stderr.toString().trim() || "no bun inside"}).`,
+        "Install unzip (apt-get install unzip), then run the command again.");
+    }
+    writeFileSync(dest + ".tmp", p.stdout);
+  } finally {
+    rmSync(dest + ".zip", { force: true });
+  }
+  chmodSync(dest + ".tmp", 0o755);
+  renameSync(dest + ".tmp", dest);
+}
+
+/** Is there a Bun every user of this machine can run? A Bun in someone's home folder (~/.bun/bin, as Bun's own
+ * installer puts it) does not count: the factory user would not find it. */
+export function bunForEveryone(): boolean {
+  if (existsSync(P("/usr/local/bin/bun"))) return true;
+  const found = Bun.which("bun", { PATH: process.env.PATH ?? "" });
+  return Boolean(found) && !/^\/(home|root|Users)\//.test(found as string);
+}
+
 /** The lines of a public-key file; a private key is refused. */
 export function pubkeys(path: string): string {
   const text = read(path);
@@ -262,6 +317,9 @@ export function steps(opts: MachineOptions): Step[] {
       [new Run(["apt-get", "update", "-q"], { env: apt }), new Run(["apt-get", "install", "-y", "-q", ...missing], { env: apt })],
       { done: () => !packagesMissing().length, privileged: true, record: { packages: missing } })
     : new Step("packages", "Packages are installed", [], { done: () => true, privileged: true }));
+  out.push(new Step("bun", "Install Bun, which the factory runs on (release binary, checksum checked)",
+    [new Call(() => installBun(), "download bun")],
+    { done: bunForEveryone, privileged: true, record: { files: [P("/usr/local/bin/bun")] } }));
   out.push(new Step("sops", "Install sops (release binary, checksum checked)", [new Call(installSops, "download sops")],
     { done: () => existsSync(P("/usr/local/bin/sops")) || probe(["sops", "--version"])[0] === 0,
       privileged: true, record: { files: [P("/usr/local/bin/sops")] } }));
