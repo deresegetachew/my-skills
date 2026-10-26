@@ -6,6 +6,8 @@ It refuses, and says what to do instead (always: write an owner-queue ask):
   - a merge unless the PR's latest approval marker is `<!-- factory-approved sha=<head> -->` for exactly the head being
     merged, no must-fix came after it, the merge is pinned to that head (`-f sha=<head>`, or `--match-head-commit`) and
     CI is judged green (newest non-skipped run per job name, factory_ci_judge.py);
+  - closing a pull request (`gh api -X PATCH .../pulls/<n> -f state=closed`) unless a factory agent opened it (a `task/` branch
+    in this repository, or the manager's own `manager/` branch): anyone else's is the owner's to close (#203);
   - a merge of a pull request the manager opened itself (a `manager/` branch, or a body with
     `<!-- factory-role role=dev-manager ... -->`): its own PRs wait for the owner;
   - deleting refs (`git push --delete`, `git push origin :branch`, `git branch -d`, `git update-ref -d`,
@@ -41,6 +43,8 @@ OWN_BODY = re.compile(r"<!--\s*factory-role\s+role=dev-manager\b")
 APPROVED = re.compile(r"<!--\s*factory-approved\s+sha=([0-9a-f]{7,40})")
 MUSTFIX = re.compile(r"<!--\s*factory-mustfix\b")
 MERGE_PATH = re.compile(r"^(?P<repo>repos/[^/]+/[^/]+)/pulls/(?P<n>\d+)/merge/?$")
+PULL_PATH = re.compile(r"^(?P<repo>repos/[^/]+/[^/]+)/pulls/(?P<n>\d+)/?$")
+AGENT_BRANCH = re.compile(r"^task/")
 PROTECTED_WRITE = [
     (re.compile(r"/contents/\.github(/|$)"), "`.github/` content (workflows and CODEOWNERS are protected)"),
     (re.compile(r"/branches/[^?]+/protection"), "branch protection"),
@@ -143,6 +147,22 @@ def gate_merge(repo, n, given):
                f"`factory wait ci {n}`, re-run only a flake the project's note lists, or post a must-fix.")
 
 
+def gate_close(repo, n):
+    """Allows closing PR n when a factory agent opened it (a task/ branch in this repository, or the manager's own branch),
+    else refuses: a pull request from the owner or anyone else is the owner's to close."""
+    pr = gh_api(f"{repo}/pulls/{n}")
+    if pr.get("state") != "open":
+        return  # already closed or merged: nothing to close
+    ref = (pr.get("head") or {}).get("ref") or ""
+    head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
+    base_repo = ((pr.get("base") or {}).get("repo") or {}).get("full_name")
+    if head_repo and base_repo and head_repo != base_repo:
+        refuse(f"PR #{n} comes from another repository ({head_repo}), so it is not a factory agent's. Closing it is the owner's. " + ASK)
+    if not (AGENT_BRANCH.match(ref) or OWN_BRANCH.match(ref)):
+        refuse(f"PR #{n} is not a factory agent's (its branch is {ref or 'unknown'}, not task/...). The manager closes only the pull "
+               "requests agents opened; one from the owner or anyone else is the owner's decision. " + ASK)
+
+
 def api_call(flags, pos, cmd):
     """Checks one `gh api` call; `flags` and `pos` are its parsed arguments (pos[0] is "api", pos[1] the path)."""
     path = (pos[1] if len(pos) > 1 else "").split("://", 1)[-1]
@@ -151,6 +171,14 @@ def api_call(flags, pos, cmd):
     fields = [v for n in ("-f", "--raw-field", "-F", "--field") for v in flags.get(n, [])]
     method = (given[-1] if given else ("POST" if fields or "--input" in flags else "GET")).upper()
     if method == "GET":
+        return
+    pull = PULL_PATH.match(path)
+    if pull and method == "PATCH":
+        if "--input" in flags or PG.SHELL_EXPANSION.search(cmd):
+            refuse("Write the pull request change as plain text (`-f state=closed`): the gate reads the command before the shell "
+                   "expands $(...) or $VARIABLES, and it cannot read a body from --input. " + ASK)
+        if "state=closed" in [f.replace(" ", "") for f in fields]:
+            gate_close(pull.group("repo"), pull.group("n"))
         return
     m = MERGE_PATH.match(path)
     if m and method == "PUT":

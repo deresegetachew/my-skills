@@ -28,7 +28,7 @@ from factory_config import load, task_labels  # noqa: E402
 
 QUESTION = re.compile(r"<!--\s*factory-question\b")  # the old markers: factory_watch.py still reads them
 ANSWER = re.compile(r"<!--\s*factory-answer\b")
-WATCHED = re.compile(r"<!--\s*pr-watch\s+sha=([0-9a-f]{7,40})")
+WATCHED = re.compile(r"<!--\s*(?:pr-watch|factory-review-failed)\s+sha=([0-9a-f]{7,40})")  # a failed review is not retried for the same head (#202)
 BAD = {"failure", "startup_failure", "timed_out", "cancelled", "action_required", "stale"}
 
 

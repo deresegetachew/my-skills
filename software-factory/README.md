@@ -252,7 +252,7 @@ Not built yet:
 ## Quick start
 
 You need a PRD first. The factory only builds what the PRD and the plan say. On the machine that runs the agents you
-need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
+need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in). Every script is parsed in the tests with the oldest Python installed among 3.9, 3.10 and 3.11 (`tests/test_parse_oldest_python.py`; macOS ships 3.9), so newer-only syntax is caught; the oldest version actually run in CI is not stated here.
 
 ```mermaid
 flowchart LR
@@ -490,6 +490,7 @@ version it pins. `factory help` lists everything.
 | `factory agent <name\|N>` | Opens Claude in that agent's folder (created the first time), with Remote Control on, for manual work there. To run the queue, use `factory loop -i` |
 | `factory next` | Shows the job the factory would hand out next. It does not claim it: the last line says so and shows the command that does, `python3 .claude/hooks/next_task.py --claim <agent> --pid $$`. `next_task.py --claim <agent> --issue <n>` (issues mode) claims that one issue for the agent if it is free and its dependencies are done; a taken, blocked or missing issue is refused with `{code, message, fix}` and nothing changes. The dev manager uses it to hand a builder a named task. In issues mode, `next` and the loop's `--dry-run` also print on stderr `Skipped #N: <agent> still holds it and is down` with the `factory issues release N` that frees it (an agent that is down or silent, not yet swept) |
 | `factory rereview plan\|prompt\|record\|reply` | Incremental re-review (#70): `plan` says whether a reviewer's next round is a delta or a full review and why; `prompt` prints its instructions (the delta, its earlier findings, the agent's reply); `record` stores a round's result; `reply` stores the agent's answer to it. `--kind` is reviewer, arch, safety or security |
+| `factory reset-run [--apply]` | Before a test run (#229): without `--apply` prints a plan, one line per leftover of an earlier run in this project: this machine's stale local claims, open Agent issues of an agent that is down or never ran (never one whose agent is alive here), exited CI containers and offline idle runners of this project's own `factory ci` names, and a `CI_RUNS_ON` / `CI_RUNS_ON_LIGHT` variable that asks for self-hosted runners when none with those labels is online. With `--apply` it does each step and prints what it did; a second run finds nothing. Errors are `{code, message, fix}`. It touches nothing outside this project's folder, repo and containers |
 | `factory review-pass reviewer\|arch` | A review agent records its pass for the current commit (#197): writes HEAD's id to `<reviewMarkers>/<branch>.ok` (`.arch.ok` for `arch`), which the PR gate reads. It is the only command the reviewer needs for this, so no chained shell has to be allowed. Run it only when there is no must-fix item |
 | `factory manager-claims list\|next\|review\|answer\|release\|sweep\|merge\|ask` | Several dev managers at once (#99): claim a PR or a question with a lease so two managers never do the same one, and see who holds what. See [Several managers at once](#several-managers-at-once) |
 | `factory lessons [show\|check\|suggest\|add\|prune]` | The curated lessons file (#72): `show` prints it (the builder and the reviewers read it first), `check` keeps it under `lessonsCap`, `suggest` proposes lessons from recent must-fix comments, review findings and CI failures, `add` and `prune` change it (dev manager only) |
@@ -1525,6 +1526,23 @@ edits it (`PATCH .../issues/comments/<id>`) before it exits. It is a memory, not
 comment of its own, the orchestrator leaves one (no model): `<!-- factory-manager-skip sha=<head> -->`, *Dev manager NAME looked
 at this pull request and did not review it*, the reason (a draft, a merge conflict, red CI with the failed jobs, CI not finished,
 or no reason given) and the next step. Once per head commit. Claims, releases and the thread note do not count as a comment.
+When the reason is "no reason given" (the session ended with nothing a person or CI will change), the comment also carries
+`<!-- factory-review-failed sha=<head> -->` and the orchestrator asks the owner once (`id=review-failed-<pr>-<sha>`): that
+head is not started again, so later pull requests are not starved; a new commit is reviewed as usual. When more pull requests
+need a manager than there are places (`manager.maxSubManagers`), the ones whose CI is green go first.
+
+**What a sub-manager may run.** It runs headless on `.claude/manager/settings.json`, so anything the profile does not allow
+stops it. The verdict goes through `gh api -X POST repos/{owner}/{repo}/issues/<n>/comments` (a longer body from
+`tmp/manager-<n>.md`, the one file it may write, with `-F body=@tmp/manager-<n>.md`); `gh pr comment` and `gh pr review`
+stay unavailable. It may also run `gh run view`, `git merge-base`, `git merge-tree`, `git ls-tree` and `git cat-file`, one
+command per call. `factory doctor` replays every command the skill names against the profile and says `fix` for one that
+would prompt.
+
+**Closing a pull request.** A superseded or obsolete pull request that a factory agent opened (a `task/...` branch in this
+repository, or the manager's own branch) is closed by the dev manager: a comment with the reason and the commit that
+supersedes it, then `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -f state=closed`. One opened by the owner or anyone
+else, or from a fork, is an owner-queue ask. `manager_gate.py` refuses the close of any other pull request and says to write
+the ask; it never allows a merge by this path, and `gh pr close` stays unavailable.
 
 **Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
 `manager.notify` (a login) or, when that is empty, the repository's owner if that is a person. GitHub's own notifications
@@ -1545,7 +1563,7 @@ A scheduled GitHub Actions workflow could run the same check without a machine, 
 is an owner step; `factory watch --json` is what it would call.
 
 Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<name>.d/<item>.out` (a sub-manager's output).
-`factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist.
+`factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist. If `.claude/manager/settings.json` is missing and the installed release does not carry it, the note says so and points at `factory releases` for a newer one (a plain `factory update` would answer "nothing to install").
 
 **A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
@@ -2306,6 +2324,7 @@ software-factory/
     factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
     factory_manager_claims.py           several dev managers at once: review and question claims with a lease
     factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
+    factory_reset_run.py                `factory reset-run`: list and clean what an earlier run left (claims, Agent issues, CI containers, runners, a runs-on variable)
     factory_stack.py                    the project's stack on a first install (node, python, unknown) and the Python CI's command runner
     pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
     check.py                            Stop: typecheck and tests
