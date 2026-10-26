@@ -1514,6 +1514,17 @@ edits it (`PATCH .../issues/comments/<id>`) before it exits. It is a memory, not
 comment of its own, the orchestrator leaves one (no model): `<!-- factory-manager-skip sha=<head> -->`, *Dev manager NAME looked
 at this pull request and did not review it*, the reason (a draft, a merge conflict, red CI with the failed jobs, CI not finished,
 or no reason given) and the next step. Once per head commit. Claims, releases and the thread note do not count as a comment.
+When the reason is "no reason given" (the session ended with nothing a person or CI will change), the comment also carries
+`<!-- factory-review-failed sha=<head> -->` and the orchestrator asks the owner once (`id=review-failed-<pr>-<sha>`): that
+head is not started again, so later pull requests are not starved; a new commit is reviewed as usual. When more pull requests
+need a manager than there are places (`manager.maxSubManagers`), the ones whose CI is green go first.
+
+**What a sub-manager may run.** It runs headless on `.claude/manager/settings.json`, so anything the profile does not allow
+stops it. The verdict goes through `gh api -X POST repos/{owner}/{repo}/issues/<n>/comments` (a longer body from
+`tmp/manager-<n>.md`, the one file it may write, with `-F body=@tmp/manager-<n>.md`); `gh pr comment` and `gh pr review`
+stay unavailable. It may also run `gh run view`, `git merge-base`, `git merge-tree`, `git ls-tree` and `git cat-file`, one
+command per call. `factory doctor` replays every command the skill names against the profile and says `fix` for one that
+would prompt.
 
 **Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
 `manager.notify` (a login) or, when that is empty, the repository's owner if that is a person. GitHub's own notifications
@@ -1534,7 +1545,7 @@ A scheduled GitHub Actions workflow could run the same check without a machine, 
 is an owner step; `factory watch --json` is what it would call.
 
 Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<name>.d/<item>.out` (a sub-manager's output).
-`factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist.
+`factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist. If `.claude/manager/settings.json` is missing and the installed release does not carry it, the note says so and points at `factory releases` for a newer one (a plain `factory update` would answer "nothing to install").
 
 **A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with

@@ -411,13 +411,27 @@ def artifacts(r, cfg):
             r.fix(what, detail + f"; run `factory artifacts pull {e['url']} {e['dest']}`")
 
 
+def manager_profile_fix(path):
+    """What fixes a missing manager profile. `factory update` at a release that does not carry the file answers "nothing to
+    install" (#172), so a project on such a release is told to look for a newer one."""
+    import factory_release as fr
+    try:
+        pin = fr.read_pin(os.getcwd())
+    except fr.FactoryError:
+        pin = None
+    if pin and path not in (pin.get("files") or {}):
+        return (f"the installed release {pin['tag']} doesn't carry it: see `factory releases` for a newer one and take it with "
+                "`factory update <version>`, or set `roles.dev-manager.profile`")
+    return "run `factory update`, or set `roles.dev-manager.profile`"
+
+
 def manager(r, cfg):
     """The dev-manager orchestrator (#97): its settings profile resolves and every hook script the profile runs exists."""
     import re as _re
     path = str(((cfg.get("roles") or {}).get("dev-manager") or {}).get("profile") or ".claude/manager/settings.json")
     if not os.path.isfile(path):
         r.note("manager profile", f"{path} doesn't exist, so sub-managers use the project's settings (which deny `gh api`): "
-               "run `factory update`, or set `roles.dev-manager.profile`")
+               + manager_profile_fix(path))
         return
     try:
         profile = json.load(open(path))
@@ -436,6 +450,43 @@ def manager(r, cfg):
         r.fix(f"{path}: {script}", "the hook script is missing: run `factory update`")
     if not missing:
         r.ok("manager profile: it resolves and its hooks exist")
+    skill_commands(r, profile, path)
+
+
+def would_prompt(profile, command):
+    """True when Claude Code would ask before running `command` under `profile` (a headless run cannot answer):
+    a deny rule matches, or no allow rule does. Matching is the rules' own: Bash(prefix*) globs on the whole command."""
+    rules = profile.get("permissions") or {}
+
+    def hit_with_argument(rule_list, cmd):  # `gh api` in prose stands for `gh api <path>`
+        return any(m and fnmatch.fnmatchcase(cmd + " x", m.group(1)) for m in (re.fullmatch(r"Bash\((.*)\)", x) for x in rule_list))
+
+    def hit(rule_list):
+        return any(m and fnmatch.fnmatchcase(command, m.group(1)) for m in (re.fullmatch(r"Bash\((.*)\)", x) for x in rule_list))
+    return hit(rules.get("deny") or []) or not (hit(rules.get("allow") or []) or hit_with_argument(rules.get("allow") or [], command))
+
+
+def skill_commands(r, profile, path):
+    """Replays each command the dev manager's skill names against the profile (#202): one the profile would prompt for
+    stalls a headless sub-manager, which is how a verdict never got posted. Spans in a line that says "never" are the
+    commands the skill forbids, and are left out."""
+    skill = ".claude/skills/manage-pass/SKILL.md"
+    if not os.path.isfile(skill):
+        return
+    stuck = []
+    for line in open(skill).read().splitlines():
+        if re.search(r"\bnever\b", line, re.I):
+            continue
+        for cmd in re.findall(r"`((?:gh|git|factory|\./factory) [^`]+)`", line):
+            if cmd.startswith(("factory dev-manager", "factory loop")):
+                continue  # started by the orchestrator, not run by a sub-manager
+            if not re.search(r"[;|&]|\$\(", cmd) and would_prompt(profile, cmd) and cmd not in stuck:
+                stuck.append(cmd)
+    for cmd in stuck:
+        r.fix(f"{path}: `{cmd}`", "the manage-pass skill names this command but the profile would ask before running it, and a headless "
+              "sub-manager cannot answer, so its verdict never lands: run `factory update` (or add the rule to the profile)")
+    if not stuck:
+        r.ok("manager profile: every command the manage-pass skill names is allowed without a prompt")
 
 
 def main():
