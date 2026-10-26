@@ -45,6 +45,6 @@ for you" in a report):
    the PR. Don't offer "here or in a follow-up?": the answer is here. Ask only when the fix would reach outside the
    task, change what the PRD or a decision says, or when the rules themselves disagree.
 6. **Before you report a cause, check it on GitHub.** If a `gh` command fails oddly (a 307, a 404 on something that
-   exists, "repository moved"), run `python3 .claude/hooks/factory_remote.py`: it asks GitHub where the repository
+   exists, "repository moved"), run `bun --no-env-file .claude/hooks/factory_remote.ts`: it asks GitHub where the repository
    is now and points `origin` there if it moved. Don't tell the dev manager the repository moved unless that script
    says so.

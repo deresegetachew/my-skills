@@ -15,7 +15,7 @@ fixed yet.
    full one), ask the `reviewer` subagent (and the auditor the PR needed) for a pass on the
    new commit, then push. The push moves the head, so the PR is no longer rework.
 4. Reply on the PR: what changed for each must-fix, with the commit. Post the task's tokens again
-   (`python3 .claude/hooks/factory_usage.py --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`).
+   (`bun --no-env-file .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`).
    Don't merge it: the PR gate holds a PR with a must-fix until the dev manager approves the new commit.
 5. Then stop (under `factory-loop.sh`) or go back to step 1. **In an interactive loop** (`FACTORY_INTERACTIVE=1`),
    stopping means marking the rework done, exactly like a new task:

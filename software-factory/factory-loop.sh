@@ -184,7 +184,7 @@ tidy() {
 home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 # Only the project's MCP servers: never the user's own claude.ai connectors or the servers in their settings, which
 # would put tool definitions nobody here needs into every turn (#55). The config is the .mcp.json main has on origin
-# (factory_mcp.py), never this worktree's copy, since Claude starts those servers without asking. Set before each
+# (factory_mcp.ts), never this worktree's copy, since Claude starts those servers without asking. Set before each
 # run, since main may change it. --mcp-config takes several values, so another flag must follow it.
 isolate() {
   local cfg
@@ -206,9 +206,9 @@ isolate() {
   headless_flags=()
   while IFS= read -r line; do [ -n "$line" ] && headless_flags+=("$line"); done < <(fh "$hooks/factory_roles" permission-flags)
   eval "$(fh "$hooks/factory_turbo" env)" || true
-  # The `models` setting (factory_models.py): --model and --effort for the role's session, and --agents for the
+  # The `models` setting (factory_models.ts): --model and --effort for the role's session, and --agents for the
   # subagents whose model the project sets. No setting, no flags. A bad setting stops the loop with the reason.
-  if [ -f "$hooks/factory_models.py" ]; then
+  if [ -f "$hooks/factory_models.ts" ]; then
     local m
     m="$(fh "$hooks/factory_models" flags "$model_role" 2>&1)" || { echo "[$agent] $m"; exit 1; }
     while IFS= read -r line; do [ -n "$line" ] && claude_flags+=("$line"); done <<< "$m"

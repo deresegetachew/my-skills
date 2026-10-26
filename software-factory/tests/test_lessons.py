@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The fixes from the 22 Oct lessons: free decision and migration numbers, CI that never started, a moved
-repository, and a finished branch waiting for a PR slot.  python3 software-factory/tests/test_lessons.py"""
+repository (now in remote.test.ts, #252), and a finished branch waiting for a PR slot.  python3 software-factory/tests/test_lessons.py"""
 import json, os, subprocess, sys, tempfile
 
 KIT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "kit"))
@@ -202,42 +202,6 @@ if a[:1] != ["api"]:''', 1)
                   "check-runs/1/annotations": [{"message": BILLING}]})
     rc, err = gate(d, env, f"gh pr merge 7 --squash --match-head-commit {head}")
     assert rc == 2 and "CI didn't run on this commit" in err, err
-
-
-# --- a moved repository ----------------------------------------------------------------------------------------
-
-def remote(d, env, *args):
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_remote.py"), *args], cwd=d, env=env,
-                       capture_output=True, text=True)
-    return p.returncode, p.stdout
-
-
-def test_a_remote_to_a_moved_repository_is_pointed_at_its_new_name():
-    d, db, env = project([], [])
-    git(d, "remote", "set-url", "origin", "https://github.com/remanual-org/remanual.git")
-    answers(db, text={"repos/remanual-org/remanual": "deresegetachew/remanual"})
-    assert remote(d, env, "--check")[0] == 1
-    assert git(d, "config", "--get", "remote.origin.url") == "https://github.com/remanual-org/remanual.git"  # --check changes nothing
-    rc, out = remote(d, env)
-    assert rc == 0 and "now points at https://github.com/deresegetachew/remanual.git" in out, out
-    assert git(d, "config", "--get", "remote.origin.url") == "https://github.com/deresegetachew/remanual.git"
-
-
-def test_ssh_remotes_keep_their_form_and_a_current_remote_is_left_alone():
-    d, db, env = project([], [])
-    git(d, "remote", "set-url", "origin", "git@github.com:old/app.git")
-    answers(db, text={"repos/old/app": "new/app"})
-    remote(d, env)
-    assert git(d, "config", "--get", "remote.origin.url") == "git@github.com:new/app.git"
-    answers(db, text={"repos/new/app": "new/app"})
-    assert remote(d, env) == (0, "")
-
-
-def test_no_answer_from_github_changes_nothing():
-    d, db, env = project([], [])
-    git(d, "remote", "set-url", "origin", "https://github.com/old/app")
-    assert remote(d, env) == (0, "")
-    assert git(d, "config", "--get", "remote.origin.url") == "https://github.com/old/app"
 
 
 # --- a finished branch waiting for a PR slot --------------------------------------------------------------------

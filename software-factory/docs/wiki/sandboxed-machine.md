@@ -65,7 +65,7 @@ uid (`meta skuid`):
 - `--egress none` closes the internet too.
 
 The settings are saved in `/etc/software-factory/sandbox.json`, so a re-run converges on them (`user`, `egress`,
-`allowHosts`, `blockLoopbackPorts`, `blockInboundPorts`). Rules are rendered from `hooks/factory_netguard.py`, which is also
+`allowHosts`, `blockLoopbackPorts`, `blockInboundPorts`). Rules are rendered from `hooks/factory_netguard.ts`, which is also
 what the tests check.
 
 ### `factory doctor --sandbox`

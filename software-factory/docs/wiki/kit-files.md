@@ -60,12 +60,12 @@ software-factory/
     factory_doctor.py                   `factory doctor`: checks a machine and project, read-only
     factory_release.py                  `factory version | releases | update | rollback`: the release client
     factory_bootstrap.py                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
-    factory_bootstrap_core.py           the steps and actions bootstrap is built from, and the executor
-    factory_bootstrap_machine.py        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
+    factory_bootstrap_core.ts           the steps and actions bootstrap is built from, and the executor
+    factory_bootstrap_machine.ts        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
     factory_bootstrap_project.py        the user's steps: rootless Docker, Node, Claude Code, checkout, runners; the human steps
-    factory_netguard.py                 renders the nftables rules and the guard's systemd unit
+    factory_netguard.ts                 renders the nftables rules and the guard's systemd unit
     factory_sandbox.py                  `factory doctor --sandbox`
-    factory_models.py                   the `models` setting: claude flags per role, effective models
+    factory_models.ts                   the `models` setting: claude flags per role, effective models
     factory_fix.py                      `factory fix`: format and auto-fix the changed files (`commands.fix`)
     factory_run_check.py                `factory run-check`: a quiet check with the full log on disk
     factory_messages.py                 the message envelope (`factory-msg`): build, parse and states (docs/messages.md)
@@ -78,7 +78,7 @@ software-factory/
     factory_settings_store.py           reads and writes factory.json and the machine file (order, indent, atomic)
     factory_settings_interactive.py     the interactive menu behind `factory settings`
     factory_settings_save.py            `factory settings pr`: branch, commit, push and open the pull request
-    factory_usage.py                    `factory usage`: tokens per task from the local Claude Code logs
+    factory_usage.ts                    `factory usage`: tokens per task from the local Claude Code logs
     factory_artifacts.py                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
     factory_handover.py                 `factory handover snapshot`: the state a manager hands over, read from GitHub
     factory_init.py                     `factory init`: the project's scaffold (roles, labels, owner queue, PRD stub)
