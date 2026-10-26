@@ -59,6 +59,9 @@ Look
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
                          incremental re-review: a reviewer's next round reads only the delta since its last one
+  reset-run [--apply]    before a test run: lists what an earlier run left in this project (stale local claims, Agent
+                         issues of dead or never-run agents, exited CI containers, offline runners, a runs-on variable that
+                         points at no online runner); --apply cleans it and says what it did. Only this project's own repo, folder and containers
   review-pass reviewer|arch
                          a review agent records its pass for the current commit (what the PR gate reads); one command
   manager-claims list|next|review|answer|release|sweep|merge|ask
@@ -262,6 +265,7 @@ case "$cmd" in
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
   review-pass) py factory_review_pass.py "$@" ;;
+  reset-run)   py factory_reset_run.py "$@" ;;
   manager-claims) py factory_manager_claims.py "$@" ;;
   lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
   settings)  py factory_settings.py "$@" ;;
