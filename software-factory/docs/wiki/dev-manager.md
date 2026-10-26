@@ -88,7 +88,7 @@ factory watch [--json]                     the seven checks on their own: one li
 ```
 
 **The orchestrator has no model (#97).** `factory dev-manager loop` is a loop script. Each cycle it runs the seven checks
-(`factory_watch.py`; `factory precheck` is its checks 1, 2 and the quiet agents and issues), reads labels and comments as
+(`factory_watch.ts`; `factory precheck` is its checks 1, 2 and the quiet agents and issues), reads labels and comments as
 the only truth, and starts a fresh one-item sub-manager for each item that needs a manager: `claude -p "/manage-pass pr-417"`
 on the manager settings profile, with the item's fact sheet and its thread note in the prompt. A sub-manager does its one item
 and exits. The orchestrator never starts a builder, and it never merges or reviews itself.

@@ -27,10 +27,10 @@ software-factory/
   docs/messages.md                        the message envelope, states and the A2A mapping
   tests/                                  tests for the gate, issues, the loop and the hooks
   hooks/
-    factory_watch.py                    the dev manager's seven checks on GitHub (`factory watch`), no model
-    factory_orchestrator.py             `factory dev-manager loop`: cycles, thread notes, owner asks, sub-managers
+    factory_watch.ts                    the dev manager's seven checks on GitHub (`factory watch`), no model
+    factory_orchestrator.ts             `factory dev-manager loop`: cycles, thread notes, owner asks, sub-managers
     factory_lease.ts                    the lease on an item (claim comments), the interface #99 will replace
-    factory_roles.py                    the roles' definitions, role folders (`init-roles`) and `choose`
+    factory_roles.ts                    the roles' definitions, role folders (`init-roles`) and `choose`
     manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
     factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
     factory_lessons.ts                  the curated lessons file: show, check, suggest, add, prune
@@ -80,19 +80,19 @@ software-factory/
     factory_settings_save.ts            `factory settings pr`: branch, commit, push and open the pull request
     factory_usage.ts                    `factory usage`: tokens per task from the local Claude Code logs
     factory_artifacts.ts                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
-    factory_handover.py                 `factory handover snapshot`: the state a manager hands over, read from GitHub
-    factory_init.py                     `factory init`: the project's scaffold (roles, labels, owner queue, PRD stub)
-    factory_flow.py                     `factory prd --stage`: the flow stages and the owner's gates
-    factory_po.py                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
-    factory_prd.py                      `factory prd`: progress against the PRD, per user story
+    factory_handover.ts                 `factory handover snapshot`: the state a manager hands over, read from GitHub
+    factory_init.ts                     `factory init`: the project's scaffold (roles, labels, owner queue, PRD stub)
+    factory_flow.ts                     `factory prd --stage`: the flow stages and the owner's gates
+    factory_po.ts                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
+    factory_prd.ts                      `factory prd`: progress against the PRD, per user story
     factory_signoff.ts                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)
     factory_verify.ts                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
     factory_guard.ts                    the CI guard
     style_checks.ts                     CI: each style's check
     factory_config.py                   reads factory.json, with defaults
     wait_for_merge.sh                   waits on a PR without spending tokens
-    factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
-    factory_tick.py                     `factory manage-tick`: the precheck, then one manage-pass session only when there is work
+    factory_wait.ts                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
+    factory_tick.ts                     `factory manage-tick`: the precheck, then one manage-pass session only when there is work
     factory_turbo.py                    `factory turbo`: the shared Turborepo cache (status, install, down, env, ci-env)
   ci/                                     `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
                                           compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,

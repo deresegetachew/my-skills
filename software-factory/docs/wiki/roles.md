@@ -66,7 +66,7 @@ digest, and decides nothing. The `product-pass` skill holds the standing rules; 
 in `<roles.dir>/product-owner/` hold the product's voice, what the owner decides alone, and where the PRD and designs are.
 There is no custom UI: the owner reads progress and queues as plain text, below.
 
-**What gives the role work** (`factory_roles.py work product-owner`, one line each): an open issue or PR with
+**What gives the role work** (`factory_roles.ts work product-owner`, one line each): an open issue or PR with
 `roles.product-owner.workLabel`; an owner-queue ask tagged `for=product` that nobody has answered; a test plan that waits
 for the owner or for a run; sign-off items. `factory product-owner loop --once --dry-run` prints where the role reads, then
 that list, and the command it would run. It writes nothing.

@@ -18,7 +18,14 @@ root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this
 cd "$root"
 hooks="$root/.claude/hooks"
 py() { fh "$hooks/${1%.py}" "${@:2}"; }
-main() { python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))'; }
+# One value of .claude/factory.json (`setting mainBranch main`, `setting commands.install ""`): the default when the key
+# is missing; fails when the file is missing or not JSON.
+setting() {
+  bun --no-env-file -e 'const [k, d] = process.argv.slice(1); let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8"));
+for (const p of k.split(".")) v = v !== null && typeof v === "object" && !Array.isArray(v) && p in v ? v[p] : undefined;
+console.log(v === undefined ? d : typeof v === "string" ? v : JSON.stringify(v));' "$@"
+}
+main() { setting mainBranch main; }
 
 usage() {
   cat <<'EOF'
@@ -206,7 +213,7 @@ case "$cmd" in
       case "$a" in coding-agent|dev-manager|product-owner) want="$a" ;; -i|--interactive) asks=1; rest+=("$a") ;; *) rest+=("$a") ;; esac
     done
     if [ -z "$want" ] && [ "$asks" = 1 ] && [ -t 0 ] && [ -t 2 ]; then
-      pick="$(py factory_roles.py choose)" || exit 1
+      pick="$(fh "$hooks/factory_roles" choose)" || exit 1
       read -r want pickname <<< "$pick"
       exec env FACTORY_ROLE="$want" FACTORY_NAME="$pickname" "$root/factory-loop.sh" ${rest[@]+"${rest[@]}"}
     fi
@@ -217,10 +224,10 @@ case "$cmd" in
     if [ -n "${1:-}" ] && [ "$1" != loop ]; then who="$1"; shift; fi
     [ "${1:-}" = loop ] || { echo "usage: factory $role [name|N] loop [-i] [--once] [--dry-run]" >&2; exit 1; }
     shift
-    case "$who" in ''|*[!0-9]*) ;; *) who="$(py factory_roles.py nth "$role" "$who")" || exit 1 ;; esac
+    case "$who" in ''|*[!0-9]*) ;; *) who="$(fh "$hooks/factory_roles" nth "$role" "$who")" || exit 1 ;; esac
     exec env FACTORY_ROLE="$role" FACTORY_NAME="$who" "$root/factory-loop.sh" "$@" ;;
-  init)      py factory_init.py "$@" ;;
-  init-roles) py factory_roles.py init "$@" ;;
+  init)      fh "$hooks/factory_init" "$@" ;;
+  init-roles) fh "$hooks/factory_roles" init "$@" ;;
   agent)
     # --detach (#106): start the agent in a detached tmux session, which `factory follow <name>` finds from anywhere.
     detach=0; rest=()
@@ -296,10 +303,10 @@ case "$cmd" in
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
   precheck)  fh "$hooks/factory_wait" precheck ;;
-  watch)     py factory_watch.py "$@" ;;
-  prd)       py factory_prd.py "$@" ;;
+  watch)     fh "$hooks/factory_watch" "$@" ;;
+  prd)       fh "$hooks/factory_prd" "$@" ;;
   artifacts) fh "$hooks/factory_artifacts" "$@" ;;
-  handover)  py factory_handover.py "$@" ;;
+  handover)  fh "$hooks/factory_handover" "$@" ;;
   signoff)   fh "$hooks/factory_signoff" "$@" ;;
   manage-tick) fh "$hooks/factory_tick" "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;

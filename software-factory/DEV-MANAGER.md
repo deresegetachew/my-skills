@@ -42,7 +42,7 @@ to undo it.
 ## How it runs: an orchestrator and one-item sub-managers
 
 The dev manager is **not one long session**. `factory dev-manager loop` is an **orchestrator**: a loop script with no model
-(`factory_orchestrator.py`, #97 and #109). Each cycle it reads GitHub (`factory watch`, the seven checks), and for each item
+(`factory_orchestrator.ts`, #97 and #109). Each cycle it reads GitHub (`factory watch`, the seven checks), and for each item
 that needs a manager it starts a **one-item sub-manager**: a fresh, small `claude -p "/manage-pass pr-417"` on the manager's
 settings profile. A sub-manager reads its item's fact sheet and thread note, does that one thing, writes down what it decided,
 and exits. The orchestrator never reviews, merges or answers itself; it posts to the owner queue what only the owner can do, and

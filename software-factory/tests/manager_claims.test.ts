@@ -1,8 +1,6 @@
 // Several dev managers at once (#99): review and question claims with a lease, a stale hold cleaned, a merge that
 // GitHub refuses because someone else got there first, and owner-queue asks posted once. A fake `gh` keeps one
 // repository in a JSON file (with a lock, so two managers can really race); the managers are the real command.
-// (One check stays in test_manager_claims.py until factory_wait is ported: `factory precheck` does not take a claim
-// for an answer.)
 import { expect, test } from "bun:test";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -541,4 +539,15 @@ test("builders cannot run the claim commands or post the markers", () => {
     const [rc, err] = runGate(r.d, { ...r.env, FACTORY_AGENT: "haile" }, `gh pr comment 7 --body '<!-- ${marker} manager=x -->'`);
     expect(rc, `${marker} ${err}`).toBe(2);
   }
+});
+
+// ------------------------------------------------------------------------------------------------ the waiting code
+
+test("a claim is not mistaken for an answer by the waiting code", () => {
+  // factory wait answer / precheck treat a later factory-answer as the end of a question; a claim must not be one
+  const q = comment("<!-- factory-question -->\nWhich database?", 10);
+  const r = new Repo([pull(5)], { 5: [q, comment(claimText("dm-1", 10, 20, "answer", "question"), 11)] });
+  const p = r.factory("precheck");
+  expect(p.code, p.out).toBe(3);
+  expect(p.stdout).toContain("question waits for an answer");
 });
