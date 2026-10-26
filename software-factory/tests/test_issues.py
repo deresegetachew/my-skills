@@ -57,8 +57,8 @@ if m:
     if method == "POST":
         cs.append({"body": body["body"], "at": db["clock"]}); out(cs[-1])
     out([] if page > 1 else cs)
-if p in ("branches", "labels", "milestones", "pulls"): out([] if page > 1 else db.get(p, []))
 if p == "labels" and method == "POST": db.setdefault("labels", []).append(body); out(body)
+if p in ("branches", "labels", "milestones", "pulls"): out([] if page > 1 else db.get(p, []))
 sys.exit(f"fake gh: no route for {method} {p}")
 '''
 
