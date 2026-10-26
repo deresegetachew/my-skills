@@ -65,8 +65,8 @@ def body(diffs):
     needs = reviews_needed(diffs)
     lines += ["", "Review needed:"]
     lines += [f"- {n}" for n in needs] or ["- no extra label"]
-    lines += [f"- {DEFAULT_REVIEW}", "", "The settings are read by the PR gate and the hooks, so this is merged by the dev "
-              "manager or the owner, never by an agent."]
+    lines += [f"- {DEFAULT_REVIEW}", "", "The settings are read by the PR gate and the hooks, so this is merged by the "
+              "owner, never by an agent."]
     return "\n".join(lines)
 
 

@@ -364,7 +364,7 @@ What stays the project's own in every case: `.claude/factory.json`, `.claude/fac
    `settings.json` and the docs need no change. `--layout auto`, the default, leaves a project that links through
    `kit/` alone, so a plain `factory update` never switches one by surprise.
 2. Check: `ls -l .claude/hooks` shows `.../software-factory/hooks/...`, and `factory doctor` is green.
-3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the dev manager or the owner
+3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the owner
    merges it. A CI workflow, a `protected` list or a document that names `.claude/hooks/...` needs no change for this
    step, because those paths did not move.
 4. On a machine that runs the CI runners, `factory update` reinstalls them when their copies are older; if you did not
@@ -2434,7 +2434,7 @@ reviewed pull request, and today most of it is by hand:
    by hand.
 5. **Check:** `factory doctor` is green, and `factory version` shows the release.
 6. **Commit the install and open the pull request.** `.claude/` and `.gitmodules` are normally in `protected`, so the
-   dev manager or the owner merges it. After that, `factory update` is the only way the factory changes in the project.
+   owner merges it. After that, `factory update` is the only way the factory changes in the project.
 
 Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is the owner's merge.
 

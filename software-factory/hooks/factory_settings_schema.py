@@ -32,7 +32,7 @@ SECTION_READERS = {slug: readers for slug, _, readers in SECTIONS}
 
 KINDS = ("str", "int", "bool", "list", "dict", "enum")
 DEFAULT_REVIEW = ("Any change to .claude/factory.json is under `.claude/`, which is protected: it goes through a pull "
-                  "request that the dev manager (or the owner) merges.")
+                  "request that the owner merges.")
 
 # Settings whose change needs more than that: the review label or decision they trigger.
 NEEDS = {
@@ -260,7 +260,7 @@ MORE = {
                         "those paths and the PR gate needs its pass.",
                    examples=['factory settings set styles \'[{"paths": ["apps/api/**"], "skills": ["nestjs-best-practices"], "check": "python3 tools/check_structure.py"}]\'']),
     "protected": dict(long="Regexes on file paths. A PR that changes a protected file is never merged by an agent: the "
-                           "dev manager or the owner merges it. Keep `^\\.claude/` here: it protects the factory's "
+                           "owner merges it. Keep `^\\.claude/` here: it protects the factory's "
                            "own settings. Loosening this list is the most sensitive change in the file.",
                       examples=['factory settings set protected \'["^CLAUDE\\\\.md$", "^\\\\.claude/", "^\\\\.github/"]\'']),
     "alwaysAllowed": dict(long="Files that are never counted as protected even if a `protected` regex matches, typically "

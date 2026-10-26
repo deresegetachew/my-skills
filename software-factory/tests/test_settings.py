@@ -202,6 +202,13 @@ def test_every_default_and_every_template_key_is_a_known_setting():
         assert s.short and s.section and s.kind in ("str", "int", "bool", "list", "dict", "enum"), key
 
 
+def test_the_help_says_the_owner_merges_a_change_under_claude_never_the_dev_manager():
+    d = project({})
+    for key in ("tasks.source", "protected"):
+        out = settings(d, "help", key).stdout
+        assert "owner merges" in out and "dev manager" not in out, (key, out)
+
+
 def test_help_without_a_key_lists_the_sections_and_with_a_key_gives_the_long_help():
     d = project({})
     p = settings(d, "help")
