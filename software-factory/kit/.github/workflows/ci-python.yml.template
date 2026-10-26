@@ -59,10 +59,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
+      - uses: oven-sh/setup-bun@v2  # the factory's scripts run on Bun (#252)
       - name: Install (commands.install in .claude/factory.json)
-        run: python3 .claude/hooks/factory_stack.py run install
-      - uses: oven-sh/setup-bun@v2
+        run: bun --no-env-file .claude/hooks/factory_stack.ts run install
       - name: Style checks (styles[].check in .claude/factory.json)
         run: bun --no-env-file .claude/hooks/style_checks.ts
       - name: Test (commands.test in .claude/factory.json)
-        run: python3 .claude/hooks/factory_stack.py run test
+        run: bun --no-env-file .claude/hooks/factory_stack.ts run test

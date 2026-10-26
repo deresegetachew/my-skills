@@ -1,7 +1,7 @@
 // The factory's code lives in software-factory/ (#112). The old kit paths that projects link are symlinks to it
 // (forwarders), so a project that links the old paths keeps working until it switches. A Bun script (#252) gets no
 // forwarder: projects link hooks/ and ci/ directly (`install.sh --layout new`).
-// (The `install.sh --link` case stays in test_forwarders.py until factory_stack, which install.sh runs, is ported.)
+// (The `install.sh --link` case is in install_layout.test.ts.)
 import { expect, test } from "bun:test";
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
