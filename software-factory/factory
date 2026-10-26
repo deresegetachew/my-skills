@@ -114,6 +114,7 @@ Check
 CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
   ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
   ci use local|github    send CI jobs to the self-hosted runners (labels <repo>-local and <repo>-light), or back
+  ci log <pr or run>     the failed job's log, trimmed to the failing step (read-only): why did my CI fail?
   ci stale | check       are the installed runner copies older than the checkout / fit to start (update runs both)
   ci install             install ci.runners runners and the light lane as <repo>-ci, -2 ... and -light: LaunchAgents
                          on macOS, systemd --user services on Linux (run it again to update or change the number)
@@ -328,7 +329,7 @@ EOF
     chmod +x "$bin/factory"
     echo "Installed $bin/factory."
     case ":$PATH:" in *":$bin:"*) ;; *) echo "Add it to your PATH, for example in ~/.zshrc:  export PATH=\"\$HOME/.local/bin:\$PATH\"";; esac ;;
-  ci)        exec bash "$root/.claude/ci/ci.sh" "$@" ;;
+  ci)        if [ "${1:-}" = log ]; then py factory_ci_log.py "${@:2}"; else exec bash "$root/.claude/ci/ci.sh" "$@"; fi ;;
   help|-h|--help) usage ;;
   *) echo "factory: unknown command '$cmd'" >&2; usage >&2; exit 1 ;;
 esac
