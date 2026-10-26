@@ -34,7 +34,7 @@ This file is the core. Open the others in this folder only when they apply:
    files, edge cases, out of scope. Open those, and widen only when they don't answer your question. Search long
    documents (`grep -n`) instead of reading them whole: most of a task's cost is what it reads. Say in one line which
    task you're doing and what "done" means.
-4. **Read the lessons.** `python3 .claude/hooks/factory_lessons.py show` prints this project's short list of repeated
+4. **Read the lessons.** `bun --no-env-file .claude/hooks/factory_lessons.ts show` prints this project's short list of repeated
    mistakes (one line each, with an example). Check your work against it before every push; the reviewers do too.
    If a person's must-fix or a CI failure teaches something new, say so in the PR description as "lesson candidate:";
    you cannot edit the file, the dev manager does (`factory lessons suggest`).
@@ -64,7 +64,7 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    Don't spend a turn on formatting or auto-fixable lint findings: when `commands.fix` is set, the Stop check and
    `./factory verify` run it on the files you changed ("formatted 3 files"); `./factory fix` runs it by hand. If verify
    says it formatted files, commit them and run it again.
-4. **Extra reviews:** run `python3 .claude/hooks/factory_reviews.py` and do each line it prints (a skill such as
+4. **Extra reviews:** run `bun --no-env-file .claude/hooks/factory_reviews.ts` and do each line it prints (a skill such as
    `design-check` or the eval, or a subagent such as `safety-auditor` or `security-reviewer`), fixing every must-fix.
    Ask the `safety-auditor` whenever the diff touches what CLAUDE.md calls critical rules, and the
    `security-reviewer` for auth, payments, public endpoints, uploads, storage, tenancy, secrets or model calls on
@@ -81,9 +81,9 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
 7. **Re-reviews read only the delta** (#70). Each reviewer records its round (commit, result, findings), and the next
    round of the same reviewer checks only what changed since: the diff since its last commit, its own findings and
    your reply. After fixing and committing, and before asking again, save your reply for each finding:
-   `python3 .claude/hooks/factory_rereview.py reply --kind reviewer --text "<what you changed for each finding>"`
+   `bun --no-env-file .claude/hooks/factory_rereview.ts reply --kind reviewer --text "<what you changed for each finding>"`
    (`--kind arch` for the `architecture-reviewer`, `safety` and `security` for the auditors). Then ask the subagent as
-   before; it runs `factory_rereview.py prompt` itself and reads the delta. `factory_rereview.py plan --kind reviewer`
+   before; it runs `factory_rereview.ts prompt` itself and reads the delta. `factory_rereview.ts plan --kind reviewer`
    shows which it will be. A big fix (over `reReviewPercent` of the branch diff), a new file, a rebase or a merge of
    main makes the next round a full review. The pass the PR gate needs is still the reviewer's marker for the head
    commit, so the last round always ends on HEAD.

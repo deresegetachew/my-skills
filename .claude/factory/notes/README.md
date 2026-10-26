@@ -12,4 +12,4 @@ Start with these facts, which the shared agents cannot know:
   `test_*` function; helpers are fine. They use fakes (fake `gh`, fake `systemctl`, a local fake of GitHub's release
   API) and temp folders, never the network or the real home folder.
 - The code under review may be the code that runs the review (the hooks, the gate). Read a change to `pr-gate.py`,
-  `factory_guard.py` or `settings.json` as if you did not trust it.
+  `factory_guard.ts` or `settings.json` as if you did not trust it.

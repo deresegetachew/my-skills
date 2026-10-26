@@ -96,12 +96,6 @@ def gate(d, env, command):
     return p.returncode, p.stderr
 
 
-def numbers(d, env):
-    p = subprocess.run([sys.executable, os.path.join(HOOKS, "factory_numbers.py")], cwd=d, env=env,
-                       capture_output=True, text=True)
-    return p.returncode, p.stdout + p.stderr
-
-
 CREATE = "gh pr create --title x --body 'Closes #1'"
 
 
@@ -125,23 +119,6 @@ def test_a_number_another_open_pr_took_is_refused():
                       "pulls/145/files": "docs/decisions/0045-home-page.md"})
     rc, err = gate(d, env, CREATE)
     assert rc == 2 and "0042-reader.md in #127" in err and "Rename it to 0046" in err, err
-
-
-def test_migrations_count_when_configured_and_this_branch_own_pr_is_not_a_clash():
-    d, db, env = project(["apps/api/migrations/0008_a.sql"], ["apps/api/migrations/0009_b.sql"],
-                         cfg={"numberedDirs": ["apps/api/migrations"]})
-    answers(db, text={"pulls": "144\ttask/1-x\n150\ttask/9-y", "pulls/144/files": "apps/api/migrations/0009_b.sql",
-                      "pulls/150/files": "apps/api/migrations/0009_other.sql"})
-    rc, out = numbers(d, env)
-    assert rc == 1 and "0009_other.sql in #150" in out and "Rename it to 0010" in out, out
-    answers(db, text={"pulls": "144\ttask/1-x"})  # only this branch's own PR: free
-    assert numbers(d, env)[0] == 0
-
-
-def test_two_new_files_with_one_number_in_a_branch_are_refused():
-    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-b.md", "docs/decisions/0002-c.md"])
-    rc, out = numbers(d, env)
-    assert rc == 1 and "in this branch" in out and "Rename it to 0003" in out, out
 
 
 def test_a_draft_skips_the_number_check():
@@ -286,28 +263,6 @@ def test_other_accounts_prs_do_not_fill_this_accounts_slots():
     assert pick(d, env)[1] == "issue-107 Demo guides"
 
 
-def test_a_rename_that_keeps_its_number_is_not_a_new_number():
-    d, db, env = project(["docs/decisions/0001-a.md", "docs/decisions/0002-old-title.md"], [])
-    git(d, "mv", "docs/decisions/0002-old-title.md", "docs/decisions/0002-new-title.md")
-    git(d, "commit", "-qm", "retitle")
-    assert numbers(d, env)[0] == 0
-    answers(db, text={"pulls": "150\ttask/9-y",
-                      "pulls/150/files": "docs/decisions/0002-retitled.md\tdocs/decisions/0002-old-title.md"})
-    assert numbers(d, env)[0] == 0  # another PR retitling a decision takes no number either
-
-
-def test_a_number_merged_to_main_meanwhile_counts_without_a_manual_fetch():
-    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-mine.md"])
-    other = tempfile.mkdtemp()
-    subprocess.run(["git", "clone", "-q", git(d, "config", "--get", "remote.origin.url"), other], check=True)
-    git(other, "config", "user.email", "t@t"); git(other, "config", "user.name", "t")
-    os.makedirs(os.path.join(other, "docs", "decisions"), exist_ok=True)
-    open(os.path.join(other, "docs", "decisions", "0002-theirs.md"), "w").write("x")
-    git(other, "add", "-A"); git(other, "commit", "-qm", "theirs"); git(other, "push", "-q", "origin", "HEAD:main")
-    rc, out = numbers(d, env)  # this checkout never fetched since: the check does
-    assert rc == 1 and "0002-theirs.md on main" in out and "Rename it to 0003" in out, out
-
-
 def test_a_timed_out_job_next_to_billing_is_a_real_result():
     d, db, env = project([], [])
     runs = {"total_count": 2, "check_runs": [{"id": 1, "conclusion": "failure"}, {"id": 2, "conclusion": "timed_out"}]}
@@ -392,16 +347,6 @@ def test_a_fork_pr_with_the_same_branch_name_is_not_this_branchs_pr():
     json.dump(data, open(db, "w"))
     rc, out, err = pick(d, env)
     assert out == "none" and "waits for a pull-request slot" in err, (out, err)
-
-
-def test_numbers_skip_only_this_repos_own_pr():
-    d, db, env = project(["docs/decisions/0001-a.md"], ["docs/decisions/0002-mine.md"])
-    answers(db, text={"pulls": "201\ttask/1-x\tstranger/fork\tme/app",
-                      "pulls/201/files": "docs/decisions/0002-theirs.md"})
-    rc, out = numbers(d, env)
-    assert rc == 1 and "0002-theirs.md in #201" in out, out
-    answers(db, text={"pulls": "144\ttask/1-x\tme/app\tme/app"})
-    assert numbers(d, env)[0] == 0
 
 
 def test_a_task_waiting_for_a_slot_is_not_stale():

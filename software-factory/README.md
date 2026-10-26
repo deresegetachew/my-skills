@@ -329,7 +329,7 @@ software-factory/
   factory-loop.sh               the loop behind `factory loop`
   install.sh                    puts the factory into a project (links, or copies)
   VERSION                       the release number (a `vX.Y.Z` tag must match it)
-  hooks/                        every hook and every `factory_*.py` command, next_task.py, pr-gate.py, check.py ...
+  hooks/                        every hook and every `factory_*.py` command, next_task.py, pr-gate.py, check.ts ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
   tests/                        the tests (run with tools/run_tests.py at the repo root)
   docs/                         reference pages (PRD.md, messages.md, manager-handover.md) and the wiki

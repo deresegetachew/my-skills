@@ -16,6 +16,7 @@
       "Bash(gh pr *)",
       "Bash(docker compose *)",
       "Bash(python3 .claude/hooks/*)",
+      "Bash(bun --no-env-file .claude/hooks/*)",
       "Bash(npm run *)",
       "Bash(npm test*)",
       "Bash(npm ci*)",
@@ -79,8 +80,8 @@
       "Bash(factory lessons prune*)",
       "Bash(./factory lessons add*)",
       "Bash(./factory lessons prune*)",
-      "Bash(*factory_lessons.py add*)",
-      "Bash(*factory_lessons.py prune*)",
+      "Bash(*factory_lessons.ts add*)",
+      "Bash(*factory_lessons.ts prune*)",
       "Bash(factory autostart install*)",
       "Bash(factory autostart uninstall*)",
       "Bash(./factory autostart install*)",
@@ -113,7 +114,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.py",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.ts",
             "timeout": 600
           },
           {

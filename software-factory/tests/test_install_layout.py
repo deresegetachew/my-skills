@@ -14,7 +14,7 @@ VENDOR = "vendor/my-skills/software-factory"
 GIT_ENV = {**os.environ, "GIT_CONFIG_COUNT": "3", "GIT_CONFIG_KEY_0": "protocol.file.allow", "GIT_CONFIG_VALUE_0": "always",
            "GIT_CONFIG_KEY_1": "user.name", "GIT_CONFIG_VALUE_1": "t", "GIT_CONFIG_KEY_2": "user.email",
            "GIT_CONFIG_VALUE_2": "t@example.com", "PYTHONDONTWRITEBYTECODE": "1"}
-ENGINE = [".claude/hooks/factory_guard.py", ".claude/hooks/wait_for_merge.sh", ".claude/ci/ci.sh", ".claude/ci/entrypoint.sh",
+ENGINE = [".claude/hooks/factory_guard.ts", ".claude/hooks/wait_for_merge.sh", ".claude/ci/ci.sh", ".claude/ci/entrypoint.sh",
           "factory", "factory-loop.sh"]
 KIT_ONLY = [".claude/agents/reviewer.md", ".claude/settings.json"]
 
@@ -53,7 +53,7 @@ def test_a_fresh_link_install_points_the_code_straight_at_the_factorys_folders()
         assert "/kit/" not in got[rel], (rel, got[rel])
         assert os.path.isfile(os.path.join(d, rel)), rel
     assert got["factory"] == VENDOR + "/factory"
-    assert got[".claude/hooks/factory_guard.py"] == "../../" + VENDOR + "/hooks/factory_guard.py"
+    assert got[".claude/hooks/factory_guard.ts"] == "../../" + VENDOR + "/hooks/factory_guard.ts"
     assert got[".claude/ci/entrypoint.sh"] == "../../" + VENDOR + "/ci/entrypoint.sh"
     for rel in KIT_ONLY:  # agents, skills and settings.json still come from kit/.claude, where they live
         assert got[rel] == os.path.relpath(VENDOR + "/kit/" + rel, os.path.dirname(rel)), got[rel]
@@ -97,11 +97,11 @@ def test_a_copy_that_differs_is_kept_and_a_plain_copy_becomes_a_link_in_either_l
     for layout in ("new", "old"):
         d = project()
         os.makedirs(os.path.join(d, ".claude", "hooks"))
-        shutil.copy(os.path.join(SF, "hooks", "check.py"), os.path.join(d, ".claude", "hooks", "check.py"))
+        shutil.copy(os.path.join(SF, "hooks", "check.ts"), os.path.join(d, ".claude", "hooks", "check.ts"))
         open(os.path.join(d, ".claude", "hooks", "factory_env.py"), "w").write("# my own edit\n")
         out = install(d, "--link", "--layout", layout).stdout
-        assert os.path.islink(os.path.join(d, ".claude", "hooks", "check.py"))
-        assert "linked   .claude/hooks/check.py (was a copy)" in out
+        assert os.path.islink(os.path.join(d, ".claude", "hooks", "check.ts"))
+        assert "linked   .claude/hooks/check.ts (was a copy)" in out
         assert not os.path.islink(os.path.join(d, ".claude", "hooks", "factory_env.py"))
         assert "kept     .claude/hooks/factory_env.py (differs" in out
 
@@ -122,10 +122,10 @@ def test_a_copy_install_holds_real_files_from_the_new_folders_with_the_same_mode
             assert not os.path.islink(os.path.join(root, f)), os.path.join(root, f)
     for rel in ENGINE + KIT_ONLY:
         assert os.path.isfile(os.path.join(d, rel)), rel
-    for src, rel in (("hooks/factory_guard.py", ".claude/hooks/factory_guard.py"), ("ci/entrypoint.sh", ".claude/ci/entrypoint.sh"),
+    for src, rel in (("hooks/factory_guard.ts", ".claude/hooks/factory_guard.ts"), ("ci/entrypoint.sh", ".claude/ci/entrypoint.sh"),
                      ("factory", "factory")):
         assert open(os.path.join(SF, src), "rb").read() == open(os.path.join(d, rel), "rb").read(), rel
-    for rel in ("factory", "factory-loop.sh", ".claude/ci/ci.sh", ".claude/hooks/factory_guard.py"):
+    for rel in ("factory", "factory-loop.sh", ".claude/ci/ci.sh", ".claude/hooks/factory_guard.ts"):
         assert os.stat(os.path.join(d, rel)).st_mode & stat.S_IXUSR, rel
 
 

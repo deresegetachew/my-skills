@@ -33,13 +33,13 @@ software-factory/
     factory_roles.py                    the roles' definitions, role folders (`init-roles`) and `choose`
     manager_gate.py                     PreToolUse for the manager: merge gate, refs, protected places, secrets
     factory_ci_judge.py                 CI judged the manager's way: newest non-skipped run per job
-    factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
+    factory_lessons.ts                  the curated lessons file: show, check, suggest, add, prune
     factory_manager_claims.py           several dev managers at once: review and question claims with a lease
-    factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
+    factory_rereview.ts                 incremental re-review: the delta since a reviewer's last round
     factory_reset_run.py                `factory reset-run`: list and clean what an earlier run left (claims, Agent issues, CI containers, runners, a runs-on variable)
     factory_stack.py                    the project's stack on a first install (node, python, unknown) and the Python CI's command runner
     pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
-    check.py                            Stop: typecheck and tests
+    check.ts                            Stop: typecheck and tests
     factory_stop.py                     Stop: closes a finished session in `factory loop -i`
     factory_session.py                  SessionStart: a plain `claude` session becomes an agent
     factory_agents.py                   live agents: register, ping, down, sweep (and the hook entry)
@@ -66,12 +66,12 @@ software-factory/
     factory_netguard.ts                 renders the nftables rules and the guard's systemd unit
     factory_sandbox.py                  `factory doctor --sandbox`
     factory_models.ts                   the `models` setting: claude flags per role, effective models
-    factory_fix.py                      `factory fix`: format and auto-fix the changed files (`commands.fix`)
-    factory_run_check.py                `factory run-check`: a quiet check with the full log on disk
+    factory_fix.ts                      `factory fix`: format and auto-fix the changed files (`commands.fix`)
+    factory_run_check.ts                `factory run-check`: a quiet check with the full log on disk
     factory_messages.py                 the message envelope (`factory-msg`): build, parse and states (docs/messages.md)
     factory_cards.py                    agent cards: who an agent is and what it can do, as data
     factory_clock.py                    the one clock the scripts share; tests can set the time
-    factory_reviews.py                  which extra reviews a change needs
+    factory_reviews.ts                  which extra reviews a change needs
     factory_report.py                   `factory report`: per-task timings, rework rounds and CI runs from GitHub
     factory_settings.py                 `factory settings`: the commands (list, get, set, unset, help, diff, validate, pr, docs)
     factory_settings_schema.py          the table that describes every setting: help, limits, defaults, README tables
@@ -86,9 +86,9 @@ software-factory/
     factory_po.py                       `to=po` questions: their level (product owner, dev manager, owner) from age and whether a PO runs
     factory_prd.py                      `factory prd`: progress against the PRD, per user story
     factory_signoff.py                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)
-    factory_verify.py                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
-    factory_guard.py                    the CI guard
-    style_checks.py                     CI: each style's check
+    factory_verify.ts                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
+    factory_guard.ts                    the CI guard
+    style_checks.ts                     CI: each style's check
     factory_config.py                   reads factory.json, with defaults
     wait_for_merge.sh                   waits on a PR without spending tokens
     factory_wait.py                     the other waits (ci, answer, slot, ready) and the dev manager's precheck

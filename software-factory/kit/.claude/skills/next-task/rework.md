@@ -10,7 +10,7 @@ fixed yet.
    test to make a finding go away. If you disagree with a finding, reply with your evidence in a
    `<!-- factory-question -->` comment instead of pushing, and stop (step 5).
 3. Run the commands from `factory.json`, save your reply for the reviewer's next round
-   (`python3 .claude/hooks/factory_rereview.py reply --kind reviewer --text "<what you changed for each must-fix>"`; it
+   (`bun --no-env-file .claude/hooks/factory_rereview.ts reply --kind reviewer --text "<what you changed for each must-fix>"`; it
    makes that round a delta review when the fix is small; if it says there is no earlier round, carry on: the review is a
    full one), ask the `reviewer` subagent (and the auditor the PR needed) for a pass on the
    new commit, then push. The push moves the head, so the PR is no longer rework.
