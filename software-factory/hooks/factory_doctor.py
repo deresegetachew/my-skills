@@ -247,7 +247,8 @@ def trust(r, cfg):
     for path in [p for p in paths if os.path.isdir(p)]:
         found = factory_trust.state(path)
         if found == "trusted":
-            r.ok(f"Claude Code trusts {path}")
+            main = factory_trust.inherited_from(path)
+            r.ok(f"Claude Code trusts {path}" + (f" (a git worktree of {main}, which is trusted; Claude Code writes no entry for a worktree)" if main else ""))
         elif found == "untrusted":
             r.fix(f"Claude Code does not trust {path}", f"it would ignore the allow list in .claude/settings.json and an unattended "
                   f"run would stop at its first command: run `cd {path} && claude` yourself and answer yes to the trust question "

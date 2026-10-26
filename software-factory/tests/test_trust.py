@@ -37,6 +37,43 @@ def trust_lines(p):
     return [l for l in p.stdout.splitlines() if "trust" in l.lower() and l.split()[0] in ("ok", "fix", "note")]
 
 
+def git_worktree(d, wt):
+    import subprocess
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+    subprocess.run(["git", "commit", "-q", "--allow-empty", "-m", "start"], cwd=d, env=env, check=True)
+    subprocess.run(["git", "worktree", "add", "-q", "--detach", wt], cwd=d, env=env, check=True)
+
+
+def test_a_git_worktree_of_a_trusted_main_repo_is_trusted_and_the_check_says_so():
+    # #246: the agent folders sit beside the project, not under it, and Claude Code wrote no trust entry for them.
+    d = os.path.realpath(doc.project(cfg={"agents": ["taytu"]}))
+    env = {**doc.machine(), "FACTORY_AGENTS": "taytu"}
+    wt = d + "-agents/taytu"
+    git_worktree(d, wt)
+    path = claude_json(env["HOME"], [d])
+    before = open(path).read()
+    p = doc.doctor(d, env)
+    lines = trust_lines(p)
+    assert not [l for l in lines if l.startswith("fix")], p.stdout
+    assert [l for l in lines if l.startswith("ok") and wt in l and "worktree" in l and d in l], p.stdout
+    assert open(path).read() == before, "read only"
+
+
+def test_a_git_worktree_of_an_untrusted_main_repo_is_not_trusted():
+    d = os.path.realpath(doc.project(cfg={"agents": ["taytu"]}))
+    env = {**doc.machine(), "FACTORY_AGENTS": "taytu"}
+    wt = d + "-agents/taytu"
+    git_worktree(d, wt)
+    claude_json(env["HOME"], [])
+    p = doc.doctor(d, env)
+    assert len([l for l in trust_lines(p) if l.startswith("fix")]) == 2, p.stdout  # the project and its worktree
+
+
+def test_a_plain_folder_beside_a_trusted_project_is_still_untrusted():
+    p, d, wt, env = doctor(trusted=["project"], worktree=True)  # worktree=True makes a plain folder, not a git worktree
+    assert [l for l in trust_lines(p) if l.startswith("fix") and wt in l], p.stdout
+
+
 def test_doctor_says_ok_for_a_trusted_project_folder():
     p, d, wt, env = doctor(trusted=["project"])
     assert [l for l in trust_lines(p) if l.startswith("ok")], p.stdout

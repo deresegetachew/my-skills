@@ -47,6 +47,27 @@ def labels_of(value):
     return [l for l in parsed if isinstance(l, str)] if isinstance(parsed, list) else []
 
 
+def wait_for_runner(pool, need):
+    """The runner pool again, until a runner with the labels is online or the wait is over (#246). A heavy runner's
+    container restarts after every job, and for a few seconds it has no registration; doctor must not report that gap.
+    FACTORY_DOCTOR_RUNNER_WAIT seconds (default 30), looking every FACTORY_DOCTOR_RUNNER_STEP seconds (default 5)."""
+    import time
+    try:
+        limit, step = float(os.environ.get("FACTORY_DOCTOR_RUNNER_WAIT", "30")), float(os.environ.get("FACTORY_DOCTOR_RUNNER_STEP", "5"))
+    except ValueError:
+        limit, step = 30.0, 5.0
+    waited = 0.0
+    while True:
+        online = [x for x in pool if x.get("status") == "online" and need <= {(l.get("name") or "").lower() for l in x.get("labels", [])}]
+        if online or waited >= limit or step <= 0:
+            return online, pool
+        time.sleep(step)
+        waited += step
+        found = get(REPO + "actions/runners")
+        if isinstance(found, dict) and isinstance(found.get("runners"), list):
+            pool = found["runners"]
+
+
 def runners(r, variables):
     wanted = {v["name"]: v.get("value") for v in variables if isinstance(v, dict) and v.get("name") in VARIABLES}
     if not wanted:
@@ -65,7 +86,7 @@ def runners(r, variables):
                    f"{labels} is online: check Settings > Actions > Runners")
             continue
         need = {l.lower() for l in labels}
-        online = [x for x in pool if x.get("status") == "online" and need <= {(l.get("name") or "").lower() for l in x.get("labels", [])}]
+        online, pool = wait_for_runner(pool, need)
         if online:
             r.ok(f"{name} {wanted[name]}: runner {online[0].get('name')} is online")
         else:

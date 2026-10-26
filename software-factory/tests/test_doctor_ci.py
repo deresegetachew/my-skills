@@ -32,6 +32,11 @@ if method != "GET":
 db = json.load(open(os.environ["GH_DB"]))
 page2 = re.search(r"[&?]page=([2-9])", path)
 key = re.sub(r"[&?]page=\d+", "", re.sub(r"[&?]per_page=100", "", path))
+if key.endswith("actions/runners") and "runners_seq" in db:  # answers in turn, the last one for ever (a restarting runner)
+    n_file = os.environ["GH_DB"] + ".n"
+    n = int(open(n_file).read()) if os.path.exists(n_file) else 0
+    open(n_file, "w").write(str(n + 1))
+    print(json.dumps(db["runners_seq"][min(n, len(db["runners_seq"]) - 1)])); sys.exit(0)
 if key in db:
     print(json.dumps([] if page2 else db[key])); sys.exit(0)
 if key.startswith("repos/{owner}/{repo}/issues?"):
@@ -59,7 +64,7 @@ def task_issue(n, agent):
     return {"number": n, "title": f"Task {n}", "state": "open", "body": "", "labels": [{"name": "factory:in-progress"}, {"name": "agent:" + agent}]}
 
 
-def run(db=None, cfg=None, files=None, runs=OK_RUN):
+def run(db=None, cfg=None, files=None, runs=OK_RUN, extra_env=None):
     d = doc.project(cfg={"agents": ["taytu"], **(cfg or {})})
     for name, text in (files or {}).items():
         os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
@@ -74,7 +79,8 @@ def run(db=None, cfg=None, files=None, runs=OK_RUN):
         if tool != "gh":
             os.symlink(os.path.join(env["PATH"], tool), os.path.join(bin_, tool))
     json.dump({"user": {"login": "me"}, "repos/{owner}/{repo}": {}, P + "actions/runs?branch=main&per_page=1": runs, **(db or {})}, open(os.path.join(scratch, "db.json"), "w"))
-    env.update({"PATH": bin_, "GH_DB": os.path.join(scratch, "db.json"), "GH_LOG": os.path.join(scratch, "log"), "FACTORY_AGENTS": "taytu"})
+    env.update({"PATH": bin_, "GH_DB": os.path.join(scratch, "db.json"), "GH_LOG": os.path.join(scratch, "log"), "FACTORY_AGENTS": "taytu",
+                "FACTORY_DOCTOR_RUNNER_WAIT": "0", **(extra_env or {})})  # 0: no waiting for a restarting runner, unless a test says
     open(env["GH_LOG"], "w").close()
     p = doc.doctor(d, env)
     return p, open(env["GH_LOG"]).read()
@@ -115,6 +121,22 @@ def test_an_online_runner_with_the_label_is_ok_and_github_hosted_needs_no_runner
 def test_runners_gh_cannot_read_are_a_note_not_a_fix():
     p, log = run(variables(CI_RUNS_ON='["self-hosted","x-local"]'))  # no runners answer: needs admin
     assert mine(p, "note", "runner") and not mine(p, "fix", "CI_RUNS_ON"), p.stdout
+
+
+def test_a_runner_that_is_back_within_the_wait_is_not_reported():
+    # #246: the heavy runner container restarts after every job; doctor ran in the gap and reported a fix.
+    wanted = variables(CI_RUNS_ON='["self-hosted","x-local"]')
+    gap, back = {"runners": []}, {"runners": [runner("a", ["self-hosted", "x-local"])]}
+    p, log = run({**wanted, "runners_seq": [gap, gap, back]}, extra_env={"FACTORY_DOCTOR_RUNNER_WAIT": "5", "FACTORY_DOCTOR_RUNNER_STEP": "0.1"})
+    assert mine(p, "ok", "CI_RUNS_ON ") and not mine(p, "fix", "CI_RUNS_ON"), p.stdout
+    assert log.count("actions/runners") == 3, log
+
+
+def test_a_runner_that_stays_missing_past_the_wait_is_still_a_fix():
+    wanted = variables(CI_RUNS_ON='["self-hosted","x-local"]')
+    p, log = run({**wanted, "runners_seq": [{"runners": []}]}, extra_env={"FACTORY_DOCTOR_RUNNER_WAIT": "0.5", "FACTORY_DOCTOR_RUNNER_STEP": "0.1"})
+    assert mine(p, "fix", "CI_RUNS_ON") and "x-local" in mine(p, "fix", "CI_RUNS_ON")[0], p.stdout
+    assert log.count("actions/runners") > 1, "it looked again before giving up"
 
 
 # --- (2) the newest run on main ----------------------------------------------------------------------------------------
