@@ -44,10 +44,20 @@ def test_a_python_project_with_unittest_tests_gets_the_python_workflow_and_a_tes
     wf = read(d, WORKFLOW)
     assert "pnpm" not in wf and "setup-python" in wf and "commands" in wf and "Factory guard" in wf, wf
     c = commands(d)
-    assert c["test"] == "python3 -m unittest discover", c
+    assert c["test"] == "python3 -m unittest discover -s tests", c
     assert not (c["install"] or c["typecheck"] or c["lint"] or c["build"]), c
     assert "Python" in out and "ci.yml" in out, out
     assert not os.path.exists(os.path.join(d, ".github/workflows/ci-python.yml.template")), "the template itself is not installed"
+
+
+def test_the_test_command_runs_at_least_one_test_when_tests_has_no_init_file():
+    # Python 3.11+: `unittest discover` from the top does not enter a folder without __init__.py (#244)
+    for files in ({"tests/test_textkit.py": UNITTEST}, {"tests/unit/test_textkit.py": UNITTEST},
+                  {"tests/test_a.py": UNITTEST, "tests/sub/test_b.py": UNITTEST}):
+        d = project({"src/textkit.py": "x = 1\n", **files})
+        install(d)
+        p = subprocess.run(commands(d)["test"], shell=True, cwd=d, capture_output=True, text=True)
+        assert p.returncode == 0 and "NO TESTS RAN" not in p.stderr and "Ran 0 tests" not in p.stderr, (files, p)
 
 
 def test_python_tests_that_are_not_unittest_leave_the_test_command_empty_and_say_so():

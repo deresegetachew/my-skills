@@ -43,6 +43,7 @@ def project(files=None, cfg=None):
     json.dump(cfg or {"agents": ["menelik", "taytu"]}, open(os.path.join(d, ".claude", "factory.json"), "w"))
     json.dump({"hooks": {}}, open(os.path.join(d, ".claude", "settings.json"), "w"))
     for name, text in (files or {}).items():
+        os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
         open(os.path.join(d, name), "w").write(text)
     return d
 
@@ -186,6 +187,30 @@ def test_a_default_branch_gh_cannot_tell_is_no_fix():
     d = project(cfg={"agents": ["taytu"], "mainBranch": "alpha-test"})
     p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})  # gh prints nothing
     assert not any("main-branch" in l for l in lines(p, "fix")), p.stdout
+
+
+NOINIT = "import unittest\n\nclass T(unittest.TestCase):\n    def test_a(self):\n        pass\n"
+
+
+def test_a_test_command_that_runs_no_tests_is_a_fix(cmd="python3 -m unittest discover"):
+    d = project({"tests/test_a.py": NOINIT}, cfg={"agents": ["taytu"], "commands": {"test": cmd}})
+    p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})
+    fixes = [l for l in lines(p, "fix") if "no-tests-ran" in l]
+    assert p.returncode == 1 and fixes, p.stdout
+    assert "NO TESTS RAN" in fixes[0] and "commands.test" in fixes[0] and "Fix:" in fixes[0], fixes
+
+
+def test_a_test_command_that_runs_a_test_is_ok():
+    d = project({"tests/test_a.py": NOINIT}, cfg={"agents": ["taytu"], "commands": {"test": "python3 -m unittest discover -s tests"}})
+    p = doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})
+    assert not any("no-tests-ran" in l for l in lines(p, "fix")), p.stdout
+    assert any("commands.test" in l for l in lines(p, "ok")), p.stdout
+
+
+def test_a_test_command_that_is_not_python_is_not_run():
+    d = project(cfg={"agents": ["taytu"], "commands": {"test": "touch ran.txt"}})
+    doctor(d, {**machine(), "FACTORY_AGENTS": "taytu"})
+    assert not os.path.exists(os.path.join(d, "ran.txt"))
 
 
 if __name__ == "__main__":

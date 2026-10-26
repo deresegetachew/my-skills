@@ -2458,11 +2458,11 @@ Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is
   `setup.py`, `requirements*.txt`, or `tests/test_*.py`) mean Python: `ci.yml` is the Python template
   (`kit/.github/workflows/ci-python.yml.template`, which runs `commands.install` and `commands.test`), the pnpm
   `commands.*` are emptied, `commands.install` is `python3 -m pip install -r requirements.txt` when that file exists,
-  and `commands.test` is `python3 -m unittest discover` only when the tests are unittest-style (otherwise it stays
+  and `commands.test` is `python3 -m unittest discover -s <the folder of the tests>` only when the tests are unittest-style (otherwise it stays
   empty and the output says to set it). Anything else keeps the pnpm template and the output names the files to edit.
   The output says which it chose. An existing `ci.yml` is kept as it is. The first install from a release
   (`factory update <tag>`, no `.claude/factory.json` yet) does the same, with the detector from the release's own
-  `hooks/factory_stack.py`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` does not yet check that the
+  `hooks/factory_stack.py`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` runs a Python `commands.test` once and fails with `no-tests-ran` when it ran 0 tests (#244). It does not yet check that the
   workflow matches `factory.json` (follow-up of #199).
 - **Adds `tmp/` and `__pycache__/`** to `.gitignore`.
 

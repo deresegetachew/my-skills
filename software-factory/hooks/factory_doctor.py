@@ -264,6 +264,32 @@ def ci(r, cfg):
     factory_doctor_ci.checks(r, cfg)
 
 
+ZERO_TESTS = re.compile(r"NO TESTS RAN|Ran 0 tests|collected 0 items|no tests ran", re.I)
+
+
+def test_command(r, cfg):
+    """commands.test runs at least one test (#244). Only a Python test command (unittest or pytest) is run, once, with
+    a short timeout, so doctor stays quick and offline-safe; a command that fails for another reason is left to CI."""
+    command = (cfg.get("commands") or {}).get("test", "")
+    if not re.search(r"unittest|pytest", command):
+        return
+    try:
+        p = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        r.note("commands.test", "skipped: it took more than 30 seconds, so doctor did not wait for it")
+        return
+    except OSError as e:
+        r.note("commands.test", f"skipped: could not run it ({e})")
+        return
+    if ZERO_TESTS.search(p.stdout + p.stderr):
+        r.fix("no-tests-ran", f"`{command}` ran 0 tests (NO TESTS RAN), so CI would be red on the first pull request. "
+              "Fix: point commands.test at the folder the tests are in, for example "
+              "`factory settings set commands.test \"python3 -m unittest discover -s tests\"`, or add an empty "
+              "tests/__init__.py")
+    else:
+        r.ok("commands.test runs tests")
+
+
 def factory(r, cfg):
     if shutil.which("factory"):
         r.ok("`factory` is on your PATH")
@@ -512,6 +538,7 @@ def main():
         permissions(r, cfg)
         trust(r, cfg)
         ci(r, cfg)
+        test_command(r, cfg)
         roles(r, cfg)
         manager(r, cfg)
         turbo(r, cfg)

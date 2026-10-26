@@ -986,7 +986,7 @@ def test_a_first_release_install_in_a_python_project_gets_the_python_workflow_an
     assert "python template" in open(os.path.join(d, ".github/workflows/ci.yml")).read()
     assert not os.path.exists(os.path.join(d, ".github/workflows/ci-python.yml.template"))
     c = json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]
-    assert c["test"] == "python3 -m unittest discover" and not c["install"] and not c["build"], c
+    assert c["test"] == "python3 -m unittest discover -s tests" and not c["install"] and not c["build"], c
     assert "Stack: Python" in out, out
     # later updates leave the project's workflow and commands alone
     open(os.path.join(d, ".github/workflows/ci.yml"), "a").write("# mine\n")
@@ -994,7 +994,7 @@ def test_a_first_release_install_in_a_python_project_gets_the_python_workflow_an
     gh.add("1.1.0")
     assert fac(d, env, "update")[0] == 0
     assert open(os.path.join(d, ".github/workflows/ci.yml")).read().endswith("# mine\n")
-    assert json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]["test"] == "python3 -m unittest discover"
+    assert json.load(open(os.path.join(d, ".claude/factory.json")))["commands"]["test"] == "python3 -m unittest discover -s tests"
 
 
 def test_code_in_a_release_is_never_run_by_the_update():

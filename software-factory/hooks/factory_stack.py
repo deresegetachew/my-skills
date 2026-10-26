@@ -24,14 +24,26 @@ def is_python(root):
     return bool(python_tests(root))
 
 
+def uses_unittest_file(path):
+    try:
+        return bool(re.search(r"unittest\.TestCase|^\s*(import unittest|from unittest)", open(path, encoding="utf-8").read(), re.M))
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
 def uses_unittest(root):
-    for path in python_tests(root):
-        try:
-            if re.search(r"unittest\.TestCase|^\s*(import unittest|from unittest)", open(path, encoding="utf-8").read(), re.M):
-                return True
-        except (OSError, UnicodeDecodeError):
-            continue
-    return False
+    return any(uses_unittest_file(p) for p in python_tests(root))
+
+
+def unittest_dir(root):
+    """The folder to discover from (relative to root). Python 3.11+ skips a folder with no __init__.py when
+    discovering from the top, so the command names it (#244): tests/ when a test sits right in it, else the
+    folder of the first unittest-style test."""
+    found = [p for p in python_tests(root) if uses_unittest_file(p)]
+    top = os.path.join(root, "tests")
+    if any(os.path.dirname(p) == top for p in found):
+        return "tests"
+    return os.path.relpath(os.path.dirname(found[0]), root).replace(os.sep, "/")
 
 
 def detect(root):
@@ -43,7 +55,7 @@ def detect(root):
     if glob.glob(os.path.join(root, "requirements.txt")):
         cmds["install"] = "python3 -m pip install -r requirements.txt"
     if uses_unittest(root):
-        cmds["test"] = "python3 -m unittest discover"
+        cmds["test"] = "python3 -m unittest discover -s " + unittest_dir(root)
     else:
         notes.append("no unittest-style tests found, so commands.test is empty: set it in .claude/factory.json "
                      "(for example `python3 tests/test_x.py` or `python3 -m pytest`).")
