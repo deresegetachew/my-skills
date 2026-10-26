@@ -227,6 +227,26 @@ def permissions(r, cfg):
               "(or to .claude/settings.json in a project that takes the kit by link)")
 
 
+def trust(r, cfg):
+    """Claude Code ignores the whole allow list in a folder it has not been told to trust (#180). Reads the flag in
+    ~/.claude.json for the project folder and each agent worktree that exists; never writes it or prints the file."""
+    import factory_trust
+    top = os.path.realpath(os.path.dirname(os.path.abspath(run("git", "rev-parse", "--git-common-dir")[1])))
+    paths = [top] + [os.path.join(top + "-agents", n) for n in sorted(cfg.get("agents") or []) if isinstance(n, str)]
+    for path in [p for p in paths if os.path.isdir(p)]:
+        found = factory_trust.state(path)
+        if found == "trusted":
+            r.ok(f"Claude Code trusts {path}")
+        elif found == "untrusted":
+            r.fix(f"Claude Code does not trust {path}", f"it would ignore the allow list in .claude/settings.json and an unattended "
+                  f"run would stop at its first command: run `cd {path} && claude` yourself and answer yes to the trust question "
+                  "(the factory never sets the flag)")
+        else:
+            r.note("Claude Code trust", "~/.claude.json has no folder list to check yet: run `claude` in the project once and answer "
+                   "the trust question; do the same in each agent worktree")
+            return
+
+
 def factory(r, cfg):
     if shutil.which("factory"):
         r.ok("`factory` is on your PATH")
@@ -412,6 +432,7 @@ def main():
         factory(r, cfg)
         models(r, cfg)
         permissions(r, cfg)
+        trust(r, cfg)
         roles(r, cfg)
         manager(r, cfg)
         turbo(r, cfg)
