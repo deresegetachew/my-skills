@@ -90,9 +90,21 @@ list_files() {
   fi | sort -u
 }
 
+# The project's stack on a first install (#199): node (package.json), python, or unknown. Only python changes what is
+# installed: its CI workflow template stands in for the pnpm one, and `commands.*` are filled in below.
+stack=node
+if [ "$setup" = 1 ]; then
+  stack="$(python3 "$here/hooks/factory_stack.py" detect "$dst" | python3 -c 'import json,sys;print(json.load(sys.stdin)["stack"])')"
+fi
+PY_WORKFLOW=./.github/workflows/ci-python.yml.template
 list_files | while read -r f; do
+  [ "$f" != "$PY_WORKFLOW" ] || continue  # a template to choose from, never a workflow of its own
   target="$dst/${f#./}"
   from="$src/${f#./}"
+  python_ci=0
+  if [ "$setup" = 1 ] && [ "$stack" = python ] && [ "$f" = ./.github/workflows/ci.yml ] && [ ! -e "$target" ]; then
+    from="$src/${PY_WORKFLOW#./}"; python_ci=1
+  fi
   if [ "$layout" = new ]; then m="$(moved_to "$f")"; [ -z "$m" ] || from="$m"; fi
   # The folder is made only when a file is put in it (#152): a template the project left out must not leave an empty docs/.
   if [ "$link" = 1 ] && is_engine "$f"; then
@@ -114,7 +126,8 @@ list_files | while read -r f; do
     :  # a template the project chose not to keep (or not yet): leave it out
   else
     mkdir -p "$(dirname "$target")"; cp -L "$from" "$target"
-    echo "added    ${f#./}"
+    if [ "$python_ci" = 1 ]; then echo "added    ${f#./} (the Python template: it runs commands.install and commands.test from .claude/factory.json)"
+    else echo "added    ${f#./}"; fi
   fi
 done
 # Never change files in the kit itself: with --link it is the project's submodule.
@@ -128,6 +141,8 @@ grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignor
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 if [ "$setup" = 1 ]; then
   echo
+  python3 "$here/hooks/factory_stack.py" apply "$dst" >/dev/null  # Python: the commands.* to match
+  python3 "$here/hooks/factory_stack.py" lines "$dst"
   echo "Next: fill in .claude/factory.json, write CLAUDE.md from CLAUDE.factory.md, write docs/build-plan.md."
   echo "Then run ./factory help (and ./factory install-shim once, to type just: factory ...)."
 fi

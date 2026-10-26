@@ -2294,6 +2294,7 @@ software-factory/
     factory_lessons.py                  the curated lessons file: show, check, suggest, add, prune
     factory_manager_claims.py           several dev managers at once: review and question claims with a lease
     factory_rereview.py                 incremental re-review: the delta since a reviewer's last round
+    factory_stack.py                    the project's stack on a first install (node, python, unknown) and the Python CI's command runner
     pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
     check.py                            Stop: typecheck and tests
     factory_stop.py                     Stop: closes a finished session in `factory loop -i`
@@ -2419,6 +2420,17 @@ Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is
 - **Copies the templates** the first time only (when there's no `.claude/factory.json` yet): `factory.json`, the
   notes folder, `CLAUDE.factory.md`, the docs templates, the CI workflow, the issue template and `CODEOWNERS`. It
   never overwrites a file that's there.
+- **Tells the stack on that first install** (#199, `hooks/factory_stack.py`). A `package.json` means Node: the pnpm
+  `ci.yml` and the `commands.*` of the template stay. No `package.json` and Python files (`pyproject.toml`,
+  `setup.py`, `requirements*.txt`, or `tests/test_*.py`) mean Python: `ci.yml` is the Python template
+  (`kit/.github/workflows/ci-python.yml.template`, which runs `commands.install` and `commands.test`), the pnpm
+  `commands.*` are emptied, `commands.install` is `python3 -m pip install -r requirements.txt` when that file exists,
+  and `commands.test` is `python3 -m unittest discover` only when the tests are unittest-style (otherwise it stays
+  empty and the output says to set it). Anything else keeps the pnpm template and the output names the files to edit.
+  The output says which it chose. An existing `ci.yml` is kept as it is. The first install from a release
+  (`factory update <tag>`, no `.claude/factory.json` yet) does the same, with the detector from the release's own
+  `hooks/factory_stack.py`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` does not yet check that the
+  workflow matches `factory.json` (follow-up of #199).
 - **Adds `tmp/` and `__pycache__/`** to `.gitignore`.
 
 Without `--link` (`bash install.sh <project dir>`), it copies everything instead, for a project without the
