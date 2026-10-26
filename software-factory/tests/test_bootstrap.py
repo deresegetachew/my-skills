@@ -4,7 +4,8 @@ run that changes nothing, the refusals, and the sandbox checks.  python3 softwar
 
 apt-get, adduser, usermod, gpasswd, chmod, loginctl, systemctl, nft, ss, resolvectl, dpkg-query, id, docker, curl, sudo,
 ip and journalctl are fakes on PATH that keep their state in files; system paths live under FACTORY_BOOTSTRAP_ROOT
-(a temp folder). What apt, systemd and nftables really do on a machine can't be tested here."""
+(a temp folder). What apt, systemd and nftables really do on a machine can't be tested here.
+The guard and sops tests are in netguard.test.ts (#252)."""
 import contextlib, io, json, os, shutil, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -139,42 +140,8 @@ def machine_args(*extra):
     return ["machine", "--user", USER, *extra]
 
 
-def test_the_guard_rules_have_the_uid_the_resolver_the_allow_list_and_the_blocked_ports():
-    text = G.render_rules(1001, ["192.168.2.1"], ["192.168.2.10:5432"], ["3000", "45876"], ["4100-4199", "5440"])
-    assert "meta skuid 1001 ip daddr 192.168.2.1 meta l4proto { tcp, udp } th dport 53 accept" in text
-    assert "meta skuid 1001 ip daddr 192.168.2.10 tcp dport 5432 accept" in text
-    assert "100.64.0.0/10" in text and "169.254.0.0/16" in text and "fd7a:115c:a1e0::/48" in text
-    assert "tcp dport { 3000, 45876 }" in text and "tcp dport { 4100-4199, 5440 }" in text
-    assert text.index("192.168.2.10 tcp dport 5432 accept") < text.index("log prefix \"FACTORY-BLOCK \" drop")  # allowed first
-    assert G.render_rules(1001, ["192.168.2.1"], [], [], []) == G.render_rules(1001, ["192.168.2.1"], [], [], [])
-    none = G.render_rules(1001, [], [], [], [], egress="none")
-    assert 'oifname != "lo"' in none and "192.168.0.0/16" not in none
 
 
-def test_bad_guard_inputs_are_refused():
-    for bad in (lambda: G.render_rules(0), lambda: G.render_rules("x"), lambda: G.render_rules(1001, egress="open"),
-                lambda: G.render_rules(1001, allow_hosts=["router.local"]), lambda: G.render_rules(1001, block_loopback_ports=["99999"]),
-                lambda: G.render_rules(1001, allow_hosts=["2001:db8::1"])):
-        try:
-            bad()
-        except G.GuardError:
-            continue
-        raise AssertionError("accepted a bad input")
-
-
-def test_the_resolver_is_read_not_hardcoded_and_the_local_stub_is_skipped():
-    assert G.resolvers_from("nameserver 127.0.0.53\nsearch lan\n", "Link 2 (eth0): 10.1.1.1 10.1.1.1") == ["10.1.1.1"]
-    assert G.resolvers_from("nameserver 192.168.0.1\nnameserver 8.8.8.8\n") == ["192.168.0.1", "8.8.8.8"]
-
-
-def test_ports_other_users_listen_on_are_found_and_the_sandbox_users_own_are_not():
-    ss = ("LISTEN 0 4096 127.0.0.1:3000 0.0.0.0:* users:((\"web\",pid=5,fd=3)) uid:1000 ino:1\n"
-          "LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* uid:0 ino:2\n"
-          "LISTEN 0 4096 127.0.0.1:2375 0.0.0.0:* uid:4242 ino:3\n"
-          "LISTEN 0 4096 127.0.0.53:53 0.0.0.0:* uid:101 ino:4\n"
-          "LISTEN 0 4096 192.168.2.9:8080 0.0.0.0:* uid:1000 ino:5\n"
-          "LISTEN 0 4096 [::1]:631 [::]:* uid:0 ino:6\n")
-    assert G.listening_ports_not_owned(ss, 4242) == [22, 631, 3000]
 
 
 def test_an_agent_session_cannot_run_bootstrap_but_can_read_its_status():
@@ -323,43 +290,6 @@ def test_a_laptop_stays_awake_without_being_asked_and_can_opt_out():
         assert "Keep the machine awake" in m.run(*machine_args())[1]
         assert "Keep the machine awake" not in m.run(*machine_args("--no-keep-awake"))[1]
 
-
-def test_sops_is_installed_only_when_its_checksum_matches():
-    import hashlib
-    blob = b"#!/bin/sh\necho sops\n"
-    sums = hashlib.sha256(blob).hexdigest()
-
-    def fake(good):
-        def get(url, timeout=60):
-            class R:
-                def __enter__(s): return s
-                def __exit__(s, *a): return False
-                def read(s):
-                    if url.endswith("/releases/latest"):
-                        return json.dumps({"tag_name": "v3.9.0"}).encode()
-                    if url.endswith("checksums.txt"):
-                        return f"{sums if good else '0' * 64}  sops-v3.9.0.linux.amd64\n".encode()
-                    return blob
-            return R()
-        return get
-    import platform
-    real_machine, real_urlopen = platform.machine, M.urllib.request.urlopen
-    platform.machine = lambda: "x86_64"
-    try:
-        with Machine() as m:
-            M.urllib.request.urlopen = fake(False)
-            try:
-                M.install_sops()
-                raise AssertionError("installed a download with the wrong checksum")
-            except M.BootstrapError as e:
-                assert e.code == "checksum"
-            assert not os.path.exists(M.P("/usr/local/bin/sops"))
-            M.urllib.request.urlopen = fake(True)
-            M.install_sops()
-            assert open(M.P("/usr/local/bin/sops"), "rb").read() == blob
-            assert os.stat(M.P("/usr/local/bin/sops")).st_mode & 0o777 == 0o755
-    finally:
-        platform.machine, M.urllib.request.urlopen = real_machine, real_urlopen
 
 
 def test_status_matches_reality_and_shows_what_drifted():
