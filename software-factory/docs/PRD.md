@@ -1,7 +1,9 @@
 # PRD: the software factory
 
-Status: for the owner to review and merge. Written 25 Oct 2026 against `main` at commit `b956dbf`. It replaces the
-draft in PR #39 (see [What happened to PR #39](#what-happened-to-pr-39)). Task issue: #150.
+Status: merged (#151). Written 25 Oct 2026 against `main` at commit `b956dbf`; the status wording (what is built, what is
+in a pull request, what is published) was brought up to date on 26 Oct 2026 against `main` at commit `e590ce2` and the
+releases page (#187). It replaces the draft in PR #39 (see [What happened to PR #39](#what-happened-to-pr-39)). Task
+issues: #150, #187.
 
 This is the scope of the factory: what it is for, who uses it, what is decided, what is in and out, and what is later
 or open. The tasks are GitHub issues, in the order of #114. How the factory works and every setting is in
@@ -14,13 +16,14 @@ here is a number we made up. A line that starts `> Open question:` is not decide
 - **Built**: in `main` today.
 - **PR open (#n)**: written, in a pull request that is not merged yet.
 - **Decided**: the owner chose it, nothing is built yet.
-- **Proposal**: written in an issue for the owner to correct; he has not agreed it.
+- **Proposal**: written in an issue for the owner to correct; he has not agreed it. The code for it may already be in
+  `main`; the story's scope is still his to correct.
 
 ## 1. What the factory is
 
 The factory turns a repo into a software factory. Coding agents run on the owner's machines and build the project one
 task at a time: failing tests first, then the code, then reviewer subagents, then a pull request. A dev manager reviews
-and merges, answers the agents' questions and keeps them busy. A product owner role is planned for product questions.
+and merges, answers the agents' questions and keeps them busy. A product owner role handles product questions (the runner, the skill, `factory prd` and the sign-off queue are built: #101, #102).
 Hooks, CI and GitHub's branch protection stop work from merging when it should not. Only decisions that are the owner's
 reach the owner (README, intro; #95).
 
@@ -90,9 +93,13 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
   open pull request (a must-fix naming its head commit) comes first; then a new task, by milestone and then issue
   number, skipping any whose `Depends on` is still open. *Built.* (README "Tasks")
 - **B2.** As a builder, I claim an issue so that two agents, on one machine or on two, never build the same task. The
-  earliest claim wins; the loser picks again. *Built.* (README "Issues mode"; #45)
+  earliest claim wins; the loser picks again. When a loop run ends, claims that have no branch or pull request are given
+  back, and `factory next` says which issue a down agent still holds. *Built.* (README "Issues mode"; #45, #191, #192)
 - **B3.** As a builder, every task starts in a fresh Claude session, so no task carries the last one's context.
-  `factory loop` runs unattended; `factory loop -i` opens a session the owner can watch and type into. *Built.* (#56)
+  `factory loop` runs unattended; `factory loop -i` opens a session the owner can watch and type into. An unattended run
+  gets `--permission-mode` from the `permissionMode` setting (default `acceptEdits`), `factory doctor` says `fix` when a
+  headless run would stall, and a headless loop in a folder Claude Code does not trust stops before it spends tokens.
+  *Built.* (#56, #179, #180, #193)
 - **B4.** As a builder, I write failing tests first (`test-writer`), build, ask the reviewers, and open one small pull
   request with `Closes #<n>` and the tests. *Built.* (README "Reviews and gates"; `CLAUDE.md`)
 - **B5.** As a builder, the PR gate only lets me open a ready PR when the reviewer passed this exact commit, `factory
@@ -121,28 +128,28 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 ### 4.2 Dev manager (orchestrator and one-item sub-managers)
 
 - **M1.** As the owner, the dev manager's loop is a script with **no model**. Each cycle it runs `factory precheck` and
-  starts work only when something needs a manager, so an idle cycle costs no tokens. *Single pass built
-  (`factory manage-tick`, #143); the orchestrator is PR open (#137, #97 with #109).*
+  starts work only when something needs a manager, so an idle cycle costs no tokens. *Built: the single pass
+  (`factory manage-tick`, #143) and the orchestrator (#137; #97 with #109).*
 - **M2.** As the orchestrator, for each item that needs a manager (a PR, a question) I start a **one-item
   sub-manager**: `claude -p` (or `-i` when the owner opens it) on the manager settings profile, with the item's fact
-  sheet, its note and a lease. It exits when its item is done. *PR open (#137).* (#97)
+  sheet, its note and a lease. It exits when its item is done. *Built.* (#137; #97)
 - **M3.** As the owner, at most 2 sub-managers run at once, as the setting `manager.maxSubManagers`; the rest wait for
-  the next cycle. *Decided, recorded; PR open (#137).* (#97)
+  the next cycle. *Decided, recorded; built (#137).* (#97)
 - **M4.** As the owner, the orchestrator does not start builders. Builders keep their own `factory loop`, so a builder
   fault cannot stop the manager and the reverse. *Decided, recorded.* (#97)
 - **M5.** As a sub-manager, I am one session per item. My memory is a note comment on the task issue (on the PR when there
   is no issue); it is not a cache. `factory:in-progress` opens the thread, `factory:in-review` starts the review
-  sub-manager, closing the issue ends the thread. *Decided, recorded; PR open (#137).* (#97)
+  sub-manager, closing the issue ends the thread. *Decided, recorded; built (#137).* (#97)
 - **M6.** As the owner, I am told through GitHub itself: a `factory-question` comment or an item on the owner-queue
   issue that mentions me, which reaches my phone through GitHub notifications. No new service. *Decided, recorded.* (#97)
 - **M7.** As the owner, if items wait longer than N minutes (default 30) with no dev manager activity, a dead-man's
   switch starts a fresh manager and tells me which PRs wait, on the same channel as M6. *Decided (#109, section 5 kept);
-  PR open (#137).*
+  built (#137).*
 - **M8.** As the orchestrator, what "needs attention" is recomputed from GitHub state every cycle, so a missed event hides
   nothing, and a late wake or two managers never review the same head twice. The checks are in #109: a PR head with no
   `pr-watch` marker, an unanswered question, a must-fix or red CI or conflict on a quiet PR, an approved green PR not yet
   merged, a PR waiting too long on the PO or owner, an agent down or idle, a light CI job queued too long. *Decided
-  (#109); PR open (#137).*
+  (#109); built (#137).*
 - **M9.** As a manager, my standing rules are a skill (`manage-pass`), not a memory: the table of what I do alone and what
   I ask first, the pass order, the exact markers, the hold label and the sha-pinned merge. The project adds to it in its
   own role folder. *Built.* (#96)
@@ -161,10 +168,10 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
   and release quiet issues after checking the agent is gone. *Built.* (README "Live agents")
 - **M15.** As the owner, I reach any item the manager is working on with `factory dev-manager loop -i` from any machine
   with the factory installed, or from the Claude app through Remote Control. `factory follow` lists the one-item
-  sub-managers next to the agents. *Built (`-i`; `factory follow` lists sessions named `<manager>-<item>`); the orchestrator that starts them is PR open (#137).* (#97, #106)
+  sub-managers next to the agents. *Built (`-i`; `factory follow` lists sessions named `<manager>-<item>`); the orchestrator that starts them is built (#137).* (#97, #106)
 - **M16.** As the owner, the dev manager is handed over from the cloud session to terminal managers without a gap and
   without losing state, and DEV-MANAGER.md is rewritten around the orchestrator. Steps 2 to 5 of the handover run on my
-  computer and change my schedule, so they are mine. *PR open (#147); owner steps.* (#100)
+  computer and change my schedule, so they are mine. *DEV-MANAGER.md and `factory handover` are built (#147); steps 2 to 5 are the owner's, and whether they are done is open.* (#100)
 
 ### 4.3 Product owner
 
@@ -173,39 +180,39 @@ until he agrees them."
 
 - **P1.** As the owner, the PO is a generic role, usable in any project: `factory product-owner [name] loop [-i]`, run
   like the other roles on any machine. The project supplies a role folder; the factory supplies the skill. *Runner and
-  role folder built (#102); the `product-pass` skill is PR open (#142).*
+  role folder built (#102); the `product-pass` skill is built (#142).*
 - **P2.** As the PO, I own the PRD (scope, stories, numbering), task order and milestones as proposals, answers to
   escalated product questions, product decisions recorded in the project, and the sign-off queue. I never review or merge
-  PRs, answer technical questions or touch CI. I never decide scope without the owner's yes. *Proposal; PR open (#142).*
+  PRs, answer technical questions or touch CI. I never decide scope without the owner's yes. *Proposal; built (#142).*
   (#101)
 - **P3.** As the owner, `-i` is the PO's main mode: I chat with the PRD in a session that loads the PRD, designs and
-  queues through its `reads.md`. A pass without `-i` only triages and writes a digest and proposals. *Proposal; PR open
+  queues through its `reads.md`. A pass without `-i` only triages and writes a digest and proposals. *Proposal; built
   (#142).* (#101)
 - **P4.** As the owner, I see the link between a task and a PRD story and progress against the PRD as plain text:
   a `PRD: US-n` line in the task template and `factory prd`, which prints per story its tasks and their state, computed
-  from GitHub. The PRD's story numbers must be unique first. *Proposal; PR open (#142, #148).* (#101)
+  from GitHub. The PRD's story numbers must be unique first. *Proposal; built (#142, #148).* (#101)
 - **P5.** As the owner, items only a person can check (test plans, manual tests) wait in a sign-off and testing queue,
-  each with how to check it; builders add an entry when a task's "Done when" needs a person. *Proposal; PR open (#142).*
+  each with how to check it; builders add an entry when a task's "Done when" needs a person. *Proposal; built (#142).*
   (#101)
 - **P6.** As the owner, a builder's or manager's product question goes to the PO as `to=po` on the task issue, and the
   builder keeps working. An unanswered question moves up one level (PO, dev manager, owner); with no PO running, the dev
-  manager answers or escalates. Coding agents cannot post a PO answer. *Proposal; PR open (#145).* (#110)
+  manager answers or escalates. Coding agents cannot post a PO answer. *Proposal; built (#145).* (#110)
 - **P7.** As the PO, I check the comments addressed to me as part of my routine and write each answer where it lasts (the
-  task's acceptance criteria, a decision, or a PRD change as a PR). *Proposal; PR open (#145).* (#110)
+  task's acceptance criteria, a decision, or a PRD change as a PR). *Proposal; built (#145).* (#110)
 - **P8.** As the PO, I use the project's artifacts and designs through repo copies first (`factory artifacts pull`, with a
   manifest of where each came from). Live access to Claude Design from a terminal session is a spike, not a decision.
-  *PR open (#146); the spike is open.* (#104)
+  *Built (#146); the spike is open.* (#104)
 - **P9.** As the owner, from an empty folder and the three role commands, I reach an approved PRD, design and task issues
   (vision, design, plan, hand over), then build, check and pivot, with no chat session holding required state. Stage gates
-  wait for my approval. *PR open (#148); this is the acceptance test of the roles epic.* (#103, #95)
+  wait for my approval. *Built (#148); this is the acceptance test of the roles epic.* (#103, #95)
 - **P10.** As the PO, I also test the running app: someone sets it up, I write test plans, the owner confirms what is
   tested, and results are recorded. *To be seen; needs a spike.* (#101)
 
 ### 4.4 Reviewer
 
 - **R1.** As the reviewer, I review every change before its pull request: I run the checks and the Factory guard, check the
-  task, the PRD and `CLAUDE.md`, and record a pass for that exact commit. A new commit needs a new review. *Built.* (README
-  "Reviews and gates")
+  task, the PRD and `CLAUDE.md`, and record a pass for that exact commit with one command, `factory review-pass reviewer|arch`. A new commit needs a new
+  review. *Built.* (README "Reviews and gates"; #197)
 - **R2.** As a specialist reviewer, `architecture-reviewer` reviews changes on paths with a style guide, `safety-auditor`
   reviews changes on its listed paths, and `security-reviewer` reviews changes on its listed paths. The PR gate needs the
   architecture pass on styled paths. `factory reviews` lists which extra reviews a change needs. *Built.*
@@ -255,10 +262,13 @@ until he agrees them."
   it checks the tag is on `main` and matches `software-factory/VERSION`, runs the tests, builds the archive with
   `tools/build_release.py`, verifies the checksum and publishes with `SHA256SUMS` and notes. *Built.* (#113, #119;
   `.github/workflows/release.yml`)
-  > Open question: no release has been published yet (#112 follow-up comment; `VERSION` is `0.1.0`). The first one is the
-  > owner's call, and whether it is cut from the current `main` was not answered in #113.
+  One release is published: `v0.1.0-alpha.1`, a pre-release (`VERSION` is `0.1.0-alpha.1`, #184; the releases page lists
+  only it). A tag with a hyphen is a pre-release, so you name it to install it.
+  > Open question: no full release (such as `v0.1.0`) exists yet. Cutting it is the owner's call, and whether it is cut
+  > from the current `main` was not answered in #113.
 - **U2.** As anyone, four commands cover the whole lifecycle: `factory version`, `factory releases`, `factory update
-  [version]` and `factory rollback`. *Built.* (#113, #126)
+  [version]` and `factory rollback`. With only a pre-release published, `factory update` names it in its fix (`factory update
+  v0.1.0-alpha.1`) and `factory version` shows it. *Built.* (#113, #126, #188)
 - **U3.** As the owner, `factory update` does the whole job in one command and is safe to run twice. It refuses a dirty
   tree and names the files; downloads the archive and checks its SHA-256 (a mismatch or a cut transfer installs nothing);
   unpacks with every path checked; writes the files, undoing everything if a write fails; refreshes this machine's CI
@@ -271,11 +281,17 @@ until he agrees them."
   and every machine end on one release; a machine that pulled a new pin catches up with `factory update`. *Built.* (#113)
 - **U6.** As a project owner, what stays mine is `.claude/factory.json`, the notes, the lessons file, the roles folder,
   `CLAUDE.md`, my docs and CI workflow; a rule that should change everywhere is changed in my-skills. I never edit a
-  shared file in my project. *Built.* (README "Shared and project-owned"; #112)
+  shared file in my project. My own allow rules go in `.claude/factory.json` (`permissions.allow`), and `factory update`
+  merges them into the release's `settings.json`. *Built.* (README "Shared and project-owned"; #112, #198)
 - **U7.** As a project on the submodule, I keep working until I move. I move to the new layout or to releases in one
   reviewed pull request, with no flag day. `factory update --release` refuses where the files are still links. Moving
   Remanual changes protected files there, so it is the owner's merge. *Built (the commands); the migration is owner-led.*
   (#112, #113)
+  The code has moved out of `kit/` into `hooks/`, `ci/`, `factory` and `factory-loop.sh` (#120, #121); the `kit/`
+  forwarders and the `--layout old|auto` handling are still there. Open follow-ups, all issues: #170 (`factory
+  migrate-to-release`), #172 (the manager-profile note in `factory doctor`), #174 (a plain `factory update` at an old pin
+  must not leave a broken `./factory`), #175 (a local archive mode for `factory update`), #176 (remove the forwarders and
+  the `--layout old|auto` code). #171 and #173 are done (#177, #178), and #112 and #113 stay open.
 - **U8.** As the owner, a bump of the pin for the whole team is a separate, deliberate step from updating one machine.
   *Decided in principle; `factory update --propose` is not built, and its name is the owner's choice.* (#113, #114
   handover)
@@ -288,8 +304,11 @@ until he agrees them."
 - **U11.** As the owner, `factory doctor` says in plain words what is wrong on this machine or project and the fix, and
   exits 1 when something needs fixing. *Built.* (#63)
 - **U12.** As the owner, a project can be set up by `install.sh` (links, or a copy), which scaffolds the role folder and
-  templates and never overwrites an existing file. *Built; `factory init` for an empty folder is PR open (#148).* (#102,
-  #103)
+  templates and never overwrites an existing file. On a first install it tells the stack (Node with a `package.json`; Python
+  from `pyproject.toml`, `setup.py`, `requirements*.txt` or `tests/test_*.py`; otherwise unknown) and chooses the CI
+  workflow and `commands.*` to match, from `install.sh` and from a first `factory update <tag>`; an existing `ci.yml` is
+  kept. `factory doctor` checks that the workflow matches `factory.json` (#205, #224). *Built,
+  including `factory init` for an empty folder (#148).* (#102, #103, #199, #205)
 - **U13.** As the owner, the machines come back after a reboot: `factory autostart` starts the dev stack and this machine's
   agents in detached tmux sessions. *Built.* (#88)
 
@@ -306,7 +325,8 @@ until he agrees them."
 - **C4.** As the owner, rounds are faster with a pre-built runner image and a Docker Hub pull-through mirror, and no pnpm
   store is shared between jobs, so one PR cannot plant code that a later job runs. *Built.* (#60)
 - **C5.** As everyone, a CI outage (GitHub's billing block, no runner) is reported as an outage, not as a code failure,
-  and agents do not push or re-run to chase it. *Built.* (README "The PR gate"; `factory_ci.py`)
+  and agents do not push or re-run to chase it. An agent reads why its own CI failed with `factory ci log <pr>`. *Built.*
+  (README "The PR gate"; `factory_ci.py`; #206)
 - **C6.** As the owner, `factory ci status` works in both modes and shows where CI runs, the latest runs, the runners and
   runs queued for a long time; `factory ci stale` and `factory ci check` say whether the installed copies are older than
   the checkout and fit to start. *Built.* (#40, #113)
@@ -421,7 +441,7 @@ No recorded decision explains the choice of Python; the README only lists it as 
   spike. (#104)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
 - **Removing the `kit/` forwarders** and the `--layout old|auto` handling after the first release and after Remanual has
-  moved. (#112, README "What is left of the move")
+  moved. (#112, #176, README "What is left of the move")
 - **Ideas in the PR #39 draft that no issue or decision picked up.** They were proposals in that draft and are not
   scope: a `priority:high` label the picker honours (its story 9), a daily token budget per agent (34), a task board kept
   in step with the labels (55), the dev manager building a small task when no agent runs (51), a duplicate-task check
