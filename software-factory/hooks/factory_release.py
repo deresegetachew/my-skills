@@ -5,6 +5,8 @@
   factory releases [--all]     the releases that exist, with dates and a one-line note
   factory update [version]     newest release (or the named one): download, check the checksum, install into the
                                project, refresh this machine's runner services, verify. Leaves the change uncommitted.
+  factory update --archive F [--sums S]
+                               the same from a release archive on disk (no network); only writes the archive's files
   factory rollback             back to the release that was installed before (offline, from the download cache)
   factory migrate-to-release   a project linked to the my-skills submodule: replace the links the release owns with the
                                release's files, keep the links it does not ship, print the steps for the pull request
@@ -279,6 +281,42 @@ def fetch_archive(repo, tag, release=None, expect_sha=None):
             pass
         raise
     return archive_path, release
+
+
+ARCHIVE_NAME = re.compile(r"^software-factory-(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.]*)?)\.tar\.gz$")
+
+
+def local_archive(archive, sums, version=None):
+    """(tag, path) of a release archive given as a file (#175), after the same checksum check a download gets: the SHA256SUMS
+    file (default: the one beside the archive) must list the archive's name with its digest. Reads files only."""
+    name = os.path.basename(archive)
+    if not os.path.isfile(archive):
+        raise FactoryError("missing_file", f"the archive {archive} does not exist.",
+                           "give the real file: `factory update --archive <software-factory-X.tar.gz> --sums <SHA256SUMS>`.")
+    m = ARCHIVE_NAME.match(name)
+    if not m:
+        raise FactoryError("bad_archive_name", f"'{name}' is not named like a release archive.",
+                           "name it software-factory-MAJOR.MINOR.PATCH.tar.gz, as the release's asset is; the version is read from the name.")
+    tag = "v" + m.group(1)
+    if version and normalize_tag(version) != tag:
+        raise FactoryError("version_mismatch", f"you asked for {normalize_tag(version)}, but the archive is {tag}.",
+                           "leave the version out (it is read from the archive's name) or give the archive of that version.")
+    sums = sums or os.path.join(os.path.dirname(os.path.abspath(archive)), "SHA256SUMS")
+    for path, what in ((archive, "the archive"), (sums, "the SHA256SUMS file")):
+        if not os.path.isfile(path):
+            raise FactoryError("missing_file", f"{what} {path} does not exist.",
+                               "give the real files: `factory update --archive <software-factory-X.tar.gz> --sums <SHA256SUMS>` "
+                               "(SHA256SUMS is looked for beside the archive when --sums is left out).")
+    try:
+        want = checksum_for(open(sums).read(), name)
+    except OSError as e:
+        raise FactoryError("missing_file", f"{sums} cannot be read ({e}).", "check the file and its permissions.")
+    have = sha256_file(archive)
+    if have != want:
+        raise FactoryError("bad_checksum", f"{name} has checksum {have[:12]}..., {os.path.basename(sums)} says {want[:12]}...",
+                           "the archive is damaged or was changed. Nothing was installed. Get the files again from the release; "
+                           "if it repeats, tell the owner.")
+    return tag, archive
 
 
 # --- unpacking: nothing leaves the archive's own folder ------------------------------------------------------------
@@ -708,7 +746,7 @@ def refresh_runners(root):
     return ["runner services: refreshed with `factory ci install` (" + "; ".join(older[:4]) + ")"]
 
 
-def verify_machine(root, pin):
+def verify_machine(root, pin, run_scripts=True):
     """What must be true before saying the update worked. A list of problems; empty means verified."""
     problems = pinned_problems(root, pin)
     settings = os.path.join(root, ".claude", "settings.json")
@@ -733,7 +771,7 @@ def verify_machine(root, pin):
         elif rel.endswith(".sh") or rel in ("factory", "factory-loop.sh"):
             if subprocess.run(["bash", "-n", path], capture_output=True).returncode:
                 problems.append(f"{rel} does not parse as bash")
-    if os.path.isfile(os.path.join(root, ".claude", "ci", "ci.sh")) and run_ci(root, "names", timeout=120)[0] == 0:
+    if run_scripts and os.path.isfile(os.path.join(root, ".claude", "ci", "ci.sh")) and run_ci(root, "names", timeout=120)[0] == 0:
         rc, out = run_ci(root, "check", timeout=120)
         if rc != 0:
             problems += [l.strip() for l in out.splitlines() if l.strip()] or ["factory ci check failed"]
@@ -971,12 +1009,17 @@ def cmd_update(args, rollback=False):
     repo = repo_name(root, pin)
     dirty_ok = check_clean(root, pin)
     old_tag = pin["tag"] if pin else None
-    archive, release, releases, expect = None, None, [], None
+    archive, release, releases, expect, local = None, None, [], None, None
+    if getattr(args, "sums", None) and not getattr(args, "archive", None):
+        raise FactoryError("missing_archive", "--sums goes with --archive, and no archive was given.",
+                           "add `--archive <software-factory-X.tar.gz>`, or leave --sums out to download the release.")
     if rollback:
         if not pin or not pin.get("previous"):
             raise FactoryError("no_previous", "there is no earlier release recorded to go back to.",
                                "name the one you want: `factory update v1.3.2` (`factory releases` lists them).")
         tag, expect = pin["previous"]["tag"], pin["previous"].get("sha256")
+    elif getattr(args, "archive", None):
+        tag, local = local_archive(args.archive, args.sums, args.version)
     elif args.version:
         tag = normalize_tag(args.version)
     else:
@@ -993,7 +1036,7 @@ def cmd_update(args, rollback=False):
         say(f"  This project is already on {tag}; nothing to install.")
         installed = None
     else:
-        archive, release = fetch_archive(repo, tag, release, expect)
+        archive, release = (local, None) if local else fetch_archive(repo, tag, release, expect)
         files, manifest = unpack(archive, tag)
         archive_sha = sha256_file(archive)
         installed = install_files(root, files, manifest, tag, archive_sha, pin, repo)
@@ -1003,7 +1046,9 @@ def cmd_update(args, rollback=False):
                 say(f"    - {d}")
         else:
             say(f"  {old_tag or 'no release'} -> {tag}" + ("  (going back)" if old_tag and sort_key(tag) < sort_key(old_tag) else ""))
-            if not releases:
+            if local:
+                say(f"    (from the local archive {os.path.basename(local)}; no release notes without the network)")
+            elif not releases:
                 try:
                     releases = list_releases(repo)
                 except FactoryError:
@@ -1011,7 +1056,7 @@ def cmd_update(args, rollback=False):
             if releases and not (old_tag and sort_key(tag) < sort_key(old_tag)):
                 for rtag, line in changes_between(releases, old_tag, tag)[:15]:
                     say(f"    - {line}  ({rtag})")
-            elif not releases:
+            elif not releases and not local:
                 say("    (the release notes need the network; `factory releases` shows them later)")
         total = len(installed["added"]) + len(installed["changed"]) + len(installed["removed"])
         say(f"  Installed {tag}: {len(installed['added'])} new, {len(installed['changed'])} changed, {len(installed['removed'])} removed file(s).")
@@ -1024,13 +1069,17 @@ def cmd_update(args, rollback=False):
             say(f"    note: {t} had local changes; the release's version replaced them (see the diff)")
     new_pin = read_pin(root)
     say("This machine")
-    for line in refresh_services(root):
-        say("  " + line)
-    problems = verify_machine(root, new_pin)
+    if local:  # a file nobody published: its own scripts are not run on this machine
+        say("  runner services: not refreshed from a local archive. If they are installed here, run `factory ci install` yourself.")
+    else:
+        for line in refresh_services(root):
+            say("  " + line)
+    problems = verify_machine(root, new_pin, run_scripts=not local)
     if problems:
         raise FactoryError("verification_failed", f"{tag} is installed here, but the checks after it failed:\n" + "\n".join("    - " + p for p in problems),
                            "fix what the lines above say (each names the file), then run `factory update` again; it is safe to repeat.")
-    say(f"  checks: the files match the pin, every hook in settings.json exists, the scripts parse, the runner files are readable (verified)")
+    say("  checks: the files match the pin, every hook in settings.json exists, the scripts parse"
+        + ("" if local else ", the runner files are readable") + " (verified)")
     changed = git(root, "status", "--porcelain", "--untracked-files=all").stdout.strip()
     say()
     say(f"Done. This project is on {tag}.")
@@ -1051,6 +1100,8 @@ def main(argv=None):
     u = sub.add_parser("update")
     u.add_argument("version", nargs="?")
     u.add_argument("--release", action="store_true", help="use releases even when the project has no pin yet")
+    u.add_argument("--archive", help="install this release archive (software-factory-X.Y.Z.tar.gz) instead of downloading it")
+    u.add_argument("--sums", help="the SHA256SUMS file for --archive (default: the one beside the archive)")
     u.add_argument("--verbose", action="store_true")
     sub.add_parser("rollback").add_argument("--verbose", action="store_true")
     m = sub.add_parser("migrate-to-release")

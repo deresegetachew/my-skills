@@ -312,6 +312,85 @@ def test_the_kits_default_allow_list_has_what_a_headless_coding_agent_needs_and_
     assert len(allow) == len(set(allow))
 
 
+def local_release(version="1.0.0"):
+    """A real release built by tools/build_release.py, as files on disk: (archive path, SHA256SUMS path)."""
+    dist = build(version)
+    return os.path.join(dist, f"software-factory-{version}.tar.gz"), os.path.join(dist, "SHA256SUMS")
+
+
+def offline(env):
+    return {**env, "FACTORY_RELEASE_API": "http://127.0.0.1:9"}  # nothing listens there: any request would fail
+
+
+def test_update_from_a_local_archive_installs_it_with_no_network_and_records_the_pin():
+    gh, d, env = world()
+    archive, sums = local_release("1.0.0")
+    rc, out = fac(d, offline(env), "update", "--archive", archive, "--sums", sums)
+    assert rc == 0, out
+    assert open(os.path.join(d, ".claude/hooks/factory_x.py")).read() == "VERSION = '1.0.0'\n"
+    p = pin(d)
+    assert p["tag"] == "v1.0.0" and p["sha256"] == hashlib.sha256(open(archive, "rb").read()).hexdigest(), p
+    assert gh.hits == [], "no request reached the fake GitHub"
+    assert "local archive" in out and "git add" in out, out
+    assert "not refreshed" in out and not ci_log(env)[:-1], "the archive's own scripts are not run to refresh services"
+
+
+def test_the_sums_file_defaults_to_the_one_beside_the_archive_and_a_version_must_agree_with_the_archive():
+    gh, d, env = world()
+    archive, sums = local_release("1.0.0")
+    rc, out = fac(d, offline(env), "update", "--archive", archive)
+    assert rc == 0 and pin(d)["tag"] == "v1.0.0", out
+    commit(d)
+    rc, out = fac(d, offline(env), "update", "v2.0.0", "--archive", archive, "--sums", sums)
+    assert rc != 0 and "[version_mismatch]" in out and "Fix:" in out, out
+
+
+def test_a_local_archive_with_a_wrong_checksum_is_refused_and_nothing_is_changed():
+    gh, d, env = world()
+    archive, sums = local_release("1.0.0")
+    open(sums, "w").write("0" * 64 + "  software-factory-1.0.0.tar.gz\n")
+    before = snapshot(d)
+    rc, out = fac(d, offline(env), "update", "--archive", archive, "--sums", sums)
+    assert rc != 0 and "[bad_checksum]" in out and "Fix:" in out, out
+    assert snapshot(d) == before
+
+
+def test_an_archive_changed_after_its_sums_were_made_is_refused():
+    gh, d, env = world()
+    archive, sums = local_release("1.0.0")
+    data = open(archive, "rb").read()
+    open(archive, "wb").write(data[:-1] + bytes([data[-1] ^ 1]))
+    rc, out = fac(d, offline(env), "update", "--archive", archive, "--sums", sums)
+    assert rc != 0 and "bad_checksum" in out or "bad_archive" in out, out
+    assert not os.path.exists(os.path.join(d, PIN))
+
+
+def test_a_missing_archive_or_sums_file_is_refused_with_the_fix():
+    gh, d, env = world()
+    archive, sums = local_release("1.0.0")
+    rc, out = fac(d, offline(env), "update", "--archive", archive + ".nope")
+    assert rc != 0 and "[missing_file]" in out and "Fix:" in out, out
+    os.remove(sums)
+    rc, out = fac(d, offline(env), "update", "--archive", archive)
+    assert rc != 0 and "[missing_file]" in out and "SHA256SUMS" in out, out
+    rc, out = fac(d, offline(env), "update", "--sums", sums)
+    assert rc != 0 and "--archive" in out, out
+
+
+def test_an_archive_whose_name_is_not_a_release_is_refused():
+    gh, d, env = world()
+    archive, sums = local_release("1.0.0")
+    odd = os.path.join(os.path.dirname(archive), "release.tgz")
+    shutil.copy(archive, odd)
+    rc, out = fac(d, offline(env), "update", "--archive", odd, "--sums", sums)
+    assert rc != 0 and "[bad_archive_name]" in out and "software-factory-" in out, out
+
+
+def test_the_factory_command_sends_update_archive_to_the_release_client_even_before_a_pin_exists():
+    text = open(os.path.join(SF, "factory")).read()
+    assert "--archive" in text.split("update)")[1].split("--layout")[0], "factory update --archive reaches factory_release.py"
+
+
 def test_update_moves_to_the_newest_release_removes_files_it_dropped_and_leaves_the_projects_own_files():
     gh, d, env = world("1.0.0")
     assert fac(d, env, "update")[0] == 0
