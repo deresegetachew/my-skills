@@ -5,7 +5,7 @@
 // `claude` (logs its arguments) and a fake `gh` (a JSON file). Waits are 0 minutes.
 // (The `factory doctor` test stays in test_roles.py until factory_doctor is ported.)
 import { expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeCalls, type Env, factory, log, porcelain, project, type Row } from "./roles_support.ts";
 import { HOOKS, runCode, write } from "./support.ts";
@@ -330,4 +330,20 @@ test("usage by role separates the sessions by the marker in their first prompt",
   const got: Record<string, number> = {};
   for (const [k, v] of Object.entries(groups)) got[k] = v.tokens.output;
   expect(got).toEqual({ manager: 111, "product-owner": 222, builder: 333 });
+});
+
+test("doctor reports a reads path that does not exist", () => {
+  const [d, work, env] = project({ files: {
+    ".claude/factory/roles/dev-manager/README.md": "x\n",
+    ".claude/factory/roles/dev-manager/reads.md": "- CLAUDE.md - rules\n- docs/nope.md#section - gone\n- docs/*.md - plan\n" } });
+  const bin = join(d, "bin");
+  for (const tool of ["git", "bash", "sh", "env", "uname", "dirname", "basename", "cat", "bun"]) {
+    const found = tool === "bun" ? process.execPath : Bun.which(tool);
+    if (found && !existsSync(join(bin, tool))) symlinkSync(found, join(bin, tool));
+  }
+  writeFileSync(join(work, ".claude", "settings.json"), "{}");
+  const p = factory(work, { ...env, PATH: bin }, ["doctor"]);
+  const fixes = p.stdout.split("\n").filter((l) => l.startsWith("fix"));
+  expect(fixes.some((l) => l.includes("docs/nope.md") && l.includes("does not exist")), p.stdout).toBe(true);
+  expect(fixes.filter((l) => l.includes("CLAUDE.md") || l.includes("docs/*.md"))).toEqual([]);
 });

@@ -5,10 +5,13 @@
 // factory_doctor is ported.)
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fnmatch } from "../hooks/factory_lib.ts";
 import { allowedByProfile, gate, PROFILE, SKILL, world as gateWorld } from "./manager_support.ts";
 import { cycle, dbOf, H, H2, iso, okRun, posted, pr, prompts, put, runSub, skipComments, world } from "./orchestrator_support.ts";
 import type { Row } from "./roles_support.ts";
+import { doctor as runDoctor, lines, machine, project as doctorProject } from "./doctor_support.ts";
+import { write } from "./support.ts";
 
 const PERMS = (JSON.parse(readFileSync(PROFILE, "utf8")) as { permissions: { allow: string[]; deny: string[] } }).permissions;
 const SKILL_TEXT = readFileSync(SKILL, "utf8");
@@ -129,4 +132,31 @@ test("a green task pr is started before a pr without green ci", () => {
   const lines = p.stdout.split("\n").filter((l) => l.includes("would start a sub-manager"));
   expect(lines.length, p.stdout).toBeGreaterThan(0);
   expect(lines[0]).toContain("pr-2");
+});
+
+// --- doctor replays the skill's commands against the profile -----------------------------------------------------------
+
+function managerProject(profileAllow: string[] | null = null): string {
+  const d = doctorProject({}, { agents: ["taytu"] });
+  const prof = JSON.parse(readFileSync(PROFILE, "utf8")) as { permissions: { allow: string[] } };
+  if (profileAllow !== null) prof.permissions.allow = profileAllow;
+  write(join(d, ".claude", "manager", "settings.json"), JSON.stringify(prof));
+  write(join(d, ".claude", "skills", "manage-pass", "SKILL.md"), readFileSync(SKILL, "utf8"));
+  return d; // doctorProject links every .ts hook, manager_gate.ts and pr-gate.ts included
+}
+
+test("doctor is quiet when every command the skill names is allowed by the profile", () => {
+  const p = runDoctor(managerProject(), { ...machine(), FACTORY_AGENTS: "taytu" });
+  expect(lines(p, "ok").filter((l) => l.includes("manager profile") && l.includes("skill")).length, p.stdout).toBeGreaterThan(0);
+  expect(lines(p, "fix").filter((l) => l.includes("manager")), p.stdout).toEqual([]);
+});
+
+test("doctor fixes a profile that would prompt for a command the skill names", () => {
+  const prof = JSON.parse(readFileSync(PROFILE, "utf8")) as { permissions: { allow: string[] } };
+  const allow = prof.permissions.allow.filter((r) => !r.includes("gh run view"));
+  const p = runDoctor(managerProject(allow), { ...machine(), FACTORY_AGENTS: "taytu" });
+  const fixes = lines(p, "fix").filter((l) => l.includes("gh run view"));
+  expect(fixes.length, p.stdout).toBeGreaterThan(0);
+  expect(fixes[0]).toContain("factory update");
+  expect(p.code).toBe(1);
 });

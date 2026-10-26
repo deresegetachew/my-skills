@@ -583,3 +583,11 @@ test("the orchestrator is listed in the loop script's header and the readme", ()
   expect(readFileSync(join(KIT, ".claude", "skills", "manage-pass", "SKILL.md"), "utf8")).toContain("manage-pass");
 });
 
+
+test("doctor checks the manager profile and its hooks", () => {
+  const [, work, env] = world({ files: { ".claude/manager/settings.json": JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [
+    { type: "command", command: 'bun --no-env-file "$CLAUDE_PROJECT_DIR"/.claude/hooks/not_there.ts' }] }] } }) } });
+  const p = hook(work, env, "factory_doctor.ts");
+  expect(p.stdout).toContain("not_there.ts");
+  expect(p.stdout).toContain("fix");
+});
