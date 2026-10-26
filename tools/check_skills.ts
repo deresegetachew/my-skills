@@ -2,7 +2,7 @@
 // CI check: every top-level skill folder is well formed.
 //
 // - SKILL.md exists, with frontmatter: `name:` matching the folder and a non-empty `description:`.
-// - Every .sh parses (bash -n), every .ts parses (and uses no `any`), every .json loads, and there is no .py file.
+// - Every .sh parses (bash -n), every .ts parses (and uses no `any`), every .json loads, and the factory has no .py file.
 // - No compiled .pyc file is tracked by git.
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -68,8 +68,10 @@ for (const f of files) {
     }
   } else if (f.endsWith(".py")) pyFiles.push(f);
 }
-// #252: the factory is Bun only. No Python file may come back.
-for (const f of pyFiles) errors.push(`${rel(f)}: a Python file; the factory is TypeScript on Bun (#252)`);
+// #252: the factory is Bun only. No Python file may come back into it (other skills may ship their own scripts).
+for (const f of pyFiles) {
+  if (/^(software-factory|tools|\.github|\.claude)\//.test(rel(f))) errors.push(`${rel(f)}: a Python file; the factory is TypeScript on Bun (#252)`);
+}
 const tracked = Bun.spawnSync(["git", "ls-files", "-z"], { cwd: root, stdout: "pipe", stderr: "ignore" });
 for (const name of tracked.exitCode === 0 ? tracked.stdout.toString().split("\0") : []) {
   if (name.endsWith(".pyc") || name.includes("__pycache__/")) errors.push(`${name}: compiled file is tracked; run: git rm --cached ${name}`);

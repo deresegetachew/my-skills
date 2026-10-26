@@ -46,3 +46,17 @@ test("a .ts file that does not parse fails, and a good one passes", () => {
   expect(r.code, r.out).toBe(1);
   expect(r.stdout).toContain("demo/bad.ts");
 });
+
+test("a Python file in the factory fails, and one in another skill is that skill's own business", () => {
+  const d = repo(false);
+  mkdirSync(join(d, "software-factory"), { recursive: true });
+  writeFileSync(join(d, "software-factory", "SKILL.md"), "---\nname: software-factory\ndescription: The factory.\n---\n");
+  expect(run(d).code).toBe(0);
+  writeFileSync(join(d, "demo", "helper.py"), "print(1)\n");
+  expect(run(d).code, run(d).out).toBe(0);
+  writeFileSync(join(d, "software-factory", "x.py"), "print(1)\n");
+  const r = run(d);
+  expect(r.code).toBe(1);
+  expect(r.stdout).toContain("software-factory/x.py: a Python file");
+  expect(r.stdout).not.toContain("demo/helper.py");
+});
