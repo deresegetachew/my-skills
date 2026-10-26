@@ -1,6 +1,5 @@
 // factory_remote.ts: a remote that points at a repository moved or renamed on GitHub is pointed at its new name.
-// The Bun twins of the "a moved repository" tests in test_lessons.py, which stays in Python until the PR gate and
-// factory_numbers are ported (its other tests drive those).
+// The Bun twins of the "a moved repository" tests of test_lessons.py (its other tests are in lessons.test.ts).
 import { expect, test } from "bun:test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";

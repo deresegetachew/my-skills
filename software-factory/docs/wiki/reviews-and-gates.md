@@ -95,7 +95,7 @@ project keeps one short **lessons file** (`lessons` in `factory.json`, by defaul
 
 ### The PR gate
 
-`pr-gate.py` is a PreToolUse hook. It reads every Bash command Claude runs, including compound ones (`;`, `&&`,
+`pr-gate.ts` is a PreToolUse hook. It reads every Bash command Claude runs, including compound ones (`;`, `&&`,
 pipes, subshells), and blocks the pull-request commands that aren't ready:
 
 | Command | Allowed only when |

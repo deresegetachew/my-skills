@@ -1,6 +1,6 @@
 // Free decision and migration numbers (the 22 Oct lessons): a new numbered file takes a number neither main nor another
-// open PR has. The tests of `factory_numbers.ts` run on its own, from test_lessons.py; the ones through the PR gate stay
-// there until pr-gate is ported.
+// open PR has. The tests of `factory_numbers.ts` run on its own, from test_lessons.py; the ones through the PR gate are
+// in lessons.test.ts.
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -130,8 +130,8 @@ test("numbers skip only this repos own pr", () => {
 });
 
 test("a free number passes and github that cannot be read fails closed", () => {
-  // The gate's side of these is in test_lessons.py (test_a_free_decision_number_opens_the_pr and
-  // test_the_number_check_fails_closed_when_github_cant_be_read) until pr-gate is ported.
+  // The gate's side of these is in lessons.test.ts ("a free decision number opens the pr" and
+  // "the number check fails closed when github cant be read").
   let [d, db, env] = project(["docs/decisions/0001-a.md", "docs/decisions/0002-b.md"], ["docs/decisions/0003-c.md"]);
   let [rc, out] = numbers(d, env);
   expect(rc, out).toBe(0);

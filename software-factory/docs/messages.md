@@ -148,7 +148,7 @@ returns at once with "needs more information from you".
 
 ## Reserved senders (the PR gate)
 
-`pr-gate.py` reads the `factory-msg` envelope in every comment an agent posts (`gh pr|issue comment|edit|review`), on
+`pr-gate.ts` reads the `factory-msg` envelope in every comment an agent posts (`gh pr|issue comment|edit|review`), on
 top of the old rule that agents never post `factory-approved`, `factory-answer` or `factory-mustfix`:
 
 - `from=` must be the agent itself, so nobody posts as `po` or `dev-manager`; the names `po` and `owner` are refused even for an
