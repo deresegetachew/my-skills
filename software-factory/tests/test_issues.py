@@ -309,6 +309,29 @@ def test_claim_without_issue_still_claims_the_next_one():
     assert labels(db, 1) == ["factory:ready"], labels(db, 1)
 
 
+def test_show_prints_the_issue_then_the_human_comments_and_not_the_factory_markers():
+    d, db, env = setup([issue(1, body="Add truncate.")])
+    data = json.load(open(db))
+    data["comments"] = {"1": [
+        {"body": "Decision: n <= 0 returns an empty string.", "at": 1, "user": {"login": "boss"}},
+        {"body": "<!-- factory-claim agent=menelik -->\nClaimed.", "at": 2},
+        {"body": "<!-- factory-approved sha=abc -->\nApproved.", "at": 3},
+        {"body": "<!-- factory-mustfix sha=abc -->\nFix the loop.", "at": 4}]}
+    json.dump(data, open(db, "w"))
+    rc, out = run(d, env, "show", "1")
+    assert rc == 0, out
+    assert out.index("Add truncate.") < out.index("Decision: n <= 0 returns an empty string."), out
+    assert "boss" in out
+    for noise in ("Claimed.", "Approved.", "Fix the loop."):
+        assert noise not in out, out
+
+
+def test_show_without_comments_is_unchanged():
+    d, db, env = setup([issue(1, body="Add truncate.")])
+    rc, out = run(d, env, "show", "1")
+    assert out == "#1 Task 1  [factory:ready]  open\n\nAdd truncate.", out
+
+
 if __name__ == "__main__":
     os.environ.pop("FACTORY_AGENT", None)
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
