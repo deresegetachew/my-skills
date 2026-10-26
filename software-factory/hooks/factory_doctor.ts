@@ -508,7 +508,7 @@ export async function turbo(r: Reporter, cfg: Config): Promise<void> {
     r.note("shared build cache token", "TURBO_TOKEN isn't set and turbo.secretsCommand is empty, so builds use the " +
       "local cache only. `factory turbo status` says how to supply one");
   }
-  const [state, detail] = await probe(s.api, s.team, ""); // no token: any answer, even a refusal, proves it is there
+  const [state, detail] = await probe(s.api, s.team, ""); // no token: an answer, even a refusal, proves it is there
   if (state === "ok" || state === "rejected") r.ok(`shared build cache answers at ${s.api}`);
   else r.note("shared build cache", explain(s.api, state, detail));
   if (process.env.TURBO_REMOTE_CACHE_SIGNATURE_KEY && turboJsonSigns() === false) {
