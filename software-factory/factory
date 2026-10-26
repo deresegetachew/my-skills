@@ -67,7 +67,8 @@ Look
                          incremental re-review: a reviewer's next round reads only the delta since its last one
   reset-run [--apply]    before a test run: lists what an earlier run left in this project (stale local claims, Agent
                          issues of dead or never-run agents, exited CI containers, offline runners, a runs-on variable that
-                         points at no online runner); --apply cleans it and says what it did. Only this project's own repo, folder and containers
+                         points at no online runner); --apply cleans it and says what it did. Only this project's own repo, folder and containers;
+                         a down agent of another machine only with --agent NAME
   review-pass reviewer|arch
                          a review agent records its pass for the current commit (what the PR gate reads); one command
   manager-claims list|next|review|answer|release|sweep|merge|ask
@@ -266,20 +267,20 @@ case "$cmd" in
   next)      fh "$hooks/next_task" --note "$@" ;;
   autostart) fh "$hooks/factory_autostart" "$@" ;;
   resume)    fh "$hooks/factory_resume" "$@" ;;
-  status)    py factory_status.py "$@" ;;
-  prs)       py factory_prs.py "$@" ;;
+  status)    fh "$hooks/factory_status" "$@" ;;
+  prs)       fh "$hooks/factory_prs" "$@" ;;
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
   release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     fh "$hooks/factory_claims" clean ;;
   reviews)   py factory_reviews.py "$@" ;;
   rereview)  py factory_rereview.py "$@" ;;
   review-pass) py factory_review_pass.py "$@" ;;
-  reset-run)   py factory_reset_run.py "$@" ;;
-  manager-claims) py factory_manager_claims.py "$@" ;;
+  reset-run)   fh "$hooks/factory_reset_run" "$@" ;;
+  manager-claims) fh "$hooks/factory_manager_claims" "$@" ;;
   lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
   settings)  py factory_settings.py "$@" ;;
   usage)     py factory_usage.py "$@" ;;
-  report)    py factory_report.py "$@" ;;
+  report)    fh "$hooks/factory_report" "$@" ;;
   env)       if [ -n "${1:-}" ]; then
                case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
              else py factory_env.py; fi ;;
@@ -298,7 +299,7 @@ case "$cmd" in
   prd)       py factory_prd.py "$@" ;;
   artifacts) py factory_artifacts.py "$@" ;;
   handover)  py factory_handover.py "$@" ;;
-  signoff)   py factory_signoff.py "$@" ;;
+  signoff)   fh "$hooks/factory_signoff" "$@" ;;
   manage-tick) py factory_tick.py "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
   version|releases|rollback|migrate-to-release) py factory_release.py "$cmd" "$@" ;;

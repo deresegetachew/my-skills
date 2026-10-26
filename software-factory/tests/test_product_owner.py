@@ -3,7 +3,7 @@
 (`factory signoff`), the owner-queue asks tagged for=product, and the dry run that prints the digest.
 
 Runs the real factory and hooks in a throwaway project (see test_roles.py) with a fake `claude` and the stateful fake
-`gh` of fakegh.py.   python3 software-factory/tests/test_product_owner.py"""
+`gh` of fakegh.py. The sign-off queue's own tests are in signoff.test.ts (#252).   python3 software-factory/tests/test_product_owner.py"""
 import json, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -114,72 +114,6 @@ def test_the_task_template_has_the_prd_line():
     assert factory_prd.story_refs(text.replace("US-<n>", "US-3")) == [3]
 
 
-# --- the sign-off and testing queue ---------------------------------------------------------------------------------------
-
-def signoff(work, env, *args):
-    return factory(work, env, "signoff", *args)
-
-
-def test_an_item_that_needs_a_person_is_added_listed_and_signed_off():
-    d, work, env = po_project(db={})
-    assert "nothing waits" in signoff(work, env, "ls").stdout
-    p = signoff(work, env, "add", "arabic-label", "--task", "12", "--check", "Open the guide in Arabic; read the warning.")
-    assert p.returncode == 0, (p.stdout, p.stderr)
-    kinds = [x["kind"] for x in posted(d)]
-    assert kinds == ["issue", "comment"], kinds  # the queue is made on demand, once
-    assert posted(d)[0]["title"] == "Sign-off and testing queue"
-    ls = signoff(work, env, "ls").stdout
-    assert "arabic-label: sign-off open task #12: To check: Open the guide in Arabic" in ls, ls
-    assert signoff(work, env, "add", "arabic-label", "--task", "12", "--check", "x").returncode != 0  # no second entry
-    r = signoff(work, env, "result", "arabic-label", "pass", "--note", "Read it with Sabla.", "--by", "boss")
-    assert r.returncode == 0, r.stderr
-    assert "nothing waits" in signoff(work, env, "ls").stdout
-    assert "sign-off passed" in signoff(work, env, "ls", "--all").stdout
-    assert len([x for x in posted(d) if x["kind"] == "issue"]) == 1, "the queue issue is not made twice"
-    assert signoff(work, env, "result", "arabic-label", "blocked").returncode != 0  # a sign-off passes or fails
-
-
-def test_a_test_plan_is_proposed_then_confirmed_by_the_owner_then_gets_results():
-    d, work, env = po_project(db={})
-    assert signoff(work, env, "plan", "login-flow", "--task", "13", "--text", "1. Open the link.\n2. Tap Start.").returncode == 0
-    assert "login-flow: test plan proposed task #13: 1. Open the link." in signoff(work, env, "ls").stdout
-    early = signoff(work, env, "result", "login-flow", "pass")
-    assert early.returncode != 0 and "not confirmed" in early.stderr and "factory signoff confirm login-flow" in early.stderr
-    assert len(posted(d)) == 2, "the refused result wrote nothing"  # the queue issue and the plan
-    assert signoff(work, env, "confirm", "login-flow", "--by", "boss").returncode == 0
-    assert "test plan confirmed" in signoff(work, env, "ls").stdout
-    assert "already confirmed" in signoff(work, env, "confirm", "login-flow").stdout
-    assert signoff(work, env, "result", "login-flow", "fail", "--note", "Start did nothing.", "--build", "abc1234").returncode == 0
-    ls = signoff(work, env, "ls", "--all").stdout
-    assert "login-flow: test plan failed task #13" in ls, ls
-    items = json.loads(signoff(work, env, "ls", "--all", "--json").stdout)
-    assert items[0]["results"][0][0] == "fail" and items[0]["results"][0][1] == "me", items
-    last = posted(d)[-1]["body"]
-    assert "factory-testresult id=login-flow result=fail by=me build=abc1234" in last and "Start did nothing." in last, last
-
-
-def test_a_revised_plan_has_to_be_confirmed_again_and_its_old_results_do_not_count():
-    d, work, env = po_project(db={})
-    signoff(work, env, "plan", "p1", "--task", "13", "--text", "v1")
-    signoff(work, env, "confirm", "p1")
-    signoff(work, env, "result", "p1", "pass")
-    assert "p1: test plan passed" in signoff(work, env, "ls", "--all").stdout
-    signoff(work, env, "plan", "p1", "--text", "v2 with another step")
-    ls = signoff(work, env, "ls").stdout
-    assert "p1: test plan proposed task #13: v2" in ls, ls  # the task link carries over
-    assert signoff(work, env, "result", "p1", "pass").returncode != 0
-
-
-def test_signoff_dry_run_and_bad_ids_write_nothing():
-    d, work, env = po_project(db={})
-    p = signoff(work, env, "add", "x1", "--task", "1", "--check", "look", "--dry-run")
-    assert p.returncode == 0 and "would post" in p.stdout and "factory-signoff id=x1 task=1" in p.stdout, p.stdout
-    assert not posted(d)
-    bad = signoff(work, env, "add", "no spaces", "--task", "1", "--check", "look")
-    assert bad.returncode != 0 and "fix:" in bad.stderr and not posted(d), bad.stderr
-    assert signoff(work, env, "confirm", "ghost").returncode != 0
-
-
 # --- the owner queue, for=product ----------------------------------------------------------------------------------------
 
 QUEUE = issue(40, "Dev manager: needs the owner")
@@ -190,11 +124,10 @@ def ask(slug, tag="", text="this needs your yes: renumber the PRD stories?"):
 
 
 def test_asks_tagged_for_product_are_read_by_the_dev_manager_side_too():
-    import factory_orchestrator, factory_prs
+    # (factory_prs's side of this is in prs.test.ts, #252)
+    import factory_orchestrator
     body = ask("renumber", "for=product")
     assert factory_orchestrator.ASK_RX.search(body).group(1) == "renumber"
-    assert factory_prs.OWNER_ASK.search(body).group(1) == "renumber"
-    assert factory_prs.OWNER_ASK.search(ask("plain")).group(1) == "plain"
     assert factory_orchestrator.ASK_RX.search("<!-- factory-owner-ask id=a -->x").group(1) == "a"
 
 

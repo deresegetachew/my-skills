@@ -1,5 +1,5 @@
 // Per-machine agent names and a machine id in claims and agent pings (#45).
-// (test_the_report_reads_claims_with_a_machine stays in test_machines.py until factory_report is ported.)
+// (test_the_report_reads_claims_with_a_machine is in report.test.ts.)
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, readdirSync, realpathSync } from "node:fs";
 import { hostname } from "node:os";
