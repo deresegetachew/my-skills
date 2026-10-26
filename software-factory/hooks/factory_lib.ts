@@ -298,10 +298,23 @@ type FlockFn = (fd: number, op: number) => number;
 let flockFn: FlockFn | null = null;
 function libcFlock(): FlockFn {
   if (!flockFn) {
-    const lib = dlopen(process.platform === "darwin" ? "libSystem.B.dylib" : "libc.so.6", {
-      flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
-    });
-    flockFn = (fd, op) => lib.symbols.flock(fd, op) as number;
+    // glibc, then musl (Alpine) by its usual names, then macOS.
+    const names = process.platform === "darwin" ? ["libSystem.B.dylib"]
+      : ["libc.so.6", `libc.musl-${process.arch === "arm64" ? "aarch64" : "x86_64"}.so.1`, "libc.so"];
+    let last: unknown = null;
+    for (const name of names) {
+      try {
+        const lib = dlopen(name, { flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 } });
+        flockFn = (fd, op) => lib.symbols.flock(fd, op) as number;
+        break;
+      } catch (e) {
+        last = e;
+      }
+    }
+    if (!flockFn) {
+      throw new FactoryError("no_flock", `cannot load flock(2) from the C library (${names.join(", ")}): ${String(last)}`,
+        "run the factory on Linux (glibc or musl) or macOS; tell the owner which system this is.");
+    }
   }
   return flockFn;
 }
