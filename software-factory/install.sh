@@ -81,6 +81,10 @@ fi
 list_files() {
   if [ "$layout" = old ]; then
     ( cd "$src" && find . \( -type f -o -type l \) -not -path '*/__pycache__/*' )  # kit/ holds symlink forwarders to the moved code (#112 step 1), so symlinks count too
+    # A file that exists only in hooks/ or ci/ (no forwarder in kit/) is linked straight to its folder, so a kit-linked
+    # project that updates does not end up with a ./factory that points at a hook with no link (#174).
+    ( cd "$here" && find hooks ci -type f -not -path '*/__pycache__/*' | sed 's#^hooks/#./.claude/hooks/#; s#^ci/#./.claude/ci/#'
+      echo ./factory; echo ./factory-loop.sh )
   else
     ( cd "$src" && find . \( -type f -o -type l \) -not -path '*/__pycache__/*' | while read -r f; do
         { [ -L "$f" ] && [ -n "$(moved_to "$f")" ]; } || echo "$f"
@@ -106,6 +110,7 @@ list_files | while read -r f; do
     from="$src/${PY_WORKFLOW#./}"; python_ci=1
   fi
   if [ "$layout" = new ]; then m="$(moved_to "$f")"; [ -z "$m" ] || from="$m"; fi
+  if [ "$layout" = old ] && [ ! -e "$src/${f#./}" ]; then m="$(moved_to "$f")"; [ -z "$m" ] || from="$m"; fi  # no forwarder in kit/
   # The folder is made only when a file is put in it (#152): a template the project left out must not leave an empty docs/.
   if [ "$link" = 1 ] && is_engine "$f"; then
     want="$(rel "$target" "$from")"

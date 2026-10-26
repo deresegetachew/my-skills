@@ -187,6 +187,23 @@ def test_factory_update_leaves_a_kit_linked_project_on_kit_until_asked():
     assert "already at" in sh("bash", "factory", "update", cwd=d).stdout
 
 
+def test_factory_update_on_a_kit_linked_project_links_a_new_file_that_has_no_forwarder():
+    # #174: at the old pin an update moved the submodule but linked nothing for a hook that exists only in hooks/, so
+    # every later ./factory command failed with "can't open file .claude/hooks/...".
+    up = upstream()
+    d = submodule_project(up, "--layout", "old")
+    add_upstream_hook(up)  # no forwarder in kit/
+    before = links(d)
+    out = sh("bash", "factory", "update", cwd=d).stdout
+    link = os.path.join(d, ".claude/hooks/factory_zz.py")
+    assert os.path.islink(link) and os.path.isfile(link), out
+    assert os.readlink(link) == "../../vendor/my-skills/software-factory/hooks/factory_zz.py", os.readlink(link)
+    assert sh("python3", ".claude/hooks/factory_zz.py", cwd=d).stdout == "zz\n"
+    assert links(d) == before, "the rest stays on kit/ until --layout new is asked for"
+    assert sh("bash", "factory", "help", cwd=d).returncode == 0
+    assert sh("bash", "factory", "update", cwd=d).returncode == 0  # and a second update still starts
+
+
 def test_factory_update_refuses_an_unknown_layout():
     up = upstream()
     d = submodule_project(up)
