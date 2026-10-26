@@ -252,7 +252,7 @@ Not built yet:
 ## Quick start
 
 You need a PRD first. The factory only builds what the PRD and the plan say. On the machine that runs the agents you
-need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
+need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in). Every script is parsed in the tests with the oldest Python installed among 3.9, 3.10 and 3.11 (`tests/test_parse_oldest_python.py`; macOS ships 3.9), so newer-only syntax is caught; the oldest version actually run in CI is not stated here.
 
 ```mermaid
 flowchart LR
@@ -1550,7 +1550,7 @@ A scheduled GitHub Actions workflow could run the same check without a machine, 
 is an owner step; `factory watch --json` is what it would call.
 
 Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<name>.d/<item>.out` (a sub-manager's output).
-`factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist.
+`factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist. If `.claude/manager/settings.json` is missing and the installed release does not carry it, the note says so and points at `factory releases` for a newer one (a plain `factory update` would answer "nothing to install").
 
 **A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
