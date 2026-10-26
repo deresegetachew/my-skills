@@ -169,7 +169,7 @@ merged>`, no must-fix came after it, the merge is pinned to that head and CI is 
 name, `factory_ci_judge.py`); a merge of a PR the manager opened (a `manager/` branch, or a body with
 `<!-- factory-role role=dev-manager ... -->`: its own PRs wait for the owner); deleting refs, force-pushing and pushing to
 main; `gh api` writes to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks and deploy
-keys; and shell commands that read secrets files. Like `pr-gate.py` it is a guard rail, not a lock: keep branch protection
+keys; and shell commands that read secrets files. Like `pr-gate.ts` it is a guard rail, not a lock: keep branch protection
 and required CI on GitHub.
 
 The full playbook is [DEV-MANAGER.md](../../DEV-MANAGER.md). To start it, run `factory dev-manager loop` (or `-i`) on a machine with the factory installed; the handover from a

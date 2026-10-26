@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Incremental re-review (#70): a reviewer's second round reads only what changed since its last pass, with its own
 earlier findings and the author's reply; a big or wide change, or a rewritten history, goes back to a full review.
-The PR gate's marker is untouched. Ported to rereview.test.ts (#252); these two cases stay until pr-gate and
-factory_settings are ported.  python3 software-factory/tests/test_rereview.py"""
+The PR gate's marker is untouched. Ported to rereview.test.ts (#252); this case stays until factory_settings is
+ported.  python3 software-factory/tests/test_rereview.py"""
 import json, os, subprocess, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -63,31 +63,6 @@ def plan(d, kind="reviewer"):
 def record(d, result="fail", findings="must-fix: src/b.py line 2 prints the wrong text", kind="reviewer"):
     rc, out, err = run(d, "record", "--kind", kind, "--result", result, "--findings", findings)
     assert rc == 0, err
-
-
-def test_a_final_pass_on_head_after_a_delta_review_still_satisfies_the_gate():
-    """The marker is the one the gate reads: HEAD's id and nothing else, however the review was done."""
-    d = project()
-    record(d)
-    write(d, "src/b.py", "print('b')\nprint('right text')\n")
-    head = commit(d, "fix")
-    assert plan(d)["mode"] == "delta"
-    record(d, result="pass", findings="no must-fix")
-    marker = os.path.join(d, "tmp", "reviews", "task_70-x.ok")
-    open(marker, "w").write(git(d, "rev-parse", "HEAD") + "\n")  # what the reviewer's snippet writes
-    spec = __import__("importlib.util").util.spec_from_file_location("gate", os.path.join(HOOKS, "pr-gate.py"))
-    gate = __import__("importlib.util").util.module_from_spec(spec)
-    sys.path.insert(0, HOOKS)
-    spec.loader.exec_module(gate)
-    cwd = os.getcwd()
-    os.chdir(d)
-    try:
-        assert gate.passed({"reviewMarkers": "tmp/reviews"}, "task/70-x", head)
-        write(d, "src/b.py", "print('b')\n")
-        newer = commit(d, "later")
-        assert not gate.passed({"reviewMarkers": "tmp/reviews"}, "task/70-x", newer)  # a new commit needs a new review
-    finally:
-        os.chdir(cwd)
 
 
 def test_the_setting_is_known_and_the_forwarder_exists():

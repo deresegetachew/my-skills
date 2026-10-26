@@ -1,11 +1,11 @@
 // Incremental re-review (#70): a reviewer's second round reads only what changed since its last pass, with its own
 // earlier findings and the author's reply; a big or wide change, or a rewritten history, goes back to a full review.
 // The PR gate's marker is untouched.
-// (Two checks stay in test_rereview.py until pr-gate and factory_settings are ported: the gate's `passed` on a final
-// pass, and the reReviewPercent setting in the registry.)
+// (One check stays in test_rereview.py until factory_settings is ported: the reReviewPercent setting in the registry.)
 import { expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { passed } from "../hooks/pr-gate.ts";
 import { KIT, runHook, SF, sh, tmp, write as put } from "./support.ts";
 
 const ENV: Record<string, string | undefined> = {
@@ -203,7 +203,6 @@ test("the summary is kept and the pass marker is not touched", () => {
 });
 
 test("a final pass on head after a delta review leaves the marker to the reviewer", () => {
-  // The gate's side (`passed` on that marker) is checked in test_rereview.py until pr-gate is ported.
   const d = project();
   record(d);
   write(d, "src/b.py", "print('b')\nprint('right text')\n");
@@ -214,6 +213,27 @@ test("a final pass on head after a delta review leaves the marker to the reviewe
   writeFileSync(marker, git(d, "rev-parse", "HEAD") + "\n"); // what the reviewer's snippet writes
   record(d, "pass", "no must-fix");
   expect(readFileSync(marker, "utf8").trim()).toBe(git(d, "rev-parse", "HEAD")); // record never rewrites it
+});
+
+test("a final pass on head after a delta review still satisfies the gate", () => {
+  // The marker is the one the gate reads: HEAD's id and nothing else, however the review was done.
+  const d = project();
+  record(d);
+  write(d, "src/b.py", "print('b')\nprint('right text')\n");
+  const head = commit(d, "fix");
+  expect(plan(d).mode).toBe("delta");
+  record(d, "pass", "no must-fix");
+  put(join(d, "tmp", "reviews", "task_70-x.ok"), git(d, "rev-parse", "HEAD") + "\n"); // what the reviewer's snippet writes
+  const cwd = process.cwd();
+  process.chdir(d);
+  try {
+    expect(passed({ reviewMarkers: "tmp/reviews" }, "task/70-x", head)).toBe(true);
+    write(d, "src/b.py", "print('b')\n");
+    const newer = commit(d, "later");
+    expect(passed({ reviewMarkers: "tmp/reviews" }, "task/70-x", newer)).toBe(false); // a new commit needs a new review
+  } finally {
+    process.chdir(cwd);
+  }
 });
 
 test("the agents and the next task skill tell the reviewers to use it", () => {

@@ -38,7 +38,7 @@ software-factory/
     factory_rereview.ts                 incremental re-review: the delta since a reviewer's last round
     factory_reset_run.py                `factory reset-run`: list and clean what an earlier run left (claims, Agent issues, CI containers, runners, a runs-on variable)
     factory_stack.py                    the project's stack on a first install (node, python, unknown) and the Python CI's command runner
-    pr-gate.py                          PreToolUse: gates gh pr create, ready and merge, and the markers
+    pr-gate.ts                          PreToolUse: gates gh pr create, ready and merge, and the markers
     check.ts                            Stop: typecheck and tests
     factory_stop.py                     Stop: closes a finished session in `factory loop -i`
     factory_session.py                  SessionStart: a plain `claude` session becomes an agent

@@ -75,7 +75,7 @@ There is no web console. To look at, steer or take over an item:
 1. **GitHub access.** `gh auth status` must be signed in as an account that may review and merge. Branch protection with the
    required CI checks stays on `main` (the gate is a guard rail, not a lock).
 2. **Read the project's instructions.** `<roles.dir>/dev-manager/README.md` and `reads.md` (`factory init-roles` makes them).
-   `CLAUDE.md`, `.claude/factory.json`, `.claude/hooks/pr-gate.py` and `.claude/agents/*.md` are the review checklist.
+   `CLAUDE.md`, `.claude/factory.json`, `.claude/hooks/pr-gate.ts` and `.claude/agents/*.md` are the review checklist.
 3. **Agree the merge policy with the owner.** The default: review everything, protected paths included, and merge unless the PR
    - weakens a rule in CLAUDE.md, the PRD, the hooks or the permissions, or edits the critical rules themselves
      rather than implementing them;
@@ -198,7 +198,7 @@ envelope; docs/messages.md). They come to you first for technical and process qu
   marker is how the coding agent finds rework: `next_task.py` hands out a PR whose latest must-fix names its
   current head before any new task, and the agent's next push clears it. Without the marker, a must-fix waits
   until someone notices.
-  It also holds the merge: `pr-gate.py` refuses the agent's `gh pr merge` while the latest marker on the PR is a
+  It also holds the merge: `pr-gate.ts` refuses the agent's `gh pr merge` while the latest marker on the PR is a
   must-fix. When you re-review and it's good, merge it yourself or post `<!-- factory-approved sha=<head> -->`.
   An approval counts only for the commit its `sha=` names, and the agent's merge must carry
   `--match-head-commit <head>`. With `trustedReviewers: ["<your login>"]` in factory.json, only your approvals
