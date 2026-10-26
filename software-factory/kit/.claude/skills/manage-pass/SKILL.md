@@ -76,6 +76,14 @@ Stop early when there is nothing to do.
    longer one, write the body to `tmp/manager-<n>.md` with the Write tool (the only file this profile may write), then
    `gh api -X POST repos/{owner}/{repo}/issues/<n>/comments -F body=@tmp/manager-<n>.md`. Never a heredoc or `echo >`: the
    gate cannot read them. A verdict that is never posted is a review that did not happen: the next pass starts it again.
+   **Closing a pull request.** A pull request that is superseded (main already has the change) or obsolete (the task is gone
+   or was replaced) leaves the queue only when it is closed, and a stale one takes a sub-manager place on every pass. If a
+   factory agent opened it (its branch is `task/...` in this repository), close it yourself: first post the reason as a
+   comment, saying why and the commit that supersedes it (`superseded by <sha>` on main), with
+   `gh api -X POST repos/{owner}/{repo}/issues/<n>/comments -f body="..."`, then
+   `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -f state=closed`. If it was opened by the owner or anyone else, or comes from a
+   fork, do not close it: write an owner-queue ask that names the pull request, why you think it is superseded or obsolete and
+   your recommendation. The manager gate refuses the close of any pull request that is not an agent's. Never merge to close.
 6. **Answer questions.** Every `<!-- factory-question -->` without a later `<!-- factory-answer -->`. Answer from the PRD,
    CLAUDE.md, the decisions and the sources, and check the facts yourself. Escalate only what is the owner's (scope beyond
    the PRD, legal or customer-facing commitments, money and accounts, names and brands, things only a person can get): reply
