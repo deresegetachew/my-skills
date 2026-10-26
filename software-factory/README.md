@@ -252,7 +252,7 @@ Not built yet:
 ## Quick start
 
 You need a PRD first. The factory only builds what the PRD and the plan say. On the machine that runs the agents you
-need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in).
+need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in). Every script is parsed in the tests with the oldest Python installed among 3.9, 3.10 and 3.11 (`tests/test_parse_oldest_python.py`; macOS ships 3.9), so newer-only syntax is caught; the oldest version actually run in CI is not stated here.
 
 ```mermaid
 flowchart LR
