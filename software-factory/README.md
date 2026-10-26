@@ -409,6 +409,7 @@ factory update          # newest release: download, check, install, refresh this
 | See where I am | `factory version`: installed release, the one `origin/main` pins, the newest, and what changed since |
 | See what exists | `factory releases` (`--all` for the old ones): tag, date, one-line note, and where you are |
 | Update to the newest | `factory update`: the newest full release. A pre-release is used only when you name it |
+| Install from a file (no network) | `factory update --archive software-factory-1.4.0.tar.gz --sums SHA256SUMS` (`--sums` defaults to the SHA256SUMS beside the archive; the version is read from the file name). The same checksum, manifest and path checks run. It only writes the archive's files: nothing from the archive is run, so runner services are not refreshed (run `factory ci install` yourself) and the runner files are not checked |
 | Use a specific release | `factory update v1.4.0` (the `v` is optional; it can be older, too; a pre-release such as `v0.1.0-alpha.1` is taken this way) |
 | Go back | `factory rollback`: the release installed before, from this machine's download cache, no network needed |
 | Catch up after a pull | `factory update` again: the files came with the pull, so it only refreshes this machine's runner services and verifies |
