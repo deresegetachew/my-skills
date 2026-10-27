@@ -9,7 +9,7 @@
 //
 // `--sandbox` adds the checks of a sandboxed factory machine (factory_sandbox.ts): run it as the dedicated user that
 // `factory bootstrap` made. It runs a few network probes and one container, so it takes longer.
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import * as fa from "./factory_artifacts.ts";
@@ -270,6 +270,43 @@ export function hookLines(r: Reporter): void {
   if (seen && !python.size && !missing.size && !notBun.size) r.ok("the hooks in .claude/settings.json run with Bun");
 }
 
+/** The project's own workflows run factory scripts that exist (#254): after the update from the Python releases a
+ * workflow could still run `python3 .claude/hooks/<name>.py`, so CI failed on every pull request. A workflow that runs
+ * `bun` needs the setup-bun step too. Quiet when no workflow runs a factory script. */
+export function workflows(r: Reporter): void {
+  let names: string[];
+  try {
+    names = readdirSync(join(".github", "workflows")).filter((n) => /\.ya?ml$/.test(n)).sort();
+  } catch {
+    return;
+  }
+  let seen = 0;
+  let bad = 0;
+  for (const name of names) {
+    const rel = `.github/workflows/${name}`;
+    const text = readText(rel);
+    const scripts = new Set([...text.matchAll(/\.claude\/(?:hooks|ci)\/[\w-]+\.(?:ts|py|sh)\b/g)].map((m) => m[0]));
+    if (scripts.size) seen += 1;
+    for (const script of [...scripts].sort()) {
+      if (script.endsWith(".py") && isFile(script.slice(0, -3) + ".ts")) {
+        bad += 1;
+        r.fix(`${rel} runs ${script}`, `the factory runs on Bun now: run \`factory update\` (it moves the factory's steps to ` +
+          `\`bun --no-env-file ${script.slice(0, -3)}.ts\` and adds setup-bun), then commit the workflow in the update's pull request`);
+      } else if (!isFile(script)) {
+        bad += 1;
+        r.fix(`${rel} runs ${script}`, "that script is not in this project: remove the step, or run the factory command it " +
+          "stood for (`./factory <command>`)");
+      }
+    }
+    if (/\bbun\s+--no-env-file\b/.test(text) && !text.includes("oven-sh/setup-bun")) {
+      bad += 1;
+      r.fix(`${rel} runs bun`, "the runner has no Bun: add `- uses: oven-sh/setup-bun@v2` after the checkout step " +
+        "(after its `with:` lines), or run `factory update`");
+    }
+  }
+  if (seen && !bad) r.ok("the workflows in .github/workflows run the factory's scripts with Bun");
+}
+
 export function project(r: Reporter, cfg: Config): void {
   const [rc, out] = run(["git", "submodule", "status"]);
   if (rc === 0 && out) {
@@ -282,6 +319,7 @@ export function project(r: Reporter, cfg: Config): void {
   if (existsSync(".claude/settings.json")) {
     r.ok(".claude/settings.json");
     hookLines(r);
+    workflows(r);
   } else {
     r.fix(".claude/settings.json", "it doesn't resolve, so the hooks and deny rules won't load: run " +
       "`factory update` (a project on releases), or `git submodule update --init` / " +

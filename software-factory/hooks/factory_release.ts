@@ -830,6 +830,10 @@ export interface Installed {
   removed: string[];
   kept_local: string[];
   unlinked: string[];
+  /** The project's own workflows whose factory lines were moved to Bun (#254). */
+  workflows: string[];
+  /** Factory scripts a workflow still runs with python3 that this release does not ship: the person decides. */
+  workflowsLeft: string[];
   stack?: Found;
 }
 
@@ -837,6 +841,86 @@ type Backup = null | { link: string } | { data: Uint8Array; mode: number };
 
 function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((x, i) => x === b[i]);
+}
+
+const FACTORY_PY = /python3?\s+((?:"?\$CLAUDE_PROJECT_DIR"?\/)?\.claude\/(?:hooks|ci)\/[\w-]+)\.py\b/g;
+const SETUP_BUN = "oven-sh/setup-bun@v2";
+
+/** The project's own workflows (#254), moved to the factory's Bun scripts. They are templates the factory never
+ * overwrites, so after an update from the Python releases they still ran `python3 .claude/hooks/<name>.py`, which the
+ * update had just removed. Only those lines change, and only for a script this release ships as `<name>.ts`; a job that
+ * now runs bun gets the setup-bun step after its checkout step, unless it has one. Everything else is left as it is.
+ * Returns the rewritten files and the factory scripts that are still called but no longer shipped. */
+export function migrateWorkflows(root: string, shipped: Set<string>): { rewritten: [string, string][]; left: string[] } {
+  const dir = join(root, ".github", "workflows");
+  const rewritten: [string, string][] = [];
+  const left = new Set<string>();
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((n) => /\.ya?ml$/.test(n)).sort();
+  } catch {
+    return { rewritten, left: [] };
+  }
+  for (const name of names) {
+    const rel = `.github/workflows/${name}`;
+    const path = join(root, rel);
+    if (!isFile(path) || isLink(path)) continue;
+    const before = readFileSync(path, "utf8");
+    let text = before.replace(FACTORY_PY, (all, script: string) => {
+      const target = script.replace(/^"?\$CLAUDE_PROJECT_DIR"?\//, "") + ".ts";
+      if (!shipped.has(target)) {
+        left.add(script.replace(/^"?\$CLAUDE_PROJECT_DIR"?\//, "") + ".py");
+        return all;
+      }
+      return `bun --no-env-file ${script}.ts`;
+    });
+    if (text !== before) text = withSetupBun(text);
+    if (text !== before) rewritten.push([rel, text]);
+  }
+  return { rewritten, left: [...left].sort() };
+}
+
+/** Each job that runs `bun` and has no setup-bun step gets one right after its checkout step (and that step's `with:`
+ * lines), at the same indent. A job with no checkout step is left alone. */
+function withSetupBun(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  // the jobs: a line `  <name>:` under `jobs:`, at the indent of the first job
+  const jobStarts: number[] = [];
+  let jobsAt = -1;
+  let jobIndent = -1;
+  lines.forEach((l, i) => {
+    if (/^jobs:\s*$/.test(l)) jobsAt = i;
+    else if (jobsAt >= 0 && /^(\s+)[\w.-]+:\s*$/.test(l)) {
+      const ind = (l.match(/^\s*/) as RegExpMatchArray)[0].length;
+      if (jobIndent < 0) jobIndent = ind;
+      if (ind === jobIndent) jobStarts.push(i);
+    }
+  });
+  const bounds = jobStarts.map((start, k) => [start, jobStarts[k + 1] ?? lines.length] as [number, number]);
+  const insertAfter = new Map<number, string>();
+  for (const [start, end] of bounds) {
+    const body = lines.slice(start, end);
+    if (!body.some((l) => /\bbun\s+--no-env-file\b/.test(l)) || body.some((l) => l.includes("oven-sh/setup-bun"))) continue;
+    const co = body.findIndex((l) => /^\s*-\s+uses:\s*actions\/checkout@/.test(l));
+    if (co < 0) continue;
+    const stepIndent = (body[co] as string).indexOf("-");
+    let last = co;
+    for (let j = co + 1; j < body.length; j++) {
+      const l = body[j] as string;
+      if (!l.trim()) continue;
+      const ind = (l.match(/^\s*/) as RegExpMatchArray)[0].length;
+      if (ind <= stepIndent) break;
+      last = j;
+    }
+    insertAfter.set(start + last, " ".repeat(stepIndent) + `- uses: ${SETUP_BUN}  # the factory's scripts run on Bun (#252)`);
+  }
+  lines.forEach((l, i) => {
+    out.push(l);
+    const add = insertAfter.get(i);
+    if (add) out.push(add);
+  });
+  return out.join("\n");
 }
 
 /** Write the release into the project. Returns {added, changed, removed, kept_local}; undoes its work on a failure.
@@ -860,7 +944,7 @@ export async function installFiles(root: string, files: Files, manifest: Manifes
   const oldFiles = oldPin?.files ?? {};
   const backups = new Map<string, Backup>();
   const writtenTemplates: string[] = [];
-  const result: Installed = { added: [], changed: [], removed: [], kept_local: [], unlinked: [] };
+  const result: Installed = { added: [], changed: [], removed: [], kept_local: [], unlinked: [], workflows: [], workflowsLeft: [] };
   // A first install detects the stack before writing settings.json, so the allow rules the detected test command needs
   // (written to factory.json's permissions.allow, #249) are merged into settings.json in the same install.
   const mod = first ? await stackModule() : null;
@@ -910,6 +994,13 @@ export async function installFiles(root: string, files: Files, manifest: Manifes
         }
       }
     }
+    const wf = migrateWorkflows(root, new Set(targets));
+    for (const [rel, text] of wf.rewritten) {
+      remember(join(root, rel));
+      writeFile(join(root, rel), new TextEncoder().encode(text), statSync(join(root, rel)).mode & 0o777);
+      result.workflows.push(rel);
+    }
+    result.workflowsLeft.push(...wf.left);
     if (first && found) {
       result.stack = found;
       for (const target of [...templates.keys()].sort()) {
@@ -1401,6 +1492,10 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
     }
     for (const t of installed.removed.slice(0, 8)) say(`    removed ${t}`);
     for (const t of installed.kept_local.slice(0, 8)) say(`    note: ${t} had local changes; the release's version replaced them (see the diff)`);
+    for (const t of installed.workflows) say(`    changed ${t}: the factory's steps run with Bun now (and setup-bun where a job needed it); your own steps are untouched`);
+    for (const t of installed.workflowsLeft) {
+      say(`    note: a workflow still runs ${t}, which this release does not ship: remove that step, or replace it with \`./factory <command>\``);
+    }
   }
   const newPin = readPin(root) as Pin;
   say("This machine");

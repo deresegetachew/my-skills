@@ -925,3 +925,83 @@ test("a first release install never overwrites an existing workflow or factory j
   expect(read(join(d, ".github/workflows/ci.yml"))).toBe("name: mine\n");
   expect(commands(d).test).toBe("make test");
 });
+
+// #254: a project's own .github/workflows/ci.yml (a template, never overwritten) still ran the factory's Python hooks
+// after the update to a Bun release removed them, so CI on the update PR failed. The update rewrites the factory's own
+// lines to Bun, adds the setup-bun step to each job that now runs bun, leaves every other line alone, and says so.
+const OLD_CI = `name: CI
+on: [pull_request]
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Factory guard
+        run: python3 .claude/hooks/factory_x.py --base main
+      - name: Project's own script
+        run: python3 scripts/check_names.py
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+      - run: python3 .claude/hooks/factory_gone.py run test
+      - run: python3 -m unittest discover -s tests
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo docs
+`;
+
+test("update to a bun release moves the project's workflow lines that ran the factory's python hooks", async () => {
+  const [gh, d, env] = await world();
+  gh.add("0.1.0-alpha.3", { pre: true, date: "2026-10-01T10:00:00Z", files: {
+    "hooks/factory_x.ts": null, "hooks/factory_x.py": "X = 1\n",
+    "kit/.claude/settings.json": JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command",
+      command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_x.py" }] }] } }) + "\n" } });
+  let [rc, out] = await fac(d, env, "update", "v0.1.0-alpha.3");
+  expect(rc, out).toBe(0);
+  mkdirSync(join(d, ".github", "workflows"), { recursive: true });
+  writeFileSync(join(d, ".github", "workflows", "ci.yml"), OLD_CI);
+  commit(d, "on the python release, with the project's own CI");
+  gh.add("0.2.0", { date: "2026-11-01T10:00:00Z" });
+  [rc, out] = await fac(d, env, "update", "v0.2.0");
+  expect(rc, out).toBe(0);
+  const ci = read(join(d, ".github", "workflows", "ci.yml"));
+  // the factory's hook that the new release ships runs with Bun now
+  expect(ci).toContain("run: bun --no-env-file .claude/hooks/factory_x.ts --base main");
+  expect(ci).not.toContain("factory_x.py");
+  // the project's own commands, and a factory script the new release no longer has, are not guessed at
+  expect(ci).toContain("run: python3 scripts/check_names.py");
+  expect(ci).toContain("run: python3 -m unittest discover -s tests");
+  expect(ci).toContain("run: python3 .claude/hooks/factory_gone.py run test");
+  // setup-bun once, right after the checkout step (and its `with:`), only in the job that runs bun now
+  const guard = ci.slice(ci.indexOf("  guard:"), ci.indexOf("  test:"));
+  // after `with:`, never between checkout and its fetch-depth (that broke the guard in the sandbox: no origin/main)
+  expect(guard).toContain("          fetch-depth: 0\n      - uses: oven-sh/setup-bun@v2  # the factory's scripts run on Bun (#252)\n      - name: Factory guard");
+  expect(ci.split("oven-sh/setup-bun").length - 1).toBe(1);
+  // said, and listed so the reviewer sees it; what it could not move is named with the fix
+  expect(out).toContain("changed .github/workflows/ci.yml");
+  expect(out).toContain(".claude/hooks/factory_gone.py");
+  // safe to run twice: the same update again changes nothing more
+  commit(d, "on the bun release");
+  [rc, out] = await fac(d, env, "update", "v0.2.0");
+  expect(rc, out).toBe(0);
+  expect(read(join(d, ".github", "workflows", "ci.yml"))).toBe(ci);
+});
+
+test("a workflow that already runs the factory with bun is left alone", async () => {
+  const [gh, d, env] = await world();
+  gh.add("0.2.0", { date: "2026-11-01T10:00:00Z" });
+  mkdirSync(join(d, ".github", "workflows"), { recursive: true });
+  const ci = "jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n      - uses: oven-sh/setup-bun@v2\n      - run: bun --no-env-file .claude/hooks/factory_x.ts\n";
+  writeFileSync(join(d, ".github", "workflows", "ci.yml"), ci);
+  commit(d, "bun ci");
+  const [rc, out] = await fac(d, env, "update", "v0.2.0");
+  expect(rc, out).toBe(0);
+  expect(read(join(d, ".github", "workflows", "ci.yml"))).toBe(ci);
+  expect(out).not.toContain("changed .github/workflows/ci.yml");
+});

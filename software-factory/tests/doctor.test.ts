@@ -244,3 +244,22 @@ test("doctor outside a git repo says where to run it", () => {
   expect(p.stderr).toContain("factory doctor: run it inside the project's git repo.");
   rmSync(d, { recursive: true, force: true });
 });
+
+// #254: after the update from the Python releases a project's own ci.yml could still run the removed Python hooks.
+test("a workflow that runs a removed python hook or bun without setup-bun is a fix and a good one is ok", () => {
+  const steps = (lines: string[]) => "jobs:\n  a:\n    steps:\n      - uses: actions/checkout@v4\n" + lines.map((l) => `      - ${l}\n`).join("");
+  let d = project({ ".github/workflows/ci.yml": steps(["run: python3 .claude/hooks/factory_guard.py --base main"]) });
+  let p = doctor(d, machine());
+  expect(lines(p, "fix").some((l) => l.includes(".github/workflows/ci.yml runs .claude/hooks/factory_guard.py") && l.includes("factory update")), p.stdout).toBe(true);
+  d = project({ ".github/workflows/ci.yml": steps(["run: bun --no-env-file .claude/hooks/factory_guard.ts"]) });
+  p = doctor(d, machine());
+  expect(lines(p, "fix").some((l) => l.includes("ci.yml runs bun") && l.includes("oven-sh/setup-bun@v2")), p.stdout).toBe(true);
+  d = project({ ".github/workflows/ci.yml": steps(["run: bun --no-env-file .claude/hooks/factory_nope.ts", "uses: oven-sh/setup-bun@v2"]) });
+  p = doctor(d, machine());
+  expect(lines(p, "fix").some((l) => l.includes("runs .claude/hooks/factory_nope.ts") && l.includes("not in this project")), p.stdout).toBe(true);
+  d = project({ ".github/workflows/ci.yml": steps(["uses: oven-sh/setup-bun@v2", "run: bun --no-env-file .claude/hooks/factory_guard.ts",
+    "run: python3 -m unittest discover -s tests"]) });
+  p = doctor(d, machine());
+  expect(lines(p, "fix").filter((l) => l.includes("workflows")), p.stdout).toEqual([]);
+  expect(lines(p, "ok").some((l) => l.includes("the workflows in .github/workflows run the factory's scripts with Bun")), p.stdout).toBe(true);
+});
