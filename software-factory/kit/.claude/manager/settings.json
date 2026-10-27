@@ -140,7 +140,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/manager_gate.ts",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/manager_gate.ts || exit 2",
             "timeout": 60
           }
         ]
@@ -151,7 +151,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 10
           }
         ]
@@ -162,7 +162,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]

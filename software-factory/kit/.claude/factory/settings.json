@@ -107,6 +107,7 @@
       "Bash(./factory heartbeat uninstall*)",
       "Bash(./factory heartbeat run*)",
       "Bash(*factory_heartbeat*)",
+      "Bash(gh pr merge*--admin*)",
       "Bash(gh pr review *--approve*)",
       "Bash(gh pr comment *factory-approved*)",
       "Bash(gh pr comment *factory-answer*)",
@@ -121,17 +122,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.ts",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.ts",
             "timeout": 600
           },
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.ts",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.ts",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]
@@ -143,7 +144,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pr-gate.ts",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pr-gate.ts || exit 2",
             "timeout": 60
           }
         ]
@@ -154,7 +155,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_session.ts",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_session.ts",
             "timeout": 600
           }
         ]
@@ -165,7 +166,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 10
           }
         ]
@@ -176,7 +177,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]

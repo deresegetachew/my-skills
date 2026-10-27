@@ -51,7 +51,7 @@ test("every hook in the agents' and the manager's settings starts Bun without th
   for (const path of SETTINGS) {
     const commands = hookCommands(path).filter((c) => c.includes(".claude/hooks/"));
     expect(commands.length, path).toBeGreaterThan(0);
-    for (const c of commands) expect(c, path).toMatch(/^bun --no-env-file --config=\/dev\/null /);
+    for (const c of commands) expect(c, path).toMatch(/^env -u BUN_OPTIONS bun --no-env-file --config=\/dev\/null /);
   }
 });
 

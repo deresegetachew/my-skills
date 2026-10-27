@@ -133,7 +133,14 @@ trip and a new session. Drafts don't need it, nor does the merge (CI itself is g
 on main, nothing changes.
 
 **It fails closed.** If it hits an error (a broken `factory.json`, `gh` not signed in, a command it can't parse), it
-blocks the command and says why.
+blocks the command and says why. Claude Code blocks a command only when the hook exits 2, so the gate's hook line ends
+with `|| exit 2`: a gate script that is missing or crashes blocks the command too (the manager gate's line does the same).
+Every hook line starts Bun with `env -u BUN_OPTIONS`, so that variable can't add a preload. `factory doctor` reports a
+hook line without either as a fix. The agents' settings also deny `gh pr merge … --admin` outright.
+
+The hook scripts still run from the agent's own folder, so an agent that puts back an older gate from git history runs
+that one. Running the hooks from main's code instead is #274; the lock that does not depend on the
+agent's folder is on GitHub (see Branch protection below).
 
 **Trusted reviewers.** With `"trustedReviewers": ["<login>"]` in `factory.json`, only approvals from those GitHub
 logins count, and only their must-fixes send a pull request back to rework (`factory next`). This only helps once the

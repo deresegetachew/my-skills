@@ -238,7 +238,8 @@ function hookCommands(data: unknown): string[] {
 }
 
 /** The hooks .claude/factory/settings.json runs are the factory's Bun scripts (#252): each `.claude/hooks/<name>.ts` exists
- * and is run with `bun --no-env-file --config=/dev/null`, and no line still runs a Python hook. Quiet when it runs no factory hook. */
+ * and is run with `env -u BUN_OPTIONS bun --no-env-file --config=/dev/null`, the PR gate's line fails closed (`|| exit 2`),
+ * and no line still runs a Python hook. Quiet when it runs no factory hook. */
 export function hookLines(r: Reporter): void {
   let data: unknown;
   try {
@@ -249,17 +250,23 @@ export function hookLines(r: Reporter): void {
   const python = new Set<string>();
   const missing = new Set<string>();
   const notBun = new Set<string>();
+  const bunOptions = new Set<string>();
+  const openGate = new Set<string>();
   let seen = 0;
   for (const command of hookCommands(data)) {
     for (const m of command.matchAll(/\.claude\/hooks\/[\w.-]+\.py\b/g)) python.add(m[0]);
     const scripts = [...command.matchAll(/\.claude\/hooks\/[\w.-]+\.ts\b/g)].map((m) => m[0]);
     if (scripts.length) seen += 1;
     for (const script of scripts) if (!isFile(script)) missing.add(script);
-    if (scripts.length && !/^\s*bun --no-env-file --config=\/dev\/null\s/.test(command)) notBun.add(command);
+    if (!scripts.length) continue;
+    if (!/^\s*(env -u BUN_OPTIONS )?bun --no-env-file --config=\/dev\/null\s/.test(command)) notBun.add(command);
+    else if (!/^\s*env -u BUN_OPTIONS /.test(command)) bunOptions.add(command);
+    // Claude Code blocks a tool call only on exit 2: a gate that is missing or crashes (exit 1) would let it through.
+    if (scripts.some((s) => /\/(pr-gate|manager_gate)\.ts$/.test(s)) && !/\|\|\s*exit 2\s*$/.test(command)) openGate.add(command);
   }
   for (const script of [...python].sort()) {
     r.fix(`.claude/factory/settings.json runs ${script}`, "the factory runs on Bun now and has no Python hooks: run `factory update` " +
-      "(it writes the hook lines as `bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/<name>.ts`)");
+      "(it writes the hook lines as `env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/<name>.ts`)");
   }
   for (const script of [...missing].sort()) {
     r.fix(`.claude/factory/settings.json runs ${script}`, "the hook script is missing: run `factory update`");
@@ -268,7 +275,17 @@ export function hookLines(r: Reporter): void {
     r.fix(".claude/factory/settings.json hook line", `\`${command}\` does not start with \`bun --no-env-file --config=/dev/null\`, so Bun would load the ` +
       "project's .env or run its bunfig.toml preload before the hook (#259): run `factory update`");
   }
-  if (seen && !python.size && !missing.size && !notBun.size) r.ok("the hooks in .claude/factory/settings.json run with Bun");
+  for (const command of [...bunOptions].sort()) {
+    r.fix(".claude/factory/settings.json hook line", `\`${command}\` keeps BUN_OPTIONS, which can add a preload that runs before ` +
+      "the hook: run `factory update` (it starts every hook with `env -u BUN_OPTIONS`)");
+  }
+  for (const command of [...openGate].sort()) {
+    r.fix(".claude/factory/settings.json hook line", `\`${command}\` does not end with \`|| exit 2\`, so a gate that is missing or ` +
+      "crashes lets the command through (Claude Code blocks only on exit 2): run `factory update`");
+  }
+  if (seen && !python.size && !missing.size && !notBun.size && !bunOptions.size && !openGate.size) {
+    r.ok("the hooks in .claude/factory/settings.json run with Bun");
+  }
 }
 
 export function project(r: Reporter, cfg: Config): void {
