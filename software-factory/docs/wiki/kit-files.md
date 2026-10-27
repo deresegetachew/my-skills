@@ -20,7 +20,7 @@ software-factory/
   PO.md                                   the product owner's playbook
   docs/PRD.md                             the factory's PRD: scope, decisions, user stories, what is later
   docs/manager-handover.md                runbook: from the cloud-session manager to terminal managers
-  install.sh                              install into a project (--link with the submodule)
+  install.sh                              install into a project from a my-skills checkout (--link: links into the submodule)
   factory                                 the command line
   factory-loop.sh                         the loop behind `factory loop`
   VERSION                                 the release number
@@ -38,7 +38,12 @@ software-factory/
     factory_rereview.ts                 incremental re-review: the delta since a reviewer's last round
     factory_reset_run.ts                `factory reset-run`: list and clean what an earlier run left (claims, Agent issues, CI containers, runners, a runs-on variable)
     factory_stack.ts                    the project's stack on a first install (node, python, unknown) and the CI command runner for a Python project
-    pr-gate.ts                          PreToolUse: gates gh pr create, ready and merge, and the markers
+    pr-gate.ts                          PreToolUse: gates gh pr create, ready and merge, gh api writes, force pushes and the markers
+    factory_shell.ts                    the command reader the gates share (simple commands, gh arguments)
+    factory_agent_settings.ts           the agents' rules from main, passed with `claude --settings` when an agent starts (#258)
+    factory_mcp.ts                      the MCP config a factory session starts with: main's `.mcp.json`, never the worktree's
+    factory_trust.ts                    is a folder trusted by Claude Code (doctor and the loop read it)
+    factory_review_pass.ts              `factory review-pass`: a review agent records its pass for the current commit
     check.ts                            Stop: typecheck and tests (in a factory run only)
     factory_stop.ts                     Stop: closes a finished session in `factory loop -i`
     factory_session.ts                  SessionStart: a plain `claude` session becomes an agent
@@ -58,7 +63,10 @@ software-factory/
     factory_follow.ts                   `factory follow`, `say`, `remote` and `agent --detach`
     factory_remotes.ts                  remotes, ssh calls and finding sessions by name
     factory_doctor.ts                   `factory doctor`: checks a machine and project, read-only
-    factory_release.ts                  `factory version | releases | update | rollback`: the release client
+    factory_doctor_ci.ts                the doctor's CI and agent checks (runners, main's CI, held issues)
+    factory_release.ts                  `factory version | releases | update | rollback | migrate-to-release`: the release client
+    factory_tar.ts                      tar archives for releases: a fixed writer and a careful reader
+    factory_workflow.ts                 rewrites a project's CI steps that call a removed Python hook (#254)
     factory_bootstrap.ts                `factory bootstrap`: machine, project, status, uninstall (plan first, --apply as root)
     factory_bootstrap_core.ts           the steps and actions bootstrap is built from, and the executor
     factory_bootstrap_machine.ts        the root steps: packages, user, subuid, linger, guard, SSH, keep awake
@@ -88,8 +96,13 @@ software-factory/
     factory_signoff.ts                  `factory signoff`: the sign-off and testing queue (plans, confirmations, results)
     factory_verify.ts                   `factory verify`: what CI runs, here, before a PR (`commands.ci`)
     factory_guard.ts                    the CI guard
+    factory_ci.ts                       tells a CI failure from CI that never ran (minutes, spending limit)
+    factory_ci_log.ts                   `factory ci log`: the failed job's log, trimmed to the failing step
     style_checks.ts                     CI: each style's check
     factory_config.ts                   reads factory.json, with defaults
+    factory_lib.ts                      shared helpers: processes, errors, JSON
+    factory_numbers.ts                  numbered files (decisions, migrations): a number neither main nor an open PR has
+    factory_remote.ts                   keeps the remotes pointing at where the repository lives now
     wait_for_merge.sh                   waits on a PR without spending tokens
     factory_wait.ts                     the other waits (ci, answer, slot, ready) and the dev manager's precheck
     factory_tick.ts                     `factory manage-tick`: the precheck, then one manage-pass session only when there is work
@@ -110,8 +123,9 @@ software-factory/
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
     .claude/skills/product-pass/          the product owner's standing rules (one page)
     .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main); a release installs and updates it
-    .github/                              template: CI workflow, factory-task issue template, CODEOWNERS
+    .github/                              template: CI workflow (Node or Python), factory-task issue template, PRD-change PR template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
+    .gitignore                            the lines a project's ignore file gets
 ```
 
 Run one test file with `bun tools/run_tests.ts pr_gate` (each file runs in its own process).

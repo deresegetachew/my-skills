@@ -38,14 +38,14 @@ between passes. What differs is small:
 |---|---|---|---|
 | Skill a pass runs | `/next-task` | `/manage-pass <item>`, started by the orchestrator once per item | `/product-pass` |
 | Has work when | a task is ready (it claims it) | `factory watch` lists something (the orchestrator, no model) | an issue or PR has `roles.product-owner.workLabel`, an owner-queue ask is tagged `for=product`, or a test plan or sign-off item waits |
-| Settings | the project's `settings.json` | `roles.dev-manager.profile` | `roles.product-owner.profile` |
+| Settings | the agents' settings (`.claude/factory/settings.json`, passed at start) | `roles.dev-manager.profile` | `roles.product-owner.profile` |
 | Model | `models.builder` | `models.manager` | `models.product-owner` |
 | Wait after a pass | `waitMinutes` (inside the loop) | `manager.busyMinutes` (2) / `manager.idleMinutes` (5) | `roles.product-owner.busyMinutes` (30) / `idleMinutes` (60); 0 idle: exit |
 
 Only the coding agent claims a task. Managers and product owners register as live agents (`factory agents` shows the
 role) and keep pinging while they wait, so the sweep does not take a sleeping manager for a dead one. A role's profile
-is used only when its file exists; then its sessions read just the user's settings and the profile (the project's own
-`settings.json` denies `gh api`, which the manager and product owner need).
+is used only when its file exists; then its sessions read just the user's settings and the profile, not the project's
+own `.claude/settings.json` (the coding agents' settings deny `gh api`, which the manager and product owner need).
 
 **`factory loop -i` with no role asks.** In a terminal it asks which role (coding agent, dev manager, product owner)
 and which name (a free one, or type one). `factory loop -i dev-manager` or `FACTORY_ROLE=dev-manager` skips the
@@ -182,7 +182,7 @@ Each project has a folder for what its roles need, committed in the project's ow
   stories`. The role's skill reads this list first and nothing else up front, so a pass does not load the whole PRD
   or the repo's docs; a `#section` lets it `grep -n` for the part. The PRD, designs and research stay where they are
   (`docs/`, `design/`); `reads.md` only points at them.
-- It lives under `.claude/` on purpose: the shared `settings.json` denies agents editing `.claude/**`, so the
+- It lives under `.claude/` on purpose: the agents' settings deny editing `.claude/**`, so the
   instructions that govern a role change only through a reviewed pull request.
 - `install.sh` scaffolds it for a new project, `factory init-roles` for an existing one (it never overwrites), and
   `factory doctor` reports every path in a `reads.md` that does not exist.

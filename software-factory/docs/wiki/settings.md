@@ -36,7 +36,7 @@ Files that don't follow the guide yet go on a legacy list (`structure.legacy`). 
 
 The template has every key with a short `_about`. Missing keys fall back to the defaults in `factory_config.ts`.
 `factory settings` is how you browse, understand and change them without editing JSON. In a terminal it opens a menu
-(plain `input()` and `print()`, no extra packages, so it works over SSH):
+(plain prompts on the terminal, no extra packages, so it works over SSH):
 
 ```
 factory settings
