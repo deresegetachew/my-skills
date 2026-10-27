@@ -146,7 +146,10 @@ flowchart TB
     start --> l1 --> l2 --> l3 --> l4 --> done
 ```
 
-Files that govern the agents themselves (the gate, the settings, the agent definitions) are on a protected list.
+The agents' rules (their deny list and hooks) are passed only to the sessions the factory starts, read from `main`, so
+an agent cannot loosen its own next run, and your own Claude sessions in the project are not bound by them.
+Files that govern the agents themselves (the gate, the agents' rules, the agent definitions, `factory` and
+`factory-loop.sh`) are on a protected list.
 A change to them is never merged by the agent that wrote it. The dev manager or you merges it, except a change under
 `.claude/` (the settings, the permissions, the agents' definitions): only you merge that.
 
@@ -166,7 +169,7 @@ flowchart LR
         end
         hooks["Hooks in every session<br/>start, before and after tools,<br/>stop, end"]
         subs["Subagents<br/>test-writer, reviewer,<br/>architecture-reviewer,<br/>safety-auditor, security-reviewer"]
-        files[".claude/ in the project<br/>the factory's agents, skills,<br/>hooks and settings"]
+        files[".claude/ in the project<br/>the factory's agents, skills,<br/>hooks and the agents' rules"]
     end
 
     subgraph github["GitHub"]
@@ -202,8 +205,8 @@ that has nothing to do sleeps instead of asking a model.
 <br>
 ## Where things stand
 
-The factory is in alpha. The releases so far are pre-releases (`v0.1.0-alpha.1` to `v0.1.0-alpha.3`), so you name
-one when you install. They are the old Python factory; the first Bun release is the next one
+The factory is in alpha. Every release so far is a pre-release, so you name one when you install (`factory update
+v0.2.0-alpha.1`). `v0.2.0-alpha.1` is the first on Bun; the `v0.1.0` ones are the old Python factory
 ([Updating from releases](docs/wiki/updating.md#updating-from-releases)).
 
 Not built yet:
@@ -370,25 +373,23 @@ Only where they come from differs:
 What stays the project's own in every case: `.claude/factory.json`, `.claude/factory/notes/`, `.claude/factory/lessons.md`,
 `CLAUDE.md`, its docs, its CI workflow, and (on releases) the pin file.
 
-**A project on the submodule still linked through `kit/`** (made before the move) is relinked by
-`factory update --layout new`, or by `bash vendor/my-skills/software-factory/install.sh . --link` after moving the
-submodule to my-skills' newest main: each link is re-pointed from `kit/` to the factory's own folder. The links keep
-their places in `.claude/`, so `settings.json` and the docs need no change. Check with `ls -l .claude/hooks` (it shows
-`.../software-factory/hooks/...`) and `factory doctor`, then commit the changed links in a pull request; `.claude/` is a
-protected path, so the owner merges it. `--layout new` (and `auto`) are still accepted and change nothing; `--layout
-old` is refused with `[layout_removed]`.
-
-A project that moves to releases needs no `--layout`: `factory migrate-to-release <tag>` replaces the links with a
-release's files (see [Projects that use the submodule](docs/wiki/submodule.md#moving-a-project-from-the-submodule-to-releases)).
+**A project on the submodule** moves to releases with `factory migrate-to-release <tag>`, in one reviewed pull request
+([Projects that use the submodule](docs/wiki/submodule.md#moving-a-project-from-the-submodule-to-releases)). Until
+then, `factory update --layout new` (or `bash vendor/my-skills/software-factory/install.sh . --link` after moving the
+submodule) re-points any link it still has into the old `kit/` paths to the factory's own folders. Check with
+`ls -l .claude/hooks` (it shows `.../software-factory/hooks/...`) and `factory doctor`, then commit the changed links
+in a pull request; the owner merges it. `--layout new` and `auto` are still accepted and change nothing; `--layout old`
+is refused with `[layout_removed]`.
 
 **The nestjs skills are not in the release.** `nestjs-best-practices` and `nestjs-clean-code-ddd-hexagonal` are
 top-level folders of my-skills, outside `software-factory/`, and a release ships only `software-factory/`. A project
 that uses them (remanual) keeps `vendor/my-skills` as a submodule after it moves to releases, for these things only:
 its `.claude/skills/nestjs-*` links, the `check` command in `.claude/factory.json` that runs
-`vendor/my-skills/nestjs-clean-code-ddd-hexagonal/scripts/check_structure.py`, and `submodules: true` on the
+`python3 vendor/my-skills/nestjs-clean-code-ddd-hexagonal/scripts/check_structure.py` (a script of that skill, not
+of the factory), and `submodules: true` on the
 `actions/checkout` steps in its `ci.yml`. Keep them; the factory itself (hooks, CI, agents, `factory`) comes from the
 release. A project that does not use the nestjs skills drops the submodule entirely.
 
-**Where the move stands** (#112): the code is out of `kit/` and `.claude/`, releases exist (pre-releases so far;
+**The move is done** (#112, #113): the code is out of `kit/` and `.claude/`, releases exist (pre-releases so far;
 cutting one stays the owner's call), Remanual, the first project, is on releases (its PR 440), and the `kit/`
 forwarders and `--layout old` are gone (#176).

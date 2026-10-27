@@ -71,8 +71,9 @@ git add .gitmodules vendor/my-skills .claude/skills
 git commit -m "Skills from my-skills"
 ```
 
-> **Using the software factory?** Skip the manual links. Its installer makes all of them and adds the `factory`
-> command. See [software-factory](software-factory/README.md#set-up-a-project).
+> **Using the software factory?** It does not come through the submodule: a project installs it from a numbered
+> release (`factory update <tag>`). See [software-factory](software-factory/README.md#set-up-a-project). The submodule
+> is only for the other skills, such as the nestjs ones.
 
 ### Clone a project that uses it
 
@@ -90,7 +91,7 @@ In GitHub Actions, check out with `submodules: true`.
 2. In the project, move the submodule forward and commit it in a pull request:
 
    ```bash
-   git submodule update --remote vendor/my-skills     # factory projects: just run `factory update`
+   git submodule update --remote vendor/my-skills
    git commit -am "Update my-skills"
    ```
 
@@ -98,8 +99,8 @@ The project stays on its old version until that commit merges. A change here nev
 
 ### Protect it
 
-A coding agent must not change the rules it is reviewed against. In a software factory project, `vendor/my-skills`
-and `.gitmodules` are on the protected list, and agents are denied edits under `vendor/`.
+A coding agent must not change the rules it is reviewed against. In a software factory project that keeps the
+submodule, add `vendor/my-skills` and `.gitmodules` to the protected list; agents are denied edits under `vendor/`.
 
 <br>
 
@@ -121,11 +122,15 @@ Two files: `software-factory-<version>.tar.gz` and `SHA256SUMS` (check with `sha
 ```
 MANIFEST.json   schema, version, tag, source commit, and every file with sha256, size and mode
 VERSION
-install.sh  README.md  SKILL.md  DEV-MANAGER.md
-kit/            the factory kit, exactly as in software-factory/kit (hooks, agents, skills, CI files, templates)
+factory  factory-loop.sh  install.sh  README.md  SKILL.md  DEV-MANAGER.md  PO.md
+hooks/          every hook and factory_*.ts command, including the release client factory_release.ts
+ci/             the runner services
+docs/           the PRD, reference pages and the wiki
+kit/            what a project is given: agents, skills, the agents' rules, templates
 ```
 
-It is everything under `software-factory/` except `tests/` (those test my-skills itself) and caches. Nothing from the other skills is in it.
+It is everything git tracks under `software-factory/` except `tests/` (those test my-skills itself), the dev-only
+type-checking files (`package.json`, `tsconfig.json`, `bun.lock`) and caches. Nothing from the other skills is in it.
 
 ## Using a skill
 
