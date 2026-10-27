@@ -62,5 +62,6 @@ export function lines(p: Proc, kind: string): string[] {
 
 /** The kit's hook line for a Bun hook, as `factory update` writes it into settings.json. */
 export function hookLine(name: string): string {
-  return `bun --no-env-file --config=/dev/null "$CLAUDE_PROJECT_DIR"/.claude/hooks/${name}.ts`;
+  const line = `env -u BUN_OPTIONS bun --no-env-file --config=/dev/null "$CLAUDE_PROJECT_DIR"/.claude/hooks/${name}.ts`;
+  return name === "pr-gate" || name === "manager_gate" ? line + " || exit 2" : line; // the gates fail closed
 }
