@@ -19,26 +19,25 @@ Some projects still take the factory through a git submodule (`vendor/my-skills`
 ### Moving a project from the submodule to releases
 
 A project that takes the factory from the submodule has its engine files as links. A release does not overwrite links:
-`factory update v0.1.0-alpha.1` (or `--release`) stops with `[linked_install]` and changes nothing. The move is its own
-reviewed pull request, and today most of it is by hand:
+`factory update` stops with `[linked_install]` and changes nothing. `factory migrate-to-release` makes the move, and it
+is its own reviewed pull request:
 
-1. **Start from a clean main** and make a branch for the move.
-2. **Remove the links the installer made** for the engine files: `.claude/hooks/*`, `.claude/ci/*`, the agents and skills
-   the factory ships, `.claude/settings.json`, `.claude/manager/settings.json`, `factory` and `factory-loop.sh`. By hand;
-   no command does this step yet. Keep your own files (`.claude/factory.json`, `.claude/factory/notes/`, `CLAUDE.md`).
-   Keep the `.claude/skills/nestjs-*` links if you use them (see the next section). Commit the removal on the branch:
-   `factory update` refuses a tree with uncommitted changes (`[dirty_tree]`) when the project has no pin yet.
-3. **Install the release.** `factory` is gone with its link, so run the client from the submodule that is still there:
-   `bun --no-env-file vendor/my-skills/software-factory/hooks/factory_release.ts update <version>`. It writes real files, the
-   pin `.claude/factory/release.json` and no templates over yours.
-4. **Decide about the submodule.** A project that uses the nestjs skills keeps `vendor/my-skills` for them only; a
-   project that does not removes the submodule, its `.gitmodules` entry and the `submodules: true` lines in CI. Both are
-   by hand.
-5. **Check:** `factory doctor` is green, and `factory version` shows the release.
-6. **Commit the install and open the pull request.** `.claude/` and `.gitmodules` are normally in `protected`, so the
-   owner merges it. After that, `factory update` is the only way the factory changes in the project.
-
-Steps 2 and 4 are the parts still manual. Moving Remanual, the first project, is the owner's merge.
+1. **Stop the project's factory loops**, so no agent builds on the old files during the move.
+2. **Start from a clean main** and make a branch: `git switch main && git pull && git switch -c factory-from-release`.
+3. **Run the command from a current my-skills checkout**, not through the submodule: the submodule is pinned to an old
+   commit, which may not have the command, and moving it makes the tree dirty (`[dirty_tree]`).
+   `git clone --depth 1 https://github.com/deresegetachew/my-skills.git /tmp/my-skills-main`, then, in the project:
+   `bun --no-env-file /tmp/my-skills-main/software-factory/hooks/factory_release.ts migrate-to-release <tag>`. Name
+   the tag while every release is a pre-release (`gh release list -R deresegetachew/my-skills` lists them; without one it stops with
+   `[no_releases]` and names the command). It replaces the links with the release's files, removes the links to factory
+   files the release no longer has (the old Python hooks, #264), keeps the links to other skills (the
+   `.claude/skills/nestjs-*` links), keeps your own files, fixes the CI workflow's steps, refreshes this machine's
+   runner services and checks them.
+4. **Drop the submodule** when the output prints the command for it (no link into it is left). A project that uses the
+   nestjs skills keeps `vendor/my-skills` for them only.
+5. **Commit and open the pull request.** `.claude/` and `.gitmodules` are normally in `protected`, so the owner merges
+   it. After that, `git pull` and `factory update <tag>` on each machine, start the loops again, and `factory update`
+   is the only way the factory changes in the project.
 
 <br>
 ## Installed as a submodule: what's shared and what's yours
@@ -136,7 +135,7 @@ reaches a project until the project moves its pin, in a PR.
 |---|---|---|
 | `git submodule update --init` | Makes `vendor/my-skills` match the pinned commit (clones it the first time) | No |
 | `git submodule update --remote vendor/my-skills` | Moves the folder to my-skills' newest main | Yes, in your working tree: you commit it |
-| `factory update` | Runs both of the above, lists the new my-skills commits, re-runs `install.sh . --link` to link any new shared files (`--layout new` also switches the links to the new folders), and tells you to commit. It doesn't commit or push | Yes, like `--remote` |
+| `factory update` | Runs both of the above, lists the new my-skills commits, re-runs `install.sh . --link` to link any new shared files (and moves a link still made through `kit/` to the factory's own folder), and tells you to commit. It doesn't commit or push | Yes, like `--remote` |
 | `git config submodule.recurse true` | One setting per clone (not committed). After it, `git pull`, `checkout` and `switch` also update the submodule to the pin | No |
 | `git clone --recurse-submodules <url>` | Clones the project with the submodule checked out | No |
 

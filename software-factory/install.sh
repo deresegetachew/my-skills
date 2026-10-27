@@ -12,15 +12,13 @@
 #       A shared file that is already a plain copy identical to the kit becomes a link; one that differs is kept,
 #       with a warning: move its project-specific lines to factory.json or a note, delete it, and run this again. Re-run it after `git submodule update --remote` to link new shared files.
 #
-#   --layout new|old|auto     (with --link; default auto)    where the project's links point (#112 step 2)
-#       new   the factory's code is read from its own folders: .claude/hooks/x -> software-factory/hooks/x,
-#             .claude/ci/x -> software-factory/ci/x, factory -> software-factory/factory, factory-loop.sh likewise.
-#             The links stay where the factory and the docs expect them; only where they point changes.
-#             The agents, skills and .claude/factory/settings.json still come from software-factory/kit/.claude/.
-#       old   the paths under software-factory/kit/ (symlink forwarders to the new folders). What every project
-#             linked before the move; it keeps working until the project switches.
-#       auto  a project that already links through kit/ stays old (a re-run changes nothing); any other is new.
-#             Switch a project with --layout new, in one reviewed commit.
+#   Where the links point (#112): the factory's code is read from its own folders: .claude/hooks/x ->
+#   software-factory/hooks/x, .claude/ci/x -> software-factory/ci/x, factory -> software-factory/factory,
+#   factory-loop.sh likewise. The agents, skills and .claude/factory/settings.json come from software-factory/kit/.claude/.
+#   A link a project made before the move (into software-factory/kit/, where the forwarders were until #176) is relinked.
+#   `--layout new` and `--layout auto` are still accepted and change nothing: there is one layout. An older `factory
+#   update` passes `--layout auto` when it moves the submodule to this version, so that must keep working. `--layout
+#   old` was removed with the forwarders (#176) and is refused.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 # Run a factory script (<path>.ts) with Bun. --no-env-file: Bun must not load the project's .env into the factory.
@@ -32,18 +30,18 @@ fh() {
 src="$here/kit"
 [ -d "${1:?Usage: install.sh <project dir> [--link]}" ] || { echo "No such folder: $1" >&2; exit 1; }
 dst="$(cd "$1" && pwd)"
-link=0; layout=auto
+link=0
 shift
 while [ $# -gt 0 ]; do
   case "$1" in
     --link) link=1 ;;
-    --layout) layout="${2:-}"; shift ;;
-    --layout=*) layout="${1#--layout=}" ;;
-    *) echo "Unknown option: $1 (use --link and --layout new|old|auto)" >&2; exit 1 ;;
+    --layout|--layout=*)
+      if [ "$1" = --layout ]; then layout="${2:-}"; shift; else layout="${1#--layout=}"; fi
+      case "$layout" in new|auto) ;; *) printf '{"code": "layout_removed", "message": "--layout %s is gone: the kit/ forwarders it linked through were removed (#176).", "fix": "run it again without --layout (or with --layout new); links into kit/ are relinked to the new folders."}\n' "$layout" >&2; exit 1 ;; esac ;;
+    *) echo "Unknown option: $1 (use --link)" >&2; exit 1 ;;
   esac
   shift
 done
-case "$layout" in new|old|auto) ;; *) echo "--layout takes new, old or auto, not '$layout'" >&2; exit 1 ;; esac
 # A project that already has .claude/factory.json is set up: a relink only updates the links, never re-adds templates.
 setup=1; [ -f "$dst/.claude/factory.json" ] && setup=0
 if [ "$link" = 1 ]; then
@@ -77,32 +75,12 @@ rel() {
   printf '%s\n' "$up${2#"$common"/}"
 }
 
-# Layout of the links (see --layout above). Auto: a project that links through kit/ already stays on it.
-if [ "$link" = 1 ] && [ "$layout" = auto ]; then
-  layout=new
-  for t in "$dst"/.claude/hooks/* "$dst"/.claude/ci/* "$dst/factory" "$dst/factory-loop.sh"; do
-    if [ -L "$t" ]; then case "$(readlink "$t")" in */software-factory/kit/*) layout=old; break;; esac; fi
-  done
-fi
-[ "$link" = 1 ] || layout=new  # a copy always takes the real files
-
-# The files to install, as paths inside kit/ (./.claude/hooks/x.ts, ./factory ...), one per line. In the new layout
-# the forwarders in kit/ are replaced by what is really in hooks/, ci/ and the two entry points, so a file added
-# there needs no forwarder to reach a project.
+# The files to install, as paths a project has them (./.claude/hooks/x.ts, ./factory ...), one per line: what kit/
+# holds, plus the factory's code from hooks/, ci/ and the two entry points.
 list_files() {
-  if [ "$layout" = old ]; then
-    ( cd "$src" && find . \( -type f -o -type l \) -not -path '*/__pycache__/*' )  # kit/ holds symlink forwarders to the moved code (#112 step 1), so symlinks count too
-    # A file that exists only in hooks/ or ci/ (no forwarder in kit/) is linked straight to its folder, so a kit-linked
-    # project that updates does not end up with a ./factory that points at a hook with no link (#174).
+  { ( cd "$src" && find . -type f -not -path '*/__pycache__/*' )
     ( cd "$here" && find hooks ci -type f -not -path '*/__pycache__/*' | sed 's#^hooks/#./.claude/hooks/#; s#^ci/#./.claude/ci/#'
-      echo ./factory; echo ./factory-loop.sh )
-  else
-    ( cd "$src" && find . \( -type f -o -type l \) -not -path '*/__pycache__/*' | while read -r f; do
-        { [ -L "$f" ] && [ -n "$(moved_to "$f")" ]; } || echo "$f"
-      done )
-    ( cd "$here" && find hooks ci -type f -not -path '*/__pycache__/*' | sed 's#^hooks/#./.claude/hooks/#; s#^ci/#./.claude/ci/#'
-      echo ./factory; echo ./factory-loop.sh )
-  fi | sort -u
+      echo ./factory; echo ./factory-loop.sh ); } | sort -u
 }
 
 # The project's stack on a first install (#199): node (package.json), python, or unknown. Only python changes what is
@@ -130,8 +108,7 @@ list_files | while read -r f; do
   if [ "$setup" = 1 ] && [ "$stack" = python ] && [ "$f" = ./.github/workflows/ci.yml ] && [ ! -e "$target" ]; then
     from="$src/${PY_WORKFLOW#./}"; python_ci=1
   fi
-  if [ "$layout" = new ]; then m="$(moved_to "$f")"; [ -z "$m" ] || from="$m"; fi
-  if [ "$layout" = old ] && [ ! -e "$src/${f#./}" ]; then m="$(moved_to "$f")"; [ -z "$m" ] || from="$m"; fi  # no forwarder in kit/
+  m="$(moved_to "$f")"; [ -z "$m" ] || from="$m"
   # The folder is made only when a file is put in it (#152): a template the project left out must not leave an empty docs/.
   if [ "$link" = 1 ] && is_engine "$f"; then
     want="$(rel "$target" "$from")"

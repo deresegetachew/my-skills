@@ -197,7 +197,7 @@ Maintain
   migrate-to-release     a project linked to the my-skills submodule: replace the links the release owns with the
                          release's files, keep the others, print the pull-request steps (refuses a dirty tree)
   update [--layout new]  a project still on the my-skills submodule (no pin yet): pull the newest my-skills and relink;
-                         then commit it in a PR (new: point the links at the factory's own folders instead of kit/)
+                         then commit it in a PR (links made through kit/ are moved to the factory's own folders)
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
 EOF
 }
@@ -320,25 +320,26 @@ case "$cmd" in
     # factory from numbered releases (#113). Any other project keeps the submodule update below until it migrates.
     if [ -f .claude/factory/release.json ]; then fh "$hooks/factory_release" update "$@"; exit $?; fi
     for a in "$@"; do case "$a" in --release|--archive|--archive=*|v[0-9]*|[0-9]*) fh "$hooks/factory_release" update "$@"; exit $? ;; esac; done
-    # --layout new|old|auto goes to install.sh: a project that links through kit/ stays on it until it asks for `new`.
-    layout=auto
+    # `--layout new` (or `auto`) is still accepted and changes nothing: there is one layout since the kit/ forwarders went
+    # (#176); `old` is refused.
+    layout=new
     case "${1:-}" in
       --layout) layout="${2:-}" ;;
       --layout=*) layout="${1#--layout=}" ;;
       "") ;;
-      *) echo "factory: unknown option $1 (factory update [--layout new|old|auto])" >&2; exit 1 ;;
+      *) echo "factory: unknown option $1 (factory update [--layout new])" >&2; exit 1 ;;
     esac
-    case "$layout" in new|old|auto) ;; *) echo "factory: --layout takes new, old or auto, not '$layout'" >&2; exit 1 ;; esac
+    case "$layout" in new|auto) ;; *) printf '{"code": "layout_removed", "message": "--layout %s is gone: the kit/ forwarders it linked through were removed (#176).", "fix": "run factory update without --layout; links into kit/ are relinked to the new folders."}\n' "$layout" >&2; exit 1 ;; esac
     sub="$(git config -f .gitmodules --get-regexp 'submodule\..*\.url' | awk '/my-skills/ {split($1, a, "."); print a[2]}' | head -1)"
     [ -n "$sub" ] || { echo "factory: no my-skills submodule in .gitmodules" >&2; exit 1; }
     path="$(git config -f .gitmodules --get "submodule.$sub.path")"
     old="$(git -C "$path" rev-parse --short HEAD 2>/dev/null || echo none)"
     git submodule update --init -q "$path" && git submodule update --remote -q "$path" || exit 1
     new="$(git -C "$path" rev-parse --short HEAD)"
-    # Same commit: still relink, because the layout may have been asked for (and a re-run changes nothing otherwise).
-    if [ "$old" = "$new" ] && [ "$layout" = auto ]; then echo "my-skills is already at $new"; exit 0; fi
-    [ "$old" = "$new" ] || { echo "my-skills $old -> $new:"; git -C "$path" log --oneline "$old..$new" 2>/dev/null | sed 's/^/  /'; }
-    bash "$path/software-factory/install.sh" . --link --layout "$layout" | grep -E '^(relinked|linked .*was a copy|kept .*differs)' || true
+    # Same commit: still relink, so links a project made through kit/ before #176 are moved (a re-run changes nothing).
+    if [ "$old" = "$new" ]; then echo "my-skills is already at $new"
+    else echo "my-skills $old -> $new:"; git -C "$path" log --oneline "$old..$new" 2>/dev/null | sed 's/^/  /'; fi
+    bash "$path/software-factory/install.sh" . --link | grep -E '^(relinked|linked .*was a copy|kept .*differs)' || true
     echo; echo "Now commit it on a branch and open a PR, for example:"
     echo "  git checkout -b chore/update-my-skills && git add -A && git commit -m \"Update my-skills to $new\"" ;;
   install-shim)

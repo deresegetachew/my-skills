@@ -200,14 +200,13 @@ test("the real checkout builds an archive with the moved folders and no links", 
   const names = new Set(list.map((m) => m.name));
   const top = `software-factory-${version}/`;
   for (const must of ["hooks/factory_config.ts", "hooks/factory_lib.ts", "ci/ci.sh", "ci/entrypoint.sh", "factory",
-    "factory-loop.sh", "install.sh", "kit/.claude/factory/settings.json", "kit/.claude/ci/ci.sh", "kit/factory"]) {
+    "factory-loop.sh", "install.sh", "kit/.claude/factory/settings.json"]) {
     expect(names.has(top + must), must).toBe(true);
   }
   expect(member(list, top + "factory").mode).toBe(0o755);
-  expect(member(list, top + "kit/factory").mode).toBe(0o755);
-  expect(member(list, top + "kit/.claude/ci/entrypoint.sh").mode).toBe(member(list, top + "ci/entrypoint.sh").mode);
   expect([...names].filter((n) => n.includes("/tests/"))).toEqual([]);
-  expect(text(member(list, top + "kit/factory"))).toBe(text(member(list, top + "factory")));
+  // the kit/ forwarders are gone (#176): no second copy of the factory's code under kit/
+  expect([...names].filter((n) => /\/kit\/(factory|factory-loop\.sh|\.claude\/(hooks|ci)\/)/.test(n))).toEqual([]);
 });
 
 function refused(p: Proc, code: string): void {

@@ -86,6 +86,47 @@ test("when no link is left it prints the commands to drop the submodule and runs
   expect(statSync(join(d, SUB)).isDirectory() && git(d, "ls-files").includes(".gitmodules"), "it only prints them").toBe(true);
 });
 
+test("links to factory files the release no longer ships are removed, and the submodule can go (#264)", async () => {
+  // a project linked before the move to Bun: its old Python hooks and CI scripts are links the release has no file for
+  const [, d, env] = await submoduleProject();
+  link(d, ".claude/hooks/factory_old.py", "software-factory/hooks/factory_old.py", "print(1)\n");
+  link(d, ".claude/ci/ci_names.py", "software-factory/ci/ci_names.py", "print(2)\n");
+  rmSync(join(d, ".claude/skills/nestjs-x/SKILL.md"));
+  commit(d, "old python links");
+  const [rc, out] = await fac(d, env, "migrate-to-release");
+  expect(rc, out).toBe(0);
+  for (const rel of [".claude/hooks/factory_old.py", ".claude/ci/ci_names.py"]) {
+    expect(lstatSync(join(d, rel), { throwIfNoEntry: false }), rel).toBeUndefined();
+    expect(out, rel).toContain("removed " + rel);
+  }
+  expect(readFileSync(join(d, SUB, "software-factory/hooks/factory_old.py"), "utf8"), "the submodule is never written through").toBe("print(1)\n");
+  expect(out.includes(`git submodule deinit -f ${SUB}`), "no link is left, so the submodule can go: " + out).toBe(true);
+});
+
+test("a skill link outside the factory keeps the submodule, and only that link is kept", async () => {
+  const [, d, env] = await submoduleProject();
+  link(d, ".claude/hooks/factory_old.py", "software-factory/hooks/factory_old.py", "print(1)\n");
+  commit(d, "an old python link");
+  const [rc, out] = await fac(d, env, "migrate-to-release");
+  expect(rc, out).toBe(0);
+  expect(lstatSync(join(d, ".claude/hooks/factory_old.py"), { throwIfNoEntry: false })).toBeUndefined();
+  expect(isLink(join(d, ".claude/skills/nestjs-x/SKILL.md"))).toBe(true);
+  expect(out).toContain("kept link .claude/skills/nestjs-x/SKILL.md");
+  expect(out).not.toContain("kept link .claude/hooks/factory_old.py");
+  expect(out.includes("git submodule deinit"), out).toBe(false);
+});
+
+test("with only pre-releases it names the exact migrate command to run (#264)", async () => {
+  const [gh, d, env] = await submoduleProject("0.9.0");
+  gh.releases.length = 0;
+  gh.add("1.0.0-alpha.1", { pre: true });
+  const before = state(d);
+  const [rc, out] = await fac(d, env, "migrate-to-release");
+  expect(rc === 1 && out.includes("[no_releases]"), out).toBe(true);
+  expect(out).toContain("factory migrate-to-release v1.0.0-alpha.1");
+  expect(state(d)).toEqual(before);
+});
+
 test("a dirty tree is refused and nothing changes", async () => {
   const [gh, d, env] = await submoduleProject();
   writeFileSync(join(d, "notes.txt"), "mine\n");

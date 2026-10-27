@@ -1,1 +1,0 @@
-../../../hooks/wait_for_merge.sh

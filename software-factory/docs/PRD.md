@@ -292,11 +292,10 @@ until he agrees them."
   reviewed pull request, with no flag day. `factory update --release` refuses where the files are still links. Moving
   Remanual changes protected files there, so it is the owner's merge. *Built (the commands); the migration is owner-led.*
   (#112, #113)
-  The code has moved out of `kit/` into `hooks/`, `ci/`, `factory` and `factory-loop.sh` (#120, #121); the `kit/`
-  forwarders and the `--layout old|auto` handling are still there. Open follow-ups, all issues: #170 (`factory
-  migrate-to-release`), #172 (the manager-profile note in `factory doctor`), #174 (a plain `factory update` at an old pin
-  must not leave a broken `./factory`), #175 (a local archive mode for `factory update`), #176 (remove the forwarders and
-  the `--layout old|auto` code). #171 and #173 are done (#177, #178), and #112 and #113 stay open.
+  The code has moved out of `kit/` into `hooks/`, `ci/`, `factory` and `factory-loop.sh` (#120, #121), and the `kit/`
+  forwarders and `--layout old` are gone (#176): a link a project still has through `kit/` is relinked by
+  `install.sh --link`. `factory migrate-to-release` (#170, #264), the manager-profile note (#172), a safe `factory
+  update` at an old pin (#174) and the local archive mode (#175) are built, and Remanual is on releases (#113).
 - **U8.** As the owner, a bump of the pin for the whole team is a separate, deliberate step from updating one machine.
   *Decided in principle; `factory update --propose` is not built, and its name is the owner's choice.* (#113, #114
   handover)
@@ -436,8 +435,6 @@ processes per test) still apply.
 - **Live access to Claude Design and artifacts** from a role's terminal session, per role and off by default, after the
   spike. (#104)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
-- **Removing the `kit/` forwarders** and the `--layout old|auto` handling after the first release and after Remanual has
-  moved. (#112, #176, README "What is left of the move")
 - **Ideas in the PR #39 draft that no issue or decision picked up.** They were proposals in that draft and are not
   scope: a `priority:high` label the picker honours (its story 9), a daily token budget per agent (34), a task board kept
   in step with the labels (55), the dev manager building a small task when no agent runs (51), a duplicate-task check

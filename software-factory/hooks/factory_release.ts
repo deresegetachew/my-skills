@@ -238,16 +238,17 @@ export async function listReleases(repo: string): Promise<Release[]> {
   return out.sort((a, b) => compareTags(b.tag, a.tag));
 }
 
-export function newest(releases: Release[]): Release {
+/** The newest full release. `command` is the one to name a pre-release with in the fix (#264). */
+export function newest(releases: Release[], command = "factory update"): Release {
   const full = releases.filter((r) => !r.pre);
   if (!full.length) {
     const pre = releases.find((r) => r.pre)?.tag;
     if (pre) {
       throw new FactoryError("no_releases", `there is no full release yet, only the pre-release ${pre} (pre-releases are only used when named).`,
-        `install the pre-release by naming it: \`factory update ${pre}\`.`);
+        `install the pre-release by naming it: \`${command} ${pre}\`.`);
     }
     throw new FactoryError("no_releases", "there is no published release yet (pre-releases are only used when named).",
-      "ask the owner to cut one, or name a pre-release: `factory update v1.0.0-rc.1`.");
+      `ask the owner to cut one, or name a pre-release: \`${command} v1.0.0-rc.1\`.`);
   }
   return full[0] as Release;
 }
@@ -566,7 +567,8 @@ export function readManifest(files: Files, version: string): Manifest {
 // --- what goes where in a project --------------------------------------------------------------------------------------
 
 /** ["engine", target] for what the factory owns in a project, ["template", target] for what a project fills in and is
- * only given on a first install, null for what is not installed (docs, the installer, the kit/ forwarders). */
+ * only given on a first install, null for what is not installed (docs, the installer, and the kit/ forwarders that
+ * releases before #176 still carry). */
 export function classify(rel: string): ["engine" | "template", string] | null {
   if (rel === "factory" || rel === "factory-loop.sh") return ["engine", rel];
   for (const [src, dst] of [["hooks/", ".claude/hooks/"], ["ci/", ".claude/ci/"]] as const) {
@@ -1266,6 +1268,14 @@ function intoSubmodule(root: string, rel: string): boolean {
   return target.includes(sep + "software-factory" + sep);
 }
 
+/** Whether a link points into the factory itself (software-factory/ in the submodule), not into another skill there. */
+function intoFactory(root: string, rel: string): boolean {
+  const target = realpath(join(root, rel));
+  const subs = submodulePaths(root).map((q) => realpath(join(root, q)) + sep + "software-factory" + sep);
+  if (subs.length) return subs.some((q) => target.startsWith(q));
+  return target.includes(sep + "software-factory" + sep);
+}
+
 /** The links in .claude/ and the two entry points that point into the submodule, as project-relative paths. */
 function submoduleLinks(root: string): string[] {
   const found: string[] = [];
@@ -1310,7 +1320,7 @@ async function cmdMigrate(args: Args): Promise<number> {
   let release: Release | null = null;
   if (args.version) tag = normalizeTag(args.version);
   else {
-    release = newest(await listReleases(repo));
+    release = newest(await listReleases(repo), "factory migrate-to-release");
     tag = release.tag;
   }
   say("factory migrate-to-release" + (args.verbose ? `  (${repo})` : ""));
@@ -1322,12 +1332,19 @@ async function cmdMigrate(args: Args): Promise<number> {
   // .claude/factory/settings.json replaces it. Only the link goes: the submodule is never written through.
   const legacy = links.includes(LEGACY_SETTINGS) && engine.has(AGENT_SETTINGS) && !engine.has(LEGACY_SETTINGS);
   if (legacy) unlinkSync(join(root, LEGACY_SETTINGS));
-  const kept = links.filter((l) => !engine.has(l) && !(legacy && l === LEGACY_SETTINGS));
+  // A link into the factory that the release has no file for is a file the factory dropped (the Python hooks after the
+  // move to Bun, #264): the release replaces the factory, so the link goes. Only links to other skills keep the submodule.
+  const left = links.filter((l) => !engine.has(l) && !(legacy && l === LEGACY_SETTINGS));
+  const dropped = left.filter((l) => intoFactory(root, l));
+  for (const l of dropped) unlinkSync(join(root, l));
+  const kept = left.filter((l) => !dropped.includes(l));
   say(`  Replaced ${installed.unlinked.length} link(s) with ${tag}'s files; installed ${installed.added.length} new, ` +
     `${installed.changed.length} changed file(s).`);
   for (const t of installed.unlinked.slice(0, 8)) say(`    unlinked ${t}`);
   if (legacy) say(`    removed link ${LEGACY_SETTINGS} (the agents' rules are in ${AGENT_SETTINGS} now, passed when the factory starts an agent)`);
-  for (const t of kept.slice(0, 8)) say(`    kept link ${t} (this release does not ship it)`);
+  for (const t of dropped.slice(0, 8)) say(`    removed ${t} (a factory file this release no longer has)`);
+  if (dropped.length > 8) say(`    ... and ${dropped.length - 8} more removed`);
+  for (const t of kept.slice(0, 8)) say(`    kept link ${t} (not part of the factory; the submodule stays for it)`);
   for (const line of workflowLines(fixWorkflows(root))) say("  " + line);
   const newPin = readPin(root) as Pin;
   say("This machine");

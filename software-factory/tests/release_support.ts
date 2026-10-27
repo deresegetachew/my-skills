@@ -60,7 +60,8 @@ export function buildRelease(version: string, files: Record<string, string | nul
     writeFileSync(p, body);
   }
   for (const x of ["factory", "factory-loop.sh", "ci/ci.sh"]) chmodSync(join(d, "software-factory", x), 0o755);
-  // the forwarders step 1 of #112 left at the old kit/ paths: the release packs them as files, and the client skips them
+  // the forwarders step 1 of #112 left at the old kit/ paths, which releases before #176 carry: the release packs them
+  // as files, and the client skips them (a rollback can still install such a release)
   symlinkSync("../factory", join(d, "software-factory", "kit", "factory"));
   for (const hook of ["factory_x.ts", "factory_x.py"]) {
     if (`hooks/${hook}` in t) {

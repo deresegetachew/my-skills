@@ -24,17 +24,20 @@ test("the section names every top level part of software factory that exists", (
   for (const folder of top) expect(new RegExp("^  " + esc(folder) + "/", "m").test(text), `the folder ${folder}/ is not described`).toBe(true);
 });
 
-test("the section says how a project switches and what is left", () => {
+test("the section says how a project still linked through kit is relinked and where the move stands", () => {
   const text = section();
   expect(text).toContain("factory update --layout new");
   expect(text.includes("ls -l .claude/hooks") && text.includes("factory doctor")).toBe(true);
-  for (const left of ["first release", "Remanual", "forwarders"]) expect(text).toContain(left);
+  for (const said of ["Remanual", "forwarders", "#176", "layout_removed"]) expect(text).toContain(said);
+  expect(text, "no layout old row: it is gone").not.toContain("layout `old`");
 });
 
-test("the switch command the section gives is one the factory command and installer accept", () => {
+test("the relink command the section gives is one the factory command and installer accept", () => {
   const help = sh(["bash", join(SF, "factory"), "help"]).stdout;
   expect(help).toContain("update [--layout new]");
-  expect(readFileSync(join(SF, "install.sh"), "utf8")).toContain("--layout new|old|auto");
+  const install = readFileSync(join(SF, "install.sh"), "utf8");
+  expect(install).toContain("new|auto) ;;");
+  expect(install).toContain("layout_removed");
 });
 
 test("the files in the kit tree lists the hooks and ci folders beside kit not inside it", () => {
