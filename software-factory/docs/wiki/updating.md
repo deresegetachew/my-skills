@@ -106,7 +106,7 @@ the old Python client cannot restart the heartbeat daemon, so if the daemon runs
 `factory heartbeat restart` once afterwards. Later updates restart it themselves. The project's
 `.github/workflows/ci.yml` still calls `python3 .claude/hooks/*.py`, which that update removed, so CI on the update pull
 request fails until it changes: run `factory update` once more with the new client (it rewrites each such step to
-`bun --no-env-file .claude/hooks/*.ts` and adds `- uses: oven-sh/setup-bun@v2` to the jobs that need it), then commit
+`bun --no-env-file --config=/dev/null .claude/hooks/*.ts` and adds `- uses: oven-sh/setup-bun@v2` to the jobs that need it), then commit
 the workflow in the same pull request. `factory doctor` names any workflow step that calls a hook that is not there.
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory init` (#103): the project's own scaffold, after `install.sh` has put the kit in the folder.
 //
 //   factory init [--dry-run]

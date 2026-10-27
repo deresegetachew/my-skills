@@ -1,8 +1,8 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory review-pass <kind>`: a review agent records its pass for the current commit (#197).
 //
-//   bun --no-env-file .claude/hooks/factory_review_pass.ts reviewer     writes <reviewMarkers>/<branch>.ok
-//   bun --no-env-file .claude/hooks/factory_review_pass.ts arch         writes <reviewMarkers>/<branch>.arch.ok
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_review_pass.ts reviewer     writes <reviewMarkers>/<branch>.ok
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_review_pass.ts arch         writes <reviewMarkers>/<branch>.arch.ok
 //
 // The file holds HEAD's id. The PR gate reads it. The agent runs only this one command, so no chained shell, `mkdir`,
 // `cd` or `git rev-parse` has to be allowed. Run it only when there is no must-fix item, for a commit you reviewed.
@@ -28,7 +28,7 @@ export function main(argv: string[]): number {
   const kind = argv[0] ?? "";
   if (argv.length !== 1 || !Object.hasOwn(SUFFIX, kind)) {
     return refuse("bad-kind", "Say which review passed: reviewer or arch.",
-      "Run: bun --no-env-file .claude/hooks/factory_review_pass.ts reviewer (or arch).");
+      "Run: bun --no-env-file --config=/dev/null .claude/hooks/factory_review_pass.ts reviewer (or arch).");
   }
   const [rc, branch] = git("branch", "--show-current");
   if (rc !== 0 || !branch) {

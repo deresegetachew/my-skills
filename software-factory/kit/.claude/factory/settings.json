@@ -15,7 +15,7 @@
       "Bash(git fetch*)",
       "Bash(gh pr *)",
       "Bash(docker compose *)",
-      "Bash(bun --no-env-file .claude/hooks/*)",
+      "Bash(bun --no-env-file --config=/dev/null .claude/hooks/*)",
       "Bash(./factory run-check*)",
       "Bash(npm run *)",
       "Bash(npm test*)",
@@ -114,17 +114,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.ts",
+            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/check.ts",
             "timeout": 600
           },
           {
             "type": "command",
-            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.ts",
+            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.ts",
             "timeout": 30
           },
           {
             "type": "command",
-            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]
@@ -136,7 +136,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pr-gate.ts",
+            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pr-gate.ts",
             "timeout": 60
           }
         ]
@@ -147,7 +147,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_session.ts",
+            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_session.ts",
             "timeout": 600
           }
         ]
@@ -158,7 +158,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 10
           }
         ]
@@ -169,7 +169,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
+            "command": "bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]

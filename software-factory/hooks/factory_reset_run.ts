@@ -1,8 +1,8 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory reset-run`: lists, and with --apply cleans, what an earlier run left in this project before a test run (#229).
 //
-//   bun --no-env-file .claude/hooks/factory_reset_run.ts                 the plan, one line per thing; nothing is changed
-//   bun --no-env-file .claude/hooks/factory_reset_run.ts --apply         does each step and says what it did; a second run finds nothing
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_reset_run.ts                 the plan, one line per thing; nothing is changed
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_reset_run.ts --apply         does each step and says what it did; a second run finds nothing
 //   ... --agent NAME (repeatable)                                         also close NAME's Agent issue when it runs on another machine
 //
 // Four kinds of leftovers, all of this project (its checkout, its repo, its CI containers) and nothing else:

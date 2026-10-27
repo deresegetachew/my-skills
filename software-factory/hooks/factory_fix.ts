@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory fix`: format and auto-fix the files this branch changed, so agents never spend a turn on style (#69).
 //
 // Runs `commands.fix` from .claude/factory.json on the changed files only: every file that differs from the merge base

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory verify`: run what CI runs, here, for the current commit, before a pull request (#58).
 //
 // Runs `commands.ci` from .claude/factory.json (for example
@@ -9,7 +9,7 @@
 // Before it, `commands.fix` formats the changed files (#69); if that changes anything the pass is refused, because
 // the commit no longer matches the files: commit the formatting and run it again.
 //
-//   bun --no-env-file .claude/hooks/factory_verify.ts     exit 0: passed (or nothing to run); 1: it fails or can't run
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_verify.ts     exit 0: passed (or nothing to run); 1: it fails or can't run
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Config, load, loadFromMain } from "./factory_config.ts";

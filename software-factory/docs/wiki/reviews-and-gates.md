@@ -183,6 +183,16 @@ Create the two labels once in the repo. Only the dev manager adds them, after re
 Protected files are not the guard's job: the PR gate stops an agent merging them, and branch protection with
 `CODEOWNERS` can require you.
 
+The guard runs from the base branch's checkout, not the pull request's, so a pull request can't change the guard that
+judges it. (The pull request that installs the factory has no guard on its base yet, so that one runs its own copy.)
+
+**A project's `bunfig.toml` never reaches the factory's scripts** (#259). Bun reads `./bunfig.toml`, and a `preload`
+there runs before the script: it could end the PR gate with "allowed" before the gate looked at the command. So every
+place the factory starts Bun (the hooks in the agents' and the manager's settings, both CI templates, `factory`,
+`factory-loop.sh`, `install.sh` and the scripts' own calls) passes `--config=/dev/null`, which turns that file off.
+`bunfig.toml` is in the default `protected` list, and `factory doctor` notes one that has a `preload`. `factory update`
+adds `--config=/dev/null` to the factory's steps in a project's own workflows.
+
 ### Branch protection: the real lock
 
 The gate and the hooks are guard rails for well-meaning agents. They run on your machine, inside the agent's own

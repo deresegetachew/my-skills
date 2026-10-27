@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Stop hook: don't let a turn end with a broken build. Only in a factory run (`factory loop`, FACTORY_LOOP=1, #256).
 //
 // Runs the project's typecheck and test commands (from .claude/factory.json) only when files under

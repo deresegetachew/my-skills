@@ -43,9 +43,16 @@ jobs:
           BASE: ${{ github.base_ref }}
           BRANCH: ${{ github.head_ref }}
           LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-        run: bun --no-env-file .claude/hooks/factory_guard.ts --base "origin/$BASE" --branch "$BRANCH" --labels "$LABELS"
+        # The guard runs from the base branch's checkout, never the pull request's, so a pull request can't change how
+        # it runs; --config=/dev/null keeps a bunfig.toml (its preload) out of it (#259). The pull request that installs
+        # the factory has no guard on its base yet, so that one runs its own copy.
+        run: |
+          git worktree add -q --detach "$RUNNER_TEMP/factory-base" "origin/$BASE"
+          guard="$RUNNER_TEMP/factory-base/.claude/hooks/factory_guard.ts"
+          [ -f "$guard" ] || guard=.claude/hooks/factory_guard.ts
+          bun --no-env-file --config=/dev/null "$guard" --base "origin/$BASE" --branch "$BRANCH" --labels "$LABELS"
       - name: Lessons file (at most lessonsCap one-line lessons, each with an example or a link)
-        run: bun --no-env-file .claude/hooks/factory_lessons.ts check
+        run: bun --no-env-file --config=/dev/null .claude/hooks/factory_lessons.ts check
 
   check:
     name: Typecheck, lint, test, build
@@ -66,7 +73,7 @@ jobs:
           TURBO_TEAM: ${{ vars.TURBO_TEAM }}
           TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
           TURBO_REMOTE_CACHE_SIGNATURE_KEY: ${{ secrets.TURBO_REMOTE_CACHE_SIGNATURE_KEY }}
-        run: bun --no-env-file .claude/hooks/factory_turbo.ts ci-env >> "$GITHUB_ENV"
+        run: bun --no-env-file --config=/dev/null .claude/hooks/factory_turbo.ts ci-env >> "$GITHUB_ENV"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -77,6 +84,6 @@ jobs:
       - run: pnpm lint
       - uses: oven-sh/setup-bun@v2
       - name: Style checks (styles[].check in .claude/factory.json)
-        run: bun --no-env-file .claude/hooks/style_checks.ts
+        run: bun --no-env-file --config=/dev/null .claude/hooks/style_checks.ts
       - run: pnpm test
       - run: pnpm build

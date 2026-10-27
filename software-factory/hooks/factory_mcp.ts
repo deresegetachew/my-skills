@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The MCP config a factory session starts with (#55): the project's `.mcp.json` as the main branch has it on the
 // remote, never this worktree's copy.
 //
@@ -9,7 +9,7 @@
 // it prints the empty config `{"mcpServers":{}}`, so nothing starts. `.mcp.json` is protected, so a change to it
 // needs a person to merge.
 //
-//   bun --no-env-file .claude/hooks/factory_mcp.ts      prints the value for `--mcp-config`
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_mcp.ts      prints the value for `--mcp-config`
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { runMain } from "./factory_lib.ts";

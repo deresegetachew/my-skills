@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The dev manager's watcher (#109): from GitHub state alone, with no model, work out what needs a manager and what
 // needs the owner. It recomputes everything each time, so a missed event hides nothing, and it only reads.
 //

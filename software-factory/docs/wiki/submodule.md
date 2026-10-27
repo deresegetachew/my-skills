@@ -27,7 +27,7 @@ is its own reviewed pull request:
 3. **Run the command from a current my-skills checkout**, not through the submodule: the submodule is pinned to an old
    commit, which may not have the command, and moving it makes the tree dirty (`[dirty_tree]`).
    `git clone --depth 1 https://github.com/deresegetachew/my-skills.git /tmp/my-skills-main`, then, in the project:
-   `bun --no-env-file /tmp/my-skills-main/software-factory/hooks/factory_release.ts migrate-to-release <tag>`. Name
+   `bun --no-env-file --config=/dev/null /tmp/my-skills-main/software-factory/hooks/factory_release.ts migrate-to-release <tag>`. Name
    the tag while every release is a pre-release (`gh release list -R deresegetachew/my-skills` lists them; without one it stops with
    `[no_releases]` and names the command). It replaces the links with the release's files, removes the links to factory
    files the release no longer has (the old Python hooks, #264), keeps the links to other skills (the

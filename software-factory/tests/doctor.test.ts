@@ -32,7 +32,7 @@ test("a workflow that calls a removed python hook or runs bun without setting it
   expect(p.code, p.stdout).toBe(1);
   const fixes = lines(p, "fix").join("\n");
   expect(fixes).toContain(".github/workflows/ci.yml: .claude/hooks/factory_guard.py");
-  expect(fixes).toContain("run `factory update` (it rewrites the step to `bun --no-env-file .claude/hooks/factory_guard.ts`)");
+  expect(fixes).toContain("run `factory update` (it rewrites the step to `bun --no-env-file --config=/dev/null .claude/hooks/factory_guard.ts`)");
   expect(fixes).toContain(".github/workflows/ci.yml: .claude/hooks/no_such_hook.ts");
   expect(fixes).toContain(".github/workflows/ci.yml: job check: it runs Bun but has no `- uses: oven-sh/setup-bun@v2` step");
   expect(fixes, "style_checks.ts is there").not.toContain("style_checks.ts");

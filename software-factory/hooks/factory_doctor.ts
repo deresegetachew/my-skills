@@ -1,11 +1,11 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory doctor`: check this machine and project for what the factory needs, and say how to fix each gap (#63).
 //
 // Read-only: it runs version and status commands, never installs, logs in, decrypts or prints a secret. Each line is
 // `ok`, `fix` (the factory won't work until it's fixed, with the fix) or `note` (worth a look). Exit 1 when any `fix`.
 // Checks that don't apply to the project (Node without a package.json, sops without a .sops.yaml) are left out.
 //
-//   bun --no-env-file .claude/hooks/factory_doctor.ts [--sandbox]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_doctor.ts [--sandbox]
 //
 // `--sandbox` adds the checks of a sandboxed factory machine (factory_sandbox.ts): run it as the dedicated user that
 // `factory bootstrap` made. It runs a few network probes and one container, so it takes longer.
@@ -238,7 +238,7 @@ function hookCommands(data: unknown): string[] {
 }
 
 /** The hooks .claude/factory/settings.json runs are the factory's Bun scripts (#252): each `.claude/hooks/<name>.ts` exists
- * and is run with `bun --no-env-file`, and no line still runs a Python hook. Quiet when it runs no factory hook. */
+ * and is run with `bun --no-env-file --config=/dev/null`, and no line still runs a Python hook. Quiet when it runs no factory hook. */
 export function hookLines(r: Reporter): void {
   let data: unknown;
   try {
@@ -255,18 +255,18 @@ export function hookLines(r: Reporter): void {
     const scripts = [...command.matchAll(/\.claude\/hooks\/[\w.-]+\.ts\b/g)].map((m) => m[0]);
     if (scripts.length) seen += 1;
     for (const script of scripts) if (!isFile(script)) missing.add(script);
-    if (scripts.length && !/^\s*bun --no-env-file\s/.test(command)) notBun.add(command);
+    if (scripts.length && !/^\s*bun --no-env-file --config=\/dev\/null\s/.test(command)) notBun.add(command);
   }
   for (const script of [...python].sort()) {
     r.fix(`.claude/factory/settings.json runs ${script}`, "the factory runs on Bun now and has no Python hooks: run `factory update` " +
-      "(it writes the hook lines as `bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/<name>.ts`)");
+      "(it writes the hook lines as `bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/<name>.ts`)");
   }
   for (const script of [...missing].sort()) {
     r.fix(`.claude/factory/settings.json runs ${script}`, "the hook script is missing: run `factory update`");
   }
   for (const command of [...notBun].sort()) {
-    r.fix(".claude/factory/settings.json hook line", `\`${command}\` does not start with \`bun --no-env-file\`, so Bun would load the ` +
-      "project's .env into the factory: run `factory update`");
+    r.fix(".claude/factory/settings.json hook line", `\`${command}\` does not start with \`bun --no-env-file --config=/dev/null\`, so Bun would load the ` +
+      "project's .env or run its bunfig.toml preload before the hook (#259): run `factory update`");
   }
   if (seen && !python.size && !missing.size && !notBun.size) r.ok("the hooks in .claude/factory/settings.json run with Bun");
 }
@@ -292,6 +292,12 @@ export function project(r: Reporter, cfg: Config): void {
   if (/\.claude\/hooks\/pr-gate\.(ts|py)\b/.test(existsSync(".claude/settings.json") ? readText(".claude/settings.json") : "")) {
     r.note(".claude/settings.json", "it still holds the factory's agent rules, so your own Claude sessions here get them too: " +
       "run `factory update`, which moves them to .claude/factory/settings.json");
+  }
+  // #259: a preload in ./bunfig.toml runs before any script a plain `bun` starts here. The factory's own scripts start
+  // with --config=/dev/null so it can't stop the PR gate, but the project's code and tests still run it.
+  if (existsSync("bunfig.toml") && /^\s*preload\s*=/m.test(readText("bunfig.toml"))) {
+    r.note("bunfig.toml", "it has a `preload`, which runs before every script Bun starts in this folder (the factory's own " +
+      "scripts don't read it). Check that a person added it on purpose; a pull request that changes it is a protected change");
   }
   if (existsSync(".env.example") && !existsSync(".env.local")) {
     r.note(".env.local", "missing; copy .env.example to .env.local and fill it in");
@@ -456,7 +462,7 @@ export function workflows(r: Reporter): void {
       bad += 1;
       const ts = script.replace(/\.py$/, ".ts");
       r.fix(`${rel}: ${script}`, script.endsWith(".py") && ts !== script && existsSync(ts)
-        ? `CI calls a Python hook this release removed: run \`factory update\` (it rewrites the step to \`bun --no-env-file ${ts}\`), then commit ${rel}`
+        ? `CI calls a Python hook this release removed: run \`factory update\` (it rewrites the step to \`bun --no-env-file --config=/dev/null ${ts}\`), then commit ${rel}`
         : "CI calls a hook script that is not in .claude/hooks: fix the step, or run `factory update` if a file is missing");
     }
     for (const job of wf.bunWithoutSetup(text)) {

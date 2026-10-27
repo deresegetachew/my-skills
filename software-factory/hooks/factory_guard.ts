@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // CI guard for factory pull requests. Runs in CI, where the coding agent can't edit around it.
 //
 // Checks the PR's commits against the base branch and fails (exit 1) on:
@@ -14,7 +14,7 @@
 // and warns (no failure) when the PR is larger than `prSizeWarn` changed lines.
 //
 // The dev manager adds the labels after reading the change; the agent's own token shouldn't.
-// Usage (CI): bun --no-env-file .claude/hooks/factory_guard.ts --base origin/main --branch "$HEAD_REF" --labels "$LABELS_JSON"
+// Usage (CI): bun --no-env-file --config=/dev/null .claude/hooks/factory_guard.ts --base origin/main --branch "$HEAD_REF" --labels "$LABELS_JSON"
 import { appendFileSync } from "node:fs";
 import { branchTask, load, matches, tasks } from "./factory_config.ts";
 import { die, run, runMain, splitLines } from "./factory_lib.ts";

@@ -1,10 +1,10 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Incremental re-review (#70): a reviewer's second round checks only what changed since its last pass.
 //
-//   bun --no-env-file .claude/hooks/factory_rereview.ts plan   --kind reviewer     full or delta, and why (JSON)
-//   bun --no-env-file .claude/hooks/factory_rereview.ts prompt --kind reviewer     the instructions for this round
-//   bun --no-env-file .claude/hooks/factory_rereview.ts record --kind reviewer --result pass|fail --findings "..."
-//   bun --no-env-file .claude/hooks/factory_rereview.ts reply  --kind reviewer --text "what was changed for each finding"
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts plan   --kind reviewer     full or delta, and why (JSON)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts prompt --kind reviewer     the instructions for this round
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts record --kind reviewer --result pass|fail --findings "..."
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts reply  --kind reviewer --text "what was changed for each finding"
 //
 // `--kind` names the reviewer: reviewer, arch (the architecture reviewer), safety, security. Each has its own history
 // in <reviewMarkers>/<branch>.reviews.json: the commit it reviewed, whether it passed, its findings, the files and

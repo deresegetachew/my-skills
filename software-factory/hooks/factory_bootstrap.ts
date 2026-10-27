@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory bootstrap`: take a fresh Linux machine to a sandboxed, factory-ready state (#105). HELP below is what
 // `factory bootstrap help` prints. It runs from where this script lives (the factory's dispatcher calls it before
 // there is a checkout).

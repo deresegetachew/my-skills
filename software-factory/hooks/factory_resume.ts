@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory resume`: what a machine does after a reboot (#88). `factory autostart install` runs it at every boot.
 //
 //   factory resume              wait for Docker and the network, run `commands.stackUp`, then start this machine's

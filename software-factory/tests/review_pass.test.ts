@@ -111,7 +111,7 @@ test("review agents use only allowed unchained commands", () => {
 
 test("pass commands are documented and pr body dir is allowed", () => {
   for (const [name, kind] of [["reviewer.md", "reviewer"], ["architecture-reviewer.md", "arch"]] as const) {
-    expect(agentCommands(name)).toContain(`bun --no-env-file .claude/hooks/factory_review_pass.ts ${kind}`);
+    expect(agentCommands(name)).toContain(`bun --no-env-file --config=/dev/null .claude/hooks/factory_review_pass.ts ${kind}`);
   }
   const s = (JSON.parse(readFileSync(join(KIT, "factory", "settings.json"), "utf8")) as Settings).permissions.allow;
   expect(s).toContain("Edit(tmp/**)");
