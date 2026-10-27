@@ -79,6 +79,54 @@ test("with no rules on main the loop starts no agent and says how to fix it", ()
   expect(p.out).toContain("no session was started");
 });
 
+/** Replace the project's rules file with a link to `target` (relative to .claude/factory/), committed on main. */
+function linkRules(work: string, target: string): void {
+  rmSync(join(work, ".claude", "factory", "settings.json"));
+  symlinkSync(target, join(work, ".claude", "factory", "settings.json"));
+  commitAndPush(work, "the rules by link");
+}
+
+test("rules that main has as a link into the same repo are followed", () => {
+  // my-skills itself: .claude/factory/settings.json -> ../../software-factory/kit/.claude/factory/settings.json
+  const [work, env] = loopProject();
+  write(join(work, "kit", "rules.json"), read(KIT_AGENT_SETTINGS));
+  linkRules(work, "../../kit/rules.json");
+  const p = loop(work, env);
+  expect(p.code, p.out).toBe(0);
+  const got = startedSettings(calls(env)[0] as string[]) as Settings;
+  expect(got.permissions.deny).toEqual(kit().permissions.deny);
+  expect(got.hooks).toEqual(kit().hooks);
+});
+
+test("rules that main has as a link into the my-skills submodule are read at the commit main pins", () => {
+  // a project that takes the kit by link: .claude/factory/settings.json -> ../../vendor/my-skills/.../settings.json
+  const [work, env] = loopProject();
+  const skills = join(tmp(), "skills");
+  quiet(["git", "init", "-q", "-b", "main", skills]);
+  write(join(skills, "software-factory", "kit", ".claude", "factory", "settings.json"), read(KIT_AGENT_SETTINGS));
+  quiet(["git", "add", "-A"], skills);
+  quiet(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "kit"], skills);
+  quiet(["git", "-c", "protocol.file.allow=always", "submodule", "add", "-q", skills, "vendor/my-skills"], work);
+  linkRules(work, "../../vendor/my-skills/software-factory/kit/.claude/factory/settings.json");
+  // the agent's uncommitted edit inside the submodule must not count
+  write(join(work, "vendor", "my-skills", "software-factory", "kit", ".claude", "factory", "settings.json"),
+    JSON.stringify({ permissions: { deny: [] }, hooks: {} }));
+  const p = loop(work, { ...env, GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "protocol.file.allow", GIT_CONFIG_VALUE_0: "always" });
+  expect(p.code, p.out).toBe(0);
+  const got = startedSettings(calls(env)[0] as string[]) as Settings;
+  expect(got.permissions.deny).toEqual(kit().permissions.deny);
+  expect(got.hooks).toEqual(kit().hooks);
+});
+
+test("a link on main that leads outside the repo is refused and no agent starts", () => {
+  const [work, env] = loopProject();
+  linkRules(work, "../../../../outside.json");
+  const p = loop(work, env);
+  expect(p.code, p.out).not.toBe(0);
+  expect(calls(env)).toEqual([]);
+  expect(p.out).toContain("no session was started");
+});
+
 /** A project with the factory as a submodule copy at vendor/my-skills (a real path, not /var -> /private/var). */
 function linkedProject(): string {
   const d = realpathSync(tmp());

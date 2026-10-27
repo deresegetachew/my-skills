@@ -28,8 +28,12 @@ export const NO_CONNECTORS = '{"disableClaudeAiConnectors": true}';
 type JsonObj = Record<string, unknown>;
 
 function git(...args: string[]): { code: number; stdout: Uint8Array } {
+  return gitIn(".", ...args);
+}
+
+function gitIn(dir: string, ...args: string[]): { code: number; stdout: Uint8Array } {
   try {
-    const p = Bun.spawnSync(["git", ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+    const p = Bun.spawnSync(["git", "-C", dir, ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
     if (p.exitCode === null) return { code: 1, stdout: new Uint8Array() };
     return { code: p.exitCode, stdout: p.stdout };
   } catch {
@@ -41,10 +45,53 @@ function obj(v: unknown): JsonObj | null {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? v as JsonObj : null;
 }
 
-/** A file as main has it (FETCH_HEAD), or null when main has none. */
+const text = (b: Uint8Array): string => new TextDecoder("utf-8", { fatal: true }).decode(b);
+
+/** `path` with `.` and `..` folded, or null when it leaves the top of its repository. */
+function normal(path: string): string | null {
+  const out: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      if (!out.length) return null;
+      out.pop();
+    } else out.push(part);
+  }
+  return out.join("/");
+}
+
+/** A file as the commit `rev` of the repository at `dir` has it, following links the way the checkout would (#258):
+ * a link into the same repository is read from the same commit, a path inside a submodule from the submodule at the
+ * commit `rev` pins (never its working files). A link that leaves the repository, a loop, or a missing file: null. */
+function readAt(dir: string, rev: string, path: string, hops = 0): string | null {
+  if (hops > 8) return null;
+  const parts = path.split("/");
+  for (let i = 1; i <= parts.length; i++) {
+    const prefix = parts.slice(0, i).join("/");
+    const entry = text(gitIn(dir, "ls-tree", rev, "--", prefix).stdout).split("\n")[0] ?? "";
+    const m = /^(\d+) \w+ ([0-9a-f]+)\t/.exec(entry);
+    if (!m) return null;
+    const [, mode, sha] = m as unknown as [string, string, string];
+    const rest = parts.slice(i).join("/");
+    if (mode === "160000") return rest ? readAt(`${dir}/${prefix}`, sha, rest, hops + 1) : null; // a submodule at its pinned commit
+    if (mode === "120000") {
+      const target = text(gitIn(dir, "cat-file", "blob", sha).stdout);
+      if (target.startsWith("/")) return null;
+      const next = normal(`${parts.slice(0, i - 1).join("/")}/${target}${rest ? `/${rest}` : ""}`);
+      return next === null ? null : readAt(dir, rev, next, hops + 1);
+    }
+    if (i === parts.length) return mode.startsWith("100") ? text(gitIn(dir, "cat-file", "blob", sha).stdout) : null;
+  }
+  return null;
+}
+
+/** A file as main has it (FETCH_HEAD), links followed, or null when main has none. */
 function onMain(path: string): string | null {
-  const p = git("show", `FETCH_HEAD:${path}`);
-  return p.code === 0 ? new TextDecoder("utf-8", { fatal: true }).decode(p.stdout) : null;
+  try {
+    return readAt(".", "FETCH_HEAD", path);
+  } catch {
+    return null;
+  }
 }
 
 /** The agents' settings with `extras` added to permissions.allow after the file's own (no repeats), connectors off. */
