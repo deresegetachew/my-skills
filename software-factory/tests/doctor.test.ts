@@ -12,7 +12,7 @@ test("a good machine is all ok", () => {
   const p = doctor(d, { ...machine({ extra: ["pnpm", "factory"] }), FACTORY_AGENTS: "taytu" });
   expect(p.code, p.out).toBe(0);
   expect(lines(p, "fix"), p.stdout).toEqual([]);
-  for (const what of ["git", "bun", "Claude Code", "gh is signed in", "Node v22", "pnpm", ".claude/settings.json", "taytu"]) {
+  for (const what of ["git", "bun", "Claude Code", "gh is signed in", "Node v22", "pnpm", ".claude/factory/settings.json", "taytu"]) {
     expect(lines(p, "ok").some((l) => l.includes(what)), `${what}\n${p.stdout}`).toBe(true);
   }
   expect(p.stdout).toContain("All the checks pass.");
@@ -72,12 +72,12 @@ test("a failing gh api names the reason", () => {
 
 test("each problem gets a one line fix", () => {
   const d = project({ "package.json": '{"packageManager": "pnpm@9.0.0"}', ".nvmrc": "22\n", ".sops.yaml": "creation_rules: []\n" });
-  unlinkSync(join(d, ".claude", "settings.json"));
+  unlinkSync(join(d, ".claude", "factory", "settings.json"));
   const p = doctor(d, { ...machine({ ghSignedIn: false, node: "v18.19.0" }), FACTORY_AGENTS: "ada" });
   expect(p.code, p.out).toBe(1);
   const fixes = lines(p, "fix").join("\n");
   for (const [what, how] of [["GitHub CLI", "gh auth login"], ["Node", "nvm install"], ["pnpm", "corepack enable"],
-    ["sops", "install sops"], [".claude/settings.json", "git submodule update --init"], ["FACTORY_AGENTS", "ada"]] as const) {
+    ["sops", "install sops"], [".claude/factory/settings.json", "git submodule update --init"], ["FACTORY_AGENTS", "ada"]] as const) {
     expect(lines(p, "fix").some((l) => l.includes(what) && l.includes(how)), `${what}\n${fixes}`).toBe(true);
   }
   expect(p.stdout).toContain(`${lines(p, "fix").length} to fix.`);
@@ -100,13 +100,13 @@ test("a machine without bun is told how to install it", () => {
 
 test("the hook lines in settings.json must run the Bun hooks", () => {
   const d = project();
-  const settings = (commands: string[]) => write(join(d, ".claude", "settings.json"), JSON.stringify({
+  const settings = (commands: string[]) => write(join(d, ".claude", "factory", "settings.json"), JSON.stringify({
     hooks: { PreToolUse: [{ matcher: "Bash", hooks: commands.map((command) => ({ type: "command", command })) }] },
   }));
   const env = { ...machine(), FACTORY_AGENTS: "taytu" };
   settings([hookLine("pr-gate"), hookLine("factory_session")]);
   let p = doctor(d, env);
-  expect(lines(p, "ok").some((l) => l.includes("hooks in .claude/settings.json run with Bun")), p.stdout).toBe(true);
+  expect(lines(p, "ok").some((l) => l.includes("hooks in .claude/factory/settings.json run with Bun")), p.stdout).toBe(true);
   expect(lines(p, "fix").filter((l) => l.includes("hook")), p.stdout).toEqual([]);
   settings(["python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/pr-gate.py"]);
   p = doctor(d, env);
@@ -150,7 +150,7 @@ test("doctor says to update when factory json allows a rule settings json lacks 
   pinned(d);
   let p = doctor(d, { ...machine(), FACTORY_AGENTS: "taytu" });
   expect(lines(p, "fix").some((l) => l.includes("Edit(tmp/**)") && l.includes("factory update")), p.stdout).toBe(true);
-  write(join(d, ".claude", "settings.json"), JSON.stringify({ permissions: { allow: ["Edit(tmp/**)"] } }));
+  write(join(d, ".claude", "factory", "settings.json"), JSON.stringify({ permissions: { allow: ["Edit(tmp/**)"] } }));
   p = doctor(d, { ...machine(), FACTORY_AGENTS: "taytu" });
   expect(lines(p, "fix").filter((l) => l.includes("Edit(tmp")), p.stdout).toEqual([]);
 });
@@ -227,7 +227,7 @@ test("a test command that is not python is not run", () => {
 
 // #249: an unattended agent must be able to run commands.test, alone and through `./factory run-check`.
 function factorySettings(d: string, allow: string[]): void {
-  write(join(d, ".claude", "settings.json"), JSON.stringify({
+  write(join(d, ".claude", "factory", "settings.json"), JSON.stringify({
     hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: hookLine("pr-gate") }] }] },
     permissions: { allow: ["Bash(git fetch*)", "Bash(git add*)", "Bash(git commit*)", "Bash(git push*)", "Bash(gh pr *)", ...allow] },
   }));

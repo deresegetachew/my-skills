@@ -276,7 +276,7 @@ flowchart LR
 
    `<version>` is the release you unpacked (a pre-release is only taken by name). The release client needs only Bun,
    so it can install into a project that has no factory yet. It checks the archive's checksum, writes the shared files (`.claude/hooks`, `.claude/ci`, the agents, the
-   skills, `settings.json`, `factory`, `factory-loop.sh`) as real files, writes the pin `.claude/factory/release.json`
+   skills, the agents' rules `.claude/factory/settings.json`, `factory`, `factory-loop.sh`) as real files, writes the pin `.claude/factory/release.json`
    and, on a first install, adds the templates you fill in, never over a file that exists. It commits nothing.
    [What it does, step by step](docs/wiki/updating.md#updating-from-releases).
 
@@ -350,16 +350,17 @@ software-factory/
       kit-files.md              the files in the kit
       submodule.md              projects that use the submodule
   kit/                          what a project is given:
-    .claude/agents, skills, manager/, settings.json       Claude Code reads these from the project's .claude/
+    .claude/agents, skills, manager/, factory/settings.json   Claude Code reads agents and skills from .claude/; the factory passes the agents' rules (#258)
     .claude/factory.json, factory/notes/, CLAUDE.factory.md, docs/, .github/, .gitignore     templates, copied once
 ```
 
 `kit/` holds no factory code and no symlinks. The forwarders that stood at the old `kit/` paths during the move were
 removed once every project had left them (#176).
 
-**What a project sees stays the same.** Claude Code reads agents, skills and `settings.json` from the project's
-`.claude/`, so the project still has `.claude/hooks/`, `.claude/ci/`, `.claude/agents/`, `.claude/skills/`,
-`.claude/settings.json`, `factory` and `factory-loop.sh` at those paths. Only where they come from differs:
+**What a project sees stays the same.** Claude Code reads agents and skills from the project's `.claude/`, and the
+factory passes the agents' rules when it starts an agent (#258), so the project has `.claude/hooks/`, `.claude/ci/`,
+`.claude/agents/`, `.claude/skills/`, `.claude/factory/settings.json`, `factory` and `factory-loop.sh` at those paths.
+Only where they come from differs:
 
 | The project takes the factory as | Those paths are | They change by |
 |---|---|---|

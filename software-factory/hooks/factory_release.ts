@@ -13,7 +13,7 @@
 //                                release's files, keep the links it does not ship, print the steps for the pull request
 //
 // The installed factory is committed in the project (decision in #113): hooks/ and ci/ go to .claude/hooks and
-// .claude/ci, `factory` and `factory-loop.sh` to the project root, the agents, skills and settings.json to .claude/.
+// .claude/ci, `factory` and `factory-loop.sh` to the project root, the agents and skills to .claude/, the agents' rules to .claude/factory/settings.json (#258).
 // `.claude/factory/release.json` is the pin: the release, its archive's SHA-256, the previous release and the hash of
 // every installed file. Changing it is how the whole team ends up on one release.
 //
@@ -29,7 +29,7 @@ import {
 import { homedir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { Exit, FactoryError, pyDumps, pyRepr, run, runMain, splitLines } from "./factory_lib.ts";
+import { AGENT_SETTINGS, Exit, FactoryError, LEGACY_SETTINGS, pyDumps, pyRepr, run, runMain, splitLines } from "./factory_lib.ts";
 import { tarEntries } from "./factory_tar.ts";
 import { fixWorkflows, lines as workflowLines } from "./factory_workflow.ts";
 
@@ -577,7 +577,9 @@ export function classify(rel: string): ["engine" | "template", string] | null {
   if (rel.startsWith("kit/.claude/")) {
     const sub = rel.slice("kit/.claude/".length);
     if (sub.startsWith("hooks/") || sub.startsWith("ci/")) return null; // the forwarders to the folders above
-    if (sub.startsWith("agents/") || sub.startsWith("skills/") || sub === "settings.json" || sub === "manager/settings.json") {
+    // settings.json: the agents' rules in a release before #258 (an install or a rollback of one still owns it)
+    if (sub.startsWith("agents/") || sub.startsWith("skills/") || sub === "factory/settings.json" || sub === "settings.json" ||
+      sub === "manager/settings.json") {
       return ["engine", ".claude/" + sub];
     }
     return ["template", ".claude/" + sub];
@@ -692,10 +694,21 @@ function isSymlinked(root: string, rel: string): boolean {
   return false;
 }
 
-const SETTINGS_REL = ".claude/settings.json";
+/** What `factory update` says about a file the release dropped that the project changed, so it was kept. */
+export function keptLine(target: string): string {
+  if (target === LEGACY_SETTINGS) {
+    return `kept ${target}: it has local changes and this release no longer ships it. The agents' rules are in ` +
+      `${AGENT_SETTINGS} now; move your own rules to \`permissions.allow\` in .claude/factory.json, or keep the file as ` +
+      "your own settings for every session (Claude Code adds the agents' rules on top of it), and commit what you choose.";
+  }
+  return `kept ${target}: it has local changes and this release no longer ships it; move what you need, then delete it.`;
+}
+
+/** The agents' rules (#258): factory-loop.sh passes them with `claude --settings`, never loaded by a plain session. */
+const SETTINGS_REL = AGENT_SETTINGS;
 
 /** The allow entries the project adds in .claude/factory.json (`permissions.allow`, #198). The release owns
- * settings.json, so these are merged in when it is installed instead of being typed into it by hand. */
+ * the agents' settings, so these are merged in when it is installed instead of being typed into it by hand. */
 export function projectAllow(root: string): string[] {
   const cfg = obj(readJsonFile(join(root, ".claude", "factory.json"))) ?? {};
   const perms = obj(cfg.permissions);
@@ -832,6 +845,8 @@ export interface Installed {
   changed: string[];
   removed: string[];
   kept_local: string[];
+  /** Files the old release had and this one does not ship, kept because the project changed them. */
+  kept: string[];
   unlinked: string[];
   stack?: Found;
 }
@@ -863,7 +878,7 @@ export async function installFiles(root: string, files: Files, manifest: Manifes
   const oldFiles = oldPin?.files ?? {};
   const backups = new Map<string, Backup>();
   const writtenTemplates: string[] = [];
-  const result: Installed = { added: [], changed: [], removed: [], kept_local: [], unlinked: [] };
+  const result: Installed = { added: [], changed: [], removed: [], kept_local: [], kept: [], unlinked: [] };
   // A first install detects the stack before writing settings.json, so the allow rules the detected test command needs
   // (written to factory.json's permissions.allow, #249) are merged into settings.json in the same install.
   const mod = first ? await stackModule() : null;
@@ -902,6 +917,10 @@ export async function installFiles(root: string, files: Files, manifest: Manifes
     }
     for (const target of Object.keys(oldFiles).filter((t) => !engine.has(t)).sort()) {
       const path = join(root, target);
+      if (isFile(path) && !isSymlinked(root, target) && sha256File(path) !== oldFiles[target]) {
+        result.kept.push(target); // the project changed it: never lose that work, a person deletes it once it's moved
+        continue;
+      }
       if (isFile(path) && !isSymlinked(root, target)) {
         remember(path);
         unlinkSync(path);
@@ -1036,16 +1055,16 @@ function tsProblem(path: string): string | null {
  * still lists (one from a release before Bun) is only checked against its hash: it is not run any more. */
 export function verifyMachine(root: string, pin: Pin, runScripts = true): string[] {
   const problems = pinnedProblems(root, pin);
-  const settings = join(root, ".claude", "settings.json");
+  const settings = join(root, SETTINGS_REL);
   if (isFile(settings)) {
     const text = readFileSync(settings, "utf8");
     try {
       JSON.parse(text);
     } catch (e) {
-      problems.push(`.claude/settings.json is not valid JSON (${errText(e)})`);
+      problems.push(`${SETTINGS_REL} is not valid JSON (${errText(e)})`);
     }
     const hooks = [...new Set([...text.matchAll(/\.claude\/hooks\/[\w.-]+/g)].map((m) => m[0]))].sort();
-    for (const hook of hooks) if (!isFile(join(root, hook))) problems.push(`.claude/settings.json runs ${hook}, which is not there`);
+    for (const hook of hooks) if (!isFile(join(root, hook))) problems.push(`${SETTINGS_REL} runs ${hook}, which is not there`);
   }
   for (const rel of Object.keys(pin.files).sort()) {
     const path = join(root, rel);
@@ -1309,15 +1328,20 @@ async function cmdMigrate(args: Args): Promise<number> {
   const [files, manifest] = unpack(archive, tag);
   const installed = await installFiles(root, files, manifest, tag, sha256File(archive), null, repo, true);
   const [engine] = plan(files);
+  // #258: a link to the kit's old rules file would give the agents' rules to every session here; the release's
+  // .claude/factory/settings.json replaces it. Only the link goes: the submodule is never written through.
+  const legacy = links.includes(LEGACY_SETTINGS) && engine.has(AGENT_SETTINGS) && !engine.has(LEGACY_SETTINGS);
+  if (legacy) unlinkSync(join(root, LEGACY_SETTINGS));
   // A link into the factory that the release has no file for is a file the factory dropped (the Python hooks after the
   // move to Bun, #264): the release replaces the factory, so the link goes. Only links to other skills keep the submodule.
-  const left = links.filter((l) => !engine.has(l));
+  const left = links.filter((l) => !engine.has(l) && !(legacy && l === LEGACY_SETTINGS));
   const dropped = left.filter((l) => intoFactory(root, l));
   for (const l of dropped) unlinkSync(join(root, l));
   const kept = left.filter((l) => !dropped.includes(l));
   say(`  Replaced ${installed.unlinked.length} link(s) with ${tag}'s files; installed ${installed.added.length} new, ` +
     `${installed.changed.length} changed file(s).`);
   for (const t of installed.unlinked.slice(0, 8)) say(`    unlinked ${t}`);
+  if (legacy) say(`    removed link ${LEGACY_SETTINGS} (the agents' rules are in ${AGENT_SETTINGS} now, passed when the factory starts an agent)`);
   for (const t of dropped.slice(0, 8)) say(`    removed ${t} (a factory file this release no longer has)`);
   if (dropped.length > 8) say(`    ... and ${dropped.length - 8} more removed`);
   for (const t of kept.slice(0, 8)) say(`    kept link ${t} (not part of the factory; the submodule stays for it)`);
@@ -1330,7 +1354,7 @@ async function cmdMigrate(args: Args): Promise<number> {
     throw new FactoryError("verification_failed", `${tag} is installed here, but the checks after it failed:\n` + problems.map((p) => "    - " + p).join("\n"),
       "fix what the lines above say (each names the file), then run `factory update`; it is safe to repeat.");
   }
-  say("  checks: the files match the pin, every hook in settings.json exists, the scripts parse, the runner files are readable (verified)");
+  say("  checks: the files match the pin, every hook in the agents' settings exists, the scripts parse, the runner files are readable (verified)");
   say();
   say(`Done. This project is on ${tag}. Nothing is committed for you. The steps for the pull request:`);
   say(`  1. git add -A && git commit -m "Take the software factory from release ${tag}, not the submodule"`);
@@ -1420,6 +1444,11 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
     }
     for (const t of installed.removed.slice(0, 8)) say(`    removed ${t}`);
     for (const t of installed.kept_local.slice(0, 8)) say(`    note: ${t} had local changes; the release's version replaced them (see the diff)`);
+    for (const t of installed.kept) say("    " + keptLine(t));
+    if (installed.removed.includes(LEGACY_SETTINGS)) {
+      say(`  The agents' rules moved from ${LEGACY_SETTINGS} to ${AGENT_SETTINGS} (#258): the factory passes them when it ` +
+        "starts an agent, so your own Claude sessions in this project no longer get them.");
+    }
   }
   // The workflows' steps that call a hook the release removed (a Python one, #254) are rewritten in this same change:
   // a pull request runs the workflow from its own merge ref, so a later fix could never make it green.
@@ -1436,7 +1465,7 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
     throw new FactoryError("verification_failed", `${tag} is installed here, but the checks after it failed:\n` + problems.map((p) => "    - " + p).join("\n"),
       "fix what the lines above say (each names the file), then run `factory update` again; it is safe to repeat.");
   }
-  say("  checks: the files match the pin, every hook in settings.json exists, the scripts parse" +
+  say("  checks: the files match the pin, every hook in the agents' settings exists, the scripts parse" +
     (local ? "" : ", the runner files are readable") + " (verified)");
   const changed = git(root, ["status", "--porcelain", "--untracked-files=all"]).stdout.trim();
   say();

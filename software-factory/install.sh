@@ -5,7 +5,7 @@
 #       Copy the whole kit, never overwriting a file that's already there.
 #
 #   bash vendor/my-skills/software-factory/install.sh . --link      (my-skills as a git submodule of the project)
-#       Everything shared (the hook scripts, factory-loop.sh, the agents, the skills and settings.json) becomes
+#       Everything shared (the hook scripts, factory-loop.sh, the agents, the skills and the agents' rules in .claude/factory/settings.json) becomes
 #       relative symlinks into the submodule, so the project has one version of it: the submodule's commit. What a
 #       project fills in (factory.json, CLAUDE.factory.md, the docs templates, CI) is copied as before. A project's
 #       own additions go in factory.json and .claude/factory/notes/<agent or skill>.md, never in the shared files.
@@ -14,8 +14,8 @@
 #
 #   Where the links point (#112): the factory's code is read from its own folders: .claude/hooks/x ->
 #   software-factory/hooks/x, .claude/ci/x -> software-factory/ci/x, factory -> software-factory/factory,
-#   factory-loop.sh likewise. The agents, skills and settings.json come from software-factory/kit/.claude/. A link a
-#   project made before the move (into software-factory/kit/, where the forwarders were until #176) is relinked.
+#   factory-loop.sh likewise. The agents, skills and .claude/factory/settings.json come from software-factory/kit/.claude/.
+#   A link a project made before the move (into software-factory/kit/, where the forwarders were until #176) is relinked.
 #   `--layout new` and `--layout auto` are still accepted and change nothing: there is one layout. An older `factory
 #   update` passes `--layout auto` when it moves the submodule to this version, so that must keep working. `--layout
 #   old` was removed with the forwarders (#176) and is refused.
@@ -52,7 +52,7 @@ fi
 is_engine() {
   case "$1" in
     ./factory|./factory-loop.sh|./.claude/hooks/*.ts|./.claude/hooks/*.sh|./.claude/ci/*) return 0;;
-    ./.claude/agents/*.md|./.claude/skills/*/*.md|./.claude/settings.json|./.claude/manager/settings.json) return 0;;
+    ./.claude/agents/*.md|./.claude/skills/*/*.md|./.claude/factory/settings.json|./.claude/manager/settings.json) return 0;;
     *) return 1;;
   esac
 }
@@ -90,6 +90,16 @@ if [ "$setup" = 1 ]; then
   stack="$(fh "$here/hooks/factory_stack" detect "$dst" | sed -n 's/^  "stack": "\([a-z]*\)",*$/\1/p')"
 fi
 PY_WORKFLOW=./.github/workflows/ci-python.yml.template
+# The agents' rules moved to .claude/factory/settings.json (#258), which the factory passes when it starts an agent.
+# A .claude/settings.json that is still a link to the kit's old file would give them to every session here: it goes.
+# Any other .claude/settings.json is the project's own and is never touched.
+if [ "$link" = 1 ] && [ -L "$dst/.claude/settings.json" ]; then
+  case "$(readlink "$dst/.claude/settings.json")" in
+    */software-factory/kit/.claude/settings.json)
+      rm -f "$dst/.claude/settings.json"
+      echo "removed  .claude/settings.json (a link to the kit: the agents' rules are in .claude/factory/settings.json now, passed when the factory starts an agent)" ;;
+  esac
+fi
 list_files | while read -r f; do
   [ "$f" != "$PY_WORKFLOW" ] || continue  # a template to choose from, never a workflow of its own
   target="$dst/${f#./}"

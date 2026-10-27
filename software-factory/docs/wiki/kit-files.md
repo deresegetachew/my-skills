@@ -104,7 +104,7 @@ software-factory/
     .claude/factory.json                  template: the project's config
     .claude/factory/notes/                template: the project's notes for the agents
     .claude/factory/lessons.md            template: the curated lessons file (empty)
-    .claude/settings.json                 permissions and hooks
+    .claude/factory/settings.json         the agents' rules (permissions and hooks); the factory passes it when it starts an agent, a plain session never loads it (#258)
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
     .claude/skills/                       next-task, design-check, eval
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)

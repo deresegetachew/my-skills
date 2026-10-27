@@ -12,7 +12,7 @@ const GIT_ENV = { ...process.env, GIT_CONFIG_COUNT: "3", GIT_CONFIG_KEY_0: "prot
 const KIT_LINKED = [".claude/hooks/wait_for_merge.sh", ".claude/ci/ci.sh", ".claude/ci/entrypoint.sh", "factory", "factory-loop.sh"];
 const BUN_HOOK = ".claude/hooks/factory_guard.ts";
 const ENGINE = [BUN_HOOK, ...KIT_LINKED];
-const KIT_ONLY = [".claude/agents/reviewer.md", ".claude/settings.json"];
+const KIT_ONLY = [".claude/agents/reviewer.md", ".claude/factory/settings.json"];
 
 function sh(cwd: string, ...cmd: string[]): Proc {
   const p = run(cmd, { cwd, env: GIT_ENV });

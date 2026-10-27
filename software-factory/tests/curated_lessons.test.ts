@@ -286,7 +286,7 @@ test("the builder and every reviewer read the lessons first", () => {
 });
 
 test("agents may read lessons but settings deny changing them", () => {
-  const deny = (JSON.parse(readFileSync(join(KIT, ".claude", "settings.json"), "utf8")) as { permissions: { deny: string[] } })
+  const deny = (JSON.parse(readFileSync(join(KIT, ".claude", "factory", "settings.json"), "utf8")) as { permissions: { deny: string[] } })
     .permissions.deny;
   const joined = deny.join(" ");
   for (const sub of ["add", "prune"]) {

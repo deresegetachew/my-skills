@@ -201,7 +201,11 @@ isolate() {
   cfg="$(fh "$hooks/factory_mcp")" || cfg='{"mcpServers":{}}'
   [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
   if [ "$role" = coding-agent ]; then
-    claude_flags=(--mcp-config "$cfg" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}')
+    # The agents' rules (deny list, PR gate, hooks) as main has them on origin, never this worktree's copy (#258).
+    # Claude Code adds them on top of the project's own .claude/settings.json, if it has one. No rules, no session.
+    local agent_settings
+    agent_settings="$(fh "$hooks/factory_agent_settings")" || { echo "[$agent] the agent's settings could not be read; no session was started (the error above says what to do)."; exit 1; }
+    claude_flags=(--mcp-config "$cfg" --strict-mcp-config --settings "$agent_settings")
   else
     # A manager or a product owner runs on its role's settings profile (factory_roles.ts): the project's own
     # settings.json denies `gh api`, which these roles need, so the profile replaces it for their sessions.
@@ -279,7 +283,7 @@ role_pass() {
     rc=$?; stty sane 2>/dev/null
   else
     trust_gate || exit 1
-    claude "${claude_flags[@]}" "${headless_flags[@]}" -p "$prompt"; rc=$?
+    claude "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt"; rc=$?
   fi
   [ "$discover" = 0 ] || exit "$rc"
   [ "$rc" = 0 ] || return 1
@@ -390,7 +394,7 @@ for ((n = 1; n <= limit; n++)); do
     continue
   else
     trust_gate || { fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null; give_back "$id"; exit 1; }
-    claude "${claude_flags[@]}" "${headless_flags[@]}" -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+    claude "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
   fi
   fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
   give_back "$id"

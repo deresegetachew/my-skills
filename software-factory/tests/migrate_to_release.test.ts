@@ -55,9 +55,13 @@ test("it ends on the release keeps the links it does not ship and prints the ste
   const [, d, env] = await submoduleProject();
   const [rc, out] = await fac(d, env, "migrate-to-release");
   expect(rc, out).toBe(0);
-  for (const rel of ["factory", ".claude/hooks/factory_x.ts", ".claude/agents/a.md", ".claude/settings.json"]) {
+  for (const rel of ["factory", ".claude/hooks/factory_x.ts", ".claude/agents/a.md", ".claude/factory/settings.json"]) {
     expect(!isLink(join(d, rel)) && statSync(join(d, rel)).isFile(), rel).toBe(true);
   }
+  // #258: the link to the kit's old rules file goes (every session would load it); the release's file replaces it
+  expect(lstatSync(join(d, ".claude/settings.json"), { throwIfNoEntry: false })).toBeUndefined();
+  expect(out).toContain("removed link .claude/settings.json");
+  expect(readFileSync(join(d, SUB, "software-factory/kit/.claude/settings.json"), "utf8"), "only the link goes").toBe("{}\n");
   expect(readFileSync(join(d, ".claude/hooks/factory_x.ts"), "utf8")).toContain('VERSION = "1.0.0"');
   expect(isLink(join(d, ".claude/skills/nestjs-x/SKILL.md")), "what the release does not ship stays a link").toBe(true);
   expect((JSON.parse(readFileSync(join(d, PIN), "utf8")) as Record<string, string>).tag).toBe("v1.0.0");
@@ -65,7 +69,10 @@ test("it ends on the release keeps the links it does not ship and prints the ste
   expect(out.includes("nestjs-x") && !out.includes("git submodule deinit"), out).toBe(true); // links remain, so the submodule stays
   expect(out.includes("git add -A") && out.includes("pull request"), out).toBe(true);
   const status = git(d, "status", "--porcelain");
-  for (const l of status.split("\n").filter(Boolean)) expect(["M", "T", "A", "??", "AM"], status).toContain(l.slice(0, 2).trim());
+  for (const l of status.split("\n").filter(Boolean)) {
+    if (l.slice(3) === ".claude/settings.json") expect(l.slice(0, 2).trim(), status).toBe("D"); // the old rules link, removed
+    else expect(["M", "T", "A", "??", "AM"], status).toContain(l.slice(0, 2).trim());
+  }
   expect(status.includes(".gitmodules") || status.includes(SUB), status).toBe(false);
 });
 

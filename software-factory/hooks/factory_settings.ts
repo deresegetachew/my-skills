@@ -203,9 +203,10 @@ function cmdSet(data: store.Data, indent: store.Indent, local: boolean, key: str
   console.log(`${key} = ${asText(value)} in ${PATH}. Commit it on a branch and merge it in a pull request ` +
     "(`factory settings pr` does that; the owner merges it).");
   if (key === "permissions.allow") {
-    // #251: the agents obey .claude/settings.json, so say when the rule takes effect.
-    console.log("The agents read their allow rules from .claude/settings.json, not from here: `factory settings pr` also " +
-      "writes these rules there, in the same pull request, so they apply once the owner merges it.");
+    // #251, #258: say when the rule takes effect.
+    console.log("The agents get these rules from main: `factory settings pr` opens the pull request, and once the owner " +
+      "merges it the factory adds them to the agents' rules (.claude/factory/settings.json) each time it starts an agent. " +
+      "Nothing else to run.");
   }
 }
 

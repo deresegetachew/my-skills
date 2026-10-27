@@ -291,8 +291,8 @@ function describe(cfg: Config, top: string, agent: string): void {
   console.log(`  ${agent}: ${where}`);
   console.log(`    ${work.length ? work.join(", ") : "clean, nothing to protect"}` +
     (info.changes.length || info.unpushed.length ? " -> a backup is saved first, then it resumes in place" : ""));
-  const kitOk = existsSync(join(path, ".claude", "settings.json")) || !isDir(path);
-  if (!kitOk) console.log(`    settings.json does not resolve here: it would NOT start (${SETTINGS_FIX})`);
+  const kitOk = existsSync(join(path, ".claude", "factory", "settings.json")) || !isDir(path);
+  if (!kitOk) console.log(`    .claude/factory/settings.json does not resolve here: it would NOT start (${SETTINGS_FIX})`);
   console.log(`    session ${sessionName(agent)}: ${running ? "running, left alone" : "not running, would start"}`);
 }
 

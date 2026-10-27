@@ -225,7 +225,7 @@ test("resume waits for docker starts the stack then the agents in detached sessi
   for (const w of ["FACTORY_AGENTS=haile", "loop -i", join(clone, "factory")]) expect(cmd).toContain(w);
   expect(cmd).not.toContain("FACTORY_RESUME"); // a clean agent starts normally
   for (const name of ["haile", "tewodros"]) { // each in its own worktree, with the settings resolving
-    expect(existsSync(join(clone + "-agents/" + name, ".claude", "settings.json"))).toBe(true);
+    expect(existsSync(join(clone + "-agents/" + name, ".claude", "factory", "settings.json"))).toBe(true);
   }
   const out = bootLog(env);
   expect(out).toMatch(/stack: up/);
@@ -464,7 +464,7 @@ test("a loop that is not resuming still moves to main as before", () => {
 // --- the deny rules -------------------------------------------------------------------------------------------------
 
 test("agents cannot install or run autostart", () => {
-  const deny = (JSON.parse(read(join(KIT, ".claude", "settings.json"))) as { permissions: { deny: string[] } }).permissions.deny;
+  const deny = (JSON.parse(read(join(KIT, ".claude", "factory", "settings.json"))) as { permissions: { deny: string[] } }).permissions.deny;
   for (const rule of ["Bash(factory autostart install*)", "Bash(factory autostart uninstall*)", "Bash(./factory autostart install*)",
     "Bash(*factory_autostart*)", "Bash(factory resume*)", "Bash(./factory resume*)", "Bash(*factory_resume*)"]) {
     expect(deny).toContain(rule);

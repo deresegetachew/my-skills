@@ -344,8 +344,8 @@ function startAgent(cfg: Config, top: string, agent: string, report: Report, ctx
       return;
     }
   }
-  if (!existsSync(join(path, ".claude", "settings.json"))) {
-    report.add(`agent ${agent}: NOT started: ${path}/.claude/settings.json does not resolve, so the factory's hooks ` +
+  if (!existsSync(join(path, ".claude", "factory", "settings.json"))) {
+    report.add(`agent ${agent}: NOT started: ${path}/.claude/factory/settings.json does not resolve, so the factory's hooks ` +
       `and deny rules would not load. ${SETTINGS_FIX}.`, true);
     return;
   }

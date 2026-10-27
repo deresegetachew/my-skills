@@ -498,7 +498,7 @@ test("the kits settings protect the mcp config", () => {
   const [code, err] = gate(d, env, MERGE);
   expect(code, err).toBe(2);
   expect(err).toContain(".mcp.json");
-  const deny = (JSON.parse(readFileSync(join(KIT, ".claude", "settings.json"), "utf8")) as { permissions: { deny: string[] } })
+  const deny = (JSON.parse(readFileSync(join(KIT, ".claude", "factory", "settings.json"), "utf8")) as { permissions: { deny: string[] } })
     .permissions.deny;
   expect(deny).toContain("Edit(./.mcp.json)");
 });

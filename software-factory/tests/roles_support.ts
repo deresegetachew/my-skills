@@ -80,6 +80,8 @@ export function project(o: ProjectOptions = {}): [string, string, Env] {
   write(join(work, "CLAUDE.md"), "rules\n");
   write(join(work, ".gitignore"), "__pycache__/\n");
   if (o.profile !== false) write(join(work, ".claude", "manager", "settings.json"), JSON.stringify({ permissions: { allow: ["Bash(gh api *)"] } }));
+  // the agents' rules, as a release installs them (#258): the loop starts no coding agent without them
+  write(join(work, ".claude", "factory", "settings.json"), readFileSync(join(SF, "kit", ".claude", "factory", "settings.json"), "utf8"));
   for (const [name, text] of Object.entries(o.files ?? {})) write(join(work, name), text);
   git(work, "add", "-A");
   git(work, "commit", "-qm", "start");

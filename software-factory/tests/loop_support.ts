@@ -3,7 +3,7 @@
 // machines, autostart). Not a test file.
 import { copyFileSync, existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { HOOKS, SF, sh, tmp, write, writeExe } from "./support.ts";
+import { HOOKS, KIT, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 export const EMPTY = '{"mcpServers":{}}';
 export const NO_CONNECTORS = '{"disableClaudeAiConnectors": true}';
@@ -48,9 +48,21 @@ export function quiet(cmd: string[], cwd?: string): void {
   if (p.exitCode !== 0) throw new Error(`${cmd.join(" ")} failed (${p.exitCode})`);
 }
 
-/** A clone of a bare origin with stub hooks, the real factory_mcp.ts and factory-loop.sh, committed and pushed to main.
- * `mcp` is committed as .mcp.json; `worktreeMcp` is written afterwards, only in this worktree. */
-export function loopProject(mcp?: unknown, worktreeMcp?: unknown): [string, Env] {
+/** The real scripts the loop runs before it starts claude: the MCP config and the agents' settings, as main has them. */
+export const REAL_HOOKS = ["factory_mcp.ts", "factory_agent_settings.ts", "factory_lib.ts"];
+/** The kit's rules for agents (#258), committed in a test project as a release installs them. */
+export const KIT_AGENT_SETTINGS = join(KIT, ".claude", "factory", "settings.json");
+
+/** Copy the real hooks and the kit's agents' settings into a project (before its first commit). */
+export function addAgentSettings(work: string): void {
+  for (const f of REAL_HOOKS) copyFileSync(join(HOOKS, f), join(work, ".claude", "hooks", f));
+  write(join(work, ".claude", "factory", "settings.json"), readFileSync(KIT_AGENT_SETTINGS, "utf8"));
+}
+
+/** A clone of a bare origin with stub hooks, the real factory_mcp.ts, factory_agent_settings.ts and factory-loop.sh,
+ * and the kit's agents' settings, committed and pushed to main. `mcp` is committed as .mcp.json; `worktreeMcp` is
+ * written afterwards, only in this worktree. `factoryJson` is the committed .claude/factory.json. */
+export function loopProject(mcp?: unknown, worktreeMcp?: unknown, factoryJson = '{"waitMinutes": 0}'): [string, Env] {
   const d = tmp();
   const origin = join(d, "origin.git");
   const work = join(d, "work");
@@ -60,8 +72,8 @@ export function loopProject(mcp?: unknown, worktreeMcp?: unknown): [string, Env]
   for (const name of ["factory_claims.ts", "factory_env.ts", "factory_agents.ts", "factory_remote.ts", "next_task.ts"]) {
     write(join(hooks, name), STUB);
   }
-  for (const f of ["factory_mcp.ts", "factory_lib.ts"]) copyFileSync(join(HOOKS, f), join(hooks, f));
-  write(join(work, ".claude", "factory.json"), '{"waitMinutes": 0}');
+  addAgentSettings(work);
+  write(join(work, ".claude", "factory.json"), factoryJson);
   if (mcp !== undefined) write(join(work, ".mcp.json"), JSON.stringify(mcp));
   copyFileSync(join(SF, "factory-loop.sh"), join(work, "factory-loop.sh"));
   quiet(["git", "add", "-A"], work);
@@ -89,6 +101,12 @@ export const MAIN_COPY = join(".git", "factory-mcp.json");
 
 export function mainCopy(work: string): string {
   return join(resolve(work), MAIN_COPY);
+}
+
+/** The settings a factory session was started with: the JSON `--settings` names (a file path or inline JSON). */
+export function startedSettings(args: string[]): Record<string, unknown> {
+  const v = flag(args, "--settings");
+  return JSON.parse(v.trimStart().startsWith("{") ? v : readFileSync(v, "utf8")) as Record<string, unknown>;
 }
 
 
@@ -137,6 +155,7 @@ export function loopRepo(stubs: string[] = STUB_HOOKS, extra: Record<string, str
   must(["git", "init", "-q", "--bare", "-b", "main", origin]);
   must(["git", "clone", "-q", origin, work]);
   for (const name of stubs) writeExe(join(work, ".claude", "hooks", name), LOGGING_STUB);
+  addAgentSettings(work); // the loop starts no agent without its rules (#258)
   write(join(work, ".claude", "factory.json"), '{"waitMinutes": 0}');
   for (const [rel, text] of Object.entries(extra)) write(join(work, rel), text);
   copyFileSync(join(SF, "factory-loop.sh"), join(work, "factory-loop.sh"));

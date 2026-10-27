@@ -66,13 +66,13 @@ test("the test command names the folder the tests are in", () => {
 
 // #249: the install sets commands.test, so it also lets an unattended agent run it (directly, or through
 // ./factory run-check) without a prompt: the rules go to permissions.allow in factory.json, and into a copied
-// settings.json, where Claude Code reads them.
+// .claude/factory/settings.json, the agents' rules.
 test("the install allows the detected test command and run check for unattended agents", () => {
   const d = project({ "src/textkit.py": "x = 1\n", "tests/test_textkit.py": UNITTEST });
   const out = install(d);
   const want = ["Bash(python3 -m unittest*)", "Bash(./factory run-check*)"];
   expect((factoryJson(d).permissions as Record<string, unknown>).allow).toEqual(want);
-  const allow = ((JSON.parse(read(d, ".claude/settings.json")) as Record<string, Record<string, unknown>>).permissions as Record<string, unknown>).allow as string[];
+  const allow = ((JSON.parse(read(d, ".claude/factory/settings.json")) as Record<string, Record<string, unknown>>).permissions as Record<string, unknown>).allow as string[];
   for (const rule of want) expect(allow).toContain(rule);
   expect(allow.length).toBe(new Set(allow).size);
   expect(out).toContain("Bash(python3 -m unittest*)");
@@ -133,9 +133,9 @@ test("an existing workflow is never overwritten", () => {
 test("a second run changes nothing", () => {
   const d = project({ "tests/test_a.py": UNITTEST });
   install(d);
-  const before = [read(d, WORKFLOW), read(d, ".claude/factory.json"), read(d, ".claude/settings.json")];
+  const before = [read(d, WORKFLOW), read(d, ".claude/factory.json"), read(d, ".claude/factory/settings.json")];
   install(d);
-  expect([read(d, WORKFLOW), read(d, ".claude/factory.json"), read(d, ".claude/settings.json")]).toEqual(before);
+  expect([read(d, WORKFLOW), read(d, ".claude/factory.json"), read(d, ".claude/factory/settings.json")]).toEqual(before);
 });
 
 function runCmd(d: string, name: string): ReturnType<typeof sh> {

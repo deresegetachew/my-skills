@@ -245,20 +245,23 @@ case "$cmd" in
     # A reused worktree may be behind main's submodule pin, and a new one may have none yet: without it the kit's
     # links in .claude/ point at nothing and Claude would start without the hooks and deny rules (#46).
     if [ -f .gitmodules ]; then git submodule update --init -q || { echo "factory: git submodule update failed in $dir" >&2; exit 1; }; fi
-    if [ ! -e .claude/settings.json ]; then
-      echo "factory: $dir/.claude/settings.json doesn't resolve, so the factory's hooks and deny rules wouldn't load. Run \`git submodule update --init\` there, or \`bash vendor/my-skills/software-factory/install.sh . --link\`, and try again." >&2
+    # The agents' rules (#258), or a not-yet-updated project's old .claude/settings.json, and the hook that reads them.
+    if { [ ! -e .claude/factory/settings.json ] && [ ! -e .claude/settings.json ]; } || [ ! -e .claude/hooks/factory_agent_settings.ts ]; then
+      echo "factory: $dir/.claude/factory/settings.json doesn't resolve, so the factory's hooks and deny rules wouldn't load. Run \`git submodule update --init\` there, or \`bash vendor/my-skills/software-factory/install.sh . --link\`, and try again." >&2
       exit 1
     fi
     # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
     # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
     mcp="$(fh "$dir/.claude/hooks/factory_mcp")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
+    # The agents' rules as main has them on origin (#258), as in factory-loop.sh. No rules, no session.
+    agent_settings="$(fh "$dir/.claude/hooks/factory_agent_settings")" || exit 1
     # The `models` setting for the builder (factory_models.ts): after the MCP flags, before your own arguments.
     mf=()
     if [ -f "$dir/.claude/hooks/factory_models.ts" ]; then
       m="$(fh "$dir/.claude/hooks/factory_models" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }
       while IFS= read -r line; do [ -n "$line" ] && mf+=("$line"); done <<< "$m"
     fi
-    set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' ${mf[@]+"${mf[@]}"} "$@"
+    set -- --mcp-config "$mcp" --strict-mcp-config --settings "$agent_settings" ${mf[@]+"${mf[@]}"} "$@"
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
     # FACTORY_REMOTE_CONTROL=0|1 wins; else this machine's `remoteControl` setting (factory settings --local); else on.
     rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$dir/.claude/hooks/factory_machine" remote 2>/dev/null || echo 1)"

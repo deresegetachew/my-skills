@@ -22,7 +22,7 @@ On this page:
 - **`factory loop`**: unattended. Each task is a fresh `claude -p "/next-task <id>"` run. Nobody can answer a
   permission prompt, so every headless `claude -p` starts with `--permission-mode acceptEdits` (setting
   `permissionMode`; `default` passes no flag and leaves it to your own Claude Code settings). Edits inside the
-  project then need no answer, and `.claude/settings.json` must allow every command the build needs; a command that
+  project then need no answer, and the agents' settings (`.claude/factory/settings.json` plus `permissions.allow`, passed when the loop starts the agent, #258) must allow every command the build needs; a command that
   is neither allowed nor denied stops the run. Interactive sessions are not given a mode. Before an unattended run starts, the loop checks that Claude Code trusts the folder (it ignores the whole allow list in one it does not); if not, it prints a `{code, message, fix}` naming the folder to open once with `claude`, starts nothing and stops. A folder it cannot judge (no `~/.claude.json`) goes ahead. `--dry-run` shows the flag,
   and `factory doctor` prints the mode and says `fix` when a headless run would stall (mode `default` with no mode in
   your own settings, or no rule for `git commit`, `git push`, `gh pr` and the like). Best for long stretches away.
@@ -490,7 +490,7 @@ factory resume --dry-run                                   # what a boot would d
    session** named `<repo>-<agent>` (`tmux attach -t proj-haile` shows it; Remote Control is on, as in
    `factory loop -i`). Each runs `factory loop -i` as that one agent, in its own worktree. A session that is already
    running is left alone, so running `factory resume` again is safe.
-3. starts an agent **only when its worktree's `.claude/settings.json` resolves** (after `git submodule update
+3. starts an agent **only when its worktree's `.claude/factory/settings.json` resolves** (after `git submodule update
    --init`), so an agent never runs without the factory's hooks and deny rules (#46). If it does not, that agent is
    reported `NOT started` with the fix, and the others carry on.
 4. in issues mode, if the agent still holds an in-progress issue, marks it working again on that issue, so the dev

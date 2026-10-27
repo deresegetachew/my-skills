@@ -26,8 +26,8 @@
     "^install\\.sh$",
     "^tools/build_release\\.ts$",
     "^software-factory/VERSION$",
-    "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_config|factory_release|check|factory_stop|factory_session)\\.ts$",
-    "^software-factory/kit/\\.claude/(settings\\.json|manager/|agents/|skills/)",
+    "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_config|factory_release|check|factory_stop|factory_session|factory_agent_settings)\\.ts$",
+    "^software-factory/kit/\\.claude/(settings\\.json|factory/settings\\.json|manager/|agents/|skills/)",
     "^software-factory/kit/\\.github/",
     "^software-factory/ci/(ci\\.sh|entrypoint\\.sh|loop\\.sh)$",
     "\\.env"

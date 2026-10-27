@@ -46,7 +46,7 @@ export function project(files: Record<string, string> = {}, cfg: Record<string, 
   mkdirSync(hooks, { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) symlinkSync(join(HOOKS, f), join(hooks, f));
   write(join(d, ".claude", "factory.json"), JSON.stringify(cfg ?? { agents: ["menelik", "taytu"] }));
-  write(join(d, ".claude", "settings.json"), JSON.stringify({ hooks: {} }));
+  write(join(d, ".claude", "factory", "settings.json"), JSON.stringify({ hooks: {} })); // the agents' rules (#258)
   for (const [name, text] of Object.entries(files)) write(join(d, name), text);
   return d;
 }

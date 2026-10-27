@@ -40,7 +40,7 @@ export function tree(version: string, files: Record<string, string | null> = {})
     "hooks/factory_old.ts": "export const OLD = 1;\n",
     "ci/ci.sh": FAKE_CI.replace("{v}", version),
     "kit/.claude/agents/a.md": "agent " + version + "\n",
-    "kit/.claude/settings.json": JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command",
+    "kit/.claude/factory/settings.json": JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command",
       command: "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_x.ts" }] }] } }) + "\n",
     "kit/.claude/factory.json": "{}\n",
     "kit/docs/blocked.md": "# blocked\n",

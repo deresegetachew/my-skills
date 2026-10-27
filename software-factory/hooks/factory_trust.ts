@@ -98,7 +98,7 @@ export function inheritedFrom(path: string): string | null {
 export function problem(path: string): { code: string; message: string; fix: string } {
   return {
     code: "folder_not_trusted",
-    message: `Claude Code has not been told to trust ${path}, so it ignores the allow list in .claude/settings.json ` +
+    message: `Claude Code has not been told to trust ${path}, so it ignores the allow lists (the agents' in .claude/factory/settings.json and the project's own) ` +
       "and an unattended run stops at its first command.",
     fix: `open it once yourself: \`cd ${path} && claude\`, answer yes to the trust question, then start the loop again. ` +
       "Only you can do this; the factory never sets the trust flag.",

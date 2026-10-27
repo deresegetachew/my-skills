@@ -88,7 +88,7 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    ```
    or `factory loop` to run unattended. The loop starts a clean context for every
    task, which is cheaper and avoids an agent misled by a long, stale conversation; state lives in git, the PRs
-   and the plan. It runs without anyone to approve prompts, so `.claude/settings.json` must allow every command
+   and the plan. It runs without anyone to approve prompts, so the agents' rules (`.claude/factory/settings.json` plus `permissions.allow`) must allow every command
    the build needs. Keep the machine awake while it runs (on a Mac, `caffeinate -d` in another tab), and run the
    agent with the sandbox on rather than with permission checks skipped.
    **The `factory` command:** tell the owner to run `./factory install-shim` once; then `factory help` lists

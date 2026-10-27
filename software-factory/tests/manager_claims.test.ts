@@ -525,7 +525,7 @@ test("factory command help and status know the claims", () => {
 });
 
 test("builders cannot run the claim commands or post the markers", () => {
-  const settings = JSON.parse(readFileSync(join(KIT, ".claude", "settings.json"), "utf8")) as { permissions: { deny: string[] } };
+  const settings = JSON.parse(readFileSync(join(KIT, ".claude", "factory", "settings.json"), "utf8")) as { permissions: { deny: string[] } };
   const deny = settings.permissions.deny;
   for (const cmd of ["factory manager-claims review 5", "./factory manager-claims next",
     "bun --no-env-file .claude/hooks/factory_manager_claims.ts next"]) {

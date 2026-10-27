@@ -285,9 +285,9 @@ until he agrees them."
   and every machine end on one release; a machine that pulled a new pin catches up with `factory update`. *Built.* (#113)
 - **U6.** As a project owner, what stays mine is `.claude/factory.json`, the notes, the lessons file, the roles folder,
   `CLAUDE.md`, my docs and CI workflow; a rule that should change everywhere is changed in my-skills. I never edit a
-  shared file in my project. My own allow rules go in `.claude/factory.json` (`permissions.allow`), and `factory update`
-  merges them into the release's `settings.json`; `factory settings pr` writes them there in the same pull request, so a
-  new rule applies after one owner merge (#251). *Built.* (wiki/submodule.md "Shared and project-owned"; #112, #198)
+  shared file in my project. My own allow rules go in `.claude/factory.json` (`permissions.allow`), and the factory
+  adds them to the agents' rules (`.claude/factory/settings.json`) each time it starts an agent (#258), so a
+  new rule applies after one owner merge, with nothing else to run (#251). *Built.* (wiki/submodule.md "Shared and project-owned"; #112, #198)
 - **U7.** As a project on the submodule, I keep working until I move. I move to the new layout or to releases in one
   reviewed pull request, with no flag day. `factory update --release` refuses where the files are still links. Moving
   Remanual changes protected files there, so it is the owner's merge. *Built (the commands); the migration is owner-led.*

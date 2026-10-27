@@ -46,7 +46,7 @@ is its own reviewed pull request:
 
 `bash vendor/my-skills/software-factory/install.sh . --link`, run from the project's folder:
 
-- **Links the shared files.** For every agent, skill, hook, `factory ci` file (`.claude/ci/`), `settings.json`,
+- **Links the shared files.** For every agent, skill, hook, `factory ci` file (`.claude/ci/`), the agents' rules (`.claude/factory/settings.json`),
   `factory` and `factory-loop.sh` in the kit, it makes a relative symlink in the project that points into `vendor/my-skills`. A plain copy that's identical
   to the kit becomes a link. A copy that differs is kept, with a warning: move its project lines into `factory.json`
   or a note, delete it, and run the installer again.
@@ -61,7 +61,7 @@ is its own reviewed pull request:
   and `commands.test` is `python3 -m unittest discover -s <the folder of the tests>` only when the tests are
   unittest-style (otherwise it stays empty and the output says to set it). With a test command, the install also adds
   `Bash(python3 -m unittest*)` and `Bash(./factory run-check*)` to `permissions.allow` in `factory.json` (and to a copied
-  `settings.json`), so an unattended agent can run the tests (#249). Anything else keeps the pnpm template and the output names the files to edit.
+  `.claude/factory/settings.json`), so an unattended agent can run the tests (#249). Anything else keeps the pnpm template and the output names the files to edit.
   The output says which it chose. An existing `ci.yml` is kept as it is. The first install from a release
   (`factory update <tag>`, no `.claude/factory.json` yet) does the same, with the detector from the release's own
   `hooks/factory_stack.ts`; later updates never touch `ci.yml` or `commands.*`. `factory doctor` runs a Python `commands.test` once and fails with `no-tests-ran` when it ran 0 tests (#244). It does not yet check that the

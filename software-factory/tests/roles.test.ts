@@ -8,7 +8,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { claudeCalls, type Env, factory, log, porcelain, project, type Row } from "./roles_support.ts";
-import { HOOKS, runCode, write } from "./support.ts";
+import { HOOKS, runCode, SF, write } from "./support.ts";
 
 const UNREVIEWED = { pulls: [{ number: 5, title: "x", draft: false, head: { sha: "a".repeat(40) }, user: { login: "me" } }] };
 const PO_WORK = { issues: [{ number: 7, title: "Pick the palette", labels: [{ name: "factory:needs-product" }] }] };
@@ -74,7 +74,13 @@ test("a coding agent pass runs next task exactly as before", () => {
   const calls = claudeCalls(env);
   expect(calls.length, calls.join("\n")).toBe(1);
   expect(calls[0]).toContain("-p /next-task 1.1");
-  expect(calls[0]).toContain('--settings {"disableClaudeAiConnectors": true}');
+  // the agents' rules from main, connectors off (#258), on top of the project's own settings
+  const m = /--settings (\S+factory-settings\.json) /.exec(calls[0] as string);
+  expect(m, calls[0]).not.toBeNull();
+  const started = JSON.parse(readFileSync((m as RegExpExecArray)[1] as string, "utf8")) as { disableClaudeAiConnectors: boolean; permissions: { deny: string[] } };
+  expect(started.disableClaudeAiConnectors).toBe(true);
+  expect(started.permissions.deny).toEqual((JSON.parse(readFileSync(join(SF, "kit", ".claude", "factory", "settings.json"), "utf8")) as
+    { permissions: { deny: string[] } }).permissions.deny);
   expect(calls[0]).not.toContain("--setting-sources"); // a builder keeps the project's settings
   expect(calls[0]).not.toContain("factory-role");
 });
@@ -341,7 +347,7 @@ test("doctor reports a reads path that does not exist", () => {
     const found = tool === "bun" ? process.execPath : Bun.which(tool);
     if (found && !existsSync(join(bin, tool))) symlinkSync(found, join(bin, tool));
   }
-  writeFileSync(join(work, ".claude", "settings.json"), "{}");
+  writeFileSync(join(work, ".claude", "factory", "settings.json"), "{}");
   const p = factory(work, { ...env, PATH: bin }, ["doctor"]);
   const fixes = p.stdout.split("\n").filter((l) => l.startsWith("fix"));
   expect(fixes.some((l) => l.includes("docs/nope.md") && l.includes("does not exist")), p.stdout).toBe(true);
