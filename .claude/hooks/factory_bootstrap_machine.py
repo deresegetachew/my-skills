@@ -1,1 +1,0 @@
-../../software-factory/hooks/factory_bootstrap_machine.py

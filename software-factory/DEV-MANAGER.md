@@ -10,7 +10,8 @@ factory dev-manager [name] loop -i       one item in a session you can type into
 
 The dev manager doesn't write the product. It keeps the coding agents busy and their output safe:
 
-- reviews every pull request, including the protected ones the coding agents may not merge, and merges them;
+- reviews every pull request, including the protected ones the coding agents may not merge, and merges them, except a
+  change under `.claude/` (settings, permissions, the agents' definitions), which only the owner merges (#247);
 - answers the agents' technical and process questions;
 - turns gaps it finds into tasks (with the owner's yes for scope), so the coding agents do the work with their own tools;
 - notices when an agent is stuck, silent or idle, and tells the owner;
@@ -41,7 +42,7 @@ to undo it.
 ## How it runs: an orchestrator and one-item sub-managers
 
 The dev manager is **not one long session**. `factory dev-manager loop` is an **orchestrator**: a loop script with no model
-(`factory_orchestrator.py`, #97 and #109). Each cycle it reads GitHub (`factory watch`, the seven checks), and for each item
+(`factory_orchestrator.ts`, #97 and #109). Each cycle it reads GitHub (`factory watch`, the seven checks), and for each item
 that needs a manager it starts a **one-item sub-manager**: a fresh, small `claude -p "/manage-pass pr-417"` on the manager's
 settings profile. A sub-manager reads its item's fact sheet and thread note, does that one thing, writes down what it decided,
 and exits. The orchestrator never reviews, merges or answers itself; it posts to the owner queue what only the owner can do, and
@@ -75,7 +76,7 @@ There is no web console. To look at, steer or take over an item:
 1. **GitHub access.** `gh auth status` must be signed in as an account that may review and merge. Branch protection with the
    required CI checks stays on `main` (the gate is a guard rail, not a lock).
 2. **Read the project's instructions.** `<roles.dir>/dev-manager/README.md` and `reads.md` (`factory init-roles` makes them).
-   `CLAUDE.md`, `.claude/factory.json`, `.claude/hooks/pr-gate.py` and `.claude/agents/*.md` are the review checklist.
+   `CLAUDE.md`, `.claude/factory.json`, `.claude/hooks/pr-gate.ts` and `.claude/agents/*.md` are the review checklist.
 3. **Agree the merge policy with the owner.** The default: review everything, protected paths included, and merge unless the PR
    - weakens a rule in CLAUDE.md, the PRD, the hooks or the permissions, or edits the critical rules themselves
      rather than implementing them;
@@ -126,7 +127,7 @@ the reasoning behind it. A sub-manager works on exactly its item. Run by hand (`
 An agent may merge its own PR as soon as the gate allows. To stop that while you review, put the **`factory-hold`**
 label on the PR (`holdLabel` in `factory.json`; create the label in the repo once). With the label on:
 - the PR gate refuses the agent's merge;
-- `next_task.py` doesn't hand the PR out as rework, so the agents carry on with other tasks.
+- `next_task.ts` doesn't hand the PR out as rework, so the agents carry on with other tasks.
 
 When you're done, remove the label, and either approve (`<!-- factory-approved sha=<head> -->`, then merge) or post
 `<!-- factory-mustfix sha=<head> -->` with the must-fixes, which makes it rework. Don't hold a PR with a must-fix
@@ -195,16 +196,16 @@ envelope; docs/messages.md). They come to you first for technical and process qu
 - **Spot-check claims against sources.** If a PR says text was copied word for word from a document, open
   the document and compare (for PDFs: `pdftoppm -f N -l N -r 80 -png file.pdf out`, then look at the image).
 - **Must-fix comments start with `<!-- factory-mustfix sha=<head> -->`** (the head commit you reviewed). That
-  marker is how the coding agent finds rework: `next_task.py` hands out a PR whose latest must-fix names its
+  marker is how the coding agent finds rework: `next_task.ts` hands out a PR whose latest must-fix names its
   current head before any new task, and the agent's next push clears it. Without the marker, a must-fix waits
   until someone notices.
-  It also holds the merge: `pr-gate.py` refuses the agent's `gh pr merge` while the latest marker on the PR is a
+  It also holds the merge: `pr-gate.ts` refuses the agent's `gh pr merge` while the latest marker on the PR is a
   must-fix. When you re-review and it's good, merge it yourself or post `<!-- factory-approved sha=<head> -->`.
   An approval counts only for the commit its `sha=` names, and the agent's merge must carry
   `--match-head-commit <head>`. With `trustedReviewers: ["<your login>"]` in factory.json, only your approvals
   count; that's worth it once the agents use their own GitHub account. The gate is a guard rail, not a lock:
   keep branch protection with the CI checks required on main.
-- **Unblock an issue with `factory_issues.py release <n> "<reason>"`**, not by editing labels: release (and block)
+- **Unblock an issue with `factory_issues.ts release <n> "<reason>"`**, not by editing labels: release (and block)
   post a `factory-release` marker, so an old claim from before the block can't win the issue again.
 - **One comment per reviewed commit**: verdict (merge / needs changes / needs the owner), must-fix items with
   file and line, follow-ups in a line each, and the marker `<!-- pr-watch sha=<head sha> -->`. The marker is
@@ -221,12 +222,12 @@ coming back. The builder and every reviewer read it first, so keep it short and 
 lessons, each with an example or a link.
 
 - **When a must-fix repeats,** or an agent's PR description says "lesson candidate: ...", run
-  `python3 .claude/hooks/factory_lessons.py suggest` (read-only; every ten merged PRs is enough). It lists causes that came back
+  `bun --no-env-file .claude/hooks/factory_lessons.ts suggest` (read-only; every ten merged PRs is enough). It lists causes that came back
   on two or more of the last 20 task PRs: must-fix items, CI failing at the same job and step, and the reviewer findings on
   this machine. Skip a candidate that is a one-off; reword one you keep to a single imperative line with its example, then
-  `python3 .claude/hooks/factory_lessons.py add "<rule>"` and merge the file in a PR.
+  `bun --no-env-file .claude/hooks/factory_lessons.ts add "<rule>"` and merge the file in a PR.
 - **When something enforces a lesson now** (a hook, a lint rule, a `factory.json` check), tag it `[enforced: <path>]`;
-  `factory_lessons.py prune` proposes removing the tagged ones whose enforcement exists, and `prune --apply` does.
+  `factory_lessons.ts prune` proposes removing the tagged ones whose enforcement exists, and `prune --apply` does.
 - **Past the cap, prune or merge;** never raise `lessonsCap` to make room. CI fails a file over the cap.
 - Only you change the file: the agents cannot edit `.claude/`, and `add` and `prune --apply` refuse inside an agent session.
 
@@ -293,7 +294,7 @@ All managers share one GitHub account, so the name inside the comment is the onl
 
 When the owner runs more than one `factory-loop.sh`, PRs arrive side by side for neighbouring tasks. Merge them in
 plan order when one builds on another; when a later PR conflicts after an earlier merge, ask its branch to merge the main
-branch in, never to rebase (force pushes are blocked) (or fix the conflict yourself if the loop has moved on). `python3 .claude/hooks/factory_claims.py list` on the
+branch in, never to rebase (force pushes are blocked) (or fix the conflict yourself if the loop has moved on). `bun --no-env-file .claude/hooks/factory_claims.ts list` on the
 owner's machine shows which loop holds which task; a claim lapses when its loop exits or after `claimStaleHours`.
 
 ## Token use
@@ -318,7 +319,8 @@ what it reads for its one item, not a growing history.
   changed packages only, and `checkOutputLines` for how much of a failure the agent sees. `factory settings help <key>`
   explains any of them. A settings change comes as a pull request from a person (`factory settings pr`); its body lists
   each change and the review it needs (`testPaths`, `goldenPaths` and `dependencyManifests` need `tests-reviewed` or
-  `deps-reviewed`). Agents can't change settings, and you merge those PRs only within the owner's scope.
+  `deps-reviewed`). Agents can't change settings, and you never merge those PRs: they change `.claude/`, so the owner
+  merges them (#247). Review them and say what you found.
 - **Tokens on every PR.** Agents post a `<!-- factory-usage task=<n> -->` comment with the task's tokens per subagent when they
   open the PR and again before it merges. Read it before you merge: a task far above the usual is worth a line in your review
   (what it read, how many rounds). If it's missing, ask for it in the review; it isn't a must-fix.

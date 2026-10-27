@@ -3,16 +3,28 @@
 #   ./factory <command>        or, with the shim on your PATH (factory install-shim), just: factory <command>
 [ -n "${BASH_VERSION:-}" ] || exec bash "$0" "$@"
 set -uo pipefail
+# Run a factory script (<path>.ts) with Bun. --no-env-file: Bun must not load the project's .env into the factory.
+fh() {
+  local s="$1"; shift
+  command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
+  bun --no-env-file "$s.ts" "$@"
+}
 # `factory bootstrap` sets up a machine, so it works before there is a checkout: it runs from where this script lives.
 if [ "${1:-}" = bootstrap ]; then
   self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
-  exec python3 "$(dirname "$self")/hooks/factory_bootstrap.py" "${@:2}"
+  fh "$(dirname "$self")/hooks/factory_bootstrap" "${@:2}"; exit $?
 fi
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
 cd "$root"
 hooks="$root/.claude/hooks"
-py() { python3 "$hooks/$1" "${@:2}"; }
-main() { python3 -c 'import json;print(json.load(open(".claude/factory.json")).get("mainBranch","main"))'; }
+# One value of .claude/factory.json (`setting mainBranch main`, `setting commands.install ""`): the default when the key
+# is missing; fails when the file is missing or not JSON.
+setting() {
+  bun --no-env-file -e 'const [k, d] = process.argv.slice(1); let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8"));
+for (const p of k.split(".")) v = v !== null && typeof v === "object" && !Array.isArray(v) && p in v ? v[p] : undefined;
+console.log(v === undefined ? d : typeof v === "string" ? v : JSON.stringify(v));' "$@"
+}
+main() { setting mainBranch main; }
 
 usage() {
   cat <<'EOF'
@@ -37,7 +49,7 @@ Build
                          tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next. It does not claim it: the last line shows the
-                         command that does (python3 .claude/hooks/next_task.py --claim <agent> --pid $$);
+                         command that does (bun --no-env-file .claude/hooks/next_task.ts --claim <agent> --pid $$);
                          `--claim AGENT --issue N` claims that one issue
   autostart [status|install|uninstall]
                          bring this machine back after a reboot: the dev stack (commands.stackUp) and its agents, in
@@ -61,7 +73,8 @@ Look
                          incremental re-review: a reviewer's next round reads only the delta since its last one
   reset-run [--apply]    before a test run: lists what an earlier run left in this project (stale local claims, Agent
                          issues of dead or never-run agents, exited CI containers, offline runners, a runs-on variable that
-                         points at no online runner); --apply cleans it and says what it did. Only this project's own repo, folder and containers
+                         points at no online runner); --apply cleans it and says what it did. Only this project's own repo, folder and containers;
+                         a down agent of another machine only with --agent NAME
   review-pass reviewer|arch
                          a review agent records its pass for the current commit (what the PR gate reads); one command
   manager-claims list|next|review|answer|release|sweep|merge|ask
@@ -176,7 +189,8 @@ Maintain
   version                installed release, the one main pins, the newest, and what changed since
   releases [--all]       the releases that exist, with dates and a one-line note
   update [version]       a project on releases: install the newest (or that) release, check its checksum, refresh this
-                         machine's runner services and verify; then commit it in a PR. Safe to repeat. --release: start
+                         machine's runner services and verify; then commit it in a PR. Safe to repeat. --tasks plan|issues:
+                         on a first install, where tasks come from (written to factory.json; `factory issues setup` is yours to run). --release: start
                          taking releases in a project that has no pin yet. --archive FILE [--sums FILE]: install a release
                          archive from disk (no network; for a rehearsal or an offline machine)
   rollback               back to the release installed before (needs no network)
@@ -198,7 +212,7 @@ case "$cmd" in
       case "$a" in coding-agent|dev-manager|product-owner) want="$a" ;; -i|--interactive) asks=1; rest+=("$a") ;; *) rest+=("$a") ;; esac
     done
     if [ -z "$want" ] && [ "$asks" = 1 ] && [ -t 0 ] && [ -t 2 ]; then
-      pick="$(py factory_roles.py choose)" || exit 1
+      pick="$(fh "$hooks/factory_roles" choose)" || exit 1
       read -r want pickname <<< "$pick"
       exec env FACTORY_ROLE="$want" FACTORY_NAME="$pickname" "$root/factory-loop.sh" ${rest[@]+"${rest[@]}"}
     fi
@@ -209,20 +223,20 @@ case "$cmd" in
     if [ -n "${1:-}" ] && [ "$1" != loop ]; then who="$1"; shift; fi
     [ "${1:-}" = loop ] || { echo "usage: factory $role [name|N] loop [-i] [--once] [--dry-run]" >&2; exit 1; }
     shift
-    case "$who" in ''|*[!0-9]*) ;; *) who="$(py factory_roles.py nth "$role" "$who")" || exit 1 ;; esac
+    case "$who" in ''|*[!0-9]*) ;; *) who="$(fh "$hooks/factory_roles" nth "$role" "$who")" || exit 1 ;; esac
     exec env FACTORY_ROLE="$role" FACTORY_NAME="$who" "$root/factory-loop.sh" "$@" ;;
-  init)      py factory_init.py "$@" ;;
-  init-roles) py factory_roles.py init "$@" ;;
+  init)      fh "$hooks/factory_init" "$@" ;;
+  init-roles) fh "$hooks/factory_roles" init "$@" ;;
   agent)
     # --detach (#106): start the agent in a detached tmux session, which `factory follow <name>` finds from anywhere.
     detach=0; rest=()
     for a in "$@"; do if [ "$a" = --detach ]; then detach=1; else rest+=("$a"); fi; done
     set -- ${rest[@]+"${rest[@]}"}
-    if [ "$detach" = 1 ]; then exec python3 "$hooks/factory_follow.py" detach "$@"; fi
+    if [ "$detach" = 1 ]; then fh "$hooks/factory_follow" detach "$@"; exit $?; fi
     [ -n "${1:-}" ] || { echo "usage: factory agent <name|N> [claude arguments]: Claude in that agent's folder, for manual work. To run the queue, use factory loop -i (a fresh session per task)." >&2; exit 1; }
     who="$1"; shift
     bare=0; [ "$#" = 0 ] && bare=1
-    dir="$(py factory_claims.py worktree "$who")" || exit 1
+    dir="$(fh "$hooks/factory_claims" worktree "$who")" || exit 1
     name="$(basename "$dir")"; [ "$dir" = "$root" ] && name="$who"
     echo "$name: $dir"
     # One session for many tasks grows with each one (#56): the loop gives every task a fresh context instead.
@@ -237,72 +251,72 @@ case "$cmd" in
     fi
     # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
     # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
-    mcp="$(python3 "$dir/.claude/hooks/factory_mcp.py")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
-    # The `models` setting for the builder (factory_models.py): after the MCP flags, before your own arguments.
+    mcp="$(fh "$dir/.claude/hooks/factory_mcp")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
+    # The `models` setting for the builder (factory_models.ts): after the MCP flags, before your own arguments.
     mf=()
-    if [ -f "$dir/.claude/hooks/factory_models.py" ]; then
-      m="$(python3 "$dir/.claude/hooks/factory_models.py" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }
+    if [ -f "$dir/.claude/hooks/factory_models.ts" ]; then
+      m="$(fh "$dir/.claude/hooks/factory_models" flags builder 2>&1)" || { echo "$m" >&2; exit 1; }
       while IFS= read -r line; do [ -n "$line" ] && mf+=("$line"); done <<< "$m"
     fi
     set -- --mcp-config "$mcp" --strict-mcp-config --settings '{"disableClaudeAiConnectors": true}' ${mf[@]+"${mf[@]}"} "$@"
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
     # FACTORY_REMOTE_CONTROL=0|1 wins; else this machine's `remoteControl` setting (factory settings --local); else on.
-    rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(python3 "$dir/.claude/hooks/factory_machine.py" remote 2>/dev/null || echo 1)"
+    rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$dir/.claude/hooks/factory_machine" remote 2>/dev/null || echo 1)"
     if [ "$rc" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
     exec claude "$@" ;;
-  worktree)  py factory_claims.py worktree "${1:?usage: factory worktree <name|N>}" ;;
-  issues)    py factory_issues.py "${1:-list}" "${@:2}" ;;
-  machine)   py factory_machine.py "${1:-show}" "${@:2}" ;;
-  follow|say|remote)  py factory_follow.py "$cmd" "$@" ;;
-  agents)    py factory_agents.py "${1:-list}" "${@:2}" ;;
-  messages)  py factory_messages.py "${1:-ls}" "${@:2}" ;;
-  heartbeat) py factory_heartbeat.py "${1:-status}" "${@:2}" ;;
-  next)      py next_task.py --note "$@" ;;
-  autostart) py factory_autostart.py "$@" ;;
-  resume)    py factory_resume.py "$@" ;;
-  status)    py factory_status.py "$@" ;;
-  prs)       py factory_prs.py "$@" ;;
-  claims)    py factory_claims.py "${1:-list}" "${@:2}" ;;
-  release)   py factory_claims.py release --agent "${1:?usage: factory release <agent>}" ;;
-  clean)     py factory_claims.py clean ;;
-  reviews)   py factory_reviews.py "$@" ;;
-  rereview)  py factory_rereview.py "$@" ;;
-  review-pass) py factory_review_pass.py "$@" ;;
-  reset-run)   py factory_reset_run.py "$@" ;;
-  manager-claims) py factory_manager_claims.py "$@" ;;
-  lessons)   py factory_lessons.py "${1:-show}" "${@:2}" ;;
-  settings)  py factory_settings.py "$@" ;;
-  usage)     py factory_usage.py "$@" ;;
-  report)    py factory_report.py "$@" ;;
+  worktree)  fh "$hooks/factory_claims" worktree "${1:?usage: factory worktree <name|N>}" ;;
+  issues)    fh "$hooks/factory_issues" "${1:-list}" "${@:2}" ;;
+  machine)   fh "$hooks/factory_machine" "${1:-show}" "${@:2}" ;;
+  follow|say|remote)  fh "$hooks/factory_follow" "$cmd" "$@" ;;
+  agents)    fh "$hooks/factory_agents" "${1:-list}" "${@:2}" ;;
+  messages)  fh "$hooks/factory_messages" "${1:-ls}" "${@:2}" ;;
+  heartbeat) fh "$hooks/factory_heartbeat" "${1:-status}" "${@:2}" ;;
+  next)      fh "$hooks/next_task" --note "$@" ;;
+  autostart) fh "$hooks/factory_autostart" "$@" ;;
+  resume)    fh "$hooks/factory_resume" "$@" ;;
+  status)    fh "$hooks/factory_status" "$@" ;;
+  prs)       fh "$hooks/factory_prs" "$@" ;;
+  claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
+  release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;
+  clean)     fh "$hooks/factory_claims" clean ;;
+  reviews)   fh "$hooks/factory_reviews" "$@" ;;
+  rereview)  fh "$hooks/factory_rereview" "$@" ;;
+  review-pass) fh "$hooks/factory_review_pass" "$@" ;;
+  reset-run)   fh "$hooks/factory_reset_run" "$@" ;;
+  manager-claims) fh "$hooks/factory_manager_claims" "$@" ;;
+  lessons)   fh "$hooks/factory_lessons" "${1:-show}" "${@:2}" ;;
+  settings)  fh "$hooks/factory_settings" "$@" ;;
+  usage)     fh "$hooks/factory_usage" "$@" ;;
+  report)    fh "$hooks/factory_report" "$@" ;;
   env)       if [ -n "${1:-}" ]; then
-               case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; py factory_env.py --agent "$a"
-             else py factory_env.py; fi ;;
-  verify)    py factory_verify.py "$@" ;;
-  fix)       py factory_fix.py "$@" ;;
-  run-check) py factory_run_check.py "$@" ;;
-  check)     py style_checks.py ;;
-  guard)     py factory_guard.py --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
-  doctor)    py factory_doctor.py "$@" ;;
+               case "$1" in *[!0-9]*) a="$1";; *) a="agent-$1";; esac; fh "$hooks/factory_env" --agent "$a"
+             else fh "$hooks/factory_env"; fi ;;
+  verify)    fh "$hooks/factory_verify" "$@" ;;
+  fix)       fh "$hooks/factory_fix" "$@" ;;
+  run-check) fh "$hooks/factory_run_check" "$@" ;;
+  check)     fh "$hooks/style_checks" ;;
+  guard)     fh "$hooks/factory_guard" --base "origin/$(main)" --branch "$(git branch --show-current)" "$@" ;;
+  doctor)    fh "$hooks/factory_doctor" "$@" ;;
   wait)      case "${1:-}" in
-               ci|answer|slot|ready) py factory_wait.py "$@" ;;
+               ci|answer|slot|ready) fh "$hooks/factory_wait" "$@" ;;
                *) exec "$hooks/wait_for_merge.sh" "${1:?usage: factory wait <pr> [minutes] | ci|answer <pr> | slot | ready}" "${2:-30}" ;;
              esac ;;
-  precheck)  py factory_wait.py precheck ;;
-  watch)     py factory_watch.py "$@" ;;
-  prd)       py factory_prd.py "$@" ;;
-  artifacts) py factory_artifacts.py "$@" ;;
-  handover)  py factory_handover.py "$@" ;;
-  signoff)   py factory_signoff.py "$@" ;;
-  manage-tick) py factory_tick.py "$@" ;;
-  turbo)     py factory_turbo.py "$@" ;;
-  version|releases|rollback|migrate-to-release) py factory_release.py "$cmd" "$@" ;;
+  precheck)  fh "$hooks/factory_wait" precheck ;;
+  watch)     fh "$hooks/factory_watch" "$@" ;;
+  prd)       fh "$hooks/factory_prd" "$@" ;;
+  artifacts) fh "$hooks/factory_artifacts" "$@" ;;
+  handover)  fh "$hooks/factory_handover" "$@" ;;
+  signoff)   fh "$hooks/factory_signoff" "$@" ;;
+  manage-tick) fh "$hooks/factory_tick" "$@" ;;
+  turbo)     fh "$hooks/factory_turbo" "$@" ;;
+  version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).
-    py factory_release.py check-own-repo || exit 1
+    fh "$hooks/factory_release" check-own-repo || exit 1
     # A project with a release pin (.claude/factory/release.json), or one that asks (a version, --release), takes the
     # factory from numbered releases (#113). Any other project keeps the submodule update below until it migrates.
-    if [ -f .claude/factory/release.json ]; then py factory_release.py update "$@"; exit $?; fi
-    for a in "$@"; do case "$a" in --release|--archive|--archive=*|v[0-9]*|[0-9]*) py factory_release.py update "$@"; exit $? ;; esac; done
+    if [ -f .claude/factory/release.json ]; then fh "$hooks/factory_release" update "$@"; exit $?; fi
+    for a in "$@"; do case "$a" in --release|--archive|--archive=*|v[0-9]*|[0-9]*) fh "$hooks/factory_release" update "$@"; exit $? ;; esac; done
     # --layout new|old|auto goes to install.sh: a project that links through kit/ stays on it until it asks for `new`.
     layout=auto
     case "${1:-}" in
@@ -336,7 +350,7 @@ EOF
     chmod +x "$bin/factory"
     echo "Installed $bin/factory."
     case ":$PATH:" in *":$bin:"*) ;; *) echo "Add it to your PATH, for example in ~/.zshrc:  export PATH=\"\$HOME/.local/bin:\$PATH\"";; esac ;;
-  ci)        if [ "${1:-}" = log ]; then py factory_ci_log.py "${@:2}"; else exec bash "$root/.claude/ci/ci.sh" "$@"; fi ;;
+  ci)        if [ "${1:-}" = log ]; then fh "$hooks/factory_ci_log" "${@:2}"; else exec bash "$root/.claude/ci/ci.sh" "$@"; fi ;;
   help|-h|--help) usage ;;
   *) echo "factory: unknown command '$cmd'" >&2; usage >&2; exit 1 ;;
 esac

@@ -1,1 +1,0 @@
-../../../hooks/factory_heartbeat_service.py

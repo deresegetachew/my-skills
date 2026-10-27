@@ -98,7 +98,7 @@ as defaults.
 ### Between tasks
 
 - **Remote.** If the repository was moved or renamed on GitHub, the loop points `origin` at its new name and says so
-  in one line (`factory_remote.py`). The old address still reads, but API writes to it answer `307`.
+  in one line (`factory_remote.ts`). The old address still reads, but API writes to it answer `307`.
 - **Back to main.** The loop checks out `origin/main` (detached), cleans leftovers in agent worktrees (never in the
   project folder), updates the submodules and deletes local task branches whose task is done.
 - **Self-update.** If main brought a different `factory-loop.sh`, the loop restarts itself with the new one, as the
@@ -128,7 +128,7 @@ Every factory session (`factory loop`, `factory loop -i` and `factory agent`) st
 Slack, Figma ...) or the MCP servers in your user settings. Their tools would go into every turn, cost tokens and
 tempt an agent to use them. Your own `claude` sessions outside the factory keep them.
 
-The config is `.mcp.json` as the main branch has it on origin (`factory_mcp.py` fetches it into
+The config is `.mcp.json` as the main branch has it on origin (`factory_mcp.ts` fetches it into
 `.git/factory-mcp.json`), never the worktree's copy: Claude starts the servers in it without asking, so an
 uncommitted, untracked or branch-only `.mcp.json` must never count. `.mcp.json` is in `protected`, and the deny
 rules stop agents editing it, so a change to it needs a person to merge.
@@ -219,11 +219,11 @@ How the values reach Claude Code: `factory loop` and `factory agent` add `--mode
 dev manager's and the product owner's loops do the same for `manager` and `product-owner`).
 For a subagent they add `--agents <json>`, which redefines that agent for the session with your model and the agent
 file's own prompt, tools and description, so the shared file is never edited or shadowed.
-`python3 .claude/hooks/factory_models.py flags manager` prints the same arguments for the manager's session.
+`bun --no-env-file .claude/hooks/factory_models.ts flags manager` prints the same arguments for the manager's session.
 `factory doctor` prints the effective model per role and what set it. The environment variable
 `CLAUDE_CODE_SUBAGENT_MODEL` is not used: on its own the agent file's `model:` wins, and with `..._FORCE=1` it
 forces one model on every subagent. `escalateTo` is the model the next-task skill asks the reviewer again on after a must-fix or an item it marked unsure
-(`python3 .claude/hooks/factory_models.py escalate` prints it; `opus` when unset).
+(`bun --no-env-file .claude/hooks/factory_models.ts escalate` prints it; `opus` when unset).
 
 ### Waiting without tokens
 
@@ -238,7 +238,7 @@ minutes. The exit code says what happened:
 | 1 | `ci`: a check failed (the line names it). `answer`: no question is waiting |
 | 2 | Timed out. Do other work and wait again later |
 | 3 | `ci`: the PR is merged or closed. `precheck`: there is work |
-| 4 | `ci`: GitHub never started the jobs (billing); see `factory_ci.py` |
+| 4 | `ci`: GitHub never started the jobs (billing); see `factory_ci.ts` |
 
 `factory wait <pr>` is unchanged. Agents and the dev manager never poll inside the conversation (`next-task` and
 [DEV-MANAGER.md](../../DEV-MANAGER.md) say so). A manager pass starts with `factory precheck` and ends there when it
@@ -282,7 +282,7 @@ failed. Then the medians and totals for the merged ones. `--json` gives the same
 <br>
 ## Tasks
 
-An agent never chooses a task by reading the plan. `next_task.py` hands out the next job, in this order:
+An agent never chooses a task by reading the plan. `next_task.ts` hands out the next job, in this order:
 
 1. **Rework.** An open PR whose latest `<!-- factory-mustfix sha=... -->` comment names its current head commit
    becomes `pr-<n>`. The agent checks out that branch, fixes every must-fix, gets a new reviewer pass, pushes and
@@ -345,7 +345,7 @@ current; the task never has to. Only an agent that has registered gets an issue,
 | When | What happens | Who does it |
 |---|---|---|
 | It starts | Registers: status `idle` | the loop, or the SessionStart hook |
-| It takes a task | `working on #42` | `next_task.py` |
+| It takes a task | `working on #42` | `next_task.ts` |
 | It uses any tool | A ping, at most every `tasks.pingMinutes` (default 5), in the background | PostToolUse hook |
 | A turn ends | `idle` | Stop hook |
 | It exits | `down`, label `factory:agent-down` | the loop on exit, or the SessionEnd hook for your own sessions |

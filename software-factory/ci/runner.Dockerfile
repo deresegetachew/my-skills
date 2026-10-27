@@ -20,8 +20,15 @@ ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     FACTORY_CI_IMAGE=1
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl xz-utils python3 git \
+ && apt-get install -y --no-install-recommends ca-certificates curl xz-utils unzip git \
  && rm -rf /var/lib/apt/lists/*
+# Bun, which install-tools.sh runs its small scripts with (the factory has no Python, #252). One pinned release from
+# GitHub, the binary only, in /usr/local/bin.
+ARG BUN_VERSION=1.4.4
+RUN case "$(dpkg --print-architecture)" in arm64) bun_arch=aarch64 ;; *) bun_arch=x64 ;; esac \
+ && curl -fsSL -o /tmp/bun.zip "https://github.com/oven-sh/bun/releases/download/bun-v$BUN_VERSION/bun-linux-$bun_arch.zip" \
+ && unzip -q -j /tmp/bun.zip "bun-linux-$bun_arch/bun" -d /usr/local/bin \
+ && chmod 755 /usr/local/bin/bun && rm -f /tmp/bun.zip && bun --version
 COPY install-tools.sh /tmp/install-tools.sh
 RUN NODE_VERSION="$NODE_VERSION" PNPM_VERSION="$PNPM_VERSION" PLAYWRIGHT_VERSION="$PLAYWRIGHT_VERSION" \
     bash /tmp/install-tools.sh && rm -f /tmp/install-tools.sh

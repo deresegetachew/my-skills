@@ -147,7 +147,8 @@ flowchart TB
 ```
 
 Files that govern the agents themselves (the gate, the settings, the agent definitions) are on a protected list.
-A change to them is never merged by the agent that wrote it. The dev manager or you merges it.
+A change to them is never merged by the agent that wrote it. The dev manager or you merges it, except a change under
+`.claude/` (the settings, the permissions, the agents' definitions): only you merge that.
 
 <br>
 ## Where the machines and GitHub meet
@@ -201,7 +202,8 @@ that has nothing to do sleeps instead of asking a model.
 <br>
 ## Where things stand
 
-The factory is in alpha. The one release is `v0.1.0-alpha.1`, a pre-release, so you name it when you install
+The factory is in alpha. The releases so far are pre-releases (`v0.1.0-alpha.1` to `v0.1.0-alpha.3`), so you name
+one when you install. They are the old Python factory; the first Bun release is the next one
 ([Updating from releases](docs/wiki/updating.md#updating-from-releases)).
 
 Not built yet:
@@ -252,7 +254,9 @@ The long parts of this guide are wiki pages in [`docs/wiki/`](docs/wiki). Each p
 ## Quick start
 
 You need a PRD first. The factory only builds what the PRD and the plan say. On the machine that runs the agents you
-need git, bash, Python 3, Claude Code and the GitHub CLI (`gh`, signed in). Every script is parsed in the tests with the oldest Python installed among 3.9, 3.10 and 3.11 (`tests/test_parse_oldest_python.py`; macOS ships 3.9), so newer-only syntax is caught; the oldest version actually run in CI is not stated here.
+need git, bash, Bun, Claude Code and the GitHub CLI (`gh`, signed in). The factory is TypeScript run by Bun; install
+Bun first with `curl -fsSL https://bun.sh/install | bash` (CI uses Bun 1.4 or newer). `factory bootstrap` installs it
+for you on a sandboxed machine, and `factory doctor` checks it.
 
 ```mermaid
 flowchart LR
@@ -267,11 +271,11 @@ flowchart LR
 2. **Install it.** In the project's folder, in a terminal of your own (an agent session is refused), on a clean tree:
 
    ```bash
-   python3 <unpacked folder>/hooks/factory_release.py update v0.1.0-alpha.1
+   bun --no-env-file <unpacked folder>/hooks/factory_release.ts update <version>
    ```
 
-   The release client uses only the Python standard library, so it can install into a project that has no factory
-   yet. It checks the archive's checksum, writes the shared files (`.claude/hooks`, `.claude/ci`, the agents, the
+   `<version>` is the release you unpacked (a pre-release is only taken by name). The release client needs only Bun,
+   so it can install into a project that has no factory yet. It checks the archive's checksum, writes the shared files (`.claude/hooks`, `.claude/ci`, the agents, the
    skills, `settings.json`, `factory`, `factory-loop.sh`) as real files, writes the pin `.claude/factory/release.json`
    and, on a first install, adds the templates you fill in, never over a file that exists. It commits nothing.
    [What it does, step by step](docs/wiki/updating.md#updating-from-releases).
@@ -329,9 +333,9 @@ software-factory/
   factory-loop.sh               the loop behind `factory loop`
   install.sh                    puts the factory into a project (links, or copies)
   VERSION                       the release number (a `vX.Y.Z` tag must match it)
-  hooks/                        every hook and every `factory_*.py` command, next_task.py, pr-gate.py, check.py ...
+  hooks/                        every hook and every `factory_*.ts` command, next_task.ts, pr-gate.ts, check.ts ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
-  tests/                        the tests (run with tools/run_tests.py at the repo root)
+  tests/                        the tests (run with tools/run_tests.ts at the repo root)
   docs/                         reference pages (PRD.md, messages.md, manager-handover.md) and the wiki
     wiki/                       the long parts of this guide, one page per topic (links in the Wiki list above)
       updating.md               updating from releases
@@ -375,7 +379,7 @@ What stays the project's own in every case: `.claude/factory.json`, `.claude/fac
    `settings.json` and the docs need no change. `--layout auto`, the default, leaves a project that links through
    `kit/` alone, so a plain `factory update` never switches one by surprise.
 2. Check: `ls -l .claude/hooks` shows `.../software-factory/hooks/...`, and `factory doctor` is green.
-3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the dev manager or the owner
+3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the owner
    merges it. A CI workflow, a `protected` list or a document that names `.claude/hooks/...` needs no change for this
    step, because those paths did not move.
 4. On a machine that runs the CI runners, `factory update` reinstalls them when their copies are older; if you did not
@@ -395,7 +399,7 @@ release. A project that does not use the nestjs skills drops the submodule entir
 
 **What is left of the move** (#112):
 
-- The first release exists: `v0.1.0-alpha.1`, a pre-release (see [Updating from releases](docs/wiki/updating.md#updating-from-releases)). Cutting
+- The first releases exist: `v0.1.0-alpha.1` to `v0.1.0-alpha.3`, pre-releases (see [Updating from releases](docs/wiki/updating.md#updating-from-releases)). Cutting
   a release stays the owner's call.
 - Remanual, the first project, then relinks or moves to releases in its own reviewed pull request. That changes
   protected files in that repo, so it is the owner's merge.

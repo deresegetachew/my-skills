@@ -35,14 +35,14 @@ A change that breaks one of these is wrong even if the tests pass. The `safety-a
 ## How to work (software factory)
 
 - To build: `factory loop -i` (a fresh session per task that you can type into) or `factory loop` (unattended). The next task comes from
-  `python3 .claude/hooks/next_task.py`, never from reading the plan by eye. Tests come first from `test-writer`
+  `bun --no-env-file .claude/hooks/next_task.ts`, never from reading the plan by eye. Tests come first from `test-writer`
   and are read-only once implementation starts; `reviewer` passes each commit before its PR.
 - Questions go to the dev manager as PR comments starting with `<!-- factory-question -->`; keep working around
   them. Wait for a merge with `.claude/hooks/wait_for_merge.sh <n>`, never with a timed pause.
 - CI's Factory guard fails PRs that change existing tests or expected outputs, add `.skip`/`.only` or
   dependencies (until the dev manager labels them reviewed), reuse a decision number, or tick another task.
 - PRs merge themselves when the reviewer passed the latest commit, CI is green and no protected files
-  changed (`.claude/hooks/pr-gate.py`, paths in `.claude/factory.json`). The rest are reviewed and merged by
+  changed (`.claude/hooks/pr-gate.ts`, paths in `.claude/factory.json`). The rest are reviewed and merged by
   the dev manager (a Claude session watching the repo) or a person.
 - UI work is checked with `/design-check`; prompt and model work with `/eval`.
 - Small pull requests, one build-plan task each, with tests that check what a user or another module can

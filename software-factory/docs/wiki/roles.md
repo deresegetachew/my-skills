@@ -66,7 +66,7 @@ digest, and decides nothing. The `product-pass` skill holds the standing rules; 
 in `<roles.dir>/product-owner/` hold the product's voice, what the owner decides alone, and where the PRD and designs are.
 There is no custom UI: the owner reads progress and queues as plain text, below.
 
-**What gives the role work** (`factory_roles.py work product-owner`, one line each): an open issue or PR with
+**What gives the role work** (`factory_roles.ts work product-owner`, one line each): an open issue or PR with
 `roles.product-owner.workLabel`; an owner-queue ask tagged `for=product` that nobody has answered; a test plan that waits
 for the owner or for a run; sign-off items. `factory product-owner loop --once --dry-run` prints where the role reads, then
 that list, and the command it would run. It writes nothing.
@@ -126,7 +126,7 @@ the ask `stage-<name>` in the owner queue: a first word of yes, approved, ok or 
 id=stage-<name> -->`. Anything else is a question, the stage stays open and the product owner reads it. While the owner is away,
 the stages wait: no role proceeds on its own at a gate. Errors are `{code, message, fix}`.
 
-Tested end to end in `tests/test_flow.py` with fakes (a fake `claude` that runs the session's steps, a fake `gh`): init, the
+Tested end to end in `tests/flow.test.ts` with fakes (a fake `claude` that runs the session's steps, a fake `gh`): init, the
 three gates, the hand over, a pivot, and a role on a fresh clone. What it cannot test is the interview and the quality of the
 PRD; the owner runs the flow once with a real model. Gaps: the dev manager's plan check (buildability, order, missing "Done when") is not built; and the design stage always
 needs a file in `design/`, so a project with no UI adds a one-line `design/README.md` saying so.

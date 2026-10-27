@@ -1,1 +1,0 @@
-../../software-factory/hooks/check.py

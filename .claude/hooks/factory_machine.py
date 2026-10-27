@@ -1,1 +1,0 @@
-../../software-factory/hooks/factory_machine.py

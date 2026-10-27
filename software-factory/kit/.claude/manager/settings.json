@@ -114,8 +114,8 @@
       "Bash(factory lessons prune*)",
       "Bash(./factory lessons add*)",
       "Bash(./factory lessons prune*)",
-      "Bash(*factory_lessons.py add*)",
-      "Bash(*factory_lessons.py prune*)",
+      "Bash(*factory_lessons.ts add*)",
+      "Bash(*factory_lessons.ts prune*)",
       "Bash(factory settings pr*)",
       "Bash(./factory settings pr*)",
       "Bash(factory settings interactive*)",
@@ -140,7 +140,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/manager_gate.py",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/manager_gate.ts",
             "timeout": 60
           }
         ]
@@ -151,7 +151,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 10
           }
         ]
@@ -162,7 +162,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.py hook",
+            "command": "bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_agents.ts hook",
             "timeout": 20
           }
         ]

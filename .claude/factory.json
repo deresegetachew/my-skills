@@ -1,5 +1,5 @@
 {
-  "_about": "my-skills builds itself with its own factory (#112). Only what differs from the defaults is set here; `factory settings` shows the rest. Tests: tools/run_tests.py (also CI). protected: pull requests that touch these paths are merged by the dev manager or the owner. The kit's own files (agents, skills, hooks that guard, CI, the release) are listed one by one so ordinary factory changes can still merge themselves.",
+  "_about": "my-skills builds itself with its own factory (#112). Only what differs from the defaults is set here; `factory settings` shows the rest. Tests: bun tools/run_tests.ts (also CI). protected: pull requests that touch these paths are merged by the dev manager or the owner. The kit's own files (agents, skills, hooks that guard, CI, the release) are listed one by one so ordinary factory changes can still merge themselves.",
   "agents": ["menelik", "taytu", "haile"],
   "tasks": {
     "source": "issues",
@@ -7,8 +7,8 @@
   },
   "mainBranch": "main",
   "commands": {
-    "lint": "python3 tools/check_skills.py",
-    "test": "python3 tools/run_tests.py"
+    "lint": "bun tools/check_skills.ts",
+    "test": "bun tools/run_tests.ts"
   },
   "codePaths": [
     "software-factory",
@@ -24,9 +24,9 @@
     "^\\.github/",
     "^\\.mcp\\.json$",
     "^install\\.sh$",
-    "^tools/build_release\\.py$",
+    "^tools/build_release\\.ts$",
     "^software-factory/VERSION$",
-    "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_config|factory_release|check|factory_stop|factory_session)\\.py$",
+    "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_config|factory_release|check|factory_stop|factory_session)\\.ts$",
     "^software-factory/kit/\\.claude/(settings\\.json|manager/|agents/|skills/)",
     "^software-factory/kit/\\.github/",
     "^software-factory/ci/(ci\\.sh|entrypoint\\.sh|loop\\.sh)$",
@@ -42,14 +42,14 @@
   "reviews": {
     "safety-auditor": {
       "paths": [
-        "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_release)\\.py$",
+        "^software-factory/hooks/(pr-gate|factory_guard|manager_gate|factory_release)\\.ts$",
         "^software-factory/kit/\\.claude/settings\\.json$",
-        "^tools/build_release\\.py$"
+        "^tools/build_release\\.ts$"
       ]
     },
     "security-reviewer": {
       "paths": [
-        "^software-factory/hooks/(factory_netguard|factory_sandbox|factory_bootstrap[^/]*|factory_release)\\.py$",
+        "^software-factory/hooks/(factory_netguard|factory_sandbox|factory_bootstrap[^/]*|factory_release)\\.ts$",
         "^software-factory/ci/",
         "^\\.github/workflows/"
       ]

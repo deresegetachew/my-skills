@@ -109,10 +109,10 @@ The factory is delivered as numbered GitHub releases. Only the owner publishes o
 
 1. Change `software-factory/VERSION` (for example `1.1.0`) in a pull request and merge it to `main`.
 2. Tag that commit on `main` and push the tag: `git tag v1.1.0 && git push origin v1.1.0`.
-3. The `Release` workflow (`.github/workflows/release.yml`) runs. It refuses a tag that is not on `main` or that differs from `VERSION`, runs `check_skills.py` and the tests, builds the archive, checks the checksum and publishes the release with notes. A tag with a `-` (for example `v1.1.0-rc.1`) is published as a pre-release.
+3. The `Release` workflow (`.github/workflows/release.yml`) runs. It refuses a tag that is not on `main` or that differs from `VERSION`, runs `check_skills.ts` and the tests, builds the archive, checks the checksum and publishes the release with notes. A tag with a `-` (for example `v1.1.0-rc.1`) is published as a pre-release.
 4. A refused or failed run publishes nothing. Delete the tag (`git push origin :refs/tags/v1.1.0`), fix the cause and tag again.
 
-To try the build locally (needs a clean checkout, works offline): `python3 tools/build_release.py --out dist`. The same commit always gives the same bytes.
+To try the build locally (needs a clean checkout, works offline): `bun tools/build_release.ts --out dist`. The same commit always gives the same bytes.
 
 ### What a release holds
 

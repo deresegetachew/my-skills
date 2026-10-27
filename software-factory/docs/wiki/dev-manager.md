@@ -33,7 +33,7 @@ It talks to the agents through markers in PR comments:
 
 Two or more managers (any machine) can work one repository without reviewing, answering, merging or asking the same
 thing twice, and a manager that dies mid-review does not block a PR. The protocol is a few comments on GitHub, so it
-needs no server. `factory manager-claims` (`hooks/factory_manager_claims.py`) implements it; every command needs the
+needs no server. `factory manager-claims` (`hooks/factory_manager_claims.ts`) implements it; every command needs the
 manager's name, `--manager dm-1`.
 
 | Marker | Written by | Meaning |
@@ -88,7 +88,7 @@ factory watch [--json]                     the seven checks on their own: one li
 ```
 
 **The orchestrator has no model (#97).** `factory dev-manager loop` is a loop script. Each cycle it runs the seven checks
-(`factory_watch.py`; `factory precheck` is its checks 1, 2 and the quiet agents and issues), reads labels and comments as
+(`factory_watch.ts`; `factory precheck` is its checks 1, 2 and the quiet agents and issues), reads labels and comments as
 the only truth, and starts a fresh one-item sub-manager for each item that needs a manager: `claude -p "/manage-pass pr-417"`
 on the manager settings profile, with the item's fact sheet and its thread note in the prompt. A sub-manager does its one item
 and exits. The orchestrator never starts a builder, and it never merges or reviews itself.
@@ -109,7 +109,7 @@ that is not renewed expires after `manager.claimMinutes` (20). Two orchestrators
 same item. A new head is a new key. The cap is `manager.maxSubManagers` (2) sub-managers at once, counting the ones this
 orchestrator started and the items other managers hold; the rest wait for the next cycle. `-i` runs one at a time.
 `manager.subManagerMinutes` (30) stops a sub-manager that runs too long. The marker formats are the ones #99 defines;
-`factory_lease.py` is the small module behind them, to be replaced by #99's.
+`factory_lease.ts` is the small module behind them, to be replaced by #99's.
 
 **Thread notes.** The memory of a sub-manager is a comment on the task issue (on the PR when there is no issue):
 `<!-- factory-manager-note thread=issue-20 status=open -->`. The orchestrator opens it when an issue gets
@@ -135,7 +135,7 @@ would prompt.
 **Closing a pull request.** A superseded or obsolete pull request that a factory agent opened (a `task/...` branch in this
 repository, or the manager's own branch) is closed by the dev manager: a comment with the reason and the commit that
 supersedes it, then `gh api -X PATCH repos/{owner}/{repo}/pulls/<n> -f state=closed`. One opened by the owner or anyone
-else, or from a fork, is an owner-queue ask. `manager_gate.py` refuses the close of any other pull request and says to write
+else, or from a fork, is an owner-queue ask. `manager_gate.ts` refuses the close of any other pull request and says to write
 the ask; it never allows a merge by this path, and `gh pr close` stays unavailable.
 
 **Telling the owner.** The channel is GitHub: one comment on the issue "Dev manager: needs the owner", mentioning
@@ -163,13 +163,13 @@ Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<n
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
 `claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
 read-only git, `Read`/`Grep`/`Glob` and subagents, and denies pushing to main, force-push, editing `.claude/**`, `vendor/**`,
-`CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.py` refuses, and says
+`CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.ts` refuses, and says
 to write an owner-queue ask instead: a merge unless the PR's latest approval marker is `factory-approved sha=<the head being
 merged>`, no must-fix came after it, the merge is pinned to that head and CI is judged green (newest non-skipped run per job
-name, `factory_ci_judge.py`); a merge of a PR the manager opened (a `manager/` branch, or a body with
+name, `factory_ci_judge.ts`); a merge of a PR the manager opened (a `manager/` branch, or a body with
 `<!-- factory-role role=dev-manager ... -->`: its own PRs wait for the owner); deleting refs, force-pushing and pushing to
 main; `gh api` writes to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks and deploy
-keys; and shell commands that read secrets files. Like `pr-gate.py` it is a guard rail, not a lock: keep branch protection
+keys; and shell commands that read secrets files. Like `pr-gate.ts` it is a guard rail, not a lock: keep branch protection
 and required CI on GitHub.
 
 The full playbook is [DEV-MANAGER.md](../../DEV-MANAGER.md). To start it, run `factory dev-manager loop` (or `-i`) on a machine with the factory installed; the handover from a
@@ -201,7 +201,7 @@ Agents
 failure, and a skipped run decides nothing. The PR gets one state: `red` (a job failed, was cancelled or timed out),
 else `running`, else `queued`, else `green`. `none` means GitHub shows no runs yet; `unknown` means they could not be
 read (the other PRs still show). `notGreen` names the jobs that are not green. `factory status` uses the same rule
-and the same reading of the markers (both come from `factory_prs.py`).
+and the same reading of the markers (both come from `factory_prs.ts`).
 
 **Markers per commit.** `markers` holds the newest `factory-approved`, `factory-mustfix` or `pr-watch` for each
 commit, oldest first, and `namesHead` says whether it names the current head. Only the head's marker decides:

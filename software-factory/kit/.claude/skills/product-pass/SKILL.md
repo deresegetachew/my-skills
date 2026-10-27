@@ -50,7 +50,7 @@ no story used twice and no task naming a missing story.
 
 ## The pass order
 
-1. **The list.** `python3 .claude/hooks/factory_roles.py work product-owner` prints what waits for you, one line each (or
+1. **The list.** `bun --no-env-file .claude/hooks/factory_roles.ts work product-owner` prints what waits for you, one line each (or
    `nothing to do`): issues and pull requests with the product label, owner-queue asks tagged `for=product`, test plans that
    wait for the owner or for a run, sign-off items, and **product questions** addressed `to=po` by builders and the dev
    manager. Work through exactly those lines.

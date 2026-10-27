@@ -1,1 +1,0 @@
-../../../hooks/factory_manager_claims.py

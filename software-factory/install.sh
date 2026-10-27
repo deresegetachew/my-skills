@@ -23,6 +23,12 @@
 #             Switch a project with --layout new, in one reviewed commit.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
+# Run a factory script (<path>.ts) with Bun. --no-env-file: Bun must not load the project's .env into the factory.
+fh() {
+  local s="$1"; shift
+  command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
+  bun --no-env-file "$s.ts" "$@"
+}
 src="$here/kit"
 [ -d "${1:?Usage: install.sh <project dir> [--link]}" ] || { echo "No such folder: $1" >&2; exit 1; }
 dst="$(cd "$1" && pwd)"
@@ -47,13 +53,13 @@ fi
 # Shared: used unchanged by every project. Everything else in kit/ is a template the project fills in.
 is_engine() {
   case "$1" in
-    ./factory|./factory-loop.sh|./.claude/hooks/*.py|./.claude/hooks/*.sh|./.claude/ci/*) return 0;;
+    ./factory|./factory-loop.sh|./.claude/hooks/*.ts|./.claude/hooks/*.sh|./.claude/ci/*) return 0;;
     ./.claude/agents/*.md|./.claude/skills/*/*.md|./.claude/settings.json|./.claude/manager/settings.json) return 0;;
     *) return 1;;
   esac
 }
 
-# Is $1 (a path in kit/, like ./.claude/hooks/x.py) code that moved out of kit/ (#112)? Then its real file is at $2.
+# Is $1 (a path in kit/, like ./.claude/hooks/x.ts) code that moved out of kit/ (#112)? Then its real file is at $2.
 moved_to() {
   case "$1" in
     ./.claude/hooks/*) [ -f "$here/hooks/${1#./.claude/hooks/}" ] && echo "$here/hooks/${1#./.claude/hooks/}" ;;
@@ -64,7 +70,12 @@ moved_to() {
 }
 
 # Relative path from the folder holding $1 (inside the project) to the kit file $2.
-rel() { python3 -c 'import os,sys;print(os.path.relpath(sys.argv[2], os.path.dirname(sys.argv[1])))' "$1" "$2"; }
+# Both are absolute, normalized paths (from `cd ... && pwd`), so this is plain string work, like os.path.relpath.
+rel() {
+  local common="${1%/*}" up=""
+  while [ -n "$common" ] && [ "${2#"$common"/}" = "$2" ]; do common="${common%/*}"; up="../$up"; done
+  printf '%s\n' "$up${2#"$common"/}"
+}
 
 # Layout of the links (see --layout above). Auto: a project that links through kit/ already stays on it.
 if [ "$link" = 1 ] && [ "$layout" = auto ]; then
@@ -75,7 +86,7 @@ if [ "$link" = 1 ] && [ "$layout" = auto ]; then
 fi
 [ "$link" = 1 ] || layout=new  # a copy always takes the real files
 
-# The files to install, as paths inside kit/ (./.claude/hooks/x.py, ./factory ...), one per line. In the new layout
+# The files to install, as paths inside kit/ (./.claude/hooks/x.ts, ./factory ...), one per line. In the new layout
 # the forwarders in kit/ are replaced by what is really in hooks/, ci/ and the two entry points, so a file added
 # there needs no forwarder to reach a project.
 list_files() {
@@ -98,7 +109,7 @@ list_files() {
 # installed: its CI workflow template stands in for the pnpm one, and `commands.*` are filled in below.
 stack=node
 if [ "$setup" = 1 ]; then
-  stack="$(python3 "$here/hooks/factory_stack.py" detect "$dst" | python3 -c 'import json,sys;print(json.load(sys.stdin)["stack"])')"
+  stack="$(fh "$here/hooks/factory_stack" detect "$dst" | sed -n 's/^  "stack": "\([a-z]*\)",*$/\1/p')"
 fi
 PY_WORKFLOW=./.github/workflows/ci-python.yml.template
 list_files | while read -r f; do
@@ -136,18 +147,18 @@ list_files | while read -r f; do
   fi
 done
 # Never change files in the kit itself: with --link it is the project's submodule.
-[ "$link" = 1 ] || chmod +x "$dst"/.claude/hooks/*.py "$dst"/.claude/hooks/*.sh "$dst"/.claude/ci/*.sh "$dst"/factory-loop.sh "$dst"/factory 2>/dev/null || true
+[ "$link" = 1 ] || chmod +x "$dst"/.claude/hooks/*.ts "$dst"/.claude/hooks/*.sh "$dst"/.claude/ci/*.sh "$dst"/factory-loop.sh "$dst"/factory 2>/dev/null || true
 # The role folders (#102): README.md and reads.md per role, from the project's own documents. Never overwritten; a
 # project that was set up before roles existed gets them with `factory init-roles`.
-if [ "$setup" = 1 ] && [ -f "$dst/.claude/hooks/factory_roles.py" ]; then
-  ( cd "$dst" && CLAUDE_PROJECT_DIR="$dst" python3 .claude/hooks/factory_roles.py init | sed 's/^/roles    /' ) || true
+if [ "$setup" = 1 ] && [ -f "$dst/.claude/hooks/factory_roles.ts" ]; then
+  ( cd "$dst" && CLAUDE_PROJECT_DIR="$dst" fh .claude/hooks/factory_roles init | sed 's/^/roles    /' ) || true
 fi
 grep -qxF 'tmp/' "$dst/.gitignore" 2>/dev/null || echo 'tmp/' >> "$dst/.gitignore"
 grep -qxF '__pycache__/' "$dst/.gitignore" 2>/dev/null || echo '__pycache__/' >> "$dst/.gitignore"
 if [ "$setup" = 1 ]; then
   echo
-  python3 "$here/hooks/factory_stack.py" apply "$dst" >/dev/null  # Python: the commands.* to match
-  python3 "$here/hooks/factory_stack.py" lines "$dst"
+  fh "$here/hooks/factory_stack" apply "$dst" >/dev/null  # a Python project: the commands.* to match
+  fh "$here/hooks/factory_stack" lines "$dst"
   echo "Next: fill in .claude/factory.json, write CLAUDE.md from CLAUDE.factory.md, write docs/build-plan.md."
   echo "Then run ./factory help (and ./factory install-shim once, to type just: factory ...)."
 fi

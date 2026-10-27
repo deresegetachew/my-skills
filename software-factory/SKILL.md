@@ -26,8 +26,8 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    what the PRD and plan say.
 2. **Install the kit.** Prefer a numbered release: the project runs one pinned version of the factory as real files,
    committed. Download the release archive and `SHA256SUMS`, check them, unpack, and run
-   `python3 <unpacked folder>/hooks/factory_release.py update <version>` in the project (the only release so far is the
-   pre-release `v0.1.0-alpha.1`, which has to be named). README.md, "Quick start", has the steps. A project that is
+   `bun --no-env-file <unpacked folder>/hooks/factory_release.ts update <version>` in the project (install Bun first:
+   `curl -fsSL https://bun.sh/install | bash`; the releases so far are pre-releases, which have to be named). README.md, "Quick start", has the steps. A project that is
    already on the submodule keeps working and moves later (docs/wiki/submodule.md, "Moving a project from the submodule to
    releases"). To install with the submodule instead:
    `git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills`, then
@@ -43,7 +43,7 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
 3. **Fill in `.claude/factory.json`** (`factory settings` is the guided way: a menu with help for every setting;
    `factory settings validate` checks the result): the doc paths, the install, typecheck, lint, test and build commands,
-   the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges":
+   the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges" (a change under `.claude/`: only the owner):
    the rules files, CI, lockfiles, migrations, and anything that implements a critical rule (safety logic,
    money, approval gates). Set `testPaths` and `goldenPaths` to where tests and expected outputs live, and
    `smoke` to a quick command that proves main works.

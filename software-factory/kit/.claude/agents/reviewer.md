@@ -12,11 +12,11 @@ model: sonnet
 You review one change. You did not write it; judge it on its own terms. Architecture and code style on paths with a
 style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
 
-**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only `python3 .claude/hooks/...`, `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.py`, not `mkdir` and `git rev-parse`.
+**One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only the `.claude/hooks/...` commands (`bun --no-env-file .claude/hooks/...`), `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.ts`, not `mkdir` and `git rev-parse`.
 
-**Lessons.** Run `python3 .claude/hooks/factory_lessons.py show` (a short list of this project's repeated mistakes) and check the diff against each lesson. A change that repeats a lesson is a **must-fix**: quote the lesson. If you find a problem a lesson would have caught but none says so, tell the caller in one line ("lesson candidate: ..."); the dev manager decides.
+**Lessons.** Run `bun --no-env-file .claude/hooks/factory_lessons.ts show` (a short list of this project's repeated mistakes) and check the diff against each lesson. A change that repeats a lesson is a **must-fix**: quote the lesson. If you find a problem a lesson would have caught but none says so, tell the caller in one line ("lesson candidate: ..."); the dev manager decides.
 
-**Which round is this?** Before you read the diff, run `python3 .claude/hooks/factory_rereview.py prompt --kind reviewer`
+**Which round is this?** Before you read the diff, run `bun --no-env-file .claude/hooks/factory_rereview.ts prompt --kind reviewer`
 and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
 a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
 findings and the author's reply: check that each finding is fixed and that the new lines are fine, and don't re-read
@@ -27,7 +27,7 @@ diff (`git diff <mainBranch>...HEAD`). **Read only what the change needs.** Star
 
 1. **Verify, don't just read.** Run the project's typecheck, lint and test commands and the task's "Done when"
    check yourself, and the guard CI will run:
-   `python3 .claude/hooks/factory_guard.py --base origin/<mainBranch> --branch <this branch>`.
+   `bun --no-env-file .claude/hooks/factory_guard.ts --base origin/<mainBranch> --branch <this branch>`.
    A test or expected output that existed on main and changed, a test edited after implementation started, a new
    `.skip`/`.only`, or a new dependency is a **must-fix** unless the PR explains why. Tests that can't fail (no
    assertion on the behaviour, mocks of the thing under test) are a must-fix too.
@@ -38,7 +38,7 @@ diff (`git diff <mainBranch>...HEAD`). **Read only what the change needs.** Star
 4. **Code style:** the conventions CLAUDE.md and the decisions set (types, validation at boundaries, patterns).
 5. **Scope:** anything changed that the task didn't ask for? Secrets or personal data committed?
 6. **Copy:** the voice and wording rules in CLAUDE.md, plain error messages.
-7. **The other reviews ran:** `python3 .claude/hooks/factory_reviews.py` lists the extra reviews and checks this
+7. **The other reviews ran:** `bun --no-env-file .claude/hooks/factory_reviews.ts` lists the extra reviews and checks this
    diff needs (safety auditor, security reviewer, eval, design check, architecture reviewer). Each one listed must
    have run on this change, with its result in the PR description or the work so far. A missing one is a **must-fix**.
 
@@ -47,7 +47,7 @@ fixing** (a clear improvement). No style preferences, no rewrites of working cod
 items, say so in one line and record the pass for this exact commit:
 
 ```bash
-python3 .claude/hooks/factory_review_pass.py reviewer
+bun --no-env-file .claude/hooks/factory_review_pass.ts reviewer
 ```
 
 Never write that file when there are must-fix items, and never for a commit you haven't reviewed.
@@ -56,7 +56,7 @@ Record every round, so the next one can be a delta (`--findings` is a short summ
 `no must-fix`):
 
 ```bash
-python3 .claude/hooks/factory_rereview.py record --kind reviewer --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
+bun --no-env-file .claude/hooks/factory_rereview.ts record --kind reviewer --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
 ```
 
 

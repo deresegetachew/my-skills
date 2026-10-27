@@ -10,7 +10,7 @@
 #   factory ci logs [i] [-f]       a runner's log (instance 1 unless you name one)
 #   factory ci stale | check       are the installed runner copies older than this checkout / fit to start (factory update runs both)
 #
-# Every name comes from the project (ci_names.py): the runner is `<repo>-ci`, its jobs ask for the label
+# Every name comes from the project (ci_names.ts): the runner is `<repo>-ci`, its jobs ask for the label
 # `<repo>-local`, unless "ci" in .claude/factory.json says otherwise. Several machines can run runners with the
 # same label; GitHub gives each job to one of them.
 set -euo pipefail
@@ -24,9 +24,15 @@ export FACTORY_CI_PLATFORM="$platform"
 if [ "$platform" = linux ]; then machine="this machine"; manager=systemd; else machine="this Mac"; manager=launchd; fi
 
 kit="$(cd "$(dirname "$0")" && pwd)"
+# Run a factory script (<path>.ts) with Bun. --no-env-file: Bun must not load the project's .env into the factory.
+fh() {
+  local s="$1"; shift
+  command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
+  bun --no-env-file "$s.ts" "$@"
+}
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$root"
-eval "$(python3 "$kit/ci_names.py")"
+eval "$(fh "$kit/ci_names")"
 domain="gui/$(id -u)"
 exe="$CI_INSTALLED/$CI_NAME"
 # Which machine a runner is on, in its name (<name>-<host>-<epoch>), so `stop` removes only this machine's.
@@ -62,29 +68,26 @@ use_instance() {
 # The versions runner.Dockerfile bakes in, from this checkout: Node from .nvmrc, pnpm from package.json's
 # packageManager, Playwright from node_modules or the lockfile. Prints three lines (each may be empty).
 tool_versions() {
-  python3 - <<'PY'
-import json, os, re
-node = ""
-if os.path.exists(".nvmrc"):
-    v = open(".nvmrc").read().strip()
-    node = v if re.fullmatch(r"v?\d+(\.\d+){0,2}", v) else ""
-pnpm = ""
-try:
-    m = re.fullmatch(r"pnpm@(\d+\.\d+\.\d+)(\+.*)?", json.load(open("package.json")).get("packageManager", ""))
-    pnpm = m.group(1) if m else ""
-except (OSError, ValueError):
-    pass
-pw = ""
-try:
-    pw = json.load(open("node_modules/@playwright/test/package.json"))["version"]
-except (OSError, ValueError, KeyError):
-    try:
-        m = re.search(r"@playwright/test@(\d+\.\d+\.\d+)", open("pnpm-lock.yaml").read())
-        pw = m.group(1) if m else ""
-    except OSError:
-        pass
-print(node); print(pnpm); print(pw)
-PY
+  bun --no-env-file -e "$(cat <<'TS'
+import { readFileSync } from "node:fs";
+const read = (f: string): string | null => { try { return readFileSync(f, "utf8"); } catch { return null; } };
+const json = (f: string): unknown => { const t = read(f); if (t === null) return null; try { return JSON.parse(t); } catch { return null; } };
+const field = (v: unknown, k: string): unknown => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>)[k] : undefined);
+let node = "";
+const nvmrc = read(".nvmrc");
+if (nvmrc !== null) { const v = nvmrc.trim(); node = /^v?\d+(\.\d+){0,2}$/.test(v) ? v : ""; }
+const pm = field(json("package.json"), "packageManager");
+const m = typeof pm === "string" ? /^pnpm@(\d+\.\d+\.\d+)(\+.*)?$/.exec(pm) : null;
+const pnpm = m ? m[1] : "";
+let pw = field(json("node_modules/@playwright/test/package.json"), "version");
+if (typeof pw !== "string") {
+  const lock = read("pnpm-lock.yaml");
+  const l = lock === null ? null : /@playwright\/test@(\d+\.\d+\.\d+)/.exec(lock);
+  pw = l ? l[1] : "";
+}
+console.log(node); console.log(pnpm); console.log(pw);
+TS
+)"
 }
 
 # The image is built from the checkout at install time. When main has moved Node, pnpm or Playwright since, say so.
@@ -860,13 +863,15 @@ cmd_status() {
   # The light lane as GitHub will route it: the label in CI_RUNS_ON_LIGHT, if it is set, whatever ci.light says.
   local light_var light_label=""
   if light_var="$(gh api "repos/$CI_REPO/actions/variables/CI_RUNS_ON_LIGHT" --jq .value 2>/dev/null)"; then
-    light_label="$(python3 -c 'import json,sys
-v = json.loads(sys.argv[1]); v = [v] if isinstance(v, str) else v
-print(next((x for x in v if x != "self-hosted"), ""))' "$light_var" 2>/dev/null || true)"
+    light_label="$(bun --no-env-file -e 'let v: unknown = JSON.parse(process.argv.at(-1) ?? "");
+v = typeof v === "string" ? [v] : v;
+if (!Array.isArray(v)) throw new Error("not a list");
+const x: unknown = v.find((x: unknown) => x !== "self-hosted");
+console.log(x === undefined ? "" : String(x));' "$light_var" 2>/dev/null || true)"
   elif [ "$CI_LIGHT" = 1 ]; then
     light_label="$CI_LIGHT_LABEL"
   fi
-  python3 "$kit/ci_status.py" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
+  fh "$kit/ci_status" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
     ${light_label:+--light-label "$light_label"} ${light_var:+--light-variable-set}
   if [ -n "$local_mode$installed" ] && [ -f "$CI_STATE/runner.log" ]; then
     echo
