@@ -93,9 +93,9 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
 1. Plan mode: tick your own task (`- [x]`) on the branch, and no other. Issues mode: see `issues-mode.md`.
 2. Commit in small logical commits, push, and open the PR with `gh pr create`: title `<id>: <task name>`, body with
    what changed, how it was verified (commands and results), what the reviewers raised, and any decision recorded. Write the body to `tmp/pr.md` (git-ignored, and the allow list covers it), then `--body-file tmp/pr.md`.
-   **If `gh pr create` fails** (GraphQL blocked, as in the dev manager's cloud workspace), open it with REST:
-   `gh api repos/{owner}/{repo}/pulls -f title=... -f head=<branch> -f base=<main> -F body=@tmp/pr.md`, and comment with
-   `gh api repos/{owner}/{repo}/issues/<n>/comments -F body=@file` where `gh pr comment` fails.
+   **If `gh pr create` fails** (for example GraphQL is blocked, as in a claude.ai cloud session), don't open it another
+   way: `gh api` is denied, because it would get around the PR gate (#182). Stop and report what failed, with the error
+   and the pushed branch; keep your task claim, so the task waits for you. Builders need a machine where `gh pr` works.
    Then drop your task claim: `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --agent "$FACTORY_AGENT" --tasks-only`
    (when `FACTORY_AGENT` is set). **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
    `bun --no-env-file --config=/dev/null .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
