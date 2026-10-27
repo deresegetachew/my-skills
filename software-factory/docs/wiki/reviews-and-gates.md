@@ -85,7 +85,7 @@ project keeps one short **lessons file** (`lessons` in `factory.json`, by defaul
   and what an existing lesson already says is left out. It prints each candidate with its PRs and a ready
   `factory lessons add "..."` command, and changes nothing.
 - **The dev manager approves.** Agents cannot edit `.claude/`, and `add` and `prune --apply` refuse inside an agent
-  session (and are denied in `settings.json`); the dev manager runs them and merges the change in a pull request. An agent
+  session (and are denied in the agents' settings); the dev manager runs them and merges the change in a pull request. An agent
   that learns something writes "lesson candidate: ..." in its PR description.
 - **Pruned when enforced.** A lesson a hook, lint rule or check enforces now is dead weight. Tag it
   `[enforced: path/to/check]`; `factory lessons prune` lists the tagged lessons whose enforcement exists, `--apply` removes
@@ -114,7 +114,7 @@ It also blocks:
   to a `labels` path (or with a `labels` field) or to a `reviews` path, and GraphQL mutations. Other writes have their
   fields (`-f`, `-F body=@<file>`) and `--input` file read: the dev manager's markers and messages are checked as for
   `gh pr comment`, and `POST repos/<o>/<r>/pulls` gets the `gh pr create` checks (`-F draft=true` is a draft). A plain
-  GET passes the gate (`settings.json` still denies `gh api` to agents);
+  GET passes the gate (the agents' settings still deny `gh api`);
 - a force push: `git push` with `-f`, `--force`, `--force-with-lease`, `--force-if-includes`, `--mirror` or a `+`
   refspec, wherever git's global options (`-C`, `-c`) sit, also inside `bash -c` or `xargs`; and deleting a remote
   branch (`git push <remote> :<branch>`).
@@ -143,7 +143,7 @@ In issues mode `factory doctor` reports an empty list as a fix (#260).
 **Protected by default.** The default `protected` list also covers `factory` and `factory-loop.sh` at the project root:
 the loop runs main's copy of the script, so a merged change to it runs in every loop.
 
-`settings.json` backs it up with deny rules: no force push, no push to main, no `--no-verify`, no deleting remote
+The agents' settings back it up with deny rules: no force push, no push to main, no `--no-verify`, no deleting remote
 branches, no `gh api` and no `gh alias` from the agent, no edits to `.claude/`, `vendor/`, `CLAUDE.md` or the PRD,
 no reading `.env` files.
 
