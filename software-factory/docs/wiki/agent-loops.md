@@ -454,6 +454,11 @@ factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent:
   (`claude.ai/code/session_...`, it changes when the session restarts), so you can open the same session from the Claude app on a
   phone. A cloud agent has no machine: `follow` prints its link instead of attaching. A remote that cannot be reached is named,
   with the reason, and the others still list.
+- **Builders don't run in a claude.ai cloud session** (#182). A builder opens its pull request with `gh pr create`, which
+  needs GitHub's GraphQL API, and that is blocked there. The agents' settings deny `gh api`, because a REST call would get
+  around the PR gate (a merge or a review marker it never sees), so there is no fallback: the builder stops and reports,
+  keeping its claim. Run builders on a factory machine; a cloud session can still be followed, talked to and used for
+  work that opens no pull request.
 - **Detaching is safe**: `Ctrl-b d` detaches, and closing the terminal or losing the connection only detaches, so the agent
   keeps working. `Ctrl+C` is not detach: it interrupts Claude, and quitting Claude ends the session and drops the agent's
   claims (it then shows as silent in `factory agents`). Everyone attached sees one screen, shrunk to the smallest terminal: give

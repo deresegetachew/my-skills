@@ -84,7 +84,7 @@ export function gate(d: string, env: Env, command: string): [number, string] {
 
 // --- the manager profile, as Claude Code matches it (#202) -----------------------------------------------------------
 
-interface Permissions {
+export interface Permissions {
   allow: string[];
   deny: string[];
 }
@@ -101,7 +101,11 @@ function ruleMatches(rule: string, kind: string, subject: string): boolean {
 /** Whether Claude Code would run `command` without asking: no `$(...)` or backticks, and every simple command in it
  * matches an allow rule and no deny rule. */
 export function allowedByProfile(command: string): boolean {
-  const profile = profilePermissions();
+  return allowedBy(profilePermissions(), command);
+}
+
+/** The same check against any settings file's permissions (the agents' settings, #182). */
+export function allowedBy(profile: Permissions, command: string): boolean {
   if (command.includes("$(") || command.includes("`")) return false; // "can't be checked before it runs"
   for (const tokens of simpleCommands(command)) {
     const text = tokens.map((t) => (/\s/.test(t) ? shQuote(t) : t)).join(" ");
