@@ -139,7 +139,7 @@ Every hook line starts Bun with `env -u BUN_OPTIONS`, so that variable can't add
 hook line without either as a fix. The agents' settings also deny `gh pr merge … --admin` outright.
 
 The hook scripts still run from the agent's own folder, so an agent that puts back an older gate from git history runs
-that one. Running the hooks from main's code instead is an open security issue; the lock that does not depend on the
+that one. Running the hooks from main's code instead is #274; the lock that does not depend on the
 agent's folder is on GitHub (see Branch protection below).
 
 **Trusted reviewers.** With `"trustedReviewers": ["<login>"]` in `factory.json`, only approvals from those GitHub
