@@ -256,7 +256,8 @@ until he agrees them."
   agents. Everything is opened under one account, so branch protection requires a pull request with 0 approvals, the CI
   checks, no force pushes and no bypass. *Built (documented).* (wiki/reviews-and-gates.md "Branch protection")
   > Open question: #261 (from the #43 audit) says the real merge boundary needs the agents on an account without admin
-  > rights and branch protection that requires the checks and a review. Setting that up on GitHub is the owner's.
+  > rights and branch protection that requires the checks and a review. `factory doctor` now checks both and the
+  > setup is documented (wiki/reviews-and-gates.md); setting it up on GitHub is the owner's.
 - **O8.** As the owner, secrets never enter the repo or an agent's prompt. Agents are denied reading `.env` files, and
   the factory never reads, prints or stores a token or key. *Built.* (wiki/sandboxed-machine.md "Security notes", "bootstrap")
 - **O9.** As the owner, my-skills is built by its own factory: its tasks are issues with the `factory:*` labels, its
