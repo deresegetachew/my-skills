@@ -39,7 +39,7 @@ software-factory/
     factory_reset_run.ts                `factory reset-run`: list and clean what an earlier run left (claims, Agent issues, CI containers, runners, a runs-on variable)
     factory_stack.ts                    the project's stack on a first install (node, python, unknown) and the CI command runner for a Python project
     pr-gate.ts                          PreToolUse: gates gh pr create, ready and merge, and the markers
-    check.ts                            Stop: typecheck and tests
+    check.ts                            Stop: typecheck and tests (in a factory run only)
     factory_stop.ts                     Stop: closes a finished session in `factory loop -i`
     factory_session.ts                  SessionStart: a plain `claude` session becomes an agent
     factory_agents.ts                   live agents: register, ping, down, sweep (and the hook entry)

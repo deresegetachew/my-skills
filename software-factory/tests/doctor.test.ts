@@ -2,10 +2,10 @@
 // Runs with a PATH of stub tools, so it doesn't depend on what this machine has installed.
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { doctor, hookLine, lines, machine, project } from "./doctor_support.ts";
-import { HOOKS, readmeAndWiki, runBun, tmp, write } from "./support.ts";
+import { HOOKS, readmeAndWiki, runBun, SF, tmp, write } from "./support.ts";
 
 test("a good machine is all ok", () => {
   const d = project({ "package.json": '{"packageManager": "pnpm@9.0.0"}', ".nvmrc": "22\n" });
@@ -17,6 +17,35 @@ test("a good machine is all ok", () => {
   }
   expect(p.stdout).toContain("All the checks pass.");
   expect(p.stdout.toLowerCase(), "the factory needs Bun, not Python").not.toContain("python");
+});
+
+test("a workflow that calls a removed python hook or runs bun without setting it up is a fix", () => {
+  // #254: after the update to Bun a Python project's ci.yml still called python3 .claude/hooks/*.py
+  const ci = ["name: CI", "on: [pull_request]", "jobs:",
+    "  guard:", "    runs-on: ubuntu-latest", "    steps:",
+    "      - run: python3 .claude/hooks/factory_guard.py --base main",
+    "  check:", "    runs-on: ubuntu-latest", "    steps:",
+    "      - run: bun --no-env-file .claude/hooks/style_checks.ts",
+    "      - run: bun --no-env-file .claude/hooks/no_such_hook.ts", ""].join("\n");
+  const d = project({ ".github/workflows/ci.yml": ci });
+  const p = doctor(d, { ...machine(), FACTORY_AGENTS: "taytu" });
+  expect(p.code, p.stdout).toBe(1);
+  const fixes = lines(p, "fix").join("\n");
+  expect(fixes).toContain(".github/workflows/ci.yml: .claude/hooks/factory_guard.py");
+  expect(fixes).toContain("run `factory update` (it rewrites the step to `bun --no-env-file .claude/hooks/factory_guard.ts`)");
+  expect(fixes).toContain(".github/workflows/ci.yml: .claude/hooks/no_such_hook.ts");
+  expect(fixes).toContain(".github/workflows/ci.yml: job check: it runs Bun but has no `- uses: oven-sh/setup-bun@v2` step");
+  expect(fixes, "style_checks.ts is there").not.toContain("style_checks.ts");
+});
+
+test("the kits own workflows pass the workflow check", () => {
+  const d = project({
+    ".github/workflows/ci.yml": readFileSync(join(SF, "kit/.github/workflows/ci.yml"), "utf8"),
+    ".github/workflows/ci-python.yml": readFileSync(join(SF, "kit/.github/workflows/ci-python.yml.template"), "utf8"),
+  });
+  const p = doctor(d, { ...machine(), FACTORY_AGENTS: "taytu" });
+  expect(lines(p, "fix").filter((l) => l.includes(".github/workflows")), p.stdout).toEqual([]);
+  expect(lines(p, "ok").some((l) => l.includes("CI workflows")), p.stdout).toBe(true);
 });
 
 test("gh auth status failing is no fix when the api works", () => {

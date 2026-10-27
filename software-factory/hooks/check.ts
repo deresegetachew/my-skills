@@ -1,5 +1,5 @@
 #!/usr/bin/env -S bun --no-env-file
-// Stop hook: don't let a turn end with a broken build.
+// Stop hook: don't let a turn end with a broken build. Only in a factory run (`factory loop`, FACTORY_LOOP=1, #256).
 //
 // Runs the project's typecheck and test commands (from .claude/factory.json) only when files under
 // `codePaths` changed. `commands.typecheckChanged` and `commands.testChanged`, when set, run instead, for the
@@ -73,6 +73,9 @@ function fingerprint(commands: string[], needs: string[]): string {
 
 export function main(): number {
   const data = readStdin();
+  // Only in a factory run (#256): factory-loop.sh exports FACTORY_LOOP. The owner's own session in the project (which
+  // the session hook gives a FACTORY_AGENT too) never waits on the tests; CI and the PR gate still check the build.
+  if (process.env.FACTORY_LOOP !== "1") return 0;
   if (data && typeof data === "object" && (data as Record<string, unknown>).stop_hook_active) {
     return 0; // already continuing because of this hook; don't loop
   }

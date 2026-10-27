@@ -109,14 +109,35 @@ test("agents are denied the settings command", () => {
   }
 });
 
-function stopCheck(d: string, commands: Record<string, string>, outLines?: unknown): Proc {
+/** The Stop check in a factory run (`factory-loop.sh` exports FACTORY_LOOP=1), unless `loop` is false. */
+function stopCheck(d: string, commands: Record<string, string>, outLines?: unknown, loop = true): Proc {
   mkdirSync(join(d, "src"), { recursive: true });
   const cfg: Record<string, unknown> = { codePaths: ["src"], commands };
   if (outLines) cfg.checkOutputLines = outLines;
   write(join(d, ".claude", "factory.json"), JSON.stringify(cfg));
   write(join(d, "src", "a.ts"), "x"); // an untracked change under codePaths
-  return runBun(CHECK, [], { cwd: d, input: "{}", env: { ...personEnv(), CLAUDE_PROJECT_DIR: d } });
+  const env: Env = { ...personEnv(), CLAUDE_PROJECT_DIR: d };
+  if (loop) env.FACTORY_LOOP = "1";
+  return runBun(CHECK, [], { cwd: d, input: "{}", env });
 }
+
+test("the stop check runs nothing outside a factory run", () => {
+  // #256: the owner's own session (FACTORY_AGENT set by the session hook, but no loop) never waits on the tests
+  const d = project();
+  for (const agent of [undefined, "menelik"]) {
+    const env: Env = { ...personEnv(), CLAUDE_PROJECT_DIR: d };
+    if (agent) env.FACTORY_AGENT = agent;
+    mkdirSync(join(d, "src"), { recursive: true });
+    write(join(d, ".claude", "factory.json"), JSON.stringify({ codePaths: ["src"], commands: { test: "echo ran > ran; exit 1" } }));
+    write(join(d, "src", "a.ts"), "x");
+    const p = runBun(CHECK, [], { cwd: d, input: "{}", env });
+    expect(p.code, p.stderr).toBe(0);
+    expect(existsSync(join(d, "ran")), `agent ${agent}`).toBe(false);
+    expect(existsSync(join(d, "tmp")), "and writes no log").toBe(false);
+  }
+  expect(stopCheck(d, { test: "echo ran > ran; exit 1" }).code, "in a factory run it still runs and blocks").toBe(2);
+  expect(existsSync(join(d, "ran"))).toBe(true);
+});
 
 test("the stop check runs the changed only command when set", () => {
   const d = project();

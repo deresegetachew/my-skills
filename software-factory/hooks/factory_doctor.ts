@@ -27,6 +27,7 @@ import { run as sandbox } from "./factory_sandbox.ts";
 import { allowRules } from "./factory_stack.ts";
 import * as factoryTrust from "./factory_trust.ts";
 import { explain, probe, settings as turboSettings, TurboSettingError, turboJsonSigns } from "./factory_turbo.ts";
+import * as wf from "./factory_workflow.ts";
 
 const LINUX = process.platform === "linux";
 
@@ -433,7 +434,35 @@ export function ci(r: Reporter, cfg: Config): void {
   doctorCi.checks(r, cfg);
 }
 
-export const ZERO_TESTS = /NO TESTS RAN|Ran 0 tests|collected 0 items|no tests ran/i;
+/** Every `.claude/hooks/` script a workflow calls is there, and a job that runs Bun sets it up (#254). A project that
+ * came from the Python releases can still call `python3 .claude/hooks/X.py`, which fails CI at once. */
+export function workflows(r: Reporter): void {
+  const files = wf.workflowFiles(".");
+  if (!files.length) return;
+  let bad = 0;
+  for (const rel of files) {
+    let text: string;
+    try {
+      text = readFileSync(rel, "utf8");
+    } catch {
+      continue;
+    }
+    for (const script of wf.hookRefs(text).filter((s) => !existsSync(s))) {
+      bad += 1;
+      const ts = script.replace(/\.py$/, ".ts");
+      r.fix(`${rel}: ${script}`, script.endsWith(".py") && ts !== script && existsSync(ts)
+        ? `CI calls a Python hook this release removed: run \`factory update\` (it rewrites the step to \`bun --no-env-file ${ts}\`), then commit ${rel}`
+        : "CI calls a hook script that is not in .claude/hooks: fix the step, or run `factory update` if a file is missing");
+    }
+    for (const job of wf.bunWithoutSetup(text)) {
+      bad += 1;
+      r.fix(`${rel}: job ${job}`, `it runs Bun but has no \`- uses: ${wf.SETUP_BUN}\` step: add one before the first step that runs bun`);
+    }
+  }
+  if (!bad) r.ok("CI workflows: every factory script they call is there");
+}
+
+export const ZERO_TESTS =/NO TESTS RAN|Ran 0 tests|collected 0 items|no tests ran/i;
 
 /** commands.test runs at least one test (#244). Only a Python test command (unittest or pytest) is run, once, with a
  * short timeout, so doctor stays quick and offline-safe; a command that fails for another reason is left to CI. */
@@ -717,6 +746,7 @@ export async function main(argv: string[]): Promise<number> {
     testAllowed(r, cfg);
     trust(r, cfg);
     ci(r, cfg);
+    workflows(r);
     testCommand(r, cfg);
     roles(r, cfg);
     manager(r, cfg);

@@ -31,6 +31,7 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { Exit, FactoryError, pyDumps, pyRepr, run, runMain, splitLines } from "./factory_lib.ts";
 import { tarEntries } from "./factory_tar.ts";
+import { fixWorkflows, lines as workflowLines } from "./factory_workflow.ts";
 
 export { FactoryError };
 
@@ -1303,6 +1304,7 @@ async function cmdMigrate(args: Args): Promise<number> {
     `${installed.changed.length} changed file(s).`);
   for (const t of installed.unlinked.slice(0, 8)) say(`    unlinked ${t}`);
   for (const t of kept.slice(0, 8)) say(`    kept link ${t} (this release does not ship it)`);
+  for (const line of workflowLines(fixWorkflows(root))) say("  " + line);
   const newPin = readPin(root) as Pin;
   say("This machine");
   for (const line of refreshServices(root)) say("  " + line);
@@ -1402,6 +1404,9 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
     for (const t of installed.removed.slice(0, 8)) say(`    removed ${t}`);
     for (const t of installed.kept_local.slice(0, 8)) say(`    note: ${t} had local changes; the release's version replaced them (see the diff)`);
   }
+  // The workflows' steps that call a hook the release removed (a Python one, #254) are rewritten in this same change:
+  // a pull request runs the workflow from its own merge ref, so a later fix could never make it green.
+  for (const line of workflowLines(fixWorkflows(root))) say("  " + line);
   const newPin = readPin(root) as Pin;
   say("This machine");
   if (local) { // a file nobody published: its own scripts are not run on this machine
