@@ -20,7 +20,13 @@
 //         addressed to it, with a valid state transition; the question is looked up in the thread (the number on the
 //         command, else ref=). An envelope of another version is not read, so it passes. With `trustedReviewers` in
 //         factory.json, only those GitHub logins' approvals count. An approval counts only for the commit it names (`sha=`).
-// Pushes: agents may not delete remote branches (`git push <remote> :<branch>` or `+:<branch>`), also inside bash -c.
+//         `--admin` is refused: it skips branch protection (#260).
+// gh api: a plain GET passes. Writes to `pulls/<n>/merge`, labels or reviews, and GraphQL mutations, are refused: the
+//         plain gh commands are the checked way. Other writes have their fields and --input read: markers and messages
+//         are checked as for comments, and `POST repos/<o>/<r>/pulls` gets the create checks (#260).
+// Pushes: agents may not delete remote branches (`git push <remote> :<branch>` or `+:<branch>`), also inside bash -c,
+//         nor force-push (-f, --force*, --mirror, a +refspec), wherever git's global options sit (#260).
+// Quoting: gh and git are found in the parsed words, so `g\h` and `"g"h` are gh (#260).
 // Settings: agents may not change the factory's settings (`factory settings set`, `unset`, `pr`, `interactive`, `--local`
 //         changes, `docs --write`), also inside bash -c; the read-only ones (list, get, help, diff, validate) pass (#49).
 // Wrappers: gh run through a shell, eval, xargs or a package runner (pnpm exec, npx, yarn) can't be checked: refused.
@@ -48,6 +54,19 @@ export const SETTINGS_READ_ONLY = new Set(["list", "ls", "get", "show", "help", 
 const SETTINGS_WITH_VALUE = new Set(["--section", "--file"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/s;
 const NEXT = "`bun --no-env-file .claude/hooks/next_task.ts`";
+/** gh api's flags that take a value. */
+const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input",
+  "-q", "--jq", "-t", "--template", "--cache", "-p", "--preview", "--hostname"]);
+/** git push's flags that take a value (so `-o fix` is not -f). */
+const PUSH_VALUE_FLAGS = new Set(["-o", "--push-option", "--repo", "--receive-pack", "--exec"]);
+const MARKER_MSG = "Only the dev manager posts factory-approved, factory-answer, factory-mustfix, claim and owner-ask comments. " +
+  "Ask with <!-- factory-question --> instead.";
+
+/** The command as bash reads its words, for the quick tests: quotes, backslashes and line continuations gone, so
+ * `g\h` and `"g"h` read as gh. Only for finding a program; the checks run on the parsed words. */
+function unquoted(text: string): string {
+  return text.replace(/\\\r?\n/g, "").replace(/["'\\]/g, "");
+}
 
 type Row = { [key: string]: unknown };
 
@@ -120,16 +139,52 @@ export function changesSettings(cmd: string, depth = 0): boolean {
   return false;
 }
 
-/** Whether this simple command is `git push` with a refspec that deletes a remote branch (`:branch`). */
-export function pushDeletes(tokens: string[]): boolean {
+/** The arguments after `push` when this simple command is `git push`, else null. */
+function pushArgs(tokens: string[]): string[] | null {
   let i = programAt(tokens, false);
-  if (i >= tokens.length || basename(tokens[i] as string) !== "git") return false;
+  if (i >= tokens.length || basename(tokens[i] as string) !== "git") return null;
   i += 1;
   while (i < tokens.length && (tokens[i] as string).startsWith("-")) { // git's global options, some with a value
     i += GIT_GLOBAL_WITH_VALUE.has(tokens[i] as string) ? 2 : 1;
   }
-  if (i >= tokens.length || tokens[i] !== "push") return false;
-  return tokens.slice(i + 1).some((t) => (t.startsWith(":") || t.startsWith("+:")) && t.replace(/^\++/, "").length > 1);
+  return i < tokens.length && tokens[i] === "push" ? tokens.slice(i + 1) : null;
+}
+
+/** Whether this simple command is `git push` with a refspec that deletes a remote branch (`:branch`). */
+export function pushDeletes(tokens: string[]): boolean {
+  return (pushArgs(tokens) ?? []).some((t) => (t.startsWith(":") || t.startsWith("+:")) && t.replace(/^\++/, "").length > 1);
+}
+
+/** Whether this simple command is a `git push` that can overwrite the remote: -f (also bundled, `-uf`), --force,
+ * --force-with-lease, --force-if-includes, --mirror or a `+` refspec. */
+export function pushForces(tokens: string[]): boolean {
+  const args = pushArgs(tokens) ?? [];
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k] as string;
+    if (PUSH_VALUE_FLAGS.has(t)) k++;
+    else if (t === "--mirror" || t.startsWith("--force")) return true;
+    else if (/^-[^-]/.test(t) && (t.slice(1).split("o")[0] as string).includes("f")) return true; // -o takes the rest as its value
+    else if (t.startsWith("+")) return true;
+  }
+  return false;
+}
+
+/** The simple commands, and the ones a wrapper runs: `xargs git push -f` and `bash -c 'git push -f'` (a few levels). */
+function withWrapped(parts: string[][], depth = 0): string[][] {
+  const out = [...parts];
+  if (depth >= 3) return out;
+  for (const p of parts) {
+    if (!p.length || !WRAPPERS.has(basename(p[0] as string))) continue;
+    out.push(...withWrapped([p.slice(1)], depth + 1));
+    for (const arg of p.slice(1).filter((t) => /\s/.test(t))) {
+      try {
+        out.push(...withWrapped(simpleCommands(arg), depth + 1));
+      } catch {
+        // an argument that isn't a command: nothing to add
+      }
+    }
+  }
+  return out;
 }
 
 export type GhCall = [top: string, sub: string, args: string[]];
@@ -160,6 +215,18 @@ export function ghCall(tokens: string[]): GhCall | null {
   const [top] = word();
   const [sub, lead] = word();
   return [top, sub, [...lead, ...rest.slice(k)]];
+}
+
+/** The arguments after `api`, in their order, when this simple command is `gh api`, else null. */
+export function apiArgs(tokens: string[]): string[] | null {
+  const i = programAt(tokens, true);
+  if (i >= tokens.length || basename(tokens[i] as string) !== "gh") return null;
+  for (let k = i + 1; k < tokens.length; k++) {
+    const t = tokens[k] as string;
+    if (GLOBAL_WITH_VALUE.has(t)) k++;
+    else if (!t.startsWith("-")) return t === "api" ? tokens.slice(k + 1) : null;
+  }
+  return null;
 }
 
 function values(flags: Flags, ...names: string[]): string[] {
@@ -205,7 +272,8 @@ function main(): void {
       "`--local`, `docs --write`): the PR gate reads them. `factory settings list`, `get`, `help`, `diff` and " +
       "`validate` are fine. Ask the dev manager to change the setting in a pull request.");
   }
-  if (/\bpush\b/.test(cmd) && /\bgit\b/.test(cmd)) {
+  const plain = unquoted(cmd);
+  if (/\bpush\b/.test(plain) && /\bgit\b/.test(plain)) {
     let pushes: string[][] = [];
     try {
       pushes = simpleCommands(cmd);
@@ -217,8 +285,15 @@ function main(): void {
       block("Agents don't delete remote branches (`git push <remote> :<branch>`). Leave branch clean-up to the " +
         "dev manager.");
     }
+    if (withWrapped(pushes).some(pushForces)) {
+      block("Agents don't force-push (-f, --force, --force-with-lease, --force-if-includes, --mirror or a +refspec): " +
+        "it overwrites commits a reviewer or another agent saw. Push new commits on top instead (`git push origin " +
+        "<branch>`), or ask the dev manager with <!-- factory-question --> if the branch really needs rewriting.");
+    }
   }
-  if (!/(^|[^\p{L}\p{N}_.-])gh\b/u.test(cmd)) return; // no gh at all: the fast path for every other Bash call
+  // no gh at all: the fast path for every other Bash call. On the text without quotes, so `g\h` and `"g"h` are seen;
+  // the checks below find gh in the parsed words.
+  if (!/(^|[^\p{L}\p{N}_.-])gh\b/u.test(plain)) return;
   let parts: string[][] = [];
   try {
     parts = simpleCommands(cmd);
@@ -232,7 +307,8 @@ function main(): void {
   }
   // gh hidden inside one argument (bash -c '...', eval "...", xargs sh -c ...) can't be checked: refuse it.
   if (parts.some((p) => p.length > 0 && WRAPPERS.has(basename(p[0] as string))
-    && (p.slice(1).some((t) => GH_IN_TEXT.test(t)) || GH_IN_TEXT.test(p.slice(1).join(" ")))) || GH_IN_SUBSTITUTION.test(cmd)) {
+    && (p.slice(1).some((t) => GH_IN_TEXT.test(unquoted(t))) || GH_IN_TEXT.test(unquoted(p.slice(1).join(" ")))))
+    || GH_IN_SUBSTITUTION.test(cmd) || GH_IN_SUBSTITUTION.test(plain)) {
     block("Run gh directly, not inside bash -c, sh -c, eval or a quoted string: the PR gate has to see the command.");
   }
   if (!found.length) return;
@@ -260,20 +336,109 @@ function main(): void {
       checkMarkers(cfg, sub, args);
     }
   }
+  const apiCreates: ApiCreate[] = [];
+  for (const [, tokens] of found) {
+    const api = apiArgs(tokens);
+    const create = api ? gateApi(api) : null;
+    if (create) apiCreates.push(create);
+  }
   const prCalls = calls.filter(([top]) => top === "pr").map(([, sub, args]): [string, string[]] => [sub, args]);
   const merges = prCalls.filter(([sub]) => sub === "merge").map(([, args]) => args);
   const gated = prCalls.filter(([sub, args]) => ["create", "new", "ready", "merge"].includes(sub)
     && !(sub === "ready" && isTrue(parseArgs(args)[0], "--undo"))); // back to draft: nothing to gate
-  if (!gated.length) return;
+  if (!gated.length && !apiCreates.length) return;
   if (merges.length > 1) block("One merge per command, so each one is checked.");
   if (merges.length && parts.some((p) => p.length > 0 && basename(p[0] as string) === "git" && p.slice(1, 4).includes("push"))) {
     block("Push and merge in separate commands: a push in the same command would merge a commit nobody checked.");
   }
-  if (gated.length > 1) block("One pull-request command at a time (create, ready or merge), so each one is checked.");
+  if (gated.length + apiCreates.length > 1) block("One pull-request command at a time (create, ready or merge), so each one is checked.");
+  if (apiCreates.length) {
+    const c = apiCreates[0] as ApiCreate;
+    gateCreate(cfg, c.draft, c.body);
+    return;
+  }
   const [sub, args] = gated[0] as [string, string[]];
-  if (sub === "create" || sub === "new") gateCreate(cfg, args);
-  else if (sub === "ready") gateReady(cfg, args);
+  if (sub === "create" || sub === "new") {
+    const [flags] = parseArgs(args);
+    gateCreate(cfg, isTrue(flags, "--draft", "-d"), () => bodyText(flags));
+  } else if (sub === "ready") gateReady(cfg, args);
   else gateMerge(cfg, args);
+}
+
+type ApiCreate = { draft: boolean; body: () => string };
+
+/** A file's text for the gate, or a refusal when it can't be read: stdin can't be checked. */
+function fileText(path: string, flag: string): string {
+  if (path === "-" || path === "") block(`Pass ${flag} a file path, not stdin: the PR gate has to read it (--input <file>, -F body=@<file>).`);
+  if (!isFile(path)) block(`${path} (${flag}) doesn't exist.`);
+  return readFileSync(path, "utf8");
+}
+
+/** Every string in a JSON value, so an escaped `<!--` reads as the marker it is. */
+function strings(v: unknown): string[] {
+  if (typeof v === "string") return [v];
+  if (Array.isArray(v)) return v.flatMap(strings);
+  if (typeof v === "object" && v !== null) return Object.values(v).flatMap(strings);
+  return [];
+}
+
+/** `gh api`: reads pass. Writes to merges, labels and reviews, and GraphQL mutations, are refused: the plain gh
+ * commands are the checked way. Other writes have their text checked for markers and messages; a pull request created
+ * through the API is returned for the create checks. */
+function gateApi(args: string[]): ApiCreate | null {
+  const [flags, pos] = parseArgs(args, API_VALUE_FLAGS);
+  const raw = values(flags, "-f", "--raw-field");
+  const typed = values(flags, "-F", "--field");
+  const inputs = values(flags, "--input");
+  const methods = values(flags, "-X", "--method");
+  const method = (methods.length ? methods[methods.length - 1] as string
+    : raw.length || typed.length || inputs.length ? "POST" : "GET").toUpperCase();
+  if (method === "GET" || method === "HEAD") return null; // a read: the settings decide whether it may run at all
+  const endpoint = (pos[0] ?? "").replace(/^\/+/, "").split("?")[0] as string;
+  if ([endpoint, ...raw, ...typed, ...inputs].some((v) => SHELL_EXPANSION.test(v))) {
+    block("Write the endpoint, the fields and the --input path as plain text: the PR gate reads the command before " +
+      "the shell expands $(...), `...` or $VARIABLES, so it can't check what they'd say.");
+  }
+  if (/^repos\/[^/]+\/[^/]+\/pulls\/[^/]+\/merge$/.test(endpoint)) {
+    block("Merge with `gh pr merge <n> --match-head-commit <head>`, which the PR gate checks, not through `gh api`.");
+  }
+  const field = (f: string): [string, string] => {
+    const i = f.indexOf("=");
+    return i < 0 ? [f, ""] : [f.slice(0, i), f.slice(i + 1)];
+  };
+  const fields: [string, string][] = [...raw.map(field),
+    ...typed.map(field).map(([k, v]): [string, string] => [k, v.startsWith("@") ? fileText(v.slice(1), "-F") : v])];
+  if (/(^|\/)labels(\/|$)/.test(endpoint) || fields.some(([k]) => /^labels(\[|$)/.test(k))) {
+    block("Change labels with `gh pr edit` or `gh issue edit` (--add-label, --remove-label), which the PR gate checks, " +
+      "not through `gh api`.");
+  }
+  if (/\/reviews(\/|$)/.test(endpoint)) {
+    block("Agents don't post pull-request reviews: the dev manager reviews. Ask with a `gh pr comment` holding " +
+      "<!-- factory-question --> instead.");
+  }
+  let text = fields.map(([, v]) => v).join("\n");
+  for (const f of inputs) {
+    const body = fileText(f, "--input");
+    let parsed: string[] = [];
+    try {
+      parsed = strings(JSON.parse(body) as unknown);
+    } catch {
+      // not JSON: the raw text is checked
+    }
+    text += "\n" + body + "\n" + parsed.join("\n");
+  }
+  if (endpoint === "graphql" && /\bmutation\b/.test(text)) {
+    block("Agents don't run GraphQL mutations through `gh api`: the PR gate can't check them. Use the plain gh " +
+      "command (gh pr comment, gh pr edit, gh pr merge), which it checks.");
+  }
+  if (MARKERS.test(text)) block(MARKER_MSG);
+  const thread = /^repos\/[^/]+\/[^/]+\/(?:issues|pulls)\/(\d+)\/comments$/.exec(endpoint);
+  checkMessages(thread ? (thread[1] as string) : null, text);
+  if (method === "POST" && /^repos\/[^/]+\/[^/]+\/pulls$/.test(endpoint)) {
+    const last = (k: string): string | undefined => fields.filter(([n]) => n === k).map(([, v]) => v).pop();
+    return { draft: last("draft") === "true", body: () => fields.filter(([n]) => n === "body").map(([, v]) => v).join("\n") };
+  }
+  return null;
 }
 
 function checkMarkers(cfg: Config, sub: string, args: string[]): void {
@@ -284,11 +449,9 @@ function checkMarkers(cfg: Config, sub: string, args: string[]): void {
   }
   if (sub === "review" && ("--approve" in flags || "-a" in flags)) block("Agents don't approve pull requests; the dev manager does.");
   const text = bodyText(flags);
-  if (MARKERS.test(text)) {
-    block("Only the dev manager posts factory-approved, factory-answer, factory-mustfix, claim and owner-ask comments. Ask with " +
-      "<!-- factory-question --> instead.");
-  }
-  checkMessages(args, text);
+  if (MARKERS.test(text)) block(MARKER_MSG);
+  const [, pos] = parseArgs(args);
+  checkMessages(pos.length && /^\d+$/.test(pos[0] as string) ? (pos[0] as string) : null, text); // `gh pr comment 7`
   const labels = (...n: string[]): Set<string> => new Set(values(flags, ...n).flatMap((v) => v.split(",").map((x) => x.trim())));
   const hold = cfg.holdLabel ?? "factory-hold";
   if (labels("--remove-label").has(hold)) block(`Only the dev manager removes \`${hold}\`.`);
@@ -304,13 +467,12 @@ function readThread(number: string): fm.Message[] {
 
 /** The reserved senders and the state machine for messages in the new envelope (docs/messages.md): an agent posts as
  * itself; approvals and must-fixes stay the dev manager's; only the addressee answers, works on or fails a question,
- * and a transition must be valid. Envelopes of another version, and plain text, pass: nothing reads them. */
-function checkMessages(args: string[], text: string): void {
+ * and a transition must be valid. Envelopes of another version, and plain text, pass: nothing reads them. `number` is
+ * the thread the command names, if it names one. */
+function checkMessages(number: string | null, text: string): void {
   const found = fm.parseEnvelopes(text);
   if (!found.length) return;
   const me = process.env.FACTORY_AGENT || null;
-  const [, pos] = parseArgs(args);
-  const number = pos.length && /^\d+$/.test(pos[0] as string) ? (pos[0] as string) : null; // `gh pr comment 7`
   for (const m of found) {
     let problem = fm.checkNew(m, null, me); // the checks that need no thread
     if (!problem && (m.kind === "answer" || m.kind === "status") && m.inReplyTo) {
@@ -419,9 +581,8 @@ function needFreeNumbers(cfg: Config, branch: string, added: Added[] | null = nu
   }
 }
 
-function gateCreate(cfg: Config, args: string[]): void {
-  const [flags] = parseArgs(args);
-  if (isTrue(flags, "--draft", "-d")) return; // drafts are how agents ask questions; they can't be merged, and ready and merge stay gated
+function gateCreate(cfg: Config, draft: boolean, body: () => string): void {
+  if (draft) return; // drafts are how agents ask questions; they can't be merged, and ready and merge stay gated
   const branch = run("git", "branch", "--show-current")[1];
   const head = run("git", "rev-parse", "HEAD")[1];
   const [rc, out, err] = run("git", "diff", "--name-only", `origin/${cfg.mainBranch}...HEAD`);
@@ -432,7 +593,7 @@ function gateCreate(cfg: Config, args: string[]): void {
   const changed = out.split(/\s+/).filter((x) => x);
   needReviews(cfg, branch, head, changed);
   needLocalCi(cfg, branch, head);
-  needTask(cfg, branch, bodyText(flags));
+  needTask(cfg, branch, body());
   needFreeNumbers(cfg, branch);
   needRoom(cfg);
 }
@@ -479,6 +640,10 @@ function gateReady(cfg: Config, args: string[]): void {
 
 function gateMerge(cfg: Config, args: string[]): void {
   const [flags, pos] = parseArgs(args, MERGE_VALUE_FLAGS);
+  if ("--admin" in flags) {
+    block("Merge without --admin: it skips branch protection and the required checks, which are what really guard " +
+      "main. If the merge is blocked, leave the pull request open for the dev manager or a person.");
+  }
   const pr = view(prRef(pos), "number,headRefName,headRefOid,comments,labels");
   const head = String(pr.headRefOid);
   const hold = cfg.holdLabel ?? "factory-hold";

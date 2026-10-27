@@ -48,6 +48,8 @@
     "^docs/PRD\\.md$",
     "^\\.github/",
     "^\\.mcp\\.json$",
+    "^factory$",
+    "^factory-loop\\.sh$",
     "/migrations/",
     "\\.env",
     "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|bun\\.lockb?)$"

@@ -6,7 +6,7 @@
 //   bun --no-env-file .claude/hooks/next_task.ts --after 1.3   -> the next one after 1.3 (to work around a blocked PR)
 //   Rework comes first: an open PR whose latest must-fix (`<!-- factory-mustfix sha=<head> -->` or a `factory-msg` of kind
 //   mustfix) from the dev manager names its current head commit (nothing pushed since) is printed as
-//   "pr-42 Rework #42: <title> (<branch>)".
+//   "pr-42 Rework #42: <title> (<branch>)". With `trustedReviewers` set, only must-fixes from those logins count.
 //   A PR with the `holdLabel` label (default `factory-hold`) is the dev manager's to review: it's never rework.
 //   bun --no-env-file .claude/hooks/next_task.ts --note    -> what `factory next` runs: the same line, then "Not claimed. To claim it: ..."
 //   bun --no-env-file .claude/hooks/next_task.ts --claim taytu --pid 123
@@ -51,6 +51,11 @@ interface Pull {
   head: { sha: string; ref: string };
 }
 
+interface Comment {
+  body?: string | null;
+  user?: { login?: string } | null;
+}
+
 /** [[id, title]] for open PRs with a must-fix on their current head commit, oldest first. Needs `gh`. */
 function rework(cfg: Config): Job[] {
   const ghAll = <T>(path: string): T[] => {
@@ -64,10 +69,13 @@ function rework(cfg: Config): Job[] {
   };
   const out: Job[] = [];
   const hold = (cfg.holdLabel as string | undefined) ?? "factory-hold";
+  // With `trustedReviewers`, only those logins' must-fixes count, so an agent can't send the loops to rework (#260).
+  const trusted = new Set(Array.isArray(cfg.trustedReviewers) ? (cfg.trustedReviewers as unknown[]).map(String) : []);
   const prs = ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open&per_page=100").sort((a, b) => a.number - b.number);
   for (const pr of prs) {
     if ((pr.labels ?? []).some((l) => l.name === hold)) continue; // the dev manager is reviewing it: not rework
-    const shas = ghAll<{ body?: string | null }>(`repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`)
+    const shas = ghAll<Comment>(`repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`)
+      .filter((c) => !trusted.size || trusted.has(String(c.user?.login ?? "")))
       .flatMap((c) => verdicts(c.body || "")).filter(([kind, sha]) => kind === "mustfix" && sha).map(([, sha]) => sha as string); // either form
     if (shas.length && pr.head.sha.startsWith(shas[shas.length - 1] as string)) {
       out.push([`pr-${pr.number}`, `Rework #${pr.number}: ${pr.title} (${pr.head.ref})`]);

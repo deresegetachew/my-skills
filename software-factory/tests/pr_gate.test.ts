@@ -502,3 +502,128 @@ test("the kits settings protect the mcp config", () => {
     .permissions.deny;
   expect(deny).toContain("Edit(./.mcp.json)");
 });
+
+// --- #260: the gate hardening from the #43 audit ----------------------------------------------------------------------
+
+test("a merge with --admin is refused wherever the flag sits", () => {
+  const [d, env] = setup(); // everything else about this merge passes
+  for (const c of [`${MERGE} --admin`, `gh pr merge --admin 7 --squash --match-head-commit ${HEAD}`,
+    `gh pr merge 7 --admin=true --squash --match-head-commit ${HEAD}`]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("Merge without --admin");
+  }
+});
+
+test("gh api writes to merges labels and reviews are refused", () => {
+  const [d, env] = setup();
+  for (const c of ["gh api -X PUT repos/{owner}/{repo}/pulls/1/merge", "gh api --method=PUT /repos/o/r/pulls/1/merge",
+    "gh api -XPUT repos/o/r/pulls/1/merge", "gh api --method put repos/o/r/pulls/1/merge?x=1"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("Merge with `gh pr merge <n> --match-head-commit <head>`");
+  }
+  for (const c of ["gh api repos/{owner}/{repo}/issues/7/labels -f 'labels[]=tests-reviewed'",
+    "gh api -X DELETE repos/{owner}/{repo}/issues/7/labels/factory-hold", "gh api -X POST repos/o/r/labels -f name=x",
+    "gh api -X PATCH repos/{owner}/{repo}/issues/7 -f 'labels[]=x'"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("Change labels with `gh pr edit`");
+  }
+  for (const c of ["gh api repos/{owner}/{repo}/pulls/7/reviews -f event=APPROVE",
+    "gh api -X PUT repos/o/r/pulls/7/reviews/1/dismissals -f message=x"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("Agents don't post pull-request reviews");
+  }
+});
+
+test("gh api comment bodies go through the marker check", () => {
+  const [d, env] = setup();
+  const file = write(join(d, "m.md"), "<!-- factory-mustfix sha=aaaaaaa -->");
+  const json = write(join(d, "m.json"), JSON.stringify({ body: "<!-- factory-approved sha=aaaaaaa -->" }).replace("<", "\\u003c"));
+  for (const c of ["gh api repos/{owner}/{repo}/issues/7/comments -f 'body=<!-- factory-approved sha=aaaaaaa -->'",
+    `gh api repos/{owner}/{repo}/issues/7/comments -F body=@${file}`, `gh api repos/{owner}/{repo}/issues/7/comments --input ${json}`,
+    "gh api -X PATCH repos/{owner}/{repo}/issues/comments/5 --raw-field 'body=<!-- factory-answer -->'"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("Ask with <!-- factory-question --> instead");
+  }
+  let [code, err] = gate(d, env, "gh api repos/{owner}/{repo}/issues/7/comments --input -");
+  expect(code, err).toBe(2);
+  expect(err).toContain("--input <file>");
+  [code, err] = gate(d, env, 'gh api repos/{owner}/{repo}/issues/7/comments -f body="$(cat m.md)"');
+  expect(code, err).toBe(2);
+  expect(err).toContain("plain text");
+  env.FACTORY_AGENT = "haile";
+  const asPo = write(join(d, "po.md"), envelope({ id: "q9x", kind: "question", from: "po", state: "submitted" }));
+  [code, err] = gate(d, env, `gh api repos/{owner}/{repo}/issues/7/comments -F body=@${asPo}`);
+  expect(code, err).toBe(2);
+  expect(err).toContain("yourself");
+  expect(rc(d, env, "gh api repos/{owner}/{repo}/issues/7/comments -f 'body=<!-- factory-question --> which one?'")).toBe(0);
+});
+
+test("gh api pull request creation gets the create checks", () => {
+  const [d, env] = setup();
+  rmSync(REVIEW_OK(d));
+  giveOrigin(d);
+  for (const c of ["gh api repos/{owner}/{repo}/pulls -f title=x -f head=task/1-x -f base=main -f body=y",
+    "gh api -X POST /repos/o/r/pulls -F draft=false -f title=x"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("No reviewer pass");
+  }
+  expect(rc(d, env, "gh api repos/{owner}/{repo}/pulls -F draft=true -f title=x -f head=task/1-x -f base=main")).toBe(0);
+  const [code, err] = gate(d, env, "gh api graphql -f 'query=mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'");
+  expect(code, err).toBe(2);
+  expect(err).toContain("GraphQL mutations");
+});
+
+test("plain gh api reads pass the gate", () => {
+  const [d, env] = setup();
+  for (const c of ["gh api repos/{owner}/{repo}/pulls/7", "gh api repos/{owner}/{repo}/pulls/1/merge",
+    "gh api --paginate repos/{owner}/{repo}/issues/7/labels", "gh api -X GET repos/{owner}/{repo}/pulls -f state=open",
+    "gh api graphql -f 'query=query { viewer { login } }'"]) {
+    expect(gate(d, env, c), c).toEqual([0, ""]);
+  }
+});
+
+test("the default and kit protected lists cover the loop script and the cli", () => {
+  for (const f of ["factory", "factory-loop.sh"]) {
+    let [d, env] = setup({ files: [f], main_settings: null }); // no settings on main: the defaults
+    let [code, err] = gate(d, env, MERGE);
+    expect(code, `${f} ${err}`).toBe(2);
+    expect(err).toContain(`changes protected files, so the dev manager or a person merges it: ${f}`);
+    const kitCfg = JSON.parse(readFileSync(join(KIT, ".claude", "factory.json"), "utf8")) as { protected: string[] };
+    [d, env] = setup({ files: [f], cfgExtra: { protected: kitCfg.protected } });
+    [code, err] = gate(d, env, MERGE);
+    expect(code, `${f} ${err}`).toBe(2);
+    expect(err).toContain(`merges it: ${f}`);
+  }
+});
+
+test("force pushes are refused wherever the global options sit", () => {
+  const [d, env] = setup();
+  for (const c of ["git push -f origin task/1-x", "git -C . push --force origin x", "git -c a.b=c push origin x --force-with-lease",
+    "git push --force-with-lease=x:abc origin x", "git push --force-if-includes origin x", "git push --mirror origin",
+    "git push origin +task/1-x", "git push origin +HEAD:refs/heads/x", "git push -uf origin x", "true && git -C . -c x=y push origin +x",
+    "bash -c 'git push -f origin x'", "xargs git push --force origin", "g\\it push -f origin x"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("Agents don't force-push");
+  }
+  for (const c of ["git push origin task/1-x", "git push -u origin HEAD", "git push -o ci.skip origin x", "git push -ofoo origin x",
+    "git commit -m 'push -f later'"]) {
+    expect(rc(d, env, c), c).toBe(0);
+  }
+});
+
+test("quoting gh does not get past the gate", () => {
+  const [d, env] = setup({ ci_green: false });
+  for (const c of [`g\\h pr merge 7 --match-head-commit ${HEAD}`, `"g"h pr merge 7 --match-head-commit ${HEAD}`,
+    `'g'"h" pr merge 7 --admin`, `bash -c 'g\\h pr merge 7'`, "g\\h api -X PUT repos/o/r/pulls/1/merge",
+    `g\\\nh pr merge 7 --match-head-commit ${HEAD}`]) { // backslash-newline is removed by bash: that is gh
+    expect(rc(d, env, c), c).toBe(2);
+  }
+  expect(rc(d, env, "echo 'g' 'h'")).toBe(0);
+});

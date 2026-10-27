@@ -265,6 +265,19 @@ test("the readme says doctor runs a python test command once and checks it is al
   expect(text).toContain("whether an unattended agent can run `commands.test` alone and through `./factory run-check` (#249");
 });
 
+test("doctor in issues mode with no trusted reviewers is a fix", () => {
+  // #260: with the list empty, anyone's must-fix sends the loops to rework and anyone's approval counts
+  const check = (cfg: Record<string, unknown>): string[] => {
+    const p = doctor(project({}, { agents: ["taytu"], ...cfg }), { ...machine(), FACTORY_AGENTS: "taytu" });
+    return lines(p, "fix").filter((l) => l.includes("trustedReviewers"));
+  };
+  const fixes = check({ tasks: { source: "issues" } });
+  expect(fixes.length, fixes.join("\n")).toBe(1);
+  expect(fixes[0]).toContain("factory settings set trustedReviewers '[\"<your-login>\"]'");
+  expect(check({ tasks: { source: "issues" }, trustedReviewers: ["boss"] })).toEqual([]);
+  expect(check({}), "plan mode is unchanged").toEqual([]);
+});
+
 test("doctor outside a git repo says where to run it", () => {
   const d = tmp();
   const env = { ...machine(), GIT_CEILING_DIRECTORIES: d };
