@@ -14,10 +14,15 @@ function project(): [string, Record<string, string | undefined>] {
   write(join(work, ".claude", "hooks", ".keep"), "");
   git("init", "-q", "-b", "main");
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) symlinkSync(join(HOOKS, f), join(work, ".claude", "hooks", f));
-  write(join(work, ".claude", "settings.json"), JSON.stringify({ hooks: {} }));
+  write(join(work, ".claude", "factory", "settings.json"), JSON.stringify({ hooks: {} })); // the agents' rules (#258)
   write(join(work, ".claude", "factory.json"), JSON.stringify({ agents: ["menelik", "taytu"] }));
   git("add", "-A");
   git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start");
+  // `factory agent` reads the agents' rules from main on origin, never the folder's copy
+  const origin = join(d, "origin.git");
+  sh(["git", "init", "-q", "--bare", "-b", "main", origin]);
+  git("remote", "add", "origin", origin);
+  git("push", "-q", "origin", "HEAD:main");
   const bin = join(d, "bin");
   writeExe(join(bin, "claude"), "#!/bin/sh\necho CLAUDE STARTED\n");
   const env: Record<string, string | undefined> = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FACTORY_REMOTE_CONTROL: "0" };

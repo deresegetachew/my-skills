@@ -12,7 +12,7 @@ What is here (read the part your task is about, not everything):
    `software-factory/DEV-MANAGER.md`: the skill for setting up a project and the dev manager's rules.
 2. `software-factory/hooks/` (the `factory_*.ts` commands and the hooks), `ci/` (runner services), `factory`,
    `factory-loop.sh`, `install.sh`: the factory's code. `software-factory/kit/` holds only what a project gets
-   copied or linked: agents, skills, `settings.json`, templates. Old `kit/` paths that are symlinks are
+   copied or linked: agents, skills, the agents' rules (`.claude/factory/settings.json`, passed when the factory starts an agent, #258), templates. Old `kit/` paths that are symlinks are
    forwarders from the move (#112); do not add new ones.
 3. `tools/`: `run_tests.ts`, `check_skills.ts`, `build_release.ts` (the release archive).
 4. `nestjs-best-practices/`, `nestjs-clean-code-ddd-hexagonal/`, `study-notes/`: separate skills.
@@ -67,9 +67,10 @@ A change that breaks one of these is wrong even if the tests pass.
 ## How to work
 
 - This repo uses its own factory through links: `./factory`, `./factory-loop.sh` and `.claude/{hooks,ci,agents,skills,
-  manager,settings.json}` are relative symlinks into `software-factory/` (made by
+  manager,factory/settings.json}` are relative symlinks into `software-factory/` (made by
   `bash software-factory/install.sh . --link --layout new`, re-run it when a shared file is added; it leaves no empty folder behind, which
-  `check_skills.ts` would fail on). Edit the real
+  `check_skills.ts` would fail on). There is no `.claude/settings.json` here: the agents' rules are passed only to the
+  sessions the factory starts (#258), so the owner's own sessions are not governed by them. Edit the real
   files in `software-factory/`, never through a link. Run `./factory doctor` first on a new machine, then
   `./factory loop -i`. Do not run `factory update` here: this repo is where the releases come from.
 - One task is one GitHub issue, labelled `factory:ready`, `factory:in-progress`, `factory:in-review`,

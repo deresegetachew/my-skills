@@ -200,7 +200,7 @@ test("the real checkout builds an archive with the moved folders and no links", 
   const names = new Set(list.map((m) => m.name));
   const top = `software-factory-${version}/`;
   for (const must of ["hooks/factory_config.ts", "hooks/factory_lib.ts", "ci/ci.sh", "ci/entrypoint.sh", "factory",
-    "factory-loop.sh", "install.sh", "kit/.claude/settings.json", "kit/.claude/ci/ci.sh", "kit/factory"]) {
+    "factory-loop.sh", "install.sh", "kit/.claude/factory/settings.json", "kit/.claude/ci/ci.sh", "kit/factory"]) {
     expect(names.has(top + must), must).toBe(true);
   }
   expect(member(list, top + "factory").mode).toBe(0o755);

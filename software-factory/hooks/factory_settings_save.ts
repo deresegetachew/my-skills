@@ -6,18 +6,17 @@
 // that lists each change and the review it needs. The owner merges it (#247). The person's checkout goes back to the
 // main branch afterwards.
 //
-// A change of `permissions.allow` (#251) also writes the merged allow rules into .claude/settings.json in the same
-// commit (the release's own first, then the project's, as `factory update` does), so the rules apply once the owner
-// merges this one pull request. When the project has a release pin, its hash of settings.json follows, so the merged
-// file is not drift.
+// A change of `permissions.allow` (#251) also writes the merged allow rules into .claude/factory/settings.json, the
+// agents' settings, in the same commit (the release's own first, then the project's, as `factory update` does); the
+// pin's hash of it follows, so the merged file is not drift. Either way a rule applies on an agent's next run once the
+// owner merges this one pull request: the factory adds main's `permissions.allow` when it starts an agent (#258).
 import { lstatSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { git as runGit, pyDumps, run } from "./factory_lib.ts";
+import { AGENT_SETTINGS, git as runGit, pyDumps, run } from "./factory_lib.ts";
 import { PIN_PATH, projectAllow, sha256Bytes, withAllow } from "./factory_release.ts";
 import { asText, DEFAULT_REVIEW, MISSING, NEEDS } from "./factory_settings_schema.ts";
 import { type Change, changes, type Data, fail, PATH, readProject, refuseInAgentSession } from "./factory_settings_store.ts";
 
-export const CLAUDE_SETTINGS = join(".claude", "settings.json");
+export const CLAUDE_SETTINGS = AGENT_SETTINGS;
 
 function git(args: string[], check = true): { code: number; stdout: string; stderr: string } {
   const p = runGit(args);
@@ -91,15 +90,15 @@ function isLink(path: string): boolean {
   }
 }
 
-/** Write the project's allow rules into .claude/settings.json (after the release's own), and the pin's hash of it.
- * Returns the files written, or [] with a note printed when it cannot (no settings.json, or it is a link into the
+/** Write the project's allow rules into the agents' settings (after the release's own), and the pin's hash of it.
+ * Returns the files written, or [] with a note printed when it cannot (no such file, or it is a link into the
  * shared factory, which this never writes through). Rules removed from the list stay until `factory update`. */
 export function writeAllow(): string[] {
   let current: Uint8Array;
   try {
     if (isLink(CLAUDE_SETTINGS)) {
       console.log(`Note: ${CLAUDE_SETTINGS} is a link into the shared factory, so it is not changed here; ` +
-        "the rules apply once that file has them.");
+        "the factory adds the rules from factory.json when it starts an agent.");
       return [];
     }
     current = readFileSync(CLAUDE_SETTINGS);
@@ -118,7 +117,7 @@ export function writeAllow(): string[] {
     pin = null;
   }
   const files = pin && typeof pin.files === "object" && pin.files !== null ? (pin.files as Record<string, unknown>) : null;
-  const rel = ".claude/settings.json";
+  const rel = AGENT_SETTINGS;
   if (pin && files && files[rel] === sha256Bytes(current)) { // the pin held the file as it was: keep it in step
     files[rel] = sha256Bytes(merged);
     writeFileSync(PIN_PATH, pyDumps(pin, { indent: 2, sortKeys: true }) + "\n");

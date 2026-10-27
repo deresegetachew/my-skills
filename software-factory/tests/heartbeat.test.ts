@@ -832,7 +832,7 @@ test("help and settings know the heartbeat", () => {
 });
 
 test("doctor notes a missing daemon and agents cannot install or stop it", () => {
-  const deny = (JSON.parse(read(join(SF, "kit", ".claude", "settings.json"))) as { permissions: { deny: string[] } }).permissions.deny;
+  const deny = (JSON.parse(read(join(SF, "kit", ".claude", "factory", "settings.json"))) as { permissions: { deny: string[] } }).permissions.deny;
   for (const rule of ["Bash(factory heartbeat install*)", "Bash(factory heartbeat uninstall*)",
     "Bash(./factory heartbeat install*)", "Bash(./factory heartbeat uninstall*)", "Bash(*factory_heartbeat*)"]) {
     expect(deny).toContain(rule);

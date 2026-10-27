@@ -91,7 +91,7 @@ const ALLOW = ["Bash(git fetch*)", "Bash(git add*)", "Bash(git commit*)", "Bash(
 
 function doctor(cfg: Record<string, unknown>, allow: string[] = ALLOW, homeSettings?: unknown): Proc {
   const d = doctorProject({}, { agents: ["taytu"], ...cfg });
-  write(join(d, ".claude", "settings.json"), JSON.stringify({
+  write(join(d, ".claude", "factory", "settings.json"), JSON.stringify({
     hooks: { PreToolUse: [{ hooks: [{ type: "command", command: hookLine("pr-gate") }] }] }, permissions: { allow } }));
   const env = { ...machine(), FACTORY_AGENTS: "taytu" };
   if (homeSettings !== undefined) write(join(env.HOME as string, ".claude", "settings.json"), JSON.stringify(homeSettings));

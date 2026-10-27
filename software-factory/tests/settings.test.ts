@@ -103,7 +103,7 @@ test("an agent session can read but never change settings", () => {
 });
 
 test("agents are denied the settings command", () => {
-  const rules = readJson<{ permissions: { deny: string[] } }>(join(KIT, ".claude", "settings.json")).permissions.deny;
+  const rules = readJson<{ permissions: { deny: string[] } }>(join(KIT, ".claude", "factory", "settings.json")).permissions.deny;
   for (const rule of ["Bash(factory settings set*)", "Bash(factory settings unset*)", "Bash(*factory_setting*)"]) {
     expect(rules).toContain(rule);
   }
@@ -417,7 +417,7 @@ test("the pr gate blocks settings changes but not reading", () => {
 });
 
 test("the deny rules cover every way of changing settings", () => {
-  const rules = readJson<{ permissions: { deny: string[] } }>(join(KIT, ".claude", "settings.json")).permissions.deny;
+  const rules = readJson<{ permissions: { deny: string[] } }>(join(KIT, ".claude", "factory", "settings.json")).permissions.deny;
   for (const rule of ["Bash(factory settings pr*)", "Bash(factory settings interactive*)", "Bash(factory settings --local*)",
     "Bash(./factory settings pr*)", "Bash(./factory settings --local*)", "Bash(factory settings -i*)",
     "Bash(./factory settings interactive*)", "Bash(./factory settings -i*)"]) {
@@ -595,7 +595,7 @@ test("set permissions allow says the rule applies once the settings pr is merged
   const d = project({});
   const p = settings(d, ["set", "permissions.allow", '["Bash(make test*)"]']);
   expect(p.code).toBe(0);
-  expect(p.stdout).toContain(".claude/settings.json");
+  expect(p.stdout).toContain(".claude/factory/settings.json");
   expect(p.stdout).toContain("factory settings pr");
   expect(p.stdout).toContain("once the owner merges it");
   const help = settings(d, ["help", "permissions.allow"]).stdout;
@@ -605,9 +605,9 @@ test("set permissions allow says the rule applies once the settings pr is merged
 });
 
 test("a settings pr for permissions allow also writes the merged rules into settings json in the same commit", () => {
-  const pin = { schema: "factory-pin/1", tag: "v0.1.0", files: { ".claude/settings.json": sha256(RELEASE_SETTINGS) } };
+  const pin = { schema: "factory-pin/1", tag: "v0.1.0", files: { ".claude/factory/settings.json": sha256(RELEASE_SETTINGS) } };
   const [d, remote, env] = gitProject({ maxOpenPRs: 4 }, {
-    ".claude/settings.json": RELEASE_SETTINGS,
+    ".claude/factory/settings.json": RELEASE_SETTINGS,
     ".claude/factory/release.json": JSON.stringify(pin, null, 2) + "\n",
   });
   expect(settings(d, ["set", "permissions.allow", '["Bash(make test*)", "Bash(git add*)", "Bash(make test*)"]'], env).code).toBe(0);
@@ -615,26 +615,26 @@ test("a settings pr for permissions allow also writes the merged rules into sett
   expect(p.code).toBe(0);
   expect(p.stdout).toContain("settings.json");
   const branch = (remoteBranches(d)[0] as string).split("origin/")[1] as string;
-  const merged = JSON.parse(shown(remote, branch, ".claude/settings.json")) as { permissions: { allow: string[]; deny: string[] } };
+  const merged = JSON.parse(shown(remote, branch, ".claude/factory/settings.json")) as { permissions: { allow: string[]; deny: string[] } };
   // the release's own rules first, then the project's, each once, in order
   expect(merged.permissions.allow).toEqual(["Bash(git add*)", "Bash(git commit*)", "Bash(make test*)"]);
   expect(merged.permissions.deny).toEqual(["Bash(rm -rf*)"]);
   expect(JSON.parse(shown(remote, branch, ".claude/factory.json")).permissions).toEqual({ allow: ["Bash(make test*)", "Bash(git add*)", "Bash(make test*)"] });
   // one commit carries both files, and the pin's hash follows the merged settings.json, so it is not drift
   const files = sh(["git", "--git-dir", remote, "show", "--name-only", "--format=", branch]).stdout.split("\n").filter(Boolean).sort();
-  expect(files).toEqual([".claude/factory.json", ".claude/factory/release.json", ".claude/settings.json"]);
+  expect(files).toEqual([".claude/factory.json", ".claude/factory/release.json", ".claude/factory/settings.json"]);
   const newPin = JSON.parse(shown(remote, branch, ".claude/factory/release.json")) as { files: Record<string, string> };
-  expect(newPin.files[".claude/settings.json"]).toBe(sha256(shown(remote, branch, ".claude/settings.json")));
+  expect(newPin.files[".claude/factory/settings.json"]).toBe(sha256(shown(remote, branch, ".claude/factory/settings.json")));
   expect(read(env.GH_LOG as string)).toContain("apply once this pull request is merged");
   // main is untouched, and the person is back on it with a clean tree
-  expect(shown(remote, "main", ".claude/settings.json")).toBe(RELEASE_SETTINGS);
+  expect(shown(remote, "main", ".claude/factory/settings.json")).toBe(RELEASE_SETTINGS);
   expect(sh(["git", "status", "--porcelain"], { cwd: d }).stdout.trim()).toBe("");
-  expect(read(join(d, ".claude", "settings.json"))).toBe(RELEASE_SETTINGS);
+  expect(read(join(d, ".claude", "factory", "settings.json"))).toBe(RELEASE_SETTINGS);
 });
 
 test("a settings pr that does not touch permissions leaves settings json alone", () => {
   const [d, remote, env] = gitProject({ maxOpenPRs: 4, permissions: { allow: ["Bash(make test*)"] } },
-    { ".claude/settings.json": RELEASE_SETTINGS });
+    { ".claude/factory/settings.json": RELEASE_SETTINGS });
   settings(d, ["set", "maxOpenPRs", "5"], env);
   expect(settings(d, ["pr"], env).code).toBe(0);
   const branch = (remoteBranches(d)[0] as string).split("origin/")[1] as string;

@@ -220,7 +220,7 @@ test("the profile denies what the manager never does", () => {
 });
 
 test("the profile keeps every factory protecting deny of the shared settings except the gh api one", () => {
-  const shared = (JSON.parse(readFileSync(join(KIT, ".claude", "settings.json"), "utf8")) as Profile).permissions;
+  const shared = (JSON.parse(readFileSync(join(KIT, ".claude", "factory", "settings.json"), "utf8")) as Profile).permissions;
   expect(shared.deny).toContain("Bash(gh api *)"); // the reason the manager needs its own profile
   const mine = new Set(loadProfile().permissions.deny);
   const left = shared.deny.filter((d) => d !== "Bash(gh api *)" && !mine.has(d) && !d.startsWith("Bash(gh pr ")

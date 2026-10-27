@@ -80,13 +80,13 @@ test("a project with its own factory json gets the manager profile and the next 
 });
 
 function settingsAllow(d: string): string[] {
-  return ((json(join(d, ".claude", "settings.json")).permissions as Record<string, unknown>).allow) as string[];
+  return ((json(join(d, ".claude", "factory", "settings.json")).permissions as Record<string, unknown>).allow) as string[];
 }
 
 test("a projects extra allow entries are merged survive updates and are not drift", async () => {
   const [gh, d, env] = await world();
   const kit = (allow: string[]): Record<string, string> => ({
-    "kit/.claude/settings.json": JSON.stringify({ permissions: { allow, deny: ["Bash(rm *)"] } }) + "\n",
+    "kit/.claude/factory/settings.json": JSON.stringify({ permissions: { allow, deny: ["Bash(rm *)"] } }) + "\n",
   });
   gh.add("1.0.0", { files: kit(["Bash(ls *)"]), date: "2026-10-01T10:00:00Z" });
   gh.add("1.1.0", { files: kit(["Bash(ls *)", "Bash(git log*)"]), date: "2026-11-01T10:00:00Z" });
@@ -97,7 +97,7 @@ test("a projects extra allow entries are merged survive updates and are not drif
   let [rc, out] = await fac(d, env, "update", "1.0.0");
   expect(rc, out).toBe(0);
   expect(settingsAllow(d), "the release's entries, then the project's, no repeats").toEqual(["Bash(ls *)", "Edit(tmp/**)", "Bash(mkdir -p *)"]);
-  expect((json(join(d, ".claude", "settings.json")).permissions as Record<string, unknown>).deny).toEqual(["Bash(rm *)"]);
+  expect((json(join(d, ".claude", "factory", "settings.json")).permissions as Record<string, unknown>).deny).toEqual(["Bash(rm *)"]);
   [rc, out] = await fac(d, env, "version");
   expect(out).toContain("the files match the pin");
   commit(d);
@@ -106,7 +106,7 @@ test("a projects extra allow entries are merged survive updates and are not drif
   expect(settingsAllow(d)).toEqual(["Bash(ls *)", "Bash(git log*)", "Edit(tmp/**)", "Bash(mkdir -p *)"]);
   expect((await fac(d, env, "version"))[1]).not.toContain("differ");
   commit(d);
-  const settings = join(d, ".claude", "settings.json"); // an entry added by hand in settings.json is still drift
+  const settings = join(d, ".claude", "factory", "settings.json"); // an entry added by hand in settings.json is still drift
   const data = json(settings);
   ((data.permissions as Record<string, unknown>).allow as string[]).push("Bash(curl *)");
   writeFileSync(settings, JSON.stringify(data, null, 2));
@@ -137,7 +137,7 @@ test("a bad allow list is refused with a fix and changes nothing", async () => {
 });
 
 test("the kits default allow list has what a headless coding agent needs and no unmatched or risky rules", () => {
-  const allow = ((json(join(KIT, ".claude", "settings.json")).permissions as Record<string, unknown>).allow) as string[];
+  const allow = ((json(join(KIT, ".claude", "factory", "settings.json")).permissions as Record<string, unknown>).allow) as string[];
   for (const entry of ["Edit(tmp/**)", "Bash(cd *)", "Bash(ls *)", "Bash(mkdir -p *)", "Bash(git rev-parse*)"]) expect(allow).toContain(entry);
   expect(allow.filter((a) => a.startsWith("Write(")), "Claude Code never matches Write(path) rules").toEqual([]);
   expect(allow.filter((a) => a.includes("python3 -c")), "an inline interpreter would let an agent run anything").toEqual([]);
@@ -253,6 +253,7 @@ test("update from a python release to a bun release removes the python files and
     "hooks/factory_x.ts": null, "hooks/factory_old.ts": null,
     "hooks/factory_x.py": "VERSION = '0.1.0-alpha.3'\n", "hooks/factory_old.py": "OLD = 1\n",
     "hooks/sub/helper.py": "HELP = 1\n",
+    "kit/.claude/factory/settings.json": null, // releases before #258 kept the agents' rules in .claude/settings.json
     "kit/.claude/settings.json": JSON.stringify({ permissions: { allow: ["Bash(python3 .claude/hooks/*)"] }, hooks: { Stop: [{ hooks: [{
       type: "command", command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_x.py" }] }] } }) + "\n",
   } });
@@ -270,7 +271,10 @@ test("update from a python release to a bun release removes the python files and
   expect(existsSync(join(d, ".claude/hooks/sub")), "an emptied folder goes too").toBe(false);
   expect(read(join(d, ".claude/hooks/factory_x.ts"))).toBe(VERSION_TS("0.2.0"));
   expect(Object.keys(pin(d).files).filter((f) => f.endsWith(".py")), "the pin lists no python file").toEqual([]);
-  expect(read(join(d, ".claude/settings.json"))).not.toContain("python3");
+  expect(read(join(d, ".claude/factory/settings.json"))).not.toContain("python3");
+  expect(existsSync(join(d, ".claude/settings.json")), "the old rules file goes: it matched the pin (#258)").toBe(false);
+  expect(out).toContain("removed .claude/settings.json");
+  expect(out).toContain("The agents' rules moved from .claude/settings.json to .claude/factory/settings.json");
   commit(d, "on the bun release");
   [rc, out] = await fac(d, env, "version");
   expect(rc === 0 && out.includes("the files match the pin") && !out.includes("differ"), out).toBe(true);
@@ -279,12 +283,37 @@ test("update from a python release to a bun release removes the python files and
   expect(existsSync(join(d, ".claude/hooks/factory_x.py")) && !existsSync(join(d, ".claude/hooks/factory_x.ts"))).toBe(true);
 });
 
+test("an old rules file the project changed is kept and named and a dropped file it changed is kept too", async () => {
+  // #258: the agents' rules move to .claude/factory/settings.json; a file the project edited is never thrown away
+  const [gh, d, env] = await world();
+  gh.add("1.0.0", { date: "2026-10-01T10:00:00Z", files: {
+    "kit/.claude/factory/settings.json": null,
+    "kit/.claude/settings.json": JSON.stringify({ permissions: { deny: ["Bash(rm *)"] } }) + "\n",
+  } });
+  let [rc, out] = await fac(d, env, "update", "1.0.0");
+  expect(rc, out).toBe(0);
+  writeFileSync(join(d, ".claude", "settings.json"), JSON.stringify({ permissions: { deny: ["Bash(rm *)"], allow: ["Bash(mine *)"] } }) + "\n");
+  writeFileSync(join(d, ".claude", "hooks", "factory_old.ts"), "export const OLD = 2; // changed here\n");
+  commit(d, "local changes");
+  gh.add("1.1.0", { date: "2026-11-01T10:00:00Z", files: { "hooks/factory_old.ts": null } });
+  [rc, out] = await fac(d, env, "update", "1.1.0");
+  expect(rc, out).toBe(0);
+  expect(read(join(d, ".claude", "settings.json"))).toContain("Bash(mine *)");
+  expect(out).toContain("kept .claude/settings.json: it has local changes and this release no longer ships it");
+  expect(out).toContain("permissions.allow");
+  expect(existsSync(join(d, ".claude", "factory", "settings.json")), "the agents' rules are installed where the factory reads them").toBe(true);
+  expect(read(join(d, ".claude", "hooks", "factory_old.ts"))).toContain("changed here");
+  expect(out).toContain("kept .claude/hooks/factory_old.ts: it has local changes");
+  expect(out).not.toContain("removed .claude/settings.json");
+});
+
 test("update from a python release to a bun release rewrites the workflow steps that call a removed python hook", async () => {
   // #254: the workflow is the project's file, but CI on the update PR fails at once while it calls the deleted scripts
   const [gh, d, env] = await world();
   gh.add("0.1.0-alpha.3", { pre: true, date: "2026-10-01T10:00:00Z", files: {
     "hooks/factory_x.ts": null, "hooks/factory_old.ts": null,
     "hooks/factory_x.py": "VERSION = '0.1.0-alpha.3'\n", "hooks/factory_old.py": "OLD = 1\n",
+    "kit/.claude/factory/settings.json": null,
     "kit/.claude/settings.json": JSON.stringify({ hooks: { Stop: [{ hooks: [{
       type: "command", command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_x.py" }] }] } }) + "\n",
   } });
@@ -480,7 +509,7 @@ test("agents cannot update the factory", async () => {
 });
 
 test("agents are denied update and rollback in the shipped settings", () => {
-  const rules = ((json(join(KIT, ".claude", "settings.json")).permissions as Record<string, unknown>).deny) as string[];
+  const rules = ((json(join(KIT, ".claude", "factory", "settings.json")).permissions as Record<string, unknown>).deny) as string[];
   for (const rule of ["Bash(factory update*)", "Bash(./factory update*)", "Bash(factory rollback*)", "Bash(./factory rollback*)",
     "Bash(*factory_release*)"]) expect(rules).toContain(rule);
 });
@@ -841,7 +870,7 @@ test("a release built from this repo installs into a project and passes the veri
   let [rc, out] = await fac(d, env, "update");
   expect(rc, out).toBe(0);
   for (const rel of [".claude/hooks/factory_release.ts", ".claude/hooks/factory_stack.ts", ".claude/ci/ci.sh", ".claude/ci/entrypoint.sh",
-    ".claude/settings.json", ".claude/agents/reviewer.md", ".claude/skills/next-task/SKILL.md", "factory", "factory-loop.sh"]) {
+    ".claude/factory/settings.json", ".claude/agents/reviewer.md", ".claude/skills/next-task/SKILL.md", "factory", "factory-loop.sh"]) {
     expect(existsSync(join(d, rel)) && !lstatSync(join(d, rel)).isSymbolicLink(), rel).toBe(true);
   }
   expect(executable(join(d, "factory")) && executable(join(d, ".claude/ci/ci.sh"))).toBe(true);

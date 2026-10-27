@@ -5,14 +5,23 @@
 // `factory agent` starts its claude the same way.
 import { expect, test } from "bun:test";
 import { join } from "node:path";
-import { calls, EMPTY, type Env, fakeClaude, flag, loopProject, mainCopy, NO_CONNECTORS, quiet } from "./loop_support.ts";
+import {
+  calls, EMPTY, type Env, fakeClaude, flag, KIT_AGENT_SETTINGS, loopProject, mainCopy, NO_CONNECTORS, quiet, startedSettings,
+} from "./loop_support.ts";
 import { readdirSync, symlinkSync } from "node:fs";
 import { HOOKS, read, SF, sh, tmp, write } from "./support.ts";
 
+/** Only the project's MCP servers, connectors off, and the agents' rules from main on top of the project's own
+ * settings (#258): never --setting-sources, which would drop the project's own .claude/settings.json. */
 function assertIsolated(args: string[], mcpConfig: string): void {
   expect(args).toContain("--strict-mcp-config");
   expect(flag(args, "--mcp-config")).toBe(mcpConfig);
-  expect(JSON.parse(flag(args, "--settings"))).toEqual(JSON.parse(NO_CONNECTORS));
+  const kit = JSON.parse(read(KIT_AGENT_SETTINGS)) as { permissions: { deny: string[] }; hooks: unknown };
+  const got = startedSettings(args) as { permissions: { deny: string[] }; hooks: unknown };
+  expect(got).toMatchObject(JSON.parse(NO_CONNECTORS));
+  expect(got.permissions.deny).toEqual(kit.permissions.deny);
+  expect(got.hooks).toEqual(kit.hooks);
+  expect(args).not.toContain("--setting-sources");
 }
 
 /** factory-loop.sh -i reads /dev/tty, so it runs on a pseudo-terminal. Returns its output. */
@@ -106,7 +115,7 @@ test("factory agent starts claude isolated and passes its own arguments on", () 
   quiet(["git", "init", "-q", "-b", "main", work]);
   write(join(work, ".claude", "hooks", ".keep"), "");
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) symlinkSync(join(HOOKS, f), join(work, ".claude", "hooks", f));
-  write(join(work, ".claude", "settings.json"), JSON.stringify({ hooks: {} }));
+  write(join(work, ".claude", "factory", "settings.json"), read(KIT_AGENT_SETTINGS));
   write(join(work, ".claude", "factory.json"), JSON.stringify({ agents: ["menelik", "taytu"] }));
   write(join(work, ".mcp.json"), JSON.stringify(DOCS));
   quiet(["git", "add", "-A"], work);

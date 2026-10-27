@@ -200,7 +200,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `permissionMode` | one of acceptEdits/default | `"acceptEdits"` | How unattended `claude -p` runs get their permissions: acceptEdits (the default) or default (your own Claude Code settings decide). |
 | `waitMinutes` | int | `1` | How often an idle loop looks for work. 0: it exits instead. |
 | `models` | dict | `{}` | The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default. |
-| `permissions.allow` | list | `[]` | Extra Claude Code allow rules for this project, like "Edit(src/**)". A rule applies once the pull request from `factory settings pr` is merged: it also writes the rules into .claude/settings.json, after the release's own. |
+| `permissions.allow` | list | `[]` | Extra Claude Code allow rules for this project's agents, like "Edit(src/**)". A rule applies on an agent's next run once the pull request from `factory settings pr` is merged: the factory adds them to the agents' settings, after the release's own. |
 
 **Issues mode**
 

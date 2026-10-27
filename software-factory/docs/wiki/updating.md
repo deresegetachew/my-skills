@@ -13,7 +13,7 @@ On this page:
 ## Updating from releases
 
 A project on releases has the factory as plain files committed in its repo (`.claude/hooks/`, `.claude/ci/`, `factory`,
-`factory-loop.sh`, and the agents, skills and `settings.json` in `.claude/`), plus one file that says which release they
+`factory-loop.sh`, the agents and skills in `.claude/`, and the agents' rules in `.claude/factory/settings.json`), plus one file that says which release they
 are: `.claude/factory/release.json`, the **pin**. Updating is a normal reviewed diff. For the common case you need one
 command:
 
@@ -45,14 +45,14 @@ other project is unaffected.
    installs nothing and leaves nothing in the cache. A transfer that stops part way does the same.
 3. Unpacks in memory with every path checked (nothing outside the archive's own folder, no links, no duplicate or
    unlisted file) and checks every file against the archive's `MANIFEST.json`.
-4. Writes the files into the project, undoing everything if a write fails, removes files the new release dropped, and
-   writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
+4. Writes the files into the project, undoing everything if a write fails, removes files the new release dropped (one
+   you changed is kept and named, never thrown away), and writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
    `.gitignore` lines), never over an existing file.
 5. Refreshes this machine: if CI runner services are installed here and older than the files (`factory ci stale`), it
    runs `factory ci install`, which also rebuilds the runner image. If the heartbeat daemon is installed here it is
    restarted too (`factory heartbeat restart`), because it is one long process that would otherwise keep running the
    old code.
-6. Verifies: every file matches the pin; every hook named in `settings.json` exists; the TypeScript and shell scripts parse;
+6. Verifies: every file matches the pin; every hook named in the agents' settings exists; the TypeScript and shell scripts parse;
    and the installed runner files are readable by the runner container's user, not writable by others, and match the
    checkout (`factory ci check`, which, when Docker and the runner image are on the machine, also starts the installed
    entrypoint in the image as the container's own user and parses it). If any of that fails it exits 1, names each problem and does not say it worked.
@@ -61,15 +61,29 @@ other project is unaffected.
    commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
    running `factory update`. Agent sessions cannot run it (the PR gate reads these files).
 
-**Your own allow rules.** `.claude/settings.json` belongs to the release: a rule typed into it by hand is drift
-(`factory doctor` says `fix`), and the next `factory update` replaces it. List the project's extra allow rules in
-`.claude/factory.json` instead, as `"permissions": {"allow": ["Edit(src/**)", "Bash(make test*)"]}`. `factory update`
-adds them after the release's own rules and records the merged file in the pin, so they are not drift and survive every
-update. A rule in `factory.json` that `settings.json` does not have yet is reported with `run factory update`. Use
-`Edit(path/**)` for files (Claude Code never matches `Write(path)` rules). Deny rules always win. Changing the list is a
-protected change: it goes through a pull request the owner merges. `factory settings set permissions.allow ...` and
-`factory settings pr` put the merged rules into `.claude/settings.json` in that same pull request, so a new rule applies
-once the owner merges it, with no second pull request (#251).
+**Your own allow rules.** `.claude/factory/settings.json` (the agents' rules) belongs to the release: a rule typed into
+it by hand is drift (`factory doctor` says `fix`), and the next `factory update` replaces it. List the project's extra
+allow rules in `.claude/factory.json` instead, as `"permissions": {"allow": ["Edit(src/**)", "Bash(make test*)"]}`.
+Each time the factory starts an agent it adds them, as main has them, after the release's own rules (#258), so a rule
+applies on the agent's next run once the owner merges the pull request from `factory settings pr`, with nothing else to
+run (#251). `factory update` and `factory settings pr` also write them into the file and record it in the pin, so they
+are not drift. Use `Edit(path/**)` for files (Claude Code never matches `Write(path)` rules). Deny rules always win.
+Changing the list is a protected change: it goes through a pull request the owner merges.
+
+**Where the agents' rules live (#258).** The factory's rules for its agents (the deny list, the PR gate and the other
+hooks) are in `.claude/factory/settings.json`, which Claude Code never loads by itself. `factory loop` and
+`factory agent` pass it when they start an agent (`claude --settings <file>`), as main has it on origin, never the
+worktree's copy, so an agent cannot loosen its own next run. Your own Claude sessions in the project do not get these
+rules. A `.claude/settings.json` of your own still applies to every session, agents included: Claude Code adds the
+factory's file on top, and a deny rule in either one wins. When main has no agents' settings, the factory starts no
+agent and says how to fix it.
+
+**Moving to injected settings.** Releases before #258 kept the agents' rules in `.claude/settings.json`. The update
+that brings #258 removes that file when it still matches the pin, and says so; when you changed it, it is kept and
+named: move your own rules to `permissions.allow` in `.claude/factory.json`, or keep the file as your own settings for
+every session, and commit what you choose. A project linked to the submodule loses the link on its next
+`install.sh . --link` (or `factory migrate-to-release`). `factory doctor` notes a `.claude/settings.json` that still
+holds the factory's rules.
 
 Where things live: downloads are cached in `~/.cache/software-factory/<repo>/<tag>/` (`FACTORY_CACHE_DIR` moves it).
 `release.repo` in `factory.json` names the repository whose releases are used (default `deresegetachew/my-skills`);

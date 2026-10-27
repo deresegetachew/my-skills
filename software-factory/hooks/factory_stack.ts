@@ -12,7 +12,7 @@
 //                                             empty: says so and exits 0 (CI's Python template uses it)
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { pyDumps, run as runCmd, runMain } from "./factory_lib.ts";
+import { AGENT_SETTINGS, pyDumps, run as runCmd, runMain } from "./factory_lib.ts";
 
 export const PYTHON_MARKERS = ["pyproject.toml", "setup.py", "setup.cfg"];
 
@@ -155,18 +155,15 @@ function isLink(path: string): boolean {
 }
 
 /** What the install tells the person about the stack it found (the same words from install.sh and the release
- * client). With `root`, a project whose .claude/settings.json is a link is told to add the allow rules by hand. */
-export function lines(found: Found, root?: string): string[] {
+ * client). The allow rules apply in a linked project too: the factory adds factory.json's `permissions.allow` to the
+ * agents' settings each time it starts one (#258). */
+export function lines(found: Found, _root?: string): string[] {
   if (found.stack === "python") {
     const out = ["Stack: Python (no package.json). CI uses the Python workflow, and commands.* in .claude/factory.json were set to match."];
     const rules = allowRules(found);
     if (rules.length) {
       out.push("Allowed for unattended agents (permissions.allow in .claude/factory.json): " +
         rules.map((r) => "`" + r + "`").join(", ") + ".");
-      if (root && isLink(join(root, ".claude", "settings.json"))) {
-        out.push("Note: .claude/settings.json is a link into the kit, so Claude Code does not read those rules from " +
-          "factory.json: add them to the allow list in a .claude/settings.local.json, or the agent cannot run the tests unattended.");
-      }
     }
     return out.concat(found.notes.map((n) => "Note: " + n));
   }
@@ -177,14 +174,14 @@ export function lines(found: Found, root?: string): string[] {
   return [];
 }
 
-/** Write a Python stack's commands and allow rules into factory.json; a copied (not linked) .claude/settings.json gets
+/** Write a Python stack's commands and allow rules into factory.json; a copied (not linked) agents' settings file gets
  * the allow rules too, after its own, so Claude Code lets an unattended agent run the tests (#249). */
 export function apply(root: string): Found {
   const found = detect(root);
   const path = join(root, ".claude", "factory.json");
   if (found.stack === "python") {
     writeFileSync(path, commandsText(readFileSync(path, "utf8"), found));
-    const settings = join(root, ".claude", "settings.json");
+    const settings = join(root, AGENT_SETTINGS);
     if (isFile(settings) && !isLink(settings)) {
       try {
         const doc = JSON.parse(readFileSync(settings, "utf8")) as JsonObj;

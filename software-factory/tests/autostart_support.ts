@@ -80,7 +80,7 @@ export function shOk(cmd: string[], cwd?: string): Proc {
   return p;
 }
 
-/** A clone (named proj) of a bare origin; .claude/settings.json is a link into a submodule, as in a real project. */
+/** A clone (named proj) of a bare origin; .claude/factory/settings.json (the agents' rules) is a link into a submodule, as in a real project. */
 export function project(cfg: unknown = null): string {
   const top = tmp();
   const [kit, origin, work, seedKit] = ["kit.git", "origin.git", "seed", "kit-seed"].map((n) => join(top, n)) as [string, string, string, string];
@@ -94,7 +94,8 @@ export function project(cfg: unknown = null): string {
   write(join(work, "docs", "a.txt"), "one\n");
   write(join(work, "docs", "b.txt"), "two\n");
   write(join(work, ".claude", "factory.json"), JSON.stringify(cfg ?? { agents: NAMES }));
-  symlinkSync("../vendor/my-skills/kit/settings.json", join(work, ".claude", "settings.json"));
+  mkdirSync(join(work, ".claude", "factory"), { recursive: true });
+  symlinkSync("../../vendor/my-skills/kit/settings.json", join(work, ".claude", "factory", "settings.json"));
   shOk(["git", "add", "-A"], work);
   shOk(["git", "commit", "-qm", "project"], work);
   shOk(["git", "clone", "-q", "--bare", work, origin]);

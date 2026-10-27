@@ -237,12 +237,12 @@ function hookCommands(data: unknown): string[] {
   return out;
 }
 
-/** The hooks .claude/settings.json runs are the factory's Bun scripts (#252): each `.claude/hooks/<name>.ts` exists
+/** The hooks .claude/factory/settings.json runs are the factory's Bun scripts (#252): each `.claude/hooks/<name>.ts` exists
  * and is run with `bun --no-env-file`, and no line still runs a Python hook. Quiet when it runs no factory hook. */
 export function hookLines(r: Reporter): void {
   let data: unknown;
   try {
-    data = JSON.parse(readText(".claude/settings.json"));
+    data = JSON.parse(readText(".claude/factory/settings.json"));
   } catch {
     return; // missing (reported above) or not JSON (Claude Code and `factory update` say so)
   }
@@ -258,17 +258,17 @@ export function hookLines(r: Reporter): void {
     if (scripts.length && !/^\s*bun --no-env-file\s/.test(command)) notBun.add(command);
   }
   for (const script of [...python].sort()) {
-    r.fix(`.claude/settings.json runs ${script}`, "the factory runs on Bun now and has no Python hooks: run `factory update` " +
+    r.fix(`.claude/factory/settings.json runs ${script}`, "the factory runs on Bun now and has no Python hooks: run `factory update` " +
       "(it writes the hook lines as `bun --no-env-file \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/<name>.ts`)");
   }
   for (const script of [...missing].sort()) {
-    r.fix(`.claude/settings.json runs ${script}`, "the hook script is missing: run `factory update`");
+    r.fix(`.claude/factory/settings.json runs ${script}`, "the hook script is missing: run `factory update`");
   }
   for (const command of [...notBun].sort()) {
-    r.fix(".claude/settings.json hook line", `\`${command}\` does not start with \`bun --no-env-file\`, so Bun would load the ` +
+    r.fix(".claude/factory/settings.json hook line", `\`${command}\` does not start with \`bun --no-env-file\`, so Bun would load the ` +
       "project's .env into the factory: run `factory update`");
   }
-  if (seen && !python.size && !missing.size && !notBun.size) r.ok("the hooks in .claude/settings.json run with Bun");
+  if (seen && !python.size && !missing.size && !notBun.size) r.ok("the hooks in .claude/factory/settings.json run with Bun");
 }
 
 export function project(r: Reporter, cfg: Config): void {
@@ -280,13 +280,18 @@ export function project(r: Reporter, cfg: Config): void {
     if (bad.length) r.fix("submodules", `${bad.join(", ")} not at the commit main pins: run \`git submodule update --init\``);
     else r.ok("submodules");
   }
-  if (existsSync(".claude/settings.json")) {
-    r.ok(".claude/settings.json");
+  if (existsSync(".claude/factory/settings.json")) {
+    r.ok(".claude/factory/settings.json (the agents' rules, passed when the factory starts an agent)");
     hookLines(r);
   } else {
-    r.fix(".claude/settings.json", "it doesn't resolve, so the hooks and deny rules won't load: run " +
+    r.fix(".claude/factory/settings.json", "it doesn't resolve, so the factory won't start an agent without its hooks and deny rules: run " +
       "`factory update` (a project on releases), or `git submodule update --init` / " +
       "`bash vendor/my-skills/software-factory/install.sh . --link` (a project on the submodule)");
+  }
+  // #258: an old release's .claude/settings.json (it runs the PR gate) gives the agents' rules to every session here.
+  if (/\.claude\/hooks\/pr-gate\.(ts|py)\b/.test(existsSync(".claude/settings.json") ? readText(".claude/settings.json") : "")) {
+    r.note(".claude/settings.json", "it still holds the factory's agent rules, so your own Claude sessions here get them too: " +
+      "run `factory update`, which moves them to .claude/factory/settings.json");
   }
   if (existsSync(".env.example") && !existsSync(".env.local")) {
     r.note(".env.local", "missing; copy .env.example to .env.local and fill it in");
@@ -341,13 +346,13 @@ export function allows(rules: unknown[], command: string): boolean {
 
 /** Is this the factory's settings.json (it runs the PR gate)? Only then is there an allow list to judge. */
 function factorySettingsText(): string | null {
-  const text = existsSync(".claude/settings.json") ? readText(".claude/settings.json") : "";
+  const text = existsSync(".claude/factory/settings.json") ? readText(".claude/factory/settings.json") : "";
   return /\.claude\/hooks\/pr-gate\.(ts|py)\b/.test(text) ? text : null;
 }
 
-/** The allow rules an unattended run gets: .claude/settings.json's and `permissions.allow` in factory.json. */
+/** The allow rules an unattended run gets: .claude/factory/settings.json's and `permissions.allow` in factory.json. */
 function allowList(cfg: Config): string[] {
-  const settings = readJsonFile(".claude/settings.json");
+  const settings = readJsonFile(".claude/factory/settings.json");
   const perms = isObject(settings.permissions) ? settings.permissions : {};
   const mine = isObject(cfg.permissions) ? cfg.permissions.allow : [];
   return [...strings(perms.allow), ...strings(mine)];
@@ -374,7 +379,7 @@ export function permissions(r: Reporter, cfg: Config): void {
   if (missing.length) {
     r.fix("allow list for unattended runs", `no rule allows ${missing.map((c) => "`" + c + "`").join(", ")}, so a headless run stops there ` +
       "waiting for an answer: add rules such as `Bash(git commit*)` to `permissions.allow` in .claude/factory.json " +
-      "(or to .claude/settings.json in a project that takes the kit by link)");
+      "(or to .claude/factory/settings.json in a project that takes the kit by link)");
   }
 }
 
@@ -418,7 +423,7 @@ export function trust(r: Reporter, cfg: Config): void {
       r.ok(`Claude Code trusts ${path}` +
         (main ? ` (a git worktree of ${main}, which is trusted; Claude Code writes no entry for a worktree)` : ""));
     } else if (found === "untrusted") {
-      r.fix(`Claude Code does not trust ${path}`, "it would ignore the allow list in .claude/settings.json and an unattended " +
+      r.fix(`Claude Code does not trust ${path}`, "it would ignore the allow lists (the agents' in .claude/factory/settings.json and the project's own) and an unattended " +
         `run would stop at its first command: run \`cd ${path} && claude\` yourself and answer yes to the trust question ` +
         "(the factory never sets the flag)");
     } else {

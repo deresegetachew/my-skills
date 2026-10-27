@@ -133,13 +133,19 @@ logins count. This only helps once the agents use a different GitHub account fro
 branches, no `gh api` and no `gh alias` from the agent, no edits to `.claude/`, `vendor/`, `CLAUDE.md` or the PRD,
 no reading `.env` files.
 
+**These rules and the hooks below apply to the agents only (#258).** They are in `.claude/factory/settings.json`,
+which Claude Code never loads by itself: `factory loop` and `factory agent` pass it (`claude --settings`), as main has
+it on origin, when they start an agent. Your own Claude sessions in the project run without the gate, the guard's
+hooks or these deny rules; CI and the PR gate on the agents' pull requests still apply. A project's own
+`.claude/settings.json` applies to every session, and Claude Code adds the factory's rules on top for an agent.
+
 ### Other hooks
 
 | Hook | What it does |
 |---|---|
 | Stop: `check.ts` | In a factory run only (`factory loop`, which sets `FACTORY_LOOP=1`): won't let a turn end while typecheck or tests fail, when code under `codePaths` changed. Skips a rerun when nothing changed since the last green check. Your own session in the project skips it; CI and the PR gate still check the build |
 | Stop: `factory_stop.ts` | In `factory loop -i`, closes the session a few seconds after the agent marks its task done |
-| SessionStart: `factory_session.ts` | Updates the submodules. For your own sessions, also claims the folder, installs, sets the agent's env and registers it |
+| SessionStart: `factory_session.ts` | Updates the submodules. In a session `factory agent` started, also claims the folder, installs, sets the agent's env and registers it |
 | Post-tool, Stop, SessionEnd: `factory_agents.ts hook` | Pings, idle and down on the agent issue (issues mode) |
 
 ### The Factory guard (CI)

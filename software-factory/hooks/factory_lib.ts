@@ -4,6 +4,13 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname } from "node:path";
 import { dlopen, FFIType } from "bun:ffi";
 
+/** The factory's rules for its agents (deny list, PR gate and the other hooks), in a project (#258). Claude Code never
+ * loads it by itself: factory-loop.sh and `factory agent` pass it with `claude --settings` (factory_agent_settings.ts),
+ * so the owner's own sessions in the project are not governed by it. */
+export const AGENT_SETTINGS = ".claude/factory/settings.json";
+/** Where releases before #258 put those rules. Claude Code loads it in every session in the folder. */
+export const LEGACY_SETTINGS = ".claude/settings.json";
+
 /** A stop with a message (like Python's `raise SystemExit("text")`) or a bare exit code (`SystemExit(2)`).
  * Thrown, not exited, so a caller (or a test) can catch it; `runMain` prints the message and exits. */
 export class Exit extends Error {

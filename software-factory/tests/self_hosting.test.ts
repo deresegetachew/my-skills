@@ -43,7 +43,7 @@ test("the factory settings of this repo are valid and take tasks from issues", (
 test("what governs the agents is protected and the notes folder exists", () => {
   const cfg = config();
   for (const path of ["CLAUDE.md", ".claude/factory.json", ".github/workflows/check.yml", "software-factory/hooks/pr-gate.ts",
-    "software-factory/hooks/factory_guard.ts", "software-factory/kit/.claude/settings.json",
+    "software-factory/hooks/factory_guard.ts", "software-factory/kit/.claude/factory/settings.json",
     "software-factory/kit/.claude/agents/reviewer.md", "tools/build_release.ts", "software-factory/VERSION"]) {
     expect(cfg.protected.some((rx) => new RegExp(rx).test(path)), path).toBe(true);
   }

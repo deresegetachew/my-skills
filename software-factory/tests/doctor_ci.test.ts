@@ -82,7 +82,7 @@ function run(o: { db?: Row; cfg?: Row; files?: Record<string, string>; runs?: Ro
   const d = tmp();
   sh(["git", "init", "-q", "-b", "main", d]);
   write(join(d, ".claude", "factory.json"), JSON.stringify({ agents: ["taytu"], ...(o.cfg ?? {}) }));
-  write(join(d, ".claude", "settings.json"), JSON.stringify({ hooks: {} }));
+  write(join(d, ".claude", "factory", "settings.json"), JSON.stringify({ hooks: {} }));
   for (const [name, text] of Object.entries(o.files ?? {})) write(join(d, name), text);
   const scratch = tmp();
   const bin = join(scratch, "bin");

@@ -261,11 +261,11 @@ export function services(r: Report, cfgProject: Record<string, unknown> | null):
   for (const line of wrc === 0 ? wout.split(/\r\n|\r|\n/) : []) {
     if (line.startsWith("worktree ")) {
       const path = line.slice(9);
-      if (existsSync(join(path, ".gitmodules")) && !existsSync(join(path, ".claude", "settings.json"))) bad.push(path);
+      if (existsSync(join(path, ".gitmodules")) && !existsSync(join(path, ".claude", "factory", "settings.json"))) bad.push(path);
     }
   }
   if (bad.length) {
-    r.fix("agent worktrees", `${bad.join(", ")} have no .claude/settings.json (submodules missing): ` +
+    r.fix("agent worktrees", `${bad.join(", ")} have no .claude/factory/settings.json (submodules missing): ` +
       "`git submodule update --init` in each");
   } else if (wrc === 0) {
     r.ok("every worktree has its submodules");

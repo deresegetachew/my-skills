@@ -213,8 +213,8 @@ export const SETTINGS: Record<string, Setting> = table([
   S("tasks.heartbeatMissMinutes", "int", "issues", "An agent the daemon writes for counts as silent after this many minutes without a keepalive (instead of downMinutes)."),
   S("tasks.releaseDownMinutes", "int", "issues", "An agent that is plainly down (its loop or the daemon said so) gets its in-progress issues back to ready by the sweep after this long."),
   S("tasks.showWhere", "bool", "issues", "Post the machine, folder, tmux session and Remote Control link on agent issues (anyone who can read the repo sees them).", { default: false }),
-  // #251: `factory settings pr` writes the merged rules into .claude/settings.json in the same pull request.
-  S("permissions.allow", "list", "agents", 'Extra Claude Code allow rules for this project, like "Edit(src/**)". A rule applies once the pull request from `factory settings pr` is merged: it also writes the rules into .claude/settings.json, after the release\'s own.'),
+  // #251, #258: the factory adds main's rules to the agents' settings each time it starts one.
+  S("permissions.allow", "list", "agents", 'Extra Claude Code allow rules for this project\'s agents, like "Edit(src/**)". A rule applies on an agent\'s next run once the pull request from `factory settings pr` is merged: the factory adds them to the agents\' settings, after the release\'s own.'),
   S("reviews.safety-auditor.paths", "list", "gate", "Regexes of paths that need the safety auditor."),
   S("reviews.security-reviewer.paths", "list", "gate", "Regexes of paths that need the security reviewer."),
   S("eval.command", "str", "design", "The eval command (e.g. `pnpm golden`). Empty: no eval yet.", { default: "" }),
@@ -348,11 +348,11 @@ const MORE: Record<string, More> = {
   examples: ['factory settings set trustedReviewers \'["your-login"]\''] },
   holdLabel: { long: "While the dev manager reviews a PR it puts this label on it. Agents skip held PRs (no " +
     "rework) and can't merge them.", examples: ["factory settings set holdLabel factory-hold"] },
-  "permissions.allow": { long: "The release owns .claude/settings.json, so a rule added there by hand is drift and the next `factory update` " +
-    "replaces it. List the project's extra allow rules here instead. A rule applies once it is in .claude/settings.json: " +
-    "`factory settings pr` writes the merged rules there (the release's own first, then these) in the same pull request as " +
-    "the change here, so the rule applies once the owner merges that pull request; until then the agents do not have it. " +
-    "`factory update` merges them again after the release's own, and `factory doctor` says to run it when one is missing. " +
+  "permissions.allow": { long: "The agents' rules are in .claude/factory/settings.json, which the release owns, so a rule added there by " +
+    "hand is drift and the next `factory update` replaces it. List the project's extra allow rules here instead. Each time " +
+    "the factory starts an agent it adds these rules, as main has them, after the release's own (#258), so a rule applies " +
+    "once the pull request from `factory settings pr` is merged, on the agent's next run; nothing else to run. They " +
+    "apply to the agents only: your own Claude sessions in the project use your own settings. " +
     "Use `Edit(path/**)` for files (Claude Code never matches `Write(path)` rules) and `Bash(command *)` for commands. " +
     "Deny rules still win. Review each rule: an unattended loop can run what it allows.",
   examples: ['factory settings set permissions.allow \'["Edit(src/**)", "Bash(make test*)"]\''] },
@@ -371,7 +371,7 @@ const MORE: Record<string, More> = {
   examples: ["factory settings set claimStaleHours 6"] },
   permissionMode: { long: "Nobody can answer a permission prompt in an unattended run, so every headless `claude -p` the loops and the dev " +
     "manager start gets `--permission-mode acceptEdits`: edits inside the project need no answer, and the allow list in " +
-    ".claude/settings.json (plus `permissions.allow` here) covers the commands. Anything not allowed or denied stops the run, " +
+    ".claude/factory/settings.json (plus `permissions.allow` here) covers the commands. Anything not allowed or denied stops the run, " +
     "so the allow list is the real limit. `default` passes no flag and leaves it to your own Claude Code settings; " +
     "`factory doctor` says `fix` unless they set a mode. Interactive sessions (`-i`) are not given a mode, since a person answers.",
   examples: ["factory settings set permissionMode default"] },

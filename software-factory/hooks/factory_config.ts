@@ -94,7 +94,7 @@ export const DEFAULTS: Config = {
   mainBranch: "main",
   // How an unattended run (`claude -p`, started by the loops and the dev manager's sub-managers) gets its permissions
   // (#179): "acceptEdits" passes --permission-mode acceptEdits, so edits inside the project need no answer and the
-  // allow list in .claude/settings.json covers the commands. "default" passes nothing: your own Claude Code settings
+  // allow list in .claude/factory/settings.json covers the commands. "default" passes nothing: your own Claude Code settings
   // decide (`factory doctor` says when a run would then stall).
   permissionMode: "acceptEdits",
   // typecheckChanged / testChanged: the Stop check runs these instead of typecheck / test when set, for the changed
@@ -182,7 +182,7 @@ export const DEFAULTS: Config = {
   },
   // The eval skill. Empty command: no eval yet.
   eval: {},
-  // Allow rules the project adds to .claude/settings.json (#198).
+  // Allow rules the project adds to the agents' settings (#198, #258).
   permissions: { allow: [] },
   // The shared Turborepo remote cache (factory_turbo.ts, `factory turbo`, #59).
   turbo: { api: "", team: "", bind: "127.0.0.1", port: 3335, secretsCommand: "" },
