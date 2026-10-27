@@ -14,8 +14,10 @@ Three roles, one repo (each is a command you run in a terminal; see docs/wiki/ro
 | **Product owner** | `factory product-owner loop -i` | Takes the product questions: scope, order, the PRD and what to test. Writes proposals; the owner decides |
 
 Guard rails live in the repo, not in anyone's memory: `CLAUDE.md` (the rules), `.claude/factory.json`
-(paths, commands, protected files), a Stop hook that won't let a turn end with a broken build, a PreToolUse
-hook that gates `gh pr create` and `gh pr merge`, and permission deny rules.
+(paths, commands, protected files), and the agents' rules in `.claude/factory/settings.json`: permission deny rules,
+a Stop hook that won't let a turn end with a broken build, and a PreToolUse hook that gates `gh pr create`,
+`gh pr merge`, `gh api` and force pushes. The factory passes those rules (from `main`) only to the sessions it starts;
+a project's own `.claude/settings.json` stays the project's.
 
 Pick the mode from the request: **set up** a project, or **act as dev manager** on one.
 
@@ -27,20 +29,15 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
 2. **Install the kit.** Prefer a numbered release: the project runs one pinned version of the factory as real files,
    committed. Download the release archive and `SHA256SUMS`, check them, unpack, and run
    `bun --no-env-file --config=/dev/null <unpacked folder>/hooks/factory_release.ts update <version>` in the project (install Bun first:
-   `curl -fsSL https://bun.sh/install | bash`; the releases so far are pre-releases, which have to be named). README.md, "Quick start", has the steps. A project that is
-   already on the submodule keeps working and moves later (docs/wiki/submodule.md, "Moving a project from the submodule to
-   releases"). To install with the submodule instead:
-   `git submodule add https://github.com/deresegetachew/my-skills.git vendor/my-skills`, then
-   `bash vendor/my-skills/software-factory/install.sh . --link`. The engine (`factory-loop.sh`, `.claude/hooks/*`)
-   and every shared file (agents, skills, `settings.json`) become relative links into the submodule. The templates
-   (`factory.json`, doc templates, CI) are copied for you to fill in. Project specifics never go in a shared file:
-   paths that need the safety auditor, security reviewer, eval or design check go in `factory.json` (`reviews`,
-   `eval`, `design`), and the few lines an agent needs that only this project knows go in
-   `.claude/factory/notes/<agent>.md`. With the submodule, add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, give CI's checkout
-   `submodules: true`, and put `git submodule update --init` first in `commands.install`. To take a newer factory
-   later, the owner runs `factory update` and commits it in a PR; `git config submodule.recurse true` once per clone
-   makes `git pull` update the submodule too (docs/wiki/submodule.md, "Updating the factory"). Without a submodule,
-   `bash <this skill>/install.sh <project dir>` copies everything and never overwrites existing files.
+   `curl -fsSL https://bun.sh/install | bash`; the releases so far are pre-releases, which have to be named). README.md,
+   "Quick start", has the steps. The shared files (hooks, CI files, agents, skills, the agents' rules in
+   `.claude/factory/settings.json`, `factory`, `factory-loop.sh`) are written as real files with a pin,
+   `.claude/factory/release.json`; the templates (`factory.json`, doc templates, CI) are added for you to fill in. To
+   take a newer factory later, the owner runs `factory update <tag>` and commits it in a PR. Project specifics never go
+   in a shared file: paths that need the safety auditor, security reviewer, eval or design check go in `factory.json`
+   (`reviews`, `eval`, `design`), and the few lines an agent needs that only this project knows go in
+   `.claude/factory/notes/<agent>.md`. A project that is still on the my-skills submodule moves with
+   `factory migrate-to-release <tag>` (docs/wiki/submodule.md, "Moving a project from the submodule to releases").
 3. **Fill in `.claude/factory.json`** (`factory settings` is the guided way: a menu with help for every setting;
    `factory settings validate` checks the result): the doc paths, the install, typecheck, lint, test and build commands,
    the folders that hold code, and the protected paths. Protected means "a person or the dev manager merges" (a change under `.claude/`: only the owner):
@@ -49,14 +46,16 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    `smoke` to a quick command that proves main works.
    **Style guides:** ask the owner which style skills each part of the code follows, for example the NestJS backend
    skills `nestjs-clean-code-ddd-hexagonal` and `nestjs-best-practices` from this repo.
-   - **Put them in the project**, so CI, fresh clones and the cloud dev manager can read them. Prefer a submodule:
-     add my-skills at `vendor/my-skills` (https URL), with relative links `.claude/skills/<skill>` →
-     `../../vendor/my-skills/<skill>`. Add `^vendor/my-skills` and `^\.gitmodules$` to `protected`, put
-     `git submodule update --init` first in `commands.install`, and give CI's checkout `submodules: true` (root
-     README, "Use in a project as a git submodule"). Otherwise copy them: `<my-skills>/install.sh --project . --copy <skill> [...]`.
+   - **Put them in the project**, so CI, fresh clones and the cloud dev manager can read them. A release does not
+     carry them. Prefer a submodule: add my-skills at `vendor/my-skills` (https URL), with relative links
+     `.claude/skills/<skill>` → `../../vendor/my-skills/<skill>`. Add `^vendor/my-skills` and `^\.gitmodules$` to
+     `protected`, put `git submodule update --init` first in `commands.install`, and give CI's checkout
+     `submodules: true` (root README, "2. For a project"). Otherwise copy them:
+     `<my-skills>/install.sh --project . --copy <skill> [...]`.
    - **Add a `styles` entry for each path**, for example
      `{"paths": ["apps/api/**"], "skills": ["nestjs-clean-code-ddd-hexagonal", "nestjs-best-practices"], "check": "python3 vendor/my-skills/nestjs-clean-code-ddd-hexagonal/scripts/check_structure.py"}`
-     (with a copy, copy the script into `.claude/hooks/` and point `check` there).
+     (with a copy, point `check` at the copied skill's `scripts/check_structure.py`; it is that skill's own Python
+     script, not part of the factory).
    - **For the hexagonal skill, set** `structure.roots`, and seed the legacy list with `check_structure.py --legacy` when existing code doesn't follow
      the rules yet. That list only shrinks.
    - **Enforcement:** the architecture-reviewer reviews diffs on those paths, the PR gate needs its pass, and CI runs

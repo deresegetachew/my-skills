@@ -26,7 +26,8 @@ The factory is TypeScript run by Bun (#252). There is no Python in it.
   before the pull request.
 - Types: `cd software-factory && bun install && bun x tsc --noEmit` (strict, no `any`).
 - `bun tools/check_skills.ts`: each top-level skill folder is well formed, every `.sh` parses, every `.ts` parses and
-  uses no `any`, every `.json` loads, and no `.py` file exists. A new top-level folder (not starting with a dot) must
+  uses no `any`, every `.json` loads, and the factory (`software-factory/`, `tools/`, `.github/`, `.claude/`) has no
+  `.py` file; other skills may ship their own scripts. A new top-level folder (not starting with a dot) must
   be a skill with a `SKILL.md`.
 - CI (`.github/workflows/check.yml`) runs all of these. Remove temp folders after a run.
 
@@ -39,7 +40,8 @@ A change that breaks one of these is wrong even if the tests pass.
 - **Tests are never weakened, skipped or deleted** to make a change pass. Failing tests come first; a bug fix adds
   the test that would have caught it. Tests check what a user or another program can observe (command output, exit
   codes, files written, what a fake `gh` or fake server was asked), never internals.
-- **Agents cannot change what governs them.** The PR gate, the guard, `settings.json`, the agents' definitions and
+- **Agents cannot change what governs them.** The PR gate, the guard, the agents' rules
+  (`kit/.claude/factory/settings.json`), the agents' definitions, `factory`, `factory-loop.sh` and
   `.claude/factory.json` are protected: a pull request that touches them is listed as such and is never merged by the
   agent that wrote it. A change under `.claude/` (settings, permissions, the agents' definitions) is merged by the owner
   (#247).
@@ -68,7 +70,7 @@ A change that breaks one of these is wrong even if the tests pass.
 
 - This repo uses its own factory through links: `./factory`, `./factory-loop.sh` and `.claude/{hooks,ci,agents,skills,
   manager,factory/settings.json}` are relative symlinks into `software-factory/` (made by
-  `bash software-factory/install.sh . --link --layout new`, re-run it when a shared file is added; it leaves no empty folder behind, which
+  `bash software-factory/install.sh . --link`, re-run it when a shared file is added; it leaves no empty folder behind, which
   `check_skills.ts` would fail on). There is no `.claude/settings.json` here: the agents' rules are passed only to the
   sessions the factory starts (#258), so the owner's own sessions are not governed by them. Edit the real
   files in `software-factory/`, never through a link. Run `./factory doctor` first on a new machine, then
