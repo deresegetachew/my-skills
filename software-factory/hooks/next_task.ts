@@ -1,19 +1,19 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Prints the next build-plan task: the first unticked task, in order, that isn't in the blocked list.
 //
-//   bun --no-env-file .claude/hooks/next_task.ts           -> "1.3 Validators"   (exit 1 when nothing is left)
-//   bun --no-env-file .claude/hooks/next_task.ts --json    -> {"id": "1.3", "title": "Validators", "remaining": 7, ...}
-//   bun --no-env-file .claude/hooks/next_task.ts --after 1.3   -> the next one after 1.3 (to work around a blocked PR)
+//   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts           -> "1.3 Validators"   (exit 1 when nothing is left)
+//   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --json    -> {"id": "1.3", "title": "Validators", "remaining": 7, ...}
+//   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --after 1.3   -> the next one after 1.3 (to work around a blocked PR)
 //   Rework comes first: an open PR whose latest must-fix (`<!-- factory-mustfix sha=<head> -->` or a `factory-msg` of kind
 //   mustfix) from the dev manager names its current head commit (nothing pushed since) is printed as
 //   "pr-42 Rework #42: <title> (<branch>)". With `trustedReviewers` set, only must-fixes from those logins count.
 //   A PR with the `holdLabel` label (default `factory-hold`) is the dev manager's to review: it's never rework.
-//   bun --no-env-file .claude/hooks/next_task.ts --note    -> what `factory next` runs: the same line, then "Not claimed. To claim it: ..."
-//   bun --no-env-file .claude/hooks/next_task.ts --claim taytu --pid 123
+//   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --note    -> what `factory next` runs: the same line, then "Not claimed. To claim it: ..."
+//   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --pid 123
 //       -> the first task no other running loop holds, claimed for taytu (factory-loop.sh does this; see
 //          factory_claims.ts). Exit 1 when every open task is done, blocked or held by another loop.
 //
-//   bun --no-env-file .claude/hooks/next_task.ts --claim taytu --issue 42
+//   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --issue 42
 //       -> issues mode: claim issue #42 for taytu, only that one, when it is free and its dependencies are done.
 //          Taken, blocked or missing: prints {code, message, fix} on stderr, exit 1, nothing changed. This is how a dev
 //          manager hands a builder a named task.
@@ -152,7 +152,7 @@ function main(argv: string[]): number {
 function note(a: Args): void {
   if (a.note && !a.claim) {
     const who = process.env.FACTORY_AGENT || "<your-agent-name>";
-    console.log(`Not claimed. To claim it: bun --no-env-file .claude/hooks/next_task.ts --claim ${who} --pid $$`);
+    console.log(`Not claimed. To claim it: bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim ${who} --pid $$`);
   }
 }
 

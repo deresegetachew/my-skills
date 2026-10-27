@@ -48,12 +48,12 @@ hooks="$PWD/.claude/hooks"
 fh() {
   local s="$1"; shift
   command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
-  bun --no-env-file "$s.ts" "$@"
+  bun --no-env-file --config=/dev/null "$s.ts" "$@"
 }
 # One value of .claude/factory.json (`setting mainBranch main`, `setting commands.install ""`): the default when the key
 # is missing; fails when the file is missing or not JSON.
 setting() {
-  bun --no-env-file -e 'const [k, d] = process.argv.slice(1); let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8"));
+  bun --no-env-file --config=/dev/null -e 'const [k, d] = process.argv.slice(1); let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8"));
 for (const p of k.split(".")) v = v !== null && typeof v === "object" && !Array.isArray(v) && p in v ? v[p] : undefined;
 console.log(v === undefined ? d : typeof v === "string" ? v : JSON.stringify(v));' "$@"
 }
@@ -152,7 +152,7 @@ fi
 model_role=builder
 if [ "$role" != coding-agent ]; then eval "$(fh "$hooks/factory_roles" vars "$role")"; model_role="$role_model_role"; fi
 # Python's int(): a whole number, a number (truncated), a boolean or a string of digits; anything else gives 1.
-wait_minutes=$(bun --no-env-file -e 'let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8")).waitMinutes ?? 1;
+wait_minutes=$(bun --no-env-file --config=/dev/null -e 'let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8")).waitMinutes ?? 1;
 if (typeof v === "boolean") v = Number(v); else if (typeof v === "string" && /^\s*[+-]?\d+\s*$/.test(v)) v = Number(v);
 if (typeof v !== "number" || !Number.isFinite(v)) process.exit(1); console.log(Math.trunc(v));' 2>/dev/null || echo 1)
 export FACTORY_INTERACTIVE="$interactive"
@@ -242,7 +242,7 @@ reload_if_changed() {
 # sweep would otherwise mark it down). Ctrl-C stops it.
 role_sleep() {
   local left
-  left=$(bun --no-env-file -e 'console.log(Math.trunc(Number(process.argv[1]) * 60))' "$1")
+  left=$(bun --no-env-file --config=/dev/null -e 'console.log(Math.trunc(Number(process.argv[1]) * 60))' "$1")
   while [ "$left" -gt 0 ]; do
     fh "$hooks/factory_agents" ping --agent "$agent" --status idle >/dev/null 2>&1 || true
     local chunk=$((left < 300 ? left : 300))

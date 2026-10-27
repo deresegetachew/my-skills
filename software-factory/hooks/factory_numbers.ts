@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Numbered files (decisions, migrations): a new one takes a number neither main nor another open PR has.
 //
 // Agents number decisions and migrations from main when they open a PR, so two PRs opened close together pick the
@@ -8,7 +8,7 @@
 // The folders: `decisions` in .claude/factory.json, plus `numberedDirs` (for example ["apps/api/migrations"]).
 // A numbered file's name starts with its number and a dash or underscore: 0042-demo-guides.md, 0009_spare_parts.sql.
 //
-//   bun --no-env-file .claude/hooks/factory_numbers.ts      what this branch adds, and any clash (exit 1 on a clash)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_numbers.ts      what this branch adds, and any clash (exit 1 on a clash)
 import { basename, dirname } from "node:path";
 import { type Config, load } from "./factory_config.ts";
 import { run as runCmd, runMain } from "./factory_lib.ts";

@@ -7,7 +7,7 @@ set -uo pipefail
 fh() {
   local s="$1"; shift
   command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
-  bun --no-env-file "$s.ts" "$@"
+  bun --no-env-file --config=/dev/null "$s.ts" "$@"
 }
 # `factory bootstrap` sets up a machine, so it works before there is a checkout: it runs from where this script lives.
 if [ "${1:-}" = bootstrap ]; then
@@ -20,7 +20,7 @@ hooks="$root/.claude/hooks"
 # One value of .claude/factory.json (`setting mainBranch main`, `setting commands.install ""`): the default when the key
 # is missing; fails when the file is missing or not JSON.
 setting() {
-  bun --no-env-file -e 'const [k, d] = process.argv.slice(1); let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8"));
+  bun --no-env-file --config=/dev/null -e 'const [k, d] = process.argv.slice(1); let v = JSON.parse(require("node:fs").readFileSync(".claude/factory.json", "utf8"));
 for (const p of k.split(".")) v = v !== null && typeof v === "object" && !Array.isArray(v) && p in v ? v[p] : undefined;
 console.log(v === undefined ? d : typeof v === "string" ? v : JSON.stringify(v));' "$@"
 }
@@ -49,7 +49,7 @@ Build
                          tmux session instead, which `factory follow <name>` finds from another machine
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next. It does not claim it: the last line shows the
-                         command that does (bun --no-env-file .claude/hooks/next_task.ts --claim <agent> --pid $$);
+                         command that does (bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim <agent> --pid $$);
                          `--claim AGENT --issue N` claims that one issue
   autostart [status|install|uninstall]
                          bring this machine back after a reboot: the dev stack (commands.stackUp) and its agents, in

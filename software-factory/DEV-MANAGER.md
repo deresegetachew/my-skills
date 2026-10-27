@@ -222,7 +222,7 @@ coming back. The builder and every reviewer read it first, so keep it short and 
 lessons, each with an example or a link.
 
 - **When a must-fix repeats,** or an agent's PR description says "lesson candidate: ...", run
-  `bun --no-env-file .claude/hooks/factory_lessons.ts suggest` (read-only; every ten merged PRs is enough). It lists causes that came back
+  `bun --no-env-file --config=/dev/null .claude/hooks/factory_lessons.ts suggest` (read-only; every ten merged PRs is enough). It lists causes that came back
   on two or more of the last 20 task PRs: must-fix items, CI failing at the same job and step, and the reviewer findings on
   this machine. Skip a candidate that is a one-off; reword one you keep to a single imperative line with its example, and
   propose it to the owner in an owner-queue ask.

@@ -156,8 +156,8 @@ test("the python template is not a workflow a release install would add", () => 
 
 test("the python template runs the stack commands with bun", () => {
   const wf = readFileSync(join(SF, "kit", ".github", "workflows", "ci-python.yml.template"), "utf8");
-  expect(wf).toContain("bun --no-env-file .claude/hooks/factory_stack.ts run install");
-  expect(wf).toContain("bun --no-env-file .claude/hooks/factory_stack.ts run test");
+  expect(wf).toContain("bun --no-env-file --config=/dev/null .claude/hooks/factory_stack.ts run install");
+  expect(wf).toContain("bun --no-env-file --config=/dev/null .claude/hooks/factory_stack.ts run test");
   expect(wf.indexOf("oven-sh/setup-bun", wf.indexOf("check:"))).toBeLessThan(wf.indexOf("factory_stack.ts run install"));
   expect(wf).not.toContain("factory_stack.py");
 });

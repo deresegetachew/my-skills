@@ -33,7 +33,7 @@ working on other tasks while it waits.
 
 ## The PO's checklist
 
-The PO reads the same list every pass (`bun --no-env-file .claude/hooks/factory_roles.ts work product-owner`) and works through it:
+The PO reads the same list every pass (`bun --no-env-file --config=/dev/null .claude/hooks/factory_roles.ts work product-owner`) and works through it:
 
 1. **Questions addressed `to=po`**, on issues and PRs, oldest first. Answer (the PRD, a decision or the design settles it), ask
    back (a status message `input-required`: the asker has to say more), or escalate (`failed` with a first line `needs-owner: ...`, plus an

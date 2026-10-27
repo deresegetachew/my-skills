@@ -25,7 +25,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 fh() {
   local s="$1"; shift
   command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
-  bun --no-env-file "$s.ts" "$@"
+  bun --no-env-file --config=/dev/null "$s.ts" "$@"
 }
 src="$here/kit"
 [ -d "${1:?Usage: install.sh <project dir> [--link]}" ] || { echo "No such folder: $1" >&2; exit 1; }

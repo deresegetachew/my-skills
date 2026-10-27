@@ -143,7 +143,7 @@ test("the kits default allow list has what a headless coding agent needs and no 
   expect(allow.filter((a) => a.includes("python3 -c")), "an inline interpreter would let an agent run anything").toEqual([]);
   expect(allow.length).toBe(new Set(allow).size);
   // #252: the factory's hooks run on Bun; the old Python rule is gone
-  expect(allow).toContain("Bash(bun --no-env-file .claude/hooks/*)");
+  expect(allow).toContain("Bash(bun --no-env-file --config=/dev/null .claude/hooks/*)");
   expect(allow).not.toContain("Bash(python3 .claude/hooks/*)");
 });
 
@@ -339,8 +339,8 @@ test("update from a python release to a bun release rewrites the workflow steps 
   expect(rc, out).toBe(0);
   const text = read(ci);
   expect(text).not.toContain("python3 .claude/hooks/factory_x.py");
-  expect(text).toContain("run: bun --no-env-file .claude/hooks/factory_x.ts --base main");
-  expect(text).toContain("run: bun --no-env-file .claude/hooks/factory_x.ts run test");
+  expect(text).toContain("run: bun --no-env-file --config=/dev/null .claude/hooks/factory_x.ts --base main");
+  expect(text).toContain("run: bun --no-env-file --config=/dev/null .claude/hooks/factory_x.ts run test");
   expect(text, "a removed hook with no Bun version is left for doctor to name").toContain("python3 .claude/hooks/factory_gone.py");
   const guard = text.slice(text.indexOf("  guard:"), text.indexOf("  check:"));
   const check = text.slice(text.indexOf("  check:"));
@@ -348,7 +348,7 @@ test("update from a python release to a bun release rewrites the workflow steps 
   expect(guard.indexOf("oven-sh/setup-bun@v2")).toBeLessThan(guard.indexOf("bun --no-env-file"));
   expect(check.split("oven-sh/setup-bun").length - 1, "a job that has it gets no second one").toBe(1);
   expect(out).toContain("Changed .github/workflows/ci.yml");
-  expect(out).toContain("python3 .claude/hooks/factory_x.py  ->  bun --no-env-file .claude/hooks/factory_x.ts");
+  expect(out).toContain("python3 .claude/hooks/factory_x.py  ->  bun --no-env-file --config=/dev/null .claude/hooks/factory_x.ts");
   const after = read(ci);
   commit(d, "on the bun release");
   [rc, out] = await fac(d, env, "update", "v0.2.0"); // safe to run twice

@@ -28,7 +28,7 @@ kit="$(cd "$(dirname "$0")" && pwd)"
 fh() {
   local s="$1"; shift
   command -v bun >/dev/null 2>&1 || { printf '{"code": "bun_missing", "message": "%s needs Bun, and bun is not on the PATH.", "fix": "Install Bun (curl -fsSL https://bun.sh/install | bash), open a new terminal, then run the command again."}\n' "${s##*/}.ts" >&2; return 127; }
-  bun --no-env-file "$s.ts" "$@"
+  bun --no-env-file --config=/dev/null "$s.ts" "$@"
 }
 root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$root"
@@ -68,7 +68,7 @@ use_instance() {
 # The versions runner.Dockerfile bakes in, from this checkout: Node from .nvmrc, pnpm from package.json's
 # packageManager, Playwright from node_modules or the lockfile. Prints three lines (each may be empty).
 tool_versions() {
-  bun --no-env-file -e "$(cat <<'TS'
+  bun --no-env-file --config=/dev/null -e "$(cat <<'TS'
 import { readFileSync } from "node:fs";
 const read = (f: string): string | null => { try { return readFileSync(f, "utf8"); } catch { return null; } };
 const json = (f: string): unknown => { const t = read(f); if (t === null) return null; try { return JSON.parse(t); } catch { return null; } };
@@ -863,7 +863,7 @@ cmd_status() {
   # The light lane as GitHub will route it: the label in CI_RUNS_ON_LIGHT, if it is set, whatever ci.light says.
   local light_var light_label=""
   if light_var="$(gh api "repos/$CI_REPO/actions/variables/CI_RUNS_ON_LIGHT" --jq .value 2>/dev/null)"; then
-    light_label="$(bun --no-env-file -e 'let v: unknown = JSON.parse(process.argv.at(-1) ?? "");
+    light_label="$(bun --no-env-file --config=/dev/null -e 'let v: unknown = JSON.parse(process.argv.at(-1) ?? "");
 v = typeof v === "string" ? [v] : v;
 if (!Array.isArray(v)) throw new Error("not a list");
 const x: unknown = v.find((x: unknown) => x !== "self-hosted");

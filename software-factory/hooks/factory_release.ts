@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The release client (#113): a project gets the software factory from numbered GitHub releases of my-skills.
 //
 //   factory version              installed release, the one main pins, the newest, and what changed since
@@ -18,7 +18,7 @@
 // every installed file. Changing it is how the whole team ends up on one release.
 //
 // Bun and its built-ins only, so it also installs the first release into a project that has no factory yet:
-//   bun --no-env-file <unpacked release>/hooks/factory_release.ts update
+//   bun --no-env-file --config=/dev/null <unpacked release>/hooks/factory_release.ts update
 //
 // Every error is `[code] message` and `Fix: ...`. Tests point FACTORY_RELEASE_API at a local fake of GitHub's API.
 import { createHash } from "node:crypto";
@@ -1006,7 +1006,7 @@ function runCi(root: string, args: string[], timeoutMs = 900_000): [number, stri
 function refreshHeartbeat(root: string): string[] {
   const script = join(import.meta.dir, "factory_heartbeat_service.ts");
   if (!isFile(script)) return [];
-  const p = run([process.execPath, "--no-env-file", script, "restart"], { cwd: root, timeoutMs: 120_000 });
+  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", script, "restart"], { cwd: root, timeoutMs: 120_000 });
   if (p.code !== 0) {
     const tail = splitLines((p.stdout + p.stderr).trim()).slice(-6).map((l) => "    " + l).join("\n");
     throw new FactoryError("services_failed", "restarting the heartbeat daemon failed:\n" + tail,

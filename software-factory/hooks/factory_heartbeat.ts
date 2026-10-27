@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The per-machine heartbeat daemon (#108): real agent liveness, reported to GitHub cheaply.
 //
 // Liveness used to be a side effect of tool use: an agent pinged its issue when a tool finished. So an agent waiting
@@ -38,12 +38,12 @@
 // away the issue of an agent it sees alive. Without it everything works as before: pings on tool use, 30 minutes to
 // silent.
 //
-//   bun --no-env-file .claude/hooks/factory_heartbeat.ts run         the daemon: one cycle every few seconds, until stopped
-//   bun --no-env-file .claude/hooks/factory_heartbeat.ts once        one cycle, then print what it saw
-//   bun --no-env-file .claude/hooks/factory_heartbeat.ts status      is it installed and running, and what it last saw
-//   bun --no-env-file .claude/hooks/factory_heartbeat.ts install     keep it running: a systemd user service or a LaunchAgent
-//   bun --no-env-file .claude/hooks/factory_heartbeat.ts uninstall
-//   bun --no-env-file .claude/hooks/factory_heartbeat.ts restart     run the files now on disk (`factory update` does it)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts run         the daemon: one cycle every few seconds, until stopped
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts once        one cycle, then print what it saw
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts status      is it installed and running, and what it last saw
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts install     keep it running: a systemd user service or a LaunchAgent
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts uninstall
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts restart     run the files now on disk (`factory update` does it)
 //
 // `factory autostart install` installs it too (unless --no-heartbeat). One daemon runs per project and machine: a
 // second `run` stops with `{code: heartbeat-running}`. A GitHub failure is retried a minute later and never stops it.

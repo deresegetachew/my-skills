@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Live agents, tracked on GitHub (issues mode: `tasks.source: "issues"` in .claude/factory.json).
 //
 // Each agent has one issue, `Agent: <name> · <status>`, labelled `factory:agent`, so the board and your phone show who
@@ -27,16 +27,16 @@
 // agent that is alive on its machine, and also releases the issues of an agent that is plainly `down` for
 // `tasks.releaseDownMinutes` (10).
 //
-//   bun --no-env-file .claude/hooks/factory_agents.ts ls [--json] [--local] [--fresh]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts ls [--json] [--local] [--fresh]
 //                                                                every agent: where it runs, its state, task, since when,
 //                                                                last seen and follow link (factory_agents_ls.ts)
-//   bun --no-env-file .claude/hooks/factory_agents.ts list [--json]         who is working, idle or down, and since when (--json: cards)
-//   bun --no-env-file .claude/hooks/factory_agents.ts card <name>           one agent's card (factory_cards.ts), also for dev-manager and po
-//   bun --no-env-file .claude/hooks/factory_agents.ts sweep                 mark silent agents down, release their issues
-//   bun --no-env-file .claude/hooks/factory_agents.ts register --agent taytu [--kind dev-manager] [--cloud] [--follow URL] [--role dev-manager]
-//   bun --no-env-file .claude/hooks/factory_agents.ts ping --agent taytu [--status "working on #42"] [--force]
-//   bun --no-env-file .claude/hooks/factory_agents.ts down --agent taytu
-//   bun --no-env-file .claude/hooks/factory_agents.ts hook                  the Claude hook entry (reads the event on stdin)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts list [--json]         who is working, idle or down, and since when (--json: cards)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts card <name>           one agent's card (factory_cards.ts), also for dev-manager and po
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts sweep                 mark silent agents down, release their issues
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts register --agent taytu [--kind dev-manager] [--cloud] [--follow URL] [--role dev-manager]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts ping --agent taytu [--status "working on #42"] [--force]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts down --agent taytu
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts hook                  the Claude hook entry (reads the event on stdin)
 //
 // Every role registers the same way (#102): a dev manager or a product owner has an agent issue too, with its role in a
 // second marker, `<!-- factory-role role=dev-manager -->`, on its own line so an older kit still reads the first one. An

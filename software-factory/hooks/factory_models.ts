@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The `models` setting: which model (and effort) each factory role runs on (#94).
 //
 //   "models": {"builder": {"model": "opus", "effort": "high"}, "manager": {"model": "sonnet"},
@@ -17,9 +17,9 @@
 //     CLAUDE_CODE_SUBAGENT_MODEL does not do it: it loses to the file's `model:`, and with
 //     CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1 it forces ONE model on every subagent, not one per role.
 //
-//   bun --no-env-file .claude/hooks/factory_models.ts flags <role>   one argument per line, for factory-loop.sh and `factory agent`
-//   bun --no-env-file .claude/hooks/factory_models.ts escalate       the model the reviewer is asked again on (models.reviewer.escalateTo, else opus)
-//   bun --no-env-file .claude/hooks/factory_models.ts table          the effective model per role and what set it (factory doctor)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_models.ts flags <role>   one argument per line, for factory-loop.sh and `factory agent`
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_models.ts escalate       the model the reviewer is asked again on (models.reviewer.escalateTo, else opus)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_models.ts table          the effective model per role and what set it (factory doctor)
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";

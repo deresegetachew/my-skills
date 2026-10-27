@@ -69,8 +69,8 @@ removes its own.
 `factory manager-claims list [--json]` and `factory status` show every claim. `claimMinutes` is the setting
 `manager.claimMinutes`. All managers and builders use one GitHub account, so the name lives inside the comment, and
 `trustedReviewers` cannot tell managers apart: nothing here relies on it. Builders cannot post the claim markers
-(PR gate) or run the command (`settings.json`).
-**The standing rules are a skill, not a memory (#96).** `/manage-pass` (`kit/.claude/skills/manage-pass/SKILL.md`, linked into
+(PR gate) or run the command (the agents' settings).
+**The standing rules are a skill, not a memory (#96).** `/manage-pass` (`kit/.claude/skills/manage-pass/SKILL.md`, installed in
 a project like the other skills) holds everything a fresh session needs: the two-column table of what the manager does
 alone and what it asks the owner first (the one copy; the playbook links to it), the pass order, the exact markers, the hold
 label, the sha-pinned REST merge (`PUT .../pulls/<n>/merge` with `sha`), the CI rule, and the "never" list. The project's own
@@ -159,7 +159,7 @@ is an owner step; `factory watch --json` is what it would call.
 Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<name>.d/<item>.out` (a sub-manager's output).
 `factory doctor` checks that `gh` is signed in, the manager profile resolves and its hook scripts exist. If `.claude/manager/settings.json` is missing and the installed release does not carry it, the note says so and points at `factory releases` for a newer one (a plain `factory update` would answer "nothing to install").
 
-**A settings profile and a gate keep it inside the rules.** The shared `settings.json` denies `Bash(gh api *)`, so builders
+**A settings profile and a gate keep it inside the rules.** The builders' settings (`.claude/factory/settings.json`) deny `Bash(gh api *)`, so builders
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
 `claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
 read-only git, `Read`/`Grep`/`Glob` and subagents, and denies pushing to main, force-push, editing `.claude/**`, `vendor/**`,

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The names a project's self-hosted CI runner uses, as shell assignments for `factory ci` (ci.sh).
 //
 // Every name comes from the project, so two projects can run their runners side by side on one Mac:
