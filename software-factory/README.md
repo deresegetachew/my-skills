@@ -352,11 +352,10 @@ software-factory/
   kit/                          what a project is given:
     .claude/agents, skills, manager/, settings.json       Claude Code reads these from the project's .claude/
     .claude/factory.json, factory/notes/, CLAUDE.factory.md, docs/, .github/, .gitignore     templates, copied once
-    factory, factory-loop.sh, .claude/hooks/*, .claude/ci/*     symlink forwarders to the real files above
 ```
 
-The `kit/` forwarders exist only so a project that links through `kit/` keeps working until it switches. A release
-archive stores them as plain copies, which the client does not install. Nothing new is added to them.
+`kit/` holds no factory code and no symlinks. The forwarders that stood at the old `kit/` paths during the move were
+removed once every project had left them (#176).
 
 **What a project sees stays the same.** Claude Code reads agents, skills and `settings.json` from the project's
 `.claude/`, so the project still has `.claude/hooks/`, `.claude/ci/`, `.claude/agents/`, `.claude/skills/`,
@@ -365,29 +364,21 @@ archive stores them as plain copies, which the client does not install. Nothing 
 | The project takes the factory as | Those paths are | They change by |
 |---|---|---|
 | A release (`.claude/factory/release.json` exists) | real files, committed | `factory update` or `factory rollback`, then a reviewed pull request |
-| The submodule, layout `new` | relative symlinks to `vendor/my-skills/software-factory/hooks/...`, `.../ci/...`, `.../factory` | the pin of `vendor/my-skills`, then `factory update` |
-| The submodule, layout `old` | symlinks through `vendor/my-skills/software-factory/kit/...` (the forwarders): what every project had before the move | the same |
+| The submodule | relative symlinks to `vendor/my-skills/software-factory/hooks/...`, `.../ci/...`, `.../factory` | the pin of `vendor/my-skills`, then `factory update` |
 
 What stays the project's own in every case: `.claude/factory.json`, `.claude/factory/notes/`, `.claude/factory/lessons.md`,
 `CLAUDE.md`, its docs, its CI workflow, and (on releases) the pin file.
 
-**A project on the submodule switches to the `new` layout** in one reviewed pull request:
+**A project on the submodule still linked through `kit/`** (made before the move) is relinked by
+`factory update --layout new`, or by `bash vendor/my-skills/software-factory/install.sh . --link` after moving the
+submodule to my-skills' newest main: each link is re-pointed from `kit/` to the factory's own folder. The links keep
+their places in `.claude/`, so `settings.json` and the docs need no change. Check with `ls -l .claude/hooks` (it shows
+`.../software-factory/hooks/...`) and `factory doctor`, then commit the changed links in a pull request; `.claude/` is a
+protected path, so the owner merges it. `--layout new` (and `auto`) are still accepted and change nothing; `--layout
+old` is refused with `[layout_removed]`.
 
-1. On a clean main, run `factory update --layout new` (it does the same as
-   `bash vendor/my-skills/software-factory/install.sh . --link --layout new` after moving the submodule to my-skills'
-   newest main). Each link is re-pointed from `kit/` to the new folder. The links keep their places in `.claude/`, so
-   `settings.json` and the docs need no change. `--layout auto`, the default, leaves a project that links through
-   `kit/` alone, so a plain `factory update` never switches one by surprise.
-2. Check: `ls -l .claude/hooks` shows `.../software-factory/hooks/...`, and `factory doctor` is green.
-3. Commit the changed links and open the pull request. `.claude/` is a protected path, so the owner
-   merges it. A CI workflow, a `protected` list or a document that names `.claude/hooks/...` needs no change for this
-   step, because those paths did not move.
-4. On a machine that runs the CI runners, `factory update` reinstalls them when their copies are older; if you did not
-   run it, run `factory ci install` once.
-
-A project that moves to releases instead needs no `--layout`: `factory update --release` installs real files. It
-refuses where the files are still links into the submodule, so take the submodule step out first, in its own pull
-request (see [Updating from releases](docs/wiki/updating.md#updating-from-releases)).
+A project that moves to releases needs no `--layout`: `factory migrate-to-release <tag>` replaces the links with a
+release's files (see [Projects that use the submodule](docs/wiki/submodule.md#moving-a-project-from-the-submodule-to-releases)).
 
 **The nestjs skills are not in the release.** `nestjs-best-practices` and `nestjs-clean-code-ddd-hexagonal` are
 top-level folders of my-skills, outside `software-factory/`, and a release ships only `software-factory/`. A project
@@ -397,11 +388,6 @@ its `.claude/skills/nestjs-*` links, the `check` command in `.claude/factory.jso
 `actions/checkout` steps in its `ci.yml`. Keep them; the factory itself (hooks, CI, agents, `factory`) comes from the
 release. A project that does not use the nestjs skills drops the submodule entirely.
 
-**What is left of the move** (#112):
-
-- The first releases exist: `v0.1.0-alpha.1` to `v0.1.0-alpha.3`, pre-releases (see [Updating from releases](docs/wiki/updating.md#updating-from-releases)). Cutting
-  a release stays the owner's call.
-- Remanual, the first project, then relinks or moves to releases in its own reviewed pull request. That changes
-  protected files in that repo, so it is the owner's merge.
-- After remanual has merged, the `kit/` forwarders are removed from my-skills in a pull request of their own, and the
-  `--layout old` and `auto` handling in `install.sh` can go with them.
+**Where the move stands** (#112): the code is out of `kit/` and `.claude/`, releases exist (pre-releases so far;
+cutting one stays the owner's call), Remanual, the first project, is on releases (its PR 440), and the `kit/`
+forwarders and `--layout old` are gone (#176).

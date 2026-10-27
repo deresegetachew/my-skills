@@ -135,7 +135,7 @@ reaches a project until the project moves its pin, in a PR.
 |---|---|---|
 | `git submodule update --init` | Makes `vendor/my-skills` match the pinned commit (clones it the first time) | No |
 | `git submodule update --remote vendor/my-skills` | Moves the folder to my-skills' newest main | Yes, in your working tree: you commit it |
-| `factory update` | Runs both of the above, lists the new my-skills commits, re-runs `install.sh . --link` to link any new shared files (`--layout new` also switches the links to the new folders), and tells you to commit. It doesn't commit or push | Yes, like `--remote` |
+| `factory update` | Runs both of the above, lists the new my-skills commits, re-runs `install.sh . --link` to link any new shared files (and moves a link still made through `kit/` to the factory's own folder), and tells you to commit. It doesn't commit or push | Yes, like `--remote` |
 | `git config submodule.recurse true` | One setting per clone (not committed). After it, `git pull`, `checkout` and `switch` also update the submodule to the pin | No |
 | `git clone --recurse-submodules <url>` | Clones the project with the submodule checked out | No |
 

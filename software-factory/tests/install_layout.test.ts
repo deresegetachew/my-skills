@@ -1,10 +1,6 @@
-// install.sh and `factory update` know the new layout (#112 step 2): a project's links can point straight at the
-// factory's own folders (hooks/, ci/, factory, factory-loop.sh) instead of the forwarders under kit/. A project that
-// links through kit/ stays there until it asks for the switch (--layout new), so nothing flips on a plain re-run.
-//
-// #252: a Bun script (.ts) has no forwarder in kit/, so in the old layout it is linked straight to hooks/ (as #174 does
-// for any file without a forwarder); the files that still have forwarders (the .sh scripts, ci/, the entry points) keep
-// going through kit/.
+// install.sh and `factory update` link a project's code straight at the factory's own folders (hooks/, ci/, factory,
+// factory-loop.sh) (#112 step 2). The forwarders under kit/ are gone (#176), and with them `--layout old`: a link a
+// project made through kit/ before that is relinked to the new folder, and `--layout new` is still accepted.
 import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -13,9 +9,9 @@ import { type Proc, ROOT, SF, sh as run, tmp } from "./support.ts";
 const VENDOR = "vendor/my-skills/software-factory";
 const GIT_ENV = { ...process.env, GIT_CONFIG_COUNT: "3", GIT_CONFIG_KEY_0: "protocol.file.allow", GIT_CONFIG_VALUE_0: "always",
   GIT_CONFIG_KEY_1: "user.name", GIT_CONFIG_VALUE_1: "t", GIT_CONFIG_KEY_2: "user.email", GIT_CONFIG_VALUE_2: "t@example.com" };
-const FORWARDED = [".claude/hooks/wait_for_merge.sh", ".claude/ci/ci.sh", ".claude/ci/entrypoint.sh", "factory", "factory-loop.sh"];
+const KIT_LINKED = [".claude/hooks/wait_for_merge.sh", ".claude/ci/ci.sh", ".claude/ci/entrypoint.sh", "factory", "factory-loop.sh"];
 const BUN_HOOK = ".claude/hooks/factory_guard.ts";
-const ENGINE = [BUN_HOOK, ...FORWARDED];
+const ENGINE = [BUN_HOOK, ...KIT_LINKED];
 const KIT_ONLY = [".claude/agents/reviewer.md", ".claude/settings.json"];
 
 function sh(cwd: string, ...cmd: string[]): Proc {
@@ -50,6 +46,14 @@ const isFile = (p: string): boolean => statSync(p, { throwIfNoEntry: false })?.i
 const isLink = (p: string): boolean => lstatSync(p, { throwIfNoEntry: false })?.isSymbolicLink() ?? false;
 const bunRun = (d: string, rel: string): Proc => sh(d, process.execPath, "--no-env-file", rel);
 
+/** Point the code links the way every project had them before the move: through kit/, where nothing is left (#176). */
+function linkThroughKit(d: string): void {
+  for (const rel of KIT_LINKED) {
+    rmSync(join(d, rel), { force: true });
+    symlinkSync(relative(dirname(join(d, rel)), join(d, VENDOR, "kit", rel)), join(d, rel));
+  }
+}
+
 test("a fresh link install points the code straight at the factorys folders", () => {
   const d = project();
   install(d, "--link");
@@ -75,56 +79,47 @@ test("a file added to hooks reaches a project without a forwarder", () => {
   expect(bunRun(d, ".claude/hooks/factory_zz.ts").stdout).toBe("zz\n");
 });
 
-test("a project linked through kit keeps its links on a plain rerun", () => {
+test("a project linked through kit is relinked to the new folders and a rerun changes nothing", () => {
   const d = project();
-  install(d, "--link", "--layout", "old"); // what every project got before the move
-  const before = links(d);
-  for (const rel of FORWARDED) {
-    expect(before[rel], rel).toContain("/kit/");
-    expect(isFile(join(d, rel)), rel).toBe(true);
-  }
-  expect(before[BUN_HOOK], "a Bun script has no forwarder: it is linked straight to hooks/").toBe("../../" + VENDOR + "/hooks/factory_guard.ts");
-  const out = install(d, "--link").stdout; // auto: stays on kit/
-  expect(links(d)).toEqual(before);
-  expect(out.includes("relinked") || out.includes("was a copy"), out).toBe(false);
-  expect(links(d), "a second run changes nothing either").toEqual(before);
-});
-
-test("layout new switches a kit linked project and a rerun changes nothing", () => {
-  const d = project();
-  install(d, "--link", "--layout", "old");
-  let out = install(d, "--link", "--layout", "new").stdout;
-  for (const rel of FORWARDED) expect(out, rel).toContain(`relinked ${rel} (from kit/ to the new folder)`);
+  install(d, "--link");
+  linkThroughKit(d); // links made before #176: their kit/ targets no longer exist
+  for (const rel of KIT_LINKED) expect(isFile(join(d, rel)), rel).toBe(false);
+  let out = install(d, "--link").stdout;
+  for (const rel of KIT_LINKED) expect(out, rel).toContain(`relinked ${rel} (from kit/ to the new folder)`);
   for (const rel of ENGINE) {
     expect(readlinkSync(join(d, rel)), rel).not.toContain("/kit/");
     expect(isFile(join(d, rel)), rel).toBe(true);
   }
   const after = links(d);
-  out = install(d, "--link").stdout; // auto now finds no kit/ link, so it is new and idempotent
-  expect(links(d)).toEqual(after);
-  expect(out).not.toContain("relinked");
+  for (const layout of ["new", "auto"]) { // still accepted (an older `factory update` passes auto), and change nothing
+    out = install(d, "--link", "--layout", layout).stdout;
+    expect(links(d), layout).toEqual(after);
+    expect(out, layout).not.toContain("relinked");
+  }
   expect(sh(d, "bash", join(d, "factory"), "help").stdout).toContain("factory <command>");
 });
 
-test("a copy that differs is kept and a plain copy becomes a link in either layout", () => {
-  for (const layout of ["new", "old"]) {
-    const d = project();
-    mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
-    copyFileSync(join(SF, "hooks", "check.ts"), join(d, ".claude", "hooks", "check.ts"));
-    writeFileSync(join(d, ".claude", "hooks", "factory_env.ts"), "// my own edit\n");
-    const out = install(d, "--link", "--layout", layout).stdout;
-    expect(isLink(join(d, ".claude", "hooks", "check.ts")), layout).toBe(true);
-    expect(out).toContain("linked   .claude/hooks/check.ts (was a copy)");
-    expect(isLink(join(d, ".claude", "hooks", "factory_env.ts"))).toBe(false);
-    expect(out).toContain("kept     .claude/hooks/factory_env.ts (differs");
-  }
+test("a copy that differs is kept and a plain copy becomes a link", () => {
+  const d = project();
+  mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
+  copyFileSync(join(SF, "hooks", "check.ts"), join(d, ".claude", "hooks", "check.ts"));
+  writeFileSync(join(d, ".claude", "hooks", "factory_env.ts"), "// my own edit\n");
+  const out = install(d, "--link").stdout;
+  expect(isLink(join(d, ".claude", "hooks", "check.ts"))).toBe(true);
+  expect(out).toContain("linked   .claude/hooks/check.ts (was a copy)");
+  expect(isLink(join(d, ".claude", "hooks", "factory_env.ts"))).toBe(false);
+  expect(out).toContain("kept     .claude/hooks/factory_env.ts (differs");
 });
 
-test("a bad option is refused with a message", () => {
+test("a bad option is refused with a message, and --layout old is refused before anything changes", () => {
+  for (const layout of ["old", "sideways"]) {
+    const d = project();
+    const p = run(["bash", join(d, VENDOR, "install.sh"), ".", "--layout", layout, "--link"], { cwd: d, env: GIT_ENV });
+    expect(p.code === 1 && p.stderr.includes('"code": "layout_removed"') && p.stderr.includes('"fix"'), p.out).toBe(true);
+    expect(existsSync(join(d, ".claude")), layout + ": nothing was installed").toBe(false);
+  }
   const d = project();
-  let p = run(["bash", join(d, VENDOR, "install.sh"), ".", "--layout", "sideways", "--link"], { cwd: d, env: GIT_ENV });
-  expect(p.code === 1 && p.stderr.includes("--layout takes new, old or auto"), p.out).toBe(true);
-  p = run(["bash", join(d, VENDOR, "install.sh"), ".", "--lnk"], { cwd: d, env: GIT_ENV });
+  const p = run(["bash", join(d, VENDOR, "install.sh"), ".", "--lnk"], { cwd: d, env: GIT_ENV });
   expect(p.code === 1 && p.stderr.includes("Unknown option"), p.out).toBe(true);
 });
 
@@ -184,49 +179,48 @@ test("factory update links a new file straight to the new folder in a new layout
   expect(readlinkSync(join(d, "factory"))).not.toContain("/kit/");
 });
 
-test("factory update leaves a kit linked project on kit until asked", () => {
+test("factory update relinks a project linked through kit, and links a new file (#174, #176)", () => {
+  // #174: an update must link a hook that exists only in hooks/, or every later ./factory command fails.
+  // The project pins a my-skills that still has the forwarders and links through them; the update takes it to one
+  // without them (and with a new hook), and its own ./factory, the old one, relinks every link.
   const up = upstream();
-  const d = submoduleProject(up, "--layout", "old");
-  // upstream keeps a forwarder for a new shell hook (a .ts never gets one, #252)
-  addUpstreamHook(up, "zz.sh", "#!/usr/bin/env bash\necho zz\n");
-  symlinkSync("../../../hooks/zz.sh", join(up, "software-factory/kit/.claude/hooks/zz.sh"));
+  const kit = join(up, "software-factory", "kit");
+  for (const rel of KIT_LINKED) {
+    const real = join(up, "software-factory", rel.replace(/^\.claude\//, ""));
+    mkdirSync(dirname(join(kit, rel)), { recursive: true });
+    symlinkSync(relative(dirname(join(kit, rel)), real), join(kit, rel));
+  }
   sh(up, "git", "add", "-A");
-  sh(up, "git", "commit", "-q", "-m", "forwarder");
-  const before = links(d);
+  sh(up, "git", "commit", "-q", "-m", "the forwarders, as before #176");
+  const d = submoduleProject(up);
+  linkThroughKit(d);
+  for (const rel of KIT_LINKED) expect(isFile(join(d, rel)), rel).toBe(true);
+  sh(d, "git", "add", "-A");
+  sh(d, "git", "commit", "-q", "-m", "linked through kit");
+  for (const rel of KIT_LINKED) rmSync(join(kit, rel));
+  addUpstreamHook(up); // commits the removal too
   let out = sh(d, "bash", "factory", "update").stdout;
-  expect(links(d)).toEqual(before);
-  expect(out).not.toContain("relinked");
-  expect(readlinkSync(join(d, ".claude/hooks/zz.sh")), "new files follow the project's layout").toContain("/kit/");
-  expect(sh(d, "bash", ".claude/hooks/zz.sh").stdout).toBe("zz\n");
-  out = sh(d, "bash", "factory", "update", "--layout", "new").stdout; // same commit, but the switch was asked for
-  expect(out.includes("relinked .claude/hooks/zz.sh") && out.includes("relinked factory "), out).toBe(true);
-  expect(readlinkSync(join(d, ".claude/hooks/zz.sh"))).not.toContain("/kit/");
-  expect(sh(d, "bash", ".claude/hooks/zz.sh").stdout).toBe("zz\n");
-  expect(sh(d, "bash", "factory", "update").stdout).toContain("already at");
-});
-
-test("factory update on a kit linked project links a new file that has no forwarder", () => {
-  // #174: at the old pin an update moved the submodule but linked nothing for a hook that exists only in hooks/, so
-  // every later ./factory command failed with "can't open file .claude/hooks/...".
-  const up = upstream();
-  const d = submoduleProject(up, "--layout", "old");
-  addUpstreamHook(up); // no forwarder in kit/
-  const before = links(d);
-  const out = sh(d, "bash", "factory", "update").stdout;
+  for (const rel of KIT_LINKED) expect(out, rel).toContain(`relinked ${rel}`);
+  for (const rel of ENGINE) expect(readlinkSync(join(d, rel)), rel).not.toContain("/kit/");
   const link = join(d, ".claude/hooks/factory_zz.ts");
   expect(isLink(link) && isFile(link), out).toBe(true);
-  expect(readlinkSync(link)).toBe("../../vendor/my-skills/software-factory/hooks/factory_zz.ts");
   expect(bunRun(d, ".claude/hooks/factory_zz.ts").stdout).toBe("zz\n");
-  expect(links(d), "the rest stays on kit/ until --layout new is asked for").toEqual(before);
   expect(sh(d, "bash", "factory", "help").code).toBe(0);
-  expect(sh(d, "bash", "factory", "update").code).toBe(0); // and a second update still starts
+  out = sh(d, "bash", "factory", "update").stdout; // a second update starts and changes nothing
+  expect(out).toContain("already at");
+  expect(out).not.toContain("relinked");
 });
 
-test("factory update refuses an unknown layout", () => {
+test("factory update refuses a removed or unknown layout and changes nothing", () => {
   const up = upstream();
   const d = submoduleProject(up);
-  const p = run(["bash", "factory", "update", "--layout", "sideways"], { cwd: d, env: GIT_ENV });
-  expect(p.code === 1 && p.stderr.includes("--layout takes new, old or auto"), p.out).toBe(true);
+  addUpstreamHook(up);
+  for (const layout of ["old", "sideways"]) {
+    const p = run(["bash", "factory", "update", "--layout", layout], { cwd: d, env: GIT_ENV });
+    expect(p.code === 1 && p.stderr.includes('"code": "layout_removed"'), p.out).toBe(true);
+  }
+  expect(existsSync(join(d, ".claude/hooks/factory_zz.ts")), "the submodule was not moved").toBe(false);
+  expect(sh(d, "bash", "factory", "update", "--layout", "new").stdout).toContain("add factory_zz");
 });
 
 function emptyDirs(d: string): string[] {
@@ -269,8 +263,8 @@ test("relinking this repo leaves no empty folder and check skills passes", () =>
   }
 });
 
-test("a setup project gets no empty docs folder in either mode and layout", () => {
-  for (const args of [["--link", "--layout", "new"], ["--link", "--layout", "old"], []]) {
+test("a setup project gets no empty docs folder in either mode", () => {
+  for (const args of [["--link", "--layout", "new"], ["--link"], []]) {
     const d = project();
     install(d, ...args); // first run: the templates are copied, docs/ holds files
     expect(isFile(join(d, "docs", "build-plan.md")), args.join(" ")).toBe(true);
@@ -281,8 +275,8 @@ test("a setup project gets no empty docs folder in either mode and layout", () =
   }
 });
 
-// From test_forwarders.py: the install case that waited for factory_stack (run by install.sh) to be ported.
-test("link install in a project resolves through the forwarders", () => {
+// From test_forwarders.py: a link install from a copy of this whole repo resolves to the factory's folders.
+test("link install in a project resolves to the factorys folders", () => {
   const d = tmp();
   mkdirSync(join(d, "vendor"));
   sh(d, "cp", "-a", ROOT, join(d, "vendor", "my-skills")); // install.sh --link needs the kit inside the project

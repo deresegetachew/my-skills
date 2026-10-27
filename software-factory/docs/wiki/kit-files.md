@@ -98,8 +98,8 @@ software-factory/
                                           compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,
                                           runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.ts,
                                           ci_status.ts
-  kit/                                    what a project is given (templates, agents, skills, settings); its
-                                          factory, factory-loop.sh, .claude/hooks and .claude/ci are forwarders
+  kit/                                    what a project is given (templates, agents, skills, settings); no
+                                          factory code and no symlinks (the forwarders went in #176)
     CLAUDE.factory.md                     template for the project's CLAUDE.md
     .claude/factory.json                  template: the project's config
     .claude/factory/notes/                template: the project's notes for the agents

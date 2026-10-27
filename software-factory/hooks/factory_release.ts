@@ -567,7 +567,8 @@ export function readManifest(files: Files, version: string): Manifest {
 // --- what goes where in a project --------------------------------------------------------------------------------------
 
 /** ["engine", target] for what the factory owns in a project, ["template", target] for what a project fills in and is
- * only given on a first install, null for what is not installed (docs, the installer, the kit/ forwarders). */
+ * only given on a first install, null for what is not installed (docs, the installer, and the kit/ forwarders that
+ * releases before #176 still carry). */
 export function classify(rel: string): ["engine" | "template", string] | null {
   if (rel === "factory" || rel === "factory-loop.sh") return ["engine", rel];
   for (const [src, dst] of [["hooks/", ".claude/hooks/"], ["ci/", ".claude/ci/"]] as const) {
