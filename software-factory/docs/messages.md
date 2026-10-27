@@ -160,7 +160,7 @@ top of the old rule that agents never post `factory-approved`, `factory-answer` 
   `in-reply-to` blocks, and an invalid transition blocks with the reason;
 - an envelope of another version, and plain text, pass (nothing reads them).
 
-The gate does not cover `gh api` (agents are denied it in the kit's `settings.json`).
+Agents are denied `gh api` in their settings (`.claude/factory/settings.json`), and the PR gate also checks the markers in `gh api` writes (#260).
 
 ## Agent cards
 

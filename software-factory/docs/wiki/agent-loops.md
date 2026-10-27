@@ -123,8 +123,8 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 ### MCP servers: the project's only
 
 Every factory session (`factory loop`, `factory loop -i` and `factory agent`) starts Claude with
-`--strict-mcp-config --mcp-config <main's .mcp.json>`, or an empty config when main has none, and with
-`--settings '{"disableClaudeAiConnectors": true}'`. So agents never load your own claude.ai connectors (Notion,
+`--strict-mcp-config --mcp-config <main's .mcp.json>`, or an empty config when main has none, and the agents'
+settings it passes (`--settings`, #258) turn off claude.ai connectors (`disableClaudeAiConnectors`). So agents never load your own claude.ai connectors (Notion,
 Slack, Figma ...) or the MCP servers in your user settings. Their tools would go into every turn, cost tokens and
 tempt an agent to use them. Your own `claude` sessions outside the factory keep them.
 
