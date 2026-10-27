@@ -123,8 +123,8 @@ claude.ai/code and in the Claude app, named after the agent and the task, so you
 ### MCP servers: the project's only
 
 Every factory session (`factory loop`, `factory loop -i` and `factory agent`) starts Claude with
-`--strict-mcp-config --mcp-config <main's .mcp.json>`, or an empty config when main has none, and with
-`--settings '{"disableClaudeAiConnectors": true}'`. So agents never load your own claude.ai connectors (Notion,
+`--strict-mcp-config --mcp-config <main's .mcp.json>`, or an empty config when main has none, and the agents'
+settings it passes (`--settings`, #258) turn off claude.ai connectors (`disableClaudeAiConnectors`). So agents never load your own claude.ai connectors (Notion,
 Slack, Figma ...) or the MCP servers in your user settings. Their tools would go into every turn, cost tokens and
 tempt an agent to use them. Your own `claude` sessions outside the factory keep them.
 
@@ -219,11 +219,11 @@ How the values reach Claude Code: `factory loop` and `factory agent` add `--mode
 dev manager's and the product owner's loops do the same for `manager` and `product-owner`).
 For a subagent they add `--agents <json>`, which redefines that agent for the session with your model and the agent
 file's own prompt, tools and description, so the shared file is never edited or shadowed.
-`bun --no-env-file .claude/hooks/factory_models.ts flags manager` prints the same arguments for the manager's session.
+`bun --no-env-file --config=/dev/null .claude/hooks/factory_models.ts flags manager` prints the same arguments for the manager's session.
 `factory doctor` prints the effective model per role and what set it. The environment variable
 `CLAUDE_CODE_SUBAGENT_MODEL` is not used: on its own the agent file's `model:` wins, and with `..._FORCE=1` it
 forces one model on every subagent. `escalateTo` is the model the next-task skill asks the reviewer again on after a must-fix or an item it marked unsure
-(`bun --no-env-file .claude/hooks/factory_models.ts escalate` prints it; `opus` when unset).
+(`bun --no-env-file --config=/dev/null .claude/hooks/factory_models.ts escalate` prints it; `opus` when unset).
 
 ### Waiting without tokens
 

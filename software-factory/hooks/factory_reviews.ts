@@ -1,8 +1,8 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Which extra reviews and checks a change needs, from `reviews`, `eval`, `design` and `styles` in factory.json.
 //
-//   bun --no-env-file .claude/hooks/factory_reviews.ts            the current branch against origin/<mainBranch>
-//   bun --no-env-file .claude/hooks/factory_reviews.ts --json
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_reviews.ts            the current branch against origin/<mainBranch>
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_reviews.ts --json
 //
 // Paths are matched as regexes, ignoring case; committed, uncommitted and untracked changes all count.
 // Prints one line per needed review or check with the first changed files that triggered it, for example

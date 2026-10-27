@@ -1,8 +1,8 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // SessionStart hook: makes a plain `claude` session in a project folder or worktree a factory agent.
 //
 // What factory-loop.sh does for its runs, this does for a session you start yourself, for example
-// `factory agent taytu` (or `cd "$(bun --no-env-file .claude/hooks/factory_claims.ts worktree 2)" && claude`), for manual
+// `factory agent taytu` (or `cd "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts worktree 2)" && claude`), for manual
 // work in that agent's folder; to run the queue, use `factory loop -i`, which gives each task a fresh session:
 //
 //   1. Slot and name: slot 1 is the project folder, slot N `<project>-agents/<name>`; the names are `agents` in
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
   if (other) {
     notes.push(`Another live session (pid ${other.pid ?? "None"}) already works in this folder as ${agent}. Two ` +
       "sessions in one folder share files and claims: use another worktree, " +
-      "`cd \"$(bun --no-env-file .claude/hooks/factory_claims.ts worktree <N>)\"`.");
+      "`cd \"$(bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts worktree <N>)\"`.");
   }
 
   const env = agentEnv(cfg, slot);
@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     appendFileSync(envFile, text);
   } else {
     notes.push("This Claude version gave the hook no CLAUDE_ENV_FILE, so the slot's variables aren't set: " +
-      "run `eval \"$(bun --no-env-file .claude/hooks/factory_env.ts)\"` in each command, or use factory-loop.sh.");
+      "run `eval \"$(bun --no-env-file --config=/dev/null .claude/hooks/factory_env.ts)\"` in each command, or use factory-loop.sh.");
   }
 
   // issues mode: the agent's own issue on GitHub says it's alive (factory_agents.ts)

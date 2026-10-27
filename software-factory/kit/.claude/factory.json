@@ -52,7 +52,8 @@
     "^factory-loop\\.sh$",
     "/migrations/",
     "\\.env",
-    "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|bun\\.lockb?)$"
+    "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|bun\\.lockb?)$",
+    "(^|/)\\.?bunfig\\.toml$"
   ],
   "alwaysAllowed": [
     "docs/build-plan.md",

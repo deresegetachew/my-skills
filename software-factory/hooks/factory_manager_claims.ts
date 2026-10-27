@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Several dev managers at once (#99): review and question claims with a lease, so two managers never review,
 // answer, merge or ask the same thing twice, and a manager that dies mid-review does not block a PR.
 //

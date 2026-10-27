@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Product questions (#110): a question addressed `to=po` waits for the product owner, and moves up a level when nobody
 // answers: product owner, then dev manager, then the owner. It only reads.
 //

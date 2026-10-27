@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory turbo`: the shared self-hosted Turborepo remote cache for the agents and CI (#59).
 //
 // Every agent worktree, every machine and every CI job used to build, type-check and test the same unchanged packages

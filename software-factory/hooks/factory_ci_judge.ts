@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Judging CI the way the dev manager does (#96): from a commit's check runs, take for each job name only the newest
 // run that is not `skipped`; the commit is green only when every one of those succeeded.
 //

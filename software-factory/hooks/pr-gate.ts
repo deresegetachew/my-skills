@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // PreToolUse hook on Bash: gate the coding agent's pull-request commands.
 //
 // create (and `gh pr new`, `gh pr ready`): needs a reviewer pass for the commit (<reviewMarkers>/<branch>.ok holding
@@ -53,7 +53,7 @@ export const REVIEW_LABELS = new Set(["tests-reviewed", "deps-reviewed"]);
 export const SETTINGS_READ_ONLY = new Set(["list", "ls", "get", "show", "help", "options", "diff", "validate", "docs"]);
 const SETTINGS_WITH_VALUE = new Set(["--section", "--file"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/s;
-const NEXT = "`bun --no-env-file .claude/hooks/next_task.ts`";
+const NEXT = "`bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts`";
 /** gh api's flags that take a value. */
 const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input",
   "-q", "--jq", "-t", "--template", "--cache", "-p", "--preview", "--hostname"]);
@@ -517,7 +517,7 @@ function needReviews(cfg: Config, branch: string, head: string, changed: string[
 function needLocalCi(cfg: Config, branch: string, head: string): void {
   if ((cfg.commands ?? {}).ci && !passed(cfg, branch, head, ".ci.ok")) {
     block("CI's checks haven't passed locally for this commit. Run `factory verify` (or " +
-      "`bun --no-env-file .claude/hooks/factory_verify.ts`), fix what fails, commit, and try again.");
+      "`bun --no-env-file --config=/dev/null .claude/hooks/factory_verify.ts`), fix what fails, commit, and try again.");
   }
 }
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory run-check [--name N] [--lines N] <command>`: run a check or test command quietly (#68).
 //
 // The full output goes to a log file (`<checkLogDir>/<name>.log`, default tmp/checks), and the agent sees only a

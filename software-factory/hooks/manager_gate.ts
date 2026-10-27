@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // PreToolUse hook on Bash for the dev manager's sessions (#96): the guard rails the manager's settings profile
 // (.claude/manager/settings.json) wires in.
 //

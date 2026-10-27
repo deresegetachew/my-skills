@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The dev manager's orchestrator (#97, #109): what `factory dev-manager [name] loop` runs each cycle. It has no model.
 //
 // Each cycle it reads GitHub (factory_watch.ts: the seven checks, which include `factory precheck`'s), and:

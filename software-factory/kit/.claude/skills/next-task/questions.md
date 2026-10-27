@@ -13,7 +13,7 @@ decision the docs leave open), don't guess:
 
 Small gaps the docs don't cover: choose the simplest option that fits the PRD, write it down as
 `<decisions>/NNNN-title.md`, and carry on. A number must be free on main **and** in every open PR (other agents' PRs
-take numbers too). Run `bun --no-env-file .claude/hooks/factory_numbers.ts` before you open the PR: it lists any clash with the
+take numbers too). Run `bun --no-env-file --config=/dev/null .claude/hooks/factory_numbers.ts` before you open the PR: it lists any clash with the
 next free number. The PR gate runs the same check and won't open the PR until the numbers are free. Migrations
 (`numberedDirs` in `.claude/factory.json`) follow the same rule.
 
@@ -45,6 +45,6 @@ for you" in a report):
    the PR. Don't offer "here or in a follow-up?": the answer is here. Ask only when the fix would reach outside the
    task, change what the PRD or a decision says, or when the rules themselves disagree.
 6. **Before you report a cause, check it on GitHub.** If a `gh` command fails oddly (a 307, a 404 on something that
-   exists, "repository moved"), run `bun --no-env-file .claude/hooks/factory_remote.ts`: it asks GitHub where the repository
+   exists, "repository moved"), run `bun --no-env-file --config=/dev/null .claude/hooks/factory_remote.ts`: it asks GitHub where the repository
    is now and points `origin` there if it moved. Don't tell the dev manager the repository moved unless that script
    says so.

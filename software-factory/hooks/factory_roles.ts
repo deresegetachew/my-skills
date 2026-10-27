@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Factory roles (#102): the small per-role definition the shared loop runner (factory-loop.sh) reads, and the
 // project's role folder.
 //

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // CI check: every top-level skill folder is well formed.
 //
 // - SKILL.md exists, with frontmatter: `name:` matching the folder and a non-empty `description:`.

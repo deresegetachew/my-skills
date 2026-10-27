@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Per-loop environment, so several loops on one machine don't share ports, databases or queues.
 //
 // Each loop has a slot: 1 for the project folder, N for the worktree `<project>-agents/<name>` of the Nth name in
@@ -10,9 +10,9 @@
 //
 // Slot 1 gets the project's defaults, so the main folder works exactly as before.
 //
-//   eval "$(bun --no-env-file .claude/hooks/factory_env.ts)"            in a worktree: the slot comes from the folder name
-//   eval "$(bun --no-env-file .claude/hooks/factory_env.ts --agent taytu)"
-//   bun --no-env-file .claude/hooks/factory_env.ts --dotenv              KEY=value lines instead of exports
+//   eval "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_env.ts)"            in a worktree: the slot comes from the folder name
+//   eval "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_env.ts --agent taytu)"
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_env.ts --dotenv              KEY=value lines instead of exports
 //
 // factory-loop.sh does the eval for you and then runs `commands.agentSetup` (for example, create the slot's database)
 // before the first task.

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory handover snapshot` (#100): the state a manager hands over, read from GitHub on the day, as plain text.
 //
 // The runbook (docs/manager-handover.md) starts by moving a long-running manager's notes out of its session. A snapshot made

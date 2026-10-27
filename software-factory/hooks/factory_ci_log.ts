@@ -1,10 +1,10 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory ci log <pr or run>`: why did my CI fail? Prints the failed job's log, trimmed to the failing step (#206).
 //
 // Read-only: it only GETs through `gh api`, so it needs none of the writes the deny rules keep out. The argument is a
 // pull request number or a workflow run id; a number that is not a pull request is tried as a run.
 //
-//   bun --no-env-file .claude/hooks/factory_ci_log.ts <pr or run>
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_ci_log.ts <pr or run>
 //
 // No failed job: one line saying so (exit 0). Not found or unreadable: `{code, message, fix}` on stderr (exit 1).
 import { pyDumps, run, runMain, splitLines } from "./factory_lib.ts";

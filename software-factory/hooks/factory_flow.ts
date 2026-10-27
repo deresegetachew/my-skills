@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory prd --stage` (#103): where a project is on the way from an idea to a first milestone, read from the project and
 // GitHub, and the owner's gates between the stages.
 //

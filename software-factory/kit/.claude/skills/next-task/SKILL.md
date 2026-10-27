@@ -25,7 +25,7 @@ This file is the core. Open the others in this folder only when they apply:
 1. **Start routine:** `git fetch origin && git checkout --detach origin/<mainBranch>`, then
    `git submodule update --init` if the repo has a `.gitmodules`. Read `git log --oneline -15`, and run the `smoke`
    command if `factory.json` has one. If main is broken, fixing it is the task.
-2. **Let the script pick:** `bun --no-env-file .claude/hooks/next_task.ts ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}`.
+2. **Let the script pick:** `bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}`.
    If you were told which issue to build, add `--issue <n>` (issues mode) so the claim takes that one and no other.
    Never pick by reading the plan yourself. If `$ARGUMENTS` names a task, under `factory-loop.sh` the loop has
    already claimed it: build only that one. `pr-<n>` means rework (`rework.md`). Respect phase order unless the plan
@@ -34,7 +34,7 @@ This file is the core. Open the others in this folder only when they apply:
    files, edge cases, out of scope. Open those, and widen only when they don't answer your question. Search long
    documents (`grep -n`) instead of reading them whole: most of a task's cost is what it reads. Say in one line which
    task you're doing and what "done" means.
-4. **Read the lessons.** `bun --no-env-file .claude/hooks/factory_lessons.ts show` prints this project's short list of repeated
+4. **Read the lessons.** `bun --no-env-file --config=/dev/null .claude/hooks/factory_lessons.ts show` prints this project's short list of repeated
    mistakes (one line each, with an example). Check your work against it before every push; the reviewers do too.
    If a person's must-fix or a CI failure teaches something new, say so in the PR description as "lesson candidate:";
    you cannot edit the file, the dev manager does (`factory lessons suggest`).
@@ -64,7 +64,7 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    Don't spend a turn on formatting or auto-fixable lint findings: when `commands.fix` is set, the Stop check and
    `./factory verify` run it on the files you changed ("formatted 3 files"); `./factory fix` runs it by hand. If verify
    says it formatted files, commit them and run it again.
-4. **Extra reviews:** run `bun --no-env-file .claude/hooks/factory_reviews.ts` and do each line it prints (a skill such as
+4. **Extra reviews:** run `bun --no-env-file --config=/dev/null .claude/hooks/factory_reviews.ts` and do each line it prints (a skill such as
    `design-check` or the eval, or a subagent such as `safety-auditor` or `security-reviewer`), fixing every must-fix.
    Ask the `safety-auditor` whenever the diff touches what CLAUDE.md calls critical rules, and the
    `security-reviewer` for auth, payments, public endpoints, uploads, storage, tenancy, secrets or model calls on
@@ -74,14 +74,14 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
 6. **The reviewer starts on Sonnet, Opus when it finds something.** The `reviewer` runs on Sonnet (`model:` in its
    file); the `safety-auditor` and `security-reviewer` run on Opus. When the reviewer reports a must-fix, fix it and
    commit, then ask the reviewer again with `model: "opus"` on the fixed commit (or the model
-   `bun --no-env-file .claude/hooks/factory_models.ts escalate` prints, when the project sets `models.reviewer.escalateTo`), naming each earlier must-fix; it
+   `bun --no-env-file --config=/dev/null .claude/hooks/factory_models.ts escalate` prints, when the project sets `models.reviewer.escalateTo`), naming each earlier must-fix; it
    says how each one was resolved before it records the pass. Asking again without a fix is only for items it marked
    **unsure**. Keep `opus` for its later rounds on this task, and start on `opus` when the diff is over `prSizeWarn`
    lines or touches a `protected` path.
 7. **Re-reviews read only the delta** (#70). Each reviewer records its round (commit, result, findings), and the next
    round of the same reviewer checks only what changed since: the diff since its last commit, its own findings and
    your reply. After fixing and committing, and before asking again, save your reply for each finding:
-   `bun --no-env-file .claude/hooks/factory_rereview.ts reply --kind reviewer --text "<what you changed for each finding>"`
+   `bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts reply --kind reviewer --text "<what you changed for each finding>"`
    (`--kind arch` for the `architecture-reviewer`, `safety` and `security` for the auditors). Then ask the subagent as
    before; it runs `factory_rereview.ts prompt` itself and reads the delta. `factory_rereview.ts plan --kind reviewer`
    shows which it will be. A big fix (over `reReviewPercent` of the branch diff), a new file, a rebase or a merge of
@@ -96,9 +96,9 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    **If `gh pr create` fails** (for example GraphQL is blocked, as in a claude.ai cloud session), don't open it another
    way: `gh api` is denied, because it would get around the PR gate (#182). Stop and report what failed, with the error
    and the pushed branch; keep your task claim, so the task waits for you. Builders need a machine where `gh pr` works.
-   Then drop your task claim: `bun --no-env-file .claude/hooks/factory_claims.ts release --agent "$FACTORY_AGENT" --tasks-only`
+   Then drop your task claim: `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --agent "$FACTORY_AGENT" --tasks-only`
    (when `FACTORY_AGENT` is set). **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
-   `bun --no-env-file .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
+   `bun --no-env-file --config=/dev/null .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
    (`<id>` is the issue number in issues mode). Post it even when it finds no replies.
 3. Once CI is green, post the tokens again (the same command), then merge it yourself:
    `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, with the full hash from `git rev-parse HEAD`
