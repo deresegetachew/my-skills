@@ -6,7 +6,7 @@
 // one's /v8/artifacts/status. The token below is made up for the test; it must never show up in any output, argument
 // or log.
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, lstatSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CI, KIT, read, readmeAndWiki, runHook, SF, sh, type Proc, tmp, write, writeExe } from "./support.ts";
 
@@ -418,14 +418,15 @@ test("factory help lists the turbo commands and the command is wired", () => {
   for (const want of ["turbo status", "turbo install", "turbo down"]) expect(out).toContain(want);
 });
 
-test("the new files reach projects through the old kit paths too", () => {
-  // The compose file still has its forwarder from the move (#112). The hook is now factory_turbo.ts, which projects
-  // reach through .claude/hooks (install.sh links the hooks folder); the .py forwarder went with the .py (#252).
-  const old = join(KIT, ".claude", "ci", "compose-turbo.yaml");
-  expect(lstatSync(old).isSymbolicLink()).toBe(true);
-  expect(realpathSync(old)).toBe(realpathSync(join(SF, "ci", "compose-turbo.yaml")));
-  expect(existsSync(join(SF, "hooks", "factory_turbo.ts"))).toBe(true);
-  expect(existsSync(join(KIT, ".claude", "hooks", "factory_turbo.py"))).toBe(false);
+test("the new files live in the factorys folders and not under kit", () => {
+  // install.sh links every file in ci/ and hooks/ into a project's .claude/ci and .claude/hooks (install_layout.test.ts);
+  // the kit/ forwarders are gone (#176), and the .py went with the move to Bun (#252).
+  for (const rel of ["ci/compose-turbo.yaml", "hooks/factory_turbo.ts"]) {
+    expect(lstatSync(join(SF, rel)).isFile(), rel).toBe(true);
+  }
+  for (const rel of [".claude/ci/compose-turbo.yaml", ".claude/hooks/factory_turbo.py", ".claude/hooks/factory_turbo.ts"]) {
+    expect(existsSync(join(KIT, rel)), rel).toBe(false);
+  }
 });
 
 test("the docs cover setup security signing and the open owner item", () => {
