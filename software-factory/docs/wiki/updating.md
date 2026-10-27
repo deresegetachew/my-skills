@@ -90,6 +90,13 @@ says to take it by name: `factory update v0.1.0-alpha.1`. `factory version` show
 machine needs Bun first (`curl -fsSL https://bun.sh/install | bash`; `factory doctor` checks it). On that one update
 the old Python client cannot restart the heartbeat daemon, so if the daemon runs on the machine, run
 `factory heartbeat restart` once afterwards. Later updates restart it themselves.
+Your own `.github/workflows/ci.yml` was copied once and is yours, but its factory steps still ran the Python hooks the
+update removes (#254). Updating with `v0.2.0-alpha.2` or later moves them to Bun for you: each
+`python3 .claude/hooks/<name>.py` becomes `bun --no-env-file .claude/hooks/<name>.ts`, and a job that now runs Bun gets
+`- uses: oven-sh/setup-bun@v2` after its checkout step (after its `with:` lines). Your own steps are not touched; the
+update lists the workflow it changed, so commit it in the same pull request, or CI on that pull request fails.
+Updating to `v0.2.0-alpha.1` with the old client does not do this: make those changes by hand in the same pull request.
+`factory doctor` fails when a workflow runs a factory script that is not there or runs Bun without setup-bun.
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
