@@ -28,8 +28,9 @@ function project(exitCode = 0): [string, string] {
   return [d, log];
 }
 
+/** The Stop check at the end of an agent's turn, in a factory run (FACTORY_LOOP=1, #256). */
 function stop(d: string) {
-  return runHook("check", [], { cwd: d, input: "{}", env: { ...ENV, CLAUDE_PROJECT_DIR: d } });
+  return runHook("check", [], { cwd: d, input: "{}", env: { ...ENV, CLAUDE_PROJECT_DIR: d, FACTORY_LOOP: "1" } });
 }
 
 function runs(log: string): number {
