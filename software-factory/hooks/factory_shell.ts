@@ -132,7 +132,8 @@ export function shlexTokens(text: string): string[] {
 /** The command split into simple commands (on ; & | && || newlines and brackets), each a token list. Throws on a
  * command it can't read (unbalanced quotes), like pr-gate.py's ValueError. */
 export function simpleCommands(cmd: string): string[][] {
-  cmd = cmd.replaceAll("\\\r\n", " ").replaceAll("\\\n", " "); // a backslash-newline continues the line in bash
+  // a backslash-newline continues the line in bash, and is removed: `g\<newline>h` is gh (#260)
+  cmd = cmd.replaceAll("\\\r\n", "").replaceAll("\\\n", "");
   const out: string[][] = [];
   let cur: string[] = [];
   for (const tok of shlexTokens(cmd.replaceAll("\n", " ; "))) {

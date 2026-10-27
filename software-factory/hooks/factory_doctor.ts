@@ -15,7 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import * as fa from "./factory_artifacts.ts";
 import * as autostart from "./factory_autostart.ts";
 import { missingOriginMain } from "./factory_claims.ts";
-import { type Config, load, roleNames, rolesDir } from "./factory_config.ts";
+import { type Config, load, roleNames, rolesDir, taskSource } from "./factory_config.ts";
 import * as doctorCi from "./factory_doctor_ci.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
 import { Exit, FactoryError, fnmatch, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
@@ -623,6 +623,20 @@ export function roles(r: Reporter, cfg: Config): void {
   if (clash.length) r.fix("role names", `${clash.join(", ")} is also a coding agent's name: change \`roles.<role>.names\``);
 }
 
+/** Issues mode with no `trustedReviewers` (#260): anyone's approval counts at the merge and anyone's must-fix sends the
+ * loops to rework, so an agent's comment could steer them. Plan mode is left as it was. */
+export function trustedReviewers(r: Reporter, cfg: Config): void {
+  if (taskSource(cfg) !== "issues") return;
+  const logins = Array.isArray(cfg.trustedReviewers) ? (cfg.trustedReviewers as unknown[]) : [];
+  if (logins.length) {
+    r.ok(`trustedReviewers: ${logins.map(String).join(", ")}`);
+    return;
+  }
+  r.fix("trustedReviewers in .claude/factory.json", "it is empty, so any GitHub login's approval counts at the merge and " +
+    "any login's must-fix sends the loops to rework. Set the dev manager's and your logins: " +
+    "`factory settings set trustedReviewers '[\"<your-login>\"]'`");
+}
+
 /** The artifact copies in the repo (#104): each one exists, is not edited by hand, and is not older than its artifact
  * when the project can say (`artifacts.info`). */
 export function artifacts(r: Reporter, cfg: Config): void {
@@ -755,6 +769,7 @@ export async function main(argv: string[]): Promise<number> {
     testCommand(r, cfg);
     roles(r, cfg);
     manager(r, cfg);
+    trustedReviewers(r, cfg);
     await turbo(r, cfg);
     artifacts(r, cfg);
     release(r);

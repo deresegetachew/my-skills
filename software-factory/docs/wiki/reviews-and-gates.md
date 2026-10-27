@@ -101,7 +101,7 @@ pipes, subshells), and blocks the pull-request commands that aren't ready:
 | Command | Allowed only when |
 |---|---|
 | `gh pr create`, `gh pr new`, `gh pr ready` | The reviewer passed the current commit (and the architecture reviewer, on styled paths). When main's `factory.json` sets `commands.ci`, `factory verify` passed that commit too. Fewer than `maxOpenPRs` of your ready PRs are open. Plan mode: the task isn't ticked or blocked on main. Issues mode: the issue is open, not blocked, not held by another agent, and the body says `Closes #<n>`. Every new decision or migration file (`decisions`, `numberedDirs`) takes a number neither main nor another open PR has; the message names the next free one (`factory_numbers.ts`). Drafts (`--draft`) skip all of this: they're how agents ask questions |
-| `gh pr merge` | The PR is named by number or URL. It has no `factory-hold` label. The latest marker on it isn't a must-fix, and if it's an approval, it names the current head. The command has `--match-head-commit <head>`, so GitHub merges only the commit the gate checked. The reviewer passes (and the architecture reviewer's, on styled paths) are for that head. CI is green (`gh pr checks`); when the jobs never started (GitHub billing or the spending limit), the gate says that isn't a code result, so the agent doesn't push or re-run to chase it (`factory_ci.ts`). No protected file changed (all files, past the first 100) |
+| `gh pr merge` | The command has no `--admin` (it skips branch protection). The PR is named by number or URL. It has no `factory-hold` label. The latest marker on it isn't a must-fix, and if it's an approval, it names the current head. The command has `--match-head-commit <head>`, so GitHub merges only the commit the gate checked. The reviewer passes (and the architecture reviewer's, on styled paths) are for that head. CI is green (`gh pr checks`); when the jobs never started (GitHub billing or the spending limit), the gate says that isn't a code result, so the agent doesn't push or re-run to chase it (`factory_ci.ts`). No protected file changed (all files, past the first 100) |
 
 It also blocks:
 
@@ -109,7 +109,17 @@ It also blocks:
 - `gh` aliases and anything that isn't a known `gh` command;
 - an agent posting the dev manager's markers (`factory-approved`, `factory-answer`, `factory-mustfix`) in a PR or issue
   comment, edit, review or close; `gh pr review --approve`; adding `tests-reviewed` or `deps-reviewed`; removing
-  `factory-hold`.
+  `factory-hold`;
+- writes through `gh api` that go around those checks (#260): any method but GET to `repos/<o>/<r>/pulls/<n>/merge`,
+  to a `labels` path (or with a `labels` field) or to a `reviews` path, and GraphQL mutations. Other writes have their
+  fields (`-f`, `-F body=@<file>`) and `--input` file read: the dev manager's markers and messages are checked as for
+  `gh pr comment`, and `POST repos/<o>/<r>/pulls` gets the `gh pr create` checks (`-F draft=true` is a draft). A plain
+  GET passes the gate (`settings.json` still denies `gh api` to agents);
+- a force push: `git push` with `-f`, `--force`, `--force-with-lease`, `--force-if-includes`, `--mirror` or a `+`
+  refspec, wherever git's global options (`-C`, `-c`) sit, also inside `bash -c` or `xargs`; and deleting a remote
+  branch (`git push <remote> :<branch>`).
+
+It finds `gh` and `git` in the words as the shell reads them, so quoting (`g\h`, `"g"h`) does not hide them.
 
 **A local CI check before the PR** (`commands.ci`). Set it to what the CI job runs, scoped to what changed and
 building dependent packages first, for example
@@ -126,8 +136,12 @@ on main, nothing changes.
 blocks the command and says why.
 
 **Trusted reviewers.** With `"trustedReviewers": ["<login>"]` in `factory.json`, only approvals from those GitHub
-logins count. This only helps once the agents use a different GitHub account from the dev manager (see
-[Security notes](sandboxed-machine.md#security-notes)).
+logins count, and only their must-fixes send a pull request back to rework (`factory next`). This only helps once the
+agents use a different GitHub account from the dev manager (see [Security notes](sandboxed-machine.md#security-notes)).
+In issues mode `factory doctor` reports an empty list as a fix (#260).
+
+**Protected by default.** The default `protected` list also covers `factory` and `factory-loop.sh` at the project root:
+the loop runs main's copy of the script, so a merged change to it runs in every loop.
 
 `settings.json` backs it up with deny rules: no force push, no push to main, no `--no-verify`, no deleting remote
 branches, no `gh api` and no `gh alias` from the agent, no edits to `.claude/`, `vendor/`, `CLAUDE.md` or the PRD,

@@ -112,7 +112,8 @@ export const DEFAULTS: Config = {
   checkOutputLines: 40,
   // Where the full output of a failed check is saved (the agent sees only a capped summary and this path).
   checkLogDir: "tmp/checks",
-  protected: ["^CLAUDE\\.md$", "^\\.claude/", "^\\.github/", "^\\.mcp\\.json$", "\\.env",
+  // The loop script and the CLI too: factory-loop.sh runs main's copy, so a merged change runs in every loop (#260).
+  protected: ["^CLAUDE\\.md$", "^\\.claude/", "^\\.github/", "^\\.mcp\\.json$", "^factory$", "^factory-loop\\.sh$", "\\.env",
     "(^|/)(pnpm-lock\\.yaml|package-lock\\.json|yarn\\.lock|bun\\.lockb?)$"],
   alwaysAllowed: ["docs/build-plan.md", "docs/blocked.md"],
   // Tests and expected outputs: the implementer must not quietly change them (factory_guard.ts).

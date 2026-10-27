@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { agentIssue, agents, countAgentIssues, HOOKS, inProject, issue, labels, loadDb, nextTask, pull, run, saveDb,
   setup, snapshot } from "./issues_support.ts";
-import { runHook } from "./support.ts";
+import { runHook, write } from "./support.ts";
 
 test("pick claims in milestone order and skips dependencies", () => {
   const [d, db, env] = setup([issue(1, undefined, "", 2), issue(2, undefined, "Depends on #3", 1), issue(3, undefined, "", 1)]);
@@ -220,6 +220,24 @@ test("show prints the issue then the human comments and not the factory markers"
   expect(out.indexOf("Add truncate.")).toBeLessThan(out.indexOf("Decision: n <= 0 returns an empty string."));
   expect(out).toContain("boss");
   for (const noise of ["Claimed.", "Approved.", "Fix the loop."]) expect(out).not.toContain(noise);
+});
+
+test("rework comes only from a trusted reviewers must-fix when trustedReviewers is set", () => {
+  // #260: an agent's forged must-fix would send every loop to rework that pull request
+  const sha = "a".repeat(40);
+  const go = (login: string, trusted: string[] | null): [number, string, string] => {
+    const [d, db, env] = setup([]);
+    const data = loadDb(db);
+    data.pulls = [{ number: 5, title: "Add truncate", labels: [], head: { sha, ref: "task/5-x" } }];
+    data.comments = { 5: [{ body: "<!-- factory-mustfix sha=aaaaaaa -->\nFix it.", at: 1, user: { login } }] };
+    saveDb(db, data);
+    const cfg = { tasks: { source: "issues" }, agents: ["menelik"], ...(trusted ? { trustedReviewers: trusted } : {}) };
+    write(join(d, ".claude", "factory.json"), JSON.stringify(cfg));
+    return nextTask(d, env);
+  };
+  expect(go("agent-bot", ["boss"])[1]).toBe("none");
+  expect(go("boss", ["boss"])[1]).toBe("pr-5 Rework #5: Add truncate (task/5-x)");
+  expect(go("agent-bot", null)[1], "no list: anyone, as before").toBe("pr-5 Rework #5: Add truncate (task/5-x)");
 });
 
 test("show without comments is unchanged", () => {
