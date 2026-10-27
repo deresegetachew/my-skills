@@ -137,7 +137,7 @@ no reading `.env` files.
 
 | Hook | What it does |
 |---|---|
-| Stop: `check.ts` | Won't let a turn end while typecheck or tests fail, when code under `codePaths` changed. Skips a rerun when nothing changed since the last green check |
+| Stop: `check.ts` | In a factory run only (`factory loop`, which sets `FACTORY_LOOP=1`): won't let a turn end while typecheck or tests fail, when code under `codePaths` changed. Skips a rerun when nothing changed since the last green check. Your own session in the project skips it; CI and the PR gate still check the build |
 | Stop: `factory_stop.ts` | In `factory loop -i`, closes the session a few seconds after the agent marks its task done |
 | SessionStart: `factory_session.ts` | Updates the submodules. For your own sessions, also claims the folder, installs, sets the agent's env and registers it |
 | Post-tool, Stop, SessionEnd: `factory_agents.ts hook` | Pings, idle and down on the agent issue (issues mode) |

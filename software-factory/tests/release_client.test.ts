@@ -279,6 +279,53 @@ test("update from a python release to a bun release removes the python files and
   expect(existsSync(join(d, ".claude/hooks/factory_x.py")) && !existsSync(join(d, ".claude/hooks/factory_x.ts"))).toBe(true);
 });
 
+test("update from a python release to a bun release rewrites the workflow steps that call a removed python hook", async () => {
+  // #254: the workflow is the project's file, but CI on the update PR fails at once while it calls the deleted scripts
+  const [gh, d, env] = await world();
+  gh.add("0.1.0-alpha.3", { pre: true, date: "2026-10-01T10:00:00Z", files: {
+    "hooks/factory_x.ts": null, "hooks/factory_old.ts": null,
+    "hooks/factory_x.py": "VERSION = '0.1.0-alpha.3'\n", "hooks/factory_old.py": "OLD = 1\n",
+    "kit/.claude/settings.json": JSON.stringify({ hooks: { Stop: [{ hooks: [{
+      type: "command", command: "python3 \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_x.py" }] }] } }) + "\n",
+  } });
+  let [rc, out] = await fac(d, env, "update", "v0.1.0-alpha.3");
+  expect(rc, out).toBe(0);
+  const ci =join(d, ".github/workflows/ci.yml");
+  mkdirSync(dirname(ci), { recursive: true });
+  writeFileSync(ci, [
+    "name: CI", "on: [pull_request]", "jobs:",
+    "  guard:", "    runs-on: ubuntu-latest", "    steps:",
+    "      - uses: actions/checkout@v4",
+    "      - run: python3 .claude/hooks/factory_x.py --base main",
+    "  check:", "    runs-on: ubuntu-latest", "    steps:",
+    "      - uses: actions/checkout@v4",
+    "      - uses: oven-sh/setup-bun@v2",
+    "      - name: Tests", "        run: python3 .claude/hooks/factory_x.py run test",
+    "      - run: python3 .claude/hooks/factory_gone.py",
+    "",
+  ].join("\n"));
+  commit(d, "on the python release");
+  gh.add("0.2.0", { date: "2026-11-01T10:00:00Z" });
+  [rc, out] = await fac(d, env, "update", "v0.2.0");
+  expect(rc, out).toBe(0);
+  const text = read(ci);
+  expect(text).not.toContain("python3 .claude/hooks/factory_x.py");
+  expect(text).toContain("run: bun --no-env-file .claude/hooks/factory_x.ts --base main");
+  expect(text).toContain("run: bun --no-env-file .claude/hooks/factory_x.ts run test");
+  expect(text, "a removed hook with no Bun version is left for doctor to name").toContain("python3 .claude/hooks/factory_gone.py");
+  const guard = text.slice(text.indexOf("  guard:"), text.indexOf("  check:"));
+  const check = text.slice(text.indexOf("  check:"));
+  expect(guard.indexOf("oven-sh/setup-bun@v2"), "the job without Bun gets the setup step").toBeGreaterThan(-1);
+  expect(guard.indexOf("oven-sh/setup-bun@v2")).toBeLessThan(guard.indexOf("bun --no-env-file"));
+  expect(check.split("oven-sh/setup-bun").length - 1, "a job that has it gets no second one").toBe(1);
+  expect(out).toContain("Changed .github/workflows/ci.yml");
+  expect(out).toContain("python3 .claude/hooks/factory_x.py  ->  bun --no-env-file .claude/hooks/factory_x.ts");
+  const after = read(ci);
+  commit(d, "on the bun release");
+  [rc, out] = await fac(d, env, "update", "v0.2.0"); // safe to run twice
+  expect(rc === 0 && read(ci) === after && !out.includes("Changed .github"), out).toBe(true);
+});
+
 test("verification parses every installed ts file and a broken one fails the update", async () => {
   const [gh, d, env] = await world();
   gh.add("1.0.0", { files: { "hooks/factory_bad.ts": "export const = ;\n" } });

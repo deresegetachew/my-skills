@@ -149,8 +149,9 @@ test("a failing fixer shows the capped findings and the log path", () => {
   expect(r.stderr).toContain("tmp/checks/fix.log");
 });
 
+/** The Stop check at the end of an agent's turn, in a factory run (FACTORY_LOOP=1, #256). */
 function stop(d: string) {
-  return runHook("check", [], { cwd: d, input: "{}", env: { ...ENV, CLAUDE_PROJECT_DIR: d } });
+  return runHook("check", [], { cwd: d, input: "{}", env: { ...ENV, CLAUDE_PROJECT_DIR: d, FACTORY_LOOP: "1" } });
 }
 
 test("the stop check formats before the tests run and says so", () => {

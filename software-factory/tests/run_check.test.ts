@@ -74,7 +74,7 @@ test("no command is a usage error", () => {
 test("the stop check names the log and stays capped", () => {
   const d = project(NOISY_FAIL, { checkOutputLines: 10 });
   write(join(d, "src", "a.ts"), "two\n");
-  const r = runHook("check", [], { cwd: d, input: "{}", env: { ...ENV, CLAUDE_PROJECT_DIR: d } });
+  const r = runHook("check", [], { cwd: d, input: "{}", env: { ...ENV, CLAUDE_PROJECT_DIR: d, FACTORY_LOOP: "1" } }); // a factory run (#256)
   expect(r.code, r.out).toBe(2);
   expect(r.stderr).toContain("FAIL src/a.test.ts:12:3");
   expect(r.stderr.split("\n")[0]).toContain("Full log: tmp/checks/test.log");

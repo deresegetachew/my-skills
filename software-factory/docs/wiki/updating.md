@@ -89,7 +89,11 @@ says to take it by name: `factory update v0.1.0-alpha.1`. `factory version` show
 **From the old Python release to Bun.** A project on `v0.1.0-alpha.3` updates with `factory update` as before. The
 machine needs Bun first (`curl -fsSL https://bun.sh/install | bash`; `factory doctor` checks it). On that one update
 the old Python client cannot restart the heartbeat daemon, so if the daemon runs on the machine, run
-`factory heartbeat restart` once afterwards. Later updates restart it themselves.
+`factory heartbeat restart` once afterwards. Later updates restart it themselves. The project's
+`.github/workflows/ci.yml` still calls `python3 .claude/hooks/*.py`, which that update removed, so CI on the update pull
+request fails until it changes: run `factory update` once more with the new client (it rewrites each such step to
+`bun --no-env-file .claude/hooks/*.ts` and adds `- uses: oven-sh/setup-bun@v2` to the jobs that need it), then commit
+the workflow in the same pull request. `factory doctor` names any workflow step that calls a hook that is not there.
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
