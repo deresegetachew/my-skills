@@ -87,8 +87,8 @@ There is no web console. To look at, steer or take over an item:
    Those wait for the owner, with a comment saying why. Write the project's version into the role folder's README.
    Without a live session (no tokens when idle), run `factory manage-tick` from cron, launchd or a systemd timer: it runs
    `factory precheck` in the shell and starts one `/manage-pass` session on the manager profile only when there is work.
-4. **Create the review labels** once: `tests-reviewed` and `deps-reviewed` (`POST /repos/{o}/{r}/labels`). The
-   CI factory guard fails a PR that changes existing tests or expected outputs, edits tests after
+4. **Create the review labels** once: `factory issues setup` makes `tests-reviewed` and `deps-reviewed` with the task
+   labels (don't create labels by hand). The CI factory guard fails a PR that changes existing tests or expected outputs, edits tests after
    implementation started, adds `.skip`/`.only`, or adds a dependency, until you've reviewed it and added the
    label. Never add one without reading the change.
 5. **Start it.** `factory dev-manager loop --dry-run` first (it reads GitHub and prints what a cycle would do), then
@@ -112,8 +112,7 @@ the reasoning behind it. A sub-manager works on exactly its item. Run by hand (`
    a PR a few minutes after it opens if the agent may still be pushing; a clean, green PR that says "a person merges this one"
    is yours. Retarget stacked PRs to main after a merge.
 2. **Must-fix findings, failing CI or merge conflicts** on a PR with no new commit for 15+ minutes go back to the agent as a
-   must-fix (the manager profile has read-only git); small fixes the profile allows may be done on that branch; big ones or
-   judgement calls go to the owner.
+   must-fix (the manager profile has read-only git, so it can't push a fix itself); judgement calls go to the owner.
 3. **Questions:** every question without a later answer. `factory messages ls --to dev-manager` lists them. Answer with an
    envelope (`factory messages new --kind answer --in-reply-to <id> --ref pr#<n>`; state `completed`, `failed` when it needs the
    owner, `input-required` when you need more from the asker) and keep the old marker on the next line. Product questions
@@ -192,7 +191,7 @@ envelope; docs/messages.md). They come to you first for technical and process qu
   the test easier to pass (must-fix: say so and don't label)? For a new dependency, check the package exists
   on the registry, is maintained, has real usage, and is the one intended (names an agent invents are often
   squatted); then add `deps-reviewed`. Decision-number collisions and wrong task ticks can't be labelled away:
-  fix them on the branch or ask the coding agent to.
+  post them as must-fixes for the coding agent.
 - **Spot-check claims against sources.** If a PR says text was copied word for word from a document, open
   the document and compare (for PDFs: `pdftoppm -f N -l N -r 80 -png file.pdf out`, then look at the image).
 - **Must-fix comments start with `<!-- factory-mustfix sha=<head> -->`** (the head commit you reviewed). That
@@ -203,9 +202,10 @@ envelope; docs/messages.md). They come to you first for technical and process qu
   must-fix. When you re-review and it's good, merge it yourself or post `<!-- factory-approved sha=<head> -->`.
   An approval counts only for the commit its `sha=` names, and the agent's merge must carry
   `--match-head-commit <head>`. With `trustedReviewers: ["<your login>"]` in factory.json, only your approvals
-  count; that's worth it once the agents use their own GitHub account. The gate is a guard rail, not a lock:
+  count at the merge, and only your must-fixes send a PR back as rework; that's worth it once the agents use their own
+  GitHub account. In issues mode `factory doctor` asks for it while it is empty. The gate is a guard rail, not a lock:
   keep branch protection with the CI checks required on main.
-- **Unblock an issue with `factory_issues.ts release <n> "<reason>"`**, not by editing labels: release (and block)
+- **Unblock an issue with `factory issues release <n> "<reason>"`**, not by editing labels: release (and block)
   post a `factory-release` marker, so an old claim from before the block can't win the issue again.
 - **One comment per reviewed commit**: verdict (merge / needs changes / needs the owner), must-fix items with
   file and line, follow-ups in a line each, and the marker `<!-- pr-watch sha=<head sha> -->`. The marker is
@@ -224,12 +224,13 @@ lessons, each with an example or a link.
 - **When a must-fix repeats,** or an agent's PR description says "lesson candidate: ...", run
   `bun --no-env-file --config=/dev/null .claude/hooks/factory_lessons.ts suggest` (read-only; every ten merged PRs is enough). It lists causes that came back
   on two or more of the last 20 task PRs: must-fix items, CI failing at the same job and step, and the reviewer findings on
-  this machine. Skip a candidate that is a one-off; reword one you keep to a single imperative line with its example, then
-  `bun --no-env-file --config=/dev/null .claude/hooks/factory_lessons.ts add "<rule>"` and merge the file in a PR.
+  this machine. Skip a candidate that is a one-off; reword one you keep to a single imperative line with its example, and
+  propose it to the owner in an owner-queue ask.
 - **When something enforces a lesson now** (a hook, a lint rule, a `factory.json` check), tag it `[enforced: <path>]`;
-  `factory_lessons.ts prune` proposes removing the tagged ones whose enforcement exists, and `prune --apply` does.
+  `factory lessons prune` proposes removing the tagged ones whose enforcement exists, and `prune --apply` does.
 - **Past the cap, prune or merge;** never raise `lessonsCap` to make room. CI fails a file over the cap.
-- Only you change the file: the agents cannot edit `.claude/`, and `add` and `prune --apply` refuse inside an agent session.
+- The file is under `.claude/` (`.claude/factory/lessons.md` by default), so a person writes it: `factory lessons add "<rule>"`
+  and `prune --apply` refuse inside any Claude session, and the owner merges the pull request (#247).
 
 ## Waiting for CI
 
@@ -294,8 +295,8 @@ All managers share one GitHub account, so the name inside the comment is the onl
 
 When the owner runs more than one `factory-loop.sh`, PRs arrive side by side for neighbouring tasks. Merge them in
 plan order when one builds on another; when a later PR conflicts after an earlier merge, ask its branch to merge the main
-branch in, never to rebase (force pushes are blocked) (or fix the conflict yourself if the loop has moved on). `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts list` on the
-owner's machine shows which loop holds which task; a claim lapses when its loop exits or after `claimStaleHours`.
+branch in, never to rebase (force pushes are blocked). `factory claims` on the owner's machine shows which loop holds
+which task; a claim lapses when its loop exits or after `claimStaleHours`.
 
 ## Token use
 

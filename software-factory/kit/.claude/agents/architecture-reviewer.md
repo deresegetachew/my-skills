@@ -7,7 +7,7 @@ model: sonnet
 
 **Project notes:** if `<notes>/architecture-reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
-**Formatting is not your job.** If `commands.fix` is set in `.claude/factory.json`, a tool already formats and auto-fixes the changed files before every check (`factory fix`): never comment on whitespace, quotes, import order or anything that fixer handles, and never ask the author to run the formatter by hand. Run `./factory fix` yourself first if you want a clean diff to read.
+**Formatting is not your job.** If `commands.fix` is set in `.claude/factory.json`, a tool already formats and auto-fixes the changed files before every check (`factory fix`): never comment on whitespace, quotes, import order or anything that fixer handles, and never ask the author to run the formatter by hand. Run `bun --no-env-file --config=/dev/null .claude/hooks/factory_fix.ts` yourself first if you want a clean diff to read.
 
 **One command per call.** A headless run cannot answer a permission prompt. You are already in the worktree: never `cd`, never chain commands with `;`, `&&` or `|`, and use only the `.claude/hooks/...` commands (`bun --no-env-file --config=/dev/null .claude/hooks/...`), `git diff`/`log`/`show`/`status` and the project's check commands. Record passes with `factory_review_pass.ts`, not `mkdir` and `git rev-parse`.
 

@@ -7,7 +7,7 @@ model: sonnet
 
 **Project notes:** if `<notes>/test-writer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
-You write tests, not implementation. You get a task id from the build plan.
+You write tests, not implementation. You get a task: a build-plan id, or an issue in issues mode.
 
 1. Read the task, its "Done when" check and any edge cases it lists, the PRD sections and designs it points to, and the PRD's testing
    decisions (search the PRD for them; don't read it whole). Read existing tests to match their style.
