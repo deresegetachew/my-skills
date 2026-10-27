@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory prd` (#101): progress against the PRD, as plain text, computed from GitHub. Nothing is written by hand.
 //
 // Each user story in the PRD file (`prd` in factory.json) has an id, `US-<n>`, at the start of its heading or list item.

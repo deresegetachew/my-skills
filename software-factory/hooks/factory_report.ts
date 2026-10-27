@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory report`: how long each task took and how often it went round, from GitHub (#65). The tokens are in
 // `factory usage`, from this machine's logs; this is the part GitHub knows, the same on every machine.
 //

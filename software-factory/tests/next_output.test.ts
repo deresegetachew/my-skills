@@ -6,7 +6,7 @@ import { type Env, issue, type IssueRow, setup } from "./issues_support.ts";
 import { HOOKS, readmeAndWiki, runHook, SF, sh } from "./support.ts";
 
 // The command a person runs to claim (the .ts since #252; it was python3 .claude/hooks/next_task.py before).
-const CLAIM = "bun --no-env-file .claude/hooks/next_task.ts --claim taytu --pid $$";
+const CLAIM = "bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --pid $$";
 
 function project(issues: IssueRow[]): [string, Env] {
   const [d, , env] = setup(issues);

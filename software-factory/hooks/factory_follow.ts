@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory follow`, `factory say`, `factory remote` and `factory agent <name> --detach` (#106): watch and talk to an
 // agent by its name, wherever it runs. The text below (HELP) is what `help` prints.
 //

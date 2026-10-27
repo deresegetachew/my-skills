@@ -62,5 +62,5 @@ export function lines(p: Proc, kind: string): string[] {
 
 /** The kit's hook line for a Bun hook, as `factory update` writes it into settings.json. */
 export function hookLine(name: string): string {
-  return `bun --no-env-file "$CLAUDE_PROJECT_DIR"/.claude/hooks/${name}.ts`;
+  return `bun --no-env-file --config=/dev/null "$CLAUDE_PROJECT_DIR"/.claude/hooks/${name}.ts`;
 }

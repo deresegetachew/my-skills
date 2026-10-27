@@ -10,16 +10,16 @@ fixed yet.
    test to make a finding go away. If you disagree with a finding, reply with your evidence in a
    `<!-- factory-question -->` comment instead of pushing, and stop (step 5).
 3. Run the commands from `factory.json`, save your reply for the reviewer's next round
-   (`bun --no-env-file .claude/hooks/factory_rereview.ts reply --kind reviewer --text "<what you changed for each must-fix>"`; it
+   (`bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts reply --kind reviewer --text "<what you changed for each must-fix>"`; it
    makes that round a delta review when the fix is small; if it says there is no earlier round, carry on: the review is a
    full one), ask the `reviewer` subagent (and the auditor the PR needed) for a pass on the
    new commit, then push. The push moves the head, so the PR is no longer rework.
 4. Reply on the PR: what changed for each must-fix, with the commit. Post the task's tokens again
-   (`bun --no-env-file .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`).
+   (`bun --no-env-file --config=/dev/null .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`).
    Don't merge it: the PR gate holds a PR with a must-fix until the dev manager approves the new commit.
 5. Then stop (under `factory-loop.sh`) or go back to step 1. **In an interactive loop** (`FACTORY_INTERACTIVE=1`),
    stopping means marking the rework done, exactly like a new task:
-   `bun --no-env-file .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task pr-<n>`, then end with one line,
+   `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task pr-<n>`, then end with one line,
    `Rework on #<n> pushed: <PR link>.` The session closes by itself and the loop goes on. Don't wait in the session
    for the review: it comes back as a new must-fix (another pass) or an approval, and nobody may be at the terminal
    to type `/exit`.

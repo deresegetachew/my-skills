@@ -6,7 +6,7 @@ the plan, and the steps in SKILL.md change like this:
 | Step | In issues mode |
 |---|---|
 | Pick | `next_task.ts` prints `issue-<n> <title>`: your own in-progress issue first, else it claims the next `factory:ready` one on GitHub for you (labels `factory:in-progress` and `agent:<your name>`). `$ARGUMENTS` may be `issue-<n>`. When the dev manager named your issue, claim exactly it: `next_task.ts --claim "$AGENT" --issue <n>` (refused with `{code, message, fix}` if taken or blocked; then stop and say so). |
-| Read | `bun --no-env-file .claude/hooks/factory_issues.ts show <n>`: the brief, goals, acceptance criteria, edge cases, todos. The acceptance criteria are the "Done when". |
+| Read | `bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts show <n>`: the brief, goals, acceptance criteria, edge cases, todos. The acceptance criteria are the "Done when". |
 | Branch | `task/<n>-<short-name>`, for example `task/42-style-leftovers`. |
 | Todos | Tick each checkbox as you finish it: `factory_issues.ts tick <n> <index>` (1-based). The board and the owner's phone show it. |
 | Blocked | Instead of the blocked list: `factory_issues.ts block <n> "<what a person must provide>"`, then the next job. |

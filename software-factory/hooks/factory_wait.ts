@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Token-free waiting. A Claude session that waits by checking again and again pays for every check (each turn
 // re-sends the whole context), so every wait is a shell loop here that only returns when there is something to do,
 // with one short line. Exit codes: 0 = it happened, 2 = timed out (do other work), 1 = it can't happen (see the line),
@@ -122,7 +122,7 @@ export function waitCi(n: number, minutes: number | string): Outcome {
     if (state === "green") return [0, `PR #${n}: CI green (${detail}) on ${sha.slice(0, 7)}`];
     if (state === "failed") {
       if (notStarted(sha)) {
-        return [4, `PR #${n}: CI didn't run on ${sha.slice(0, 7)} (GitHub didn't start the jobs). Run: bun --no-env-file .claude/hooks/factory_ci.ts ${sha}`];
+        return [4, `PR #${n}: CI didn't run on ${sha.slice(0, 7)} (GitHub didn't start the jobs). Run: bun --no-env-file --config=/dev/null .claude/hooks/factory_ci.ts ${sha}`];
       }
       return [1, `PR #${n}: CI failed on ${sha.slice(0, 7)}: ${detail}`];
     }

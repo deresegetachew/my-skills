@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // One dev manager tick that costs nothing when there is nothing to do (#71).
 //
 //   factory manage-tick [--dry-run] [--print-command]

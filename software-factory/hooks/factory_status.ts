@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory status`: one read-only view of the whole factory, across machines (#64).
 //
 //   Agents     every agent on every machine (issues mode: their agent issues): working, idle, silent or down
@@ -13,7 +13,7 @@
 // working tree; in plan mode `next_task.ts` runs a `git fetch` to see main's plan. A section
 // GitHub can't answer says so and the rest still shows.
 //
-//   bun --no-env-file .claude/hooks/factory_status.ts [--json]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_status.ts [--json]
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { agentIssues, current, stateOf } from "./factory_agents.ts";

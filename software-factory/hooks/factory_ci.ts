@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Tells a CI failure from CI that never ran.
 //
 // When GitHub can't start a job (the account's Actions minutes or spending limit, a failed payment), every job ends
@@ -6,7 +6,7 @@
 // payments have failed or your spending limit needs to be increased". That says nothing about the code: pushing
 // again or re-running CI only adds more failed runs. Only a person (billing) can fix it.
 //
-//   bun --no-env-file .claude/hooks/factory_ci.ts <commit>     prints why CI didn't run and exits 3; exits 0 when it did run
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_ci.ts <commit>     prints why CI didn't run and exits 3; exits 0 when it did run
 import { die, run, runMain } from "./factory_lib.ts";
 
 // Only GitHub's own wording: a real test named "billing" that fails must still count as a failure.

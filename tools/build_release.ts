@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Build a software-factory release: a deterministic .tar.gz, its manifest, and SHA256SUMS (#113).
 //
 //     bun tools/build_release.ts [--out dist] [--tag v1.2.3] [--root <checkout>]

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Lets several factory loops run on one project without stepping on each other.
 //
 // Two things are claimed, both in a lock-protected JSON file inside the repo's shared git directory
@@ -12,18 +12,18 @@
 // `claimStaleHours`), it no longer counts. Loops on other machines or clones can't see this file, so a task whose
 // `task/<id>-...` branch got a commit on the remote within `claimStaleHours` counts as taken too.
 //
-//   bun --no-env-file .claude/hooks/factory_claims.ts checkout --pid $$     -> prints "<agent> <directory>" to work in
-//   bun --no-env-file .claude/hooks/factory_claims.ts checkout --pid $$ --role dev-manager [--name lead]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts checkout --pid $$     -> prints "<agent> <directory>" to work in
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts checkout --pid $$ --role dev-manager [--name lead]
 //                                                                 -> the same for another role (#102): its names are
 //                                                                    `roles.<role>.names`, its folder
 //                                                                    `<project>-agents/<name>`. A name belongs to one
 //                                                                    loop on a clone, whatever its role.
-//   bun --no-env-file .claude/hooks/factory_claims.ts release --agent taytu [--tasks-only]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --agent taytu [--tasks-only]
 //                                                                 -> one line: what was released, or "Nothing to release: ..."
-//   bun --no-env-file .claude/hooks/factory_claims.ts list
-//   bun --no-env-file .claude/hooks/factory_claims.ts done --agent taytu --task 3.2       (factory loop -i: close the session)
-//   bun --no-env-file .claude/hooks/factory_claims.ts clean                                remove unused agent worktrees
-//   cd "$(bun --no-env-file .claude/hooks/factory_claims.ts worktree taytu)" && claude
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts list
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --agent taytu --task 3.2       (factory loop -i: close the session)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts clean                                remove unused agent worktrees
+//   cd "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts worktree taytu)" && claude
 //                                                                 -> a plain Claude session in taytu's worktree; the
 //                                                                    SessionStart hook (factory_session.ts) sets it up
 // next_task.ts --claim <agent> --pid <pid> uses `claimTask` below.

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The network guard of a sandboxed factory machine (#105): renders the nftables rules and the systemd unit that
 // keep the dedicated user (default `factory`) away from the home network, and reads the facts the rules need.
 //
@@ -7,7 +7,7 @@
 // services of other users are not reachable. Everything here only builds text. Nothing runs until
 // `factory bootstrap machine --apply` installs it as root.
 //
-//   bun --no-env-file factory_netguard.ts render --uid 1001 [--resolver ADDR] [--allow-host ADDR[:PORT]] ...   print the rules
+//   bun --no-env-file --config=/dev/null factory_netguard.ts render --uid 1001 [--resolver ADDR] [--allow-host ADDR[:PORT]] ...   print the rules
 //
 // Rendering is deterministic (same inputs, same text), so a re-run of bootstrap can tell whether anything changed.
 import { isIP } from "node:net";
@@ -21,7 +21,7 @@ Tailscale range 100.64.0.0/10, link-local, IPv6 ULA and tailnet); the user's DNS
 services of other users are not reachable. Everything here only builds text. Nothing runs until
 \`factory bootstrap machine --apply\` installs it as root.
 
-  bun --no-env-file factory_netguard.ts render --uid 1001 [--resolver ADDR] [--allow-host ADDR[:PORT]] ...   print the rules
+  bun --no-env-file --config=/dev/null factory_netguard.ts render --uid 1001 [--resolver ADDR] [--allow-host ADDR[:PORT]] ...   print the rules
 
 Rendering is deterministic (same inputs, same text), so a re-run of bootstrap can tell whether anything changed.
 `;

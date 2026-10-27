@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // What belongs to this machine and not to the project (#45): its id, and the agent names it runs.
 //
 // Two machines on one project must never share an agent name. Both live outside the repo, in the config folder
@@ -15,11 +15,11 @@
 //                     `factory settings --local` shows and changes all of them.
 //   <repo>.env        KEY=value lines `factory resume` loads for the agents it starts at boot (SOPS_AGE_KEY_FILE ...).
 //
-//   bun --no-env-file .claude/hooks/factory_machine.ts id                     print this machine's id
-//   bun --no-env-file .claude/hooks/factory_machine.ts show                   the id and the names this machine runs
-//   bun --no-env-file .claude/hooks/factory_machine.ts setup haile,tewodros   write the names file (issues mode: refuses a
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts id                     print this machine's id
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts show                   the id and the names this machine runs
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts setup haile,tewodros   write the names file (issues mode: refuses a
 //                                                                             name another machine has live)
-//   bun --no-env-file .claude/hooks/factory_machine.ts remote                 1 or 0: whether sessions start with Remote Control
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts remote                 1 or 0: whether sessions start with Remote Control
 // Errors are `{code, message, fix}` on stderr.
 import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from "node:fs";

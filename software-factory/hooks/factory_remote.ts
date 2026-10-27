@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Keeps the git remotes pointing at where the repository lives now.
 //
 // When a repository is moved or renamed on GitHub, the old address still works for reading (GitHub redirects it),
@@ -7,8 +7,8 @@
 // GitHub for each remote's current name and, when it differs, points the remote at it and says so in one line.
 // Remotes are shared by every worktree of the repository, so one fix covers all the agents on the machine.
 //
-//   bun --no-env-file .claude/hooks/factory_remote.ts          check and fix; prints one line per remote it changed
-//   bun --no-env-file .claude/hooks/factory_remote.ts --check  only say what it would change (exit 1 if anything)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_remote.ts          check and fix; prints one line per remote it changed
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_remote.ts --check  only say what it would change (exit 1 if anything)
 import { run, runMain } from "./factory_lib.ts";
 
 const GITHUB = /^(?<pre>(?:https?:\/\/|ssh:\/\/)?(?:[^@/]+@)?github\.com[:/])(?<owner>[\w.-]+)\/(?<repo>[\w.-]+?)(?<post>\.git)?\/?$/;

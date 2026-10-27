@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory settings`: browse, understand and change the factory's settings (.claude/factory.json) without editing JSON.
 //
 //   factory settings                       the interactive menu in a terminal; elsewhere (a pipe, a script) the list
