@@ -242,4 +242,77 @@ test("doctor only reads from github", () => {
   const calls = log.split("\n").filter((l) => l.startsWith("api"));
   expect(calls.length, log).toBeGreaterThan(0);
   expect(calls.filter((l) => ["-X POST", "-X PATCH", "-X PUT", "-X DELETE", "--input"].some((w) => l.includes(w))), log).toEqual([]);
+  expect(log, "the merge boundary checks ask too, read-only (#261)").toContain("rules/branches/main");
+});
+
+// --- (5) the merge boundary on GitHub (#261) ------------------------------------------------------------------------------
+// The local gate can't stop an agent that runs its own code (a package script it wrote); GitHub can, when the agents'
+// login has no admin rights and main requires the checks and a review.
+
+const RULES = P + "rules/branches/main";
+const PROTECTION = P + "branches/main/protection";
+const BRANCH = P + "branches/main";
+const repo = (admin: boolean): Row => ({ "repos/{owner}/{repo}": { permissions: { admin, push: true, pull: true } } });
+const GUARDED_RULES = [{ type: "pull_request", parameters: { required_approving_review_count: 1 } },
+  { type: "required_status_checks", parameters: { required_status_checks: [{ context: "Factory guard" }, { context: "Typecheck, lint, test, build" }] } }];
+
+test("a gh login with admin rights on the repo is a fix that says to run the agents as an account without them", () => {
+  const [p] = run({ db: repo(true) });
+  const fixes = mine(p, "fix", "admin");
+  expect(fixes.length, p.stdout).toBe(1);
+  expect(fixes[0]).toContain("me");
+  expect(fixes[0]).toContain("--admin");
+  expect(fixes[0]).toContain("Write");
+  expect(p.code).toBe(1);
+});
+
+test("a gh login without admin rights is ok", () => {
+  const [p] = run({ db: repo(false) });
+  expect(mine(p, "ok", "admin").length, p.stdout).toBe(1);
+  expect(mine(p, "fix", "admin"), p.stdout).toEqual([]);
+});
+
+test("a main branch that requires nothing is a fix with the steps", () => {
+  const [p] = run({ db: { ...repo(false), [RULES]: [], [BRANCH]: { name: "main", protected: false } } });
+  const fixes = mine(p, "fix", "main requires");
+  expect(fixes.length, p.stdout).toBe(1);
+  expect(fixes[0]).toContain("Factory guard");
+  expect(fixes[0]).toContain("review");
+  expect(fixes[0]).toContain("Settings");
+  expect(p.code).toBe(1);
+});
+
+test("a ruleset on main that requires the guard and a review is ok", () => {
+  const [p] = run({ db: { ...repo(false), [RULES]: GUARDED_RULES, [BRANCH]: { name: "main", protected: false } } });
+  expect(mine(p, "ok", "main requires").length, p.stdout).toBe(1);
+  expect(mine(p, "fix", "main requires"), p.stdout).toEqual([]);
+});
+
+test("branch protection that requires the guard and a review is ok", () => {
+  const [p] = run({ db: { ...repo(true), [RULES]: [], [BRANCH]: { name: "main", protected: true },
+    [PROTECTION]: { required_status_checks: { contexts: ["Factory guard"] }, required_pull_request_reviews: { required_approving_review_count: 1 } } } });
+  expect(mine(p, "ok", "main requires").length, p.stdout).toBe(1);
+});
+
+test("a required check without the guard, or no review, is a fix that names what is missing", () => {
+  const onlyCi = [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "Typecheck, lint, test, build" }] } }];
+  const [p] = run({ db: { ...repo(false), [RULES]: onlyCi, [BRANCH]: { name: "main", protected: false } } });
+  const fixes = mine(p, "fix", "main requires");
+  expect(fixes.length, p.stdout).toBe(1);
+  expect(fixes[0]).toContain("Factory guard");
+  expect(fixes[0]).toContain("review");
+});
+
+test("protection this login can't fully read is a note to check by hand, not a fix", () => {
+  // classic protection with the guard required: a login without admin sees the checks but not the review setting
+  const [p] = run({ db: { ...repo(false), [RULES]: [], [BRANCH]: { name: "main", protected: true,
+    protection: { enabled: true, required_status_checks: { contexts: ["Factory guard"] } } } } });
+  expect(mine(p, "fix", "main requires"), p.stdout).toEqual([]);
+  expect(mine(p, "note", "main").some((l) => l.includes("by hand")), p.stdout).toBe(true);
+});
+
+test("when GitHub can't be asked about main the check is skipped with a note", () => {
+  const [p] = run({ db: repo(false) }); // the rules, the branch and its protection all answer 404
+  expect(mine(p, "fix", "main requires"), p.stdout).toEqual([]);
+  expect(mine(p, "note", "main").some((l) => l.includes("can't read")), p.stdout).toBe(true);
 });

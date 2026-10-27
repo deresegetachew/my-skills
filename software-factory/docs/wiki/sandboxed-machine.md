@@ -97,9 +97,13 @@ Not in this version: macOS, a VM mode, creating the GitHub account.
   also posts as your account, GitHub can't tell them apart: an agent's token can merge, label and
   comment like the dev manager, and `trustedReviewers` can't separate them. The gate and the deny rules stop an agent
   doing this through its normal commands, but they're not a boundary against one that writes its own script.
-- **Recommended for projects that matter: a separate GitHub account for the agents**, with write access (not admin)
-  to the repo. Then put the dev manager's login in `trustedReviewers`, require approvals or code-owner reviews in
-  branch protection, and the agents can't approve their own work.
+- **Required for the lock to hold: a separate GitHub account for the agents**, with write access (not admin)
+  to the repo. Then put the dev manager's login in `trustedReviewers`, require the checks and an approval in a ruleset
+  on main, and the agents can't approve or force their own work. `factory doctor` checks both (#261); the steps are in
+  [Branch protection: the real lock](reviews-and-gates.md#branch-protection-the-real-lock).
+- **The agents' allow list names the package commands they need** (`pnpm install|test|lint|typecheck|build`,
+  `npm ci|test`), not `pnpm *` or `npm run *`, so `pnpm exec` or a script an agent added asks first. It narrows what
+  runs without a prompt; it is not the boundary, since `pnpm test` runs the project's own scripts.
 - **The agents run on your machine.** Keep Claude Code's sandbox on rather than skipping permission checks, and keep
   secrets out of the repo (`.env.local`, the host's secret store). Agents are denied reading `.env` files.
 - **Agent issues are public to anyone who can read the repo.** They show the slot only, unless you set

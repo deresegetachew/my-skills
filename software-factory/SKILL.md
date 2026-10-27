@@ -72,13 +72,18 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    it checks, where the agent can't edit around it, that tests and expected outputs weren't quietly changed,
    no `.skip`/`.only` slipped in, new dependencies were reviewed, decision numbers don't collide, and a branch
    ticks only its own task. Once the project has an eval, run it in CI too, so the score isn't self-reported.
-7. **Protect the main branch** on GitHub (Settings → Rules → Rulesets). The PR gate is a guard rail; this is the
-   lock. Require a pull request with 0 approvals (everything is opened under one account, and an author can't
-   approve their own PR), require the CI checks (`Factory guard` and `Typecheck, lint, test, build`), block force
-   pushes, and include administrators (no bypass list). Optional: CODEOWNERS on the protected paths.
-   **Stronger, when the project matters:** let the coding agent's GitHub token push branches but not merge, and
-   have the reviewer pass posted as a commit status by a separate identity (a GitHub App or a second account)
-   that the ruleset requires. The local hooks then stay as the fast check, and the agent can't approve itself.
+7. **Set up the lock on GitHub** (the owner does this; an agent can't). The PR gate is a guard rail: an agent that
+   runs the project's own scripts can get past it, so GitHub must hold the line (#261):
+   - **The agents get their own GitHub account with the Write role, not Admin** (Settings → Collaborators), and the
+     agents' machine is signed in to `gh` as that account. The dev manager's login (or the owner's) goes in
+     `trustedReviewers`.
+   - **A ruleset on main** (Settings → Rules → Rulesets): require a pull request with 1 approval from the dev
+     manager's or the owner's account, require the CI checks (`Factory guard` and `Typecheck, lint, test, build`),
+     block force pushes, and give the agents' account no bypass.
+
+   `factory doctor` fails until both hold, with the steps. Until the agents have their own account, require 0
+   approvals (an author can't approve their own PR) and know the lock is only as strong as that one login. Details:
+   docs/wiki/reviews-and-gates.md, "Branch protection: the real lock".
 8. **Commit on a branch and open a PR.** Then tell the owner how to start the coding agent, in a terminal
    on their machine, in the repo:
    ```

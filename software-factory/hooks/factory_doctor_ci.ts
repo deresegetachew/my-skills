@@ -1,6 +1,6 @@
 // What `factory doctor` says about CI and the agents before a test run (#205, and the doctor part of #199).
 //
-// Four read-only checks, each an `ok`, `fix` (with the step) or `note`; everything it asks of GitHub is a `gh api` GET:
+// Six read-only checks, each an `ok`, `fix` (with the step) or `note`; everything it asks of GitHub is a `gh api` GET:
 //
 //   1. the repo variables CI_RUNS_ON and CI_RUNS_ON_LIGHT, and whether a runner with that label is online (a runner
 //      that is missing is looked for again for a while first: a heavy runner's container restarts after every job, #246)
@@ -9,6 +9,8 @@
 //      configured agents or roles (they never ran here)
 //   4. a workflow whose setup does not match .claude/factory.json (pnpm/Node steps with no package.json, or a command
 //      the workflow runs that factory.json leaves empty)
+//   5. the merge boundary on GitHub (#261): this machine's gh login, which the agents use, has no admin rights on the repo
+//   6. main requires the Factory guard check and a review before a merge (a ruleset or branch protection)
 //
 // A GitHub answer it can't read (no admin for the runners, gh signed out) is skipped or a note, never a fix.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -220,10 +222,99 @@ export function workflow(r: Report, cfg: Config): void {
 }
 
 /** Every check above, onto the doctor's report. */
+/** The CI job a merge must wait for: the factory guard, by the name the kit's workflows give it. */
+export const GUARD_CHECK = "Factory guard";
+
+const RULESET_STEPS = "on GitHub, Settings → Rules → Rulesets → New branch ruleset, target the default branch, turn on " +
+  "\"Require a pull request before merging\" (1 approval) and \"Require status checks to pass\" with `" + GUARD_CHECK +
+  "` and the other CI jobs, and leave the bypass list empty (or only you). See the wiki's reviews-and-gates page";
+
+/** The merge boundary on GitHub (#261), part 1: the gh login the agents use here has no admin rights on the repo, so
+ * `gh pr merge --admin` and an API merge can't skip branch protection. Silent when GitHub doesn't say. */
+export function adminRights(r: Report): void {
+  const found = get("repos/{owner}/{repo}");
+  const perms = isObject(found) && isObject(found.permissions) ? found.permissions : null;
+  if (!perms || typeof perms.admin !== "boolean") return;
+  const user = get("user");
+  const login = isObject(user) && typeof user.login === "string" ? user.login : "this login";
+  if (!perms.admin) {
+    r.ok(`gh login ${login} has no admin rights on the repo (the agents can't skip branch protection)`);
+    return;
+  }
+  r.fix("gh login has admin rights", `${login} is an admin of the repo, and the agents on this machine use it, so an ` +
+    "agent's `gh pr merge --admin` or an API merge would skip branch protection. Run the agents as a separate GitHub " +
+    "account: invite it under Settings → Collaborators with the Write role (not Admin), then on this machine run " +
+    "`gh auth login` as that account (or set GH_TOKEN to its token)");
+}
+
+/** What a list of rules (GitHub's rulesets for a branch) requires: status check names, and whether a review is. */
+function fromRules(rules: unknown[]): [string[], boolean] {
+  const checks: string[] = [];
+  let review = false;
+  for (const rule of rules) {
+    if (!isObject(rule)) continue;
+    const params = isObject(rule.parameters) ? rule.parameters : {};
+    if (rule.type === "pull_request") review ||= Number(params.required_approving_review_count ?? 0) >= 1;
+    if (rule.type === "required_status_checks" && Array.isArray(params.required_status_checks)) {
+      for (const c of params.required_status_checks) if (isObject(c) && typeof c.context === "string") checks.push(c.context);
+    }
+  }
+  return [checks, review];
+}
+
+/** The status checks a classic protection object names (`contexts`, or `checks[].context`). */
+function contextsOf(v: unknown): string[] {
+  if (!isObject(v)) return [];
+  const out = Array.isArray(v.contexts) ? v.contexts.filter((c): c is string => typeof c === "string") : [];
+  if (Array.isArray(v.checks)) for (const c of v.checks) if (isObject(c) && typeof c.context === "string") out.push(c.context);
+  return out;
+}
+
+/** The merge boundary on GitHub (#261), part 2: main requires the factory guard (with the CI) and a review before a
+ * merge, through a ruleset or branch protection. A login without admin rights can read the rulesets and the branch's
+ * required checks but not classic protection's review setting: then it says what to check by hand, never a false fix. */
+export function mainRequires(r: Report, main: string): void {
+  // An answer without the fields GitHub always sends is no answer (a proxy, a stub): it says nothing about main.
+  const rules = get(REPO + `rules/branches/${main}`);
+  const prot = get(REPO + `branches/${main}/protection`);
+  const protection = isObject(prot) && ["url", "required_status_checks", "required_pull_request_reviews"].some((k) => k in prot) ? prot : null;
+  const found = get(REPO + `branches/${main}`);
+  const branch = isObject(found) && typeof found.name === "string" ? found : null;
+  if (!Array.isArray(rules) && !isObject(protection) && !isObject(branch)) {
+    r.note(`main branch ${main}`, "can't read its rules or protection from GitHub; run `factory doctor` again when gh works");
+    return;
+  }
+  const [checks, ruleReview] = Array.isArray(rules) ? fromRules(rules) : [[], false];
+  let review = ruleReview;
+  if (isObject(protection)) {
+    checks.push(...contextsOf(protection.required_status_checks));
+    const reviews = protection.required_pull_request_reviews;
+    review ||= isObject(reviews) && Number(reviews.required_approving_review_count ?? 0) >= 1;
+  }
+  const classic = isObject(branch) && branch.protected === true;
+  if (isObject(branch) && isObject(branch.protection)) checks.push(...contextsOf(branch.protection.required_status_checks));
+  const guard = checks.includes(GUARD_CHECK);
+  if (guard && review) {
+    r.ok(`main requires the ${GUARD_CHECK} check and a review before a merge`);
+    return;
+  }
+  if (guard && classic && !isObject(protection)) {
+    r.note(`main branch ${main}`, `it requires the ${GUARD_CHECK} check, but this login can't read whether it also ` +
+      "requires a review (that needs admin rights). Check by hand: Settings → Branches → the rule for " + main +
+      " → \"Require a pull request before merging\" with 1 approval");
+    return;
+  }
+  const missing = [...(guard ? [] : [`the \`${GUARD_CHECK}\` check`]), ...(review ? [] : ["a review"])].join(" and ");
+  r.fix(`main requires ${missing}`, `nothing on GitHub requires ${missing} before a merge to ${main}, so the PR gate on ` +
+    `this machine is the only thing between an agent and main, and an agent that runs its own code can get around it. Fix: ${RULESET_STEPS}`);
+}
+
 export function checks(r: Report, cfg: Config): void {
   const variables = get(REPO + "actions/variables");
   if (isObject(variables)) runners(r, Array.isArray(variables.variables) ? variables.variables : []);
   newestRun(r, cfg.mainBranch || "main");
   if (taskSource(cfg) === "issues") agents(r, cfg);
   workflow(r, cfg);
+  adminRights(r);
+  mainRequires(r, cfg.mainBranch || "main");
 }

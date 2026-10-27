@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm *)",
+      "Bash(pnpm install*)",
+      "Bash(pnpm test*)",
+      "Bash(pnpm lint*)",
+      "Bash(pnpm typecheck*)",
+      "Bash(pnpm build*)",
+      "Bash(pnpm -s test*)",
+      "Bash(pnpm -s lint*)",
+      "Bash(pnpm -s typecheck*)",
+      "Bash(pnpm -s build*)",
       "Bash(git status*)",
       "Bash(git diff*)",
       "Bash(git log*)",
@@ -17,7 +25,6 @@
       "Bash(docker compose *)",
       "Bash(bun --no-env-file --config=/dev/null .claude/hooks/*)",
       "Bash(./factory run-check*)",
-      "Bash(npm run *)",
       "Bash(npm test*)",
       "Bash(npm ci*)",
       "Bash(git branch --show-current*)",

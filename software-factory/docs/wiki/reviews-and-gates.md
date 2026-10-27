@@ -196,19 +196,30 @@ adds `--config=/dev/null` to the factory's steps in a project's own workflows.
 ### Branch protection: the real lock
 
 The gate and the hooks are guard rails for well-meaning agents. They run on your machine, inside the agent's own
-session, and see only Bash commands. They are not a security boundary. **GitHub's branch protection is the lock.**
-Set a ruleset (Settings, Rules, Rulesets) or a branch protection rule on main:
+session, and see only Bash commands. They are not a security boundary: an agent runs the project's own scripts to
+build and test, and a script it wrote can run `gh` or `git` past the gate (#261). **GitHub is the lock**, and it needs
+two things on GitHub that only the owner can set:
 
-- **Require a pull request before merging, with 0 required approvals.** Everything is opened under one GitHub
-  account, and GitHub doesn't let an author approve their own PR, so requiring an approval would block every merge.
-- **Require status checks to pass:** `Factory guard` and `Typecheck, lint, test, build` (the job names in the kit's
-  CI), plus any you add.
-- **Block force pushes** (and deletions).
-- **Include administrators:** no bypass list, so the rules hold for your own account too, which is the account the
-  agents use.
+1. **The agents use their own GitHub account, without admin rights.** Make a second account (a machine user), invite it
+   under Settings, Collaborators with the **Write** role (not Admin), and on the agents' machine run `gh auth login` as
+   that account (or set `GH_TOKEN` to its token). Then `gh pr merge --admin` and a merge through the API fail on
+   GitHub's side. Put the dev manager's login (or yours) in `trustedReviewers`.
+2. **A ruleset on main** (Settings, Rules, Rulesets, New branch ruleset, target the default branch), or a branch
+   protection rule:
+   - **Require a pull request before merging, with 1 approval.** The dev manager's account (or yours) approves; the
+     agents' account can't approve its own PR.
+   - **Require status checks to pass:** `Factory guard` and `Typecheck, lint, test, build` (the job names in the kit's
+     CI), plus any you add.
+   - **Block force pushes** (and deletions).
+   - **No bypass for the agents' account.** Leave the bypass list empty, or only you.
 
-Optional: `CODEOWNERS` on the protected paths, with "require review from code owners" once agents have their own
-account.
+`factory doctor` checks both: it fails when this machine's gh login is an admin of the repo, and when main doesn't
+require the `Factory guard` check and a review. A login without admin rights can't read every protection setting;
+then it says what to check by hand instead of failing.
+
+Until the agents have their own account, everything is opened under one login, and GitHub doesn't let an author
+approve their own PR: require 0 approvals and the checks, and know that the lock is then only as strong as that one
+login. Optional: `CODEOWNERS` on the protected paths, with "require review from code owners".
 
 <br>
 
