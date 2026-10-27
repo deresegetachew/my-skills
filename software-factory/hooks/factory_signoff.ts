@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The sign-off and testing queue (#101): what only a person can check, and the tests of the running app.
 //
 // One issue, "Sign-off and testing queue" (pin it), holds one comment per item. The state of an item is read from the

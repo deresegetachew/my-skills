@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory usage`: how many tokens the factory's sessions used, per task, from Claude Code's own session logs on
 // this machine. Use it to measure a change to the factory (a cheaper model, less reading) before and after.
 //

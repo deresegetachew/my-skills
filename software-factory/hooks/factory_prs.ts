@@ -1,11 +1,11 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory prs`: the one list a dev manager starts a pass from (#98). Read-only, REST only (`gh api`; no `gh pr`).
 //
 // For every open pull request: the head and its age, labels, CI judged by one rule, the newest marker per commit,
 // the review claim, and the next action. Below them: unanswered questions, unanswered owner asks, agents that went
 // quiet. `factory status` uses the same CI rule and the same reading of the dev manager's markers (this file).
 //
-//   bun --no-env-file .claude/hooks/factory_prs.ts [--json] [--since-days N]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_prs.ts [--json] [--since-days N]
 //
 // The CI rule: per job name, the newest run that was not skipped decides (a re-run replaces a failure; a skipped run
 // decides nothing). One state for the PR: red (a job failed), running, queued, green; `none` when GitHub shows no

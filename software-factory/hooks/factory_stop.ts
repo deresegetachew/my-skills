@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Stop hook for `factory loop -i`: when the agent has marked its task done, close the session.
 //
 // The next-task skill runs `factory_claims.ts done --agent $FACTORY_AGENT --task <id>` once its PR is open. When the

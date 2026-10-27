@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Run the software factory's tests: each software-factory/tests/*.test.ts file with `bun test`, in its own process,
 // with its own scratch folders. Exits 1 if any test fails, so CI goes red.
 //
@@ -81,7 +81,7 @@ async function runFile(path: string): Promise<Result> {
   try {
     // Output goes to files, not pipes: a test that leaves a background process behind would hold a pipe open.
     const outFile = join(scratch, "out.txt");
-    const proc = Bun.spawn([process.execPath, "--no-env-file", "test", "--timeout", "120000", path], {
+    const proc = Bun.spawn([process.execPath, "--no-env-file", "--config=/dev/null", "test", "--timeout", "120000", path], {
       cwd: ROOT,
       env,
       stdin: "ignore",

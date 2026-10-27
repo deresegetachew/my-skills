@@ -10,6 +10,9 @@ export const WORKFLOW_DIR = ".github/workflows";
 export const SETUP_BUN = "oven-sh/setup-bun@v2";
 
 const OLD_HOOK = /\bpython3?\s+(\.claude\/hooks\/[\w.-]+)\.py\b/g;
+// A Bun hook started without --config=/dev/null reads the project's bunfig.toml, whose preload runs first (#259).
+const OPEN_BUN = /\bbun --no-env-file (?!--config=\/dev\/null)(\.claude\/hooks\/[\w.-]+\.ts)\b/g;
+export const BUN_RUN = "bun --no-env-file --config=/dev/null";
 const HOOK_REF = /\.claude\/hooks\/[\w.-]+/g;
 
 /** The project's workflow files, relative to its root, sorted. */
@@ -64,7 +67,8 @@ function stepStart(lines: string[], i: number, from: number): number {
 }
 
 /** The workflow with each `python3 .claude/hooks/X.py` whose X.py is gone and X.ts exists (`has`) changed to
- * `bun --no-env-file .claude/hooks/X.ts`, and a Bun setup step added to each job that now runs one and has none. */
+ * `bun --no-env-file --config=/dev/null .claude/hooks/X.ts`, each `bun --no-env-file .claude/hooks/X.ts` given the
+ * --config=/dev/null it lacks (#259), and a Bun setup step added to each job that now runs one and has none. */
 export function rewrite(text: string, has: (hook: string) => boolean): Rewrite {
   const lines = text.split("\n");
   const changed: [string, string][] = [];
@@ -72,7 +76,11 @@ export function rewrite(text: string, has: (hook: string) => boolean): Rewrite {
   lines.forEach((line, i) => {
     const next = line.replace(OLD_HOOK, (all: string, base: string) => {
       if (has(base + ".py") || !has(base + ".ts")) return all;
-      const now = `bun --no-env-file ${base}.ts`;
+      const now = `${BUN_RUN} ${base}.ts`;
+      changed.push([all, now]);
+      return now;
+    }).replace(OPEN_BUN, (all: string, script: string) => {
+      const now = `${BUN_RUN} ${script}`;
       changed.push([all, now]);
       return now;
     });
@@ -129,7 +137,7 @@ export function lines(found: Map<string, Rewrite>): string[] {
   const out: string[] = [];
   for (const [rel, r] of found) {
     const kinds = [...new Map(r.changed).entries()];
-    out.push(`Changed ${rel}: ${r.changed.length} step(s) called a removed Python hook; they run on Bun now` +
+    out.push(`Changed ${rel}: ${r.changed.length} step(s) now run the factory's hooks on Bun without the project's bunfig.toml` +
       (r.bunSteps ? ` (added \`uses: ${SETUP_BUN}\` to ${r.bunSteps} job(s))` : "") + ":");
     for (const [a, b] of kinds.slice(0, 8)) out.push(`    ${a}  ->  ${b}`);
   }

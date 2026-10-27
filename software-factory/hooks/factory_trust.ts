@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Is a folder trusted by Claude Code? (#180, #193)
 //
 // A folder Claude Code has not been told to trust makes it ignore the whole `permissions.allow` list ("Ignoring N
@@ -8,7 +8,7 @@
 // #248: Claude Code writes no entry for an agent worktree beside the project, and shows no trust question there). This
 // only reads that file, never writes it, and never prints what is in it.
 //
-//   bun --no-env-file .claude/hooks/factory_trust.ts check [<path>]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_trust.ts check [<path>]
 //       exit 0 when trusted or unknown; exit 1 and a {code, message, fix} line when the folder is not trusted
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
@@ -17,7 +17,7 @@ import { die, git, pyDumps, runMain } from "./factory_lib.ts";
 
 const USAGE = `Is a folder trusted by Claude Code? (#180, #193)
 
-  bun --no-env-file .claude/hooks/factory_trust.ts check [<path>]   exit 0 when trusted or unknown; exit 1 and a
+  bun --no-env-file --config=/dev/null .claude/hooks/factory_trust.ts check [<path>]   exit 0 when trusted or unknown; exit 1 and a
                                                           {code, message, fix} line when the folder is not trusted`;
 
 export type TrustState = "trusted" | "untrusted" | "unknown";

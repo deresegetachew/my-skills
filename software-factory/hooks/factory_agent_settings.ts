@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The settings a coding agent's session starts with (#258): the factory's rules for agents (its deny list, the PR gate
 // and the other hooks), passed with `claude --settings <file>` by factory-loop.sh and `factory agent`.
 //
@@ -17,7 +17,7 @@
 // main has neither, or the remote can't be asked, it exits 1 with {code, message, fix} on stderr and the caller starts
 // no session: an agent without its rules would run unrestricted.
 //
-//   bun --no-env-file .claude/hooks/factory_agent_settings.ts      prints the value for `--settings`
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agent_settings.ts      prints the value for `--settings`
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { AGENT_SETTINGS, LEGACY_SETTINGS, pyDumps, runMain } from "./factory_lib.ts";

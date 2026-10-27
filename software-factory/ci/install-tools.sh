@@ -8,7 +8,7 @@ case "$arch" in amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; *) node_arch="
 if [ -n "${NODE_VERSION:-}" ]; then
   want="${NODE_VERSION#v}"
   # "24" or "24.1": the newest release with that prefix; "24.1.0": exactly that one.
-  version="$(curl -fsSL https://nodejs.org/dist/index.json | bun --no-env-file -e '
+  version="$(curl -fsSL https://nodejs.org/dist/index.json | bun --no-env-file --config=/dev/null -e '
 const want = (process.argv.at(-1) ?? "").split(".");
 const releases = JSON.parse(await Bun.stdin.text()) as { version: string }[];
 for (const r of releases) {

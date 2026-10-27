@@ -95,18 +95,19 @@ described [below](submodule.md#updating-the-factory) until the project migrates.
 starts taking releases in a project whose factory files are plain copies; it refuses, and changes nothing, where the
 files are links into the submodule. Moving a project off the submodule is its own reviewed pull request.
 
-**Which releases exist.** Pre-releases so far: `v0.1.0-alpha.1` (#184) to `v0.1.0-alpha.3`, each built from the
-commit that bumped `software-factory/VERSION`. They are the old Python factory; later releases are Bun (#252). A tag with a hyphen is published as a pre-release. Until a full
-release such as `v0.1.0` exists, `factory update` with no version stops with `[no_releases]`, names the pre-release that exists and
-says to take it by name: `factory update v0.1.0-alpha.1`. `factory version` shows a pre-release newer than the newest full one on its own line. `factory releases` lists what exists.
+**Which releases exist.** Only pre-releases so far, each built from the commit that bumped `software-factory/VERSION`:
+`v0.1.0-alpha.1` (#184) to `v0.1.0-alpha.3` are the old Python factory, and `v0.2.0-alpha.1` on are Bun (#252). A tag
+with a hyphen is published as a pre-release. Until a full release exists, `factory update` with no version stops with
+`[no_releases]`, names the newest pre-release and says to take it by name, for example `factory update v0.2.0-alpha.1`
+(`factory migrate-to-release` names its own command the same way). `factory version` shows a pre-release newer than the newest full one on its own line. `factory releases` lists what exists.
 
-**From the old Python release to Bun.** A project on `v0.1.0-alpha.3` updates with `factory update` as before. The
+**From the old Python release to Bun.** A project on `v0.1.0-alpha.3` updates by naming the Bun release, for example `factory update v0.2.0-alpha.1`. The
 machine needs Bun first (`curl -fsSL https://bun.sh/install | bash`; `factory doctor` checks it). On that one update
 the old Python client cannot restart the heartbeat daemon, so if the daemon runs on the machine, run
 `factory heartbeat restart` once afterwards. Later updates restart it themselves. The project's
 `.github/workflows/ci.yml` still calls `python3 .claude/hooks/*.py`, which that update removed, so CI on the update pull
 request fails until it changes: run `factory update` once more with the new client (it rewrites each such step to
-`bun --no-env-file .claude/hooks/*.ts` and adds `- uses: oven-sh/setup-bun@v2` to the jobs that need it), then commit
+`bun --no-env-file --config=/dev/null .claude/hooks/*.ts` and adds `- uses: oven-sh/setup-bun@v2` to the jobs that need it), then commit
 the workflow in the same pull request. `factory doctor` names any workflow step that calls a hook that is not there.
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and

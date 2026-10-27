@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The curated lessons file (#72): a short list of one-line rules the builder and the reviewers read first, so the
 // same must-fix, review finding or CI failure does not come back task after task.
 //

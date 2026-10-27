@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The factory's messages (#107): one structured, versioned envelope for questions, answers, must-fixes, approvals and
 // status, shaped like A2A tasks and kept in the GitHub comments and issues the factory already uses. The full
 // specification (envelope, states, transitions, the mapping to A2A) is docs/messages.md.

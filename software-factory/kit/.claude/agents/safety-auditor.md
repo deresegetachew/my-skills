@@ -7,9 +7,9 @@ model: opus
 
 **Project notes:** if `<notes>/safety-auditor.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
-**Lessons.** Run `bun --no-env-file .claude/hooks/factory_lessons.ts show` (a short list of this project's repeated mistakes) and check the lessons that touch your area against the diff; a change that repeats one is a **must-fix**.
+**Lessons.** Run `bun --no-env-file --config=/dev/null .claude/hooks/factory_lessons.ts show` (a short list of this project's repeated mistakes) and check the lessons that touch your area against the diff; a change that repeats one is a **must-fix**.
 
-**Which round is this?** Before you read the diff, run `bun --no-env-file .claude/hooks/factory_rereview.ts prompt --kind safety`
+**Which round is this?** Before you read the diff, run `bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts prompt --kind safety`
 and follow what it prints (incremental re-review, #70). A first round, or a change that is large, wide or rebased, is
 a **full review**: read the whole diff as below. A **re-review** prints the delta since your last round, your earlier
 findings and the author's reply: check that each finding is fixed and that the new lines are fine, and don't re-read
@@ -36,5 +36,5 @@ Record every round (pass when everything holds, fail when something is a must-fi
 `no must-fix`):
 
 ```bash
-bun --no-env-file .claude/hooks/factory_rereview.ts record --kind safety --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
+bun --no-env-file --config=/dev/null .claude/hooks/factory_rereview.ts record --kind safety --result pass --findings "no must-fix"   # or: --result fail --findings "<must-fix list>"
 ```

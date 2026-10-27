@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory autostart`: make this machine bring the factory back after every boot (#88).
 //
 //   factory autostart status                        what is set up here and what would start; read-only

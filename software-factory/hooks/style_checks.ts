@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // CI: run every style `check` command from .claude/factory.json (`styles[].check`), once each.
 //
 // Exit 1 if any fails. With no styles, prints that and passes.

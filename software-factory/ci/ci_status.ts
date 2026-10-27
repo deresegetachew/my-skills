@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The GitHub side of `factory ci status`: recent CI runs on main and on open pull requests, anything queued for
 // long, and (local mode) the runners registered with this project's label.
 //

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The project's stack (#199): what install.sh finds on a first install, and how the Python CI workflow runs a command.
 //
 //   factory_stack.ts detect <project>         prints JSON: {stack, reason, commands, notes}
@@ -7,7 +7,7 @@
 //   factory_stack.ts apply <project>          writes the Python `commands.*` into <project>/.claude/factory.json, with the
 //                                             allow rules an unattended agent needs to run commands.test (#249)
 //                                             (does nothing for node or an unknown stack)
-//   bun --no-env-file .claude/hooks/factory_stack.ts run <name>
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_stack.ts run <name>
 //                                             runs commands.<name> from .claude/factory.json in the current folder;
 //                                             empty: says so and exits 0 (CI's Python template uses it)
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync, writeFileSync, writeSync } from "node:fs";

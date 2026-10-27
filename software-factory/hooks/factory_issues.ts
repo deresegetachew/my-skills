@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Tasks as GitHub issues (`tasks.source: "issues"` in .claude/factory.json).
 //
 // Each task is an open issue written from the factory-task template: what we're building, goals, acceptance
@@ -10,21 +10,21 @@
 //
 // The branch is task/<issue number>-<short-name>, the PR says `Closes #<n>`, and merging the PR closes the issue.
 //
-//   bun --no-env-file .claude/hooks/factory_issues.ts pick --agent taytu      the agent's own in-progress issue, else claim
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts pick --agent taytu      the agent's own in-progress issue, else claim
 //                                                                          the next ready one: prints "issue-42 <title>"
-//   bun --no-env-file .claude/hooks/factory_issues.ts peek                     the next ready issue, without claiming it
-//   bun --no-env-file .claude/hooks/factory_issues.ts show 42                  title, labels, body, then the people's comments
-//   bun --no-env-file .claude/hooks/factory_issues.ts tick 42 3                tick the 3rd checkbox (1-based) in the body
-//   bun --no-env-file .claude/hooks/factory_issues.ts review 42                in-progress -> in-review (after opening the PR);
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts peek                     the next ready issue, without claiming it
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts show 42                  title, labels, body, then the people's comments
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts tick 42 3                tick the 3rd checkbox (1-based) in the body
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts review 42                in-progress -> in-review (after opening the PR);
 //                                                                          prints which labels changed
-//   bun --no-env-file .claude/hooks/factory_issues.ts block 42 "needs the Stripe keys"
-//   bun --no-env-file .claude/hooks/factory_issues.ts give-back --agent taytu  release the claims that have no branch or PR
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts block 42 "needs the Stripe keys"
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts give-back --agent taytu  release the claims that have no branch or PR
 //                                                                          (the loop, #192)
-//   bun --no-env-file .claude/hooks/factory_issues.ts release 42 ["why"]       back to ready, the agent's label off
-//   bun --no-env-file .claude/hooks/factory_issues.ts stale [--hours 3]        in-progress issues with no activity (dev manager)
-//   bun --no-env-file .claude/hooks/factory_issues.ts new --title T --body-file F [--milestone "Phase 3"] [--label L ...]
-//   bun --no-env-file .claude/hooks/factory_issues.ts setup                    create the labels
-//   bun --no-env-file .claude/hooks/factory_issues.ts list                     open task issues and their state
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts release 42 ["why"]       back to ready, the agent's label off
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts stale [--hours 3]        in-progress issues with no activity (dev manager)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts new --title T --body-file F [--milestone "Phase 3"] [--label L ...]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts setup                    create the labels
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts list                     open task issues and their state
 //
 // Claims are race-free across machines: a claim is labels plus a `<!-- factory-claim agent=<name> machine=<id> -->`
 // comment, and when two agents claim at once (even with the same name, on two machines) the earlier comment wins; the

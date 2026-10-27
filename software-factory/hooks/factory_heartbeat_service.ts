@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Keeps the heartbeat daemon (factory_heartbeat.ts, #108) running: a systemd user service on Linux, a LaunchAgent on
 // macOS. It is the long-running sibling of the boot job `factory autostart` installs (factory_autostart.ts): that one
 // runs `factory resume` once per boot, this one runs `factory heartbeat run` for as long as the machine is up and

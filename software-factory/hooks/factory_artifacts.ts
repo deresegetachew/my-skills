@@ -1,4 +1,4 @@
-#!/usr/bin/env -S bun --no-env-file
+#!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory artifacts` (#104): the project's artifacts and designs, as reviewed copies in the repo.
 //
 // Artifacts (a PRD page, a design canvas, a design system) are where they are written. The **repo holds the reviewed copy**,

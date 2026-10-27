@@ -28,7 +28,7 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    what the PRD and plan say.
 2. **Install the kit.** Prefer a numbered release: the project runs one pinned version of the factory as real files,
    committed. Download the release archive and `SHA256SUMS`, check them, unpack, and run
-   `bun --no-env-file <unpacked folder>/hooks/factory_release.ts update <version>` in the project (install Bun first:
+   `bun --no-env-file --config=/dev/null <unpacked folder>/hooks/factory_release.ts update <version>` in the project (install Bun first:
    `curl -fsSL https://bun.sh/install | bash`; the releases so far are pre-releases, which have to be named). README.md,
    "Quick start", has the steps. The shared files (hooks, CI files, agents, skills, the agents' rules in
    `.claude/factory/settings.json`, `factory`, `factory-loop.sh`) are written as real files with a pin,

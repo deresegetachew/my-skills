@@ -274,7 +274,7 @@ flowchart LR
 2. **Install it.** In the project's folder, in a terminal of your own (an agent session is refused), on a clean tree:
 
    ```bash
-   bun --no-env-file <unpacked folder>/hooks/factory_release.ts update <version>
+   bun --no-env-file --config=/dev/null <unpacked folder>/hooks/factory_release.ts update <version>
    ```
 
    `<version>` is the release you unpacked (a pre-release is only taken by name). The release client needs only Bun,

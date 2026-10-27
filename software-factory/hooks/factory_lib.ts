@@ -296,7 +296,7 @@ export function shSplit(line: string): string[] {
 
 /** The command that runs a factory script with this Bun (Python's [sys.executable, script]): .env loading off. */
 export function bunCmd(script: string): string[] {
-  return [process.execPath, "--no-env-file", script];
+  return [process.execPath, "--no-env-file", "--config=/dev/null", script];
 }
 
 // flock(2) through bun:ffi (Bun built-in), for the lock files Python took with fcntl.flock. The lock belongs to the
