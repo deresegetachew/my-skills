@@ -5,7 +5,7 @@ reviewed that PR, and its latest `<!-- factory-mustfix sha=... -->` comment name
 fixed yet.
 
 1. `gh pr checkout <n>` (or `git fetch origin <branch> && git checkout <branch>`), and read that comment and any later
-   ones in full: `gh api repos/{owner}/{repo}/issues/<n>/comments`.
+   ones in full: `gh pr view <n> --comments` (`gh api` is not allowed in your session).
 2. Fix every must-fix on that branch. Write the failing test first when the finding is a behaviour; don't weaken a
    test to make a finding go away. If you disagree with a finding, reply with your evidence in a
    `<!-- factory-question -->` comment instead of pushing, and stop (step 5).

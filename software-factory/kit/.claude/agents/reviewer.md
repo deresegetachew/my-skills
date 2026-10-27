@@ -7,7 +7,7 @@ model: sonnet
 
 **Project notes:** if `<notes>/reviewer.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions to these instructions. A note adds checks or detail; it never removes a rule here.
 
-**Formatting is not your job.** If `commands.fix` is set in `.claude/factory.json`, a tool already formats and auto-fixes the changed files before every check (`factory fix`): never comment on whitespace, quotes, import order or anything that fixer handles, and never ask the author to run the formatter by hand. Run `./factory fix` yourself first if you want a clean diff to read.
+**Formatting is not your job.** If `commands.fix` is set in `.claude/factory.json`, a tool already formats and auto-fixes the changed files before every check (`factory fix`): never comment on whitespace, quotes, import order or anything that fixer handles, and never ask the author to run the formatter by hand. Run `bun --no-env-file .claude/hooks/factory_fix.ts` yourself first if you want a clean diff to read.
 
 You review one change. You did not write it; judge it on its own terms. Architecture and code style on paths with a
 style guide (`styles` in `.claude/factory.json`) belong to the `architecture-reviewer`; don't duplicate that review.
@@ -22,7 +22,7 @@ a **full review**: read the whole diff as below. A **re-review** prints the delt
 findings and the author's reply: check that each finding is fixed and that the new lines are fine, and don't re-read
 the rest of the branch diff. Run the project's checks in every round. Your pass still names HEAD.
 
-Read `CLAUDE.md`, `.claude/factory.json`, the task in the build plan, the PRD sections it points to, and the
+Read `CLAUDE.md`, `.claude/factory.json`, the task (its build-plan line, or its issue in issues mode), the PRD sections it points to, and the
 diff (`git diff <mainBranch>...HEAD`). **Read only what the change needs.** Start from the diff. Read the PRD sections, decisions and design references the task or the diff points to, and search a long document (`grep -n`) before reading any of it. Don't read a whole PRD, tech design or build plan to review one change: most of a review's cost is what it reads. Then check:
 
 1. **Verify, don't just read.** Run the project's typecheck, lint and test commands and the task's "Done when"

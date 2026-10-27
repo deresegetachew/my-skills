@@ -6,7 +6,7 @@ If the task needs something only a person can provide (real data, an API key or 
 decision the docs leave open), don't guess:
 
 - add it to the blocked list as `- 1.5: needs 30 real samples in data/samples/ (person)` (issues mode:
-  `factory_issues.ts block`, see `issues-mode.md`),
+  `bun --no-env-file .claude/hooks/factory_issues.ts block`, see `issues-mode.md`),
 - commit that on a branch and open a short pull request titled `Blocked: <task>`,
 - go back to step 1 for the next task that isn't blocked (under `factory-loop.sh`, stop instead: the loop claims the
   next one).

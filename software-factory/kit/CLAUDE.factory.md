@@ -43,7 +43,7 @@ A change that breaks one of these is wrong even if the tests pass. The `safety-a
   dependencies (until the dev manager labels them reviewed), reuse a decision number, or tick another task.
 - PRs merge themselves when the reviewer passed the latest commit, CI is green and no protected files
   changed (`.claude/hooks/pr-gate.ts`, paths in `.claude/factory.json`). The rest are reviewed and merged by
-  the dev manager (a Claude session watching the repo) or a person.
+  the dev manager (`factory dev-manager loop`) or a person; a change under `.claude/` only by the owner.
 - UI work is checked with `/design-check`; prompt and model work with `/eval`.
 - Small pull requests, one build-plan task each, with tests that check what a user or another module can
   observe. Never assert on prompts or internal state. Model calls in tests use recorded replies.

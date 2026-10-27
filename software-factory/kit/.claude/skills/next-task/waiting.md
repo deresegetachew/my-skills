@@ -25,8 +25,8 @@ Read this after shipping a task, or when you have to wait.
   session only opens the PR. **In an interactive loop**, end that session the usual way so the loop can wait:
   `bun --no-env-file .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task <id>`, then one line,
   `Task <id> pushed; its PR waits for a slot.` Keep the issue (don't release it): the loop gives it back to you.
-- **CI that never ran:** when every job fails at once with no steps, run `bun --no-env-file .claude/hooks/factory_ci.ts <head
-  commit>`. If it says GitHub didn't start the jobs (billing or the spending limit), that's not about your code:
+- **CI that never ran:** when every job fails at once with no steps, run
+  `bun --no-env-file .claude/hooks/factory_ci.ts <head commit>`. If it says GitHub didn't start the jobs (billing or the spending limit), that's not about your code:
   don't change code, push again or re-run CI. Say so once on the PR and carry on; the dev manager re-runs CI when it
   works.
 - **Fresh context per task:** if the owner started you with `./factory-loop.sh` (or `factory loop`), do exactly one
