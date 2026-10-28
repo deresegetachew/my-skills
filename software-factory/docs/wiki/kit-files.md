@@ -98,6 +98,8 @@ software-factory/
     factory_guard.ts                    the CI guard
     factory_ci.ts                       tells a CI failure from CI that never ran (minutes, spending limit)
     factory_ci_log.ts                   `factory ci log`: the failed job's log, trimmed to the failing step
+    factory_ci_runners.ts               `factory ci runners`: this machine's runner count for the project, saved and installed
+    factory_ci_clean.ts                 `factory ci clean`: this project's offline runners and exited CI containers (reset-run's code)
     style_checks.ts                     CI: each style's check
     factory_config.ts                   reads factory.json, with defaults
     factory_lib.ts                      shared helpers: processes, errors, JSON

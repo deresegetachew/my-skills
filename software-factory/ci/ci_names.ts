@@ -12,7 +12,9 @@
 //   CI_INSTALLED ~/Library/Application Support/<name>  the private copy launchd runs (never the checkout)
 //   CI_STATE     ~/.local/state/<name>                 the log and the pid of a loop started by hand
 //   CI_REPLACES  "ci.replaces": LaunchAgent labels of an older install to unload first
-//   CI_RUNNERS   "ci.runners": heavy runner loops on this machine (default 1); FACTORY_CI_RUNNERS overrides it here
+//   CI_RUNNERS   heavy runner loops on this machine (#282): FACTORY_CI_RUNNERS, else this machine's saved count
+//                ("ci.runners" in <config dir>/<repo>.json, set by `factory ci runners <n>`), else "ci.runners", else 1
+//   CI_RUNNERS_FROM where that count came from: env, machine, project or default
 //   CI_LIGHT     1 unless "ci.light" is false: one more, small loop without Docker for light jobs
 //   CI_LIGHT_LABEL "ci.lightLabel", else "<repo name>-light"                                  (remanual-light)
 //   CI_IMAGE     "ci.image": "build" (default: build runner.Dockerfile with the project's Node, pnpm and Playwright)
@@ -26,7 +28,7 @@
 //   bun ci_names.ts            prints them as `NAME=value` lines, quoted for `eval` in bash
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 // Self-contained (no import from ../hooks): ci.sh runs it from wherever its own folder is, alone.
 
@@ -101,6 +103,56 @@ function toInt(raw: unknown): number | null {
   return null;
 }
 
+/** This machine's settings folder, as factory_machine.ts has it: $FACTORY_CONFIG_DIR, else
+ * $XDG_CONFIG_HOME/software-factory, else ~/.config/software-factory. */
+function configDir(): string {
+  const given = process.env.FACTORY_CONFIG_DIR;
+  if (given) return given;
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "software-factory");
+}
+
+/** This machine's settings file for the project (factory_machine.ts namesFile()): <config dir>/<main clone's folder>.json. */
+export function machineFile(): string {
+  const [rc, out] = run("git", "rev-parse", "--git-common-dir");
+  const common = resolve(rc === 0 && out ? out : ".git");
+  return join(configDir(), `${basename(dirname(common))}.json`);
+}
+
+export type RunnerSource = "env" | "machine" | "project" | "default";
+
+/** The heavy runner count as given (not yet checked) and where it comes from (#282): FACTORY_CI_RUNNERS, then this
+ * machine's saved count, then "ci.runners" in .claude/factory.json, then 1. */
+export function runnerSetting(cfg: CiSettings): { raw: unknown; source: RunnerSource } {
+  if (process.env.FACTORY_CI_RUNNERS) return { raw: process.env.FACTORY_CI_RUNNERS, source: "env" };
+  let saved: unknown;
+  try {
+    const data = JSON.parse(readFileSync(machineFile(), "utf8")) as unknown;
+    saved = isObject(data) ? data["ci.runners"] : undefined;
+  } catch {
+    saved = undefined;
+  }
+  if (saved !== undefined && saved !== null) return { raw: saved, source: "machine" };
+  if ("runners" in cfg) return { raw: cfg.runners, source: "project" };
+  return { raw: 1, source: "default" };
+}
+
+/** Where a count came from, for a person. */
+export function sourceText(source: RunnerSource): string {
+  if (source === "env") return "FACTORY_CI_RUNNERS";
+  if (source === "machine") return "this machine's setting";
+  if (source === "project") return "ci.runners in .claude/factory.json";
+  return "the default";
+}
+
+/** The heavy runner count and its source; stops with a message when it is not a whole number from 1 to 16. */
+export function runnerCount(cfg: CiSettings): { runners: number; source: RunnerSource } {
+  const { raw, source } = runnerSetting(cfg);
+  const runners = toInt(raw);
+  if (runners === null) die(`factory ci: ${sourceText(source)} must be a whole number, not ${repr(raw)}.`);
+  if (!(runners >= 1 && runners <= 16)) die(`factory ci: ${sourceText(source)} is ${runners}; use 1 to 16.`);
+  return { runners, source };
+}
+
 /** The names, from the "ci" settings. Stops with a message when one is missing or unsafe. */
 export function names(cfg: CiSettings): Record<string, string> {
   let repo = cfg.repo ? String(cfg.repo) : "";
@@ -116,10 +168,7 @@ export function names(cfg: CiSettings): Record<string, string> {
   const name = cfg.name ? String(cfg.name) : `${base}-ci`;
   const label = cfg.label ? String(cfg.label) : `${base}-local`;
   const lightLabel = cfg.lightLabel ? String(cfg.lightLabel) : `${base}-light`;
-  const raw: unknown = process.env.FACTORY_CI_RUNNERS || ("runners" in cfg ? cfg.runners : 1);
-  const runners = toInt(raw);
-  if (runners === null) die(`factory ci: ci.runners (or FACTORY_CI_RUNNERS) must be a whole number, not ${repr(raw)}.`);
-  if (!(runners >= 1 && runners <= 16)) die(`factory ci: ci.runners is ${runners}; use 1 to 16.`);
+  const { runners, source } = runnerCount(cfg);
   if (lightLabel === label) {
     die(`factory ci: ci.lightLabel must differ from ci.label (${pyRepr(label)}): with one label, light jobs ` +
       "would wait behind heavy ones again.");
@@ -158,6 +207,7 @@ export function names(cfg: CiSettings): Record<string, string> {
     CI_STATE: join(stateHome, name),
     CI_REPLACES: replaces.join(" "),
     CI_RUNNERS: String(runners),
+    CI_RUNNERS_FROM: source,
     CI_LIGHT: light ? "1" : "0",
     CI_LIGHT_LABEL: lightLabel,
     CI_IMAGE: image,

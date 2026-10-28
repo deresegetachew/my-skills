@@ -132,8 +132,13 @@ CI                       local (a self-hosted runner on this machine) or GitHub'
   ci use local|github    send CI jobs to the self-hosted runners (labels <repo>-local and <repo>-light), or back
   ci log <pr or run>     the failed job's log, trimmed to the failing step (read-only): why did my CI fail?
   ci stale | check       are the installed runner copies older than the checkout / fit to start (update runs both)
-  ci install             install ci.runners runners and the light lane as <repo>-ci, -2 ... and -light: LaunchAgents
+  ci install             install the heavy runners and the light lane as <repo>-ci, -2 ... and -light: LaunchAgents
                          on macOS, systemd --user services on Linux (run it again to update or change the number)
+  ci runners [<n>]       how many heavy runners this machine runs for this project, and where that comes from;
+                         with <n>: save it for this machine (not committed) and install. FACTORY_CI_RUNNERS, then this
+                         machine's count, then ci.runners in factory.json, then 1. factory update never scales it down
+  ci clean [--apply]     list this project's offline idle runners and exited CI containers; --apply removes them.
+                         Never changes the runs-on variables (that is ci use); only says when no runner has their labels
   ci uninstall [i]       remove them (or instance i: 2 ... or light), their containers and idle registrations
   ci start | stop        run one runner by hand, in the background, until stop or a restart
   ci logs [i] [-f]       a runner's log (instance 1 unless you name one)
@@ -150,7 +155,7 @@ Settings
   settings diff          what the project file sets differently from the defaults
   settings validate      exit 1 with clear messages on a bad value (invalid regex, unknown tasks.source, duplicate agent ...)
   settings pr [--ready]  propose the edited .claude/factory.json as a pull request (a draft by default)
-  settings --local ...   the same for this machine's own settings (agent names, Remote Control, autostart), outside the repo
+  settings --local ...   the same for this machine's own settings (agent names, Remote Control, autostart, CI runners), outside the repo
   settings docs [--check|--write]
                          the settings page's tables (docs/wiki/settings.md), generated from the same metadata table
                          .claude/ is protected, so a project change reaches main through a pull request. Agents can't
@@ -354,7 +359,12 @@ EOF
     chmod +x "$bin/factory"
     echo "Installed $bin/factory."
     case ":$PATH:" in *":$bin:"*) ;; *) echo "Add it to your PATH, for example in ~/.zshrc:  export PATH=\"\$HOME/.local/bin:\$PATH\"";; esac ;;
-  ci)        if [ "${1:-}" = log ]; then fh "$hooks/factory_ci_log" "${@:2}"; else exec bash "$root/.claude/ci/ci.sh" "$@"; fi ;;
+  ci)        case "${1:-}" in
+               log)     fh "$hooks/factory_ci_log" "${@:2}" ;;
+               runners) fh "$hooks/factory_ci_runners" "${@:2}" ;;
+               clean)   fh "$hooks/factory_ci_clean" "${@:2}" ;;
+               *)       exec bash "$root/.claude/ci/ci.sh" "$@" ;;
+             esac ;;
   help|-h|--help) usage ;;
   *) echo "factory: unknown command '$cmd'" >&2; usage >&2; exit 1 ;;
 esac
