@@ -18,6 +18,7 @@ export type Env = Record<string, string | undefined>;
 export const FAKE_CI = `#!/usr/bin/env bash
 # fake ci.sh {v}: records what the client asks, answers from flag files
 echo "$*" >>"$FAKE_CI_LOG"
+[ -z "\${FACTORY_CI_NO_SCALE_DOWN:-}" ] || echo "(no scale-down)" >>"$FAKE_CI_LOG"
 case "$1" in
   stale) [ -f "$FAKE_CI_STALE" ] && { echo "older compose.yaml"; exit 3; }; exit 0 ;;
   install) rm -f "$FAKE_CI_STALE"; exit 0 ;;

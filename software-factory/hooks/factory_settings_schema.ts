@@ -226,7 +226,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("styles", "list", "commands", 'Style guides per path: [{"paths": [...], "skills": [...], "check": "..."}].'),
   S("ci.name", "str", "ci", "The self-hosted runner's name (default `<repo>-ci`).", { default: "" }),
   S("ci.label", "str", "ci", "The runner label CI jobs ask for (default `<repo>-local`).", { default: "" }),
-  S("ci.runners", "int", "ci", "Heavy runner loops per machine (each with its own Docker); FACTORY_CI_RUNNERS overrides it on one machine.", { default: 1 }),
+  S("ci.runners", "int", "ci", "Heavy runner loops per machine (each with its own Docker); a machine's own count (`factory ci runners <n>`) and FACTORY_CI_RUNNERS win over it.", { default: 1 }),
   S("ci.light", "bool", "ci", "Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`.", { default: true }),
   S("ci.image", "str", "ci", "The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base.", { options: ["build", "base"], default: "build" }),
   S("ci.caches", "bool", "ci", "Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets).", { default: true }),
@@ -256,6 +256,7 @@ export const MACHINE: Record<string, Setting> = table([
   S("autostart", "bool", "machine", "Bring the stack and this machine's agents back after a reboot (`factory autostart`).", { scope: "machine", default: false }),
   S("autostartAgents", "list", "machine", "The agents it starts at boot. Empty: the names this machine runs.", { scope: "machine", default: [] }),
   S("autostartReport", "bool", "machine", "Post the boot report on the first started agent's issue (issues mode).", { scope: "machine", default: true }),
+  S("ci.runners", "int", "machine", "Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's.", { scope: "machine", default: null, minimum: 1, maximum: 16 }),
 ]);
 
 function setting(key: string, local = false): Setting {
@@ -397,9 +398,16 @@ const MORE: Record<string, More> = {
   examples: ['factory settings set agentEnv \'{"API_PORT": "{port:4100}", "DATABASE_URL": "postgres://app:app@localhost:5432/app{suffix}"}\''] },
   portStep: { long: "How far each agent's ports move from the previous agent's. Make it larger than the number of " +
     "ports a loop uses.", examples: ["factory settings set portStep 10"] },
-  "ci.runners": { long: "Heavy runner loops per machine, each with its own Docker. `FACTORY_CI_RUNNERS` overrides it " +
-    "on one machine. Run `factory ci install` again after changing it.",
+  "ci.runners": { long: "Heavy runner loops per machine, each with its own Docker: the project's default. A machine's " +
+    "own count (`factory ci runners <n>`, saved outside the repo) wins over it, and `FACTORY_CI_RUNNERS` wins over both " +
+    "for one shell. Run `factory ci install` again after changing it.",
   examples: ["factory settings set ci.runners 3"] },
+  "ci.runners@machine": { long: "How many heavy CI runners this machine runs for this project (#282). `factory ci runners " +
+    "<n>` saves it and reinstalls the runners; `factory ci install` and `factory update` keep it. `FACTORY_CI_RUNNERS` " +
+    "wins over it for one shell. Unset: the project's `ci.runners`, else 1.",
+  examples: ["factory ci runners 4", "factory settings --local set ci.runners 4"],
+  read_by: "`factory ci` (ci_names.ts), `factory update` and `factory doctor --sandbox`",
+  needs: "nothing: it is this machine's file, not committed. Run `factory ci install` after `settings --local set` (`factory ci runners <n>` does it)" },
   "eval.command": { long: "What the eval skill runs, e.g. `pnpm golden`. Empty: no eval yet.",
     examples: ["factory settings set eval.command 'pnpm golden'"] },
   "design.references": { long: "The folder of design reference screens the design-check skill compares a built " +

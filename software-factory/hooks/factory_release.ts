@@ -1037,8 +1037,8 @@ export async function installFiles(root: string, files: Files, manifest: Manifes
 
 // --- this machine ----------------------------------------------------------------------------------------------------------
 
-function runCi(root: string, args: string[], timeoutMs = 900_000): [number, string] {
-  const p = run(["bash", join(root, ".claude", "ci", "ci.sh"), ...args], { cwd: root, timeoutMs });
+function runCi(root: string, args: string[], timeoutMs = 900_000, env: Record<string, string> = {}): [number, string] {
+  const p = run(["bash", join(root, ".claude", "ci", "ci.sh"), ...args], { cwd: root, timeoutMs, env: { ...process.env, ...env } });
   return [p.code, (p.stdout + p.stderr).trim()];
 }
 
@@ -1060,7 +1060,8 @@ function refreshServices(root: string): string[] {
   return [...refreshRunners(root), ...refreshHeartbeat(root)];
 }
 
-/** Reinstall the CI runner services when this machine has some and they are older than the checkout. */
+/** Reinstall the CI runner services when this machine has some and they are older than the checkout. An update never
+ * scales a machine down (#282): FACTORY_CI_NO_SCALE_DOWN keeps every runner it has installed. */
 function refreshRunners(root: string): string[] {
   if (!isFile(join(root, ".claude", "ci", "ci.sh"))) return ["runner services: this release has none to refresh"];
   let [rc, out] = runCi(root, ["names"], 120_000);
@@ -1071,7 +1072,7 @@ function refreshRunners(root: string): string[] {
     throw new FactoryError("services_failed", `could not tell whether the runner services are older (${out.slice(0, 300)}).`, "run `factory ci status` to see why.");
   }
   const older = splitLines(out).map((l) => l.trim()).filter(Boolean);
-  [rc, out] = runCi(root, ["install"]);
+  [rc, out] = runCi(root, ["install"], 900_000, { FACTORY_CI_NO_SCALE_DOWN: "1" });
   if (rc !== 0) {
     throw new FactoryError("services_failed", "refreshing the runner services failed:\n" + splitLines(out).slice(-8).map((l) => "    " + l).join("\n"),
       "run `factory ci install` and read what it says; then run `factory update` again.");

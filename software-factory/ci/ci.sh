@@ -46,6 +46,16 @@ compose=(docker compose --file "$kit/compose.yaml" --project-name "$CI_NAME")
 # Docker, label <repo>-light, for the Factory guard. Instance 1 keeps the single runner's names, so an existing
 # install carries on; instance N adds "-N" and the light lane "-light" to them.
 wanted_ids() { seq 1 "$CI_RUNNERS"; [ "$CI_LIGHT" = 1 ] && echo light; return 0; }
+# Where CI_RUNNERS came from (#282): FACTORY_CI_RUNNERS, this machine's saved count (`factory ci runners <n>`), the
+# project's ci.runners, or the default.
+runners_from() {
+  case "$CI_RUNNERS_FROM" in
+    env) echo "FACTORY_CI_RUNNERS" ;;
+    machine) echo "this machine's setting" ;;
+    project) echo "ci.runners in .claude/factory.json" ;;
+    *) echo "the default" ;;
+  esac
+}
 valid_id() { case "$1" in light|[1-9]|1[0-6]) return 0 ;; esac; return 1; }
 use_instance() {
   local sfx=""
@@ -512,7 +522,7 @@ memory_note() {
   fi
   if [ "$need" -gt "$free" ]; then
     echo "Warning: $CI_RUNNERS heavy runner(s)$([ "$CI_LIGHT" = 1 ] && echo " and the light one") need about $need MB at once,"
-    echo "  and $where. Jobs may slow down or fail; lower ci.runners (or FACTORY_CI_RUNNERS)."
+    echo "  and $where. Jobs may slow down or fail; lower the count for this machine with \`factory ci runners <n>\`."
   fi
 }
 
@@ -567,6 +577,19 @@ remove_instance() {
   echo "Removed instance $1 ($I_NAME)."
 }
 
+# FACTORY_CI_NO_SCALE_DOWN=1 (what `factory update` sets, #282): keep every heavy runner this machine has installed,
+# even when the count here is lower. Only a person scales a machine down (`factory ci runners <n>` or `factory ci install`).
+keep_installed_runners() {
+  [ -n "${FACTORY_CI_NO_SCALE_DOWN:-}" ] || return 0
+  local id top=0
+  for id in $(installed_ids); do
+    case "$id" in light) ;; *) [ "$id" -gt "$top" ] && top="$id" ;; esac
+  done
+  [ "$top" -gt "$CI_RUNNERS" ] || return 0
+  echo "Kept $top heavy runner(s) installed here; $(runners_from) asks for $CI_RUNNERS. \`factory ci runners $CI_RUNNERS\` scales this machine down."
+  CI_RUNNERS="$top"
+}
+
 cmd_install() {
   if [ "$platform" = linux ]; then need gh docker systemctl; need_user_manager
   else need gh docker launchctl plutil; fi
@@ -596,6 +619,7 @@ cmd_install() {
     done
   fi
   build_image
+  keep_installed_runners
   memory_note
   # Scale down first: instances this machine has but no longer wants.
   local id wanted
@@ -852,7 +876,7 @@ cmd_status() {
     local want
     want="$(wanted_ids | wc -l | tr -d ' ')"
     [ -n "$installed" ] && [ "$(installed_ids | wc -l | tr -d ' ')" != "$want" ] &&
-      echo "  ci.runners and ci.light ask for $want instance(s) here; \`factory ci install\` brings it to that."
+      echo "  $CI_RUNNERS heavy runner(s) ($(runners_from))$([ "$CI_LIGHT" = 1 ] && echo " and the light lane") make $want instance(s) here; \`factory ci install\` brings it to that."
     if docker info >/dev/null 2>&1; then
       echo "Docker: running"
       image_note
@@ -891,7 +915,7 @@ case "${1:-status}" in
   stop) cmd_stop ;;
   logs) shift; cmd_logs "$@" ;;
   names) for v in CI_REPO CI_NAME CI_LABEL CI_AGENT CI_PLIST CI_INSTALLED CI_STATE CI_REPLACES CI_UNIT CI_UNIT_FILE \
-               CI_RUNNERS CI_LIGHT CI_LIGHT_LABEL CI_IMAGE CI_CACHES; do
+               CI_RUNNERS CI_RUNNERS_FROM CI_LIGHT CI_LIGHT_LABEL CI_IMAGE CI_CACHES; do
       echo "$v=${!v}"
     done
     echo "CI_HOST=$host" ;;

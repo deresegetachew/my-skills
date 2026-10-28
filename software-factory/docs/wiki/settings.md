@@ -229,7 +229,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 |---|---|---|---|
 | `ci.name` | str | `""` | The self-hosted runner's name (default `<repo>-ci`). |
 | `ci.label` | str | `""` | The runner label CI jobs ask for (default `<repo>-local`). |
-| `ci.runners` | int | `1` | Heavy runner loops per machine (each with its own Docker); FACTORY_CI_RUNNERS overrides it on one machine. |
+| `ci.runners` | int | `1` | Heavy runner loops per machine (each with its own Docker); a machine's own count (`factory ci runners <n>`) and FACTORY_CI_RUNNERS win over it. |
 | `ci.light` | bool | `true` | Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`. |
 | `ci.image` | str | `"build"` | The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base. |
 | `ci.caches` | bool | `true` | Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets). |
@@ -265,6 +265,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `autostart` | bool | `false` | Bring the stack and this machine's agents back after a reboot (`factory autostart`). |
 | `autostartAgents` | list | `[]` | The agents it starts at boot. Empty: the names this machine runs. |
 | `autostartReport` | bool | `true` | Post the boot report on the first started agent's issue (issues mode). |
+| `ci.runners` | int | `null` | Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's. |
 <!-- settings:end -->
 
 <br>

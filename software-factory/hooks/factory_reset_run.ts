@@ -15,6 +15,7 @@
 //   runner     this project's registered self-hosted runners (<ci name>-...) that are offline and idle
 //   variable   CI_RUNS_ON or CI_RUNS_ON_LIGHT that asks for self-hosted runners when none with those labels is online (it is
 //              deleted, so jobs use GitHub's runners)
+// `factory ci clean` (factory_ci_clean.ts, #282) uses the same ciSteps() for the container and runner kinds.
 // Errors are {code, message, fix} on stderr with exit 1. Every GitHub and Docker call goes through ghApi() and docker().
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -210,6 +211,15 @@ export function plan(cfg: Config, named: string[] = []): Step[] {
     if (close) steps.push(["agent", `close Agent issue #${number} (${why})`, () => closeIssue(number)]);
     else steps.push(["note", `left Agent issue #${number} open (${why}); to close it from here: factory reset-run --apply --agent ${name}`, null]);
   }
+  return [...steps, ...ciSteps(cfg, "delete")];
+}
+
+/** The CI part of the plan, one implementation for `factory reset-run` and `factory ci clean` (#282): this project's
+ * exited CI containers and its offline idle runners, then each runs-on variable that asks for self-hosted runners
+ * when none with its labels is online. `variables` "delete" removes such a variable (reset-run); "note" only says so
+ * and names `factory ci use`, since that changes where jobs run (ci clean). */
+export function ciSteps(cfg: Config, variables: "delete" | "note"): Step[] {
+  const steps: Step[] = [];
   const names = ciNames(cfg);
   if (names === null) {
     steps.push(["note", "skipped the CI containers, runners and variables: can't tell this project's repository " +
@@ -231,10 +241,35 @@ export function plan(cfg: Config, named: string[] = []): Step[] {
     steps.push(["runner", `remove the offline runner ${rname} (id ${String(rid)})`, () => ghApi(REPO + `actions/runners/${String(rid)}`, "DELETE")]);
   }
   for (const [v, labels] of danglingVariables(pool)) {
-    steps.push(["variable", `delete ${v} (no online runner has ${reprList(labels)}); jobs then use GitHub's runners`,
-      () => ghApi(REPO + `actions/variables/${v}`, "DELETE")]);
+    if (variables === "delete") {
+      steps.push(["variable", `delete ${v} (no online runner has ${reprList(labels)}); jobs then use GitHub's runners`,
+        () => ghApi(REPO + `actions/variables/${v}`, "DELETE")]);
+    } else {
+      steps.push(["note", `${v} asks for ${reprList(labels)} and no online runner has those labels, so those jobs wait; ` +
+        "`factory ci install` starts runners here, or `factory ci use github` sends the jobs to GitHub's runners", null]);
+    }
   }
   return steps;
+}
+
+/** Prints the steps under `title`; with `apply` does each one first and says so. `nothing` when there is nothing to do. */
+export function runSteps(steps: Step[], apply: boolean, title: string, nothing: string): void {
+  console.log(apply ? `${title} --apply` : `${title} (a plan: nothing is changed; add --apply to do it)`);
+  for (const [kind, text, action] of steps) {
+    if (action === null) console.log(`  ${kind}: ${text}`);
+    else if (apply) {
+      action();
+      console.log(`  done, ${kind}: ${text}`);
+    } else console.log(`  ${kind}: ${text}`);
+  }
+  if (!steps.some((s) => s[2] !== null)) console.log(`  ${nothing}`);
+}
+
+/** Writes a Refusal as {code, message, fix} on stderr; returns 1. Anything else is thrown on. */
+export function refused(e: unknown): number {
+  if (!(e instanceof Refusal)) throw e;
+  process.stderr.write(pyDumps(e.body) + "\n");
+  return 1;
 }
 
 function closeIssue(number: number): void {
@@ -260,21 +295,9 @@ export function main(argv: string[]): number {
   }
   try {
     ghApi("user");
-    const steps = plan(load(), named);
-    console.log(apply ? "factory reset-run --apply" : "factory reset-run (a plan: nothing is changed; add --apply to do it)");
-    const todo = steps.filter((s) => s[2] !== null);
-    for (const [kind, text, action] of steps) {
-      if (action === null) console.log(`  ${kind}: ${text}`);
-      else if (apply) {
-        action();
-        console.log(`  done, ${kind}: ${text}`);
-      } else console.log(`  ${kind}: ${text}`);
-    }
-    if (!todo.length) console.log("  Nothing to reset.");
+    runSteps(plan(load(), named), apply, "factory reset-run", "Nothing to reset.");
   } catch (e) {
-    if (!(e instanceof Refusal)) throw e;
-    process.stderr.write(pyDumps(e.body) + "\n");
-    return 1;
+    return refused(e);
   }
   return 0;
 }
