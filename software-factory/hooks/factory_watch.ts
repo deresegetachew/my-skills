@@ -4,6 +4,9 @@
 //
 //   factory_watch.ts            one line per item: ref, who it is for, how long it has waited, and why  (exit 3 when any)
 //   factory_watch.ts --json     the same as JSON
+//   --fresh                     read GitHub now: the one-line view answers from the views' cache while it is fresh
+//                               (factory_views_cache.ts, `views.cacheSeconds`); --json and `collect` (the
+//                               orchestrator's) always read GitHub, since programs act on them
 //
 // The seven checks (thresholds are `manager.*` settings):
 //   1 review     an open PR whose head commit has no reviewed marker (factory-approved, factory-mustfix or pr-watch) and has
@@ -31,6 +34,7 @@ import { parseComment, verdicts } from "./factory_messages.ts";
 import { questions } from "./factory_po.ts";
 import { type Pull as WaitPull, precheckItems, waitingTasks } from "./factory_wait.ts";
 import { Exit, isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
+import { answer, sayAge } from "./factory_views_cache.ts";
 
 export const WATCH = /<!--\s*pr-watch\s+sha=([0-9a-f]{7,40})/g;
 export const OWNER_LABEL = "factory:needs-owner";
@@ -363,14 +367,18 @@ export function render(items: Item[], nowArg: number | null = null): string[] {
 
 export function main(argv: string[]): number {
   const cfg = load();
-  const items = collect(cfg);
-  if (argv.includes("--json")) {
+  const json = argv.includes("--json");
+  // --json is for programs, which act on it: it always reads GitHub, and keeps the answer for the next person's view.
+  const got = answer(cfg, { name: "watch", hook: import.meta.path, args: [] }, json || argv.includes("--fresh"), () => collect(cfg));
+  const items = got.data;
+  if (json) {
     console.log(pyDumps(items.map((i) => ({ ...i, since: i.since ? isoformat(i.since) : null })), { indent: 2 }));
   } else if (items.length) {
     console.log(render(items).join("\n"));
   } else {
     console.log("nothing to do");
   }
+  sayAge(got.age, json);
   return items.length ? 3 : 0;
 }
 

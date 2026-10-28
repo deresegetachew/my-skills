@@ -10,8 +10,9 @@
 // is the state the question it answers moves to. The old markers (factory-question, factory-answer, factory-mustfix,
 // factory-approved) are still read, and an envelope in the same comment wins over them.
 //
-//   factory messages ls [--to X] [--from X] [--state S] [--ref N] [--kind K] [--all] [--json]
-//                         open messages across the open issues and PRs (questions by default)
+//   factory messages ls [--to X] [--from X] [--state S] [--ref N] [--kind K] [--all] [--json] [--fresh]
+//                         open messages across the open issues and PRs (questions by default), from the views'
+//                         cache while it is fresh (factory_views_cache.ts); --fresh reads GitHub now
 //   factory messages new --kind K [--to X] [--from X] [--ref R] [--in-reply-to ID] [--state S] [--sha SHA]
 //                         print the envelope (and the old marker line) to paste at the top of a comment
 //
@@ -23,6 +24,7 @@ import { type Config, load, roleNames, roleSetting } from "./factory_config.ts";
 import { type Comment, gh, ghAll, type Issue } from "./factory_issues.ts";
 import { refuse } from "./factory_machine.ts";
 import { Exit, parseArgs, pyDumps, runMain, splitLines } from "./factory_lib.ts";
+import { answer, sayAge } from "./factory_views_cache.ts";
 
 export const SCHEMA = 1;
 export const KINDS = ["question", "answer", "mustfix", "approval", "status"] as const;
@@ -502,6 +504,7 @@ export interface LsArgs {
   kind: string;
   all: boolean;
   json: boolean;
+  fresh?: boolean;
 }
 
 /** The to / from / state / ref filters, for rows that are plain messages (questions are filtered as tasks). */
@@ -558,10 +561,15 @@ function cmdLs(a: LsArgs): void {
   if (!every.includes(a.kind)) refuse("bad-kind", `'${a.kind}' isn't a message kind.`, `Use one of: ${every.join(", ")}.`);
   const states = [...STATES, "idle", "down"];
   if (a.state && !states.includes(a.state)) refuse("bad-state", `'${a.state}' isn't a message state.`, `Use one of: ${states.join(", ")}.`);
-  const rows = collect(load(), a);
+  const cfg = load();
+  const args = ["ls", ...([["--to", a.to], ["--from", a.frm], ["--state", a.state], ["--ref", a.ref], ["--kind", a.kind]] as const)
+    .flatMap(([flag, v]) => (v ? [flag, v] : [])), ...(a.all ? ["--all"] : [])];
+  const got = answer(cfg, { name: "messages", hook: import.meta.path, args }, a.fresh, () => collect(cfg, a));
+  const rows = got.data;
   if (a.json) console.log(pyDumps(rows, { indent: 2 }));
   else if (rows.length) console.log(rows.map(line).join("\n"));
   else console.log("no messages" + (a.state ? "" : " waiting"));
+  sayAge(got.age, a.json);
 }
 
 interface NewArgs {
@@ -608,9 +616,10 @@ export function main(argv: string[]): void {
   }
   const s = (v: unknown): string | null => (typeof v === "string" ? v : null);
   if (cmd === "ls") {
-    const a = parseArgs(argv.slice(1), { valued: ["--to", "--from", "--state", "--ref", "--kind"], flags: ["--all", "--json"] },
-      `${prog} ls`, `usage: ${prog} ls [-h] [--to TO] [--from FRM] [--state STATE] [--ref REF] [--kind KIND] [--all] [--json]`);
-    cmdLs({ to: s(a.to), frm: s(a.from), state: s(a.state), ref: s(a.ref), kind: s(a.kind) ?? "question", all: Boolean(a.all), json: Boolean(a.json) });
+    const a = parseArgs(argv.slice(1), { valued: ["--to", "--from", "--state", "--ref", "--kind"], flags: ["--all", "--json", "--fresh"] },
+      `${prog} ls`, `usage: ${prog} ls [-h] [--to TO] [--from FRM] [--state STATE] [--ref REF] [--kind KIND] [--all] [--json] [--fresh]`);
+    cmdLs({ to: s(a.to), frm: s(a.from), state: s(a.state), ref: s(a.ref), kind: s(a.kind) ?? "question", all: Boolean(a.all),
+      json: Boolean(a.json), fresh: Boolean(a.fresh) });
   } else {
     const a = parseArgs(argv.slice(1), { valued: ["--kind", "--to", "--from", "--ref", "--in-reply-to", "--state", "--sha", "--id"],
       flags: ["--no-legacy"], required: ["--kind"] }, `${prog} new`, `usage: ${prog} new [-h] --kind KIND [--to TO] [--from FRM] ...`);

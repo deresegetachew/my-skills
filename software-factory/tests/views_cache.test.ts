@@ -194,7 +194,7 @@ test("a second run within the time to live reads nothing and says how old the an
 });
 
 test("with --json the note goes to stderr and stdout stays the same parseable JSON", () => {
-  for (const name of NAMES) {
+  for (const name of ["prs", "messages"] as ViewName[]) {
     const c = ctxFor(name);
     const first = run(c, name, ["--json"], T0);
     const before = calls(c);
@@ -205,6 +205,22 @@ test("with --json the note goes to stderr and stdout stays the same parseable JS
     expect(JSON.parse(second.stdout), name).toEqual(JSON.parse(first.stdout));
     expect(first.stderr, name).not.toContain("(as of");
   }
+});
+
+test("watch --json is for programs: it always reads GitHub, and its answer serves the next text view", () => {
+  const c = ctxFor("watch");
+  const first = run(c, "watch", ["--json"], T0);
+  const before = calls(c);
+  expect(before).toBeGreaterThan(0);
+  const second = run(c, "watch", ["--json"], T0 + 10);
+  expect(second.code, second.out).toBe(VIEWS.watch.code);
+  expect(calls(c), "watch --json read GitHub again").toBeGreaterThan(before);
+  expect(second.stderr).not.toContain("(as of");
+  expect(JSON.parse(second.stdout)).toEqual(JSON.parse(first.stdout));
+  const after = calls(c);
+  const text = run(c, "watch", [], T0 + 10);
+  expect(calls(c), "the text view answers from what --json read").toBe(after);
+  expect(lastLine(text)).toBe(NOTE(0));
 });
 
 test("watch keeps its exit code from the cache: 0 when nothing needs anyone", () => {

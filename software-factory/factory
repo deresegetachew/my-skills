@@ -85,9 +85,11 @@ Look
                          version and the doctor's summary; a part that can't be read is listed under "missing"
   cockpit --status       one line for tmux's status line (counts and "N need you"), from a cache: no GitHub call;
                          an old or empty cache is refreshed in the background
-  prs [--json]           what a manager decides from, one list: each open PR with its head, CI judged by one rule,
+  prs [--json] [--fresh] what a manager decides from, one list: each open PR with its head, CI judged by one rule,
                          the newest marker per commit, any review claim and the next action; then unanswered questions
-                         and owner asks, and agents gone quiet. Read-only, REST only
+                         and owner asks, and agents gone quiet. Read-only, REST only. prs, watch and messages ls answer
+                         from one cache while it is fresh (views.cacheSeconds, 45) and say how old it is; --fresh asks
+                         GitHub now (watch --json always does)
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply
@@ -122,8 +124,8 @@ Look
                          agent cards; sweep marks silent ones down and gives back the issues of agents that are really
                          down (never of one that is alive and waiting)
   messages [ls|new]      questions and answers between agents, the dev manager and the PO: ls [--to X] [--state S]
-                         [--ref N] lists what is open across issues and PRs; new --kind question --to po prints the
-                         envelope to paste at the top of a comment (docs/messages.md)
+                         [--ref N] [--fresh] lists what is open across issues and PRs; new --kind question --to po
+                         prints the envelope to paste at the top of a comment (docs/messages.md)
   alerts check|watch [--every S]
                          a terminal bell and a desktop notice (osascript, notify-send) once per new owner-queue ask;
                          watch looks every S seconds (60) in this terminal. Without a notifier the bell still rings
@@ -205,7 +207,8 @@ Maintain
   wait ci|answer <pr> [minutes], wait slot|ready [minutes]
                          the other token-free waits: CI finished, question answered, a PR slot free, a task ready
   precheck               dev manager: "nothing to do" (exit 0) or one line per thing to do (exit 3), without a model
-  watch [--json]         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
+  watch [--json] [--fresh]
+                         dev manager: the seven checks (unreviewed head, open question, must-fix or red CI or conflict,
                          approved and green, owner waits, agents down or idle, queued CI): one line each and who it is for
                          (manager or owner), exit 3 when any, without a model. The orchestrator starts from this
   prd [--open] [--story N] [--json] | --stage [--ask vision|design|plan]
