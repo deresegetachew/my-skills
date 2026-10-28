@@ -6,7 +6,7 @@
 import { expect, test } from "bun:test";
 import { cpSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { calls, type Env, fakeClaude, KIT_AGENT_SETTINGS, loopProject, NO_CONNECTORS, quiet, startedSettings } from "./loop_support.ts";
+import { calls, type Env, fakeClaude, hookShape, KIT_AGENT_SETTINGS, loopProject, NO_CONNECTORS, quiet, startedSettings } from "./loop_support.ts";
 import { HOOKS, read, SF, sh, tmp, write } from "./support.ts";
 
 type Settings = { permissions: { allow: string[]; deny: string[] }; hooks: Record<string, unknown> };
@@ -32,7 +32,7 @@ test("a coding agent starts with the kit's rules and main's extra allow rules on
   const args = calls(env)[0] as string[];
   const got = startedSettings(args) as Settings;
   expect(got.permissions.deny).toEqual(kit().permissions.deny);
-  expect(got.hooks).toEqual(kit().hooks);
+  expect(hookShape(got.hooks, true)).toEqual(hookShape(kit().hooks));
   expect(got.permissions.allow).toEqual([...kit().permissions.allow, "Bash(make test*)"]);
   expect(got).toMatchObject(JSON.parse(NO_CONNECTORS));
   // The project's own file is Claude Code's to load and merge: never copied in, never switched off.
@@ -50,7 +50,7 @@ test("an agent cannot loosen its own rules in its worktree", () => {
   expect(p.code, p.out).toBe(0);
   const got = startedSettings(calls(env)[0] as string[]) as Settings;
   expect(got.permissions.deny).toEqual(kit().permissions.deny);
-  expect(got.hooks).toEqual(kit().hooks);
+  expect(hookShape(got.hooks, true)).toEqual(hookShape(kit().hooks));
   expect(got.permissions.allow).not.toContain("Bash(*)");
 });
 
@@ -95,7 +95,7 @@ test("rules that main has as a link into the same repo are followed", () => {
   expect(p.code, p.out).toBe(0);
   const got = startedSettings(calls(env)[0] as string[]) as Settings;
   expect(got.permissions.deny).toEqual(kit().permissions.deny);
-  expect(got.hooks).toEqual(kit().hooks);
+  expect(hookShape(got.hooks, true)).toEqual(hookShape(kit().hooks));
 });
 
 test("rules that main has as a link into the my-skills submodule are read at the commit main pins", () => {
@@ -115,7 +115,7 @@ test("rules that main has as a link into the my-skills submodule are read at the
   expect(p.code, p.out).toBe(0);
   const got = startedSettings(calls(env)[0] as string[]) as Settings;
   expect(got.permissions.deny).toEqual(kit().permissions.deny);
-  expect(got.hooks).toEqual(kit().hooks);
+  expect(hookShape(got.hooks, true)).toEqual(hookShape(kit().hooks));
 });
 
 test("a link on main that leads outside the repo is refused and no agent starts", () => {

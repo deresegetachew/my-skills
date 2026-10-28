@@ -138,9 +138,17 @@ with `|| exit 2`: a gate script that is missing or crashes blocks the command to
 Every hook line starts Bun with `env -u BUN_OPTIONS`, so that variable can't add a preload. `factory doctor` reports a
 hook line without either as a fix. The agents' settings also deny `gh pr merge … --admin` outright.
 
-The hook scripts still run from the agent's own folder, so an agent that puts back an older gate from git history runs
-that one. Running the hooks from main's code instead is #274; the lock that does not depend on the
-agent's folder is on GitHub (see Branch protection below).
+**The hooks run main's code, not the agent's folder (#274).** When `factory loop` or `factory agent` starts an agent,
+it unpacks `.claude/hooks/` as main has it on origin (links and the my-skills submodule followed, like the settings)
+into the git folder, read-only, at `<git folder>/factory-hooks/<content hash>/hooks/`, and every hook line in the
+settings it passes names those files instead of `"$CLAUDE_PROJECT_DIR"/.claude/hooks/`. So an agent that puts back an
+older gate in its worktree (`git checkout <old> -- .claude/hooks/pr-gate.ts`, `git switch --detach <old>`) does not
+run it. The next start reuses the unpacked copy when it is unchanged and puts it back when it is not; copies unused for
+7 days are removed. When the hooks can't be unpacked, no session starts (`hooks_not_unpacked`, with the fix). The
+agents' settings also deny restoring `.claude/` paths from history (`git checkout|restore|reset … .claude…`,
+`git checkout-index`, `git read-tree`) and any command that names `factory-hooks`. To remove the unpacked copies by
+hand: `chmod -R u+w "$(git rev-parse --git-common-dir)/factory-hooks" && rm -rf "$(git rev-parse --git-common-dir)/factory-hooks"`.
+This is a guard rail too: the lock that does not depend on the agent's machine is on GitHub (see Branch protection below).
 
 **Trusted reviewers.** With `"trustedReviewers": ["<login>"]` in `factory.json`, only approvals from those GitHub
 logins count, and only their must-fixes send a pull request back to rework (`factory next`). This only helps once the

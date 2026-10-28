@@ -51,6 +51,14 @@
       "Bash(./factory manager-claims*)"
     ],
     "deny": [
+      "Bash(git checkout *.claude*)",
+      "Bash(git * checkout *.claude*)",
+      "Bash(git restore *.claude*)",
+      "Bash(git * restore *.claude*)",
+      "Bash(git reset *.claude*)",
+      "Bash(git checkout-index*)",
+      "Bash(git read-tree*)",
+      "Bash(*factory-hooks*)",
       "Read(./.env)",
       "Read(./.env.local)",
       "Read(./.env.*.local)",
