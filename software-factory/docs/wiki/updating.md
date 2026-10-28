@@ -111,13 +111,14 @@ described [below](submodule.md#updating-the-factory) until the project migrates.
 starts taking releases in a project whose factory files are plain copies; it refuses, and changes nothing, where the
 files are links into the submodule. Moving a project off the submodule is its own reviewed pull request.
 
-**Which releases exist.** Only pre-releases so far, each built from the commit that bumped `software-factory/VERSION`:
-`v0.1.0-alpha.1` (#184) to `v0.1.0-alpha.3` are the old Python factory, and `v0.2.0-alpha.1` on are Bun (#252). A tag
-with a hyphen is published as a pre-release. Until a full release exists, `factory update` with no version stops with
-`[no_releases]`, names the newest pre-release and says to take it by name, for example `factory update v0.2.0-alpha.1`
+**Which releases exist.** Each release is built from the commit that bumped `software-factory/VERSION`.
+`v0.1.0-alpha.1` (#184) to `v0.1.0-alpha.3` are the old Python factory, `v0.2.0-alpha.1` was the first on Bun (#252),
+and `v0.2.0` was the first full release. A tag with a hyphen is published as a pre-release, and a plain `factory update`
+never takes one: name it (`factory update v0.3.0-alpha.1`). With only pre-releases published, `factory update` with no
+version stops with `[no_releases]`, names the newest pre-release and says to take it by name
 (`factory migrate-to-release` names its own command the same way). `factory version` shows a pre-release newer than the newest full one on its own line. `factory releases` lists what exists.
 
-**From the old Python release to Bun.** A project on `v0.1.0-alpha.3` updates by naming the Bun release, for example `factory update v0.2.0-alpha.1`. The
+**From the old Python release to Bun.** A project on `v0.1.0-alpha.3` updates with `factory update` (it takes the newest full release). The
 machine needs Bun first (`curl -fsSL https://bun.sh/install | bash`; `factory doctor` checks it). On that one update
 the old Python client cannot restart the heartbeat daemon, so if the daemon runs on the machine, run
 `factory heartbeat restart` once afterwards. Later updates restart it themselves. The project's
