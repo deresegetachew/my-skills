@@ -681,7 +681,7 @@ export function artifacts(r: Reporter, cfg: Config): void {
 
 /** What fixes a missing manager profile. `factory update` at a release that does not carry the file answers "nothing
  * to install" (#172), so a project on such a release is told to look for a newer one. */
-export function managerProfileFix(path: string): string {
+export function managerProfileFix(path: string, role = "dev-manager"): string {
   let pin: fr.Pin | null;
   try {
     pin = fr.readPin(process.cwd());
@@ -691,19 +691,35 @@ export function managerProfileFix(path: string): string {
   }
   if (pin && !(path in (pin.files || {}))) {
     return `the installed release ${pin.tag} doesn't carry it: see \`factory releases\` for a newer one and take it with ` +
-      "`factory update <version>`, or set `roles.dev-manager.profile`";
+      `\`factory update <version>\`, or set \`roles.${role}.profile\``;
   }
-  return "run `factory update`, or set `roles.dev-manager.profile`";
+  return `run \`factory update\`, or set \`roles.${role}.profile\``;
 }
 
-/** The dev-manager orchestrator (#97): its settings profile resolves and every hook script the profile runs exists. */
+/** A role's settings profile (`roles.<role>.profile`, else `path`) and the skill whose commands it must allow. */
+interface RoleProfile { role: string; label: string; path: string; skill: string; missing: string; stall: string }
+
+const PROFILES: RoleProfile[] = [
+  { role: "dev-manager", label: "manager profile", path: ".claude/manager/settings.json", skill: "manage-pass",
+    missing: "so sub-managers use the project's settings (which deny `gh api`)",
+    stall: "a headless sub-manager cannot answer, so its verdict never lands" },
+  { role: "product-owner", label: "product owner profile", path: ".claude/product-owner/settings.json", skill: "product-pass",
+    missing: "so the product owner's sessions start with no allow rule and an unattended pass is refused every command",
+    stall: "an unattended product owner pass cannot answer, so the command is refused" },
+];
+
+/** The dev-manager orchestrator (#97) and the product owner: each role's settings profile resolves, every hook script
+ * it runs exists, and it allows every command the role's skill names. */
 export function manager(r: Reporter, cfg: Config): void {
-  const roleCfg = isObject(cfg.roles) ? cfg.roles["dev-manager"] : null;
+  for (const p of PROFILES) roleProfile(r, cfg, p);
+}
+
+function roleProfile(r: Reporter, cfg: Config, p: RoleProfile): void {
+  const roleCfg = isObject(cfg.roles) ? cfg.roles[p.role] : null;
   const set = isObject(roleCfg) ? roleCfg.profile : null;
-  const path = String(set || ".claude/manager/settings.json");
+  const path = String(set || p.path);
   if (!isFile(path)) {
-    r.note("manager profile", `${path} doesn't exist, so sub-managers use the project's settings (which deny \`gh api\`): ` +
-      managerProfileFix(path));
+    r.note(p.label, `${path} doesn't exist, ${p.missing}: ` + managerProfileFix(path, p.role));
     return;
   }
   let profile: Record<string, unknown>;
@@ -723,8 +739,8 @@ export function manager(r: Reporter, cfg: Config): void {
   }
   const unique = [...new Set(missing)].sort();
   for (const script of unique) r.fix(`${path}: ${script}`, "the hook script is missing: run `factory update`");
-  if (!unique.length) r.ok("manager profile: it resolves and its hooks exist");
-  skillCommands(r, profile, path);
+  if (!unique.length) r.ok(`${p.label}: it resolves and its hooks exist`);
+  skillCommands(r, profile, path, p);
 }
 
 /** True when Claude Code would ask before running `command` under `profile` (a headless run cannot answer): a deny
@@ -739,26 +755,27 @@ export function wouldPrompt(profile: Record<string, unknown>, command: string): 
   return hit(rules.deny, command) || !(hit(rules.allow, command) || hit(rules.allow, command + " x"));
 }
 
-/** Replays each command the dev manager's skill names against the profile (#202): one the profile would prompt for
- * stalls a headless sub-manager, which is how a verdict never got posted. Spans in a line that says "never" are the
- * commands the skill forbids, and are left out. */
-export function skillCommands(r: Reporter, profile: Record<string, unknown>, path: string): void {
-  const skill = ".claude/skills/manage-pass/SKILL.md";
+/** Replays each command a role's skill names against its profile (#202): one the profile would prompt for stalls a
+ * headless session, which is how a verdict never got posted. Spans in a line that says "never" are the commands the
+ * skill forbids, and are left out, and so are the role loops (the loop script starts them). */
+export function skillCommands(r: Reporter, profile: Record<string, unknown>, path: string,
+  p: RoleProfile = PROFILES[0] as RoleProfile): void {
+  const skill = `.claude/skills/${p.skill}/SKILL.md`;
   if (!isFile(skill)) return;
   const stuck: string[] = [];
   for (const line of splitLines(readText(skill))) {
     if (/\bnever\b/i.test(line)) continue;
     for (const m of line.matchAll(/`((?:gh|git|factory|\.\/factory) [^`]+)`/g)) {
       const cmd = m[1] as string;
-      if (cmd.startsWith("factory dev-manager") || cmd.startsWith("factory loop")) continue; // started by the orchestrator
+      if (/^(\.\/)?factory (loop|dev-manager|product-owner|coding-agent)\b/.test(cmd)) continue;
       if (!/[;|&]|\$\(/.test(cmd) && wouldPrompt(profile, cmd) && !stuck.includes(cmd)) stuck.push(cmd);
     }
   }
   for (const cmd of stuck) {
-    r.fix(`${path}: \`${cmd}\``, "the manage-pass skill names this command but the profile would ask before running it, and a headless " +
-      "sub-manager cannot answer, so its verdict never lands: run `factory update` (or add the rule to the profile)");
+    r.fix(`${path}: \`${cmd}\``, `the ${p.skill} skill names this command but the profile would ask before running it, and ` +
+      `${p.stall}: run \`factory update\` (or add the rule to the profile)`);
   }
-  if (!stuck.length) r.ok("manager profile: every command the manage-pass skill names is allowed without a prompt");
+  if (!stuck.length) r.ok(`${p.label}: every command the ${p.skill} skill names is allowed without a prompt`);
 }
 
 export async function main(argv: string[]): Promise<number> {

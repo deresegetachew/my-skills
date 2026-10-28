@@ -38,7 +38,7 @@ between passes. What differs is small:
 |---|---|---|---|
 | Skill a pass runs | `/next-task` | `/manage-pass <item>`, started by the orchestrator once per item | `/product-pass` |
 | Has work when | a task is ready (it claims it) | `factory watch` lists something (the orchestrator, no model) | an issue or PR has `roles.product-owner.workLabel`, an owner-queue ask is tagged `for=product`, or a test plan or sign-off item waits |
-| Settings | the agents' settings (`.claude/factory/settings.json`, passed at start) | `roles.dev-manager.profile` | `roles.product-owner.profile` |
+| Settings | the agents' settings (`.claude/factory/settings.json`, passed at start) | `roles.dev-manager.profile` (`.claude/manager/settings.json`) | `roles.product-owner.profile` (`.claude/product-owner/settings.json`) |
 | Model | `models.builder` | `models.manager` | `models.product-owner` |
 | Wait after a pass | `waitMinutes` (inside the loop) | `manager.busyMinutes` (2) / `manager.idleMinutes` (5) | `roles.product-owner.busyMinutes` (30) / `idleMinutes` (60); 0 idle: exit |
 
@@ -48,6 +48,16 @@ is used only when its file exists; then its sessions read just the user's settin
 own `.claude/settings.json` (the coding agents' settings deny `gh api`, which the manager and product owner need).
 Claude Code then does not load the project's skills either, so a role session's prompt does not start with
 `/manage-pass`: it says to read `.claude/skills/manage-pass/SKILL.md` (or `product-pass`) and run it for the item.
+
+The kit ships both profiles, and `factory update` (or `install.sh`) installs and updates them like the hooks. The product
+owner's profile allows what `/product-pass` runs: `gh api` and reading issues and pull requests, commenting, creating and
+editing task issues, its own branch (`git checkout -b`, `add`, `commit`, `push`) and a draft PRD-change pull request
+(`gh pr create --draft`), `factory prd`, `messages`, `issues`, `signoff`, `artifacts status|list|pull`, `usage` and
+`report`, and the `.claude/hooks/` commands. It denies merging, `gh pr review` and `gh pr ready`, pushes to main, force
+pushes and deletes, the factory's settings and release commands, edits under `.claude/`, `.github/`, `CLAUDE.md` and
+`.mcp.json`, and the artifact tools (on with `roles.product-owner.artifacts`). It runs the PR gate on every Bash command,
+which also refuses the review labels and every dev manager marker but `factory-owner-ask`. `factory doctor` replays each
+command the product-pass skill names against it, as it does for the dev manager.
 
 **`factory loop -i` with no role asks.** In a terminal it asks which role (coding agent, dev manager, product owner)
 and which name (a free one, or type one). `factory loop -i dev-manager` or `FACTORY_ROLE=dev-manager` skips the

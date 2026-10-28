@@ -15,6 +15,7 @@
 //         held by another agent, and `Closes #<n>` in the PR body.
 // Markers: agents may not post the dev manager's markers (factory-approved, factory-answer, factory-mustfix, and the
 //         claim markers of factory_manager_claims.ts, and factory-budget), add the review labels or remove the hold label.
+//         The product owner's sessions (FACTORY_ROLE, its profile wires this gate in) may post factory-owner-ask, nothing else.
 // Budgets (#183): a coding agent's `gh issue edit --body/--body-file` (or `gh api` write to issues/<n> with a body) may
 //         not change the issue's `Budget:` line; the gate compares it with the issue on GitHub and fails closed when it
 //         can't read it. The product owner and the dev manager (FACTORY_ROLE) may change it.
@@ -75,8 +76,15 @@ const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "-
   "-q", "--jq", "-t", "--template", "--cache", "-p", "--preview", "--hostname"]);
 /** git push's flags that take a value (so `-o fix` is not -f). */
 const PUSH_VALUE_FLAGS = new Set(["-o", "--push-option", "--repo", "--receive-pack", "--exec"]);
-const MARKER_MSG = "Only the dev manager posts factory-approved, factory-answer, factory-mustfix, claim, budget and owner-ask comments. " +
-  "Ask with <!-- factory-question --> instead.";
+const MARKER_MSG = "Only the dev manager posts factory-approved, factory-answer, factory-mustfix, claim, budget and owner-ask comments " +
+  "(the product owner posts owner-ask ones too). Ask with <!-- factory-question --> instead.";
+
+/** Whether `text` holds a marker this session may not post. The product owner (FACTORY_ROLE, set by the loop that
+ * started the session) writes owner-queue asks (the product-pass skill); every other marker stays the dev manager's. */
+function reservedMarker(text: string): boolean {
+  const po = (process.env.FACTORY_ROLE || "coding-agent") === "product-owner";
+  return [...text.matchAll(new RegExp(MARKERS.source, "g"))].some((m) => !(po && m[1] === "owner-ask"));
+}
 
 /** The command as bash reads its words, for the quick tests: quotes, backslashes and line continuations gone, so
  * `g\h` and `"g"h` read as gh. Only for finding a program; the checks run on the parsed words. */
@@ -607,7 +615,7 @@ function gateApi(args: string[]): ApiCreate | null {
     block("Agents don't run GraphQL mutations through `gh api`: the PR gate can't check them. Use the plain gh " +
       "command (gh pr comment, gh pr edit, gh pr merge), which it checks.");
   }
-  if (MARKERS.test(text)) block(MARKER_MSG);
+  if (reservedMarker(text)) block(MARKER_MSG);
   const issue = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(endpoint);
   if (issue) {
     const bodies = fields.filter(([k]) => k === "body").map(([, v]) => v);
@@ -638,7 +646,7 @@ function checkMarkers(cfg: Config, sub: string, args: string[]): void {
   }
   if (sub === "review" && ("--approve" in flags || "-a" in flags)) block("Agents don't approve pull requests; the dev manager does.");
   const text = bodyText(flags);
-  if (MARKERS.test(text)) block(MARKER_MSG);
+  if (reservedMarker(text)) block(MARKER_MSG);
   const [, pos] = parseArgs(args);
   checkMessages(pos.length && /^\d+$/.test(pos[0] as string) ? (pos[0] as string) : null, text); // `gh pr comment 7`
   const labels = (...n: string[]): Set<string> => new Set(values(flags, ...n).flatMap((v) => v.split(",").map((x) => x.trim())));

@@ -126,6 +126,7 @@ software-factory/
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
     .claude/skills/product-pass/          the product owner's standing rules (one page)
     .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main); a release installs and updates it
+    .claude/product-owner/settings.json   the product owner's settings profile (gh api, issues and comments, its own branch and draft PR, the PR gate; no merge, no review labels, no pushes to main, no .claude/ edits); a release installs and updates it
     .github/                              template: CI workflow (Node or Python), factory-task issue template, PRD-change PR template, CODEOWNERS
     docs/                                 templates: build plan, blocked list, decision template
     .gitignore                            the lines a project's ignore file gets

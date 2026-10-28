@@ -58,7 +58,8 @@ plan first, and it is advice: nothing stops at the limit, and the dev manager we
 
 When the sign-off results, test findings, usage or questions say the product should change: propose it to the owner first.
 After the owner's yes, open **one pull request with the PRD-change template** (`.github/PULL_REQUEST_TEMPLATE/prd-change.md`;
-`gh pr create --body-file` it): the stories touched, the tasks that move, a decision record (`docs/decisions/`, next free
+`gh pr create --draft --body-file` it; a draft, because the PR gate wants a code review for a ready one, and a person
+marks it ready and merges it): the stories touched, the tasks that move, a decision record (`docs/decisions/`, next free
 number on main and in open PRs), and the owner's yes. In the same pass change the task issues (new, edited "Done when", frozen
 with `factory-hold`, or closed as not planned) so running agents and the dev manager pick the change up from GitHub. Check `factory prd` shows
 no story used twice and no task naming a missing story.
