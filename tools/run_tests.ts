@@ -5,7 +5,7 @@
 // Files run in parallel (--jobs N, or FACTORY_TEST_JOBS, default min(CPU count, 8)), biggest first. Each file's report
 // is printed whole when it finishes, so output never interleaves. Arguments that are not options pick files by name
 // (`bun tools/run_tests.ts issues` runs tests/issues.test.ts).
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
@@ -58,6 +58,25 @@ function summary(out: string): string {
   return `${pass ? pass[1] : 0} passed, ${failN ? failN[1] : 0} failed`;
 }
 
+/** Remove a scratch folder, read-only folders inside it too (main's hooks are unpacked read-only, #274). */
+function removeScratch(path: string): void {
+  const writable = (p: string): void => {
+    try {
+      if (!statSync(p, { throwIfNoEntry: false })?.isDirectory() || lstatSync(p).isSymbolicLink()) return;
+      chmodSync(p, 0o700);
+      for (const n of readdirSync(p)) writable(join(p, n));
+    } catch {
+      // rmSync below says what is left
+    }
+  };
+  try {
+    rmSync(path, { recursive: true, force: true });
+  } catch {
+    writable(path);
+    rmSync(path, { recursive: true, force: true });
+  }
+}
+
 async function runFile(path: string): Promise<Result> {
   const start = Date.now();
   const rel = relative(ROOT, path);
@@ -96,7 +115,7 @@ async function runFile(path: string): Promise<Result> {
   } catch (e) {
     out = "test runner error:\n" + (e instanceof Error ? (e.stack ?? e.message) : String(e));
   } finally {
-    rmSync(scratch, { recursive: true, force: true });
+    removeScratch(scratch);
   }
   return { rel, code, out, seconds: (Date.now() - start) / 1000 };
 }

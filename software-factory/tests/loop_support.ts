@@ -103,6 +103,17 @@ export function mainCopy(work: string): string {
   return join(resolve(work), MAIN_COPY);
 }
 
+/** Hook lines with the script's folder left out: the kit's `"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.ts` and the
+ * started session's `'<git folder>/factory-hooks/<hash>/hooks/x.ts'` (main's copy, #274) both become `<hooks>/x.ts`.
+ * A started session's lines must name main's unpacked copy, never the worktree's. */
+export function hookShape(hooks: unknown, started = false): unknown {
+  const text = JSON.stringify(hooks);
+  if (started && text.includes("CLAUDE_PROJECT_DIR")) throw new Error(`a hook line runs the worktree's copy: ${text}`);
+  return JSON.parse(text
+    .replace(/'\/[^']+\/factory-hooks\/[0-9a-f]+\/hooks\/([\w.-]+)'/g, "<hooks>/$1")
+    .replace(/\\"\$CLAUDE_PROJECT_DIR\\"\/\.claude\/hooks\//g, "<hooks>/"));
+}
+
 /** The settings a factory session was started with: the JSON `--settings` names (a file path or inline JSON). */
 export function startedSettings(args: string[]): Record<string, unknown> {
   const v = flag(args, "--settings");

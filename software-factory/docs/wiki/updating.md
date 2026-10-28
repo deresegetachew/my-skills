@@ -88,7 +88,8 @@ Changing the list is a protected change: it goes through a pull request the owne
 **Where the agents' rules live (#258).** The factory's rules for its agents (the deny list, the PR gate and the other
 hooks) are in `.claude/factory/settings.json`, which Claude Code never loads by itself. `factory loop` and
 `factory agent` pass it when they start an agent (`claude --settings <file>`), as main has it on origin, never the
-worktree's copy, so an agent cannot loosen its own next run. Your own Claude sessions in the project do not get these
+worktree's copy, so an agent cannot loosen its own next run. The hook scripts it names run as main has them too,
+unpacked into the git folder (`factory-hooks/`, #274). Your own Claude sessions in the project do not get these
 rules. A `.claude/settings.json` of your own still applies to every session, agents included: Claude Code adds the
 factory's file on top, and a deny rule in either one wins. When main has no agents' settings, the factory starts no
 agent and says how to fix it.
