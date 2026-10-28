@@ -76,7 +76,7 @@ test("the po pass lists the questions addressed to it and nothing else", () => {
   const out = p.stdout;
   expect(out).toContain("work: question q1po (to=po) on issue #12 from haile, waiting 0.5 h: Should Start be disabled");
   for (const gone of ["q2dm", "q3late", "q4asked", "q5done"]) expect(out, gone).not.toContain(gone);
-  expect(out).toContain('would run: claude -p "/product-pass"');
+  expect(out).toContain('would run: claude -p "Follow the product-pass skill: read .claude/skills/product-pass/SKILL.md');
   expect(claudeCalls(env)).toEqual([]);
   expect(posted(d)).toEqual([]);
 });

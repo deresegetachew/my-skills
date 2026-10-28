@@ -50,6 +50,16 @@ test("check 2 an open question is a manager item until it is answered", () => {
   expect("question-5" in watch(work, env)).toBe(false);
 });
 
+test("two open questions on one pull request are one manager item, not the same ref twice", () => {
+  const [, work, env] = world({ db: { pulls: [pr(5)], commits: { [H]: iso(60) }, checks: { [H]: [okRun()] },
+    comments: { "5": [comment(1, `<!-- pr-watch sha=${H} -->`, 59), comment(2, "<!-- factory-question -->\nWhich colour?", 20),
+      comment(3, "<!-- factory-question -->\nWhich font?", 15)] } } });
+  const p = hook(work, env, "factory_watch.ts", "--json");
+  const refs = (JSON.parse(p.stdout) as Row[]).map((i) => i.ref as string);
+  expect(refs.filter((r) => r === "question-5"), refs.join(", ")).toEqual(["question-5"]);
+  expect(watch(work, env)["question-5"]?.line).toContain("2 questions wait");
+});
+
 test("check 2 also reads the message envelope addressed to the dev manager", () => {
   const [d, work, env] = world({ db: { pulls: [pr(5)], commits: { [H]: iso(60) },
     comments: { "5": [comment(1, `<!-- pr-watch sha=${H} -->`, 59),
@@ -175,8 +185,11 @@ test("a cycle starts one sub manager per item with the profile the item and the 
   const calls = prompts(env);
   expect(calls.length, calls.join("\n")).toBe(1);
   const line = calls[0] as string;
-  expect(line).toContain("-p /manage-pass pr-5");
+  // --setting-sources user drops the project skills, so the prompt names the skill file, not a /manage-pass command
   expect(line).toContain("--setting-sources user");
+  expect(line).not.toContain("-p /manage-pass");
+  expect(line).toContain("-p Follow the manage-pass skill for pr-5: read .claude/skills/manage-pass/SKILL.md");
+  expect(line).toContain("/manage-pass pr-5");
   expect(line).toContain("disableClaudeAiConnectors");
   expect(line).toContain("manager_gate.ts");
   expect(line).toContain("--strict-mcp-config");
@@ -212,7 +225,7 @@ test("the cap is maxSubManagers and the rest wait for the next cycle", () => {
   expect(prompts(env).length, prompts(env).join("\n")).toBe(2);
   expect(p.stdout).toContain("waiting for a free place");
   expect(p.stdout).toContain("pr-3");
-  expect(prompts(env).some((l) => l.includes("-p /manage-pass pr-1"))).toBe(true);
+  expect(prompts(env).some((l) => l.includes(" -p ") && l.includes("/manage-pass pr-1"))).toBe(true);
 });
 
 test("the cap can be set to one", () => {
@@ -481,7 +494,8 @@ test("loop once runs one cycle and exits without a model for the orchestrator it
   expect(p.code, p.out).toBe(0);
   for (let i = 0; i < 50 && !prompts(env).length; i++) await Bun.sleep(200);
   expect(prompts(env).length, p.stdout).toBe(1);
-  expect(prompts(env)[0]).toContain("-p /manage-pass pr-5");
+  expect(prompts(env)[0]).toContain(" -p ");
+  expect(prompts(env)[0]).toContain("/manage-pass pr-5");
   expect(p.stdout).toContain("[lead]");
   expect(prompts(env).some((l) => l.includes("/manage-pass") && !l.includes(" -p "))).toBe(false);
 }, 120_000);
@@ -513,6 +527,7 @@ test("loop interactive runs the first item in a session you can type into", () =
   expect(calls[0]).toContain("--remote-control=lead pr-5");
   expect(calls[0]).toContain("/manage-pass pr-5");
   expect(calls[0]).toContain("--setting-sources user");
+  expect(calls[0]).toContain(".claude/skills/manage-pass/SKILL.md"); // a typed /manage-pass is unknown without project skills
 });
 
 test("three failed cycles in a row stop the loop", () => {

@@ -214,8 +214,20 @@ test("the profile denies what the manager never does", () => {
   const deny = loadProfile().permissions.deny;
   for (const need of ["Bash(git push --force*)", "Bash(git push origin main*)", "Bash(git push * --delete*)",
     "Edit(./.claude/**)", "Edit(./vendor/**)", "Edit(./CLAUDE.md)", "Edit(./docs/PRD.md)",
-    "Write(./.claude/**)", "Read(./.env)", "Read(./.env.local)", "Read(./secrets/**)", "Bash(gh pr merge*)"]) {
+    "Edit(./.mcp.json)", "Edit(//**/factory-reviews/**)", "Read(./.env)", "Read(./.env.local)", "Read(./secrets/**)",
+    "Bash(gh pr merge*)"]) {
     expect(deny).toContain(need);
+  }
+});
+
+test("no profile has a Write(path) rule: Claude Code never matches one and warns at every start, Edit(path) covers writes", () => {
+  for (const rel of [[".claude", "factory", "settings.json"], [".claude", "manager", "settings.json"]]) {
+    const perms = (JSON.parse(readFileSync(join(KIT, ...rel), "utf8")) as Profile).permissions;
+    const all = [...perms.deny, ...(perms.allow ?? [])];
+    expect(all.filter((r) => r.startsWith("Write(")), rel.join("/")).toEqual([]);
+    for (const path of ["./.claude/**", "./vendor/**", "./CLAUDE.md", "./docs/PRD.md", "./.mcp.json", "//**/factory-reviews/**"]) {
+      expect(perms.deny, `${rel.join("/")} protects ${path}`).toContain(`Edit(${path})`);
+    }
   }
 });
 

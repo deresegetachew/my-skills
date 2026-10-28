@@ -124,7 +124,6 @@
       "Bash(*factory-hooks*)",
       "Bash(*factory-reviews*)",
       "Edit(//**/factory-reviews/**)",
-      "Write(//**/factory-reviews/**)",
       "Bash(docker compose *-f*)",
       "Bash(docker compose *--file*)",
       "Bash(docker compose *-v*)",
@@ -138,7 +137,9 @@
       "Bash(gh pr comment *factory-answer*)",
       "Bash(gh pr comment *factory-mustfix*)",
       "Bash(gh pr comment *factory-review-claim*)",
-      "Bash(gh pr comment *factory-claim-release*)"
+      "Bash(gh pr comment *factory-claim-release*)",
+      "Artifact",
+      "DesignSync"
     ]
   },
   "hooks": {

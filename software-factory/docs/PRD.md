@@ -208,8 +208,9 @@ until he agrees them."
 - **P7.** As the PO, I check the comments addressed to me as part of my routine and write each answer where it lasts (the
   task's acceptance criteria, a decision, or a PRD change as a PR). *Proposal; built (#145).* (#110)
 - **P8.** As the PO, I use the project's artifacts and designs through repo copies first (`factory artifacts pull`, with a
-  manifest of where each came from). Live access to Claude Design from a terminal session is a spike, not a decision.
-  *Built (#146); the spike is open.* (#104)
+  manifest of where each came from). Live access is for my interactive (`-i`) sessions only, when the owner turns on
+  `roles.product-owner.artifacts` (off by default; unattended passes have no artifact tool); publishing to an artifact needs
+  the owner's yes. The dev manager and the coding agents never get it. *Built (#146, #104).* (#104)
 - **P9.** As the owner, from an empty folder and the three role commands, I reach an approved PRD, design and task issues
   (vision, design, plan, hand over), then build, check and pivot, with no chat session holding required state. Stage gates
   wait for my approval. *Built (#148); this is the acceptance test of the roles epic.* (#103, #95)
@@ -448,8 +449,6 @@ processes per test) still apply.
 
 - **An A2A adapter** for the message envelope, in the heartbeat daemon. GitHub stays the transport; the adapter is a later
   step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)
-- **Live access to Claude Design and artifacts** from a role's terminal session, per role and off by default, after the
-  spike. (#104)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
 - **Ideas in the PR #39 draft that no issue or decision picked up.** They were proposals in that draft and are not
   scope: a `priority:high` label the picker honours (its story 9), a task board kept in step with the labels (55), the dev manager building a small task when no agent runs (51), a duplicate-task check
