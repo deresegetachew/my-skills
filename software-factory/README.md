@@ -205,8 +205,8 @@ that has nothing to do sleeps instead of asking a model.
 <br>
 ## Where things stand
 
-The factory is in alpha. Every release so far is a pre-release, so you name one when you install (`factory update
-v0.2.0-alpha.1`). `v0.2.0-alpha.1` is the first on Bun; the `v0.1.0` ones are the old Python factory
+The factory is released in numbered versions; `v0.2.0` was the first full release, and a plain `factory update` takes
+the newest. The `v0.1.0` pre-releases are the old Python factory, and `v0.2.0-alpha.1` was the first on Bun
 ([Updating from releases](docs/wiki/updating.md#updating-from-releases)).
 
 Not built yet:

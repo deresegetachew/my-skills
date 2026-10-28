@@ -124,7 +124,6 @@
       "Bash(*factory-hooks*)",
       "Bash(*factory-reviews*)",
       "Edit(//**/factory-reviews/**)",
-      "Write(//**/factory-reviews/**)",
       "Bash(docker compose *-f*)",
       "Bash(docker compose *--file*)",
       "Bash(docker compose *-v*)",

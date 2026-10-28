@@ -116,7 +116,8 @@ function deniedPath(tool: string, path: string): boolean {
 test("the agents' rules deny writing a pass directly", () => {
   for (const p of ["/home/a/proj/.git/factory-reviews/task_1-x.ok", "/w/.git/factory-reviews/task_1-x.arch.ok"]) {
     expect(deniedPath("Edit", p), p).toBe(true);
-    expect(deniedPath("Write", p), p).toBe(true);
+    // Edit(path) also covers the Write tool; Claude Code never matches a Write(path) rule and warns about it at start
+    expect(deniedPath("Write", p), p).toBe(false);
   }
   expect(deniedPath("Edit", "/w/proj/tmp/pr.md")).toBe(false);
   for (const c of ["cp tmp/x .git/factory-reviews/task_1-x.ok", "tee .git/factory-reviews/task_1-x.ok",

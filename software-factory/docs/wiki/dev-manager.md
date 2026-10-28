@@ -161,7 +161,8 @@ Logs: `.git/factory-manager/<name>.log` (the cycle) and `.git/factory-manager/<n
 
 **A settings profile and a gate keep it inside the rules.** The builders' settings (`.claude/factory/settings.json`) deny `Bash(gh api *)`, so builders
 cannot be reused for a manager. The manager runs on its own profile, `.claude/manager/settings.json` (pass it with
-`claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does): it allows `gh api`,
+`claude --setting-sources user --settings .claude/manager/settings.json`; `factory dev-manager loop` does; that also leaves out
+the project's skills, so the prompt says to read `.claude/skills/manage-pass/SKILL.md` instead of typing `/manage-pass`): it allows `gh api`,
 read-only git, `Read`/`Grep`/`Glob` and subagents, and denies pushing to main, force-push, editing `.claude/**`, `vendor/**`,
 `CLAUDE.md` and `docs/PRD.md`, `gh pr merge` and reading secrets files. Its PreToolUse hook `manager_gate.ts` refuses, and says
 to write an owner-queue ask instead: a merge unless the PR's latest approval marker is `factory-approved sha=<the head being
