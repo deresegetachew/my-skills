@@ -269,6 +269,22 @@ test("a failed push leaves no branch or worktree behind and keeps the staging", 
   expect(status(d)).toBe("");
 });
 
+test("factory help prints the staging commands", () => {
+  const p = sh(["bash", join(SF, "factory"), "help"], { cwd: project() });
+  expect(p.code).toBe(0);
+  for (const part of ["settings set --stage", "settings diff --staged", "settings unstage [<key>]"]) expect(p.stdout).toContain(part);
+});
+
+test("pr picks a free branch name when origin already has one from another machine", () => {
+  const [d, remote, env] = gitProject({ maxOpenPRs: 4 });
+  sh(["git", "push", "-q", "origin", "main:settings/maxopenprs"], { cwd: d });
+  expect(settings(d, ["set", "--stage", "maxOpenPRs", "5"], env).code).toBe(0);
+  const p = settings(d, ["pr"], env);
+  expect(p.code, p.out).toBe(0);
+  expect(remoteBranches(d).sort()).toEqual(["refs/heads/settings/maxopenprs", "refs/heads/settings/maxopenprs-2"]);
+  expect(JSON.parse(shown(remote, "settings/maxopenprs-2", ".claude/factory.json"))).toEqual({ maxOpenPRs: 5 });
+});
+
 test("the help and the commands page list the staging commands", () => {
   const help = read(join(SF, "factory"));
   expect(help).toContain("settings set --stage");

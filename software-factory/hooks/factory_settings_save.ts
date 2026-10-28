@@ -50,7 +50,10 @@ export function branchName(diffs: Change[]): string {
   const base = `settings/${words || "update"}`;
   let name = base;
   let n = 1;
-  while (git(["rev-parse", "--verify", "-q", name], false).code === 0) {
+  // taken here, or on origin (pushed from another machine, #306)
+  const taken = (b: string): boolean => git(["rev-parse", "--verify", "-q", b], false).code === 0 ||
+    git(["ls-remote", "--exit-code", "--heads", "origin", b], false).code === 0;
+  while (taken(name)) {
     n += 1;
     name = `${base}-${n}`;
   }
