@@ -346,8 +346,10 @@ function configPath(): string {
   return join(stateDir(), "cockpit.tmux.conf");
 }
 
+/** One tmux call on the cockpit's server. A popup waits until the owner closes it, so it has no time limit. */
 function tmux(args: string[], env: Record<string, string | undefined> = process.env) {
-  return run(["tmux", "-L", socket(), "-f", configPath(), ...args], { env, timeoutMs: 30_000 });
+  return run(["tmux", "-L", socket(), "-f", configPath(), ...args],
+    { env, timeoutMs: args[0] === "display-popup" ? undefined : 30_000 });
 }
 
 /** How well `query` matches `text`: -1 when its letters are not all in `text` in order; higher is better. */
@@ -465,8 +467,7 @@ function sidebar(once: boolean): number {
     else if (k === "\r" || k === "\n") choose(list[selectable(list)[pos] ?? -1]);
     else if (k === ":") tmux(["display-popup", "-E", "-w", "80%", "-h", "70%", barCommand()]);
     else if (k === "r") return reload();
-    else if (k === "q") tmux(["detach-client"]);
-    else if (k === "\x03") process.exit(0);
+    else if (k === "q") tmux(["detach-client"]); // Ctrl-C is ignored: the cockpit needs its sidebar pane
     draw();
   });
   process.stdout.on("resize", draw);
@@ -489,10 +490,12 @@ function openView(name: string): number {
   return tmux(["display-popup", "-E", "-w", "90%", "-h", "90%", paged(view[1])]).code === 0 ? 0 : 1;
 }
 
-/** Shows the session on the right: `factory follow` finds it on this machine or another, and attaches. */
+/** Shows the session on the right: `factory follow` finds it on this machine or another, and attaches. When it ends
+ * the pane goes back to the welcome text, so pane 0.1 is always there for the next one. */
 function openSession(name: string): number {
-  const cmd = `cd ${shQuote(top())} && ${factoryCmd(["follow", name])}; echo; ` +
-    "printf 'The session ended or could not be shown. Press Enter to close this pane.'; read _";
+  const cmd = `cd ${shQuote(top())} && ${factoryCmd(["follow", name])}; ` +
+    "printf '\\nThe session ended or could not be shown (above). Pick another on the left.\\n\\n'; " +
+    `exec ${factoryCmd(["cockpit", "--welcome"])}`;
   const a = tmux(["respawn-pane", "-k", "-t", RIGHT, cmd]);
   const b = tmux(["select-pane", "-t", RIGHT]);
   return a.code === 0 && b.code === 0 ? 0 : 1;
@@ -618,6 +621,7 @@ function open(): number {
     for (const s of steps) {
       const p = tmux(s, outside);
       if (p.code !== 0) {
+        tmux(["kill-session", "-t", `=${SESSION}`], outside); // nothing half done: the next start builds it whole
         refuse("tmux-failed", `tmux could not start the cockpit: ${(p.stderr.trim().split("\n").pop() || "no reason").slice(0, 160)}`,
           `Run \`tmux -L ${socket()} ls\` to see what is there, then run \`factory cockpit\` again.`);
       }

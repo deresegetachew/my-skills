@@ -21,6 +21,7 @@ case "$*" in
   *" -V"*|"-V") echo "\${FAKE_TMUX_VERSION:-tmux 3.4}"; exit 0 ;;
   *has-session*) [ -n "$FAKE_TMUX_RUNNING" ]; exit $? ;;
 esac
+if [ -n "\${FAKE_TMUX_FAIL:-}" ]; then case "$*" in *"$FAKE_TMUX_FAIL"*) echo "fake tmux: no space for new pane" >&2; exit 1 ;; esac; fi
 exit 0
 `;
 
@@ -290,6 +291,26 @@ test("--view with an unknown name fails listing the views", () => {
   const j = lastJson(r.stderr);
   expect(j.code).toBe("unknown-view");
   for (const name of VIEWS) expect(String(j.fix)).toContain(name);
+}, T);
+
+test("--open keeps the right pane when the session ends: it goes back to the welcome text, so the next --open has a pane", () => {
+  const p = setup();
+  expect(cockpit(p, "--open", "taytu").code).toBe(0);
+  const rp = tcalls(p).find((l) => l.includes("respawn-pane -k")) as string;
+  const after = rp.slice(rp.indexOf("follow taytu"));
+  expect(after).toMatch(/exec \S*factory\S* cockpit --welcome/);
+}, T);
+
+test("a cockpit that fails half way is removed, so the next start builds it whole", async () => {
+  const p = setup({ extra: { FAKE_TMUX_FAIL: "split-window" } });
+  const r = await open(p);
+  expect(r.code).not.toBe(0);
+  expect(lastJson(r.stderr).code).toBe("tmux-failed");
+  const calls = tcalls(p);
+  const split = calls.findIndex((l) => l.includes("split-window"));
+  const kill = calls.findIndex((l) => ownServer(l) && l.includes("kill-session") && l.includes("cockpit"));
+  expect(kill, calls.join("\n")).toBeGreaterThan(split);
+  expect(calls.some((l) => /attach(-session)? /.test(l))).toBe(false);
 }, T);
 
 test("--open follows a session in the right pane", () => {
