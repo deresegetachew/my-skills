@@ -35,6 +35,14 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
 }
 
+/** `str`, without escape sequences or control characters: a PR title or session name can't drive the terminal. */
+function plain(v: unknown): string {
+  return str(v)
+    .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "") // OSC: a window title, a link
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "") // CSI: colours, cursor moves, clearing the screen
+    .replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+}
+
 // --- what the cockpit offers -----------------------------------------------------------------------------------------
 
 export interface View {
@@ -112,7 +120,7 @@ export function resolve(line: string): string[] {
     refuse("cockpit_not_offered", `\`factory ${first}\` is for the agents and the gate, so the cockpit does not offer it.`,
       "Leave it to them; to look at the factory, type `status`, `prs` or `ci status`.", 2);
   }
-  // An action word is refused, not matched to some other command; alone it may still start one (`ci` is `ci status`).
+  // An action word is refused, not matched to some other command; alone it may still start one (`ci` runs `ci log`, the shortest).
   // So is a flag, or more words after an offered command than it takes (`claims list x`, `next --claim taytu`).
   const startsOne = words.length === 1 && OFFERED.some((n) => n.startsWith(first));
   const extra = words.some((w) => w.startsWith("-")) || OFFERED.some((n) => text.startsWith(`${n} `));
@@ -310,7 +318,7 @@ export interface Entry {
 export function entries(snap: Obj | null, vs: View[]): Entry[] {
   const needs = list(snap?.needsYou);
   const out: Entry[] = list(snap?.sessions).map((r) => ({ kind: "session", name: str(r.name),
-    label: `${str(r.name)}  ${str(r.state) || "unknown"}${needsYou(r, needs) ? "  ● needs you" : ""}` }));
+    label: `${plain(r.name)}  ${plain(r.state) || "unknown"}${needsYou(r, needs) ? "  ● needs you" : ""}` }));
   const n = needs.length;
   for (const v of vs) out.push({ kind: "view", name: v.key, label: `${v.key} ${v.title}${v.key === "1" && n ? ` (${n})` : ""}` });
   return out;
@@ -486,9 +494,9 @@ export function needs(): number {
   if (snap === null) console.log("No snapshot yet: `factory cockpit --json` reads one now.");
   else if (!items.length) console.log("Nothing needs you.");
   for (const n of items) {
-    if (n.kind === "owner-ask") console.log(`Owner ask ${str(n.id)} on #${str(n.issue)}: ${str(n.url)}`);
-    else if (n.kind === "owner-merges") console.log(`PR #${str(n.number)} ${str(n.title)} is yours to merge: ${str(n.url)}`);
-    else console.log(JSON.stringify(n));
+    if (n.kind === "owner-ask") console.log(`Owner ask ${plain(n.id)} on #${plain(n.issue)}: ${plain(n.url)}`);
+    else if (n.kind === "owner-merges") console.log(`PR #${plain(n.number)} ${plain(n.title)} is yours to merge: ${plain(n.url)}`);
+    else console.log(JSON.stringify(n)); // JSON escapes control characters itself
   }
   return 0;
 }
