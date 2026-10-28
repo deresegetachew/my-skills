@@ -15,7 +15,8 @@
 // The hooks it names run main's code too (#274): `.claude/hooks/` as main has it is unpacked, read-only, into
 // `<git folder>/factory-hooks/<content hash>/hooks/`, and each hook line's `"$CLAUDE_PROJECT_DIR"/.claude/hooks/<name>`
 // becomes that file's absolute path. An agent that checks out an older gate in its worktree does not run it. When the
-// hooks can't be unpacked it refuses like the rest: no session starts.
+// hooks can't be unpacked it refuses like the rest: no session starts. A git read that fails (under load, a timeout)
+// is tried again and then refused (`hooks_not_read`), never taken for a file main does not have.
 //
 // A project not yet updated to this release has no `.claude/factory/settings.json` on main, only the old
 // `.claude/settings.json`, which Claude Code loads from the folder: then only the connectors setting is printed. When
@@ -46,6 +47,22 @@ function gitIn(dir: string, ...args: string[]): { code: number; stdout: Uint8Arr
     return { code: p.exitCode, stdout: p.stdout };
   } catch {
     return { code: 1, stdout: new Uint8Array() };
+  }
+}
+
+/** A git read that failed (an error, a timeout under load), as opposed to one that found nothing: the caller refuses
+ * rather than take it for a file main does not have. */
+export class ReadFailed extends Error {}
+
+const READ_TRIES = 3;
+
+/** `git -C dir <args>`, tried again when it fails; throws ReadFailed when it never succeeds. */
+function gitRead(dir: string, ...args: string[]): Uint8Array {
+  for (let i = 1; ; i++) {
+    const p = gitIn(dir, ...args);
+    if (p.code === 0) return p.stdout;
+    if (i >= READ_TRIES) throw new ReadFailed(`git ${args.join(" ")} failed ${READ_TRIES} times`);
+    Bun.sleepSync(200 * i);
   }
 }
 
@@ -80,13 +97,14 @@ interface Entry {
 
 /** A path as the commit `rev` of the repository at `dir` has it, following links the way the checkout would (#258):
  * a link into the same repository is read from the same commit, a path inside a submodule from the submodule at the
- * commit `rev` pins (never its working files). A link that leaves the repository, a loop, or a missing path: null. */
+ * commit `rev` pins (never its working files). A link that leaves the repository, a loop, or a missing path: null.
+ * A git read that fails throws ReadFailed: it is not a missing path. */
 function entryAt(dir: string, rev: string, path: string, hops = 0): Entry | null {
   if (hops > 8) return null;
   const parts = path.split("/");
   for (let i = 1; i <= parts.length; i++) {
     const prefix = parts.slice(0, i).join("/");
-    const entry = text(gitIn(dir, "ls-tree", rev, "--", prefix).stdout).split("\n")[0] ?? "";
+    const entry = text(gitRead(dir, "ls-tree", rev, "--", prefix)).split("\n")[0] ?? "";
     const m = /^(\d+) \w+ ([0-9a-f]+)\t/.exec(entry);
     if (!m) return null;
     const [, mode, sha] = m as unknown as [string, string, string];
@@ -96,7 +114,7 @@ function entryAt(dir: string, rev: string, path: string, hops = 0): Entry | null
       return rest ? entryAt(sub, sha, rest, hops + 1) : { dir: sub, rev: sha, path: "", mode: "040000", sha: `${sha}^{tree}` };
     }
     if (mode === "120000") {
-      const target = text(gitIn(dir, "cat-file", "blob", sha).stdout);
+      const target = text(gitRead(dir, "cat-file", "blob", sha));
       if (target.startsWith("/")) return null;
       const next = normal(`${parts.slice(0, i - 1).join("/")}/${target}${rest ? `/${rest}` : ""}`);
       return next === null ? null : entryAt(dir, rev, next, hops + 1);
@@ -106,19 +124,21 @@ function entryAt(dir: string, rev: string, path: string, hops = 0): Entry | null
   return null;
 }
 
-/** A file's bytes as the commit has it, links followed, or null when it is missing or not a file. */
+/** A file's bytes as the commit has it, links followed, or null when it is missing or not a file. Throws ReadFailed
+ * when git can't be read. */
 function bytesAt(dir: string, rev: string, path: string): Uint8Array | null {
   const e = entryAt(dir, rev, path);
   if (!e || !e.mode.startsWith("100")) return null;
-  const p = gitIn(e.dir, "cat-file", "blob", e.sha);
-  return p.code === 0 ? p.stdout : null;
+  return gitRead(e.dir, "cat-file", "blob", e.sha);
 }
 
-/** A file as main has it (FETCH_HEAD), links followed, or null when main has none. */
+/** A file as main has it (FETCH_HEAD), links followed, or null when main has none (or it is not UTF-8). Throws
+ * ReadFailed when git can't be read: a failed read is never taken for a missing file. */
 function onMain(path: string): string | null {
+  const b = bytesAt(".", "FETCH_HEAD", path);
+  if (b === null) return null;
   try {
-    const b = bytesAt(".", "FETCH_HEAD", path);
-    return b === null ? null : text(b);
+    return text(b);
   } catch {
     return null;
   }
@@ -142,22 +162,25 @@ interface Unpacked {
 }
 
 /** main's `.claude/hooks/` files (links and submodules followed), plus `VERSION` beside the folder; null when main
- * has no such folder. Subfolders are left out: the hooks are one flat folder. */
+ * has no such folder. Subfolders are left out: the hooks are one flat folder. Every file the listing names is read
+ * or it throws ReadFailed: a copy with a file missing would be put in place and its hooks fail on the missing import. */
 function mainHooks(): Unpacked[] | null {
   const top = entryAt(".", "FETCH_HEAD", HOOKS_DIR);
   if (!top || top.mode !== "040000") return null;
-  const listing = gitIn(top.dir, "ls-tree", "-z", top.sha);
-  if (listing.code !== 0) return null;
+  const listing = gitRead(top.dir, "ls-tree", "-z", top.sha);
   const files: Unpacked[] = [];
-  for (const line of text(listing.stdout).split("\0")) {
-    const m = /^(\d+) \w+ [0-9a-f]+\t(.+)$/s.exec(line);
-    if (!m || m[1] === "040000") continue;
-    const name = m[2] as string;
-    const e = entryAt(top.dir, top.rev, top.path ? `${top.path}/${name}` : name);
+  for (const line of text(listing).split("\0")) {
+    if (line === "") continue;
+    const m = /^(\d+) \w+ ([0-9a-f]+)\t(.+)$/s.exec(line);
+    if (!m) throw new ReadFailed(`an unexpected line in the listing of ${HOOKS_DIR}`);
+    const [, mode, sha, name] = m as unknown as [string, string, string, string];
+    if (mode === "040000") continue;
+    // a plain file is read by the id the listing gives; a link (or submodule) is followed the way the checkout would
+    const e = mode.startsWith("100")
+      ? { dir: top.dir, mode, sha }
+      : entryAt(top.dir, top.rev, top.path ? `${top.path}/${name}` : name);
     if (!e || !e.mode.startsWith("100")) continue; // a link that leads nowhere: the checkout would have nothing there
-    const blob = gitIn(e.dir, "cat-file", "blob", e.sha);
-    if (blob.code !== 0) return null;
-    files.push({ name: `hooks/${name}`, bytes: blob.stdout, exec: e.mode === "100755" });
+    files.push({ name: `hooks/${name}`, bytes: gitRead(e.dir, "cat-file", "blob", e.sha), exec: e.mode === "100755" });
   }
   const parent = top.path.split("/").slice(0, -1).join("/");
   if (top.path) {
@@ -217,28 +240,59 @@ function removeTree(path: string): void {
   rmSync(path, { recursive: true, force: true });
 }
 
-/** Write the files into a new folder beside `final`, read-only, and move it into place in one step. The folder a
- * running session may still use is replaced only by a rename, and a failure removes what was written. */
-function unpackInto(root: string, final: string, files: Unpacked[]): void {
+/** The files written, read-only, into a new folder of this start's own beside the final one; removed on a failure. */
+function writeTemp(root: string, files: Unpacked[]): string {
   const temp = mkdtempSync(join(root, ".unpacking-"));
-  let old: string | null = null;
   try {
     mkdirSync(join(temp, "hooks"));
     for (const f of files) writeFileSync(join(temp, f.name), f.bytes, { mode: f.exec ? 0o555 : 0o444 });
     for (const f of files) chmodSync(join(temp, f.name), f.exec ? 0o555 : 0o444); // whatever the umask
     chmodSync(join(temp, "hooks"), 0o555);
     chmodSync(temp, 0o555);
-    if (existsSync(final)) {
-      old = `${temp}.old`;
-      renameSync(final, old);
-    }
-    renameSync(temp, final);
+    if (!intact(temp, files)) throw new Error("the unpacked copy does not match main's files");
+    return temp;
   } catch (e) {
     removeTree(temp);
-    if (old !== null && !existsSync(final)) renameSync(old, final);
     throw e;
   }
-  if (old !== null) removeTree(old);
+}
+
+/** Put a complete copy of the files at `final`. Each start writes its own folder and moves it into place in one
+ * rename, so a partial copy is never under the final name. Several starts at once (#274): a start whose rename loses
+ * to another's complete copy uses that one. A damaged copy is moved aside first (a running session may still use it,
+ * so it is replaced only by a rename), and a failure removes what was written. */
+function unpackInto(root: string, final: string, files: Unpacked[]): void {
+  let last: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (intact(final, files)) return;
+    const temp = writeTemp(root, files);
+    let old: string | null = null;
+    try {
+      if (existsSync(final) && !intact(final, files)) {
+        old = `${temp}.old`;
+        renameSync(final, old);
+      }
+      renameSync(temp, final);
+    } catch (e) {
+      last = e;
+      removeTree(temp);
+      if (old !== null) {
+        if (existsSync(final)) removeTree(old);
+        else {
+          try {
+            renameSync(old, final);
+          } catch {
+            removeTree(old);
+          }
+        }
+      }
+      continue; // another start may have put its copy there: checked at the top
+    }
+    if (old !== null) removeTree(old);
+    return;
+  }
+  if (intact(final, files)) return;
+  throw last instanceof Error ? last : new Error("the unpacked copy could not be put in place");
 }
 
 /** Remove other unpacked copies not used for KEEP_DAYS (a session may run on one for hours, so never sooner). */
@@ -335,6 +389,18 @@ function refuse(code: string, message: string, fix: string): number {
 }
 
 export function main(): number {
+  try {
+    return start();
+  } catch (e) {
+    if (!(e instanceof ReadFailed)) throw e;
+    return refuse("hooks_not_read", `main's files could not all be read from git (${e.message}), so the agent would start ` +
+      "with part of its rules or hooks. No session was started.",
+      "check that `git fetch origin` and `git cat-file -p FETCH_HEAD` work in this folder (on a machine under heavy load " +
+      "git can time out), then start it again.");
+  }
+}
+
+function start(): number {
   const branch = mainBranch();
   if (!branch || git("fetch", "-q", "origin", `refs/heads/${branch}`).code !== 0) {
     return refuse("no_main", "could not read the main branch from origin, so the agent's rules (its deny list and hooks) are unknown. No session was started.",
@@ -364,6 +430,7 @@ export function main(): number {
   try {
     folder = unpackMainHooks();
   } catch (e) {
+    if (e instanceof ReadFailed) throw e;
     return refuse("hooks_not_unpacked", `main's ${HOOKS_DIR} could not be unpacked into the git folder ` +
       `(${e instanceof Error ? e.message : String(e)}), so the agent's hooks would run its own folder's copy. No session was started.`,
       "check that this project's git folder (`git rev-parse --git-common-dir`) is writable and has free space, " +
