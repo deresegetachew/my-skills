@@ -356,6 +356,21 @@ test("a damaged staging file does not block the plain pr of an edited factory.js
   expect(JSON.parse(shown(remote, (ref as string).replace("refs/heads/", ""), ".claude/factory.json"))).toEqual({ maxOpenPRs: 7 });
 });
 
+// The safety audit of #324: the staging file sits in .git, out of the agents' edit rules, so pr shows the person every
+// change before anything is pushed.
+test("pr lists every staged change before it pushes, also one the person did not stage", () => {
+  const [d, remote, env] = gitProject({ maxOpenPRs: 4, protected: ["^src/"] });
+  expect(settings(d, ["set", "--stage", "maxOpenPRs", "5"], env).code).toBe(0);
+  write(stagingFile(d), JSON.stringify({ schema: "factory-settings-staged/1",
+    changes: { maxOpenPRs: { value: 5 }, protected: { value: [] } } }));
+  writeExe(join(remote, "hooks", "pre-receive"), "#!/bin/sh\nexit 1\n");
+  const p = settings(d, ["pr"], env);
+  expect(p.code).not.toBe(0);
+  expect(p.stdout).toContain("maxOpenPRs: 4 -> 5");
+  expect(p.stdout).toContain('protected: ["^src/"] -> []');
+  expect(remoteBranches(d)).toEqual([]);
+});
+
 test("the help and the commands page list the staging commands", () => {
   const help = read(join(SF, "factory"));
   expect(help).toContain("settings set --stage");
