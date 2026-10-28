@@ -75,6 +75,19 @@ test("every link the repo uses for its own factory points at a real file inside 
   accessSync(join(REPO, "factory"), constants.X_OK);
 });
 
+// An agent's hooks run from main's .claude/hooks (#258), which here is one link per file: a hook added without its
+// link is missing there, and every hook that imports it fails (factory_window.ts, #300).
+test("every hook and ci file in software factory has its link in the repo's claude folder", () => {
+  for (const dir of ["hooks", "ci"]) {
+    for (const name of readdirSync(join(SF, dir))) {
+      if (!isFile(join(SF, dir, name))) continue;
+      const link = join(REPO, ".claude", dir, name);
+      expect(existsSync(link), `.claude/${dir}/${name} is missing: run bash software-factory/install.sh . --link`).toBe(true);
+      expect(realpathSync(link), `.claude/${dir}/${name}`).toBe(realpathSync(join(SF, dir, name)));
+    }
+  }
+});
+
 test("the repos own factory command runs from its root", () => {
   const p = sh(["bash", join(REPO, "factory"), "help"], { cwd: REPO });
   expect(p.code === 0 && p.stdout.includes("update"), p.stderr).toBe(true);

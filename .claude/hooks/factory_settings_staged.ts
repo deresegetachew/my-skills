@@ -1,0 +1,1 @@
+../../software-factory/hooks/factory_settings_staged.ts
