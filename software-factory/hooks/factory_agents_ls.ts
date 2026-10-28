@@ -146,7 +146,9 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
     const title = issue.title || "";
     const at = title.indexOf(" · ");
     const detail = at >= 0 ? title.slice(at + 3) : state;
-    rows.push({ name, kind: kindText(f.kind || roleOf(issue)), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
+    // An older release reports every row as a coding agent (or with no kind): its role marker knows better.
+    const kind = f.kind && f.kind !== "coding-agent" ? f.kind : roleOf(issue);
+    rows.push({ name, kind: kindText(kind), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
       session: f.session ?? null, activity: null, machine, source: "github" });
   }

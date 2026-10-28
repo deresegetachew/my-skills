@@ -429,7 +429,9 @@ which tmux session and Remote Control link it has, and when it last produced out
 - **Every role has a row.** The `Kind` column is the role: coding agent, dev manager, product owner (from the loop's
   checkout claim, or `roles.<role>.names` for a claim from an older release), and sub manager for each one-item
   sub-manager the dev manager's orchestrator runs here, named `<manager>-<item>`. A sub-manager's row stays on this
-  machine: it has no agent issue.
+  machine: it has no agent issue, so `factory agents ls` on another machine does not show it. A dev manager or product
+  owner on a machine with an older release reaches GitHub as a coding agent; `factory agents ls` shows its role from
+  its agent issue's role marker.
 - **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
   `factory heartbeat install` adds it alone (a systemd user service, or a LaunchAgent on macOS), and
   `factory heartbeat restart` restarts it onto the files now on disk (`factory update` does that). `factory heartbeat status` shows what it sees. `factory doctor` checks it.
