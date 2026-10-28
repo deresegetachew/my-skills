@@ -384,7 +384,7 @@ async function sidebarLoop(): Promise<number> {
       if (v) openView(v);
       return;
     }
-    const after = idleCommand(`The session ${e.name} closed here. C-a C-a comes back to the list.`);
+    const after = idleCommand(`The session ${plain(e.name)} closed here. C-a C-a comes back to the list.`);
     tmux(sock, ["respawn-pane", "-k", "-t", `=${session}:0.1`, `${factoryCall(script, ["follow", e.name])}; ${after}`]);
     tmux(sock, ["select-pane", "-t", `=${session}:0.1`]);
   };
