@@ -325,6 +325,10 @@ what it reads for its one item, not a growing history.
 - **Tokens on every PR.** Agents post a `<!-- factory-usage task=<n> -->` comment with the task's tokens per subagent when they
   open the PR and again before it merges. Read it before you merge: a task far above the usual is worth a line in your review
   (what it read, how many rounds). If it's missing, ask for it in the review; it isn't a must-fix.
+- **Budgets are yours to weigh, not to enforce.** When the task has a token budget (#183), the usage comment adds used against
+  budget (fresh input + output) and the top-spending subagent. An overrun alone never blocks a merge and CI never fails on it:
+  accept it, ask for a split next time, or note it (a repeat cause can be a `lesson candidate:`). A builder asking for more
+  budget gets a number or a split; you or the product owner edit the issue's `Budget:` line, which counts from the next claim.
 
 ## Talking to the owner
 

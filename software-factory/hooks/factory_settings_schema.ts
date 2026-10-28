@@ -205,6 +205,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("permissionMode", "enum", "agents", "How unattended `claude -p` runs get their permissions: acceptEdits (the default) or default (your own Claude Code settings decide).", { options: ["acceptEdits", "default"] }),
   S("waitMinutes", "int", "agents", "How often an idle loop looks for work. 0: it exits instead.", { default: 1 }),
   S("models", "dict", "agents", 'The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today\'s model: the agent file\'s, or Claude Code\'s default.', { default: {} }),
+  S("budget.builder", "int", "agents", "The token budget of a task whose issue has no `Budget:` line, counting fresh input (input + cache writes) + output as `factory usage` reports them. Advisory: shown and compared, a warning at 80%, never a stop. Empty: no budget.", { default: null }),
   S("tasks.source", "enum", "issues", "Where tasks come from.", { options: ["plan", "issues"] }),
   S("tasks.staleHours", "int", "issues", "An in-progress issue with no activity this long counts as stale."),
   S("tasks.pingMinutes", "int", "issues", "How often a working agent pings its agent issue, at most."),
@@ -384,6 +385,15 @@ const MORE: Record<string, More> = {
     "manager only; the reviewer may `escalateTo` a stronger model. A role with no entry keeps " +
     "today's model.",
   examples: ['factory settings set models \'{"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}\''] },
+  "budget.builder": { long: "A task's token budget is the `Budget: 300k` line of its issue (300k, 1.2m or 300000), as it " +
+    "was when the task was claimed; a task without one gets this number. A budget counts one task's sessions and " +
+    "subagents on this machine: fresh input (input + cache writes) + output. Cache reads are not counted, and there is " +
+    "no money: prices differ per model. It is advice: the loop's prompt states it, `factory usage --task <n> --budget` " +
+    "compares it and warns at 80%, the PR's usage comment shows used against budget, and the dev manager decides about an " +
+    "overrun. Nothing stops at the limit, and CI never fails on it. The first budgets are guesses: record real numbers " +
+    "with `factory usage --record` and read `factory report` before tightening them.",
+  read_by: "`factory usage` (factory_budget.ts) and factory-loop.sh (the task's prompt)",
+  examples: ["factory settings set budget.builder 300000"] },
   "tasks.source": { long: "`plan`: the unticked lines of the build plan are the tasks. `issues`: open GitHub issues " +
     "labelled ready are the tasks, claimed with labels and a claim comment.",
   examples: ["factory settings set tasks.source issues"] },

@@ -184,11 +184,11 @@ test("the loop puts the budget line in the prompt", () => {
 });
 
 test("the setting the help the commands page and the task template know budgets", () => {
-  const help = sh(["bash", join(SF, "factory"), "help"], { cwd: tmp() }).stdout;
+  const help = sh(["bash", join(SF, "factory"), "help"], { cwd: SF }).stdout;
   expect(help).toContain("--budget");
   expect(readmeAndWiki()).toContain("factory usage --task <n> --budget");
   expect(readmeAndWiki("settings.md")).toContain("| `budget.builder` |");
-  const p = sh(["bash", join(SF, "factory"), "settings", "help", "budget.builder"], { cwd: tmp() });
+  const p = sh(["bash", join(SF, "factory"), "settings", "help", "budget.builder"], { cwd: SF });
   expect(p.code, p.out).toBe(0);
   expect(p.stdout).toContain("fresh input");
   expect(read(join(KIT, ".github", "ISSUE_TEMPLATE", "factory-task.md"))).toContain("**Budget:**");

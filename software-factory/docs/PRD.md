@@ -58,6 +58,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 | D12 | **Owner-only actions** (the list below). | #150, #114, `manage-pass` skill, `CLAUDE.md` |
 | D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash; there is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), `CLAUDE.md` |
 | D14 | **The agents' rules are passed only to the sessions the factory starts.** `factory loop` and `factory agent` start Claude with `--settings`: `.claude/factory/settings.json` and the `permissions.allow` from `.claude/factory.json`, both read from `main` on origin, never from the agent's own folder. A project's own `.claude/settings.json` stays the project's and still applies. The Stop check runs only in a factory run. So the owner's own sessions in a project are not governed by the agents' rules. | #258, #256 (owner, 27 Oct 2026) |
+| D15 | **Token budgets are per task and advisory.** The unit is one task (issue); it counts fresh input (input + cache writes) + output as `factory usage` reports them, never money or cache reads. It is set by a `Budget:` line in the task issue, else `budget.builder` in factory.json. The budget is taken from the issue when the task is claimed, and a coding agent may not change it. Over 80% the checkpoint warns; there is no hard stop, because stopping mid-change leaves broken branches. An overrun is the dev manager's call at review; CI never fails on it. | #183 (owner, 28 Oct 2026) |
 
 **Owner-only actions.** An agent or manager writes these as a proposal ("this needs your yes: ...") and waits. A yes for
 one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
@@ -380,6 +381,13 @@ until he agrees them."
   Agents post each task's tokens on its PR. *Built.* (#50, #139)
 - **T2.** As the owner, the savings come from small, short sessions, the precheck, leases, a cap on sub-managers and a
   usage meter, not from reusing a cache between sessions. *Decided as the finding of the investigation.* (#100)
+- **T3.** As the owner, a task can carry a token budget so the builder plans before it builds: a `Budget: 300k` line in the
+  task issue (the PO sizes it), else `budget.builder` in factory.json, else none. It counts fresh input (input + cache writes)
+  + output, as `factory usage` reports them. The claim records it and the PR gate keeps a coding agent from changing it. The
+  loop's prompt states it, the next-task skill plans against it and runs `factory usage --task <n> --budget` at checkpoints
+  (a warning from 80%), the PR's usage comment shows used against budget and the top subagent, and `factory report` shows
+  budget against used per merged task and the median ratio. Advisory: nothing stops and CI never fails on it; the dev
+  manager decides about an overrun. *Built.* (D15; #183, wiki/agent-loops.md "Token budgets")
 
 ## 5. Out of scope
 
@@ -444,8 +452,7 @@ processes per test) still apply.
   spike. (#104)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
 - **Ideas in the PR #39 draft that no issue or decision picked up.** They were proposals in that draft and are not
-  scope: a `priority:high` label the picker honours (its story 9), a daily token budget per agent (34), a task board kept
-  in step with the labels (55), the dev manager building a small task when no agent runs (51), a duplicate-task check
+  scope: a `priority:high` label the picker honours (its story 9), a task board kept in step with the labels (55), the dev manager building a small task when no agent runs (51), a duplicate-task check
   before a claim (54), a notice when a reviewer is unavailable (53).
 
 ### D. Open questions

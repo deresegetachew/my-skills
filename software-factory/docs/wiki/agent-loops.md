@@ -278,6 +278,38 @@ or the console for money, since prices differ per model.
 (`--since 2026-10-20` or `--since 30d`), the hours from the agent's claim to the PR (issues mode) and from the PR to
 the merge, the rework rounds (the dev manager's must-fix comments), and the CI runs on its branch with how many
 failed. Then the medians and totals for the merged ones. `--json` gives the same for scripts. It only reads.
+For merged tasks with a budget it also lists used against budget and the median ratio (below).
+
+### Token budgets
+
+A task can have a token budget (#183), so the agent plans before it builds. It is advice: shown, compared and warned
+about, never a stop.
+
+- **What it counts:** one task's tokens, all its sessions and subagents on this machine, as `factory usage` reports
+  them: fresh input (input + cache writes) + output. Cache reads are not counted (they are cheap and grow with every
+  turn), and there is no money: prices differ per model.
+- **Where it is set:** a `Budget: 300k` line in the task issue, next to the `PRD:` line (`300k`, `1.2m`, `300000` and
+  `300,000` all work); the product owner sizes tasks when writing them. A task without one gets `budget.builder` from
+  `.claude/factory.json`. Neither: no budget, and nothing changes.
+- **Who may change it:** the claim records the budget the issue had when the task was claimed
+  (`<!-- factory-budget tokens=... -->` in the claim comment), and that is the budget from then on, so an edit during
+  the task does not move it. The PR gate also refuses a coding agent's `gh issue edit` that changes the `Budget:` line,
+  and a comment with the `factory-budget` marker. The product owner and the dev manager may change it; the new number
+  counts from the next claim. An agent that needs more asks with a `<!-- factory-question -->` comment.
+- **How it reaches the agent:** the loop's prompt states the budget and what it counts. The next-task skill writes a
+  short plan with a rough estimate after reading the brief and splits or asks when it clearly won't fit. At the
+  checkpoints (tests written, before the first review, before the PR) it runs `factory usage --task <n> --budget`,
+  which prints used, budget, left and the percent, and a warning from 80%.
+- **Overrun:** the PR's usage comment (`factory usage --task <n> --markdown`) adds used against budget, with the
+  percent and the top-spending subagent. The dev manager decides at review: accept, ask for a split, or note it. CI
+  never fails on it.
+
+Why no hard stop: the agent only learns the count at checkpoints, and stopping in the middle of a change leaves a
+broken branch (red tests, a half-done rebase). Advice plus a warning at 80% keeps the branch whole.
+
+The first budgets are guesses: there are few recorded numbers yet. Record real ones with `factory usage --record`, and
+read `factory report`'s median ratio before tightening them. The logs are per machine, so a task built on two machines
+shows only this machine's part.
 
 <br>
 ## Tasks

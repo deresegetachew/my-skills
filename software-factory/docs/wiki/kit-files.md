@@ -87,6 +87,7 @@ software-factory/
     factory_settings_interactive.ts     the interactive menu behind `factory settings`
     factory_settings_save.ts            `factory settings pr`: branch, commit, push and open the pull request
     factory_usage.ts                    `factory usage`: tokens per task from the local Claude Code logs
+    factory_budget.ts                   token budgets per task: the issue's Budget line, the claim's record, the loop's prompt line
     factory_artifacts.ts                `factory artifacts`: repo copies of artifacts and designs, the manifest, status
     factory_handover.ts                 `factory handover snapshot`: the state a manager hands over, read from GitHub
     factory_init.ts                     `factory init`: the project's scaffold (roles, labels, owner queue, PRD stub)

@@ -38,6 +38,13 @@ This file is the core. Open the others in this folder only when they apply:
    mistakes (one line each, with an example). Check your work against it before every push; the reviewers do too.
    If a person's must-fix or a CI failure teaches something new, say so in the PR description as "lesson candidate:";
    you cannot edit the file, the dev manager does (`factory lessons suggest`).
+5. **Plan against the budget.** A task can have a token budget (the issue's `Budget:` line, or `budget.builder`; the
+   loop's prompt states it). It counts fresh input (input + cache writes) + output for the whole task, subagents
+   included; cache reads are not counted. `factory usage --task <id> --budget` shows it (exit 0; warns from 80%):
+   `bun --no-env-file --config=/dev/null .claude/hooks/factory_usage.ts --task <id> --budget`. Write a short plan
+   (the steps, the files, the reviews) with a rough token estimate, and compare it with the budget. Fits: go. Clearly
+   too big: propose a split, or ask the dev manager in a `<!-- factory-question -->` comment, before building. Never
+   edit the `Budget:` line yourself (the gate refuses it). No budget: still plan, and skip the comparison.
 
 A PR with the `factory-hold` label is being reviewed by the dev manager: don't rework or merge it.
 
@@ -58,6 +65,10 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
      guard fails edited tests, `.skip`/`.only` and new dependencies until the dev manager has reviewed them.
    - **Parallel loops:** ports, database names and queues come from the environment (`agentEnv`). Never hard-code a
      port; read the variable and keep today's value as the default.
+   - **Budget checkpoints** (when the task has a budget): run the `--budget` command from step 1.5 after the failing
+     tests are committed, before the first review, and before opening the PR. From 80% it warns: finish the step you
+     are on, commit a working state, and write in the PR what is left; if the rest won't fit, ask before going on.
+     Nothing stops at the limit, and the reviews and tests are never the place to save: never skip them for it.
 3. Test what a user or another module can observe. Run the "Done when" check and the `typecheck`, `lint` and `test`
    commands until they pass, and keep the output as evidence. Run them through `./factory run-check <command>`: it prints one
    line when they pass, or the first errors and the log path when they fail; open the full log only if that isn't enough.
@@ -99,7 +110,8 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    Then drop your task claim: `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --agent "$FACTORY_AGENT" --tasks-only`
    (when `FACTORY_AGENT` is set). **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
    `bun --no-env-file --config=/dev/null .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
-   (`<id>` is the issue number in issues mode). Post it even when it finds no replies.
+   (`<id>` is the issue number in issues mode). Post it even when it finds no replies. With a budget it adds used
+   against budget and the top subagent; over the budget, say in the PR body why and what you would split next time.
 3. Once CI is green, post the tokens again (the same command), then merge it yourself:
    `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, with the full hash from `git rev-parse HEAD`
    pasted in (the gate reads the command before the shell runs, so `$(...)` can't stand in for it). Run it on its

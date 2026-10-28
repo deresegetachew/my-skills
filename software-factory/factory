@@ -164,7 +164,10 @@ Settings
 Measure
   usage [--since D] [--by task|agent|model] [--record LABEL]
                          tokens per task from this machine's Claude Code logs; --record appends a row to the usage log
-  report [--since D]     per task, from GitHub: claim to PR to merge, rework rounds and CI runs (failed)
+  usage --task <n> --budget
+                         the task's tokens against its budget (fresh input + output): used, budget, left, percent;
+                         warns at 80%, never stops anything
+  report [--since D]     per task, from GitHub: claim to PR to merge, rework rounds and CI runs (failed), budget vs used
 
 Maintain
   release <agent>        drop an agent's local claims (taytu ...), for example after a crash; says what it released or "Nothing to release"
