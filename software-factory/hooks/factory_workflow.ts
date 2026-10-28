@@ -36,6 +36,14 @@ export interface Rewrite {
 
 const indentOf = (line: string): number => line.length - line.trimStart().length;
 
+/** A line without its YAML comment (#278): a whole-line `# ...`, or ` # ...` after the content. A hook named in a
+ * comment is not a step that runs it, so neither doctor nor the rewrite looks there. */
+function code(line: string): string {
+  if (line.trimStart().startsWith("#")) return "";
+  const at = line.search(/\s#/);
+  return at < 0 ? line : line.slice(0, at);
+}
+
 /** The line ranges [start, end) of each job under `jobs:` (the whole file as one range when there is no `jobs:`). */
 function jobRanges(lines: string[]): [number, number][] {
   const top = lines.findIndex((l) => /^jobs:\s*(#.*)?$/.test(l));
@@ -74,7 +82,8 @@ export function rewrite(text: string, has: (hook: string) => boolean): Rewrite {
   const changed: [string, string][] = [];
   const touched: number[] = [];
   lines.forEach((line, i) => {
-    const next = line.replace(OLD_HOOK, (all: string, base: string) => {
+    const body = code(line);
+    const next = body.replace(OLD_HOOK, (all: string, base: string) => {
       if (has(base + ".py") || !has(base + ".ts")) return all;
       const now = `${BUN_RUN} ${base}.ts`;
       changed.push([all, now]);
@@ -84,8 +93,8 @@ export function rewrite(text: string, has: (hook: string) => boolean): Rewrite {
       changed.push([all, now]);
       return now;
     });
-    if (next !== line) {
-      lines[i] = next;
+    if (next !== body) {
+      lines[i] = next + line.slice(body.length); // the comment after the step stays as it was
       touched.push(i);
     }
   });
@@ -144,9 +153,10 @@ export function lines(found: Map<string, Rewrite>): string[] {
   return out;
 }
 
-/** The `.claude/hooks/` files a workflow's text names. */
+/** The `.claude/hooks/` files a workflow's steps name (comments left out, #278). */
 export function hookRefs(text: string): string[] {
-  return [...new Set([...text.matchAll(HOOK_REF)].map((m) => m[0]))].sort();
+  const steps = text.split("\n").map(code).join("\n");
+  return [...new Set([...steps.matchAll(HOOK_REF)].map((m) => m[0]))].sort();
 }
 
 /** The jobs (their keys) that run `bun ...` and have no Bun setup step. */

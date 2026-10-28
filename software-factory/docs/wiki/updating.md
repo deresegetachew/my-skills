@@ -44,7 +44,9 @@ other project is unaffected.
 2. Finds the release, downloads the archive and `SHA256SUMS` from GitHub, and checks the archive's SHA-256. A mismatch
    installs nothing and leaves nothing in the cache. A transfer that stops part way does the same.
 3. Unpacks in memory with every path checked (nothing outside the archive's own folder, no links, no duplicate or
-   unlisted file) and checks every file against the archive's `MANIFEST.json`.
+   unlisted file) and checks every file against the archive's `MANIFEST.json`. The manifest also says where each file
+   goes (a factory file, a template, or not installed); a rule that would write outside the factory's places is
+   refused with `[unsafe_archive]` before anything is written.
 4. Writes the files into the project, undoing everything if a write fails, removes files the new release dropped (one
    you changed is kept and named, never thrown away), and writes the pin. On a project's first release it also adds the templates it does not have (`factory.json`, docs,
    `.gitignore` lines), never over an existing file.
@@ -60,6 +62,19 @@ other project is unaffected.
 7. Prints what changed (old to new, with the release notes' commit titles) and the commands to commit it. **It never
    commits, pushes or makes a branch**: you commit the diff in a pull request, and everyone else gets it by pulling and
    running `factory update`. Agent sessions cannot run it (the PR gate reads these files).
+
+**Whose rules place the files (#278).** `factory update` runs the release client the project already has, which is
+the *old* release's. Since #278 it puts each file where the new release's `MANIFEST.json` says, so a release that adds
+a factory file in a new place is installed right even by an older client; only for a release built before #278, whose
+manifest has no such rules, does the client use its own. A rollback follows the older release's manifest the same way.
+An update on the release the project is already on also checks that every factory file the release ships is there and
+in the pin, and repairs one that is not (it needs the archive: from the download cache, or downloaded; with no network
+it says what it could not check and changes nothing).
+
+A project whose update from `v0.2.0-alpha.1` to `v0.2.0` left out `.claude/factory/settings.json` (the older client did
+not know the file, so the factory refuses to start an agent with `no_agent_settings`): `v0.2.0`'s client does not notice
+it on the same release. Run `factory rollback`, then `factory update`, or update to the next release, which puts it in
+place.
 
 **Your own allow rules.** `.claude/factory/settings.json` (the agents' rules) belongs to the release: a rule typed into
 it by hand is drift (`factory doctor` says `fix`), and the next `factory update` replaces it. List the project's extra
@@ -108,7 +123,8 @@ the old Python client cannot restart the heartbeat daemon, so if the daemon runs
 `.github/workflows/ci.yml` still calls `python3 .claude/hooks/*.py`, which that update removed, so CI on the update pull
 request fails until it changes: run `factory update` once more with the new client (it rewrites each such step to
 `bun --no-env-file --config=/dev/null .claude/hooks/*.ts` and adds `- uses: oven-sh/setup-bun@v2` to the jobs that need it), then commit
-the workflow in the same pull request. `factory doctor` names any workflow step that calls a hook that is not there.
+the workflow in the same pull request. `factory doctor` names any workflow step that calls a hook that is not there; a hook named only in a YAML comment is
+not a step, and neither doctor nor the rewrite looks at comments.
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with
