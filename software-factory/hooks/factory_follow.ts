@@ -13,7 +13,7 @@ import { RemoteError } from "./factory_remotes.ts";
 import { Exit, pyDumps, run, runMain, shQuote, sleepSync, splitLines, which } from "./factory_lib.ts";
 
 export const HELP = `\`factory follow\`, \`factory say\`, \`factory remote\` and \`factory agent <name> --detach\` (#106): watch and talk to an
-agent by its name, wherever it runs.
+agent by its name, wherever it runs: on this machine (its own tmux, no remote needed), on a remote, or in the cloud.
 
   factory remote add <name> <user@host>     how to reach a machine (the sandbox user, never an admin account)
   factory remote cloud <agent> <url>        a cloud agent: the Remote Control link of its session
@@ -25,6 +25,7 @@ agent by its name, wherever it runs.
   factory follow <agent> --log [--polls N]  stream the session's output without a terminal (Ctrl-C stops)
   factory follow --all [--on R]             one read-only pane per session (tiled), in a local tmux
   factory say <agent> "message" [--on R]    send one message, as if typed; the use is logged on that machine (no text)
+  --on R                                    only remote R; --on local is this machine (the name local is kept for it)
   factory agent <name> --detach             start that agent in a detached tmux session (what the commands above find)
 
 Remotes live in this machine's own file, never in the project and never on GitHub. Errors are \`{code, message, fix}\`.
@@ -152,12 +153,12 @@ interface FollowArgs {
 
 function cmdList(args: FollowArgs): number {
   const [cfg, repo] = project();
-  if (!Object.keys(R.remotes()).length) {
-    console.log("No remotes yet. `factory remote add dev-pc factory@192.168.2.45` tells factory where a machine is; " +
-      "agents on this machine are not listed here (`factory status` shows all agents).");
+  const [out, down] = rows(cfg as unknown as Cfg, repo, args.on);
+  if (!out.length && !args.json && !Object.keys(R.remotes()).length) {
+    console.log(`No agent sessions on ${R.HERE}, and no remotes yet. ` +
+      "`factory remote add dev-pc factory@192.168.2.45` tells factory where another machine is.");
     return 0;
   }
-  const [out, down] = rows(cfg as unknown as Cfg, repo, args.on);
   if (args.json) {
     console.log(pyDumps({ agents: out, unreachable: down.map((d) => ({ remote: d.remote, error: d.error })) }, { indent: 2 }));
     return 0;
@@ -168,15 +169,28 @@ function cmdList(args: FollowArgs): number {
     const widths = [0, 1, 2, 3, 4].map((i) => Math.max(...table.map((row) => (row[i] as string).length)));
     for (const row of table) console.log(row.slice(0, 5).map((c, i) => c.padEnd(widths[i] as number)).join("  ") + "  " + row[5]);
   } else {
-    console.log("No agent sessions found on the configured remotes.");
+    console.log(`No agent sessions found on ${R.HERE} or the configured remotes.`);
   }
   for (const d of down) console.log(`${d.remote}: unreachable (${d.error})`);
   console.log("\nfactory follow <name> to attach (--read to watch only). Remote Control links open in the Claude app.");
   return 0;
 }
 
+/** How to attach to a session: over ssh, or with this machine's tmux when the target is "". */
 export function attachArgv(target: string, session: string, read: boolean): string[] {
+  if (!target) return ["tmux", "attach", ...(read ? ["-r"] : []), "-t", "=" + session];
   return [...R.sshCommand(true), target, `tmux attach ${read ? "-r " : ""}-t ${shQuote("=" + session)}`];
+}
+
+/** The environment without TMUX, so this machine's tmux attaches even from inside a tmux session. */
+function outsideTmux(): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.TMUX;
+  return env;
+}
+
+function gone(session: string, where: string): RemoteError {
+  return new RemoteError("session-gone", `The session ${session} on ${where} is gone.`, "factory follow lists what is running.");
 }
 
 /** Run a program in this terminal and end with its exit code (Python's os.execvp). */
@@ -193,20 +207,22 @@ function cmdFollowOne(args: FollowArgs): number {
     console.log(`${agent} runs in the cloud. Open it from the Claude app or claude.ai/code:\n  ${url}`);
     return 0;
   }
-  R.ensureSandboxTarget(target);
+  if (target) R.ensureSandboxTarget(target);
   if (args.log) return stream(target, session, args.polls);
-  const note = `Following ${agent} on ${remote} (${target}), tmux session ${session}.` + (args.read ? " Watching only: you cannot type." : "");
+  if (!target && run(["tmux", "has-session", "-t", `=${session}`]).code !== 0) throw gone(session, R.HERE);
+  const note = `Following ${agent} on ${remote}${target ? ` (${target})` : ""}, tmux session ${session}.` +
+    (args.read ? " Watching only: you cannot type." : "");
   process.stderr.write(note + "\n");
   if (url) process.stderr.write(`Remote Control: ${url}\n`);
   process.stderr.write(DETACH_NOTE + "\n");
-  return exec(attachArgv(target, session, args.read));
+  return exec(attachArgv(target, session, args.read), target ? undefined : outsideTmux());
 }
 
 function capture(target: string, session: string): string[] {
-  const [rc, out, err] = R.sshRun(target, `tmux capture-pane -p -t ${shQuote("=" + session + ":")} -S -200`, null, 20);
+  const [rc, out, err] = R.runOn(target, `tmux capture-pane -p -t ${shQuote("=" + session + ":")} -S -200`, null, 20);
   if (rc !== 0) {
     const lines = splitLines(err.trim());
-    throw new RemoteError("session-gone", `The session ${session} on ${target} is gone (${(lines.length ? lines[lines.length - 1] as string : "no answer").slice(0, 100)}).`,
+    throw new RemoteError("session-gone", `The session ${session} on ${target || R.HERE} is gone (${(lines.length ? lines[lines.length - 1] as string : "no answer").slice(0, 100)}).`,
       "factory follow lists what is running.");
   }
   return out.replace(/\n+$/, "").split("\n").filter((_, i, all) => !(all.length === 1 && all[0] === ""));
@@ -243,14 +259,13 @@ function cmdFollowAll(args: FollowArgs): number {
       "Start agents with `factory agent <name> --detach` on those machines, or check `factory remote list`."));
   }
   if (!which("tmux")) return refuse(new RemoteError("no-tmux", "--all needs tmux on this machine to tile the panes.", "Install tmux, or follow one agent at a time."));
-  for (const [r] of found) R.ensureSandboxTarget(r.target);
+  for (const [r] of found) if (r.target) R.ensureSandboxTarget(r.target);
   const session = `factory-follow-${process.pid}`;
-  const cmds = found.map(([r, e]) => attachArgv(r.target, e.session, true).map(shQuote).join(" "));
+  const cmds = found.map(([r, e]) => (r.target ? "" : "TMUX= ") + attachArgv(r.target, e.session, true).map(shQuote).join(" "));
   const steps: string[][] = [["tmux", "new-session", "-d", "-s", session, cmds[0] as string]];
   for (const c of cmds.slice(1)) steps.push(["tmux", "split-window", "-t", session, c]);
   steps.push(["tmux", "select-layout", "-t", session, "tiled"], ["tmux", "set-option", "-t", session, "destroy-unattached", "on"]);
-  const env: Record<string, string | undefined> = { ...process.env };
-  delete env.TMUX;
+  const env = outsideTmux();
   for (const s of steps) run(s, { env, inherit: true });
   process.stderr.write("Read-only panes. Detach with Ctrl-b d.\n");
   return exec(["tmux", "attach", "-t", session], env);
@@ -268,17 +283,15 @@ function cmdSay(agent: string, message: string, on: string | null): number {
     return refuse(new RemoteError("cloud-agent", `${agent} runs in the cloud, so there is no session to type into from here.`,
       "Open its Remote Control link (`factory follow " + agent + "`) in the Claude app and type there."));
   }
-  R.ensureSandboxTarget(target);
+  if (target) R.ensureSandboxTarget(target);
   const who = `${process.env.USER || process.env.LOGNAME || "unknown"}@${hostname()}`;
   const s = shQuote(session);
   const script = `S=${s}; tmux has-session -t "=$S" 2>/dev/null || { echo NOSESSION; exit 3; }; msg=$(cat); ` +
     `tmux send-keys -t "=$S:" -l -- "$msg" && tmux send-keys -t "=$S:" Enter || exit 4; ` +
     `d="\${XDG_STATE_HOME:-$HOME/.local/state}/software-factory"; mkdir -p "$d"; ` +
     `printf '%s from=%s via=%s agent=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ${shQuote(who)} "\${SSH_CLIENT%% *}" "$S" >>"$d/say.log"`;
-  const [rc, out, err] = R.sshRun(target, script, message);
-  if (rc === 3 || out.includes("NOSESSION")) {
-    return refuse(new RemoteError("session-gone", `The session ${session} on ${remote} is gone.`, "factory follow lists what is running."));
-  }
+  const [rc, out, err] = R.runOn(target, script, message);
+  if (rc === 3 || out.includes("NOSESSION")) return refuse(gone(session, remote));
   if (rc !== 0) {
     const lines = splitLines(err.trim());
     return refuse(new RemoteError("say-failed", `Could not send the message to ${session} on ${remote}.`,
