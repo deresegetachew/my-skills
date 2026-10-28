@@ -50,7 +50,8 @@ function setup(scenario: Row, cfg: Row = ISSUES_MODE): Proj {
   writeFileSync(log, "");
   const env = envWith(join(root, "bin"), { COCKPIT_SCENARIO: join(root, "scenario.json"), COCKPIT_LOG: log,
     XDG_STATE_HOME: xdg, HOME: join(root, "home"), FACTORY_AGENT: undefined, FACTORY_LOOP: undefined, CLAUDE_PROJECT_DIR: undefined,
-    FACTORY_COCKPIT_CACHE_SECONDS: undefined });
+    FACTORY_COCKPIT_CACHE_SECONDS: undefined, FACTORY_AGENTS: undefined, FACTORY_CONFIG_DIR: undefined,
+    XDG_CONFIG_HOME: join(root, "config") }); // this machine's own agent names must not leak in
   mkdirSync(join(root, "home"));
   return { d, env, xdg, log };
 }
