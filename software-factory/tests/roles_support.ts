@@ -92,7 +92,7 @@ export function project(o: ProjectOptions = {}): [string, string, Env] {
   const env: Env = { ...process.env, ...GIT, PATH: `${bin}:${process.env.PATH ?? ""}`, LOOP_LOG: join(d, "log"),
     FAKE_DB: join(d, "db.json"), FACTORY_REMOTE_CONTROL: "0", HOME: d };
   for (const k of ["FACTORY_AGENT", "FACTORY_AGENTS", "FACTORY_ROLE", "FACTORY_NAME", "FACTORY_RELOAD_AGENT",
-    "FACTORY_RELOAD_DIR", "FACTORY_RESUME", "CLAUDE_PROJECT_DIR"]) delete env[k];
+    "FACTORY_RELOAD_DIR", "FACTORY_RESUME", "CLAUDE_PROJECT_DIR", "FACTORY_WINDOW", "TMUX", "TMUX_PANE"]) delete env[k];
   writeFileSync(join(d, "log"), "");
   return [d, work, env];
 }

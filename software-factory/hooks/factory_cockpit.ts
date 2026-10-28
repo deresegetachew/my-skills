@@ -308,7 +308,7 @@ function watch(args: string[]): number {
         "sub-manager for each." });
   }
   if (!sub.live) {
-    return fail({ code: "sub-manager-ended", message: `The sub-manager for ${ref} has ended; its window closed with it.`,
+    return fail({ code: "sub-manager-ended", message: `The sub-manager for ${ref} has ended, so there is nothing left to watch.`,
       fix: `Read what it did: less ${sub.out}` });
   }
   const { session, window } = subWindow(sub.name, ref);

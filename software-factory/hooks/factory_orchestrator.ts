@@ -356,6 +356,10 @@ function inWindow(name: string, ref: string, job: Job, limit: number, out: Out):
   out(`${ref}: running in tmux window ${s.window} (watch it read-only: factory cockpit watch ${ref})`);
   const deadline = limit > 0 ? Date.now() + limit * 1000 : Infinity;
   while (sessionRunning(s.session)) {
+    if (existsSync(job.rc)) { // done; a tmux with remain-on-exit keeps the session, so close it here
+      run(["tmux", "kill-session", "-t", `=${s.session}`]);
+      break;
+    }
     if (Date.now() >= deadline) {
       run(["tmux", "kill-session", "-t", `=${s.session}`]);
       out(`${ref}: stopped after ${(limit / 60).toFixed(0)} minutes (manager.subManagerMinutes)`);
