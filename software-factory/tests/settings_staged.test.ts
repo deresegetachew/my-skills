@@ -307,6 +307,55 @@ test("pr picks a free branch name when origin already has one from another machi
   expect(JSON.parse(shown(remote, "settings/maxopenprs-2", ".claude/factory.json"))).toEqual({ maxOpenPRs: 5 });
 });
 
+// The dev manager's must-fix on #324: a damaged staging file must not block the owner.
+const DAMAGED: [string, string][] = [
+  ["invalid JSON", "{ not json"],
+  ["a JSON list", "[1, 2]"],
+  ["changes that are not an object", JSON.stringify({ schema: "factory-settings-staged/1", changes: [1] })],
+  ["an entry that is a bare value", JSON.stringify({ schema: "factory-settings-staged/1", changes: { maxOpenPRs: 5 } })],
+  ["an entry with neither value nor unset", JSON.stringify({ schema: "factory-settings-staged/1", changes: { maxOpenPRs: { v: 5 } } })],
+];
+
+for (const [what, text] of DAMAGED) {
+  test(`a staging file with ${what}: diff --staged, set --stage and unstage <key> fail with the unstage fix`, () => {
+    const [d, , env] = gitProject({ maxOpenPRs: 4 });
+    mkdirSync(dirname(stagingFile(d)), { recursive: true });
+    write(stagingFile(d), text);
+    for (const args of [["diff", "--staged"], ["set", "--stage", "maxOpenPRs", "6"], ["unstage", "maxOpenPRs"]]) {
+      const e = expectError(settings(d, args, env));
+      expect(e.code, args.join(" ")).toBe("settings_staged_damaged");
+      expect(e.fix, args.join(" ")).toContain("factory settings unstage");
+    }
+    expect(remoteBranches(d)).toEqual([]);
+  });
+
+  test(`a staging file with ${what}: unstage with no key clears it`, () => {
+    const [d, , env] = gitProject({ maxOpenPRs: 4 });
+    mkdirSync(dirname(stagingFile(d)), { recursive: true });
+    write(stagingFile(d), text);
+    const p = settings(d, ["unstage"], env);
+    expect(p.code, p.out).toBe(0);
+    expect(p.stdout).toContain("nothing is staged now");
+    expect(readdirSync(dirname(stagingFile(d)))).not.toContain(basename(stagingFile(d)));
+    const diff = settings(d, ["diff", "--staged"], env);
+    expect(diff.code).toBe(0);
+    expect(diff.stdout.toLowerCase()).toContain("nothing");
+  });
+}
+
+test("a damaged staging file does not block the plain pr of an edited factory.json", () => {
+  const [d, remote, env] = gitProject({ maxOpenPRs: 4 });
+  mkdirSync(dirname(stagingFile(d)), { recursive: true });
+  write(stagingFile(d), "{ not json");
+  write(join(d, ".claude", "factory.json"), JSON.stringify({ maxOpenPRs: 7 }));
+  const p = settings(d, ["pr"], env);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stderr).toContain("factory settings unstage");
+  expect(ghLog(env)).toContain("pr create");
+  const [ref] = remoteBranches(d);
+  expect(JSON.parse(shown(remote, (ref as string).replace("refs/heads/", ""), ".claude/factory.json"))).toEqual({ maxOpenPRs: 7 });
+});
+
 test("the help and the commands page list the staging commands", () => {
   const help = read(join(SF, "factory"));
   expect(help).toContain("settings set --stage");
