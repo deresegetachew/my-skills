@@ -97,6 +97,17 @@ test("loop dash i on a terminal starts the role in its own tmux window and attac
   expect(claudeCalls(env), "the loop runs in the window, not here").toEqual([]);
 }, 90_000);
 
+test("the loop in its window keeps the PATH and the FACTORY settings it was started with", async () => {
+  // A running tmux server gives a new window its own environment, not the caller's: the step must carry them over.
+  const [work, env] = withTmux(true, { FACTORY_REMOTE_CONTROL: "0", FACTORY_TEST_NOTE: "lead's $(x)" });
+  const [rc, shown] = await onATerminal(work, env, ["dev-manager", "lead", "loop", "-i"]);
+  expect(rc, shown).toBe(0);
+  const s = shape(starts(env)[0] as string);
+  expect(s.command).toContain(`PATH=${env.PATH}`);
+  expect(s.command).toContain("FACTORY_REMOTE_CONTROL=0");
+  expect(s.command).toContain(`'FACTORY_TEST_NOTE=lead'"'"'s $(x)'`); // quoted for the shell, never run
+}, 90_000);
+
 test("inside tmux it switches the client; given a role only it takes the first free name", async () => {
   const [work, env] = withTmux(true, { TMUX: "/tmp/tmux-1000/default,1,0" });
   const [rc, shown] = await onATerminal(work, env, ["loop", "-i", "dev-manager"]);

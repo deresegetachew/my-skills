@@ -90,6 +90,18 @@ export function startWindow(s: Start): Started {
   return { session, window, started: true, note };
 }
 
+/** What the caller's shell set that the loop needs: a running tmux server gives a new window the server's environment,
+ * not the caller's. PATH, Docker's socket, and every FACTORY_ variable except the window's own and the ones that name
+ * another session (FACTORY_AGENT, FACTORY_PID). */
+function carried(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v === undefined || ["FACTORY_WINDOW", "FACTORY_ROLE", "FACTORY_NAME", "FACTORY_AGENT", "FACTORY_PID"].includes(k)) continue;
+    if (["PATH", "DOCKER_HOST", "XDG_RUNTIME_DIR"].includes(k) || k.startsWith("FACTORY_")) out[k] = v;
+  }
+  return out;
+}
+
 /** `factory loop -i` on a terminal: start the loop in its window, then show it here. */
 function loop(argv: string[]): number {
   const cut = argv.indexOf("--");
@@ -116,7 +128,7 @@ function loop(argv: string[]): number {
         `Name one: factory ${role} <name> loop -i, or stop one of them first.`);
     }
     s = startWindow({ role, name, dir: top, argv: [join(top, "factory"), "loop", ...rest],
-      env: { FACTORY_ROLE: role, FACTORY_NAME: name } });
+      env: { ...carried(), FACTORY_ROLE: role, FACTORY_NAME: name } });
   } catch (e) {
     if (e instanceof WindowError) refuse(e.code, e.message, e.fix);
     throw e;
