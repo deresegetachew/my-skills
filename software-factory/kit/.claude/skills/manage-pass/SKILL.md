@@ -143,7 +143,7 @@ must-fix or a fix for the owner.
 - Never message the owner on a quiet pass. When unsure, write an owner-queue ask instead of acting.
 - Never read secrets files (`.env*`, `secrets/`, keys).
 - Use the REST API (`gh api`); GraphQL may be blocked.
-- Run one command per Bash call. No `;`, `&&`, `|`, command substitution, backticks or variables: the profile allows each command on its
+- Run one command per Bash call. No `;`, `&&`, `|`, `$(...)`, backticks or variables: the profile allows each command on its
   own, and one part that is not allowed blocks the whole line. To read a PR's CI failure use `gh run view <id> --log-failed`;
   to read the tree use `git merge-base`, `git merge-tree`, `git ls-tree` and `git cat-file` (each on its own).
 

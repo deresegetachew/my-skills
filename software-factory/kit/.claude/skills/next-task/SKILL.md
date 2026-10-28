@@ -25,10 +25,9 @@ This file is the core. Open the others in this folder only when they apply:
 1. **Start routine:** `git fetch origin && git checkout --detach origin/<mainBranch>`, then
    `git submodule update --init` if the repo has a `.gitmodules`. Read `git log --oneline -15`, and run the `smoke`
    command if `factory.json` has one. If main is broken, fixing it is the task.
-2. **Let the script pick:** `bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts`.
-   Type it exactly so, with no variable: it claims for you from your session's `FACTORY_AGENT` and `FACTORY_PID`.
-   If you were told which issue to build, add `--issue <n>` (issues mode) so the claim takes that one and no other.
-   Never pick by reading the plan yourself. If your prompt names a task, under `factory-loop.sh` the loop has
+2. **Let the script pick:** `bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts`,
+   exactly so, with no variable (it claims as your `FACTORY_AGENT`). Told which issue to build? Add `--issue <n>`
+   (issues mode) so the claim takes that one and no other. Never pick by reading the plan yourself. If your prompt names a task, under `factory-loop.sh` the loop has
    already claimed it: build only that one. `pr-<n>` means rework (`rework.md`). Respect phase order unless the plan
    says phases overlap.
 3. **Read the brief first.** The task (or issue) lists what to read: PRD sections, decisions, design references,
@@ -115,7 +114,7 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    against budget and the top subagent; over the budget, say in the PR body why and what you would split next time.
 3. Once CI is green, post the tokens again (the same command), then merge it yourself:
    `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, with the full hash from `git rev-parse HEAD`
-   pasted in (the gate reads the command before the shell runs, so a command substitution can't stand in for it). Run it on its
+   pasted in (the gate reads the command before the shell runs, so `$(...)` can't stand in for it). Run it on its
    own, with no push in the same command. The gate allows it only when the reviewer passed that commit, CI is green,
    no protected file changed and the dev manager has no hold or must-fix on it. If it says a person must merge it,
    end the PR body with "A person merges this one: <why>", leave it open and carry on. If another worktree has the

@@ -40,10 +40,14 @@ function codeOf(text: string): [number, string][] {
 
 const EXPANSION = /\$[A-Za-z_{(]/;
 
+/** A command with an expansion in it. A span of one word (`$(...)`, `$ARGUMENTS`) names a form and runs nothing: the
+ * manager's skill lists `$(...)` among the forms it forbids. */
+const expands = (code: string): boolean => EXPANSION.test(code) && /\S\s+\S/.test(code.trim());
+
 test("the scan finds the forms that stalled the agents", () => {
   const bad = "Run `next_task.ts ${FACTORY_PID:+--pid x}` then `done --agent \"$FACTORY_AGENT\"` and `x $(date)`.\n" +
-    "```\necho $HOME\n```\nPlain `next_task.ts` is fine.";
-  const hits = codeOf(bad).filter(([, c]) => EXPANSION.test(c)).map(([n]) => n);
+    "```\necho $HOME\n```\nPlain `next_task.ts` is fine, and so is naming `$(...)` as a form.";
+  const hits = codeOf(bad).filter(([, c]) => expands(c)).map(([n]) => n);
   expect(hits).toEqual([1, 1, 1, 3]);
 });
 
@@ -52,7 +56,7 @@ test("no command in the kit's skills, agents or playbooks uses a shell variable 
   const found: string[] = [];
   for (const f of FILES) {
     for (const [n, code] of codeOf(read(f))) {
-      if (EXPANSION.test(code)) found.push(`${relative(SF, f)}:${n}: ${code}`);
+      if (expands(code)) found.push(`${relative(SF, f)}:${n}: ${code}`);
     }
   }
   expect(found).toEqual([]);
