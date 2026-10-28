@@ -64,6 +64,10 @@ Build
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
                          the CI queue and runners, and the tasks; read-only
+  cockpit --json         the factory as data, one snapshot: sessions on every machine, what needs you, PRs, CI, the
+                         version and the doctor's summary; a part that can't be read is listed under "missing"
+  cockpit --status       one line for tmux's status line (counts and "N need you"), from a cache: no GitHub call;
+                         an old or empty cache is refreshed in the background
   prs [--json]           what a manager decides from, one list: each open PR with its head, CI judged by one rule,
                          the newest marker per commit, any review claim and the next action; then unanswered questions
                          and owner asks, and agents gone quiet. Read-only, REST only
@@ -290,6 +294,7 @@ case "$cmd" in
   autostart) fh "$hooks/factory_autostart" "$@" ;;
   resume)    fh "$hooks/factory_resume" "$@" ;;
   status)    fh "$hooks/factory_status" "$@" ;;
+  cockpit)   fh "$hooks/factory_cockpit" "$@" ;;
   prs)       fh "$hooks/factory_prs" "$@" ;;
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
   release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;
