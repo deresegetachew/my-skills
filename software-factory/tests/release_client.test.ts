@@ -605,6 +605,19 @@ test("services older than the pin are refreshed only when they are older", async
   expect(ciLog(env)).toContain("check");
 });
 
+test("an update refreshes the runner services without scaling the machine down", async () => {
+  // #282: `factory update` reinstalls with FACTORY_CI_NO_SCALE_DOWN, so a machine keeps the runners it has.
+  const [, d, env] = await world("1.0.0");
+  expect((await fac(d, env, "update"))[0]).toBe(0);
+  commit(d);
+  writeFileSync(env.FAKE_CI_STALE as string, "");
+  const [rc, out] = await fac(d, env, "update");
+  expect(rc, out).toBe(0);
+  const log = ciLog(env);
+  expect(log[log.indexOf("install") + 1], log.join("|")).toBe("(no scale-down)");
+  expect(log.filter((l) => l === "(no scale-down)").length, log.join("|")).toBe(1); // only the install, never stale or check
+});
+
 test("a runner whose start script cannot be read fails the verification and is not called success", async () => {
   const [, d, env] = await world("1.0.0");
   writeFileSync(env.FAKE_CI_BROKEN as string, "");

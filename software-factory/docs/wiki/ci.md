@@ -127,11 +127,35 @@ steps (approval, `tests-reviewed`, the hold), so on one busy runner a merge coul
 and variables → Actions → Variables*. With no light runner online, light jobs wait. Then set `CI_RUNS_ON_LIGHT` to the
 same value as `CI_RUNS_ON`, or delete it.
 
-**How many runners** (`ci.runners`, default 1, set with `factory settings set ci.runners 3`). Each heavy runner is
+<a id="how-many-runners"></a>
+**How many runners.** Each heavy runner is
 a loop with its own compose project (`<name>`, `<name>-2`, ...), registration names (`<name>-<host>.2-<time>`),
 Docker-in-Docker, volumes and workspace, all removed after each job ([what persists](#ci-faster)). They share the label, so GitHub gives each job
-to whichever is free, on any machine. A machine can override the number with `FACTORY_CI_RUNNERS=3` in its shell
-profile (a CI box runs 3, a laptop 1); run `factory ci install` again after changing either.
+to whichever is free, on any machine. How many fit depends on the machine and the project (a CI box runs 3, a
+laptop 1), so the count is set per project and machine (#282):
+
+```
+factory ci runners        # the count here and where it comes from
+factory ci runners 4      # save 4 for this project on this machine, then install them
+```
+
+`factory ci runners 4` writes `ci.runners` into this machine's settings file for the project (the same file as
+`factory settings --local`, outside the repo, never committed) and runs `factory ci install`. Which count wins:
+
+1. `FACTORY_CI_RUNNERS` in the shell (for one command or one shell);
+2. this machine's saved count (`factory ci runners <n>`, or `factory settings --local set ci.runners <n>`);
+3. `ci.runners` in `.claude/factory.json`, the project's default for every machine (`factory settings set ci.runners 3`, merged in a PR);
+4. 1.
+
+`factory ci install`, `factory ci status`, `factory update` and `factory doctor --sandbox` all use that count.
+`factory update` refreshes the runner services but never scales a machine down: when this machine has more heavy
+runners installed than the count says, it keeps them and says so; `factory ci runners <n>` or `factory ci install`
+scales it down.
+
+**Clean up** with `factory ci clean`: it lists this project's offline idle runners (`<name>-...`) and its exited CI
+containers, and `factory ci clean --apply` removes them. It never deletes `CI_RUNS_ON` or `CI_RUNS_ON_LIGHT`, since
+that changes where jobs run (`factory ci use`); when no online runner has their labels it says so. `factory
+reset-run` does the same and more (claims, Agent issues, a dangling runs-on variable) before a test run.
 - Budget about 4 GB of memory per heavy runner (a job, its dind and its service containers) and 1 GB for the light
   one. `install` warns when that is more than the machine has free.
 - CPU matters less: most jobs use one or two cores.
