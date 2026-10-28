@@ -343,6 +343,80 @@ test("status says when github cant be read", () => {
   contains(out, "Mode: unknown", "can't be read right now");
 });
 
+// --- status --json (#304) ----------------------------------------------------------------------------------------
+
+function ciJson(d: string, env: Env, ...args: string[]): [number, Json, string] {
+  const p = sh(["bash", CI, "status", "--json", ...args], { cwd: d, env, timeoutMs: 120_000 });
+  let data: Json = {};
+  try {
+    data = JSON.parse(p.stdout) as Json;
+  } catch {
+    data = { notJson: p.stdout };
+  }
+  return [p.code, data, p.stdout + p.stderr];
+}
+
+test("status --json on github's runners with no runner installed", () => {
+  const { d, db, env } = project();
+  runsAndPulls(db, [run("main"), run("feat", { conclusion: "failure" }), run("old")], [{ number: 12, head: { ref: "feat" } }], []);
+  const [rc, j, out] = ciJson(d, env);
+  expect(rc, out).toBe(0);
+  expect(Object.keys(j).sort()).toEqual(
+    ["docker", "errors", "instances", "label", "light", "mode", "queuedLong", "repo", "runners", "runs", "runsOn"]);
+  expect([j.mode, j.runsOn, j.repo, j.label]).toEqual(["github", null, "acme/Widget", "widget-local"]);
+  const runs = j.runs as Json[];
+  expect(runs.map((r) => [r.ref, r.branch, r.state, r.name])).toEqual([["main", "main", "success", "CI"], ["#12", "feat", "failure", "CI"]]);
+  expect(typeof runs[0]?.createdAt).toBe("string");
+  expect(runs[0]?.minutesAgo).toBe(10);
+  expect([j.instances, j.runners, j.docker, j.light, j.errors]).toEqual([[], [], null, null, []]);
+  expect(j.queuedLong).toEqual({ count: 0, longestMinutes: 0, thresholdMinutes: 15, noRunnerOnline: false });
+  lacks(out, "Mode:", "CI runs (latest");
+});
+
+test("status --json on a local runner lists the instance the runners and a stuck queue", () => {
+  const { d, db, env } = project();
+  expect(ci(d, env, "install")[0]).toBe(0);
+  update(db, { vars: { CI_RUNS_ON: '["self-hosted","widget-local"]' } });
+  runsAndPulls(db, [run("feat", { status: "queued", conclusion: null, created: ago(60) })], [{ number: 12, head: { ref: "feat" } }],
+    [{ name: "widget-ci-other-1", status: "offline", busy: false, labels: [{ name: "self-hosted" }, { name: "widget-local" }] },
+      { name: "someone-else", status: "online", busy: false, labels: [{ name: "x" }] }]);
+  const n = names(d, env);
+  writeFileSync(join(n.CI_STATE as string, "runner.log"), "2026-10-22T11:59:00Z round 3: job done\n");
+  const [rc, j, out] = ciJson(d, env);
+  expect(rc, out).toBe(0);
+  expect([j.mode, j.runsOn, j.docker]).toEqual(["local", '["self-hosted","widget-local"]', true]);
+  expect(j.instances).toEqual([{ id: "1", name: "widget-ci", state: "running", manager: "launchd", pid: 4242 }]);
+  expect(j.runners).toEqual([{ name: "widget-ci-other-1", status: "offline", busy: false }]);
+  expect((j.runs as Json[]).map((r) => [r.ref, r.state])).toEqual([["#12", "queued"]]);
+  const q = j.queuedLong as Json;
+  expect([q.count, q.noRunnerOnline]).toEqual([1, true]);
+  expect(q.longestMinutes as number).toBeGreaterThanOrEqual(60);
+  lacks(out, "round 3: job done", "Docker: running");
+});
+
+test("status --json when github cant be read says so as errors", () => {
+  const { d, db, env } = project();
+  update(db, { fail: ["repos/acme/Widget/actions/variables/CI_RUNS_ON", "repos/acme/Widget/actions/runs"] });
+  const [rc, j, out] = ciJson(d, env);
+  expect(rc, out).toBe(0);
+  expect([j.mode, j.runs]).toEqual(["unknown", null]);
+  const errors = j.errors as Json[];
+  expect(errors.length).toBeGreaterThan(0);
+  for (const e of errors) expect(Object.keys(e).sort()).toEqual(["code", "fix", "message"]);
+  expect(errors.map((e) => e.code)).toContain("github_unreadable");
+});
+
+test("status with an unknown flag is a code message fix error", () => {
+  const { d, env } = project();
+  const p = sh(["bash", CI, "status", "--jsn"], { cwd: d, env, timeoutMs: 120_000 });
+  expect(p.code).toBe(1);
+  const e = JSON.parse(p.stderr.trim()) as Json;
+  expect(e.code).toBe("bad_args");
+  expect(String(e.message)).toContain("--jsn");
+  expect(String(e.fix)).toContain("factory ci status --json");
+  expect(p.stdout).toBe("");
+});
+
 // --- start and stop ----------------------------------------------------------------------------------------------
 
 test("stop leaves an unrelated process with the saved pid alone", () => {
@@ -1116,4 +1190,10 @@ test("factory help lists the ci commands", () => {
   for (const c of ["ci status", "ci use local|github", "ci install", "ci uninstall", "ci start | stop", "ci logs"]) {
     expect(out, c).toContain(c);
   }
+});
+
+test("factory help and the commands page list ci status --json", () => {
+  const out = sh(["bash", join(SF, "factory"), "help"], { cwd: project().d }).stdout;
+  expect(out).toContain("ci status [--json]");
+  expect(readFileSync(join(SF, "docs", "wiki", "commands.md"), "utf8")).toContain("| `factory ci status [--json]` |");
 });
