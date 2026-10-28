@@ -40,7 +40,7 @@ software-factory/
     factory_stack.ts                    the project's stack on a first install (node, python, unknown) and the CI command runner for a Python project
     pr-gate.ts                          PreToolUse: gates gh pr create, ready and merge, gh api writes, force pushes and the markers
     factory_shell.ts                    the command reader the gates share (simple commands, gh arguments)
-    factory_agent_settings.ts           the agents' rules from main, passed with `claude --settings` when an agent starts (#258)
+    factory_agent_settings.ts           the agents' rules from main, passed with `claude --settings` when an agent starts (#258); their hooks run main's copy, unpacked read-only into `<git folder>/factory-hooks/` (#274)
     factory_mcp.ts                      the MCP config a factory session starts with: main's `.mcp.json`, never the worktree's
     factory_trust.ts                    is a folder trusted by Claude Code (doctor and the loop read it)
     factory_review_pass.ts              `factory review-pass`: a review agent records its pass for the current commit

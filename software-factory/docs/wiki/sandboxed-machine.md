@@ -101,6 +101,9 @@ Not in this version: macOS, a VM mode, creating the GitHub account.
   to the repo. Then put the dev manager's login in `trustedReviewers`, require the checks and an approval in a ruleset
   on main, and the agents can't approve or force their own work. `factory doctor` checks both (#261); the steps are in
   [Branch protection: the real lock](reviews-and-gates.md#branch-protection-the-real-lock).
+- **An agent's hooks are main's code** (#274): the PR gate and the other hooks run from a read-only copy of main's
+  `.claude/hooks/` in the git folder, not from the agent's worktree, so checking out an older gate does not weaken it.
+  The copy is read-only to stop mistakes, not a determined agent running as the same user: that lock is on GitHub.
 - **The agents' allow list names the package commands they need** (`pnpm install|test|lint|typecheck|build`,
   `npm ci|test`), not `pnpm *` or `npm run *`, so `pnpm exec` or a script an agent added asks first. It narrows what
   runs without a prompt; it is not the boundary, since `pnpm test` runs the project's own scripts.

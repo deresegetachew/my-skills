@@ -6,7 +6,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import {
-  calls, EMPTY, type Env, fakeClaude, flag, KIT_AGENT_SETTINGS, loopProject, mainCopy, NO_CONNECTORS, quiet, startedSettings,
+  calls, EMPTY, type Env, fakeClaude, flag, hookShape, KIT_AGENT_SETTINGS, loopProject, mainCopy, NO_CONNECTORS, quiet, startedSettings,
 } from "./loop_support.ts";
 import { readdirSync, symlinkSync } from "node:fs";
 import { HOOKS, read, SF, sh, tmp, write } from "./support.ts";
@@ -20,7 +20,7 @@ function assertIsolated(args: string[], mcpConfig: string): void {
   const got = startedSettings(args) as { permissions: { deny: string[] }; hooks: unknown };
   expect(got).toMatchObject(JSON.parse(NO_CONNECTORS));
   expect(got.permissions.deny).toEqual(kit.permissions.deny);
-  expect(got.hooks).toEqual(kit.hooks);
+  expect(hookShape(got.hooks, true)).toEqual(hookShape(kit.hooks));
   expect(args).not.toContain("--setting-sources");
 }
 
