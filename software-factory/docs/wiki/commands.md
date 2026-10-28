@@ -19,7 +19,7 @@ version it pins. `factory help` lists everything.
 | Command | What it does |
 |---|---|
 | `factory loop [N]` | Starts an agent loop: one fresh, unattended Claude run per task (`claude -p`). `N` caps the number of tasks. Run it again in another terminal for another agent |
-| `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done |
+| `factory loop -i [N]` | The same, but each task opens a normal session you can watch and type into. It closes by itself when the task is done. On a terminal it runs in its own tmux window (session `<repo>-<name>`, window `<role>-<name>`) and shows it here (`switch-client` when you are already in tmux); starting a name that already runs only says so and shows it. Needs tmux |
 | `factory coding-agent\|dev-manager\|product-owner [name\|N] loop [-i] [--once] [--dry-run]` | The three roles, started the same way and run by the same loop. `factory loop` is `factory coding-agent loop`. [Roles](roles.md#roles) |
 | `factory prd [--open] [--story N] [--json]` | Progress against the PRD from GitHub: per user story its tasks and state. [Product owner](roles.md#the-product-owner-factory-prd-and-the-sign-off-and-testing-queue) |
 | `factory artifacts pull\|status\|list` | The project's artifacts and designs as reviewed copies in the repo, with a manifest; `status` says which copy is older than its artifact. [Artifacts](roles.md#artifacts-and-designs-factory-artifacts) |
@@ -38,7 +38,7 @@ version it pins. `factory help` lists everything.
 | `factory prs [--json] [--since-days N]` | The one list a dev manager starts a pass from, read-only and REST only: every open PR with its head and age, labels, CI judged by one rule, the newest marker per commit, any review claim and a next action (`review`, `merge`, `wait CI`, `rerun flake`, `waiting for agent`, `owner merges (protected)`, `held by <manager>`, `none`); below them the unanswered questions, owner asks and quiet agents. [Details and the `--json` schema](dev-manager.md#the-list-a-manager-starts-from-factory-prs) |
 | `factory machine [show\|setup <names>]` | This machine's id and agent names; `setup` writes the names file and refuses a name another machine has live |
 | `factory autostart [status\|install\|uninstall]` | Makes this machine bring the factory back after a reboot: the dev stack and its agents, with unfinished work saved and left in place. `status` shows what would start; `install --agents haile,tewodros` turns it on and installs the boot service (systemd user unit with linger, or a LaunchAgent). [Details](agent-loops.md#after-a-reboot-factory-autostart) |
-| `factory resume [--dry-run]` | What autostart runs at boot: waits for Docker and the network, runs `commands.stackUp`, starts this machine's agents in detached tmux sessions. Safe to run by hand: running agents are left alone |
+| `factory resume [--dry-run]` | What autostart runs at boot: waits for Docker and the network, runs `commands.stackUp`, starts this machine's agents in detached tmux sessions, each in its own window `coding-agent-<name>`, through the same step as `loop -i`. Safe to run by hand: running agents are left alone |
 | `factory claims` | Which agent holds which folder and task on this clone (live or stale) |
 | `factory reviews` | Which extra reviews and checks the current change needs |
 | `factory env [name\|N]` | The ports and database of this folder, or of that agent |
