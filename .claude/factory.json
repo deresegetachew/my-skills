@@ -8,6 +8,14 @@
   "mainBranch": "main",
   "prd": "software-factory/docs/PRD.md",
   "trustedReviewers": ["deresegetachew"],
+  "permissions": {
+    "allow": [
+      "Bash(bun tools/run_tests.ts*)",
+      "Bash(bun tools/check_skills.ts*)",
+      "Bash(bun x tsc*)",
+      "Bash(./factory run-check*)"
+    ]
+  },
   "commands": {
     "lint": "bun tools/check_skills.ts",
     "test": "bun tools/run_tests.ts"
