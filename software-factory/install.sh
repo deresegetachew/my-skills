@@ -52,7 +52,7 @@ fi
 is_engine() {
   case "$1" in
     ./factory|./factory-loop.sh|./.claude/hooks/*.ts|./.claude/hooks/*.sh|./.claude/ci/*) return 0;;
-    ./.claude/agents/*.md|./.claude/skills/*/*.md|./.claude/factory/settings.json|./.claude/manager/settings.json) return 0;;
+    ./.claude/agents/*.md|./.claude/skills/*/*.md|./.claude/factory/settings.json|./.claude/manager/settings.json|./.claude/product-owner/settings.json) return 0;;
     *) return 1;;
   esac
 }

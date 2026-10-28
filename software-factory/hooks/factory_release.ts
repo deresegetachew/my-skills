@@ -584,7 +584,7 @@ export function classify(rel: string): ["engine" | "template", string] | null {
     if (sub.startsWith("hooks/") || sub.startsWith("ci/")) return null; // the forwarders to the folders above
     // settings.json: the agents' rules in a release before #258 (an install or a rollback of one still owns it)
     if (sub.startsWith("agents/") || sub.startsWith("skills/") || sub === "factory/settings.json" || sub === "settings.json" ||
-      sub === "manager/settings.json") {
+      sub === "manager/settings.json" || sub === "product-owner/settings.json") {
       return ["engine", ".claude/" + sub];
     }
     return ["template", ".claude/" + sub];

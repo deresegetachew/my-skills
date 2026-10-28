@@ -123,7 +123,8 @@ It also blocks:
 - `gh` aliases and anything that isn't a known `gh` command;
 - an agent posting the dev manager's markers (`factory-approved`, `factory-answer`, `factory-mustfix`) in a PR or issue
   comment, edit, review or close; `gh pr review --approve`; adding `tests-reviewed` or `deps-reviewed`; removing
-  `factory-hold`;
+  `factory-hold`. The product owner's sessions (its profile wires this gate in) may post `factory-owner-ask`, which its
+  skill writes to the owner queue, and no other marker;
 - writes through `gh api` that go around those checks (#260): any method but GET to `repos/<o>/<r>/pulls/<n>/merge`,
   to a `labels` path (or with a `labels` field) or to a `reviews` path, and GraphQL mutations. Other writes have their
   fields (`-f`, `-F body=@<file>`) and `--input` file read: the dev manager's markers and messages are checked as for
