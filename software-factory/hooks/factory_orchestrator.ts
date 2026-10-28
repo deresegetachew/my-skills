@@ -326,9 +326,10 @@ export function findSub(ref: string): { name: string; live: boolean; out: string
   return ended ? { name: ended, live: false, out: out(ended) } : null;
 }
 
-/** Runs one sub-manager in its own tmux window and waits for it. Its exit code, or null when no window could be made
- * (the caller then runs it with no screen). */
-function inWindow(name: string, ref: string, job: Job, limit: number, out: Out): number | null {
+/** Runs one sub-manager in its own tmux window and waits for it. Its exit code, null when no window could be made
+ * (the caller then runs it with no screen), or "busy" when a window from an earlier run is still open (it may still
+ * be working, so the caller leaves the item to the next cycle). */
+function inWindow(name: string, ref: string, job: Job, limit: number, out: Out): number | null | "busy" {
   const d = stateDir(name);
   const file = join(d, `${ref}.job.json`);
   rmSync(job.rc, { force: true });
@@ -351,7 +352,7 @@ function inWindow(name: string, ref: string, job: Job, limit: number, out: Out):
   if (!s.started) {
     rmSync(file, { force: true });
     out(`${ref}: its window ${s.window} is still open from an earlier run; leaving it (tmux kill-session -t ${s.session} ends it)`);
-    return 1;
+    return "busy";
   }
   out(`${ref}: running in tmux window ${s.window} (watch it read-only: factory cockpit watch ${ref})`);
   const deadline = limit > 0 ? Date.now() + limit * 1000 : Infinity;
@@ -415,13 +416,13 @@ export function runSub(cfg: Config, name: string, ref: string, interactive = fal
     } else {
       const logfile = join(stateDir(name), `${ref}.out`);
       const clean = Object.fromEntries(Object.entries(env).filter((kv): kv is [string, string] => kv[1] !== undefined));
-      let windowed: number | null = null;
+      let windowed: number | null | "busy" = null;
       if (process.env.FACTORY_WINDOW && which("tmux")) { // the dev manager has a window, so its sub-managers get one
-        writeFileSync(logfile, "");
         const { TMUX: _t, TMUX_PANE: _p, ...rest } = clean;
         windowed = inWindow(name, ref, { argv: ["claude", ...flags, ...permissionFlags(cfg), "--output-format", "stream-json",
           "--verbose", "-p", text], env: rest, log: logfile, rc: join(stateDir(name), `${ref}.rc`) }, limit, out);
       }
+      if (windowed === "busy") return 0; // no verdict: the open window may still post its own
       if (windowed !== null) rc = windowed;
       else {
         const fd = openSync(logfile, "w");

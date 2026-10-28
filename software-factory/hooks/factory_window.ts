@@ -215,6 +215,7 @@ async function job(file: string): Promise<number> {
   } finally {
     rmSync(file, { force: true });
   }
+  writeFileSync(j.log, ""); // emptied here, once this window has started, so an earlier window's log is never cut short
   const show = (text: string): void => {
     process.stdout.write(text);
     appendFileSync(j.log, text);
