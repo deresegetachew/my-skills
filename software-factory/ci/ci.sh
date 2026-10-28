@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # factory ci: the project's CI, on GitHub's runners or on a self-hosted runner on this machine (docs/wiki/ci.md, "CI").
 #
-#   factory ci status              where CI runs (local or github), the latest runs, and the local runner
+#   factory ci status [--json]     where CI runs (local or github), the latest runs, and the local runner (--json: as data)
 #   factory ci use local|github    sends CI jobs to the self-hosted runners, or back to GitHub's
 #   factory ci install             installs the runners: ci.runners heavy ones and the light lane, each a LaunchAgent
 #                                  (macOS) or a systemd --user service (Linux); run it again to update or rescale
@@ -829,18 +829,46 @@ cmd_use() {
   esac
 }
 
+# A {code, message, fix} error on stderr, exit 1 (what --json callers and a bad argument get).
+json_die() {
+  bun --no-env-file --config=/dev/null -e 'const [code, message, fix] = process.argv.slice(-3);
+console.error(JSON.stringify({ code, message, fix }));' "$1" "$2" "$3"
+  exit 1
+}
+
 cmd_status() {
-  need gh
-  if [ "$platform" = linux ]; then need systemctl; need_user_manager; fi
-  local value rc=0 local_mode=""
+  # --json (#304): the same facts as data for the cockpit; the text below is unchanged without it.
+  local json=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --json) json=1 ;;
+      *) json_die bad_args "factory ci status doesn't know the argument '$1'." \
+           "Run \`factory ci status\` for text, or \`factory ci status --json\` for data." ;;
+    esac
+    shift
+  done
+  if [ -n "$json" ]; then
+    command -v gh >/dev/null || json_die missing_tool "gh isn't installed or isn't on your PATH." \
+      "Install GitHub's gh CLI, run \`gh auth login\`, then \`factory ci status --json\` again."
+    if [ "$platform" = linux ] && ! { command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; }; then
+      json_die no_user_manager "systemd's user manager for $(id -un) isn't reachable, so the runner services can't be read." \
+        "Log in as $(id -un) directly, or run \`sudo loginctl enable-linger $(id -un)\` and \`export XDG_RUNTIME_DIR=/run/user/$(id -u)\`, then try again."
+    fi
+  else
+    need gh
+    if [ "$platform" = linux ]; then need systemctl; need_user_manager; fi
+  fi
+  # say: a text line, printed only without --json.
+  say() { [ -n "$json" ] || echo "$@"; }
+  local value rc=0 local_mode="" mode=unknown
   value="$(runs_on)" || rc=$?
   case "$rc" in
-    0) echo "Mode: local (CI_RUNS_ON is $value)"; local_mode=1
-       case "$value" in *"\"$CI_LABEL\""*) ;; *) echo "  Note: that doesn't ask for this project's label $CI_LABEL." ;; esac ;;
-    1) echo "Mode: github (CI_RUNS_ON isn't set, so CI runs on GitHub's runners)" ;;
-    *) echo "Mode: unknown (gh can't read the repository variable CI_RUNS_ON; it needs admin on $CI_REPO)" ;;
+    0) say "Mode: local (CI_RUNS_ON is $value)"; local_mode=1; mode=local
+       case "$value" in *"\"$CI_LABEL\""*) ;; *) say "  Note: that doesn't ask for this project's label $CI_LABEL." ;; esac ;;
+    1) say "Mode: github (CI_RUNS_ON isn't set, so CI runs on GitHub's runners)"; mode=github ;;
+    *) say "Mode: unknown (gh can't read the repository variable CI_RUNS_ON; it needs admin on $CI_REPO)" ;;
   esac
-  local installed="" id
+  local installed="" id docker="" instances=()
   [ -n "$(installed_ids)" ] && installed=1
   if [ -n "$local_mode" ] || [ -n "$installed" ] || [ -n "$(hand_pid || true)" ]; then
     local pid
@@ -851,9 +879,11 @@ cmd_status() {
       if instance_loaded "$id" && [ "$platform" = linux ]; then
         pid="$(systemctl --user show "$I_UNIT" -p MainPID --value 2>/dev/null || true)"
         if [ -n "$pid" ] && [ "$pid" != 0 ]; then
-          echo "$what: running (systemd user service $I_UNIT, pid $pid). It starts again by itself after a restart."
+          say "$what: running (systemd user service $I_UNIT, pid $pid). It starts again by itself after a restart."
+          instances+=(--instance "$id:$I_NAME:running:systemd:$pid")
         else
-          echo "$what: installed, but its loop isn't running right now; systemd starts it again within 30 s."
+          say "$what: installed, but its loop isn't running right now; systemd starts it again within 30 s."
+          instances+=(--instance "$id:$I_NAME:loop_down:systemd:")
         fi
       elif instance_loaded "$id"; then
         # Not a pipeline: an awk that stops at the pid line (gawk does) can leave launchctl writing into a closed
@@ -861,27 +891,33 @@ cmd_status() {
         pid="$(launchctl print "$domain/$I_AGENT" 2>/dev/null || true)"
         pid="$(awk '$1 == "pid" && $2 == "=" { print $3; exit }' <<<"$pid")"
         if [ -n "$pid" ]; then
-          echo "$what: running (LaunchAgent $I_AGENT, pid $pid). It starts again by itself after a restart."
+          say "$what: running (LaunchAgent $I_AGENT, pid $pid). It starts again by itself after a restart."
+          instances+=(--instance "$id:$I_NAME:running:launchd:$pid")
         else
-          echo "$what: installed, but its loop isn't running right now; launchd starts it again within 30 s."
+          say "$what: installed, but its loop isn't running right now; launchd starts it again within 30 s."
+          instances+=(--instance "$id:$I_NAME:loop_down:launchd:")
         fi
       elif [ "$platform" = mac ] && [ -f "$I_PLIST" ]; then
-        echo "$what: installed but not loaded. Run \`factory ci install\` again."
+        say "$what: installed but not loaded. Run \`factory ci install\` again."
+        instances+=(--instance "$id:$I_NAME:not_loaded:launchd:")
       elif [ "$id" = 1 ] && pid="$(hand_pid)"; then
-        echo "$what: running (started by hand, pid $pid). It stops at a restart; \`factory ci install\` keeps it running."
+        say "$what: running (started by hand, pid $pid). It stops at a restart; \`factory ci install\` keeps it running."
+        instances+=(--instance "$id:$I_NAME:running:hand:$pid")
       elif [ "$id" = 1 ]; then
-        echo "$what: not running on $machine. \`factory ci install\` starts it (another machine may run one)."
+        say "$what: not running on $machine. \`factory ci install\` starts it (another machine may run one)."
+        instances+=(--instance "$id:$I_NAME:not_running::")
       fi
     done
     local want
     want="$(wanted_ids | wc -l | tr -d ' ')"
-    [ -n "$installed" ] && [ "$(installed_ids | wc -l | tr -d ' ')" != "$want" ] &&
+    [ -z "$json" ] && [ -n "$installed" ] && [ "$(installed_ids | wc -l | tr -d ' ')" != "$want" ] &&
       echo "  $CI_RUNNERS heavy runner(s) ($(runners_from))$([ "$CI_LIGHT" = 1 ] && echo " and the light lane") make $want instance(s) here; \`factory ci install\` brings it to that."
     if docker info >/dev/null 2>&1; then
-      echo "Docker: running"
-      image_note
+      docker=1
+      [ -n "$json" ] || { echo "Docker: running"; image_note; }
     else
-      echo "Docker: not running. Jobs for $machine wait in GitHub's queue until it is."
+      docker=0
+      say "Docker: not running. Jobs for $machine wait in GitHub's queue until it is."
     fi
   fi
   # The light lane as GitHub will route it: the label in CI_RUNS_ON_LIGHT, if it is set, whatever ci.light says.
@@ -895,6 +931,14 @@ console.log(x === undefined ? "" : String(x));' "$light_var" 2>/dev/null || true
   elif [ "$CI_LIGHT" = 1 ]; then
     light_label="$CI_LIGHT_LABEL"
   fi
+  if [ -n "$json" ]; then
+    # ${a[@]+...}: an empty array is "unbound" to bash 3.2 (macOS) under set -u.
+    fh "$kit/ci_status" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
+      ${light_label:+--light-label "$light_label"} ${light_var:+--light-variable-set} \
+      --json --mode "$mode" ${local_mode:+--runs-on "$value"} ${docker:+--docker "$docker"} \
+      ${instances[@]+"${instances[@]}"}
+    return
+  fi
   fh "$kit/ci_status" --repo "$CI_REPO" --label "$CI_LABEL" ${local_mode:+--local} \
     ${light_label:+--light-label "$light_label"} ${light_var:+--light-variable-set}
   if [ -n "$local_mode$installed" ] && [ -f "$CI_STATE/runner.log" ]; then
@@ -905,7 +949,7 @@ console.log(x === undefined ? "" : String(x));' "$light_var" 2>/dev/null || true
 }
 
 case "${1:-status}" in
-  status) cmd_status ;;
+  status) shift || true; cmd_status "$@" ;;
   use) shift; cmd_use "$@" ;;
   install) cmd_install ;;
   stale) cmd_stale ;;
