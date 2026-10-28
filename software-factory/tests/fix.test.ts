@@ -207,7 +207,7 @@ test("verify refuses when the fixer changed files then passes once they are comm
   expect(p.code, p.out).toBe(1);
   expect(p.stderr).toContain("formatted 1 file");
   expect(p.stderr).toContain("Commit them");
-  expect(existsSync(join(d, "tmp/reviews/task_1-x.ci.ok"))).toBe(false);
+  expect(existsSync(join(d, ".git/factory-reviews/task_1-x.ci.ok"))).toBe(false); // passes live in the git folder (#260)
   git(d, "add", "-A"); git(d, "commit", "-qm", "format");
   p = verify(d);
   expect(p.code, p.out).toBe(0);

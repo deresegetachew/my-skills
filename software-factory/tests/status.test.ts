@@ -77,7 +77,7 @@ function scenario(): Row {
 
 test("one view of agents prs ci and tasks", () => {
   const [d, env] = setup(scenario(), ISSUES_MODE);
-  write(join(d, "tmp", "reviews", "task_7-x.ok"), SHA);
+  write(join(d, ".git", "factory-reviews", "task_7-x.ok"), SHA); // passes live in the git folder (#260)
   const p = status(d, env);
   expect(p.code, p.out).toBe(0);
   for (const w of ["taytu", "working", "#12", "CI failed", "reviewed", "hold", "must-fix", "a person merges it", "1 queued",

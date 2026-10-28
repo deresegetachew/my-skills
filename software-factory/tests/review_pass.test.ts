@@ -38,14 +38,14 @@ test("reviewer marker holds head", () => {
   const d = project();
   const p = run(d, "reviewer");
   expect(p.code, p.stderr).toBe(0);
-  expect(readFileSync(join(d, "tmp", "reviews", "task_9-x.ok"), "utf8").trim()).toBe(git(d, "rev-parse", "HEAD"));
+  expect(readFileSync(join(d, ".git", "factory-reviews", "task_9-x.ok"), "utf8").trim()).toBe(git(d, "rev-parse", "HEAD"));
 });
 
 test("arch marker is separate", () => {
   const d = project();
   expect(run(d, "arch").code).toBe(0);
-  expect(statSync(join(d, "tmp", "reviews", "task_9-x.arch.ok")).isFile()).toBe(true);
-  expect(existsSync(join(d, "tmp", "reviews", "task_9-x.ok"))).toBe(false);
+  expect(statSync(join(d, ".git", "factory-reviews", "task_9-x.arch.ok")).isFile()).toBe(true);
+  expect(existsSync(join(d, ".git", "factory-reviews", "task_9-x.ok"))).toBe(false);
 });
 
 test("marker follows a new commit", () => {
@@ -55,7 +55,7 @@ test("marker follows a new commit", () => {
   git(d, "add", "-A");
   git(d, "commit", "-qm", "two");
   run(d, "reviewer");
-  expect(readFileSync(join(d, "tmp", "reviews", "task_9-x.ok"), "utf8").trim()).toBe(git(d, "rev-parse", "HEAD"));
+  expect(readFileSync(join(d, ".git", "factory-reviews", "task_9-x.ok"), "utf8").trim()).toBe(git(d, "rev-parse", "HEAD"));
 });
 
 test("unknown kind and detached head are refused with a fix", () => {

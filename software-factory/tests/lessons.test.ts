@@ -63,7 +63,7 @@ function project(mainFiles: string[], branchFiles: string[], cfg: Record<string,
   git(d, "checkout", "-qb", "task/1-x");
   files(branchFiles);
   git(d, "add", "-A"); git(d, "commit", "-q", "--allow-empty", "-m", "task"); git(d, "fetch", "-q", "origin");
-  write(join(d, "tmp", "reviews", "task_1-x.ok"), git(d, "rev-parse", "HEAD"));
+  write(join(d, ".git", "factory-reviews", "task_1-x.ok"), git(d, "rev-parse", "HEAD")); // passes live in the git folder (#260)
   writeExe(join(root, "bin", "gh"), FAKE_GH);
   const db = join(root, "db.json");
   writeFileSync(db, JSON.stringify({ text: { pulls: "" } }));

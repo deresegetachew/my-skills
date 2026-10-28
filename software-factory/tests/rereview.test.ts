@@ -2,7 +2,7 @@
 // earlier findings and the author's reply; a big or wide change, or a rewritten history, goes back to a full review.
 // The PR gate's marker is untouched.
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { passed } from "../hooks/pr-gate.ts";
 import { defaultOf, SETTINGS } from "../hooks/factory_settings.ts";
@@ -199,7 +199,7 @@ test("the summary is kept and the pass marker is not touched", () => {
   expect(last?.result).toBe("pass");
   expect(last?.findings.startsWith("no must-fix")).toBe(true);
   expect(last?.sha.length).toBe(40);
-  expect(existsSync(join(d, "tmp", "reviews", "task_70-x.ok"))).toBe(false); // only the reviewer writes that
+  expect(existsSync(join(d, ".git", "factory-reviews", "task_70-x.ok"))).toBe(false); // only the reviewer writes that
 });
 
 test("a final pass on head after a delta review leaves the marker to the reviewer", () => {
@@ -209,8 +209,8 @@ test("a final pass on head after a delta review leaves the marker to the reviewe
   commit(d, "fix");
   expect(plan(d).mode).toBe("delta");
   record(d, "pass", "no must-fix");
-  const marker = join(d, "tmp", "reviews", "task_70-x.ok");
-  writeFileSync(marker, git(d, "rev-parse", "HEAD") + "\n"); // what the reviewer's snippet writes
+  const marker = join(d, ".git", "factory-reviews", "task_70-x.ok"); // passes live in the git folder (#260)
+  put(marker, git(d, "rev-parse", "HEAD") + "\n"); // what factory review-pass writes (put makes the folder)
   record(d, "pass", "no must-fix");
   expect(readFileSync(marker, "utf8").trim()).toBe(git(d, "rev-parse", "HEAD")); // record never rewrites it
 });
@@ -223,14 +223,14 @@ test("a final pass on head after a delta review still satisfies the gate", () =>
   const head = commit(d, "fix");
   expect(plan(d).mode).toBe("delta");
   record(d, "pass", "no must-fix");
-  put(join(d, "tmp", "reviews", "task_70-x.ok"), git(d, "rev-parse", "HEAD") + "\n"); // what the reviewer's snippet writes
+  put(join(d, ".git", "factory-reviews", "task_70-x.ok"), git(d, "rev-parse", "HEAD") + "\n"); // what factory review-pass writes (#260)
   const cwd = process.cwd();
   process.chdir(d);
   try {
-    expect(passed({ reviewMarkers: "tmp/reviews" }, "task/70-x", head)).toBe(true);
+    expect(passed("task/70-x", head)).toBe(true);
     write(d, "src/b.py", "print('b')\n");
     const newer = commit(d, "later");
-    expect(passed({ reviewMarkers: "tmp/reviews" }, "task/70-x", newer)).toBe(false); // a new commit needs a new review
+    expect(passed("task/70-x", newer)).toBe(false); // a new commit needs a new review
   } finally {
     process.chdir(cwd);
   }

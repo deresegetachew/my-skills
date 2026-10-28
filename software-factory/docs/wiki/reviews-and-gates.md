@@ -44,15 +44,29 @@ reviewed on Opus; a diff over `prSizeWarn` lines or one on a `protected` path st
 `architecture-reviewer`. The `reviewer` is always needed and isn't listed. The next-task skill runs each listed one,
 and the reviewer checks they ran.
 
-**Review markers.** A pass is a file: the reviewer writes the commit id to `tmp/reviews/<branch>.ok`, the
-architecture reviewer to `<branch>.arch.ok` (`reviewMarkers` sets the folder). A pass counts only for that exact
-commit, so any new commit needs a new review.
+**Review markers.** A pass is a file in the git folder, `<git common dir>/factory-reviews/` (`.git/factory-reviews/`
+in a plain clone, shared by every worktree): `factory review-pass reviewer` writes the commit id to `<branch>.ok`,
+`factory review-pass arch` to `<branch>.arch.ok`, and `factory verify` to `<branch>.ci.ok`. A pass counts only for that
+exact commit, so any new commit needs a new review.
+
+Passes can't be written by the coding agent (#260). They used to live in `tmp/reviews/`, which the kit lets an agent
+edit, so an agent could write its own pass. Now:
+
+- the folder is outside the worktree, and the agents' rules deny writing it (`Edit` and `Write` of `factory-reviews`,
+  and any Bash command that names it); the PR gate refuses such a command too;
+- the PR gate lets only a reviewer subagent run `factory review-pass`: Claude Code tells the hook which subagent runs a
+  command (`agent_id`, `agent_type`), so the `reviewer` may record `reviewer` and the `architecture-reviewer` may record
+  `arch`, each alone in its command. The coding agent itself, and any other subagent, are refused.
+
+A pass in `tmp/reviews/` (from before this change) no longer counts: after updating, ask the reviewer again for a
+branch that had one. `reviewMarkers` now only says where the re-review history (`<branch>.reviews.json`) is kept. This
+raises the bar; it is not the lock. A coding agent still writes the code its own tests run, so the lock is the dev
+manager's review on GitHub (see [Branch protection](#branch-protection-the-real-lock)).
 
 **Incremental re-review.** After a review finds problems and the agent fixes them, the same reviewer should not read the
 whole diff again. Each reviewer (`reviewer`, `arch`, `safety`, `security`) records its rounds with
 `factory rereview record`: the commit it reviewed, pass or fail, a short findings summary, and the files and changed
-lines of the branch diff at that moment, in `<reviewMarkers>/<branch>.reviews.json` (next to the markers, never in
-them). The agent saves its answer with `factory rereview reply`. The reviewer's first step is `factory rereview prompt`,
+lines of the branch diff at that moment, in `<reviewMarkers>/<branch>.reviews.json` (never in the passes). The agent saves its answer with `factory rereview reply`. The reviewer's first step is `factory rereview prompt`,
 which prints its instructions for this round:
 
 - **delta:** `git diff <last reviewed commit>..HEAD`, the reviewer's own earlier findings and the agent's reply. It checks
@@ -228,8 +242,16 @@ two things on GitHub that only the owner can set:
    - **Block force pushes** (and deletions).
    - **No bypass for the agents' account.** Leave the bypass list empty, or only you.
 
+**Required checks alone are not enough; the required review is the lock** (#260). CI runs on `pull_request`, so it
+runs the workflow file of the pull request itself. A pull request that edits `.github/workflows/ci.yml` can keep a job
+named `Factory guard` that always passes, or keep the guard and hand it a looser `.claude/factory.json`. The guard
+script comes from the base branch, but the job that runs it does not. So the check can be green when the guard never
+ran. Only the review stops that: the dev manager (or you) reads every change under `.github/` line by line before
+approving, and a pull request that touches it is never approved on a green check alone. (Running the guard from
+`pull_request_target`, with the base branch's workflow and config, is the later fix: #283.)
+
 `factory doctor` checks both: it fails when this machine's gh login is an admin of the repo, and when main doesn't
-require the `Factory guard` check and a review. A login without admin rights can't read every protection setting;
+require the `Factory guard` check and a review. Its line says that the review is what stops a faked check. A login without admin rights can't read every protection setting;
 then it says what to check by hand instead of failing.
 
 Until the agents have their own account, everything is opened under one login, and GitHub doesn't let an author

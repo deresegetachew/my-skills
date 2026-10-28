@@ -3,7 +3,8 @@
 // when it is ported, so both gates read a command the same way.
 //
 // simpleCommands is Python's shlex.shlex(posix=True, punctuation_chars=";&|()<>") with whitespace_split on and no
-// comment characters, the tokenizer pr-gate.py used; parseArgs is its parse_args.
+// comment characters, the tokenizer pr-gate.py used; parseArgs is its parse_args. One addition (#260): a `$'...'`
+// word (ANSI-C quoting) is decoded as bash decodes it, so `$'--admin'` reads as --admin and `$'\x67h'` as gh.
 
 export const GH_COMMANDS = new Set(["api", "attestation", "auth", "browse", "cache", "codespace", "completion", "config",
   "copilot", "extension", "gist", "gpg-key", "help", "issue", "label", "org", "pr", "preview", "project", "release", "repo",
@@ -52,6 +53,38 @@ export function shlexTokens(text: string): string[] {
   let state: string | null = " ";
   const pushback: string[] = [];
   const next = (): string => (pushback.length ? (pushback.pop() as string) : pos < text.length ? (text[pos++] as string) : "");
+  const peek = (): string => (pushback.length ? (pushback[pushback.length - 1] as string) : (text[pos] ?? ""));
+  /** The rest of a `$'...'` word (after its opening quote), decoded as bash does (#260): `$'--admin'` is --admin. */
+  const ansiC = (): string => {
+    let out = "";
+    for (;;) {
+      const c = next();
+      if (!c) throw new Error("No closing quotation");
+      if (c === "'") return out;
+      if (c !== "\\") {
+        out += c;
+        continue;
+      }
+      const e = next();
+      if (!e) throw new Error("No closing quotation");
+      const simple: Record<string, string> = { a: "\x07", b: "\b", e: "\x1b", E: "\x1b", f: "\f", n: "\n", r: "\r",
+        t: "\t", v: "\v", "\\": "\\", "'": "'", '"': '"', "?": "?" };
+      const digits = (re: RegExp, max: number): string => {
+        let s = "";
+        while (s.length < max && re.test(peek())) s += next();
+        return s;
+      };
+      if (e in simple) out += simple[e];
+      else if (/[0-7]/.test(e)) out += String.fromCharCode(parseInt(e + digits(/^[0-7]$/, 2), 8));
+      else if (e === "x" || e === "u" || e === "U") {
+        const h = digits(/^[0-9A-Fa-f]$/, e === "x" ? 2 : e === "u" ? 4 : 8);
+        out += h ? String.fromCodePoint(parseInt(h, 16)) : "\\" + e;
+      } else if (e === "c") {
+        const k = next();
+        out += k ? String.fromCharCode(k.toUpperCase().charCodeAt(0) & 0x1f) : "";
+      } else out += "\\" + e;
+    }
+  };
   const read = (): string | null => {
     let quoted = false;
     let escapedState = " ";
@@ -68,6 +101,11 @@ export function shlexTokens(text: string): string[] {
         } else if (WHITESPACE.includes(c)) {
           if (token || quoted) break;
           continue;
+        } else if (c === "$" && peek() === "'") {
+          next();
+          token += ansiC();
+          quoted = true;
+          state = "a";
         } else if (c === "\\") {
           escapedState = "a";
           state = c;
@@ -108,6 +146,10 @@ export function shlexTokens(text: string): string[] {
             state = " ";
             break;
           }
+        } else if (c === "$" && peek() === "'") {
+          next();
+          token += ansiC();
+          quoted = true;
         } else if (QUOTES.includes(c)) {
           state = c;
         } else if (c === "\\") {

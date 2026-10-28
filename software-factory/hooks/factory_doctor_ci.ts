@@ -229,6 +229,10 @@ const RULESET_STEPS = "on GitHub, Settings → Rules → Rulesets → New branch
   "\"Require a pull request before merging\" (1 approval) and \"Require status checks to pass\" with `" + GUARD_CHECK +
   "` and the other CI jobs, and leave the bypass list empty (or only you). See the wiki's reviews-and-gates page";
 
+/** Why the review, not the check, is the lock (#260): CI runs a pull request's own workflow file. */
+const REVIEW_IS_THE_LOCK = `a pull request can fake the ${GUARD_CHECK} check by editing its own workflow, and the review is ` +
+  "what stops that: read every .github/ change line by line before you approve";
+
 /** The merge boundary on GitHub (#261), part 1: the gh login the agents use here has no admin rights on the repo, so
  * `gh pr merge --admin` and an API merge can't skip branch protection. Silent when GitHub doesn't say. */
 export function adminRights(r: Report): void {
@@ -295,18 +299,19 @@ export function mainRequires(r: Report, main: string): void {
   if (isObject(branch) && isObject(branch.protection)) checks.push(...contextsOf(branch.protection.required_status_checks));
   const guard = checks.includes(GUARD_CHECK);
   if (guard && review) {
-    r.ok(`main requires the ${GUARD_CHECK} check and a review before a merge`);
+    r.ok(`main requires the ${GUARD_CHECK} check and a review before a merge (${REVIEW_IS_THE_LOCK})`);
     return;
   }
   if (guard && classic && !isObject(protection)) {
     r.note(`main branch ${main}`, `it requires the ${GUARD_CHECK} check, but this login can't read whether it also ` +
       "requires a review (that needs admin rights). Check by hand: Settings → Branches → the rule for " + main +
-      " → \"Require a pull request before merging\" with 1 approval");
+      ` → "Require a pull request before merging" with 1 approval (${REVIEW_IS_THE_LOCK})`);
     return;
   }
   const missing = [...(guard ? [] : [`the \`${GUARD_CHECK}\` check`]), ...(review ? [] : ["a review"])].join(" and ");
+  const faked = guard && !review ? ` A required check alone is not enough: ${REVIEW_IS_THE_LOCK}.` : "";
   r.fix(`main requires ${missing}`, `nothing on GitHub requires ${missing} before a merge to ${main}, so the PR gate on ` +
-    `this machine is the only thing between an agent and main, and an agent that runs its own code can get around it. Fix: ${RULESET_STEPS}`);
+    `this machine is the only thing between an agent and main, and an agent that runs its own code can get around it.${faked} Fix: ${RULESET_STEPS}`);
 }
 
 export function checks(r: Report, cfg: Config): void {

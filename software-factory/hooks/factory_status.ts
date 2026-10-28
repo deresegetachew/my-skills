@@ -20,6 +20,7 @@ import { agentIssues, current, stateOf } from "./factory_agents.ts";
 import { type Config, load, loadFromMain, taskLabels, taskSource } from "./factory_config.ts";
 import { names, taskIssues } from "./factory_issues.ts";
 import { bunCmd, isoUtc, parseArgs, parseIso, pyDumps, run, runMain } from "./factory_lib.ts";
+import { passFile } from "./factory_review_pass.ts";
 import { nowUtc } from "./factory_manager_claims.ts";
 import { type Failed, ciState as judgedCi, claimOf, gateWord, isFailed, section, trustedOf } from "./factory_prs.ts";
 
@@ -74,9 +75,10 @@ function here(): { claims: string[] } {
   return { claims: p.stdout.split("\n").filter((l) => l.trim()) };
 }
 
-function marker(cfg: Config, branch: string, sha: string, kind: string): boolean | null {
+function marker(branch: string, sha: string, kind: string): boolean | null {
   try {
-    return readFileSync(join(cfg.reviewMarkers, branch.replace(/\//g, "_") + kind), "utf8").trim() === sha;
+    const path = passFile(branch, kind); // in the git folder (#260)
+    return path === null ? null : readFileSync(path, "utf8").trim() === sha;
   } catch {
     return null; // not on this machine
   }
@@ -120,7 +122,7 @@ function pulls(cfg: Config): { pulls: StatusPull[] } {
     const dm = gateWord(comments, sha, trusted);
     const [held] = claimOf(comments, sha, nowUtc());
     return { number: Number(p.number), title: str(p.title), branch, draft: Boolean(p.draft), ci: ciState(sha),
-      reviewed: marker(cfg, branch, sha, ".ok"), hold: labels.has(hold), devManager: dm,
+      reviewed: marker(branch, sha, ".ok"), hold: labels.has(hold), devManager: dm,
       claim: held ? { manager: held.manager, until: held.until } : null,
       personMerges: str(p.body).toLowerCase().includes("a person merges this one") };
   };

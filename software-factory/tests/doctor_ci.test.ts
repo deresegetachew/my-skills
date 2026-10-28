@@ -316,3 +316,21 @@ test("when GitHub can't be asked about main the check is skipped with a note", (
   expect(mine(p, "fix", "main requires"), p.stdout).toEqual([]);
   expect(mine(p, "note", "main").some((l) => l.includes("can't read")), p.stdout).toBe(true);
 });
+
+// The v0.2.0 audit's finding 3 (#260): CI runs on pull_request with the PR's own workflow file, so a PR can keep a job
+// named `Factory guard` that always passes. A required check alone is not a lock; the required review is.
+test("a required guard check without a review is a fix that says the check can be faked", () => {
+  const guardOnly = [{ type: "required_status_checks", parameters: { required_status_checks: [{ context: "Factory guard" }] } }];
+  const [p] = run({ db: { ...repo(false), [RULES]: guardOnly, [BRANCH]: { name: "main", protected: false } } });
+  const fixes = mine(p, "fix", "main requires");
+  expect(fixes.length, p.stdout).toBe(1);
+  expect(fixes[0]).toContain("its own workflow");
+  expect(fixes[0]).toContain("the review is what stops");
+});
+
+test("the ok line for the merge boundary names the review as the lock", () => {
+  const [p] = run({ db: { ...repo(false), [RULES]: GUARDED_RULES, [BRANCH]: { name: "main", protected: false } } });
+  const ok = mine(p, "ok", "main requires");
+  expect(ok.length, p.stdout).toBe(1);
+  expect(ok[0]).toContain("the review is what stops");
+});

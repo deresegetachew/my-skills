@@ -9,7 +9,7 @@
 // `--kind` names the reviewer: reviewer, arch (the architecture reviewer), safety, security. Each has its own history
 // in <reviewMarkers>/<branch>.reviews.json: the commit it reviewed, whether it passed, its findings, the files and
 // line count of the branch diff then, and the author's reply. The pass marker the PR gate reads (<branch>.ok, holding
-// HEAD's id) is a separate file and is never touched here: a delta review still ends with the reviewer's pass for HEAD.
+// HEAD's id, in the git folder's factory-reviews/ since #260) is a separate file and is never touched here: a delta review still ends with the reviewer's pass for HEAD.
 //
 // The next round is a delta (`git diff <last reviewed commit>..HEAD`, with the earlier findings and the reply) unless:
 // there is no earlier round, `reReviewPercent` is 0, the earlier commit isn't in HEAD's history any more (rebase), the
