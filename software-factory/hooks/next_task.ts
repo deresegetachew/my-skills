@@ -13,6 +13,11 @@
 //       -> the first task no other running loop holds, claimed for taytu (factory-loop.sh does this; see
 //          factory_claims.ts). Exit 1 when every open task is done, blocked or held by another loop.
 //
+//   Inside an agent session the claim comes from the environment, so the command an agent runs is plain text (Claude
+//   Code asks before running a command with a shell variable in it, and unattended nobody can answer): with
+//   FACTORY_AGENT and FACTORY_PID set (the SessionStart hook writes both), no flags claims as FACTORY_AGENT with pid
+//   FACTORY_PID, and `--issue N` claims as FACTORY_AGENT. Explicit --claim and --pid win; --no-claim and --note only look.
+//
 //   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --issue 42
 //       -> issues mode: claim issue #42 for taytu, only that one, when it is free and its dependencies are done.
 //          Taken, blocked or missing: prints {code, message, fix} on stderr, exit 1, nothing changed. This is how a dev
@@ -95,7 +100,7 @@ interface Args {
 }
 
 const PROG = "next_task.ts";
-const USAGE = `usage: ${PROG} [-h] [--json] [--after AFTER] [--claim AGENT] [--pid PID] [--issue N] [--note] [--no-rework]`;
+const USAGE = `usage: ${PROG} [-h] [--json] [--after AFTER] [--claim AGENT] [--pid PID] [--issue N] [--note] [--no-claim] [--no-rework]`;
 
 function argError(text: string): never {
   process.stderr.write(`${USAGE}\n${PROG}: error: ${text}\n`);
@@ -107,8 +112,24 @@ function ping(agent: string, n: number): void {
     { timeoutMs: 60_000 });
 }
 
+/** No --claim given: inside an agent session, claim as FACTORY_AGENT. A pick claims only when FACTORY_PID is set too, as
+ * the skill's old `${FACTORY_PID:+--claim ...}` did: under factory-loop.sh the loop has claimed already and sets no
+ * FACTORY_PID. `--issue N` needs only the name. */
+function fromEnv(a: Args): void {
+  if (a.claim) return;
+  const agent = (process.env.FACTORY_AGENT ?? "").trim();
+  const pid = (process.env.FACTORY_PID ?? "").trim();
+  if (!agent) return;
+  if (a.issue) a.claim = agent;
+  else if (pid) {
+    a.claim = agent;
+    a.pid ??= pid;
+  }
+}
+
 function main(argv: string[]): number {
-  const p = parseArgs(argv, { valued: ["--after", "--claim", "--pid", "--issue"], flags: ["--json", "--note", "--no-rework"] }, PROG, USAGE);
+  const p = parseArgs(argv, { valued: ["--after", "--claim", "--pid", "--issue"], flags: ["--json", "--note", "--no-claim", "--no-rework"] },
+    PROG, USAGE);
   let issue: number | null = null;
   if (p.issue !== undefined) {
     if (!/^\s*[+-]?\d+\s*$/.test(p.issue as string)) argError(`argument --issue: invalid int value: '${p.issue}'`);
@@ -116,6 +137,7 @@ function main(argv: string[]): number {
   }
   const a: Args = { json: Boolean(p.json), after: (p.after as string | undefined) ?? null, claim: (p.claim as string | undefined) ?? null,
     pid: (p.pid as string | undefined) ?? null, issue, note: Boolean(p.note), noRework: Boolean(p["no-rework"]) };
+  if (!p["no-claim"] && !a.note) fromEnv(a);
   if (a.issue && !a.claim) argError("--issue needs --claim AGENT");
   const cfg = load();
   run(["git", "fetch", "-q", "origin", cfg.mainBranch]);

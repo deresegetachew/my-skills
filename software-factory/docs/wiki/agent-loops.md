@@ -323,6 +323,11 @@ An agent never chooses a task by reading the plan. `next_task.ts` hands out the 
    rework. In `factory loop -i`, the agent marks the rework done too, so the session closes and the loop goes on.
 2. **A new task**, from the plan or from issues.
 
+The agent runs it as plain `next_task.ts`, with no shell variable: Claude Code asks before running a command with
+one, and unattended nobody answers. The script takes the agent's name from `FACTORY_AGENT` and claims with
+`FACTORY_PID` when the SessionStart hook set it (under the loop, the loop has claimed already).
+`factory_claims.ts done --task <id>` and `release` take the name the same way; an explicit `--claim` or `--agent` wins.
+
 ### Plan mode (the default)
 
 Tasks are the unticked lines of `docs/build-plan.md` (`- [ ] **1.3 Title**`), in order, minus the ids in

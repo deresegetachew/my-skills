@@ -1,7 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Stop hook for `factory loop -i`: when the agent has marked its task done, close the session.
 //
-// The next-task skill runs `factory_claims.ts done --agent $FACTORY_AGENT --task <id>` once its PR is open. When the
+// The next-task skill runs `factory_claims.ts done --task <id>` (the agent is FACTORY_AGENT) once its PR is open. When the
 // turn ends, this hook sees the mark and ends the Claude process a few seconds later (so the last message stays on
 // screen). The loop then counts down and starts the next task in a fresh session. Without the mark, or outside an
 // interactive loop, it does nothing.

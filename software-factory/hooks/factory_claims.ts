@@ -18,10 +18,10 @@
 //                                                                    `roles.<role>.names`, its folder
 //                                                                    `<project>-agents/<name>`. A name belongs to one
 //                                                                    loop on a clone, whatever its role.
-//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --agent taytu [--tasks-only]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release [--agent taytu] [--tasks-only]
 //                                                                 -> one line: what was released, or "Nothing to release: ..."
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts list
-//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --agent taytu --task 3.2       (factory loop -i: close the session)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done [--agent taytu] --task 3.2     (factory loop -i: close the session)
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts clean                                remove unused agent worktrees
 //   cd "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts worktree taytu)" && claude
 //                                                                 -> a plain Claude session in taytu's worktree; the
@@ -484,12 +484,21 @@ function usageError(text: string): never {
   throw new Exit(2);
 }
 
+/** `release`, `done` and `take-done` without --agent take FACTORY_AGENT, so an agent's command needs no shell variable
+ * (Claude Code asks before running one, and unattended nobody answers). An explicit --agent wins. */
+function withEnvAgent(cmd: string, rest: string[]): string[] {
+  const agent = (process.env.FACTORY_AGENT ?? "").trim();
+  if (!["release", "done", "take-done"].includes(cmd) || !agent) return rest;
+  if (rest.some((t) => t === "--agent" || t.startsWith("--agent="))) return rest;
+  return [...rest, "--agent", agent];
+}
+
 function main(argv: string[]): void {
   const cmds = ["checkout", "free", "release", "worktree", "list", "done", "take-done", "tidy-branches", "clean"];
   const cmd = argv[0];
   if (!cmd) usageError("the following arguments are required: cmd");
   if (!cmds.includes(cmd)) usageError(`argument cmd: invalid choice: '${cmd}' (choose from ${cmds.map((c) => `'${c}'`).join(", ")})`);
-  const rest = argv.slice(1);
+  const rest = withEnvAgent(cmd, argv.slice(1));
   const specs: Record<string, ArgSpec> = {
     checkout: { valued: ["--pid", "--role", "--name"], required: ["--pid"] },
     free: { valued: ["--role"] },

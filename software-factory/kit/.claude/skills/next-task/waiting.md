@@ -23,7 +23,7 @@ Read this after shipping a task, or when you have to wait.
   `wait_for_merge.sh`. Under the loop you don't have to ask anyone to restart you: `next_task.ts` waits while your
   issue's branch is pushed and the cap is full, and gives you the issue again as soon as a slot frees, so the next
   session only opens the PR. **In an interactive loop**, end that session the usual way so the loop can wait:
-  `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task <id>`, then one line,
+  `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --task <id>`, then one line,
   `Task <id> pushed; its PR waits for a slot.` Keep the issue (don't release it): the loop gives it back to you.
 - **CI that never ran:** when every job fails at once with no steps, run
   `bun --no-env-file --config=/dev/null .claude/hooks/factory_ci.ts <head commit>`. If it says GitHub didn't start the jobs (billing or the spending limit), that's not about your code:
@@ -35,7 +35,7 @@ Read this after shipping a task, or when you have to wait.
 - **Interactive loop** (`FACTORY_INTERACTIVE=1`, from `factory loop -i`): the owner may be at the terminal. You may
   ask them short questions there, but decisions still go in the PR or a decision file, so the next fresh session sees
   them. When the task is done (PR opened, claim dropped), mark it done with
-  `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task <id>` and end with one line:
+  `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --task <id>` and end with one line:
   `Task <id> done: <PR link>.` The session then closes by itself and the loop starts the next task. Don't start
   another task in this session.
 - Stop and report only when every remaining task is blocked, a "Done when" check or CI fails in a way you can't fix,

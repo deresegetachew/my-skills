@@ -92,7 +92,7 @@ export function setup(issues: IssueRow[]): [string, string, Env] {
   write(join(d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "issues" }, agents: ["menelik", "taytu"] }));
   const db = write(join(d, "db.json"), JSON.stringify({ issues }));
   const env: Env = { ...process.env, PATH: `${d}/bin:${process.env.PATH}`, FAKE_GH_DB: db };
-  delete env.FACTORY_AGENT;
+  delete env.FACTORY_AGENT; delete env.FACTORY_PID;
   return [d, db, env];
 }
 
