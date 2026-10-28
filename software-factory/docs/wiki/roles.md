@@ -46,6 +46,8 @@ Only the coding agent claims a task. Managers and product owners register as liv
 role) and keep pinging while they wait, so the sweep does not take a sleeping manager for a dead one. A role's profile
 is used only when its file exists; then its sessions read just the user's settings and the profile, not the project's
 own `.claude/settings.json` (the coding agents' settings deny `gh api`, which the manager and product owner need).
+Claude Code then does not load the project's skills either, so a role session's prompt does not start with
+`/manage-pass`: it says to read `.claude/skills/manage-pass/SKILL.md` (or `product-pass`) and run it for the item.
 
 **`factory loop -i` with no role asks.** In a terminal it asks which role (coding agent, dev manager, product owner)
 and which name (a free one, or type one). `factory loop -i dev-manager` or `FACTORY_ROLE=dev-manager` skips the

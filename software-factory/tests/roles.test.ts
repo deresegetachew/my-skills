@@ -96,7 +96,11 @@ test("a product owner pass runs its skill in its own worktree with its profile",
   const calls = claudeCalls(env);
   expect(calls.length, calls.join("\n")).toBe(1);
   const c = calls[0] as string;
-  expect(c).toContain("-p /product-pass");
+  expect(c).toContain("/product-pass");
+  // --setting-sources user drops the project skills, so the prompt names the skill file, never a bare /product-pass
+  expect(c).not.toContain("-p /product-pass");
+  expect(c).toContain("-p Follow the product-pass skill: read .claude/skills/product-pass/SKILL.md");
+  expect(existsSync(join(SF, "kit", ".claude", "skills", "product-pass", "SKILL.md"))).toBe(true);
   expect(c).toContain("<!-- factory-role role=product-owner name=eleni -->");
   expect(c).toContain("--setting-sources user");
   expect(c).toContain("Bash(gh api *)");
@@ -223,12 +227,13 @@ console.log(JSON.stringify([a, made, b]));`;
   const p = runCode(code, { cwd: work, env });
   expect(p.code, p.out).toBe(0);
   const [text, made, after] = JSON.parse(p.stdout) as [string, string[], string];
-  expect(text.startsWith("/manage-pass"), text).toBe(true);
+  expect(text.startsWith("Follow the manage-pass skill: read .claude/skills/manage-pass/SKILL.md"), text).toBe(true);
   expect(text).toContain(".claude/factory/notes/manager.md");
   expect(text).not.toContain("roles/dev-manager");
   expect(text.trimEnd().endsWith("<!-- factory-role role=dev-manager name=lead -->"), text).toBe(true);
   expect(made.length, made.join(", ")).toBe(6);
-  expect(after.startsWith("/manage-pass pr-5"), after).toBe(true);
+  expect(after.startsWith("Follow the manage-pass skill for pr-5: read .claude/skills/manage-pass/SKILL.md"), after).toBe(true);
+  expect(after).toContain("/manage-pass pr-5");
   expect(after).toContain(".claude/factory/roles/dev-manager/README.md");
   expect(after).toContain("reads.md");
   expect(after).not.toContain("notes/manager.md");
