@@ -410,6 +410,26 @@ test("needs prints each thing that needs the owner, with its link", () => {
   expect(r.stdout).toContain("https://github.com/o/r/issues/77#c1");
 }, T);
 
+test("needs prints no control characters from a PR title or link", () => {
+  const p = setup();
+  seed(p, [], [{ kind: "owner-merges", number: 9, title: "evil\x1b]0;pwned\x07 \x1b[31mred\x1b[0m\rtitle",
+    url: "https://github.com/o/r/pull/9\x1b[2J" }]);
+  const r = cockpit(p, ["--needs"]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("PR #9");
+  expect(r.stdout).toContain("https://github.com/o/r/pull/9");
+  expect(r.stdout.replace(/\n/g, ""), JSON.stringify(r.stdout)).not.toMatch(/[\x00-\x1f\x7f]/);
+}, T);
+
+test("sidebar prints no control characters from a session name or state", () => {
+  const p = setup();
+  seed(p, [{ ...TAYTU, name: "tay\x1b]0;pwned\x07tu", state: "work\x1b[2Jing" }], []);
+  const r = cockpit(p, ["--sidebar"], undefined, { COLUMNS: "60", LINES: "30" });
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("taytu");
+  expect(r.stdout.replace(/\n/g, ""), JSON.stringify(r.stdout)).not.toMatch(/[\x00-\x1f\x7f]/);
+}, T);
+
 test("needs says so when nothing needs the owner", () => {
   const p = setup();
   seed(p, [], []);
