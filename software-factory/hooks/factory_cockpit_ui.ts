@@ -59,9 +59,22 @@ export function views(): View[] {
 }
 
 /** The read-only commands the `:` bar offers. */
-export const OFFERED = ["status", "prs", "next", "claims", "agents ls", "messages ls", "issues list", "issues show",
+export const OFFERED = ["status", "prs", "next", "claims list", "agents ls", "messages ls", "issues list", "issues show",
   "ci status", "ci log", "ci runners", "settings list", "settings show", "settings get", "settings help", "settings diff",
   "usage", "report", "lessons show", "doctor", "version", "env", "machine show", "remote list", "help"];
+
+/** The offered commands that take words after them (an issue, a run, a setting), never a flag: `factory <cmd>` passes
+ *  the rest of the line on, and flags such as `next --claim` or `usage --record` change things. */
+const TAKES_WORDS = ["issues show", "ci log", "settings show", "settings get", "settings help", "help"];
+
+/** The offered command the words start with, when the rest is allowed after it; else undefined. */
+function offeredLine(words: string[]): string | undefined {
+  const text = words.join(" ");
+  const n = OFFERED.filter((o) => text === o || text.startsWith(`${o} `)).sort((a, b) => b.length - a.length)[0];
+  if (n === undefined) return undefined;
+  const rest = words.slice(n.split(" ").length);
+  return !rest.length || (TAKES_WORDS.includes(n) && rest.every((w) => !w.startsWith("-"))) ? n : undefined;
+}
 
 /** What agents and the gate use: never in the cockpit (US-10). */
 const FOR_AGENTS = ["review-pass", "wait", "run-check", "guard", "rereview", "manager-claims"];
@@ -70,7 +83,7 @@ const FOR_AGENTS = ["review-pass", "wait", "run-check", "guard", "rereview", "ma
 const ACTIONS = ["loop", "coding-agent", "dev-manager", "product-owner", "init", "init-roles", "agent", "autostart",
   "resume", "heartbeat", "reset-run", "worktree", "say", "verify", "fix", "check", "turbo", "bootstrap", "update",
   "release", "rollback", "migrate-to-release", "cockpit", "follow", "lessons", "settings", "remote", "issues", "ci",
-  "machine", "agents", "messages", "alerts"];
+  "machine", "agents", "messages", "alerts", "claims", "next", "usage"];
 
 /** How well `name` matches what was typed: lower is better, null for no match (start, then letters in order). */
 export function rank(name: string, typed: string): number | null {
@@ -93,16 +106,17 @@ export function matches(typed: string): string[] {
 export function resolve(line: string): string[] {
   const words = line.trim().split(/\s+/).filter(Boolean);
   const text = words.join(" ");
-  const exact = OFFERED.filter((n) => text === n || text.startsWith(`${n} `)).sort((a, b) => b.length - a.length)[0];
-  if (exact) return words;
+  if (offeredLine(words)) return words;
   const first = words[0] ?? "";
   if (FOR_AGENTS.includes(first)) {
     refuse("cockpit_not_offered", `\`factory ${first}\` is for the agents and the gate, so the cockpit does not offer it.`,
       "Leave it to them; to look at the factory, type `status`, `prs` or `ci status`.", 2);
   }
   // An action word is refused, not matched to some other command; alone it may still start one (`ci` is `ci status`).
+  // So is a flag, or more words after an offered command than it takes (`claims list x`, `next --claim taytu`).
   const startsOne = words.length === 1 && OFFERED.some((n) => n.startsWith(first));
-  if (ACTIONS.includes(first) && !startsOne) {
+  const extra = words.some((w) => w.startsWith("-")) || OFFERED.some((n) => text.startsWith(`${n} `));
+  if (extra || (ACTIONS.includes(first) && !startsOne)) {
     refuse("cockpit_not_offered", `\`factory ${text}\` changes things, and the cockpit is read-only in this step.`,
       `Run \`factory ${text}\` in a shell; type \`help\` here to see every command.`, 2);
   }
@@ -350,7 +364,9 @@ async function sidebarLoop(): Promise<number> {
     const lines = frame(snap, vs, selected, process.stdout.columns || 32, process.stdout.rows || 30, true);
     process.stdout.write("\x1b[H\x1b[2J" + lines.join("\r\n"));
   };
-  const popup = (size: string[], cmd: string) => tmux(sock, ["display-popup", "-E", ...size, "-d", root, cmd]);
+  // display-popup waits until the popup closes, so it has no timeout: a view stays open as long as the owner reads it.
+  const popup = (size: string[], cmd: string) =>
+    Bun.spawnSync(["tmux", "-L", sock, "display-popup", "-E", ...size, "-d", root, cmd], { stdout: "ignore", stderr: "ignore" });
   const openView = (v: View) => popup(["-w", "90%", "-h", "90%"], viewCommand(script, v));
   const act = () => {
     const e = entries(snap, vs)[selected];
@@ -367,7 +383,7 @@ async function sidebarLoop(): Promise<number> {
   process.stdin.setRawMode(true);
   process.stdout.write("\x1b[?25l");
   process.stdout.on("resize", draw);
-  setInterval(() => {
+  const timer = setInterval(() => {
     refreshIfOld();
     snap = readCache();
     selected = Math.min(selected, Math.max(entries(snap, vs).length - 1, 0));
@@ -391,6 +407,9 @@ async function sidebarLoop(): Promise<number> {
     } else if (key === "\x03") break;
     draw();
   }
+  clearInterval(timer); // else the timer keeps the pane's process alive after C-c
+  process.stdin.setRawMode(false);
+  process.stdout.write("\x1b[?25h\r\n");
   return 0;
 }
 
@@ -431,7 +450,9 @@ async function barLoop(): Promise<number> {
       const pick = matches(typed)[at];
       const words = typed.trim().split(/\s+/).filter(Boolean);
       // What was typed runs as it is when it starts with an offered command (`ci log 12`); else the line picked.
-      const line = OFFERED.some((n) => words.join(" ") === n || words.join(" ").startsWith(`${n} `)) ? typed : pick ?? typed;
+      // A line with a flag or extra words is left as typed, so resolve() refuses it rather than running the pick.
+      const asTyped = offeredLine(words) || words.some((w) => w.startsWith("-")) || OFFERED.some((n) => words.join(" ").startsWith(`${n} `));
+      const line = asTyped ? typed : pick ?? typed;
       process.stdin.setRawMode(false);
       process.stdout.write("\x1b[H\x1b[2J");
       try {

@@ -91,6 +91,7 @@ Look
                          version and the doctor's summary; a part that can't be read is listed under "missing"
   cockpit --status       one line for tmux's status line (counts and "N need you"), from a cache: no GitHub call;
                          an old or empty cache is refreshed in the background
+  cockpit --needs        what needs you (owner asks, PRs only a person merges), with links, from the same cache
   prs [--json]           what a manager decides from, one list: each open PR with its head, CI judged by one rule,
                          the newest marker per commit, any review claim and the next action; then unanswered questions
                          and owner asks, and agents gone quiet. Read-only, REST only

@@ -311,6 +311,34 @@ test("sidebar with no cache still draws the views and does not crash", () => {
   noTrace(r.out);
 }, T);
 
+test("on a terminal, Enter on a session shows it on the right through factory follow, and C-c ends the list", async () => {
+  const p = setup();
+  seed(p, [TAYTU, ZEMEN], []);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries({ ...p.env, FACTORY_COCKPIT: "work-cockpit" })) if (v !== undefined) env[k] = v;
+  let shown = "";
+  const proc = Bun.spawn(["bash", join(SF, "factory"), "cockpit", "--sidebar"], {
+    cwd: p.d, env,
+    terminal: { cols: 60, rows: 30, data(_t, d) { shown += new TextDecoder().decode(d); } },
+  });
+  const timer = setTimeout(() => proc.kill(9), 60_000);
+  for (let i = 0; i < 200 && !shown.includes("taytu"); i++) await Bun.sleep(50);
+  expect(stripAnsi(shown), "the list is drawn").toContain("taytu");
+  proc.terminal?.write("\r");
+  for (let i = 0; i < 200 && !subs(p, "select-pane").length; i++) await Bun.sleep(50);
+  proc.terminal?.write("\x03");
+  const code = await proc.exited;
+  clearTimeout(timer);
+  proc.terminal?.close();
+  expect(code, shown).toBe(0);
+  const respawn = subs(p, "respawn-pane");
+  expect(respawn.length, shown).toBe(1);
+  const line = (respawn[0] as Call).line;
+  expect(line).toContain("-t =work-cockpit:0.1");
+  expect(line).toMatch(/follow taytu/);
+  expect((subs(p, "select-pane")[0] as Call).line).toContain("=work-cockpit:0.1");
+}, T);
+
 // --- C: the command bar -------------------------------------------------------------------------------------------------
 
 function version(p: Proj): string {
@@ -345,6 +373,24 @@ for (const word of ["review-pass", "wait", "run-check", "guard", "rereview", "ma
     expect(errorOf(r.stderr).code).toBe("cockpit_not_offered");
   }, T);
 }
+
+for (const line of ["claims release --agent taytu", "claims done --agent taytu --task 42", "next --claim taytu --issue 42",
+  "usage --record x", "claims list --pid 1", "prs --since-days 3 extra"]) {
+  test(`bar refuses "${line}", which goes past what the cockpit offers`, () => {
+    const p = setup();
+    const r = cockpit(p, ["--bar"], line + "\n");
+    expect(r.code, r.out).toBe(2);
+    expect(errorOf(r.stderr).code).toBe("cockpit_not_offered");
+    noTrace(r.out);
+  }, T);
+}
+
+test("bar runs an offered command with the word it takes", () => {
+  const p = setup();
+  const r = cockpit(p, ["--bar"], "help cockpit\n");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("cockpit");
+}, T);
 
 test("bar with text that matches nothing says so", () => {
   const p = setup();
