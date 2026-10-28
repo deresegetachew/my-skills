@@ -11,8 +11,8 @@
 // and `missing` says why, each as {code, message, fix}; the command still exits 0.
 //
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
-// missing or older than FACTORY_COCKPIT_CACHE_SECONDS (default 60) it starts one refresh in the background and says
-// how old the line is. The cockpit itself (tmux) is later (US-10): `factory cockpit` alone says so.
+// missing or older than FACTORY_COCKPIT_CACHE_SECONDS (default 300: a refresh costs a few GitHub calls per open pull
+// request, on the agents' token) it starts one refresh in the background and says how old the line is. The cockpit itself (tmux) is later (US-10): `factory cockpit` alone says so.
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -53,15 +53,20 @@ function lastLine(text: string): string {
 async function step(cmd: string[]): Promise<Step> {
   try {
     const p = Bun.spawn(cmd, { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      p.kill();
-    }, STEP_TIMEOUT_MS);
-    const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
-    const code = await p.exited;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // A grandchild (gh, doctor's probes) can hold the pipes after the kill, so the reads race the timer.
+    const late = new Promise<null>((done) => {
+      timer = setTimeout(() => {
+        p.kill();
+        done(null);
+      }, STEP_TIMEOUT_MS);
+    });
+    const read = Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+    const got = await Promise.race([read, late]);
     clearTimeout(timer);
-    return { code, stdout, stderr, timedOut };
+    if (got === null) return { code: 124, stdout: "", stderr: "", timedOut: true };
+    const [stdout, stderr, code] = got;
+    return { code, stdout, stderr, timedOut: false };
   } catch (e) {
     return { code: 127, stdout: "", stderr: e instanceof Error ? e.message : String(e), timedOut: false };
   }
@@ -215,12 +220,13 @@ function refreshInBackground(): void {
   const lock = lockPath();
   try {
     if (Date.now() / 1000 - statSync(lock).mtimeMs / 1000 < LOCK_SECONDS) return;
+    rmSync(lock, { force: true }); // left by a refresh that died
   } catch {
     // no lock: go on
   }
   try {
     mkdirSync(dirname(lock), { recursive: true });
-    writeFileSync(lock, String(process.pid));
+    writeFileSync(lock, String(process.pid), { flag: "wx" }); // atomic: of two status lines at once, one refreshes
     spawn(process.execPath, ["--no-env-file", "--config=/dev/null", import.meta.path, "--refresh"],
       { detached: true, stdio: "ignore", cwd: process.cwd() }).unref();
   } catch {
@@ -253,7 +259,7 @@ export function statusLine(snap: Obj | null, ageSeconds: number | null, ttl: num
 }
 
 function status(): number {
-  const ttl = toFloat(process.env.FACTORY_COCKPIT_CACHE_SECONDS || 60) ?? 60;
+  const ttl = toFloat(process.env.FACTORY_COCKPIT_CACHE_SECONDS || 300) ?? 300;
   const snap = readCache();
   const at = snap ? parseIso(str(snap.generatedAt)) : null;
   const age = at === null ? null : Math.max(Date.now() / 1000 - at, 0);
