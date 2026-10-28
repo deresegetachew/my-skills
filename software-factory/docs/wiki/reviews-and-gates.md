@@ -159,7 +159,10 @@ into the git folder, read-only, at `<git folder>/factory-hooks/<content hash>/ho
 settings it passes names those files instead of `"$CLAUDE_PROJECT_DIR"/.claude/hooks/`. So an agent that puts back an
 older gate in its worktree (`git checkout <old> -- .claude/hooks/pr-gate.ts`, `git switch --detach <old>`) does not
 run it. The next start reuses the unpacked copy when it is unchanged and puts it back when it is not; copies unused for
-7 days are removed. When the hooks can't be unpacked, no session starts (`hooks_not_unpacked`, with the fix). The
+7 days are removed. Every file main has there is read (a failed read is tried twice more); when one still can't be
+read, no session starts (`hooks_not_read`), so a copy with a file missing is never used. Each start writes its own
+copy and moves it into place in one step, so several agents starting at once on one clone share one complete copy.
+When the hooks can't be unpacked, no session starts (`hooks_not_unpacked`, with the fix). The
 agents' settings also deny restoring `.claude/` paths from history (`git checkout|restore|reset … .claude…`,
 `git checkout-index`, `git read-tree`) and any command that names `factory-hooks`. To remove the unpacked copies by
 hand: `chmod -R u+w "$(git rev-parse --git-common-dir)/factory-hooks" && rm -rf "$(git rev-parse --git-common-dir)/factory-hooks"`.
