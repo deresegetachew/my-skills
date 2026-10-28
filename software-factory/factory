@@ -103,6 +103,9 @@ Look
   messages [ls|new]      questions and answers between agents, the dev manager and the PO: ls [--to X] [--state S]
                          [--ref N] lists what is open across issues and PRs; new --kind question --to po prints the
                          envelope to paste at the top of a comment (docs/messages.md)
+  alerts check|watch [--every S]
+                         a terminal bell and a desktop notice (osascript, notify-send) once per new owner-queue ask;
+                         watch looks every S seconds (60) in this terminal. Without a notifier the bell still rings
   issues [list]          tasks as GitHub issues (tasks.source "issues"): list, show N, stale, setup, new ...
 
 Check
@@ -281,6 +284,7 @@ case "$cmd" in
   follow|say|remote)  fh "$hooks/factory_follow" "$cmd" "$@" ;;
   agents)    fh "$hooks/factory_agents" "${1:-list}" "${@:2}" ;;
   messages)  fh "$hooks/factory_messages" "${1:-ls}" "${@:2}" ;;
+  alerts)    fh "$hooks/factory_alerts" "${1:-check}" "${@:2}" ;;
   heartbeat) fh "$hooks/factory_heartbeat" "${1:-status}" "${@:2}" ;;
   next)      fh "$hooks/next_task" --note "$@" ;;
   autostart) fh "$hooks/factory_autostart" "$@" ;;
