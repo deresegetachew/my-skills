@@ -128,7 +128,7 @@ Check
                          privileged runs unless you pass --apply; sign-ins and the age key stay yours
 
 CI                       local (a self-hosted runner on this machine) or GitHub's runners; names from the project
-  ci status              where CI runs, the latest runs on main and open PRs, and the local runner if any
+  ci status [--json]     where CI runs, the latest runs on main and open PRs, and the local runner if any (--json: as data)
   ci use local|github    send CI jobs to the self-hosted runners (labels <repo>-local and <repo>-light), or back
   ci log <pr or run>     the failed job's log, trimmed to the failing step (read-only): why did my CI fail?
   ci stale | check       are the installed runner copies older than the checkout / fit to start (update runs both)

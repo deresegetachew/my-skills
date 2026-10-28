@@ -368,7 +368,8 @@ test("status --json on github's runners with no runner installed", () => {
   expect(runs.map((r) => [r.ref, r.branch, r.state, r.name])).toEqual([["main", "main", "success", "CI"], ["#12", "feat", "failure", "CI"]]);
   expect(typeof runs[0]?.createdAt).toBe("string");
   expect(runs[0]?.minutesAgo).toBe(10);
-  expect([j.instances, j.runners, j.docker, j.light, j.errors]).toEqual([[], [], null, null, []]);
+  expect([j.instances, j.runners, j.docker, j.errors]).toEqual([[], [], null, []]);
+  expect(j.light).toEqual({ label: "widget-light", variableSet: false, runners: [], noneOnline: true });
   expect(j.queuedLong).toEqual({ count: 0, longestMinutes: 0, thresholdMinutes: 15, noRunnerOnline: false });
   lacks(out, "Mode:", "CI runs (latest");
 });
@@ -385,7 +386,8 @@ test("status --json on a local runner lists the instance the runners and a stuck
   const [rc, j, out] = ciJson(d, env);
   expect(rc, out).toBe(0);
   expect([j.mode, j.runsOn, j.docker]).toEqual(["local", '["self-hosted","widget-local"]', true]);
-  expect(j.instances).toEqual([{ id: "1", name: "widget-ci", state: "running", manager: "launchd", pid: 4242 }]);
+  expect(j.instances).toEqual([{ id: "1", name: "widget-ci", state: "running", manager: "launchd", pid: 4242 },
+    { id: "light", name: "widget-ci-light", state: "running", manager: "launchd", pid: 4242 }]);
   expect(j.runners).toEqual([{ name: "widget-ci-other-1", status: "offline", busy: false }]);
   expect((j.runs as Json[]).map((r) => [r.ref, r.state])).toEqual([["#12", "queued"]]);
   const q = j.queuedLong as Json;
@@ -634,6 +636,23 @@ test("linux without a user manager stops before touching anything", () => {
   const calls = log(db, "systemctl").split("\n").filter((l) => l);
   expect(calls.length).toBeGreaterThan(0);
   expect(calls.every((c) => c === "--user show-environment"), calls.join("\n")).toBe(true);
+});
+
+test("linux status --json names the systemd service and a missing user manager is a code message fix", () => {
+  const { d, db, env } = linuxProject();
+  expect(ci(d, env, "install")[0]).toBe(0);
+  update(db, { vars: { CI_RUNS_ON: '["self-hosted","widget-local"]' } });
+  runsAndPulls(db, [run("main")], [], []);
+  const [rc, j, out] = ciJson(d, env);
+  expect(rc, out).toBe(0);
+  expect((j.instances as Json[])[0]).toEqual({ id: "1", name: "widget-ci", state: "running", manager: "systemd", pid: 4343 });
+  writeFileSync(join(binOf(env), "systemctl"), NO_BUS);
+  const p = sh(["bash", CI, "status", "--json"], { cwd: d, env, timeoutMs: 120_000 });
+  expect(p.code).toBe(1);
+  expect(p.stdout).toBe("");
+  const e = JSON.parse(p.stderr.trim()) as Json;
+  expect(e.code).toBe("no_user_manager");
+  expect(String(e.fix)).toContain("enable-linger");
 });
 
 test("linux install starts the loop once and escapes the unit", () => {

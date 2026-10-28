@@ -5,6 +5,10 @@
 //   bun ci_status.ts --repo owner/name --label remanual-local [--local] [--now 2026-10-22T12:00:00Z]
 //
 // Reads GitHub through `gh api`. Prints plain lines; exit 0 even when GitHub can't be read (it says so).
+//
+// --json (#304, `factory ci status --json`): one object instead, with what ci.sh knows passed in (--mode, --runs-on,
+// --docker 1|0, --instance id:name:state:manager:pid for each local runner). What GitHub can't answer is null, with
+// a {code, message, fix} in "errors"; still exit 0.
 
 // Self-contained (no import from ../hooks): ci.sh runs it from wherever its own folder is, alone.
 
@@ -74,13 +78,19 @@ interface Args {
   lightLabel: string | null;
   lightVariableSet: boolean;
   now: string | null;
+  json: boolean;
+  mode: string;
+  runsOn: string | null;
+  docker: boolean | null;
+  instances: string[];
 }
 
 const USAGE = "usage: ci_status.ts [-h] --repo REPO --label LABEL [--local] [--light-label LIGHT_LABEL] " +
-  "[--light-variable-set] [--now NOW]";
+  "[--light-variable-set] [--now NOW] [--json [--mode MODE] [--runs-on VALUE] [--docker 1|0] [--instance SPEC]...]";
 
 function parse(argv: string[]): Args {
-  const a: Partial<Args> = { local: false, lightLabel: null, lightVariableSet: false, now: null };
+  const a: Partial<Args> = { local: false, lightLabel: null, lightVariableSet: false, now: null, json: false,
+    mode: "unknown", runsOn: null, docker: null, instances: [] };
   const err = (msg: string): never => {
     process.stderr.write(`${USAGE}\nci_status.ts: error: ${msg}\n`);
     return die(2);
@@ -104,6 +114,11 @@ function parse(argv: string[]): Args {
     else if (t === "--light-label") a.lightLabel = take();
     else if (t === "--light-variable-set") a.lightVariableSet = true;
     else if (t === "--now") a.now = take();
+    else if (t === "--json") a.json = true;
+    else if (t === "--mode") a.mode = take();
+    else if (t === "--runs-on") a.runsOn = take();
+    else if (t === "--docker") a.docker = take() === "1";
+    else if (t === "--instance") (a.instances as string[]).push(take());
     else if (t === "-h" || t === "--help") {
       console.log(USAGE);
       die(0);
@@ -122,9 +137,92 @@ function runnerLine(x: Row): string {
   return `  ${String(x.name)}: ${String(x.status)}${x.busy ? ", busy" : ""}`;
 }
 
+/** Branch -> how it is shown: the default branch is "main", an open pull request's head is "#<number>". */
+function branchesOf(repo: unknown, pulls: unknown): Map<string, string> {
+  const mainBranch = isRow(repo) && "default_branch" in repo ? String(repo.default_branch) : "main";
+  const branches = new Map<string, string>([[mainBranch, "main"]]);
+  for (const p of rows(pulls)) branches.set(String((p.head as Row).ref), `#${String(p.number)}`);
+  return branches;
+}
+
+/** The newest run on each of those branches (GitHub lists the newest first). */
+function latestPerBranch(workflowRuns: Row[], branches: Map<string, string>): Map<string, Row> {
+  const latest = new Map<string, Row>();
+  for (const r of workflowRuns) {
+    const b = r.head_branch;
+    if (typeof b === "string" && branches.has(b) && !latest.has(b)) latest.set(b, r);
+  }
+  return latest;
+}
+
+function queuedLong(workflowRuns: Row[], now: number): Row[] {
+  const queued = workflowRuns.filter((r) => ["queued", "waiting", "pending"].includes(String(r.status)));
+  return queued.filter((r) => now - when(r.created_at) >= QUEUED_LONG_MIN * 60);
+}
+
+type Problem = { code: string; message: string; fix: string };
+
+function runnerData(x: Row): Row {
+  return { name: String(x.name), status: String(x.status), busy: Boolean(x.busy) };
+}
+
+/** "1:widget-ci:running:launchd:4242" -> {id, name, state, manager, pid}; an empty field is null. */
+function instanceData(spec: string): Row {
+  const [id = "", name = "", state = "", manager = "", pid = ""] = spec.split(":");
+  return { id, name, state, manager: manager || null, pid: pid ? Number(pid) : null };
+}
+
+function statusJson(a: Args, now: number): Row {
+  const errors: Problem[] = [];
+  if (a.mode === "unknown") {
+    errors.push({ code: "runs_on_unreadable", message: `gh can't read the repository variable CI_RUNS_ON; it needs admin on ${a.repo}.`,
+      fix: "Run `gh auth status` to check the login, and use an account with admin on the repository." });
+  }
+  const runs = gh(`repos/${a.repo}/actions/runs?per_page=50`);
+  const pulls = gh(`repos/${a.repo}/pulls?state=open&per_page=100`);
+  const repo = gh(`repos/${a.repo}`);
+  const runnersRaw = gh(`repos/${a.repo}/actions/runners?per_page=100`);
+  const runnersData = runnersRaw === null ? null : isRow(runnersRaw) ? runnersRaw : {};
+  if (runnersData === null) {
+    errors.push({ code: "runners_unreadable", message: "The runners on GitHub can't be read (it needs admin on the repository).",
+      fix: "Run `gh auth status`, and use an account with admin on the repository." });
+  }
+  const mine = runnersData === null ? null : listRunners(runnersData, a.label);
+  let light: Row | null = null;
+  if (a.lightLabel && runnersData !== null) {
+    const lightRunners = listRunners(runnersData, a.lightLabel);
+    light = { label: a.lightLabel, variableSet: a.lightVariableSet, runners: lightRunners.map(runnerData),
+      noneOnline: !lightRunners.some((x) => x.status === "online") };
+  }
+  let latestRuns: Row[] | null = null;
+  let queued: Row | null = null;
+  if (runs === null || pulls === null) {
+    errors.push({ code: "github_unreadable", message: "GitHub can't be read right now (gh offline or logged out).",
+      fix: "Run `gh auth status` (and `gh auth login` if it says so), then `factory ci status --json` again." });
+  } else {
+    const branches = branchesOf(repo, pulls);
+    const workflowRuns = isRow(runs) ? rows(runs.workflow_runs) : [];
+    latestRuns = [...latestPerBranch(workflowRuns, branches)].map(([b, r]) => ({
+      ref: branches.get(b) as string, branch: b, state: String(r.conclusion || r.status), name: String(r.name ?? ""),
+      createdAt: String(r.created_at), minutesAgo: minutesSince(when(r.created_at), now),
+    }));
+    const old = queuedLong(workflowRuns, now);
+    const online = mine === null ? null : mine.filter((x) => x.status === "online");
+    queued = { count: old.length, longestMinutes: old.length ? Math.max(...old.map((r) => minutesSince(when(r.created_at), now))) : 0,
+      thresholdMinutes: QUEUED_LONG_MIN, noRunnerOnline: a.mode === "local" && online !== null && online.length === 0 };
+  }
+  return { mode: a.mode, runsOn: a.runsOn, repo: a.repo, label: a.label, instances: a.instances.map(instanceData),
+    docker: a.docker, runs: latestRuns, runners: mine === null ? null : mine.map(runnerData), light, queuedLong: queued,
+    errors };
+}
+
 function main(argv: string[]): number {
   const a = parse(argv);
   const now = a.now ? when(a.now) : nowSeconds();
+  if (a.json) {
+    console.log(JSON.stringify(statusJson(a, now), null, 2));
+    return 0;
+  }
 
   const runs = gh(`repos/${a.repo}/actions/runs?per_page=50`);
   const pulls = gh(`repos/${a.repo}/pulls?state=open&per_page=100`);
@@ -133,15 +231,9 @@ function main(argv: string[]): number {
     console.log("CI runs: GitHub can't be read right now (gh offline or logged out).");
     return 0;
   }
-  const mainBranch = isRow(repo) && "default_branch" in repo ? String(repo.default_branch) : "main";
-  const branches = new Map<string, string>([[mainBranch, "main"]]);
-  for (const p of rows(pulls)) branches.set(String((p.head as Row).ref), `#${String(p.number)}`);
+  const branches = branchesOf(repo, pulls);
   const workflowRuns = isRow(runs) ? rows(runs.workflow_runs) : [];
-  const latest = new Map<string, Row>();
-  for (const r of workflowRuns) {
-    const b = r.head_branch;
-    if (typeof b === "string" && branches.has(b) && !latest.has(b)) latest.set(b, r);
-  }
+  const latest = latestPerBranch(workflowRuns, branches);
   console.log("CI runs (latest per branch):");
   if (!latest.size) console.log("  none on main or on open pull requests");
   for (const [b, r] of latest) {
@@ -150,8 +242,7 @@ function main(argv: string[]): number {
       ago(when(r.created_at), now));
   }
 
-  const queued = workflowRuns.filter((r) => ["queued", "waiting", "pending"].includes(String(r.status)));
-  const old = queued.filter((r) => now - when(r.created_at) >= QUEUED_LONG_MIN * 60);
+  const old = queuedLong(workflowRuns, now);
   let online: Row[] | null = null;
   if (a.local) {
     const raw = gh(`repos/${a.repo}/actions/runners?per_page=100`);
