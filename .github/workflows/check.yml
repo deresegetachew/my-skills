@@ -2,14 +2,50 @@ name: Check skills
 
 on:
   pull_request:
+    # labeled/unlabeled: the dev manager's `tests-reviewed` / `deps-reviewed` labels re-run the Factory guard.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
+
+concurrency:
+  # A label change re-runs only the Factory guard, in its own group so it can't cancel a code run.
+  group: ci-${{ github.ref }}-${{ contains(fromJSON('["labeled","unlabeled"]'), github.event.action) && 'label' || 'code' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
 jobs:
+  guard:
+    # The factory guard, as the kit's CI runs it in a project: test and golden-file edits, skips, new dependencies,
+    # decision numbers, task ticks. The dev manager clears reviewable findings with the `tests-reviewed` /
+    # `deps-reviewed` labels.
+    name: Factory guard
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4"
+      - env:
+          # Passed through env, never inlined into the script: branch names and labels are untrusted text.
+          BASE: ${{ github.base_ref }}
+          BRANCH: ${{ github.head_ref }}
+          LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+        # The guard runs from the base branch's checkout, never the pull request's, so a pull request can't change how
+        # it runs; --config=/dev/null keeps a bunfig.toml (its preload) out of it (#259).
+        run: |
+          git worktree add -q --detach "$RUNNER_TEMP/factory-base" "origin/$BASE"
+          bun --no-env-file --config=/dev/null "$RUNNER_TEMP/factory-base/.claude/hooks/factory_guard.ts" \
+            --base "origin/$BASE" --branch "$BRANCH" --labels "$LABELS"
+
   check:
+    name: Typecheck, lint, test, build
+    if: ${{ !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
