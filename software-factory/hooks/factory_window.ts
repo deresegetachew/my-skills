@@ -18,7 +18,7 @@
 //       removed once read, so neither the prompt nor the environment is on tmux's command line) names the command,
 //       its environment, the log and where the exit code goes. claude's stream-json output is shown as readable lines,
 //       in the window and in the log.
-import { appendFileSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { load, toFloat } from "./factory_config.ts";
 import { freeNames } from "./factory_claims.ts";
@@ -229,8 +229,9 @@ async function job(file: string): Promise<number> {
     rc = await p.exited;
   } catch (e) {
     show(`could not start ${j.argv[0]}: ${e instanceof Error ? e.message : String(e)}\n`);
-  } finally {
-    writeFileSync(j.rc, String(rc));
+  } finally { // the orchestrator reads the file once it exists: write it whole
+    writeFileSync(j.rc + ".tmp", String(rc));
+    renameSync(j.rc + ".tmp", j.rc);
   }
   return rc;
 }
