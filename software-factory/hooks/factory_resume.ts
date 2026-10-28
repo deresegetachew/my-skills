@@ -28,7 +28,8 @@ import { agentName, agentSlot, type Config, load, taskLabels, taskSource, toFloa
 import { findIssue } from "./factory_agents.ts";
 import { comment, taskIssues } from "./factory_issues.ts";
 import { autostartSettings, configDir, machineId, repoKey, stateDir } from "./factory_machine.ts";
-import { bunCmd, Exit, type RunResult, run as runProc, runMain, shQuote, sleepSync, splitLines, which } from "./factory_lib.ts";
+import { bunCmd, Exit, type RunResult, run as runProc, runMain, sleepSync, splitLines, which } from "./factory_lib.ts";
+import { running, sessionName, startWindow, WindowError } from "./factory_window.ts";
 
 const HOOKS = import.meta.dir;
 export const SETTINGS_FIX = "run `git submodule update --init` there, or `bash vendor/my-skills/software-factory/install.sh . " +
@@ -47,9 +48,7 @@ export function mainTop(): string {
   return dirname(resolve(p.stdout.trim()));
 }
 
-export function sessionName(agent: string): string {
-  return `${repoKey()}-${agent}`.replace(/[^A-Za-z0-9_-]+/g, "-");
-}
+export { sessionName };
 
 /** Where agent `agent` works: the project folder for the first name, else <project>-agents/<name>. */
 export function agentPath(cfg: Config, top: string, agent: string): string {
@@ -300,7 +299,7 @@ interface Ctx {
 
 function startAgent(cfg: Config, top: string, agent: string, report: Report, ctx: Ctx): void {
   const name = sessionName(agent);
-  if (runProc(["tmux", "has-session", "-t", `=${name}`]).code === 0) {
+  if (running(name)) {
     report.add(`agent ${agent}: already running (tmux session ${name}), left alone`);
     return;
   }
@@ -358,11 +357,16 @@ function startAgent(cfg: Config, top: string, agent: string, report: Report, ctx
     env.FACTORY_RESUME_NOTE = note;
   }
   Object.assign(env, ctx.carry);
-  const command = "exec env " + Object.entries(env).map(([k, v]) => shQuote(`${k}=${v}`)).join(" ") + " " +
-    shQuote(join(top, "factory")) + " loop -i";
-  const p = run(["tmux", "new-session", "-d", "-s", name, "-c", top, command], top, 60);
-  if (p.code !== 0 || runProc(["tmux", "has-session", "-t", `=${name}`]).code !== 0) {
-    report.add(`agent ${agent}: NOT started: tmux could not start the session: ${lastLine(p.stderr, "no session")}`, true);
+  try { // the one step every session starts through (#300): its own window, coding-agent-<name>
+    const s = startWindow({ role: "coding-agent", name: agent, dir: top, argv: [join(top, "factory"), "loop", "-i"], env });
+    if (s.note) report.add(`agent ${agent}: ${s.note}`);
+    if (!s.started) {
+      report.add(`agent ${agent}: already running (tmux session ${name}), left alone`);
+      return;
+    }
+  } catch (e) {
+    if (!(e instanceof WindowError)) throw e;
+    report.add(`agent ${agent}: NOT started: ${e.message} ${e.fix}`, true);
     return;
   }
   ctx.started.push(agent);

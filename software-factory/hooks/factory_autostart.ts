@@ -23,7 +23,8 @@ import { dirname, join } from "node:path";
 import { type Config, load } from "./factory_config.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
 import { autostartSettings, checkedNames, namesFile, refuse, repoKey, saveMachineSettings, stateDir } from "./factory_machine.ts";
-import { agentPath, inspect, mainTop, SETTINGS_FIX, sessionName } from "./factory_resume.ts";
+import { agentPath, inspect, mainTop, SETTINGS_FIX } from "./factory_resume.ts";
+import { running as sessionRunning, sessionName } from "./factory_window.ts";
 import { plistDumps, pyRepr, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
 
 export function platform(): "mac" | "linux" {
@@ -287,7 +288,7 @@ function describe(cfg: Config, top: string, agent: string): void {
   if (info.branch) work.push(`on ${info.branch}`);
   if (info.changes.length) work.push(plural(info.changes.length, "uncommitted file"));
   if (info.unpushed.length) work.push(plural(info.unpushed.length, "unpushed commit"));
-  const running = which("tmux") ? runProc(["tmux", "has-session", "-t", `=${sessionName(agent)}`]).code === 0 : false;
+  const running = which("tmux") ? sessionRunning(sessionName(agent)) : false;
   console.log(`  ${agent}: ${where}`);
   console.log(`    ${work.length ? work.join(", ") : "clean, nothing to protect"}` +
     (info.changes.length || info.unpushed.length ? " -> a backup is saved first, then it resumes in place" : ""));

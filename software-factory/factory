@@ -25,6 +25,20 @@ for (const p of k.split(".")) v = v !== null && typeof v === "object" && !Array.
 console.log(v === undefined ? d : typeof v === "string" ? v : JSON.stringify(v));' "$@"
 }
 main() { setting mainBranch main; }
+# `loop -i` on a terminal starts in its own tmux window (#300), through the one step `factory resume` uses too, and
+# shows it here. Inside that window (FACTORY_WINDOW), without a terminal (scripts, tests) or with --dry-run it runs
+# in place. Without tmux it runs in place too, with a note: only the cockpit needs tmux (#295).
+# Usage: to_window <role> <name or ""> <loop arguments>; it returns only when the loop runs here.
+to_window() {
+  local r="$1" n="$2" a i=0; shift 2
+  for a in "$@"; do case "$a" in -i|--interactive) i=1 ;; --dry-run) return 0 ;; esac; done
+  [ "$i" = 1 ] && [ -z "${FACTORY_WINDOW:-}" ] && [ -t 0 ] && [ -t 1 ] || return 0
+  command -v tmux >/dev/null 2>&1 || {
+    echo "Note: tmux is not installed, so the loop runs here. With tmux it would run in its own tmux window."
+    return 0
+  }
+  fh "$hooks/factory_window" loop --role "$r" ${n:+--name "$n"} -- "$@"; exit $?
+}
 
 usage() {
   cat <<'EOF'
@@ -34,7 +48,10 @@ Build
   loop [-i] [N]          start a coding agent loop: one fresh Claude run per task (-i: a session you can type into,
                          which closes by itself when the task is done). Start it again in another terminal for more agents.
                          FACTORY_AGENTS=haile,tewodros (or factory machine setup): only those names on this machine.
-                         `loop -i` in a terminal asks which role and name; `loop -i dev-manager` or FACTORY_ROLE skips it
+                         `loop -i` in a terminal asks which role and name; `loop -i dev-manager` or FACTORY_ROLE skips it.
+                         On a terminal `loop -i` runs in its own tmux window (session <repo>-<name>, window
+                         <role>-<name>) and shows it here; a second start of the same name says so and only shows it.
+                         Without tmux it runs here, with a note
   coding-agent [name|N] loop [-i] [--once] [--dry-run] [N]
   dev-manager  [name|N] loop [-i] [--once] [--dry-run]
   product-owner [name|N] loop [-i] [--once] [--dry-run]
@@ -233,9 +250,11 @@ case "$cmd" in
     if [ -z "$want" ] && [ "$asks" = 1 ] && [ -t 0 ] && [ -t 2 ]; then
       pick="$(fh "$hooks/factory_roles" choose)" || exit 1
       read -r want pickname <<< "$pick"
+      to_window "$want" "$pickname" ${rest[@]+"${rest[@]}"}
       exec env FACTORY_ROLE="$want" FACTORY_NAME="$pickname" "$root/factory-loop.sh" ${rest[@]+"${rest[@]}"}
     fi
     [ -n "$want" ] && export FACTORY_ROLE="$want"
+    to_window "${want:-coding-agent}" "${FACTORY_NAME:-}" ${rest[@]+"${rest[@]}"}
     exec "$root/factory-loop.sh" ${rest[@]+"${rest[@]}"} ;;
   coding-agent|dev-manager|product-owner)
     role="$cmd"; who=""
@@ -243,6 +262,7 @@ case "$cmd" in
     [ "${1:-}" = loop ] || { echo "usage: factory $role [name|N] loop [-i] [--once] [--dry-run]" >&2; exit 1; }
     shift
     case "$who" in ''|*[!0-9]*) ;; *) who="$(fh "$hooks/factory_roles" nth "$role" "$who")" || exit 1 ;; esac
+    to_window "$role" "$who" "$@"
     exec env FACTORY_ROLE="$role" FACTORY_NAME="$who" "$root/factory-loop.sh" "$@" ;;
   init)      fh "$hooks/factory_init" "$@" ;;
   init-roles) fh "$hooks/factory_roles" init "$@" ;;
