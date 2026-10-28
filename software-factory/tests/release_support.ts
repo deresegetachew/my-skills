@@ -6,8 +6,9 @@ import { createHash } from "node:crypto";
 import { chmodSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { dirname, join, relative } from "node:path";
+import { gunzipSync } from "node:zlib";
 import { build } from "../../tools/build_release.ts";
-import { gzipFixed, tarCreate, type TarInput } from "../hooks/factory_tar.ts";
+import { gzipFixed, tarCreate, tarEntries, type TarInput } from "../hooks/factory_tar.ts";
 import { git as gitOk, HOOKS, sh, tmp } from "./support.ts";
 
 export const CLIENT = join(HOOKS, "factory_release.ts");
@@ -77,6 +78,37 @@ export function buildRelease(version: string, files: Record<string, string | nul
   return out;
 }
 
+/** Install rules to put in a built release's MANIFEST.json (#278): {path: [kind, target] | null}, or "none" to take
+ * every rule out (a release built before the manifest carried them). */
+export type InstallRules = Record<string, [string, string] | null> | "none";
+
+/** Rewrite a built release's MANIFEST.json with these install rules, as a release built with other rules would carry
+ * them, and its SHA256SUMS to match. */
+export function setInstall(dist: string, version: string, install: InstallRules): void {
+  const name = `software-factory-${version}.tar.gz`;
+  const path = join(dist, name);
+  const items: TarInput[] = [];
+  for (const m of tarEntries(new Uint8Array(gunzipSync(readFileSync(path))))) {
+    if (m.kind !== "file") continue;
+    let data = m.data;
+    if (m.name.endsWith("/MANIFEST.json")) {
+      const doc = JSON.parse(new TextDecoder().decode(data)) as { files: Record<string, unknown>[] };
+      for (const f of doc.files) {
+        if (install === "none") delete f.install;
+        else if (String(f.path) in install) {
+          const r = install[String(f.path)];
+          f.install = r ? { kind: r[0], to: r[1] } : null;
+        }
+      }
+      data = new TextEncoder().encode(JSON.stringify(doc, null, 2) + "\n");
+    }
+    items.push({ name: m.name, mode: m.mode, data });
+  }
+  const gz = gzipFixed(tarCreate(items));
+  writeFileSync(path, gz);
+  writeFileSync(join(dist, "SHA256SUMS"), `${createHash("sha256").update(gz).digest("hex")}  ${name}\n`);
+}
+
 interface FakeRelease {
   tag: string;
   date: string;
@@ -119,12 +151,13 @@ export class FakeGitHub {
   }
 
   add(version: string, o: { files?: Record<string, string | null>; date?: string; notes?: string; pre?: boolean;
-    assets?: Record<string, Uint8Array> } = {}): string {
+    assets?: Record<string, Uint8Array>; install?: InstallRules } = {}): string {
     const tag = "v" + version;
     let dist = "";
     if (o.assets) this.assets[tag] = o.assets;
     else {
       dist = buildRelease(version, o.files);
+      if (o.install) setInstall(dist, version, o.install);
       this.assets[tag] = Object.fromEntries(readdirSync(dist).map((n) => [n, new Uint8Array(readFileSync(join(dist, n)))]));
     }
     const body = o.notes ?? `Software factory ${tag}.\n\nChanges:\n\n- change in ${version} (abc${version.replace(/\./g, "")})\n`;

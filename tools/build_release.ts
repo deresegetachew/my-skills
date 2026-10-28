@@ -13,11 +13,15 @@
 //   SHA256SUMS                          `sha256sum -c` format, for the archive
 // Tracked symlinks are stored as regular files with their target's content and mode: the archive holds no links, so
 // unpacking it never depends on symlink support. The archive holds MANIFEST.json (schema, version, source commit,
-// every file with sha256, size, mode).
+// every file with sha256, size, mode, and where a project gets it: install {kind, to}, or null for a file not
+// installed). The rules are the classify() beside this builder (the checkout it builds, unless --root says another), so a
+// client installs a release by that release's own rules, even when the client is older and would put a new file
+// elsewhere (#278).
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { FactoryError, pyDumps, run } from "../software-factory/hooks/factory_lib.ts";
+import { classify } from "../software-factory/hooks/factory_release.ts";
 import { gzipFixed, tarCreate, type TarInput } from "../software-factory/hooks/factory_tar.ts";
 
 const SCHEMA = "factory-release/1";
@@ -118,12 +122,13 @@ export function build(root: string, outDir: string, tag?: string | null): Built 
   const commit = git(root, "rev-parse", "HEAD").trim();
   const top = `${SRC}-${version}`;
   const entries: TarInput[] = [];
-  const manifestFiles: { path: string; sha256: string; size: number; mode: string }[] = [];
+  const manifestFiles: { path: string; sha256: string; size: number; mode: string; install: { kind: string; to: string } | null }[] = [];
   for (const [path, mode, source] of releaseFiles(root)) {
     const data = new Uint8Array(readFileSync(join(root, source)));
     const rel = path.slice(SRC.length + 1);
     entries.push({ name: `${top}/${rel}`, mode, data });
-    manifestFiles.push({ path: rel, sha256: sha256(data), size: data.length, mode: mode.toString(8) });
+    const rule = classify(rel);
+    manifestFiles.push({ path: rel, sha256: sha256(data), size: data.length, mode: mode.toString(8), install: rule ? { kind: rule[0], to: rule[1] } : null });
   }
   const manifest = { schema: SCHEMA, name: SRC, version, tag: "v" + version, source_commit: commit, files: manifestFiles };
   entries.push({ name: `${top}/MANIFEST.json`, mode: 0o644,

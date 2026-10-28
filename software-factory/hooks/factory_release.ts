@@ -486,7 +486,9 @@ export interface Manifest {
   schema?: unknown;
   version?: unknown;
   source_commit?: unknown;
-  files: { path: string; sha256?: unknown }[];
+  /** `install` (#278): where the release's own rules put the file, {kind, to}, or null for a file not installed. A
+   * release built before #278 has none, and this client's classify() decides. */
+  files: { path: string; sha256?: unknown; install?: unknown }[];
 }
 
 function unsafe(message: string): FactoryError {
@@ -561,14 +563,17 @@ export function readManifest(files: Files, version: string): Manifest {
   for (const [rel, e] of listed) {
     if (sha256Bytes((files.get(rel) as [Uint8Array, number])[0]) !== e.sha256) throw badArchive(`${rel} does not match the checksum in MANIFEST.json.`);
   }
-  return manifest as unknown as Manifest;
+  const checked = manifest as unknown as Manifest;
+  plan(files, checked); // every install rule is read and checked before anything is written
+  return checked;
 }
 
 // --- what goes where in a project --------------------------------------------------------------------------------------
 
 /** ["engine", target] for what the factory owns in a project, ["template", target] for what a project fills in and is
  * only given on a first install, null for what is not installed (docs, the installer, and the kit/ forwarders that
- * releases before #176 still carry). */
+ * releases before #176 still carry). tools/build_release.ts writes these rules into each release's MANIFEST.json, and
+ * plan() follows the manifest's rules first (#278). */
 export function classify(rel: string): ["engine" | "template", string] | null {
   if (rel === "factory" || rel === "factory-loop.sh") return ["engine", rel];
   for (const [src, dst] of [["hooks/", ".claude/hooks/"], ["ci/", ".claude/ci/"]] as const) {
@@ -590,12 +595,48 @@ export function classify(rel: string): ["engine" | "template", string] | null {
   return null;
 }
 
-export function plan(files: Files): [Map<string, string>, Map<string, string>] {
+export type Rule = ["engine" | "template", string] | null;
+
+function badRule(rel: string, why: string): FactoryError {
+  return new FactoryError("unsafe_archive", `MANIFEST.json ${why} for ${rel}.`,
+    "do not install this release; tell the owner, who can cut it again. Nothing was changed.");
+}
+
+/** A manifest's install rule for `rel` (#278), checked: an engine file goes only where the factory's own files live
+ * (`factory`, `factory-loop.sh`, `.claude/` but not the project's `.claude/factory.json` or the pin), a template
+ * anywhere inside the project but `.git/` and the pin. A release can say where a file goes, never outside those. */
+export function installRule(rel: string, raw: unknown): Rule {
+  if (raw === null) return null;
+  const o = obj(raw);
+  const kind = o?.kind;
+  const to = o?.to;
+  if (!o || (kind !== "engine" && kind !== "template") || typeof to !== "string") {
+    throw badRule(rel, "has an install rule this client cannot read");
+  }
+  const parts = to.split("/");
+  if (to.startsWith("/") || to.includes("\\") || parts.some((p) => p === "" || p === "." || p === "..") || parts[0] === ".git" ||
+    to === PIN_PATH) {
+    throw badRule(rel, `would install a file at '${to}', outside what a release may write`);
+  }
+  if (kind === "engine" && !(to === "factory" || to === "factory-loop.sh" || (to.startsWith(".claude/") && to !== ".claude/factory.json"))) {
+    throw badRule(rel, `would make '${to}' a factory file; the factory owns only factory, factory-loop.sh and .claude/`);
+  }
+  return [kind, to];
+}
+
+/** [engine target -> archive path, template target -> archive path]. The release's manifest says where each file goes
+ * (#278), so a release that adds a file in a new place is installed by its own rules, not those of the older client
+ * that runs the update; a file the manifest gives no rule (a release built before #278) goes by classify(). */
+export function plan(files: Files, manifest?: Manifest): [Map<string, string>, Map<string, string>] {
+  const rules = new Map<string, unknown>();
+  for (const f of manifest?.files ?? []) if (obj(f) && "install" in f) rules.set(String(f.path), f.install);
   const engine = new Map<string, string>();
   const templates = new Map<string, string>();
   for (const rel of [...files.keys()].sort()) {
-    const c = classify(rel);
-    if (c) (c[0] === "engine" ? engine : templates).set(c[1], rel);
+    const c = rules.has(rel) ? installRule(rel, rules.get(rel)) : classify(rel);
+    if (!c) continue;
+    if (rules.size && (engine.has(c[1]) || templates.has(c[1]))) throw badRule(rel, `sends two files to ${c[1]}`);
+    (c[0] === "engine" ? engine : templates).set(c[1], rel);
   }
   return [engine, templates];
 }
@@ -862,7 +903,7 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
  * back on a failure); any other link, and a link in a parent folder, still refuses. */
 export async function installFiles(root: string, files: Files, manifest: Manifest, tag: string, archiveSha: string,
   oldPin: Pin | null, repo: string, migrate = false, tasks: string | null = null): Promise<Installed> {
-  const [engine, templates] = plan(files);
+  const [engine, templates] = plan(files, manifest);
   const targets = [...engine.keys()].sort();
   for (const target of targets) {
     if (migrate && isLink(join(root, target)) && !isSymlinked(root, dirname(target)) && intoSubmodule(root, target)) continue;
@@ -1327,7 +1368,7 @@ async function cmdMigrate(args: Args): Promise<number> {
   const [archive] = await fetchArchive(repo, tag, release, null);
   const [files, manifest] = unpack(archive, tag);
   const installed = await installFiles(root, files, manifest, tag, sha256File(archive), null, repo, true);
-  const [engine] = plan(files);
+  const [engine] = plan(files, manifest);
   // #258: a link to the kit's old rules file would give the agents' rules to every session here; the release's
   // .claude/factory/settings.json replaces it. Only the link goes: the submodule is never written through.
   const legacy = links.includes(LEGACY_SETTINGS) && engine.has(AGENT_SETTINGS) && !engine.has(LEGACY_SETTINGS);
@@ -1368,6 +1409,17 @@ async function cmdMigrate(args: Args): Promise<number> {
   return 0;
 }
 
+/** The errors that only mean the release could not be fetched now: an update on the same release then still says it
+ * is installed, as it did before #278, and names what it could not check. */
+const OFFLINE_CODES = ["no_network", "rate_limited", "http_error", "download_interrupted", "no_such_release", "incomplete_release"];
+
+/** Engine files the release ships (by its own plan) that the pin does not list or the project does not have (#278). */
+export function notInstalled(root: string, pin: Pin, files: Files, manifest: Manifest): string[] {
+  const [engine] = plan(files, manifest);
+  return [...engine.keys()].sort().filter((t) => !(t in pin.files) || !isFile(join(root, t)))
+    .map((t) => isFile(join(root, t)) ? `${t} is not in the pin (${pin.tag} ships it)` : `${t} is missing (${pin.tag} ships it)`);
+}
+
 async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   const root = projectRoot();
   const command = rollback ? "rollback" : "update";
@@ -1405,6 +1457,21 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   }
   const same = Boolean(pin) && (pin as Pin).tag === tag;
   const drift = same ? pinnedProblems(root, pin as Pin) : [];
+  let unpacked: [string, Files, Manifest] | null = null;
+  let unchecked: string | null = null;
+  if (same && !drift.length) {
+    // #278: the pin only lists what the client that wrote it installed. An older client's rules could leave out a file
+    // the release ships, so the release's own plan is checked too, and such a file is repaired like any drift.
+    try {
+      const [archive] = local ? [local] : await fetchArchive(repo, tag, release, (pin as Pin).sha256);
+      const [files, manifest] = unpack(archive, tag);
+      unpacked = [archive, files, manifest];
+      drift.push(...notInstalled(root, pin as Pin, files, manifest));
+    } catch (e) {
+      if (!(e instanceof FactoryError) || !OFFLINE_CODES.includes(e.code)) throw e;
+      unchecked = e.message.replace(/\.+$/, "");
+    }
+  }
   if (dirtyOk && (!same || drift.length)) {
     throw new FactoryError("dirty_tree", "the working tree has uncommitted changes to the factory's own files.",
       "commit them (or `git checkout -- .claude factory factory-loop.sh` to drop them), then run it again. Nothing was changed.");
@@ -1412,13 +1479,16 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   say(`factory ${command}` + (args.verbose ? `  (${repo})` : ""));
   if (same && !drift.length) {
     say(`  This project is already on ${tag}; nothing to install.`);
+    if (unchecked) say(`  (could not check that every file ${tag} ships is here: ${unchecked}; run it again online to check)`);
   } else {
-    const [archive] = local ? [local] : await fetchArchive(repo, tag, release, expect);
-    const [files, manifest] = unpack(archive, tag);
+    const [archive, files, manifest] = unpacked ?? await (async (): Promise<[string, Files, Manifest]> => {
+      const [path] = local ? [local] : await fetchArchive(repo, tag, release, expect);
+      return [path, ...unpack(path, tag)];
+    })();
     const installed = await installFiles(root, files, manifest, tag, sha256File(archive), pin, repo, false, args.tasks);
     const goingBack = oldTag !== null && compareTags(tag, oldTag) < 0;
     if (same) {
-      say(`  ${tag} was already installed; ${drift.length} file(s) differed from the pin and were repaired:`);
+      say(`  ${tag} was already installed; ${drift.length} file(s) differed from the pin or were missing, and were repaired:`);
       for (const d of drift.slice(0, 8)) say(`    - ${d}`);
     } else {
       say(`  ${oldTag || "no release"} -> ${tag}` + (goingBack ? "  (going back)" : ""));
