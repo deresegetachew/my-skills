@@ -44,7 +44,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 
 | # | Decision | Source |
 |---|---|---|
-| D1 | **No custom UI.** The Claude app plus a Remote Control `-i` session is the UI. The UI design made on 25 Oct is not built and no issue is filed for any UI. The owner reads state as plain text: `factory status`, `factory agents ls`, `factory follow`, `factory prs`. | #114 (vision change), #97, #101, #106 |
+| D1 | **One terminal window, the cockpit** (`factory cockpit`), built on tmux. The left side lists the sessions and the views. The right side is the selected agent's real Claude Code session, or a view. tmux provides the widgets (popups, menus, the status line, keys), so there is no new dependency; the cockpit needs tmux 3.2 or newer. Every screen is built on one core of factory commands, and the plain text commands (`factory status`, `factory agents ls`, `factory follow`, `factory prs`) stay. It replaces the earlier D1, "No custom UI" (the Claude app plus a Remote Control `-i` session as the UI). A web console, Claude Code's agent view and VS Code's Agents window were set aside. | #295 (owner, 28 Oct 2026), [decisions/0001-cockpit.md](decisions/0001-cockpit.md); earlier: #114, #97, #101, #106 |
 | D2 | **The factory installs from numbered releases** of my-skills: an archive plus a SHA-256 checksum file, on GitHub. The submodule goes away (the old submodule step keeps working until a project migrates). | #113 (owner, option D) |
 | D3 | **The installed factory is committed in the project's repo** as real files with a pin file saying which release, so a fresh clone works and an update is a reviewable diff. *Recorded.* | #113 |
 | D4 | **Versions are semantic**, such as `v1.4.0`. *Recorded.* | #113, `software-factory/VERSION` |
@@ -239,9 +239,10 @@ until he agrees them."
 
 ### 4.5 The owner
 
-- **O1.** As the owner, I run the factory without a UI of ours: the Claude app plus a Remote Control `-i` session, and plain
-  text commands. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan. *Decided (D1); the
-  commands are built.* (#114; wiki/agent-loops.md "From your phone")
+- **O1.** As the owner, I can run the factory with plain text commands, and from my phone with the Claude app plus a
+  Remote Control `-i` session. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan. From a
+  terminal, the cockpit (section 4.10) is the main way. *Built (the commands); changed by the new D1 (#295).* (#114;
+  wiki/agent-loops.md "From your phone")
 - **O2.** As the owner, I am told only what needs me, each as one item on the owner-queue issue ("Dev manager: needs the
   owner") with the question, a recommendation and the exact command or step, posted once however many managers want to
   post it. *Built.* (#95; `factory manager-claims ask`)
@@ -390,9 +391,63 @@ until he agrees them."
   budget against used per merged task and the median ratio. Advisory: nothing stops and CI never fails on it; the dev
   manager decides about an overrun. *Built.* (D15; #183, wiki/agent-loops.md "Token budgets")
 
+### 4.10 The cockpit and the core it needs
+
+From #295 (owner, 28 Oct 2026; D1). The design is the Claude Design canvas "Factory cockpit", page "Cockpit A", boards 1
+to 11, linked from #295. The repo keeps this text, not the pictures. These stories have `US-<n>` ids, so tasks can say
+`PRD: US-<n>` and `factory prd` shows their progress. The stories above keep their letter ids.
+
+The core first: every screen needs it.
+
+- **US-1.** As the owner, one command gives the whole factory as data: `factory cockpit --json` prints one snapshot
+  (sessions and their states across machines, the items that need me, pull request rows, CI, the version and the summary
+  from `factory doctor`). `factory cockpit --status` prints one line for tmux's status line, from a cache, fast enough
+  to run on every status refresh. *Decided.* (#295)
+- **US-2.** As the owner, the heartbeat covers every role, not only coding agents: dev managers, product owners and
+  sub-managers each have a row with their role, and `factory agents ls` shows them. *Decided.* (#295; L1)
+- **US-3.** As the owner, every session the factory starts runs in its own tmux window, through one shared step used by
+  the cockpit, `factory autostart`, resume and `loop -i` (today `loop -i` runs in the current terminal). *Decided.* (#295)
+- **US-4.** As the owner, I can see what a sub-manager is doing: it runs in its own tmux window that the cockpit shows
+  read-only, or the cockpit shows its log. Today a sub-manager runs as `claude -p` with no screen. *Decided.* (#295)
+  > Open question: its own window, or its log? #295 names both.
+- **US-5.** As the owner, `factory follow <name>` finds a session on this machine directly, not only through an ssh
+  remote. *Decided.* (#295; O5)
+- **US-6.** As the owner, what I do by hand is a factory command, so the cockpit and the command line share it:
+  `factory owner merge`, `label`, `answer` and `release`. `merge` keeps the protected-file check: it says when a pull
+  request touches protected paths. *Decided.* (#295; D12)
+  > Open question: should these refuse inside an agent session, as `factory settings set` does (S3)? They are the
+  > owner's actions (D12).
+- **US-7.** As the owner, I am alerted when a new item needs me: a terminal bell and a desktop notice (osascript on
+  macOS, notify-send on Linux; nothing to install). Once per new item, not on every refresh. *Decided.* (#295; O2)
+- **US-8.** As the owner, the GitHub views (`factory prs`, `watch`, `messages`, CI) read from one background cache, like
+  `factory agents ls` does, so a view opens without waiting on GitHub, and `factory ci status --json` gives CI as data.
+  *Decided.* (#295; C6)
+- **US-9.** As the owner, settings I change in the cockpit collect into one `factory settings pr`; machine settings save
+  at once, as they do in `factory settings` today. *Decided.* (#295; S2, S3, S4)
+
+Then the cockpit, in steps.
+
+- **US-10.** As the owner, `factory cockpit` opens one terminal window that works over plain ssh. On the left, SESSIONS
+  (dev managers, product owners, coding agents, other machines), each with its state and a "needs you" badge, and under
+  it the VIEWS: Needs you, Pull requests, Tasks & PRD, CI, Agents & machines, Settings, Health & releases, Usage &
+  lessons. On the right, the selected agent's real Claude Code session, and I type into it. On top, the counts and "N
+  need you"; at the bottom, the keys that work now. `:` opens a fuzzy command bar over the factory commands; `/` inside
+  a session stays Claude's. The cockpit has its own prefix, `C-a`, so tmux nested over ssh keeps `C-b`. Views open as
+  popups that run the existing commands. Read-only in this step. Without tmux 3.2 or newer it stops with
+  `{code, message, fix}`. *Decided.* (#295)
+- **US-11.** As the owner, I act from the cockpit: merge, label, release, answer, start and stop an agent, say. Each
+  asks me first when it changes GitHub or the machine. *Decided.* (#295; US-6)
+- **US-12.** As the owner, the cockpit shows the alerts of US-7 in its own window: the badge, the count and the bell.
+  *Decided.* (#295)
+- **US-13.** As the owner, the views move towards the canvas boards: pull request detail, CI cards, the settings table,
+  usage bars. *Decided.* (#295)
+
+Not in the cockpit, on purpose: the commands that agents and the gate use (`review-pass`, `wait`, `run-check`, the
+guard, rereview record and reply, the `manager-claims` actions). (#295)
+
 ## 5. Out of scope
 
-- **A custom UI** of any kind: no web dashboard, no phone queue, no console. (D1; #114)
+- **A custom UI other than the terminal cockpit**: no web dashboard, no web console, no phone queue. (D1; #114, #295)
 - **New dependencies.** The factory is TypeScript on Bun, with Bun and Node built-ins only, and bash. (D13, `CLAUDE.md`)
 - **An agent changing the process.** Agents do not edit the gate, the guard, the agents' rules, agent definitions or
   `.claude/factory.json`, do not publish a release, and do not push to `main`. (D11)
@@ -447,6 +502,7 @@ processes per test) still apply.
 
 ### C. Other things that are later or not agreed
 
+- **A VS Code extension on stable APIs**, as a second screen on the same core as the cockpit. (#295)
 - **An A2A adapter** for the message envelope, in the heartbeat daemon. GitHub stays the transport; the adapter is a later
   step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
@@ -483,7 +539,7 @@ PR #39 was a draft PRD, written 22 to 24 Oct, that nobody had reviewed (#114, #1
 |---|---|
 | Roles, what exists today | Section 3 and section 4, checked against `main` and updated. |
 | The numbered stories, marked Must/Should/Could | Rewritten as the stories above, marked by status, each naming its issue. Stories for work that is now built say *Built*. |
-| UI options (CLI, TUI, dashboard, mobile inbox) and a recommendation to start with a mobile inbox | **Dropped.** Superseded by D1, no custom UI. |
+| UI options (CLI, TUI, dashboard, mobile inbox) and a recommendation to start with a mobile inbox | **Dropped.** Superseded by D1 (then "no custom UI"; since #295, the terminal cockpit). |
 | Architecture options (a state store, a local daemon) | **Dropped as options.** D10: GitHub is the state. The per-machine heartbeat daemon exists for liveness (#108). |
 | 31 numbered pains with evidence from 21 to 24 Oct | Not carried over as a list. The ones that led to built features appear as the issues those features name. |
 | Roadmap of five phases | Dropped. The order is issue #114. |
