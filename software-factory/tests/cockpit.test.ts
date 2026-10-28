@@ -16,11 +16,12 @@ appendFileSync(process.env.COCKPIT_LOG as string, a.join(" ") + "\n");
 function fail(m: string): never { console.error(m); process.exit(1); }
 const out = (x: unknown): never => { console.log(JSON.stringify(x)); process.exit(0); };
 if (s.fail_all) fail("gh: not logged in");
-if (a[0] === "repo" && a[1] === "view") { console.log("main"); process.exit(0); }
+if (a[0] === "repo" && a[1] === "view") { console.log(a.includes("nameWithOwner") ? "o/r" : "main"); process.exit(0); }
 if (a[0] !== "api") { console.log("ok"); process.exit(0); }
 const raw = a.slice(1).filter((x) => !x.startsWith("-") && x !== "GET" && x !== "POST" && x !== "PATCH" && x !== "Accept: application/vnd.github+json")[0] as string;
-const path = new URL(raw.replace("repos/{owner}/{repo}/", ""), "http://x/").pathname.slice(1);
-if (path === "contents/.claude/factory.json") fail("gh: Not Found (HTTP 404)");
+const short = raw.replace("repos/{owner}/{repo}/", "").replace(/^repos\/o\/r(\/|$)/, (_m, slash) => slash ? "" : "repo");
+const path = new URL(short, "http://x/").pathname.slice(1);
+if (path === "contents/.claude/factory.json" || path.startsWith("actions/variables/")) fail("gh: Not Found (HTTP 404)");
 if (path in s) out(s[path]);
 if (path.startsWith("issues/") && path.endsWith("/comments")) out([]);
 fail("fake gh: no answer for " + path);
@@ -105,6 +106,10 @@ function scenario(): Row {
     [`commits/${SHA}/check-runs`]: { check_runs: [{ name: "ci", status: "completed", conclusion: "success" }] },
     "issues/12/comments": [{ body: `<!-- factory-approved sha=${SHA.slice(0, 12)} -->`, user: { login: "dm" } }],
     "pulls/12/files": [{ filename: "src/a.ts" }],
+    repo: { default_branch: "main" },
+    "actions/runs": { workflow_runs: [{ head_branch: "main", status: "completed", conclusion: "success", name: "check",
+      created_at: "2020-01-01T00:00:00Z" }] },
+    "actions/runners": { runners: [] },
   };
 }
 
@@ -122,6 +127,7 @@ test("json has every key and exits 0", () => {
   expect(Array.isArray(j.missing)).toBe(true);
   expect(Object.keys(j.counts).sort()).toEqual(["needYou", "pulls", "sessions", "working"]);
   expect(Object.keys(j.version).sort()).toEqual(["installed", "source"]);
+  expect(j.ci, JSON.stringify(j.missing)).not.toBeNull();
 }, T);
 
 test("json writes the cache under the state dir", () => {
@@ -143,11 +149,14 @@ test("doctor has the summary shape", () => {
 
 test("ci is the object factory ci status --json prints", () => {
   const p = setup(scenario());
-  const ci = snapshot(p).ci;
-  if (ci !== null) {
-    expect(typeof ci).toBe("object");
-    for (const k of ["mode", "runs", "errors"]) expect(ci, k).toHaveProperty(k);
-  }
+  const j = snapshot(p);
+  const ci = j.ci;
+  expect(ci, JSON.stringify(j.missing)).not.toBeNull();
+  expect(typeof ci).toBe("object");
+  for (const k of ["mode", "runs", "errors"]) expect(ci, k).toHaveProperty(k);
+  expect(ci.errors).toEqual([]);
+  expect(ci.runs).toContainEqual(expect.objectContaining({ ref: "main", branch: "main", state: "success" }));
+  expect((j.missing as Row[]).map((m) => m.code)).not.toContain("ci_unreadable");
 }, T);
 
 test("the version comes from the release pin", () => {
@@ -243,11 +252,11 @@ test("with everything answering, missing is empty for pulls and the owner queue"
 // --- --status --------------------------------------------------------------------------------------------------------
 
 /** Run --json once, then rewrite its cache with known numbers, as of now. */
-function seedCache(p: Proj, counts: Row, missing: Row[] = []): void {
+function seedCache(p: Proj, counts: Row, missing: Row[] = [], ci?: Row): void {
   snapshot(p);
   const [file] = caches(p.xdg) as [string];
   const j = JSON.parse(read(file)) as Row;
-  writeFileSync(file, JSON.stringify({ ...j, generatedAt: new Date().toISOString(), counts, missing }));
+  writeFileSync(file, JSON.stringify({ ...j, generatedAt: new Date().toISOString(), counts, missing, ...(ci ? { ci } : {}) }));
   writeFileSync(p.log, "");
 }
 
@@ -260,6 +269,19 @@ test("status from a fresh cache is one line with the counts and makes no github 
   expect(r.stdout).toContain("4 need you");
   expect(r.stdout).toContain("3 sessions");
   expect(r.stdout).toContain("1 working");
+  expect(calls(p)).toEqual([]);
+}, T);
+
+test("status shows CI on main from the cache", () => {
+  const p = setup(scenario());
+  seedCache(p, { sessions: 0, working: 0, pulls: 0, needYou: 0 }, [],
+    { mode: "github", runs: [{ ref: "#12", branch: "task/7-x", state: "success" }, { ref: "main", branch: "main", state: "failure" }],
+      errors: [] });
+  const r = cockpit(p, "--status");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
+  expect(r.stdout).toContain("CI main failure");
+  expect(r.stdout).not.toContain("success");
   expect(calls(p)).toEqual([]);
 }, T);
 
