@@ -225,3 +225,108 @@ test("the agents' settings deny restoring .claude/ from history and touching the
   for (const c of ["git checkout -b task/12-fix", "git checkout main", "git switch -c task/12-fix",
     "git checkout -- src/a.ts", "git show HEAD", "git status"]) expect(allowedBy(perms, c), c).toBe(true);
 });
+
+// ---------- an unpack that can't read every file (dev-pc, four sessions at once) ----------
+// Under load a git read can fail or time out. A file whose entry couldn't be read was once left out as if main had
+// none, so a copy with 53 of 83 hooks was put in place and the hooks failed on a missing import.
+
+const REAL_GIT = sh(["bash", "-c", "command -v git"]).stdout.trim();
+
+/** A git that fails every call naming `FAIL_WORD` (a file name or a blob id), for the first `FAIL_TIMES` such calls
+ * (all of them when unset), and runs the real git otherwise. */
+const FLAKY_GIT = `#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in
+    *"$FAIL_WORD"*)
+      n=$(cat "$FAIL_COUNT" 2>/dev/null || echo 0)
+      if [ -z "$FAIL_TIMES" ] || [ "$n" -lt "$FAIL_TIMES" ]; then
+        echo $((n + 1)) > "$FAIL_COUNT"
+        echo "fatal: cannot read" >&2
+        exit 128
+      fi ;;
+  esac
+done
+exec ${REAL_GIT} "$@"
+`;
+
+/** factory_agent_settings.ts run with the flaky git first on PATH. */
+function flakySettings(work: string, word: string, times?: number) {
+  const bin = join(work, "..", "fakegit");
+  writeExe(join(bin, "git"), FLAKY_GIT);
+  const env = {
+    ...process.env, PATH: `${bin}:${process.env.PATH}`, FAIL_WORD: word, FAIL_COUNT: join(work, "..", "fail-count"),
+    FAIL_TIMES: times === undefined ? "" : String(times),
+  };
+  return sh(["bun", "--no-env-file", "--config=/dev/null", join(HOOKS, "factory_agent_settings.ts")], { cwd: work, env, timeoutMs: 120_000 });
+}
+
+const blobOf = (work: string, path: string): string => sh(["git", "rev-parse", `HEAD:${path}`], { cwd: work }).stdout.trim();
+
+/** The folder the hook lines name, checked to hold every hook main has, unchanged and read-only. */
+function completeCopy(s: Settings): string {
+  const dirs = [...new Set(commands(s).map((c) => scriptOf(c).replace(/\/[^/]+$/, "")))];
+  expect(dirs.length).toBe(1);
+  const dir = dirs[0] as string;
+  expect(readdirSync(dir).sort()).toEqual(readdirSync(HOOKS).sort());
+  for (const f of readdirSync(HOOKS)) {
+    expect(readFileSync(join(dir, f), "utf8"), f).toBe(read(join(HOOKS, f)));
+    expect(writable(join(dir, f)), f).toBe(false);
+  }
+  return dir;
+}
+
+function refusedUnread(p: { code: number; stdout: string; stderr: string; out: string }, work: string): void {
+  expect(p.code, p.out).toBe(1);
+  expect(p.stdout.trim()).toBe("");
+  const err = JSON.parse(p.stderr.trim()) as { code: string; message: string; fix: string };
+  expect(err.code).toBe("hooks_not_read");
+  expect(err.message).toContain("No session was started");
+  expect(err.fix.length).toBeGreaterThan(0);
+  const root = join(work, ".git", "factory-hooks");
+  expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
+  expect(existsSync(join(work, ".git", "factory-settings.json"))).toBe(false);
+}
+
+test("a hook whose entry can't be read is refused, not left out: nothing is put in place", () => {
+  const work = project(true); // links: each hook's entry is looked up by its name
+  refusedUnread(flakySettings(work, "factory_session.ts"), work);
+});
+
+test("a hook whose content can't be read is refused and nothing is put in place", () => {
+  const work = project();
+  refusedUnread(flakySettings(work, blobOf(work, ".claude/hooks/factory_session.ts")), work);
+});
+
+test("a read that fails once is tried again and the copy is complete", () => {
+  const work = project();
+  const p = flakySettings(work, blobOf(work, ".claude/hooks/factory_session.ts"), 1);
+  expect(p.code, p.out).toBe(0);
+  completeCopy(JSON.parse(read(p.stdout.trim())) as Settings);
+});
+
+test("a partial copy under the right name is rebuilt before it is used", () => {
+  const work = project();
+  const dir = completeCopy(started(work));
+  // what the cut-short unpack left: everything up to factory_resume.ts, nothing after
+  chmodSync(dir, 0o755);
+  for (const f of readdirSync(dir)) if (f > "factory_resume.ts") rmSync(join(dir, f), { force: true });
+  chmodSync(dir, 0o555);
+  expect(completeCopy(started(work))).toBe(dir);
+});
+
+test("several sessions starting at once on one clone all start, on one complete copy", async () => {
+  const work = project();
+  const runs = Array.from({ length: 6 }, () => Bun.spawn(["bun", "--no-env-file", "--config=/dev/null", join(HOOKS, "factory_agent_settings.ts")],
+    { cwd: work, stdout: "pipe", stderr: "pipe" }));
+  const results = await Promise.all(runs.map(async (r) => ({
+    code: await r.exited, stdout: await new Response(r.stdout).text(), stderr: await new Response(r.stderr).text(),
+  })));
+  const dirs = new Set<string>();
+  for (const r of results) {
+    expect(r.code, r.stderr).toBe(0);
+    dirs.add(completeCopy(JSON.parse(read(r.stdout.trim())) as Settings));
+  }
+  expect(dirs.size).toBe(1);
+  const hash = ([...dirs][0] as string).split("/").slice(-2, -1)[0] as string;
+  expect(readdirSync(join(work, ".git", "factory-hooks"))).toEqual([hash]);
+}, 120_000);
