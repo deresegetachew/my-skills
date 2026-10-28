@@ -161,7 +161,11 @@ Settings
   settings set <key> <v> change one (checked against its type and limits); unset <key> goes back to the default
   settings diff          what the project file sets differently from the defaults
   settings validate      exit 1 with clear messages on a bad value (invalid regex, unknown tasks.source, duplicate agent ...)
-  settings pr [--ready]  propose the edited .claude/factory.json as a pull request (a draft by default)
+  settings set --stage <key> <v>
+                         stage a project change instead of writing the file (unset --stage <key> too); machine settings save at once
+  settings diff --staged what is staged; settings unstage [<key>] drops one staged change, or all
+  settings pr [--ready]  propose the staged changes, else the edited .claude/factory.json, as one pull request (a draft by default);
+                         staged changes go on origin's main branch as it is now, from any checkout
   settings --local ...   the same for this machine's own settings (agent names, Remote Control, autostart, CI runners), outside the repo
   settings docs [--check|--write]
                          the settings page's tables (docs/wiki/settings.md), generated from the same metadata table

@@ -423,7 +423,8 @@ The core first: every screen needs it.
   `factory agents ls` does, so a view opens without waiting on GitHub, and `factory ci status --json` gives CI as data.
   *Decided.* (#295; C6)
 - **US-9.** As the owner, settings I change in the cockpit collect into one `factory settings pr`; machine settings save
-  at once, as they do in `factory settings` today. *Decided.* (#295; S2, S3, S4)
+  at once, as they do in `factory settings` today. *Built* (`set --stage`, `diff --staged`, `unstage`, #306; the
+  cockpit's settings view is US-13). (#295; S2, S3, S4)
 
 Then the cockpit, in steps.
 
