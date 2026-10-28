@@ -564,7 +564,7 @@ function cmdLs(a: LsArgs): void {
   const cfg = load();
   const args = ["ls", ...([["--to", a.to], ["--from", a.frm], ["--state", a.state], ["--ref", a.ref], ["--kind", a.kind]] as const)
     .flatMap(([flag, v]) => (v ? [flag, v] : [])), ...(a.all ? ["--all"] : [])];
-  const got = answer(cfg, { name: "messages", hook: import.meta.path, args }, a.fresh, () => collect(cfg, a));
+  const got = answer(cfg, { name: "messages", hook: import.meta.path, args }, Boolean(a.fresh), () => collect(cfg, a));
   const rows = got.data;
   if (a.json) console.log(pyDumps(rows, { indent: 2 }));
   else if (rows.length) console.log(rows.map(line).join("\n"));
