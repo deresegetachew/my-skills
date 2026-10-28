@@ -114,7 +114,7 @@ test("the work list has open product asks and the queue but not other asks or an
   expect(out).not.toContain("ask ci-queued");
   expect(out).not.toContain("ask freeze");
   expect(out).not.toContain("ask wording");
-  expect(out).toContain('would run: claude -p "/product-pass"');
+  expect(out).toContain('would run: claude -p "Follow the product-pass skill: read .claude/skills/product-pass/SKILL.md');
   expect(claudeCalls(env)).toEqual([]);
   expect(posted(d)).toEqual([]);
 });

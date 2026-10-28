@@ -51,7 +51,15 @@ test("a tick with work starts one manage pass on the manager profile", () => {
   const all = calls(d);
   expect(all.length).toBe(1);
   const argv = all[0] as string[];
-  expect(argv.slice(-2)).toEqual(["-p", "/manage-pass"]);
+  // the session reads only the user settings and the profile, so Claude Code does not load the project skills: the
+  // prompt names the skill file instead of starting with /manage-pass, which would be an unknown command
+  expect(argv[argv.length - 2]).toBe("-p");
+  const text = argv[argv.length - 1] as string;
+  expect(text.startsWith("/"), text).toBe(false);
+  expect(text).toContain(".claude/skills/manage-pass/SKILL.md");
+  expect(text).toContain("/manage-pass");
+  expect(text).toContain("<!-- factory-role role=dev-manager");
+  expect(argv[argv.indexOf("--setting-sources") + 1]).toBe("user");
   expect(argv[argv.indexOf("--settings") + 1]).toBe(".claude/manager/settings.json");
   expect(argv[argv.indexOf("--model") + 1]).toBe("sonnet");
   expect(argv[argv.indexOf("--effort") + 1]).toBe("low");

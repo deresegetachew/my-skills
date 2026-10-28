@@ -112,11 +112,20 @@ export function contextLine(cfg: Config, role: string): string {
   return "";
 }
 
+/** The first line of a role session's prompt. A role session reads only the user's settings and its profile
+ * (`--setting-sources user`, profileFlags), and then Claude Code does not load the project's skills: a prompt that
+ * starts with `/manage-pass` is an unknown command. So the line names the skill's file, which works whether or not the
+ * skill is loaded. */
+export function skillLine(skill: string, item = ""): string {
+  const call = `/${skill}` + (item ? ` ${item}` : "");
+  return `Follow the ${skill} skill${item ? ` for ${item}` : ""}: read .claude/skills/${skill}/SKILL.md and run it as ` +
+    `\`${call}\` (this session does not load the project's skills, so ${call} is not a command here).`;
+}
+
 /** The prompt a pass starts with: the skill (and the item), `extra` (the dev manager's fact sheet and thread note),
  * the line telling it to read the project's instructions, and the marker `factory usage --by role` reads. */
 export function prompt(cfg: Config, role: string, name: string, item = "", extra = ""): string {
-  const d = need(role);
-  const first = `/${d.skill}` + (item ? ` ${item}` : "");
+  const first = skillLine(need(role).skill, item);
   const ctx = contextLine(cfg, role);
   return [first, extra.trim(), ctx, `<!-- ${MARK} role=${role} name=${name} -->`].filter((x) => x).join("\n\n");
 }

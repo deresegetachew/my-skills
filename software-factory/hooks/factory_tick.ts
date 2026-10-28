@@ -16,11 +16,14 @@ import { existsSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { load } from "./factory_config.ts";
 import { configured, flags, ModelsError, type Models } from "./factory_models.ts";
+import { skillLine } from "./factory_roles.ts";
 import { precheck } from "./factory_wait.ts";
 import { bunCmd, flock, run, runMain, shQuote } from "./factory_lib.ts";
 
 export const PROFILE = join(".claude", "manager", "settings.json");
-export const PROMPT = "/manage-pass";
+// The session reads only the user's settings and the profile, so Claude Code does not load the project's skills: the
+// prompt names the skill's file (factory_roles.ts skillLine), and the marker lets `factory usage --by role` count it.
+export const PROMPT = `${skillLine("manage-pass")}\n\n<!-- factory-role role=dev-manager name=tick -->`;
 
 /** Only the project's MCP servers, from main on the remote (factory_mcp.ts); none when it can't say. */
 export function mcpFlags(): string[] {

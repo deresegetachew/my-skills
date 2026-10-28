@@ -200,6 +200,14 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
       items.push(make("review", `pr-${ref}`, text, { since, target: ref as number, key: p.head.sha, leaseKind: "review", pr: ref as number }));
     } else if (kind === "question") {
       const n = ref as number;
+      // One item per thread: every question on it shares the ref, the lease and the sub-manager, which answers them all.
+      const seen = items.find((i) => i.ref === `question-${n}`);
+      if (seen) {
+        const more = /\((\d+) questions wait\)$/.exec(seen.line);
+        const count = more ? Number(more[1]) + 1 : 2;
+        seen.line = seen.line.replace(/ \(\d+ questions wait\)$/, "") + ` (${count} questions wait)`;
+        continue;
+      }
       const waiting = waitingTasks(commentsOf(n));
       if (!waiting.length) continue;
       const first = waiting[0] as (typeof waiting)[number];

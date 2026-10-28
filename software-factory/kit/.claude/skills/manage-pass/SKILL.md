@@ -13,7 +13,8 @@ there is nothing to do.
 
 **Arguments.** `/manage-pass` alone is a whole pass. `/manage-pass pr-417`, `/manage-pass question-103`, `/manage-pass agent-menelik`
 or `/manage-pass issue-20` works only on that item and then exits (the orchestrator, `factory dev-manager loop`, starts one
-session per item and does not start another for it while this one runs). `--dry-run` anywhere in the arguments means: read
+session per item and does not start another for it while this one runs). `question-<n>` is every open question on #n:
+answer them all. `--dry-run` anywhere in the arguments means: read
 everything, print what you would do, one line each, and write nothing (no comment, no label, no merge, no note, no lease).
 
 **When the orchestrator started you.** Your prompt carries a fact sheet for the item (why it is on the list, the PR's head, review
