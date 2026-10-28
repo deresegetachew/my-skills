@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fail, git as runGit, pyDumps, run } from "./factory_lib.ts";
-import { asText, checkValue, SETTINGS, SettingError } from "./factory_settings_schema.ts";
+import { asText, checkValue, MISSING, SETTINGS, SettingError } from "./factory_settings_schema.ts";
 import { branchName, body, CLAUDE_SETTINGS, changesAllow, committed, title, writeAllow } from "./factory_settings_save.ts";
 import * as store from "./factory_settings_store.ts";
 
@@ -204,6 +204,9 @@ export function openStagedPr(draft: boolean, mainBranch: string): void {
     fail("settings_staged_already_on_main", `${mainBranch} already has every staged change, so there is nothing to propose.`,
       "Run `factory settings unstage` to clear them.");
   }
+  // The staging file is in .git, which no agent rule covers: show the person everything that goes out (#324).
+  console.log(`Proposing ${diffs.length === 1 ? "this change" : `these ${diffs.length} changes`} to ${store.PATH}:`);
+  for (const [key, was, now] of diffs) console.log(`- ${key}: ${was === MISSING ? "(default)" : asText(was)} -> ${now === MISSING ? "(default)" : asText(now)}`);
   const branch = branchName(diffs);
   const dir = mkdtempSync(join(tmpdir(), "factory-settings-pr-"));
   const tree = join(dir, "tree");
