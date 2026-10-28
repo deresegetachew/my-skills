@@ -14,6 +14,12 @@
 //   the transcript     when Claude last wrote to the session's log
 //
 // and works out one state:  working | waiting | idle | down.
+//
+// Every role has a row (#299), its role in `kind`: a coding agent, a dev manager or a product owner by its checkout
+// claim's role (a claim from an older release has none: then the role whose `roles.<role>.names` list it, else a coding
+// agent), and a one-item sub-manager by the orchestrator's pid file (`<git-common-dir>/factory-manager/<manager>.d/
+// <item>.pid`), named `<manager>-<item>`. A sub-manager's row stays on this machine: it has no agent issue, and one
+// that exits in seconds is simply gone at the next look.
 //   down      no live loop or Claude process holds the agent's checkout
 //   waiting   alive, and a `factory wait` runs below it: deliberately blocked (a PR slot, CI, an answer, a merge)
 //   working   alive and holds a task
@@ -52,10 +58,10 @@
 import { ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync,
   writeSync } from "node:fs";
 import { homedir, hostname } from "node:os";
-import { basename, join } from "node:path";
-import { type Config, load, taskSource, toFloat } from "./factory_config.ts";
+import { basename, dirname, join } from "node:path";
+import { type Config, load, roleNames, taskSource, toFloat } from "./factory_config.ts";
 import { now as clockNow } from "./factory_clock.ts";
-import { alive as claimAlive, type Claim, stateDir as claimsStateDir } from "./factory_claims.ts";
+import { alive as claimAlive, type Claim, pidAlive, stateDir as claimsStateDir } from "./factory_claims.ts";
 import { agentIssues, current, fields, nameOf, recall, remember, update } from "./factory_agents.ts";
 import { installCli, restartCli, serviceText, uninstallCli } from "./factory_heartbeat_service.ts";
 import { machineId, machineNames, refuse, repoKey, stateDir } from "./factory_machine.ts";
@@ -63,6 +69,8 @@ import { sessionName } from "./factory_resume.ts";
 import { Exit, flock, isoUtc, pyDumps, pyRepr, run as runCmd, runMain, splitLines } from "./factory_lib.ts";
 
 const KIND = "coding-agent";
+const SUB_MANAGER = "sub-manager";
+const NAMED_ROLES = ["dev-manager", "product-owner"];
 const LOCAL_FILE = "heartbeat.json";
 const WRITES_PER_HOUR = 12;
 const HOUR = 3600;
@@ -377,6 +385,49 @@ function knownAgents(checkouts: Record<string, Claim>): string[] {
   return [...new Set(names.filter((n) => /^[a-z0-9][a-z0-9-]{0,39}$/.test(n)))];
 }
 
+/** The role of `name`: what its claim says, else what it last reported, else the role whose names list it (an older
+ * release's claim has no role), else a coding agent. */
+function roleFor(cfg: Cfg, name: string, claim: Claim): string {
+  const given = claim.role || recall(name).role;
+  if (typeof given === "string" && given) return given;
+  return NAMED_ROLES.find((role) => roleNames(cfg as Config, role).includes(name)) ?? KIND;
+}
+
+/** {name: row} for the one-item sub-managers running here, from the orchestrator's pid files of live processes. */
+function subManagers(ps: Procs, me: string): Record<string, HeartbeatRow> {
+  const base = join(dirname(claimsStateDir()), "factory-manager");
+  const rows: Record<string, HeartbeatRow> = {};
+  let folders: string[];
+  try {
+    folders = readdirSync(base).filter((f) => f.endsWith(".d"));
+  } catch {
+    return rows; // no dev manager has run here
+  }
+  for (const folder of folders) {
+    let files: string[];
+    try {
+      files = readdirSync(join(base, folder)).filter((f) => f.endsWith(".pid"));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      let text: string;
+      try {
+        text = readFileSync(join(base, folder, file), "utf8").trim();
+      } catch {
+        continue; // it ended between the listing and the read
+      }
+      if (!/^\d+$/.test(text) || !pidAlive(text)) continue;
+      const pid = Number(text);
+      const item = file.slice(0, -4);
+      const name = `${folder.slice(0, -2)}-${item}`;
+      rows[name] = { ...derive({ alive: true, task: item, wait: waitsInTree(ps, pid) }), name, kind: SUB_MANAGER, machine: me,
+        path: null, pid, session: null, follow: null, activity: null };
+    }
+  }
+  return rows;
+}
+
 /** {agent: row}: what this machine shows about each agent, derived and not yet reported anywhere. */
 export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, HeartbeatRow> {
   const stale = toFloat(cfg.claimStaleHours ?? 6) ?? 6;
@@ -398,7 +449,8 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
     const pid = alive ? Math.trunc(Number(claim.pid)) : null;
     const task = alive ? (Object.entries(tasks).find(([, c]) => c.agent === name && claimAlive(c, stale))?.[0] ?? null) : null;
     const wait = alive ? waitsInTree(ps, pid as number) : null;
-    const row: HeartbeatRow = { ...derive({ alive, task, wait }), name, kind: KIND, machine: me, path: claim.path ?? null, pid,
+    const row: HeartbeatRow = { ...derive({ alive, task, wait }), name, kind: roleFor(cfg, name, claim), machine: me,
+      path: claim.path ?? null, pid,
       session: null, follow: null, activity: null };
     const session = sessionName(name);
     if (sessions.has(session)) {
@@ -411,6 +463,7 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
     }
     rows[name] = row;
   }
+  for (const [name, row] of Object.entries(subManagers(ps, me))) if (!(name in rows)) rows[name] = row;
   return rows;
 }
 
@@ -424,6 +477,7 @@ function reachFields(cfg: Cfg, row: HeartbeatRow): Record<string, string | null>
 
 /** Writes one agent's state to GitHub if `plan` says so. Returns 'change', 'keepalive' or null. */
 export function report(cfg: Cfg, name: string, row: HeartbeatRow, now: number, confirm: number): string | null {
+  if (row.kind === SUB_MANAGER) return null; // it has no agent issue, and one would be made for every item
   const stamp = recall(name);
   const state = row.state;
   if (state === "down" && !stamp.status) return null; // it never reported, so there is nothing to take back
@@ -439,7 +493,7 @@ export function report(cfg: Cfg, name: string, row: HeartbeatRow, now: number, c
   const extra = { kind: row.kind, task: row.task, on: row.on, since: row.since, hb: "1", ...reach };
   try {
     update(cfg, name, state, { detail: state === "working" || state === "waiting" ? row.detail : "", create: state !== "down",
-      extra, replaceExtra: true });
+      extra, replaceExtra: true, role: row.kind });
   } catch (e) {
     remember(name, { retry: now + 60 }); // GitHub is not answering: try again in a minute, not every cycle
     throw e;

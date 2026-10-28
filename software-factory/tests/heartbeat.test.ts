@@ -844,3 +844,134 @@ test("doctor notes a missing daemon and agents cannot install or stop it", () =>
   p = D.doctor(d, { ...D.machine(), FACTORY_AGENTS: "taytu" });
   expect(p.stdout).not.toContain("heartbeat");
 });
+
+// --- the heartbeat covers every role (#299) ---------------------------------------------------------------------
+
+function setRoles(w: World, roles: Record<string, { names: string[] }>): void {
+  const f = join(w.d, ".claude", "factory.json");
+  write(f, JSON.stringify({ ...(JSON.parse(read(f)) as Record<string, unknown>), roles }));
+}
+
+/** A live loop for `name` whose checkout claim carries `role` (none when null: an older release's claim). */
+function startRoleLoop(w: World, name: string, role: string | null): Loop {
+  const loop = w.startLoop(name);
+  const data = w.claims();
+  const claim = data.checkouts[name] as Record<string, unknown>;
+  if (role) claim.role = role;
+  else delete claim.role;
+  w.saveClaims(data);
+  return loop;
+}
+
+interface LsRow { name: string; kind: string; state: string; task?: string | null }
+
+function lsRows(w: World, ...args: string[]): Record<string, LsRow> {
+  const p = ls(w, "--json", ...args);
+  expect(p.code, p.out).toBe(0);
+  return Object.fromEntries((JSON.parse(p.stdout) as { agents: LsRow[] }).agents.map((r) => [r.name, r]));
+}
+
+const ROLES = { "dev-manager": { names: ["lead"] }, "product-owner": { names: ["owner", "owner2"] } };
+
+/** A long-running process standing in for a one-item sub-manager, with its pid file under the manager's folder. */
+function startSubManager(w: World, manager: string, ref: string): void {
+  const p = Bun.spawn(["sleep", "600"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  w.procs.push({ pid: p.pid, kill: () => p.kill(9) });
+  write(join(w.d, ".git", "factory-manager", `${manager}.d`, `${ref}.pid`), String(p.pid));
+}
+
+test("a dev manager and a product owner show in ls with their own kind", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  startRoleLoop(w, "lead", "dev-manager");
+  startRoleLoop(w, "owner", "product-owner");
+  w.runFor(40);
+  const rows = lsRows(w, "--local");
+  expect(rows.lead?.kind).toBe("dev manager");
+  expect(rows.owner?.kind).toBe("product owner");
+  for (const n of ["lead", "owner"]) expect(["working", "waiting", "idle", "down"]).toContain(rows[n]?.state as string);
+  expect(rows.lead?.state).toBe("idle"); // alive and holds no task
+});
+
+test("two product owners on one machine give two product owner rows", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  startRoleLoop(w, "owner", "product-owner");
+  startRoleLoop(w, "owner2", "product-owner");
+  w.runFor(40);
+  const rows = lsRows(w, "--local");
+  expect([rows.owner?.kind, rows.owner2?.kind]).toEqual(["product owner", "product owner"]);
+});
+
+test("a claim without a role is told by its name and a coding agent stays a coding agent", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  startRoleLoop(w, "owner", null); // an older release wrote no role
+  startRoleLoop(w, "taytu", null);
+  w.runFor(40);
+  const rows = lsRows(w, "--local");
+  expect(rows.owner?.kind).toBe("product owner");
+  expect(rows.taytu?.kind).toBe("coding agent");
+});
+
+test("a live sub-manager has its own row and one that exited has none", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  startRoleLoop(w, "lead", "dev-manager");
+  startSubManager(w, "lead", "pr-12");
+  const gone = Bun.spawnSync(["true"]);
+  write(join(w.d, ".git", "factory-manager", "lead.d", "pr-13.pid"), String(gone.pid));
+  w.runFor(40);
+  const rows = lsRows(w, "--local");
+  const sub = rows["lead-pr-12"];
+  expect([sub?.kind, sub?.state, sub?.task]).toEqual(["sub manager", "working", "pr-12"]);
+  expect(rows["lead-pr-13"]).toBeUndefined();
+  expect(rows.lead?.kind).toBe("dev manager");
+});
+
+test("a sub-manager is never written to GitHub", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  startSubManager(w, "lead", "pr-12");
+  const before = loadDb(w.db).issues.length;
+  w.runFor(120);
+  expect(lsRows(w, "--local")["lead-pr-12"]?.kind).toBe("sub manager"); // it is seen...
+  expect(loadDb(w.db).issues.length).toBe(before); // ...but no agent issue is made for it
+  expect(w.ghCalls().filter((l) => l.includes("-X POST") || l.includes("-X PATCH") || l.includes("lead-pr-12"))).toEqual([]);
+});
+
+test("a reported dev manager carries the role marker and its kind", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  w.addAgentIssue(81, "lead", "idle", null, "aaaa1111", true);
+  startRoleLoop(w, "lead", "dev-manager");
+  w.claimTask("issue-5", "lead");
+  w.runFor(60);
+  expect(marker(w.db, 81).status).toBe("working");
+  expect(marker(w.db, 81).kind).toBe("dev-manager");
+  expect(issueOf(w.db, 81).body).toContain("<!-- factory-role role=dev-manager -->");
+});
+
+test("ls shows another machines product owner from its role marker when the marker has no kind", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  w.addAgentIssue(90, "owner", "working", w.clock - 30, "bbbb2222", true);
+  const db = loadDb(w.db);
+  const row = db.issues.find((i) => i.number === 90) as IssueRow;
+  row.body = row.body.replace(/\n/, "\n<!-- factory-role role=product-owner -->\n");
+  write(w.db, JSON.stringify(db));
+  const rows = lsRows(w, "--fresh");
+  expect(rows.owner?.kind).toBe("product owner");
+});
+
+test("ls shows another machines dev manager from its role marker when an older release reported it as a coding agent", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  w.addAgentIssue(91, "lead", "working", w.clock - 30, "bbbb2222", true, { kind: "coding-agent" });
+  const db = loadDb(w.db);
+  const row = db.issues.find((i) => i.number === 91) as IssueRow;
+  row.body = row.body.replace(/\n/, "\n<!-- factory-role role=dev-manager -->\n");
+  write(w.db, JSON.stringify(db));
+  const rows = lsRows(w, "--fresh");
+  expect(rows.lead?.kind).toBe("dev manager");
+});

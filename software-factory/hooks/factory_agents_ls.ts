@@ -8,7 +8,8 @@
 // the line says how to start it. The other machines and the cloud agents come from their agent issues on GitHub (issues
 // mode), cached for FACTORY_AGENTS_CACHE_SECONDS (default 45) so a quick repeat costs nothing; `--fresh` asks again and
 // `--local` never asks. What a remote agent shows is what its machine posted: the hidden marker's kind, task, wait and
-// `since`, and the tmux session and follow link only when its project sets `tasks.showWhere`. A GitHub failure shows
+// `since` (an issue with no kind, from an older release, takes its role marker's), and the tmux session and follow
+// link only when its project sets `tasks.showWhere`. A GitHub failure shows
 // this machine alone, with a line saying so.
 //
 // --json prints {agents: [...], github: {...}, daemon: {...}, machine}; every row has name, kind, where, state, detail,
@@ -17,7 +18,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Config, taskSource, toFloat } from "./factory_config.ts";
 import { now as clockNow } from "./factory_clock.ts";
-import { agentIssues, current, fields, stateOf } from "./factory_agents.ts";
+import { agentIssues, current, fields, roleOf, stateOf } from "./factory_agents.ts";
 import { type HeartbeatRow, isFresh, loadLocal, observe } from "./factory_heartbeat.ts";
 import type { Issue } from "./factory_issues.ts";
 import { machineId, stateDir } from "./factory_machine.ts";
@@ -145,7 +146,9 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
     const title = issue.title || "";
     const at = title.indexOf(" · ");
     const detail = at >= 0 ? title.slice(at + 3) : state;
-    rows.push({ name, kind: kindText(f.kind), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
+    // An older release reports every row as a coding agent (or with no kind): its role marker knows better.
+    const kind = f.kind && f.kind !== "coding-agent" ? f.kind : roleOf(issue);
+    rows.push({ name, kind: kindText(kind), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
       session: f.session ?? null, activity: null, machine, source: "github" });
   }
