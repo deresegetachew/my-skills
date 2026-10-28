@@ -963,3 +963,15 @@ test("ls shows another machines product owner from its role marker when the mark
   const rows = lsRows(w, "--fresh");
   expect(rows.owner?.kind).toBe("product owner");
 });
+
+test("ls shows another machines dev manager from its role marker when an older release reported it as a coding agent", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  w.addAgentIssue(91, "lead", "working", w.clock - 30, "bbbb2222", true, { kind: "coding-agent" });
+  const db = loadDb(w.db);
+  const row = db.issues.find((i) => i.number === 91) as IssueRow;
+  row.body = row.body.replace(/\n/, "\n<!-- factory-role role=dev-manager -->\n");
+  write(w.db, JSON.stringify(db));
+  const rows = lsRows(w, "--fresh");
+  expect(rows.lead?.kind).toBe("dev manager");
+});
