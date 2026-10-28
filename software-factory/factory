@@ -27,11 +27,16 @@ console.log(v === undefined ? d : typeof v === "string" ? v : JSON.stringify(v))
 main() { setting mainBranch main; }
 # `loop -i` on a terminal starts in its own tmux window (#300), through the one step `factory resume` uses too, and
 # shows it here. Inside that window (FACTORY_WINDOW), without a terminal (scripts, tests) or with --dry-run it runs
-# in place. Usage: to_window <role> <name or ""> <loop arguments>; it returns only when the loop runs here.
+# in place. Without tmux it runs in place too, with a note: only the cockpit needs tmux (#295).
+# Usage: to_window <role> <name or ""> <loop arguments>; it returns only when the loop runs here.
 to_window() {
   local r="$1" n="$2" a i=0; shift 2
   for a in "$@"; do case "$a" in -i|--interactive) i=1 ;; --dry-run) return 0 ;; esac; done
   [ "$i" = 1 ] && [ -z "${FACTORY_WINDOW:-}" ] && [ -t 0 ] && [ -t 1 ] || return 0
+  command -v tmux >/dev/null 2>&1 || {
+    echo "Note: tmux is not installed, so the loop runs here. With tmux it would run in its own tmux window."
+    return 0
+  }
   fh "$hooks/factory_window" loop --role "$r" ${n:+--name "$n"} -- "$@"; exit $?
 }
 
@@ -45,7 +50,8 @@ Build
                          FACTORY_AGENTS=haile,tewodros (or factory machine setup): only those names on this machine.
                          `loop -i` in a terminal asks which role and name; `loop -i dev-manager` or FACTORY_ROLE skips it.
                          On a terminal `loop -i` runs in its own tmux window (session <repo>-<name>, window
-                         <role>-<name>) and shows it here; a second start of the same name says so and only shows it
+                         <role>-<name>) and shows it here; a second start of the same name says so and only shows it.
+                         Without tmux it runs here, with a note
   coding-agent [name|N] loop [-i] [--once] [--dry-run] [N]
   dev-manager  [name|N] loop [-i] [--once] [--dry-run]
   product-owner [name|N] loop [-i] [--once] [--dry-run]
