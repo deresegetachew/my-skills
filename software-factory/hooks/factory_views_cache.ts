@@ -20,6 +20,7 @@ import { git, pyDumps } from "./factory_lib.ts";
 export const SCHEMA = 1;
 export const DEFAULT_SECONDS = 45;
 const LOCK_SECONDS = 180; // a refresh that started this recently is still running (or died): don't start another
+const LOCK_ENV = "FACTORY_VIEWS_LOCK"; // set only for a background refresh: the lock it removes when it is done
 
 export interface View {
   name: "prs" | "watch" | "messages";
@@ -80,7 +81,6 @@ function writeEntry(view: View, path: string, data: unknown, at: number): void {
     // the view still answers; the next one reads GitHub again
   } finally {
     rmSync(`${path}.${process.pid}.tmp`, { force: true });
-    rmSync(`${path}.lock`, { force: true }); // a background refresh is done
   }
 }
 
@@ -96,7 +96,7 @@ function refreshInBackground(view: View, path: string): void {
   try {
     writeFileSync(lock, String(process.pid), { flag: "wx" }); // atomic: of two views at once, one refreshes
     spawn(process.execPath, ["--no-env-file", "--config=/dev/null", view.hook, ...view.args, "--fresh"],
-      { detached: true, stdio: "ignore", cwd: process.cwd() }).unref();
+      { detached: true, stdio: "ignore", cwd: process.cwd(), env: { ...process.env, [LOCK_ENV]: lock } }).unref();
   } catch {
     // the view still answers from the cache; the next open tries again
   }
@@ -116,10 +116,14 @@ export function answer<T>(cfg: Config, view: View, fresh: boolean, read: () => T
       return { data: e.data as T, age: Math.trunc(age) };
     }
   }
-  const data = read();
-  if (seconds > 0 && keep(data)) writeEntry(view, path, data, now);
-  else if (fresh) rmSync(`${path}.lock`, { force: true });
-  return { data, age: null };
+  try {
+    const data = read();
+    if (seconds > 0 && keep(data)) writeEntry(view, path, data, now);
+    return { data, age: null };
+  } finally {
+    // only the background refresh that took this entry's lock gives it back; any other read leaves it alone
+    if (process.env[LOCK_ENV] === `${path}.lock`) rmSync(`${path}.lock`, { force: true });
+  }
 }
 
 /** The line that says a view came from the cache, or null when it was read now. */

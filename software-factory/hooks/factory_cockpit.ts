@@ -173,7 +173,7 @@ function version(missing: Problem[]): Obj {
 export async function snapshot(): Promise<Obj> {
   const [ls, prs, ciStep, doc] = await Promise.all([
     step(hook("factory_agents", "ls", "--json")),
-    step(hook("factory_prs", "--json")),
+    step(hook("factory_prs", "--json", "--fresh")), // read now: this snapshot is the cockpit's own cache
     step(["bash", join(HOOKS, "..", "ci", "ci.sh"), "status", "--json"]),
     step(hook("factory_doctor")),
   ]);
