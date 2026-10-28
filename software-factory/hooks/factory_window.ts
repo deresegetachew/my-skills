@@ -9,7 +9,8 @@
 // Each session is the tmux session <repo>-<name> (what `factory follow`, `say` and the heartbeat look for) with one
 // window named <role>-<name>; dots, spaces and other signs become "-". A session that is already running is left
 // alone and said so. The command in the window gets FACTORY_WINDOW=<window>, so a `factory loop -i` inside it runs in
-// place. Without tmux it stops with {code, message, fix}. The cockpit needs tmux 3.2 or newer; an older tmux still
+// place. Without tmux the step stops with {code, message, fix} (resume, autostart); `factory loop -i` checks first and
+// runs in place instead, with a note. The cockpit needs tmux 3.2 or newer; an older tmux still
 // starts the session, with a note.
 import { join } from "node:path";
 import { load, toFloat } from "./factory_config.ts";
