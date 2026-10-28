@@ -81,6 +81,10 @@ Build
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
                          the CI queue and runners, and the tasks; read-only
+  cockpit                one window to run the factory from (tmux 3.2 or newer, own prefix C-a), read-only: sessions
+                         and views on the left, the selected agent's real Claude Code session on the right (you type
+                         into it), the counts on top; `:` opens the command bar, a tmux around it keeps C-b. Also
+                         --view <name> (a view as a popup, through less -R), --open <session>, --commands [query]
   cockpit --json         the factory as data, one snapshot: sessions on every machine, what needs you, PRs, CI, the
                          version and the doctor's summary; a part that can't be read is listed under "missing"
   cockpit --status       one line for tmux's status line (counts and "N need you"), from a cache: no GitHub call;
@@ -318,7 +322,9 @@ case "$cmd" in
   autostart) fh "$hooks/factory_autostart" "$@" ;;
   resume)    fh "$hooks/factory_resume" "$@" ;;
   status)    fh "$hooks/factory_status" "$@" ;;
-  cockpit)   fh "$hooks/factory_cockpit" "$@" ;;
+  cockpit)   # the panes run `factory` again: give them this script's path (relative to where it was started)
+    self="${BASH_SOURCE[0]}"; case "$self" in /*) ;; *) self="$OLDPWD/$self" ;; esac
+    FACTORY_SELF="$self" fh "$hooks/factory_cockpit" "$@" ;;
   prs)       fh "$hooks/factory_prs" "$@" ;;
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
   release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;

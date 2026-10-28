@@ -70,6 +70,22 @@ function cockpit(p: Proj, ...args: string[]): Proc {
   return sh(["bash", join(SF, "factory"), "cockpit", ...args], { cwd: p.d, env: p.env, timeoutMs: 50_000 });
 }
 
+/** `factory cockpit` with no flag, on a pseudo-terminal as the owner runs it: what it showed is both out and stderr. */
+async function open(p: Proj): Promise<{ code: number; out: string; stderr: string }> {
+  let shown = "";
+  const proc = Bun.spawn(["bash", join(SF, "factory"), "cockpit"], {
+    cwd: p.d, env: p.env as Record<string, string>,
+    terminal: { cols: 200, rows: 50, data(_t, d) { shown += new TextDecoder().decode(d); } },
+  });
+  const timer = setTimeout(() => proc.kill(9), 50_000);
+  const code = await proc.exited;
+  clearTimeout(timer);
+  await Bun.sleep(50);
+  proc.terminal?.close();
+  shown = shown.replace(/\r/g, "");
+  return { code, out: shown, stderr: shown };
+}
+
 const tcalls = (p: Proj): string[] => readFileSync(p.tlog, "utf8").split("\n").filter(Boolean);
 const lastJson = (s: string): Row => JSON.parse(s.trimEnd().split("\n").pop() as string) as Row;
 const ownServer = (l: string): boolean => /^-L factory-cockpit-\S+ /.test(l);
@@ -97,9 +113,19 @@ const row = (name: string, kind: string, state: string, source = "local"): Row =
 
 const VIEWS = ["Needs you", "Pull requests", "Tasks & PRD", "CI", "Agents & machines", "Settings", "Health & releases", "Usage & lessons"];
 
-test("no tmux on PATH: no-tmux error with a fix", () => {
-  const p = setup({ tmux: false });
+test("off a terminal (a script, a pipe) it starts no tmux server: no-terminal, exit 2", () => {
+  const p = setup();
   const r = cockpit(p);
+  expect(r.code).toBe(2);
+  const j = lastJson(r.stderr);
+  expect(j.code).toBe("no-terminal");
+  expect(typeof j.fix).toBe("string");
+  expect(tcalls(p).some((l) => l.includes("new-session") || l.includes("attach"))).toBe(false);
+}, T);
+
+test("no tmux on PATH: no-tmux error with a fix", async () => {
+  const p = setup({ tmux: false });
+  const r = await open(p);
   expect(r.code).not.toBe(0);
   const j = lastJson(r.stderr);
   expect(j.code).toBe("no-tmux");
@@ -107,9 +133,9 @@ test("no tmux on PATH: no-tmux error with a fix", () => {
   expect(typeof j.fix).toBe("string");
 }, T);
 
-test("tmux 3.1 is too old: tmux-too-old naming 3.2, and no session is started", () => {
+test("tmux 3.1 is too old: tmux-too-old naming 3.2, and no session is started", async () => {
   const p = setup({ version: "3.1" });
-  const r = cockpit(p);
+  const r = await open(p);
   expect(r.code).not.toBe(0);
   const j = lastJson(r.stderr);
   expect(j.code).toBe("tmux-too-old");
@@ -118,17 +144,17 @@ test("tmux 3.1 is too old: tmux-too-old naming 3.2, and no session is started", 
 }, T);
 
 for (const v of ["3.2", "3.4", "next-3.5"]) {
-  test(`tmux ${v} passes the version check`, () => {
+  test(`tmux ${v} passes the version check`, async () => {
     const p = setup({ version: v });
-    const r = cockpit(p);
+    const r = await open(p);
     expect(r.code, r.out).toBe(0);
     expect(tcalls(p).some((l) => l.includes("new-session"))).toBe(true);
   }, T);
 }
 
-test("starts the cockpit on its own tmux server with its config, panes and attaches", () => {
+test("starts the cockpit on its own tmux server with its config, panes and attaches", async () => {
   const p = setup();
-  const r = cockpit(p);
+  const r = await open(p);
   expect(r.code, r.out).toBe(0);
   const calls = tcalls(p).filter((l) => !isVersionCheck(l));
   expect(calls.length).toBeGreaterThan(0);
@@ -150,9 +176,9 @@ test("starts the cockpit on its own tmux server with its config, panes and attac
   expect(calls[calls.length - 1]).toMatch(/attach(-session)? .*cockpit/);
 }, T);
 
-test("inside another tmux it still attaches to the cockpit's own server", () => {
+test("inside another tmux it still attaches to the cockpit's own server", async () => {
   const p = setup({ extra: { TMUX: "/tmp/tmux-1000/default,1,0" } });
-  const r = cockpit(p);
+  const r = await open(p);
   expect(r.code, r.out).toBe(0);
   const att = tcalls(p).filter((l) => /attach(-session)? /.test(l));
   expect(att.length).toBe(1);
@@ -160,9 +186,9 @@ test("inside another tmux it still attaches to the cockpit's own server", () => 
   expect(att[0]).toContain("cockpit");
 }, T);
 
-test("a cockpit already running is attached to, not started again", () => {
+test("a cockpit already running is attached to, not started again", async () => {
   const p = setup({ running: true });
-  const r = cockpit(p);
+  const r = await open(p);
   expect(r.code, r.out).toBe(0);
   const calls = tcalls(p);
   expect(calls.some((l) => l.includes("new-session"))).toBe(false);
