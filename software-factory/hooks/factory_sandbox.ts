@@ -17,9 +17,8 @@ import { join } from "node:path";
 import * as M from "./factory_bootstrap_machine.ts";
 import * as G from "./factory_netguard.ts";
 import { probe } from "./factory_bootstrap_core.ts";
-import { repoKey } from "./factory_machine.ts";
+import { machineSettings, repoKey } from "./factory_machine.ts";
 import { pyInt } from "./factory_lib.ts";
-import { runnerSetting } from "../ci/ci_names.ts";
 
 export const INTERNET = ["https://github.com", "https://registry.npmjs.org", "https://api.anthropic.com"];
 export const LINK_LOCAL = "169.254.169.254";
@@ -244,9 +243,11 @@ export function services(r: Report, cfgProject: Record<string, unknown> | null):
   } catch {
     repo = "";
   }
-  // The count `factory ci install` uses here (#282): FACTORY_CI_RUNNERS, this machine's saved count, then ci.runners.
-  const { raw, source } = runnerSetting(cfgProject ? obj(cfgProject.ci) : {});
-  const want = source === "default" ? 0 : (pyInt(raw || 0) ?? 0);
+  // The count `factory ci install` uses here (#282, ci_names.ts runnerSetting()): FACTORY_CI_RUNNERS, this machine's
+  // saved count, then ci.runners. Read here without importing ../ci, so the doctor runs where only the hooks are.
+  const saved = machineSettings()["ci.runners"];
+  const raw = process.env.FACTORY_CI_RUNNERS || (saved ?? (cfgProject ? obj(cfgProject.ci).runners : undefined));
+  const want = pyInt(raw || 0) ?? 0;
   const [rc, out] = probe(["systemctl", "--user", "list-units", "--no-legend", "--state=active", `${repo}-ci*.service`]);
   const active = rc === 0 ? out.split(/\r\n|\r|\n/).filter((l) => l.includes(".service")).length : 0;
   if (rc !== 0) {
