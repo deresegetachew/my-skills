@@ -6,6 +6,8 @@
     "staleHours": 3
   },
   "mainBranch": "main",
+  "prd": "software-factory/docs/PRD.md",
+  "trustedReviewers": ["deresegetachew"],
   "commands": {
     "lint": "bun tools/check_skills.ts",
     "test": "bun tools/run_tests.ts"
