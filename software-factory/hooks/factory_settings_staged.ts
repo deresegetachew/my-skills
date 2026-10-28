@@ -7,7 +7,7 @@
 // main branch as `origin` has it when the person runs `pr`, in a temporary worktree, so the person's own checkout
 // (any branch, any state) is never touched, and a main that moved on since the staging is no problem. Each staged
 // value is checked again first: a schema that changed since can make one invalid. Machine settings are never staged.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fail, git as runGit, pyDumps, run } from "./factory_lib.ts";
@@ -33,10 +33,44 @@ export function stagingPath(): string {
   return join(p.stdout.trim(), "factory", "settings-staged.json");
 }
 
+function isObject(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === "object" && !Array.isArray(v);
+}
+
+/** The staged changes, or why the staging file can't be read (a damaged file must never block the owner). */
+export function loadStaged(): { changes: Staged } | { problem: string } {
+  let text: string;
+  try {
+    text = readFileSync(stagingPath(), "utf8");
+  } catch (e) {
+    if ((e as { code?: string }).code === "ENOENT") return { changes: {} };
+    return { problem: e instanceof Error ? e.message : String(e) };
+  }
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return { problem: "it isn't valid JSON" };
+  }
+  if (!isObject(data)) return { problem: "it isn't a JSON object" };
+  if (data.changes === undefined) return { changes: {} };
+  if (!isObject(data.changes)) return { problem: "its `changes` isn't an object" };
+  for (const [key, c] of Object.entries(data.changes)) {
+    if (!isObject(c) || !(Object.hasOwn(c, "value") || c.unset === true)) {
+      return { problem: `the entry for \`${key}\` is neither {"value": ...} nor {"unset": true}` };
+    }
+  }
+  return { changes: data.changes as Staged };
+}
+
+/** The fix for a damaged staging file: drop it and stage again. */
+export const DAMAGED_FIX = "Run `factory settings unstage` to drop the staged changes, then stage them again with " +
+  "`factory settings set --stage <key> <value>`.";
+
 export function readStaged(): Staged {
-  const data = store.readProject(stagingPath())[0];
-  const changes = data.changes;
-  return changes && typeof changes === "object" && !Array.isArray(changes) ? (changes as Staged) : {};
+  const r = loadStaged();
+  if ("problem" in r) fail("settings_staged_damaged", `The staged settings (${stagingPath()}) can't be read: ${r.problem}.`, DAMAGED_FIX);
+  return r.changes;
 }
 
 function writeStaged(changes: Staged): void {
@@ -65,13 +99,16 @@ export function stage(key: string, value?: unknown): void {
 
 export function unstage(key?: string): void {
   store.refuseInAgentSession();
-  const changes = readStaged();
   if (key === undefined) {
+    // Removed without parsing, so a damaged file can always be cleared.
+    const r = loadStaged();
     writeStaged({});
-    console.log(`Dropped ${count(Object.keys(changes).length).replace(" staged", "")}; nothing is staged now.`);
+    const what = "changes" in r ? count(Object.keys(r.changes).length).replace(" staged", "") : "the damaged staging file";
+    console.log(`Dropped ${what}; nothing is staged now.`);
     return;
   }
-  if (!(key in changes)) {
+  const changes = readStaged();
+  if (!Object.hasOwn(changes, key)) {
     fail("settings_not_staged", `\`${key}\` has no staged change.`, "`factory settings diff --staged` lists what is staged.");
   }
   delete changes[key];

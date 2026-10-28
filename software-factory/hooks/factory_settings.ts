@@ -323,7 +323,12 @@ export async function main(argv: string[]): Promise<void> {
   if (cmd === "pr") {
     store.refuseInAgentSession();
     const staged = await import("./factory_settings_staged.ts");
-    if (Object.keys(staged.readStaged()).length) {
+    const found = staged.loadStaged();
+    if ("problem" in found) {
+      // A damaged staging file never blocks the pull request of an edited factory.json.
+      process.stderr.write(`warning: the staged settings can't be read (${found.problem}), so they are not in this pull request. ` +
+        `${staged.DAMAGED_FIX}\n`);
+    } else if (Object.keys(found.changes).length) {
       const [data] = store.readProject();
       return staged.openStagedPr(!flags.has("--ready"), (typeof data.mainBranch === "string" && data.mainBranch) || "main");
     }
