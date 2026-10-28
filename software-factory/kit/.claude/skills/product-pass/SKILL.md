@@ -94,6 +94,19 @@ no story used twice and no task naming a missing story.
    you (`roles.product-owner.logins`).
 8. **Tell the owner only what needs them**, one line each, with your recommendation. Then exit.
 
+## Artifacts and designs
+
+- **Read the repo copy.** A design or document made as a claude.ai artifact is read through its copy in the project (the
+  path `reads.md` names, pulled with `factory artifacts pull`). Run `factory artifacts status` before you rely on one: when it
+  says a copy is OLDER than its artifact, say so in what you write ("the copy of <id> is older than the artifact; ask the
+  owner to pull it again") and do not guess what changed.
+- **Live access is interactive only.** An unattended pass (`claude -p`) has no artifact tool. A `-i` session has the
+  `Artifact` tool only when the owner turned on `roles.product-owner.artifacts`; otherwise it is denied. When it is there,
+  **reading** an artifact (listing, reading a page or a published file) is fine.
+- **Writing needs the owner's yes.** Publishing or changing an artifact is publishing: ask the owner in the session and act
+  only on their yes, each time. Bring the change into the repo afterwards with `factory artifacts pull`, in a pull request.
+- Do not build on `DesignSync`: standalone Claude Design closes on 2026-12-14, and designs are Artifact types now.
+
 ## Rules
 
 - A proposal says "I recommend ... because ..."; it ends with what you need from the owner.

@@ -135,7 +135,7 @@ export const DEFAULTS: Config = {
     "product-owner": {
       names: ["mentewab", "eleni", "sabla"], busyMinutes: 30, idleMinutes: 60,
       profile: ".claude/product-owner/settings.json", workLabel: "factory:needs-product",
-      escalateMinutes: 120, logins: [],
+      escalateMinutes: 120, logins: [], artifacts: false,
     },
   },
   // The dev manager (#97, #109): an orchestrator with no model, starting one-item sub-managers.

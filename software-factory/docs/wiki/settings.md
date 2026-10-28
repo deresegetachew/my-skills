@@ -111,7 +111,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `mainBranch` | str | `"main"` | The main branch. |
 | `artifacts.manifest` | str | `"docs/artifacts.json"` | Where `factory artifacts` records each artifact copy kept in the repo: where it came from, when, by whom, and a hash of each file. |
 | `artifacts.dir` | str | `"docs/artifacts"` | The default folder for an artifact's repo copy: <dir>/<artifact id>. |
-| `artifacts.fetch` | str | `""` | A command that exports the artifact `{url}` into the folder `{out}`, for `factory artifacts pull`. Empty: pull takes an export made by hand (`--from`). How a terminal session may read an artifact is not settled. |
+| `artifacts.fetch` | str | `""` | A command that exports the artifact `{url}` into the folder `{out}`, for `factory artifacts pull`. Empty: pull takes an export made by hand (`--from`). Unattended sessions have no artifact tool (#104), so this is your own exporter. |
 | `artifacts.info` | str | `""` | A command that prints JSON {title, updated, version} for the artifact `{url}`, for `factory artifacts status` and `factory doctor`. Empty: they say they can't tell whether a copy is older. |
 | `notes` | str | `".claude/factory/notes"` | The folder of project notes for the shared agents and skills. |
 | `usageLog` | str | `"docs/factory-usage.md"` | Where `factory usage --record` appends its rows (commit it to keep the history). |
@@ -183,6 +183,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `roles.product-owner.idleMinutes` | int | `60` | Minutes it waits when there was none. 0: it exits instead. |
 | `roles.product-owner.escalateMinutes` | int | `120` | A question addressed `to=po` that nobody answered moves up one level after this many minutes: product owner, then dev manager, then the owner. With no product owner running it starts at the dev manager. |
 | `roles.product-owner.logins` | list | `[]` | GitHub logins whose answers count for the product owner. Empty: any login. An answer from another login is ignored. |
+| `roles.product-owner.artifacts` | bool | `false` | Let the product owner's interactive (`-i`) sessions use the `Artifact` and `DesignSync` tools to read claude.ai artifacts live. Off: its sessions deny them. The dev manager and the coding agents never get them. Read from main. |
 | `manager.busyMinutes` | int | `2` | Minutes the dev manager's loop waits after a cycle that had work. |
 | `manager.idleMinutes` | int | `5` | Minutes it waits when there was none. 0: it exits instead. |
 | `manager.maxSubManagers` | int | `2` | How many one-item sub-managers the dev-manager orchestrator runs at once. Items beyond the cap wait for the next cycle. |

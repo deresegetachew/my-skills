@@ -143,7 +143,9 @@
       "Bash(./factory heartbeat install*)",
       "Bash(./factory heartbeat uninstall*)",
       "Bash(./factory heartbeat run*)",
-      "Bash(*factory_heartbeat*)"
+      "Bash(*factory_heartbeat*)",
+      "Artifact",
+      "DesignSync"
     ]
   },
   "hooks": {

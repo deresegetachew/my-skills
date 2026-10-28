@@ -28,6 +28,8 @@
 import { existsSync, mkdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Config, DEFAULTS, load, ROLE_NAMES, roleNames, roleSetting, roleWait, rolesDir, safeAgent, toFloat } from "./factory_config.ts";
+import { ARTIFACT_TOOLS } from "./factory_agent_settings.ts";
+import { mainBranch } from "./factory_mcp.ts";
 import { flags as modelFlags, ModelsError, validate } from "./factory_models.ts";
 // What reads GitHub is loaded when a command needs it, so `vars`, `prompt`, `permission-flags` and `claude-flags` (the
 // loop asks for them every pass) need only the settings, and the orchestrator can import this module.
@@ -278,13 +280,44 @@ function compactJson(x: unknown): string {
   return JSON.stringify(x).replace(/[\u007f-￿]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
+/** Whether `role` may use the artifact tools (#104): only the product owner, and only when
+ * `roles.product-owner.artifacts` is true in `.claude/factory.json` as main has it on origin, never this folder's copy
+ * (a role must not turn it on for itself). When main can't be read: no. */
+export function artifactsAllowed(role: string): boolean {
+  if (role !== "product-owner") return false;
+  const branch = mainBranch();
+  if (!branch || run(["git", "fetch", "-q", "origin", `refs/heads/${branch}`], { timeoutMs: 60_000 }).code !== 0) return false;
+  const shown = run(["git", "show", "FETCH_HEAD:.claude/factory.json"], { timeoutMs: 60_000 });
+  if (shown.code !== 0) return false;
+  try {
+    const roles = (JSON.parse(shown.stdout) as { roles?: Record<string, { artifacts?: unknown } | undefined> }).roles;
+    return roles?.[role]?.artifacts === true;
+  } catch {
+    return false;
+  }
+}
+
+/** `settings` with the artifact tools denied, or, when `allowed`, with no deny rule for them (a profile's own too). */
+export function withArtifacts(settings: Record<string, unknown>, allowed: boolean): Record<string, unknown> {
+  const { permissions, ...rest } = settings;
+  const perms = typeof permissions === "object" && permissions !== null && !Array.isArray(permissions)
+    ? { ...permissions as Record<string, unknown> } : {};
+  const deny = (Array.isArray(perms.deny) ? perms.deny : []).filter((d) => !ARTIFACT_TOOLS.includes(d as string));
+  if (!allowed) deny.push(...ARTIFACT_TOOLS);
+  if (deny.length) perms.deny = deny;
+  else delete perms.deny;
+  return Object.keys(perms).length ? { permissions: perms, ...rest } : rest;
+}
+
 /** The settings flags for a role's sessions. With a profile file, the session reads only the user's settings and
  * that profile (the project's own settings deny `gh api`, and the profile has to allow it): `--setting-sources user
- * --settings <profile + no claude.ai connectors>`. Without one, today's flags. */
+ * --settings <profile + no claude.ai connectors>`. Without one, today's flags. Either way the artifact tools are
+ * denied unless the role may use them (artifactsAllowed). */
 export function profileFlags(cfg: Config, role: string): string[] {
   const off = { disableClaudeAiConnectors: true };
   const path = String(roleSetting(cfg, role, "profile", "") || "");
-  if (role === "coding-agent" || !path || !isFile(path)) return ["--settings", pyDumps(off)];
+  const allowed = artifactsAllowed(role);
+  if (role === "coding-agent" || !path || !isFile(path)) return ["--settings", pyDumps(withArtifacts(off, allowed))];
   let profile: unknown;
   try {
     profile = JSON.parse(readFileSync(path, "utf8"));
@@ -293,7 +326,7 @@ export function profileFlags(cfg: Config, role: string): string[] {
       `\`roles.${role}.profile\` to another file.`);
   }
   const base = typeof profile === "object" && profile !== null && !Array.isArray(profile) ? profile as Record<string, unknown> : {};
-  return ["--setting-sources", "user", "--settings", compactJson({ ...base, ...off })];
+  return ["--setting-sources", "user", "--settings", compactJson(withArtifacts({ ...base, ...off }, allowed))];
 }
 
 /** The flags that give an unattended (`claude -p`) run its permissions (#179): `--permission-mode <permissionMode>`,

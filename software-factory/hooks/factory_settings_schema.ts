@@ -50,6 +50,7 @@ export const NEEDS: Record<string, string> = {
   trustedReviewers: "the owner's decision: it changes whose approvals count",
   permissionMode: "the owner's decision: it changes what an unattended agent may do without asking",
   "permissions.allow": "the owner's decision: it changes what an unattended agent may run without asking",
+  "roles.product-owner.artifacts": "the owner's decision: it lets a role's interactive sessions read claude.ai artifacts",
   mainBranch: "the owner's decision: the PR gate reads the branch from GitHub, so keep it the same",
   "reviews.safety-auditor.paths": "the owner's decision: it changes which changes get the safety auditor",
   "reviews.security-reviewer.paths": "the owner's decision: it changes which changes get the security reviewer",
@@ -172,7 +173,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("manager.flakes", "list", "gate", "Names of CI jobs known to fail now and then for no reason. `factory prs` says `rerun flake` for a PR whose only red jobs are these, failing for the first time on that commit; a second failure goes back to the agent.", { default: [] }),
   S("artifacts.manifest", "str", "paths", "Where `factory artifacts` records each artifact copy kept in the repo: where it came from, when, by whom, and a hash of each file."),
   S("artifacts.dir", "str", "paths", "The default folder for an artifact's repo copy: <dir>/<artifact id>."),
-  S("artifacts.fetch", "str", "paths", "A command that exports the artifact `{url}` into the folder `{out}`, for `factory artifacts pull`. Empty: pull takes an export made by hand (`--from`). How a terminal session may read an artifact is not settled."),
+  S("artifacts.fetch", "str", "paths", "A command that exports the artifact `{url}` into the folder `{out}`, for `factory artifacts pull`. Empty: pull takes an export made by hand (`--from`). Unattended sessions have no artifact tool (#104), so this is your own exporter."),
   S("artifacts.info", "str", "paths", "A command that prints JSON {title, updated, version} for the artifact `{url}`, for `factory artifacts status` and `factory doctor`. Empty: they say they can't tell whether a copy is older."),
   S("roles.dir", "str", "agents", "The project's role folder: <dir>/<role>/README.md (the project's own instructions for the role) and reads.md (what it reads, one per line). Committed in the project. A project without it falls back to `notes`. `factory init-roles` creates it."),
   S("roles.dev-manager.names", "list", "agents", "The dev managers' names: `factory dev-manager [name|N] loop`. Lowercase letters, digits, dashes; none may be a coding agent's name."),
@@ -184,6 +185,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("roles.product-owner.idleMinutes", "int", "agents", "Minutes it waits when there was none. 0: it exits instead."),
   S("roles.product-owner.escalateMinutes", "int", "agents", "A question addressed `to=po` that nobody answered moves up one level after this many minutes: product owner, then dev manager, then the owner. With no product owner running it starts at the dev manager."),
   S("roles.product-owner.logins", "list", "agents", "GitHub logins whose answers count for the product owner. Empty: " + "any login. An answer from another login is ignored."),
+  S("roles.product-owner.artifacts", "bool", "agents", "Let the product owner's interactive (`-i`) sessions use the `Artifact` and `DesignSync` tools to read claude.ai artifacts live. Off: its sessions deny them. The dev manager and the coding agents never get them. Read from main."),
   S("manager.busyMinutes", "int", "agents", "Minutes the dev manager's loop waits after a cycle that had work."),
   S("manager.idleMinutes", "int", "agents", "Minutes it waits when there was none. 0: it exits instead."),
   S("manager.maxSubManagers", "int", "agents", "How many one-item sub-managers the dev-manager orchestrator runs at once. Items beyond the cap wait for the next cycle."),
@@ -371,6 +373,15 @@ const MORE: Record<string, More> = {
   claimStaleHours: { long: "A loop's claim on a task (and a pushed task branch) lapses after this many hours, or " +
     "when its process exits, so a crashed agent doesn't hold work for ever.",
   examples: ["factory settings set claimStaleHours 6"] },
+  "roles.product-owner.artifacts": { long: "Interactive Claude Code sessions have the built-in `Artifact` tool (list " +
+    "artifacts, read a page or a published file) and `DesignSync`; unattended `claude -p` passes have no artifact tool at " +
+    "all, so they read the repo copies (`factory artifacts pull`, `factory artifacts status`). Off (the default): every " +
+    "role session denies both tools, which also keeps their definitions out of every turn. On: the product owner's sessions " +
+    "do not deny them, so `factory product-owner loop -i` may read artifacts; publishing to one still needs the owner's yes. " +
+    "The value is read from `.claude/factory.json` on the main branch, so a role can't turn it on for itself. The dev " +
+    "manager and the coding agents are always denied them. Standalone Claude Design closes on 2026-12-14 (designs are " +
+    "Artifact types now), so nothing is built on `DesignSync`.",
+  examples: ["factory settings set roles.product-owner.artifacts true"] },
   permissionMode: { long: "Nobody can answer a permission prompt in an unattended run, so every headless `claude -p` the loops and the dev " +
     "manager start gets `--permission-mode acceptEdits`: edits inside the project need no answer, and the allow list in " +
     ".claude/factory/settings.json (plus `permissions.allow` here) covers the commands. Anything not allowed or denied stops the run, " +

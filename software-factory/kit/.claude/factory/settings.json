@@ -137,7 +137,9 @@
       "Bash(gh pr comment *factory-answer*)",
       "Bash(gh pr comment *factory-mustfix*)",
       "Bash(gh pr comment *factory-review-claim*)",
-      "Bash(gh pr comment *factory-claim-release*)"
+      "Bash(gh pr comment *factory-claim-release*)",
+      "Artifact",
+      "DesignSync"
     ]
   },
   "hooks": {
