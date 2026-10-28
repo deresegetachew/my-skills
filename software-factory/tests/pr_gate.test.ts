@@ -653,7 +653,11 @@ test("a program the shell has to work out first is refused", () => {
     "cat > tmp/pr.md <<'EOF'\n* one\n**two** done\n$ pnpm test\nEOF", "cat <<-EOF > tmp/x\n\t[x] y\n\tEOF\necho ok",
     // the kit's skills pass the agent's name in a variable
     'bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task issue-5',
-    'bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}']) {
+    'bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}',
+    // and now in plain text, which the scripts fill in from the environment
+    "bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts", "bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --issue 5",
+    "bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --task issue-5",
+    "bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --tasks-only"]) {
     expect(gate(d, env, c), c).toEqual([0, ""]);
   }
   for (const c of ["bun $S", "bun --no-env-file run $(cat x)", "node ${X}/a.js"]) {

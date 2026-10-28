@@ -9,7 +9,7 @@ export const NAMES = ["menelik", "taytu", "haile", "tewodros"];
 export function baseEnv(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t",
     GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
-  for (const k of ["FACTORY_AGENT", "FACTORY_AGENTS", "FACTORY_LOOP", "CLAUDE_PROJECT_DIR"]) delete env[k];
+  for (const k of ["FACTORY_AGENT", "FACTORY_AGENTS", "FACTORY_PID", "FACTORY_LOOP", "CLAUDE_PROJECT_DIR"]) delete env[k];
   return env;
 }
 

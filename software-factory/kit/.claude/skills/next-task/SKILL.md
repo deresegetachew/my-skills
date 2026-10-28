@@ -8,8 +8,8 @@ description: Pick the next unticked task in the build plan, build it on its own 
 # Next task
 
 One task at a time: pick, test, build, review, ship. Paths and commands come from `.claude/factory.json` (`plan`,
-`blocked`, `prd`, `decisions`, `commands`). `$ARGUMENTS`: empty for one task, a task id such as `1.3`, `issue-<n>`,
-`pr-<n>`, or `all` to keep going until every remaining task is blocked.
+`blocked`, `prd`, `decisions`, `commands`). The argument (what follows `/next-task` in your prompt): empty for one task, a task id such as `1.3`,
+`issue-<n>`, `pr-<n>`, or `all` to keep going until every remaining task is blocked.
 
 This file is the core. Open the others in this folder only when they apply:
 
@@ -25,9 +25,9 @@ This file is the core. Open the others in this folder only when they apply:
 1. **Start routine:** `git fetch origin && git checkout --detach origin/<mainBranch>`, then
    `git submodule update --init` if the repo has a `.gitmodules`. Read `git log --oneline -15`, and run the `smoke`
    command if `factory.json` has one. If main is broken, fixing it is the task.
-2. **Let the script pick:** `bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}`.
-   If you were told which issue to build, add `--issue <n>` (issues mode) so the claim takes that one and no other.
-   Never pick by reading the plan yourself. If `$ARGUMENTS` names a task, under `factory-loop.sh` the loop has
+2. **Let the script pick:** `bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts`,
+   exactly so, with no variable (it claims as your `FACTORY_AGENT`). Told which issue to build? Add `--issue <n>`
+   (issues mode) so the claim takes that one and no other. Never pick by reading the plan yourself. If your prompt names a task, under `factory-loop.sh` the loop has
    already claimed it: build only that one. `pr-<n>` means rework (`rework.md`). Respect phase order unless the plan
    says phases overlap.
 3. **Read the brief first.** The task (or issue) lists what to read: PRD sections, decisions, design references,
@@ -107,7 +107,7 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    **If `gh pr create` fails** (for example GraphQL is blocked, as in a claude.ai cloud session), don't open it another
    way: `gh api` is denied, because it would get around the PR gate (#182). Stop and report what failed, with the error
    and the pushed branch; keep your task claim, so the task waits for you. Builders need a machine where `gh pr` works.
-   Then drop your task claim: `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --agent "$FACTORY_AGENT" --tasks-only`
+   Then drop your task claim: `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release --tasks-only`
    (when `FACTORY_AGENT` is set). **Post the task's tokens** on the PR, so whoever merges it sees what it cost:
    `bun --no-env-file --config=/dev/null .claude/hooks/factory_usage.ts --task <id> --markdown > tmp/usage.md && gh pr comment <n> --body-file tmp/usage.md`
    (`<id>` is the issue number in issues mode). Post it even when it finds no replies. With a budget it adds used

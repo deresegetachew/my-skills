@@ -25,5 +25,5 @@ test("the rework step tells an interactive agent to mark it done", () => {
   expect(read(SKILL)).toContain("rework.md"); // the core skill sends a pr-<n> pick there
   const rework = read(REWORK);
   expect(rework).toContain("FACTORY_INTERACTIVE=1");
-  expect(rework).toMatch(/factory_claims\.ts done --agent "\$FACTORY_AGENT" --task pr-<n>/);
+  expect(rework).toContain("factory_claims.ts done --task pr-<n>`"); // FACTORY_AGENT from the environment: no variable
 });

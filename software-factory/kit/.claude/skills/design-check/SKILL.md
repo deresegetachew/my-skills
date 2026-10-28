@@ -7,7 +7,7 @@ description: Compare a built screen with its design reference by taking Playwrig
 
 # Design check
 
-Arguments: `$ARGUMENTS`: the screen(s) to check.
+Arguments: the screen(s) to check, named after `/design-check` in your prompt.
 
 1. **Find the reference:** `design.references` in `.claude/factory.json` (for example `design/screens/<Name>.html`)
    and `design.renders` (the rendered PNGs), or what CLAUDE.md points to. If there is none, say so and skip to step 6.

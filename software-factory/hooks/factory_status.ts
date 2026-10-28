@@ -151,7 +151,7 @@ type Tasks = { next: string } | { ready: Record<string, number>; inProgress: num
 
 function tasks(cfg: Config): Tasks {
   if (taskSource(cfg) !== "issues") {
-    const p = run(bunCmd(join(HOOKS, "next_task.ts")));
+    const p = run([...bunCmd(join(HOOKS, "next_task.ts")), "--no-claim"]); // status only looks, even in an agent session
     const out = p.stdout.trim();
     if (p.code === 0 && out) return { next: out };
     if (p.code === 1 && out === "none") return { next: "nothing ready" };
