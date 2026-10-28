@@ -407,16 +407,16 @@ The core first: every screen needs it.
   sub-managers each have a row with their role, and `factory agents ls` shows them. *Decided.* (#295; L1)
 - **US-3.** As the owner, every session the factory starts runs in its own tmux window, through one shared step used by
   the cockpit, `factory autostart`, resume and `loop -i` (today `loop -i` runs in the current terminal). *Decided.* (#295)
-- **US-4.** As the owner, I can see what a sub-manager is doing: it runs in its own tmux window that the cockpit shows
-  read-only, or the cockpit shows its log. Today a sub-manager runs as `claude -p` with no screen. *Decided.* (#295)
-  > Open question: its own window, or its log? #295 names both.
+- **US-4.** As the owner, I can see what a sub-manager is doing: it runs in its own tmux window, started through the
+  shared step of US-3, and the cockpit shows that window read-only. Today a sub-manager runs as `claude -p` with no
+  screen. *Decided.* (#295; owner's answer in #293, 28 Oct 2026)
 - **US-5.** As the owner, `factory follow <name>` finds a session on this machine directly, not only through an ssh
   remote. *Decided.* (#295; O5)
 - **US-6.** As the owner, what I do by hand is a factory command, so the cockpit and the command line share it:
   `factory owner merge`, `label`, `answer` and `release`. `merge` keeps the protected-file check: it says when a pull
-  request touches protected paths. *Decided.* (#295; D12)
-  > Open question: should these refuse inside an agent session, as `factory settings set` does (S3)? They are the
-  > owner's actions (D12).
+  request touches protected paths. The dev manager may run them too, still under the PR gate; a coding agent may not,
+  so inside a coding agent's session they refuse with `{code, message, fix}`. *Decided.* (#295; D12; owner's answer in
+  #293, 28 Oct 2026)
 - **US-7.** As the owner, I am alerted when a new item needs me: a terminal bell and a desktop notice (osascript on
   macOS, notify-send on Linux; nothing to install). Once per new item, not on every refresh. *Decided.* (#295; O2)
 - **US-8.** As the owner, the GitHub views (`factory prs`, `watch`, `messages`, CI) read from one background cache, like
