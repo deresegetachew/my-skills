@@ -42,15 +42,21 @@ export function running(session: string): boolean {
   return run(["tmux", "has-session", "-t", `=${session}`]).code === 0;
 }
 
+/** The installed tmux is older than 3.2, which the cockpit needs: its version ("3.1"), else "" (newer, or no number). */
+export function tmuxTooOld(): string {
+  const m = /(\d+)\.(\d+)/.exec(run(["tmux", "-V"]).stdout);
+  return m && (Number(m[1]) < 3 || (Number(m[1]) === 3 && Number(m[2]) < 2)) ? m[0] : "";
+}
+
 /** Throws WindowError when there is no tmux; returns a note when it is older than 3.2, else "". */
 export function checkTmux(): string {
   if (!which("tmux")) {
     throw new WindowError("no-tmux", "tmux is not installed, and every factory session runs in its own tmux window.",
       "Install tmux (for example `sudo apt install tmux` or `brew install tmux`), then run the command again.");
   }
-  const m = /(\d+)\.(\d+)/.exec(run(["tmux", "-V"]).stdout);
-  if (m && (Number(m[1]) < 3 || (Number(m[1]) === 3 && Number(m[2]) < 2))) {
-    return `Note: ${m[0]} is older than tmux 3.2: the session starts, but the cockpit needs 3.2 or newer. ` +
+  const old = tmuxTooOld();
+  if (old) {
+    return `Note: ${old} is older than tmux 3.2: the session starts, but the cockpit needs 3.2 or newer. ` +
       "Upgrade tmux before you use `factory cockpit`.";
   }
   return "";
