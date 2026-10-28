@@ -156,6 +156,23 @@ test("several sub-managers at once each get their own session, named after the i
   expect(starts(env).some((l) => l.includes("-n dev-manager-lead-pr-2 "))).toBe(true);
 });
 
+test("a window still open from an earlier run is left alone: no skip comment, no owner ask, its out file kept", () => {
+  const [d, work, env] = setup({ window: true });
+  hookFile(d, env, "exit 0\n");
+  mkdirSync(subDir(work), { recursive: true });
+  writeFileSync(join(subDir(work), "pr-5.out"), "still working\n");
+  mkdirSync(env.FAKE_TMUX as string, { recursive: true });
+  writeFileSync(join(env.FAKE_TMUX as string, "work-lead-pr-5"), String(process.pid));
+  const p = runSub(work, env);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("still open");
+  expect(starts(env)).toEqual([]);
+  expect(readFileSync(join(subDir(work), "pr-5.out"), "utf8")).toBe("still working\n");
+  const db = readFileSync(join(d, "db.json"), "utf8");
+  expect(db).not.toContain("factory-manager-skip");
+  expect(db).not.toContain("review-failed");
+});
+
 // --- factory cockpit watch ---------------------------------------------------------------------------------------------
 
 /** A live sub-manager for `ref` as the orchestrator leaves it: a pid file with a live pid, and optionally its session. */
