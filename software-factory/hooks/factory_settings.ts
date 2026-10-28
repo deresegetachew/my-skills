@@ -11,7 +11,13 @@
 //   factory settings help [<key>]          the long help for one setting, or the list of sections
 //   factory settings diff                  what the project file sets differently from the defaults
 //   factory settings validate              exit 1 with clear messages when a value is wrong (usable in CI)
-//   factory settings pr [--ready]          propose the edited .claude/factory.json as a pull request (a draft by default)
+//   factory settings set --stage <key> <value>, unset --stage <key>
+//                                          stage a project change instead of writing the file (#306); machine settings
+//                                          (--local) are saved at once, never staged
+//   factory settings diff --staged         what is staged
+//   factory settings unstage [<key>]       drop one staged change, or all of them
+//   factory settings pr [--ready]          propose the staged changes, else the edited .claude/factory.json, as one pull
+//                                          request (a draft by default)
 //   factory settings docs [--check|--write] [--file F]
 //                                          the settings page's tables (docs/wiki/settings.md), generated from the metadata table
 //   factory settings --local ...           the same commands for this machine's own settings (outside the repo)
@@ -40,8 +46,8 @@ export function defaultOf(key: string): unknown {
 }
 
 const VALUE_FLAGS = ["--section", "--file"];
-export const USAGE = "usage: factory settings [--local] [list [--section S] [--json] | get <key> | set <key> <value> | unset <key> | " +
-  "help [<key>] | diff | validate | interactive | pr [--ready] | docs [--check|--write]]";
+export const USAGE = "usage: factory settings [--local] [list [--section S] [--json] | get <key> | set [--stage] <key> <value> | " +
+  "unset [--stage] <key> | unstage [<key>] | help [<key>] | diff [--staged] | validate | interactive | pr [--ready] | docs [--check|--write]]";
 
 function die(message: string): never {
   stop(`factory settings: ${message}`);
@@ -58,7 +64,7 @@ function parseArgs(argv: string[]): [Set<string>, Record<string, string>, string
       values[a] = argv[++i] as string;
     } else if (a.startsWith("--") && a.includes("=") && VALUE_FLAGS.includes(a.split("=")[0] as string)) {
       values[a.split("=")[0] as string] = a.slice(a.indexOf("=") + 1);
-    } else if (["--local", "--json", "--draft", "--ready", "--check", "--write", "-i"].includes(a)) flags.add(a);
+    } else if (["--local", "--json", "--draft", "--ready", "--check", "--write", "--stage", "--staged", "-i"].includes(a)) flags.add(a);
     else rest.push(a);
   }
   return [flags, values, rest];
@@ -181,7 +187,7 @@ function projectAgents(): string[] {
   return Array.isArray(data.agents) ? (data.agents as string[]) : schema.DEFAULTS.agents;
 }
 
-function cmdSet(data: store.Data, indent: store.Indent, local: boolean, key: string, raw: string): void {
+async function cmdSet(data: store.Data, indent: store.Indent, local: boolean, key: string, raw: string, stage: boolean): Promise<void> {
   const s = known(key, local);
   store.refuseInAgentSession();
   let value: unknown;
@@ -196,8 +202,10 @@ function cmdSet(data: store.Data, indent: store.Indent, local: boolean, key: str
     data[key] = value;
     const path = store.writeMachine(data);
     console.log(`${key} = ${asText(value)} in ${path} (this machine only, not committed).`);
+    if (stage) console.log("Machine settings are saved at once, never staged.");
     return;
   }
+  if (stage) return (await import("./factory_settings_staged.ts")).stage(key, value);
   store.assign(data, key, value);
   store.writeProject(data, indent);
   console.log(`${key} = ${asText(value)} in ${PATH}. Commit it on a branch and merge it in a pull request ` +
@@ -210,9 +218,10 @@ function cmdSet(data: store.Data, indent: store.Indent, local: boolean, key: str
   }
 }
 
-function cmdUnset(data: store.Data, indent: store.Indent, local: boolean, key: string): void {
+async function cmdUnset(data: store.Data, indent: store.Indent, local: boolean, key: string, stage: boolean): Promise<void> {
   const s = known(key, local);
   store.refuseInAgentSession();
+  if (stage && !local) return (await import("./factory_settings_staged.ts")).stage(key);
   if (local) {
     if (key in data) {
       delete data[key];
@@ -220,6 +229,7 @@ function cmdUnset(data: store.Data, indent: store.Indent, local: boolean, key: s
     }
   } else if (store.remove(data, key)) store.writeProject(data, indent);
   console.log(`${key} is back to its default (${asText(s.default)}).`);
+  if (stage) console.log("Machine settings are saved at once, never staged.");
 }
 
 function cmdDiff(data: store.Data, local: boolean): void {
@@ -312,16 +322,27 @@ export async function main(argv: string[]): Promise<void> {
   if (cmd === "docs") return cmdDocs(flags, values);
   if (cmd === "pr") {
     store.refuseInAgentSession();
+    const staged = await import("./factory_settings_staged.ts");
+    if (Object.keys(staged.readStaged()).length) {
+      const [data] = store.readProject();
+      return staged.openStagedPr(!flags.has("--ready"), (typeof data.mainBranch === "string" && data.mainBranch) || "main");
+    }
     const { openPr } = await import("./factory_settings_save.ts");
     return openPr(!flags.has("--ready"));
   }
+  if (cmd === "unstage" && args.length <= 1) {
+    store.refuseInAgentSession();
+    return (await import("./factory_settings_staged.ts")).unstage(args[0]);
+  }
+  if (cmd === "diff" && flags.has("--staged") && !args.length) return (await import("./factory_settings_staged.ts")).showStaged();
   const [data, indent] = readScope(local);
   if ((cmd === "list" || cmd === "ls") && !args.length) return cmdList(data, local, values["--section"], flags.has("--json"));
   if (cmd === "help") return cmdHelp(local, args[0]);
   if ((cmd === "show" || cmd === "options") && args.length === 1) return cmdShow(data, local, args[0] as string);
   if (cmd === "get" && args.length === 1) return cmdGet(data, local, args[0] as string);
-  if (cmd === "set" && args.length === 2) return cmdSet(data, indent, local, args[0] as string, args[1] as string);
-  if (cmd === "unset" && args.length === 1) return cmdUnset(data, indent, local, args[0] as string);
+  const stage = flags.has("--stage");
+  if (cmd === "set" && args.length === 2) return cmdSet(data, indent, local, args[0] as string, args[1] as string, stage);
+  if (cmd === "unset" && args.length === 1) return cmdUnset(data, indent, local, args[0] as string, stage);
   if (cmd === "diff" && !args.length) return cmdDiff(data, local);
   if (cmd === "validate" && !args.length) return cmdValidate(data, local);
   stop(USAGE);

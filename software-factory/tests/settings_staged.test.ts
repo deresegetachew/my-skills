@@ -170,7 +170,7 @@ test("pr is built from the fresh origin/main when main has moved on", () => {
   const [d, remote, env] = gitProject({ maxOpenPRs: 4, testPaths: ["^t/"] });
   expect(settings(d, ["set", "--stage", "maxOpenPRs", "5"], env).code).toBe(0);
   const other = tmp();
-  expect(sh(["git", "clone", "-q", remote, other]).code).toBe(0);
+  expect(sh(["git", "clone", "-q", "-b", "main", remote, other]).code).toBe(0);
   write(join(other, ".claude", "factory.json"), JSON.stringify({ maxOpenPRs: 4, testPaths: ["^t/", "^x/"] }));
   for (const a of [["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "other"], ["push", "-q", "origin", "HEAD:main"]]) {
     expect(sh(["git", ...a], { cwd: other }).code).toBe(0);
@@ -252,6 +252,21 @@ test("pr refuses when there is also an uncommitted edit of the settings file", (
   expectError(settings(d, ["pr"], env));
   expect(remoteBranches(d)).toEqual([]);
   expect(ghLog(env)).not.toContain("pr create");
+});
+
+test("a failed push leaves no branch or worktree behind and keeps the staging", () => {
+  const [d, remote, env] = gitProject({ maxOpenPRs: 4 });
+  expect(settings(d, ["set", "--stage", "maxOpenPRs", "5"], env).code).toBe(0);
+  sh(["git", "fetch", "-q", "origin"], { cwd: d });
+  sh(["git", "config", "remote.origin.pushurl", join(tmp(), "gone")], { cwd: d });
+  const e = expectError(settings(d, ["pr"], env));
+  expect(e.fix).toContain("factory settings pr");
+  expect(sh(["git", "branch", "--list", "settings/*"], { cwd: d }).stdout.trim()).toBe("");
+  expect(sh(["git", "worktree", "list"], { cwd: d }).stdout.trim().split("\n").length).toBe(1);
+  expect(ghLog(env)).not.toContain("pr create");
+  expect(settings(d, ["diff", "--staged"], env).stdout).toContain("maxOpenPRs");
+  expect(shown(remote, "main", ".claude/factory.json")).toBe(JSON.stringify({ maxOpenPRs: 4 }));
+  expect(status(d)).toBe("");
 });
 
 test("the help and the commands page list the staging commands", () => {

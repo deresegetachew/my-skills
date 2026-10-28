@@ -65,9 +65,18 @@ factory settings unset maxOpenPRs                     # back to the default
 factory settings help [tasks.source]                  # the long help, or the list of sections
 factory settings diff                                 # what the file sets differently from the defaults
 factory settings validate                             # exit 1 with clear messages when a value is wrong
-factory settings pr [--ready]                         # propose the edited file as a pull request (a draft by default)
+factory settings pr [--ready]                         # propose the staged changes, else the edited file, as one pull request (a draft by default)
+factory settings set --stage maxOpenPRs 5             # stage a change instead of writing the file (unset --stage too)
+factory settings diff --staged                        # what is staged
+factory settings unstage [maxOpenPRs]                 # drop one staged change, or all
 factory settings --local set remoteControl off        # the machine scope (below)
 ```
+
+Staging (#306) is how the cockpit collects changes: each `set --stage` is kept in the git directory, not in the
+file, and `factory settings pr` puts them all in one pull request. It builds that on the main branch as `origin` has it
+now, in a temporary worktree, so it works from any checkout and after main has moved on. It checks each staged value
+again first: if one is no longer valid (or no longer a setting) it stops, opens nothing and says which to `unstage`.
+Machine settings (`--local`) are saved at once, never staged.
 
 `validate` fails on: a regex that does not compile, a `tasks.source` that is not `plan` or `issues`, a duplicate or
 invalid agent name, an integer below its minimum (`maxOpenPRs`, `portStep` ... at least 1), a `prd`, `plan` or
