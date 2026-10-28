@@ -11,8 +11,8 @@
 //   factory artifacts status [--json]     per copy: up to date, OLDER than its artifact, edited locally, missing, or can't tell
 //   factory artifacts list                the manifest
 //
-// Two settings tell the factory how to reach an artifact; both are commands, empty by default, because how a terminal session
-// may read an artifact is not settled (see "Spike" in docs/wiki/roles.md):
+// Two settings tell the factory how to reach an artifact; both are commands, empty by default, because an unattended
+// session has no artifact tool (#104; see "Live access" in docs/wiki/roles.md):
 //   artifacts.fetch   writes the artifact `{url}` into the folder `{out}`; exit 0 when it did
 //   artifacts.info    prints JSON {"title": ..., "updated": ..., "version": ...} for `{url}`; used by `status` and `doctor`
 // With neither, `pull --from DIR` imports an export, and `status` says it can't tell.

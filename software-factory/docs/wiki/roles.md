@@ -156,14 +156,31 @@ destination outside the project is refused. Where the files come from:
 `artifacts.info` is a command that prints `{"title", "updated", "version"}` for `{url}`; with it `status` and `factory doctor` say
 which copies are older than their artifact. Without it they say they can't tell. Both settings are empty by default.
 
-**Spike (not done): can a terminal role read artifacts live?** The loop starts every role with `--strict-mcp-config`, an MCP
-config taken from the project's `.mcp.json`, and `disableClaudeAiConnectors: true` (#55), so a role in a terminal has no claude.ai
-connectors. Whether a Claude Code terminal session can list and read artifacts at all, with which tool, whether the isolation
-blocks it, what it costs per turn, and whether a Design artifact's boards and comments can be read as files: **none of this has
-been checked**. The check is small: in a plain terminal session on a development machine, with the owner's login, try to list and
-read one artifact; then repeat under the loop's flags; write the finding in #104. Until then there is no per-role allowlist
-(`roles.<role>.tools` / `roles.<role>.mcp`); layer 2 is built only if the spike says it is possible, default off, and a role
-writing to an artifact would count as publishing (the owner's yes).
+#### Live access: what works where
+
+The spike (#104, Claude Code 2.1.312) found:
+
+| Session | Artifact tools | How a role reads an artifact |
+|---|---|---|
+| Unattended pass (`claude -p`: every loop pass, every sub-manager) | none, with or without the factory's isolation | the repo copy; `factory artifacts status` says when it is older |
+| Interactive role session (`factory <role> loop -i`) | the built-in `Artifact` tool (list, read a page, read a published file), and `DesignSync` | the repo copy; live too, for the product owner only, when `roles.product-owner.artifacts` is on |
+
+The `Artifact` tool is built in, not a claude.ai connector, so `disableClaudeAiConnectors` does not remove it, and its definition
+goes into every turn of a session that has it. So the factory denies it (permission rules `Artifact` and `DesignSync`) in every
+role session unless the owner turns it on:
+
+- **Product owner:** `roles.product-owner.artifacts` (default `false`). On: its sessions do not deny the two tools, so an `-i`
+  session may read artifacts live. Its unattended passes are the same as before (they have no artifact tool). **Reading is fine;
+  publishing or changing an artifact needs the owner's yes in the session**, each time (the `product-pass` skill says so), and
+  the change comes back into the repo with `factory artifacts pull` in a pull request.
+- **Dev manager and coding agents:** always denied, whatever the settings say. They read the repo copies.
+- The value is read from `.claude/factory.json` **as main has it on origin**, never the role's own folder, so a role can't turn
+  it on for itself; when main can't be read, the tools stay denied. The coding agents' deny is also in
+  `.claude/factory/settings.json` and added again when the factory starts one.
+
+`DesignSync` reads and writes claude.ai/design design-system projects. Standalone Claude Design closes on 2026-12-14 (designs are
+Artifact types now), so the factory builds nothing on it and denies it with `Artifact`. A Design-type artifact is pulled into the
+repo like any other.
 
 ### The role folder
 

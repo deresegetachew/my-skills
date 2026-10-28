@@ -298,12 +298,20 @@ export function pointHooksAt(settings: JsonObj, folder: string): JsonObj | null 
   return doc;
 }
 
-/** The agents' settings with `extras` added to permissions.allow after the file's own (no repeats), connectors off. */
+/** The tools that read and write claude.ai artifacts and designs (#104): built into interactive Claude Code sessions,
+ * absent from unattended (`-p`) ones. A coding agent never gets them, nor does the dev manager; the product owner only
+ * when `roles.product-owner.artifacts` is on, as main has it (factory_roles.ts). */
+export const ARTIFACT_TOOLS = ["Artifact", "DesignSync"];
+
+/** The agents' settings with `extras` added to permissions.allow after the file's own (no repeats), the artifact tools
+ * denied (#104; also when main's file comes from a release without those rules), connectors off. */
 export function merged(settings: JsonObj, extras: string[]): JsonObj {
   const doc = structuredClone(settings);
   const perms = obj(doc.permissions) ?? (doc.permissions = {}) as JsonObj;
   const allow = (Array.isArray(perms.allow) ? perms.allow : (perms.allow = [])) as unknown[];
   for (const e of extras) if (!allow.includes(e)) allow.push(e);
+  const deny = (Array.isArray(perms.deny) ? perms.deny : (perms.deny = [])) as unknown[];
+  for (const t of ARTIFACT_TOOLS) if (!deny.includes(t)) deny.push(t);
   doc.disableClaudeAiConnectors = true;
   return doc;
 }

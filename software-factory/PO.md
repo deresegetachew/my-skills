@@ -54,6 +54,7 @@ The PO reads the same list every pass (`bun --no-env-file --config=/dev/null .cl
 | Propose a decision record or a PRD change as a pull request | Merging a PRD or decision change |
 | Write test plans; record results of a plan the owner confirmed | Confirming what is tested; starting anything on the owner's computer |
 | Report what needs the owner, with a recommendation | Money, legal and customer wording, names and brands, accounts |
+| Read the repo copies of artifacts (`factory artifacts status` says which is older); read an artifact live in a `-i` session when `roles.product-owner.artifacts` is on | Publishing or changing an artifact: the owner's yes in the session, each time |
 
 If the PO finds it did something from the right column, it writes an owner-queue ask saying what it did and offering to undo it.
 
