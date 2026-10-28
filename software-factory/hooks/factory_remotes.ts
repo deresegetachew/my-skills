@@ -4,7 +4,8 @@
 // this machine's own file (`factory machine show` prints where), never in the project and never on GitHub. A cloud agent is
 // a name with the Remote Control link of its session. There is no role field: an agent is found by its name.
 //
-// Sessions are tmux sessions on the remote, one per agent. A session belongs to an agent when its name is the agent's name or
+// Sessions are tmux sessions on the remote, one per agent, or on this machine (#301): its own tmux is asked directly, with no
+// ssh and no sudo check (the name `local` is kept for it, so `--on local` picks this machine). A session belongs to an agent when its name is the agent's name or
 // `<repo>-<agent>` (what `factory autostart` and `factory agent --detach` start). A one-item sub-manager that the dev manager's
 // orchestrator starts (#97) is a session called `<manager>-<item>`, for example `dev-manager-pr-42`; it is listed too.
 //
@@ -14,11 +15,13 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { machineSettings, saveMachineSettings } from "./factory_machine.ts";
-import { FactoryError, pyDumps, pyRepr, run, shQuote, shSplit, splitLines } from "./factory_lib.ts";
+import { FactoryError, pyDumps, pyRepr, run, shQuote, shSplit, splitLines, which } from "./factory_lib.ts";
 
 const TARGET_OK = /^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]_-]+$/;
 const NAME_OK = /^[a-z][a-z0-9-]*$/;
 const URL_OK = /^https:\/\/claude\.ai\/\S+$/;
+export const LOCAL = "local";
+export const HERE = "this machine";
 export const MANAGER_ROLES = ["dev-manager", "manager", "product-owner", "po"];
 
 export class RemoteError extends FactoryError {
@@ -53,6 +56,7 @@ export function saveRemotes(data: Record<string, Remote>): void {
 
 export function addSsh(name: string, target: string): void {
   if (!NAME_OK.test(name)) throw new RemoteError("bad-name", `${pyRepr(name)} is not a usable remote name.`, "Use lowercase letters, digits and dashes.");
+  if (name === LOCAL) throw new RemoteError("bad-name", `${pyRepr(name)} is kept for ${HERE} (\`--on local\`).`, "Give the machine its own name, for example dev-pc.");
   if (!TARGET_OK.test(target)) {
     throw new RemoteError("bad-target", `${pyRepr(target)} is not user@host.`, "Give the sandbox user and the address, for example factory@192.168.2.45.");
   }
@@ -103,6 +107,14 @@ export function sshRun(target: string, script: string, stdin: string | null = nu
   const argv = [...sshCommand(), target, "bash -c " + shQuote(script)];
   const p = run(argv, { input: stdin ?? undefined, timeoutMs: timeout * 1000 });
   if (p.timedOut) return [255, "", `Command '${argv.join(" ")}' timed out after ${timeout} seconds`];
+  return [p.code, p.stdout, p.stderr];
+}
+
+/** [returncode, stdout, stderr] of `bash -c script` on the target, or on this machine when the target is "". */
+export function runOn(target: string, script: string, stdin: string | null = null, timeout = 30): [number, string, string] {
+  if (target) return sshRun(target, script, stdin, timeout);
+  const p = run(["bash", "-c", script], { input: stdin ?? undefined, timeoutMs: timeout * 1000 });
+  if (p.timedOut) return [255, "", `tmux did not answer within ${timeout} seconds`];
   return [p.code, p.stdout, p.stderr];
 }
 
@@ -204,6 +216,25 @@ export interface Discovered {
   entries: Found[];
 }
 
+function entries(text: string, cfg: Record<string, unknown>, repo: string): Found[] {
+  const names = knownNames(cfg);
+  const out: Found[] = [];
+  for (const s of parseSessions(text)[0]) {
+    const found = classify(s.session, names, repo);
+    if (found) out.push({ kind: found[0], name: found[1], item: found[2], session: s.session, url: s.url });
+  }
+  return out;
+}
+
+/** What this machine's own tmux has: no ssh, and no sudo check (that is for the sandbox user on a remote). */
+export function discoverLocal(cfg: Record<string, unknown>, repo: string): Discovered {
+  const out: Discovered = { remote: HERE, target: "", reachable: true, error: "", entries: [] };
+  if (!which("tmux")) return out;
+  const [rc, text] = runOn("", LIST_SCRIPT.replace(/^sudo .*\n/m, ""), null, 25);
+  if (rc === 0) out.entries = entries(text, cfg, repo);
+  return out;
+}
+
 /** What one ssh remote has. */
 export function discoverOne(name: string, remote: Remote, cfg: Record<string, unknown>, repo: string): Discovered {
   const out: Discovered = { remote: name, target: remote.target as string, reachable: true, error: "", entries: [] };
@@ -213,26 +244,24 @@ export function discoverOne(name: string, remote: Remote, cfg: Record<string, un
     out.error = lastLine(err, "no answer").slice(0, 140);
     return out;
   }
-  const [sessions, flags] = parseSessions(text);
+  const flags = parseSessions(text)[1];
   if (flags.has("SUDO")) {
     out.reachable = false;
     out.error = "the account can run sudo: not the sandbox user";
     return out;
   }
-  const names = knownNames(cfg);
-  for (const s of sessions) {
-    const found = classify(s.session, names, repo);
-    if (found) out.entries.push({ kind: found[0], name: found[1], item: found[2], session: s.session, url: s.url });
-  }
+  out.entries = entries(text, cfg, repo);
   return out;
 }
 
-/** Asks every ssh remote which sessions it has. Returns a list of per-remote results. (The Python asked them in
- * parallel threads; here one after the other, each with its own timeout.) */
+/** Asks this machine and every ssh remote which sessions they have (`only`: one remote, or `local` for this machine).
+ * Returns a list of per-machine results, this machine first, one after the other, each with its own timeout. */
 export function discover(cfg: Record<string, unknown>, repo: string, only: string | null = null): Discovered[] {
+  if (only === LOCAL) return [discoverLocal(cfg, repo)];
   const chosen = Object.entries(remotes()).filter(([k, v]) => v.kind === "ssh" && (only === null || k === only));
   if (only && !chosen.length) throw new RemoteError("no-such-remote", `There is no ssh remote called ${only}.`, "factory remote list shows them.");
-  return chosen.map(([k, v]) => discoverOne(k, v, cfg, repo));
+  const here = only === null ? [discoverLocal(cfg, repo)] : [];
+  return [...here, ...chosen.map(([k, v]) => discoverOne(k, v, cfg, repo))];
 }
 
 export interface CloudEntry {
@@ -249,28 +278,31 @@ export function cloudEntries(): CloudEntry[] {
 
 export type Hit = [kind: string, remote: string, target: string, session: string, url: string];
 
-/** Where `agent` runs: ['ssh', remote name, target, session, url] or ['cloud', 'cloud', '', '', url].
+/** Where `agent` runs: ['ssh', remote name, target, session, url], ['local', 'this machine', '', session, url] or
+ * ['cloud', 'cloud', '', '', url].
  * Throws when it is nowhere, or on more than one remote (then --on names the one). */
 export function find(agent: string, cfg: Record<string, unknown>, repo: string, on: string | null = null): Hit {
   const hits: Hit[] = [];
   for (const r of discover(cfg, repo, on)) {
     for (const e of r.entries) {
-      if ((e.kind === "agent" && e.name === agent) || e.session === agent) hits.push(["ssh", r.remote, r.target, e.session, e.url]);
+      if ((e.kind === "agent" && e.name === agent) || e.session === agent) hits.push([r.target ? "ssh" : LOCAL, r.remote, r.target, e.session, e.url]);
     }
   }
   if (!on) for (const c of cloudEntries()) if (c.name === agent) hits.push(["cloud", "cloud", "", "", c.url]);
   if (hits.length > 1) {
     throw new RemoteError("ambiguous", `${agent} answers on ${hits.map((h) => h[1]).sort().join(", ")}: agent names must be unique.`,
-      `Say which one: factory follow ${agent} --on <remote>. (Two machines running one name is a setup error: ` +
+      `Say which one: factory follow ${agent} --on <remote> (--on local for ${HERE}). (Two machines running one name is a setup error: ` +
       "see factory machine setup.)");
   }
   if (!hits.length) {
     const names = knownNames(cfg);
     const all = remotes();
     const reach = Object.keys(all).filter((r) => all[r]?.kind === "ssh");
-    let hint = !reach.length ? "`factory remote add <name> <user@host>` tells factory where the machines are."
-      : `It is not running on ${reach.join(", ")}. \`factory follow\` lists what is.`;
-    if (names.length && !names.includes(agent)) hint = `Known names: ${names.join(", ")}. ` + hint;
+    const looked = on === LOCAL ? [HERE] : on ? [on] : [HERE, ...reach];
+    let hint = `It is not running on ${looked.join(", ")}. ` + (!reach.length && !on
+      ? "`factory remote add <name> <user@host>` tells factory where the other machines are."
+      : "`factory follow` lists what is.");
+    if (names.length) hint = `Known names: ${names.join(", ")}. ` + hint;
     throw new RemoteError("no-such-agent", `No agent called ${agent} was found.`, hint);
   }
   return hits[0] as Hit;

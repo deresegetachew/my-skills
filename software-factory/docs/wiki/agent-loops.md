@@ -466,7 +466,7 @@ owner running it starts at the dev manager. Nobody answers for the product owner
 ## Watch and talk to an agent: `factory follow`
 
 An agent's **name** is the only handle. `factory follow haile` opens that agent's live session from your own terminal,
-wherever it runs: on a factory machine you can ssh to, or in the cloud. There is no custom UI: the Claude app, through the
+wherever it runs: on this machine (no remote needed), on a factory machine you can ssh to, or in the cloud. There is no custom UI: the Claude app, through the
 session's Remote Control link, is the other way in, and `factory follow` is how you find the link.
 
 ```sh
@@ -476,6 +476,7 @@ factory follow haile                              # attach: type, answer prompts
 factory follow haile --read                       # watch only (tmux attach -r): it cannot type
 factory follow --all                              # one read-only pane per session, tiled, in a local tmux
 factory follow haile --log                        # stream the output without a terminal (Ctrl-C stops)
+factory follow haile --on local                   # only this machine (--on dev-pc: only that remote)
 factory say haile "check the failing test first"  # one message, as if typed, without attaching
 factory agent haile --detach                      # on the factory machine: start the agent in a detached tmux session
 factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent: follow prints its link
@@ -485,10 +486,13 @@ factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent:
   show` prints where), never in the project and never on
   GitHub. Agent issues are readable by anyone who can read the repo, so where an agent runs stays on your side. There is
   no role field.
-- **How a name is found.** `factory follow <agent>` asks every remote in parallel for its tmux sessions. A session belongs to
+- **How a name is found.** `factory follow <agent>` asks this machine's own tmux (directly: no ssh, no remote needed)
+  and then every remote for their tmux sessions. A session belongs to
   an agent when it is called `<name>` or `<repo>-<name>` (what `factory agent --detach` and `factory autostart` start), so
   sessions started by hand work too. The names come from `agents` (and `roles.*.names`) in `factory.json`. If two remotes
-  answer to one name, `follow` refuses and `--on <remote>` picks; unique names across machines is a setup rule.
+  answer to one name, or this machine and a remote, `follow` refuses and `--on <remote>` picks (`--on local` is this
+  machine, so no remote may be called `local`); unique names across machines is a setup rule. A name that is not
+  found, or whose session ended, is refused with the names it knows.
 - **Sub-managers.** The one-item sub-managers that the dev manager's orchestrator starts are tmux sessions called
   `<manager>-<item>` (`dev-manager-pr-42`, `manager-issue-7`): they are listed with the agents, with the manager and the item
   in the task column, and `factory follow dev-manager-pr-42` attaches to one.
