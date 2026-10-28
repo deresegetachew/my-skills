@@ -99,7 +99,8 @@ Not in this version: macOS, a VM mode, creating the GitHub account.
   doing this through its normal commands, but they're not a boundary against one that writes its own script.
 - **Required for the lock to hold: a separate GitHub account for the agents**, with write access (not admin)
   to the repo. Then put the dev manager's login in `trustedReviewers`, require the checks and an approval in a ruleset
-  on main, and the agents can't approve or force their own work. `factory doctor` checks both (#261); the steps are in
+  on main, and the agents can't approve or force their own work. The approval is the lock, not the checks: a pull
+  request can fake a check by editing its own workflow (#260). `factory doctor` checks both (#261); the steps are in
   [Branch protection: the real lock](reviews-and-gates.md#branch-protection-the-real-lock).
 - **An agent's hooks are main's code** (#274): the PR gate and the other hooks run from a read-only copy of main's
   `.claude/hooks/` in the git folder, not from the agent's worktree, so checking out an older gate does not weaken it.

@@ -40,11 +40,11 @@ function setup(o: { pr?: Obj; cfgExtra?: Obj; [key: string]: unknown } = {}): [s
   writeExe(join(d, "bin", "gh"), FAKE_GH);
   const cfg = { reviewMarkers: "tmp/reviews", protected: ["^\\.claude/"], alwaysAllowed: [], maxOpenPRs: 3, ...(cfgExtra ?? {}) };
   write(join(d, ".claude", "factory.json"), JSON.stringify(cfg));
-  write(join(d, "tmp", "reviews", "task_1-x.ok"), HEAD); // the reviewer passed HEAD
   const fullPr = { number: 7, headRefName: "task/1-x", headRefOid: HEAD, comments: [], labels: [], body: "", ...(pr ?? {}) };
   // The gate reads the settings from GitHub's default branch (#51): the fake gh serves the same ones.
   write(join(d, "scenario.json"), JSON.stringify({ pr: fullPr, main_settings: cfg, ...scenario }));
   sh(["git", "init", "-q", d]);
+  write(passFile(d, ".ok"), HEAD); // the reviewer passed HEAD (in the git folder, #260)
   const env: Env = { ...process.env, PATH: `${d}/bin:${process.env.PATH}`, GATE_SCENARIO: join(d, "scenario.json"),
     GATE_LOG: join(d, "log") };
   delete env.FACTORY_AGENT;
@@ -63,7 +63,11 @@ function rc(d: string, env: Env, command: string): number {
 }
 
 const MERGE = `gh pr merge 7 --squash --match-head-commit ${HEAD}`;
-const REVIEW_OK = (d: string): string => join(d, "tmp", "reviews", "task_1-x.ok");
+/** Where a pass for task/1-x lives: the git folder, which an agent can't edit (#260). */
+function passFile(d: string, kind: string): string {
+  return join(d, ".git", "factory-reviews", "task_1-x" + kind);
+}
+const REVIEW_OK = (d: string): string => passFile(d, ".ok");
 
 test("a good merge passes", () => {
   const [d, env] = setup();
@@ -448,7 +452,7 @@ function branchWithACommit(d: string): string {
 }
 
 function ciMark(d: string, sha: string): void {
-  write(join(d, "tmp", "reviews", "task_1-x.ci.ok"), sha);
+  write(passFile(d, ".ci.ok"), sha);
 }
 
 test("a ready pr needs the local ci check for its head commit", () => {
@@ -626,4 +630,83 @@ test("quoting gh does not get past the gate", () => {
     expect(rc(d, env, c), c).toBe(2);
   }
   expect(rc(d, env, "echo 'g' 'h'")).toBe(0);
+});
+
+// The v0.2.0 audit's finding 5 (#260): shell forms that hid the program or a flag from the gate.
+test("a program the shell has to work out first is refused", () => {
+  const [d, env] = setup({ ci_green: false });
+  for (const c of [`x=gh; $x pr merge 7 --match-head-commit ${HEAD}`, `g\${IFS}h pr merge 7 --match-head-commit ${HEAD}`,
+    `$(echo gh) pr merge 7 --match-head-commit ${HEAD}`, `\`echo gh\` pr merge 7 --match-head-commit ${HEAD}`,
+    "$GIT push -f origin x", "${G:-git} push origin x", "env $X pr merge 7", "/usr/bin/g? pr merge 7",
+    `y=merge; gh pr $y 7 --match-head-commit ${HEAD}`, "bash <<'EOF'\nx=gh; $x pr merge 7\nEOF",
+    "cat <<EOF | sh\n$X pr merge 7\nEOF"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+  }
+  const [code, err] = gate(d, env, "x=gh; $x pr merge 7");
+  expect(code).toBe(2);
+  expect(err).toContain("program");
+  // everyday commands are untouched: expansions in arguments, assignments, and plain programs
+  for (const c of ["echo $HOME", "ls \"$TMPDIR\"", "X=1 pnpm test", "cd \"$(git rev-parse --show-toplevel)\"",
+    "[ -f package.json ] && pnpm test", "for f in a b; do echo $f; done", "git log --format=%H -1",
+    // a here-document's lines are text, not programs
+    "cat > tmp/pr.md <<'EOF'\n* one\n**two** done\n$ pnpm test\nEOF", "cat <<-EOF > tmp/x\n\t[x] y\n\tEOF\necho ok",
+    // the kit's skills pass the agent's name in a variable
+    'bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --agent "$FACTORY_AGENT" --task issue-5',
+    'bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts ${FACTORY_PID:+--claim "$FACTORY_AGENT" --pid "$FACTORY_PID"}']) {
+    expect(gate(d, env, c), c).toEqual([0, ""]);
+  }
+  for (const c of ["bun $S", "bun --no-env-file run $(cat x)", "node ${X}/a.js"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, c).toBe(2);
+    expect(err).toContain("script as plain text");
+  }
+});
+
+test("ansi-c quoting is read as bash reads it", () => {
+  const [d, env] = setup();
+  let [code, err] = gate(d, env, `${MERGE} $'--admin'`);
+  expect(code, err).toBe(2);
+  expect(err).toContain("without --admin");
+  [code, err] = gate(d, env, `$'\\x67h' pr merge 7 --admin --match-head-commit ${HEAD}`);
+  expect(code, err).toBe(2);
+  expect(err).toContain("without --admin");
+  [code, err] = gate(d, env, "git push $'-f' origin x");
+  expect(code, err).toBe(2);
+  expect(err).toContain("force-push");
+  expect(gate(d, env, "echo $'a\\tb'")).toEqual([0, ""]);
+});
+
+test("push settings on the command line and wrapped pushes are refused", () => {
+  const [d, env] = setup();
+  for (const c of ["git -c remote.origin.mirror=true push origin x", "git -c push.default=matching push",
+    "git -c alias.p='push -f' p origin x", "git -c url.x.insteadOf=y push origin x",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=remote.origin.mirror GIT_CONFIG_VALUE_0=true git push origin x",
+    "git --config-env=remote.origin.mirror=V push origin x"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+  }
+  for (const c of ["timeout 5 git push -f origin x", "nice -n 5 git push --force origin x", "env -u X git push -f origin x",
+    "stdbuf -oL git push --mirror origin", "command -p git push -f origin x", "ionice -c 3 git push origin +x"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("force-push");
+  }
+  for (const c of ["stdbuf -oL gh pr merge 7 --admin", "timeout 60 gh pr merge 7 --admin"]) {
+    const [code, err] = gate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+  }
+  for (const c of ["git -c core.quotepath=off status", "git -c user.name=x commit -m y", "timeout 60 pnpm test",
+    "git push origin task/1-x"]) {
+    expect(gate(d, env, c), c).toEqual([0, ""]);
+  }
+});
+
+test("an old pass in tmp/reviews no longer counts (#260)", () => {
+  const [d, env] = setup();
+  rmSync(passFile(d, ".ok"));
+  write(join(d, "tmp", "reviews", "task_1-x.ok"), HEAD); // where passes used to live: the agent could write it
+  const [code, err] = gate(d, env, MERGE);
+  expect(code, err).toBe(2);
+  expect(err).toContain("No reviewer pass");
 });

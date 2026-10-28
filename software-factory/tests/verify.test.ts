@@ -55,7 +55,7 @@ function verify(d: string) {
 }
 
 function mark(d: string): string | null {
-  const p = join(d, "tmp", "reviews", "task_1-x.ci.ok");
+  const p = join(d, ".git", "factory-reviews", "task_1-x.ci.ok"); // passes live in the git folder (#260)
   return existsSync(p) ? readFileSync(p, "utf8").trim() : null;
 }
 

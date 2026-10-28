@@ -159,7 +159,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 |---|---|---|---|
 | `maxOpenPRs` | int | `3` | Ready PRs the account may have open at once. About the number of agents + 1. |
 | `prSizeWarn` | int | `600` | The guard warns above this many changed lines. |
-| `reviewMarkers` | str | `"tmp/reviews"` | Where review passes are written. |
+| `reviewMarkers` | str | `"tmp/reviews"` | Where the re-review history (`<branch>.reviews.json`) is kept. Review passes are not: they are in the git folder (`factory-reviews`, #260). |
 | `reReviewPercent` | int | `30` | A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review. |
 | `lessons` | str | `".claude/factory/lessons.md"` | The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`). |
 | `lessonsCap` | int | `40` | The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now. |

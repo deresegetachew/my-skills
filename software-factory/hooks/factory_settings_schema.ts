@@ -165,7 +165,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("dependencyManifests", "list", "tests", "Regexes of dependency manifests (a new dependency needs deps-reviewed)."),
   S("maxOpenPRs", "int", "gate", "Ready PRs the account may have open at once. About the number of agents + 1."),
   S("prSizeWarn", "int", "gate", "The guard warns above this many changed lines."),
-  S("reviewMarkers", "str", "gate", "Where review passes are written."),
+  S("reviewMarkers", "str", "gate", "Where the re-review history (`<branch>.reviews.json`) is kept. Review passes are not: they are in the git folder (`factory-reviews`, #260)."),
   S("reReviewPercent", "int", "gate", "A reviewer's second round reads only what changed since its last round, unless that is more than this percent of the branch diff (or touches a new file): then it is a full review. 0: always a full review."),
   S("lessons", "str", "gate", "The curated lessons file: one-line rules the builder and the reviewers read first (`factory lessons`)."),
   S("lessonsCap", "int", "gate", "The most lessons the file may hold; `factory lessons check` fails above it and add refuses. Prune what a check enforces now."),
@@ -336,8 +336,9 @@ const MORE: Record<string, More> = {
   examples: ["factory settings set maxOpenPRs 4"] },
   prSizeWarn: { long: "The guard warns (it does not fail) when a PR changes more lines than this. Small PRs are " +
     "reviewed faster.", examples: ["factory settings set prSizeWarn 600"] },
-  reviewMarkers: { long: "Review passes are small marker files named after the branch and commit. They live in " +
-    "this folder (git-ignored), and the PR gate looks for them.",
+  reviewMarkers: { long: "The reviewers' round history (`<branch>.reviews.json`, for incremental re-review) lives in " +
+    "this folder (git-ignored). Review passes used to live here too; they are now in the git folder " +
+    "(`<git common dir>/factory-reviews/`), which agents can't write, and a pass left here no longer counts (#260).",
   examples: ["factory settings set reviewMarkers tmp/reviews"] },
   reReviewPercent: { long: "A reviewer's second round reads only what changed since its own last round, unless that " +
     "delta is more than this percent of the branch diff or touches a new file: then it is " +

@@ -3,16 +3,15 @@
 //
 // Runs `commands.ci` from .claude/factory.json (for example
 // `pnpm turbo run typecheck lint test build --filter=...[{base}]`, where `{base}` becomes `origin/<main>`). When it
-// passes on a clean working tree, it records the commit in <reviewMarkers>/<branch>.ci.ok. The PR gate needs that
+// passes on a clean working tree, it records the commit in <git common dir>/factory-reviews/<branch>.ci.ok (#260). The PR gate needs that
 // mark for `gh pr create` and `gh pr ready` when main's factory.json sets `commands.ci`; drafts don't.
 //
 // Before it, `commands.fix` formats the changed files (#69); if that changes anything the pass is refused, because
 // the commit no longer matches the files: commit the formatting and run it again.
 //
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_verify.ts     exit 0: passed (or nothing to run); 1: it fails or can't run
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { type Config, load, loadFromMain } from "./factory_config.ts";
+import { writePass } from "./factory_review_pass.ts";
 import { git as gitRun, pyInt, runMain, shell, splitLines } from "./factory_lib.ts";
 import * as factoryFix from "./factory_fix.ts";
 import { writeLog } from "./factory_run_check.ts";
@@ -82,9 +81,7 @@ export function main(): number {
     process.stderr.write("factory verify: the commit or the files changed while it ran; run it again.\n");
     return 1;
   }
-  const d = cfg.reviewMarkers;
-  mkdirSync(d, { recursive: true });
-  writeFileSync(join(d, branch.replace(/\//g, "_") + ".ci.ok"), head + "\n");
+  writePass(branch, ".ci.ok", head);
   process.stdout.write(`factory verify: passed for ${head.slice(0, 12)} on ${branch}.\n`);
   return 0;
 }

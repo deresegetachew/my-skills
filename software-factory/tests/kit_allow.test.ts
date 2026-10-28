@@ -26,3 +26,21 @@ test("package runners that run any code are not allowed without a prompt", () =>
     expect(allowedBy(agents(), c), c).toBe(false);
   }
 });
+
+// The v0.2.0 audit's finding 2 (#260): `docker compose *` let an agent run any container with the host's files
+// (`docker compose -f tmp/x.yaml run -v "$HOME/.config/gh:/root/.config/gh" ...`). Only the dev stack's forms are allowed.
+test("only the dev stack's docker compose forms are allowed", () => {
+  for (const c of ["docker compose up -d", "docker compose up -d postgres", "docker compose ps", "docker compose ps -a",
+    "docker compose logs postgres", "docker compose logs --tail 50 api", "docker compose exec -T postgres psql -U app -c 'select 1'",
+    "docker compose down"]) {
+    expect(allowedBy(agents(), c), c).toBe(true);
+  }
+  for (const c of ["docker compose -f tmp/x.yaml run --rm x sh", "docker compose --file tmp/x.yaml up -d",
+    "docker compose up -d -f tmp/x.yaml", "docker compose up -d --file=tmp/x.yaml", "docker compose run --rm x sh",
+    "docker compose up -d x && docker compose run x", "docker compose exec -T postgres -v /:/h sh",
+    "docker compose down -v", "docker compose down --volumes", "docker compose cp tmp/x postgres:/x",
+    "docker compose --project-directory tmp up -d", "docker compose up -d --project-directory tmp",
+    "docker compose exec api sh", "docker compose -p other up -d", "docker compose up -d --env-file tmp/e"]) {
+    expect(allowedBy(agents(), c), c).toBe(false);
+  }
+});
