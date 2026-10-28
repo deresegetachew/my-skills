@@ -98,7 +98,7 @@ export function showStaged(): void {
 export function invalid(changes: Staged): [string, string][] {
   const out: [string, string][] = [];
   for (const [key, c] of Object.entries(changes)) {
-    const s = SETTINGS[key];
+    const s = Object.hasOwn(SETTINGS, key) ? SETTINGS[key] : undefined;
     if (!s) {
       out.push([key, "is no longer a project setting"]);
       continue;

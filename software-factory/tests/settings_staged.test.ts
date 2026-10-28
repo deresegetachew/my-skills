@@ -269,6 +269,28 @@ test("a failed push leaves no branch or worktree behind and keeps the staging", 
   expect(status(d)).toBe("");
 });
 
+test("the pr gate blocks staging and unstaging but not listing what is staged", () => {
+  const gate = (command: string): Proc =>
+    runBun(join(HOOKS, "pr-gate.ts"), [], { input: JSON.stringify({ tool_input: { command } }), env: personEnv() });
+  for (const command of ["factory settings set --stage maxOpenPRs 5", "./factory settings unset --stage agents",
+    "factory settings --stage set maxOpenPRs 5", "factory settings unstage", "factory settings unstage maxOpenPRs",
+    "bun --no-env-file .claude/hooks/factory_settings.ts unstage"]) {
+    const p = gate(command);
+    expect(p.code, command).toBe(2);
+    expect(p.stderr, command).toContain("settings");
+  }
+  for (const command of ["factory settings diff --staged", "./factory settings diff --staged"]) expect(gate(command).code, command).toBe(0);
+});
+
+test("a staged name that is only an object property is not a setting", () => {
+  const [d, , env] = gitProject({ maxOpenPRs: 4 });
+  expect(settings(d, ["set", "--stage", "maxOpenPRs", "5"], env).code).toBe(0);
+  write(stagingFile(d), JSON.stringify({ schema: "factory-settings-staged/1", changes: { constructor: { value: 1 } } }));
+  const e = expectError(settings(d, ["pr"], env));
+  expect(e.fix).toContain("factory settings unstage constructor");
+  expect(remoteBranches(d)).toEqual([]);
+});
+
 test("factory help prints the staging commands", () => {
   const p = sh(["bash", join(SF, "factory"), "help"], { cwd: project() });
   expect(p.code).toBe(0);
