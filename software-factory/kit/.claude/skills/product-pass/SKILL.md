@@ -29,7 +29,8 @@ project, never only in chat. `factory prd --stage` shows where you are and what 
    Then `factory prd --stage --ask design`.
 3. **Plan.** Only after the design is approved. Cut the stories into milestones and tasks: `factory issues new --title ...
    --body-file ... --milestone ...`, each from the task template with a `PRD: US-<n>` line, a brief, "Done when" and edge
-   cases. Read `factory prd` until no story lacks a task. The dev manager checking the plan for buildability is not built yet
+   cases. Size each task with a `Budget:` line next to the `PRD:` line (tokens, counting fresh input + output, for example
+   `Budget: 300k`): see **Sizing tasks** below. Read `factory prd` until no story lacks a task. The dev manager checking the plan for buildability is not built yet
    (#96 follow-up): look for dependencies, an order that works, and a "Done when" a test can check. Then `factory prd --stage
    --ask plan`.
 4. **Stop at the gates.** The owner's yes is a reply under the ask (`yes`, or a comment saying what to change). A reply that is
@@ -38,6 +39,20 @@ project, never only in chat. `factory prd --stage` shows where you are and what 
 5. **Hand over.** With the three approvals `factory prd --stage` says to start the builders (`factory coding-agent loop`) and
    the dev manager (`factory dev-manager loop`). Nothing you know may live only in this chat: the PRD, the designs, the
    issues and the role folder are what the next role reads.
+
+## Sizing tasks: token budgets
+
+A task's `Budget:` line (`300k`, `1.2m` or `300000`) is its token budget: fresh input (input + cache writes) + output for the
+whole task, subagents included, as `factory usage` reports them; cache reads and money are not counted. It makes the builder
+plan first, and it is advice: nothing stops at the limit, and the dev manager weighs an overrun at review.
+
+- Size from what you have: `factory report` lists budget against used for merged tasks and the median ratio; `factory usage
+  --by task` shows recent tasks. Few numbers yet means guesses: say so, and adjust when the median ratio drifts far from 100%.
+- A task without the line gets `budget.builder` from `.claude/factory.json`, or none. Leave the line out rather than guess wildly.
+- A task too big for any sensible budget is a task to split, not a bigger number.
+- The claim records the budget the issue had then, so a change during the task counts from its next claim. A builder that asks
+  for more (a `factory-question` to `po` or the dev manager): answer with the number or a split, and edit the line yourself; a
+  coding agent can't.
 
 ## Pivot: a change of direction
 

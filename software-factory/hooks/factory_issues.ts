@@ -31,6 +31,7 @@
 // other takes its label off and picks again. Everything goes through the GitHub REST API (`gh api`).
 import { readFileSync } from "node:fs";
 import { type Config, load, taskLabels, toFloat } from "./factory_config.ts";
+import { claimRecord } from "./factory_budget.ts";
 import { machineId } from "./factory_machine.ts";
 import { die, Exit, parseArgs, parseIso, pyDumps, pyQuote, run, runMain, sleepSync } from "./factory_lib.ts";
 
@@ -242,7 +243,8 @@ export function claimIssue(cfg: Config, agent: string, i: Issue): boolean {
   addLabels(n, [L.inProgress, mine]);
   removeLabel(n, L.ready);
   const where = machine ? ` machine=${machine}` : "";
-  comment(n, `<!-- factory-claim agent=${agent}${where} -->\n**${agent}** is working on this.`);
+  // The budget the issue has now goes into the claim, so a later edit of the issue does not move it (#183).
+  comment(n, `<!-- factory-claim agent=${agent}${where} -->\n**${agent}** is working on this.\n${claimRecord(i.body)}`);
   sleepSync(claimSettleSeconds()); // let a simultaneous claim land, then let the earliest comment decide
   const winner = claimWinner(n);
   if (isMe(winner, agent, machine)) return true;

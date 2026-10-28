@@ -8,7 +8,10 @@
 //   factory usage --by role             manager (sessions that start with /manage-pass, or end with a `factory-role` line naming
 //                                       the dev manager), product-owner (that line names it) against builder (all others)
 //   factory usage --json                the same as JSON
-//   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it)
+//   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it);
+//                                       with a budget (#183) it adds used against budget and the top subagent
+//   factory usage --task 96 --budget    the checkpoint: used, budget, what is left and the percent; a warning from 80%.
+//                                       Always exit 0: a budget is advice (factory_budget.ts says where it comes from)
 //   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
 //                                       factory.json, default docs/factory-usage.md), to commit in a PR
 //
@@ -22,7 +25,8 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { load } from "./factory_config.ts";
+import { COUNTED, short, taskBudget, WARN_PERCENT } from "./factory_budget.ts";
+import { type Config, load } from "./factory_config.ts";
 import { die, pyDumps, pyRepr, runMain, splitLines } from "./factory_lib.ts";
 
 const TASK = /^task\/(\d+(?:[.-]\d+)*?)-/;
@@ -277,10 +281,28 @@ function byModel(total: Total): string {
   return mostCommon(total.models).map(([m, v]) => `${m} ${k(v)}`).join(", ");
 }
 
-/** A PR comment: this task's tokens per subagent type, from this machine's logs up to now. */
-export function markdown(task: string, groups: Map<string, Group>, total: Total, since: number): string {
+/** What a budget counts: fresh input + output (cache reads are not counted). */
+export function counted(t: Tokens): number {
+  return fresh(t) + t.output;
+}
+
+function percent(used: number, budget: number): number {
+  return Math.round((used / budget) * 100);
+}
+
+/** The subagent (not the main session) that spent the most counted tokens, or null when there was none. */
+function topSubagent(groups: Map<string, Group>): [string, number] | null {
+  const subs = [...groups.entries()].filter(([key]) => key !== "main").map(([key, g]): [string, number] => [key, counted(g.tokens)]);
+  return subs.sort((a, b) => b[1] - a[1])[0] ?? null;
+}
+
+/** A PR comment: this task's tokens per subagent type, from this machine's logs up to now. With a budget, the marker
+ * carries used= and budget= (`factory report` reads them) and a line compares the two. */
+export function markdown(task: string, groups: Map<string, Group>, total: Total, since: number, budget: number | null = null): string {
   const t = total.tokens;
-  const lines = [`<!-- factory-usage task=${task} -->`,
+  const used = counted(t);
+  const mark = budget === null ? `<!-- factory-usage task=${task} -->` : `<!-- factory-usage task=${task} used=${used} budget=${budget} -->`;
+  const lines = [mark,
     `**Tokens for task ${task}** so far, from this machine's Claude Code logs (${ymd(since)} to now). ` +
     "Fresh input is input that missed the cache.", "",
     "| Agent | Replies | Fresh input | Cache reads | Output | Cache hit |", "|---|---|---|---|---|---|"];
@@ -290,6 +312,13 @@ export function markdown(task: string, groups: Map<string, Group>, total: Total,
   }
   lines.push(`| **All** | ${total.replies} | ${k(fresh(t))} | ${k(t.cache_read)} | ${k(t.output)} | ${pct(hit(t))}% |`);
   if (total.models.size) lines.push("", "By model: " + byModel(total) + ".");
+  if (budget !== null) {
+    const top = topSubagent(groups);
+    const pct = percent(used, budget);
+    lines.push("", `**Budget:** used ${short(used)} of ${short(budget)} (${pct}%), counting ${COUNTED}; cache reads are not counted.` +
+      (top ? ` Top subagent: ${top[0]}, ${short(top[1])}.` : "") +
+      (pct > 100 ? " Over the budget: the dev manager decides at review (accept, ask for a split, or note it)." : ""));
+  }
   if (!total.replies) lines.push("", "No replies found for this task on this machine (another machine may have built it).");
   return lines.join("\n");
 }
@@ -315,6 +344,29 @@ export function report(groups: Map<string, Group>, total: Total, by: string, sin
       `output ${k(Math.floor(t.output / n))}.`);
   }
   if (total.models.size) out("By model (all tokens): " + byModel(total));
+}
+
+/** The checkpoint (`--budget`): used, budget, what is left and the percent, and a warning from 80%. */
+export function checkpoint(task: string, total: Total, budget: number | null, source: string): string {
+  const used = counted(total.tokens);
+  const lines: string[] = [];
+  if (budget === null) {
+    lines.push(`Task ${task} has no budget: no Budget: line on its issue and no budget.builder in .claude/factory.json. ` +
+      `Used ${short(used)} tokens so far, counting ${COUNTED}.`);
+  } else {
+    const pct = percent(used, budget);
+    const left = budget - used;
+    lines.push(`Task ${task}: ${short(used)} of ${short(budget)} tokens used (${pct}%), ` +
+      (left >= 0 ? `${short(left)} left.` : `over the budget by ${short(-left)}.`));
+    lines.push(`Counted: ${COUNTED}, from this machine's Claude Code logs; cache reads are not counted. Budget from ${source}.`);
+    if (pct >= WARN_PERCENT) {
+      lines.push(`Warning: ${pct}% of the budget is used. Finish the step you are on, commit a working state and write in ` +
+        "the PR what is left. If the rest will not fit, ask the dev manager in a <!-- factory-question --> comment before " +
+        "going on. Nothing stops at the limit: the dev manager weighs an overrun at review.");
+    }
+  }
+  if (!total.replies) lines.push("No replies found for this task on this machine (another machine may have built it).");
+  return lines.join("\n");
 }
 
 function localToday(): string {
@@ -358,7 +410,7 @@ function isoformat(ms: number): string {
 
 const USAGE = `usage: factory usage [-h] [--since SINCE] [--until UNTIL]
                      [--by {task,agent,model,role}] [--json] [--record LABEL]
-                     [--task TASK] [--markdown]
+                     [--task TASK] [--markdown] [--budget]
 `;
 
 const HELP = `${USAGE}
@@ -374,6 +426,8 @@ options:
   --task TASK           only the sessions of this task (its id or issue
                         number)
   --markdown            print a PR comment (use with --task)
+  --budget              the task's tokens against its budget (use with
+                        --task): used, budget, left, percent; warns at 80%
 `;
 
 interface Args {
@@ -384,6 +438,7 @@ interface Args {
   record: string | null;
   task: string | null;
   markdown: boolean;
+  budget: boolean;
   logs: string;
 }
 
@@ -392,12 +447,12 @@ function argError(message: string): never {
   die(2);
 }
 
-const OPTIONS = ["--help", "--since", "--until", "--by", "--json", "--record", "--task", "--markdown", "--logs"];
+const OPTIONS = ["--help", "--since", "--until", "--by", "--json", "--record", "--task", "--markdown", "--budget", "--logs"];
 const TAKES_VALUE = new Set(["--since", "--until", "--by", "--record", "--task", "--logs"]);
 
 /** argparse, by hand: the same options, abbreviations, errors (exit 2) and help. */
 export function parseArgs(argv: string[]): Args {
-  const a: Args = { since: null, until: null, by: "task", json: false, record: null, task: null, markdown: false,
+  const a: Args = { since: null, until: null, by: "task", json: false, record: null, task: null, markdown: false, budget: false,
     logs: join(process.env.HOME || homedir(), ".claude", "projects") };
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i] as string;
@@ -448,6 +503,9 @@ export function parseArgs(argv: string[]): Args {
       case "--markdown":
         a.markdown = true;
         break;
+      case "--budget":
+        a.budget = true;
+        break;
       case "--record":
         a.record = v;
         break;
@@ -459,10 +517,20 @@ export function parseArgs(argv: string[]): Args {
         break;
     }
   }
+  if (a.budget && !a.task) argError("--budget needs --task: factory usage --task <n> --budget");
   return a;
 }
 
 const DAY_MS = 86_400_000;
+
+/** A task's budget; any failure to look it up means no budget, since this is advice. */
+function budgetOf(cfg: Config, task: string): { tokens: number | null; source: string } {
+  try {
+    return taskBudget(cfg, task);
+  } catch {
+    return { tokens: null, source: "" };
+  }
+}
 
 export function main(argv: string[]): number {
   const a = parseArgs(argv);
@@ -477,7 +545,10 @@ export function main(argv: string[]): number {
     sessions = new Map([...sessions].filter(([, s]) => s.task === task));
   }
   const [groups, total] = summarise(sessions, a.markdown ? "agent" : a.by);
-  if (a.markdown) out(markdown(a.task ? a.task.replace(/^#+/, "") : "-", groups, total, since));
+  const id = a.task ? a.task.replace(/^#+/, "") : "-";
+  const budget = a.task && (a.markdown || a.budget) ? budgetOf(cfg, id) : { tokens: null, source: "" };
+  if (a.budget) out(checkpoint(id, total, budget.tokens, budget.source));
+  else if (a.markdown) out(markdown(id, groups, total, since, budget.tokens));
   else if (a.json) {
     const g: Record<string, { tokens: Tokens; replies: number }> = {};
     for (const [key, x] of groups) g[key] = { tokens: x.tokens, replies: x.replies };

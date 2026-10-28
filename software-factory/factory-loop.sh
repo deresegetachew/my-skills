@@ -360,6 +360,10 @@ for ((n = 1; n <= limit; n++)); do
   isolate
   # The restart note (factory_resume.ts) goes into the first prompt only.
   prompt="/next-task $id"
+  # The task's token budget and what it counts (#183), when it has one. Advice only: a failed lookup adds nothing.
+  budget=""
+  [ -f "$hooks/factory_budget.ts" ] && budget="$(fh "$hooks/factory_budget" prompt "$id" 2>/dev/null)" || budget=""
+  [ -n "$budget" ] && prompt="$prompt"$'\n\n'"$budget"
   if [ -n "${FACTORY_RESUME_NOTE:-}" ] && [ -f "$FACTORY_RESUME_NOTE" ]; then
     prompt="$prompt"$'\n\n'"$(cat "$FACTORY_RESUME_NOTE")"
     rm -f "$FACTORY_RESUME_NOTE"; unset FACTORY_RESUME_NOTE

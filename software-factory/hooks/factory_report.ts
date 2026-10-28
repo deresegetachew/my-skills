@@ -7,12 +7,15 @@
 //   PR -> merge     from opening the PR to merging it (open: so far; closed unmerged: "closed")
 //   rework          the dev manager's must-fix comments on the PR (each one is a round of rework)
 //   CI runs         workflow runs on the PR's branch, and how many of them failed
+//   budget          merged tasks with a budget (#183): tokens used against it, from the PR's last usage comment
+//                   (`<!-- factory-usage task=<n> used=... budget=... -->`), and the median ratio
 //
 //   factory report                  the last 7 days
 //   factory report --since 2026-10-20
 //   factory report --json           the same as JSON
 //
 // Reads only, through `gh api`.
+import { short } from "./factory_budget.ts";
 import { branchTask, load, taskSource } from "./factory_config.ts";
 import { die, parseArgs, parseIso, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 import { verdicts } from "./factory_messages.ts";
@@ -60,6 +63,22 @@ export interface ReportRow {
   rework: number;
   ciRuns: number;
   ciFailed: number;
+  /** Tokens used and the budget, from the PR's last usage comment that carries both (#183); null without one. */
+  used: number | null;
+  budget: number | null;
+}
+
+// `<!-- factory-usage task=7 used=44000 budget=100000 -->`: what `factory usage --task <n> --markdown` posts with a budget.
+const USAGE_MARK = /<!--\s*factory-usage\s+task=\S+\s+used=(\d+)\s+budget=(\d+)\s*-->/;
+
+/** [used, budget] from the last usage comment with a budget, or [null, null]. */
+function usageOf(comments: Obj[]): [number | null, number | null] {
+  let found: [number | null, number | null] = [null, null];
+  for (const c of comments) {
+    const m = USAGE_MARK.exec(typeof c.body === "string" ? c.body : "");
+    if (m) found = [Number(m[1]), Number(m[2])];
+  }
+  return found;
 }
 
 /** Task PRs opened at or after `cut`, newest first (the list is sorted by creation, so stop at the first older). */
@@ -94,6 +113,7 @@ function row(p: Obj, issuesMode: boolean, now: number): ReportRow {
   const comments = list(gh(`repos/{owner}/{repo}/issues/${String(p.number)}/comments?per_page=100`));
   const runs = list(obj(gh(`repos/{owner}/{repo}/actions/runs?branch=${pyQuote(branch)}&per_page=100`)).workflow_runs);
   const merged = when(p.merged_at);
+  const [used, budget] = usageOf(comments);
   const state = merged !== null ? "merged" : p.state === "closed" ? "closed" : "open";
   return {
     task: tid, pr: Number(p.number), agent, state,
@@ -101,7 +121,7 @@ function row(p: Obj, issuesMode: boolean, now: number): ReportRow {
     prToMerge: merged !== null ? hours(opened, merged) : state === "open" ? hours(opened, now) : null,
     claimToMerge: hours(claimed, merged),
     rework: comments.filter((c) => verdicts(typeof c.body === "string" ? c.body : "").some(([k]) => k === "mustfix")).length,
-    ciRuns: runs.length, ciFailed: runs.filter((r) => r.conclusion === "failure").length,
+    ciRuns: runs.length, ciFailed: runs.filter((r) => r.conclusion === "failure").length, used, budget,
   };
 }
 
@@ -142,6 +162,18 @@ function show(rows: ReportRow[], cut: number): void {
       (done.some((r) => r.claimToMerge !== null) ? `, claim->merge ${med("claimToMerge")}h` : "") +
       `. Rework rounds ${sum("rework")}, CI runs ${sum("ciRuns")} (${sum("ciFailed")} failed).`);
   }
+  budgets(done);
+}
+
+/** Budget against used per merged task that had one, and the median ratio: are the sizes too high or too low? */
+function budgets(done: ReportRow[]): void {
+  const rows = done.filter((r): r is ReportRow & { used: number; budget: number } => r.used !== null && r.budget !== null && r.budget > 0);
+  if (!rows.length) return;
+  const pct = (r: { used: number; budget: number }): number => Math.round((r.used / r.budget) * 100);
+  console.log(`\nBudget against used, per merged task (tokens: fresh input + output, from each PR's last usage comment):`);
+  for (const r of rows) console.log(`  ${r.task.padEnd(8)} #${String(r.pr).padEnd(5)} ${short(r.used)} of ${short(r.budget)} (${pct(r)}%)`);
+  const ratio = Math.round(median(rows.map((r) => (r.used / r.budget) * 100)));
+  console.log(`Median used/budget over ${rows.length} merged task${rows.length === 1 ? "" : "s"} with a budget: ${ratio}%.`);
 }
 
 const PROG = "factory_report.ts";

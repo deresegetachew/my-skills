@@ -14,7 +14,10 @@
 // Issues mode (`tasks.source: "issues"`): create also needs the branch's issue (task/<n>-...) open, not blocked, not
 //         held by another agent, and `Closes #<n>` in the PR body.
 // Markers: agents may not post the dev manager's markers (factory-approved, factory-answer, factory-mustfix, and the
-//         claim markers of factory_manager_claims.ts), add the review labels or remove the hold label.
+//         claim markers of factory_manager_claims.ts, and factory-budget), add the review labels or remove the hold label.
+// Budgets (#183): a coding agent's `gh issue edit --body/--body-file` (or `gh api` write to issues/<n> with a body) may
+//         not change the issue's `Budget:` line; the gate compares it with the issue on GitHub and fails closed when it
+//         can't read it. The product owner and the dev manager (FACTORY_ROLE) may change it.
 // Messages (docs/messages.md): a comment with a `factory-msg` envelope is checked too. An agent posts as itself
 //         (from= is FACTORY_AGENT), never as kind approval or mustfix, and answers, works on or fails only a question
 //         addressed to it, with a valid state transition; the question is looked up in the thread (the number on the
@@ -46,6 +49,7 @@ import { basename } from "node:path";
 import {
   type Config, blockedIds, branchTask, load, loadFromMain, styled, taskLabels, taskSource, tasks,
 } from "./factory_config.ts";
+import { parseBudget } from "./factory_budget.ts";
 import { message as ciMessage, notStarted } from "./factory_ci.ts";
 import { Exit, run as runCmd, runMain } from "./factory_lib.ts";
 import * as fm from "./factory_messages.ts";
@@ -56,7 +60,8 @@ import {
   PUSH_DELETE_IN_TEXT, SHELL_EXPANSION, WRAPPERS, type Flags, parseArgs, simpleCommands,
 } from "./factory_shell.ts";
 
-export const MARKERS = /<!--\s*factory-(approved|answer|mustfix|review-claim|claim-release|owner-ask)\b/;
+// factory-budget: the budget a claim records (#183), which only the claim itself writes.
+export const MARKERS = /<!--\s*factory-(approved|answer|mustfix|review-claim|claim-release|owner-ask|budget)\b/;
 export const REVIEW_LABELS = new Set(["tests-reviewed", "deps-reviewed"]);
 export const SETTINGS_READ_ONLY = new Set(["list", "ls", "get", "show", "help", "options", "diff", "validate", "docs"]);
 const SETTINGS_WITH_VALUE = new Set(["--section", "--file"]);
@@ -70,7 +75,7 @@ const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "-
   "-q", "--jq", "-t", "--template", "--cache", "-p", "--preview", "--hostname"]);
 /** git push's flags that take a value (so `-o fix` is not -f). */
 const PUSH_VALUE_FLAGS = new Set(["-o", "--push-option", "--repo", "--receive-pack", "--exec"]);
-const MARKER_MSG = "Only the dev manager posts factory-approved, factory-answer, factory-mustfix, claim and owner-ask comments. " +
+const MARKER_MSG = "Only the dev manager posts factory-approved, factory-answer, factory-mustfix, claim, budget and owner-ask comments. " +
   "Ask with <!-- factory-question --> instead.";
 
 /** The command as bash reads its words, for the quick tests: quotes, backslashes and line continuations gone, so
@@ -505,6 +510,7 @@ function main(): void {
     if ((top === "pr" || top === "issue") && ["comment", "edit", "review", "close", "reopen", "create", "new"].includes(sub)) {
       checkMarkers(cfg, sub, args);
     }
+    if (top === "issue" && sub === "edit") checkBudgetEdit(args);
   }
   const apiCreates: ApiCreate[] = [];
   for (const [, tokens] of found) {
@@ -602,6 +608,19 @@ function gateApi(args: string[]): ApiCreate | null {
       "command (gh pr comment, gh pr edit, gh pr merge), which it checks.");
   }
   if (MARKERS.test(text)) block(MARKER_MSG);
+  const issue = /^repos\/[^/]+\/[^/]+\/issues\/(\d+)$/.exec(endpoint);
+  if (issue) {
+    const bodies = fields.filter(([k]) => k === "body").map(([, v]) => v);
+    for (const f of inputs) {
+      try {
+        const b = row(JSON.parse(fileText(f, "--input")) as unknown).body;
+        if (b !== undefined) bodies.push(typeof b === "string" ? b : "");
+      } catch {
+        block("Pass --input a JSON file the PR gate can read, so it can check the issue's Budget line.");
+      }
+    }
+    if (bodies.length) checkBudget(issue[1] as string, bodies.join("\n"));
+  }
   const thread = /^repos\/[^/]+\/[^/]+\/(?:issues|pulls)\/(\d+)\/comments$/.exec(endpoint);
   checkMessages(thread ? (thread[1] as string) : null, text);
   if (method === "POST" && /^repos\/[^/]+\/[^/]+\/pulls$/.test(endpoint)) {
@@ -627,6 +646,38 @@ function checkMarkers(cfg: Config, sub: string, args: string[]): void {
   if (labels("--remove-label").has(hold)) block(`Only the dev manager removes \`${hold}\`.`);
   const added = labels("--add-label", "-l", "--label");
   if ([...REVIEW_LABELS].some((l) => added.has(l))) block("Only the dev manager adds the review labels (tests-reviewed, deps-reviewed).");
+}
+
+/** `gh issue edit <n>... --body/--body-file`: the budget line must stay as it is (#183). */
+function checkBudgetEdit(args: string[]): void {
+  const [flags, pos] = parseArgs(args);
+  if (!values(flags, "-b", "--body", "-F", "--body-file").length) return; // labels, title ...: no budget in them
+  const text = bodyText(flags);
+  for (const p of pos) {
+    const n = /(\d+)\/?$/.exec(p)?.[1];
+    if (!n) block(`Name the issue by its number (gh issue edit <n>), so the PR gate can check its Budget line; got ${p}.`);
+    checkBudget(n, text);
+  }
+}
+
+/** A coding agent doesn't change a task's budget (#183): the `Budget:` line of issue #n must say the same after the
+ * edit. The product owner and the dev manager may (FACTORY_ROLE, set by the loop that started the session). */
+function checkBudget(n: string, newBody: string): void {
+  const role = process.env.FACTORY_ROLE || "coding-agent";
+  if (role === "product-owner" || role === "dev-manager") return;
+  const [rc, out, err] = run("gh", "api", `repos/{owner}/{repo}/issues/${n}`);
+  if (rc !== 0) block(`I could not read issue #${n} to check its Budget line (${err.slice(0, 200)}). Try again in a moment.`);
+  let now = "";
+  try {
+    now = String(row(JSON.parse(out) as unknown).body ?? "");
+  } catch {
+    block(`I could not read issue #${n} to check its Budget line (gh answered something that isn't JSON). Try again in a moment.`);
+  }
+  if (parseBudget(now) !== parseBudget(newBody)) {
+    block(`This edit changes the Budget line of #${n}. A coding agent doesn't change a task's budget: keep the line as ` +
+      "it is. If the budget is too small, write a short plan of what is left and ask the dev manager in a " +
+      "<!-- factory-question --> comment; the product owner or the dev manager changes it.");
+  }
 }
 
 function readThread(number: string): fm.Message[] {
