@@ -142,17 +142,15 @@ test("inside a window (FACTORY_WINDOW) or without a terminal the loop runs in pl
   expect(calls(env2).some((l) => l.startsWith("attach-session"))).toBe(false);
 }, 150_000);
 
-test("without tmux it stops with no-tmux and says how to install it", async () => {
+test("without tmux loop dash i on a terminal runs in place, with a note that tmux would give it a window", async () => {
+  // tmux is needed for the cockpit, not for the factory (#295): the owner's machine may have none.
   const [work, env] = withTmux(false);
-  const [rc, shown] = await onATerminal(work, env, ["dev-manager", "lead", "loop", "-i"]);
-  expect(rc, shown).toBe(1);
-  const line = shown.split(/\r?\n/).find((l) => l.includes('"code"') && l.includes("no-tmux"));
-  expect(line, shown).toBeDefined();
-  const e = JSON.parse(line as string) as { code: string; message: string; fix: string };
-  expect(e.code).toBe("no-tmux");
-  expect(e.message.length).toBeGreaterThan(0);
-  expect(e.fix).toMatch(/install tmux/i);
-  expect(claudeCalls(env)).toEqual([]);
+  const [rc, shown] = await onATerminal(work, env, ["dev-manager", "lead", "loop", "-i", "--once"]);
+  expect(rc, shown).toBe(0);
+  const notes = shown.split(/\r?\n/).filter((l) => /tmux is not installed/i.test(l));
+  expect(notes.length, shown).toBe(1);
+  expect(notes[0]).toMatch(/own tmux window/);
+  expect(shown).not.toContain('"no-tmux"');
 }, 90_000);
 
 test("a tmux older than 3.2 still starts the session with a note about 3.2", async () => {
