@@ -39,9 +39,14 @@ test("the manager gate refuses a comment body it cannot read before the shell ru
     "printf '<!-- factory-owner-%s' answer > new.md; gh issue comment 40 --body-file new.md",
     "printf '<!-- factory-owner-%s' answer > old.md; gh issue comment 40 --body-file old.md",
     "printf '<!-- factory-owner-%s' answer >> old.md && gh api -X POST repos/{owner}/{repo}/issues/40/comments -F body=@old.md",
+    "gh issue comment 40 --body-file ans*.md",
+    "gh issue comment 40 --body-file ans?wer.md",
+    "gh api -X POST repos/{owner}/{repo}/issues/40/comments -F body=@ans[w]er.md",
+    "gh issue comment 40 --body-file ~/answer.md",
   ]) {
     const [d, env] = world({ comments: [comment("hi")] });
     write(join(d, "old.md"), "harmless\n");
+    write(join(d, "answer.md"), `${MARK}\n`);
     const [rc, err] = gate(d, env, command);
     expect(rc, `${command} ${err}`).toBe(2);
     expect(err).toContain("plain text");

@@ -258,7 +258,8 @@ function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
 }
 
 /** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`); read from
- * stdin or anything else that is not a regular file (`-`, `/dev/stdin`); or read from a file in a command that runs
+ * stdin or anything else that is not a regular file (`-`, `/dev/stdin`); from a path the shell expands (a glob, `~`);
+ * or from a file in a command that runs
  * more than the gh call, which could write the file first. A missing file is left to gh to report. */
 function hidesBody(flags: Flags, cmd: string, parts: number): boolean {
   const files = bodyFiles(flags);
@@ -267,7 +268,8 @@ function hidesBody(flags: Flags, cmd: string, parts: number): boolean {
   if (!files.length && !texts.length) return false;
   if (SHELL_EXPANSION.test(cmd)) return true;
   if (files.length && parts > 1) return true;
-  return files.some((p) => p === "-" || (existsSync(p) && !regularFile(p)));
+  // a glob or ~ names another file once the shell expands it
+  return files.some((p) => p === "-" || /[*?[{]|^~/.test(p) || (existsSync(p) && !regularFile(p)));
 }
 
 function gitCall(args: string[]): void {
