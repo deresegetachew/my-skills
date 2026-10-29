@@ -342,7 +342,7 @@ export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
   if (flag === "--settings" && rest.every((a) => a === "--color") && rest.length <= 1) {
-    return (await import("./factory_cockpit_settings.ts")).settingsView(rest);
+    return (await import("./factory_cockpit_ui.ts")).settingsView(rest);
   }
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
