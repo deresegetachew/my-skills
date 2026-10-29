@@ -94,6 +94,8 @@ Look
   cockpit --needs        what needs you (owner asks, PRs only a person merges), with links, from the same cache
   cockpit --ci           the CI view, from the same cache: where jobs run, the heavy runners, leftovers, the runners and
                          the queue, with the commands that act on them; fits COLUMNS, no colour with NO_COLOR
+  cockpit --usage        the usage view, from this machine's logs (no GitHub call): each task of the last 7 days
+                         against its budget as a bar, with its agent and top subagent, and the lessons
   cockpit watch <item>   watch the item's sub-manager (pr-12, issue-7) in its own tmux window, read-only: it never
                          sends keys; one that ended points at its log
   prs [--json] [--fresh] what a manager decides from, one list: each open PR with its head, CI judged by one rule,
