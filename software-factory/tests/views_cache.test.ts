@@ -207,20 +207,78 @@ test("with --json the note goes to stderr and stdout stays the same parseable JS
   }
 });
 
-test("watch --json is for programs: it always reads GitHub, and its answer serves the next text view", () => {
+// #347: --json answers from the cache too
+test("watch --json is for programs: it answers from the cache while fresh and --fresh reads now, and its answer serves the next text view", () => {
   const c = ctxFor("watch");
   const first = run(c, "watch", ["--json"], T0);
   const before = calls(c);
   expect(before).toBeGreaterThan(0);
   const second = run(c, "watch", ["--json"], T0 + 10);
   expect(second.code, second.out).toBe(VIEWS.watch.code);
-  expect(calls(c), "watch --json read GitHub again").toBeGreaterThan(before);
-  expect(second.stderr).not.toContain("(as of");
+  expect(calls(c), "watch --json read GitHub again").toBe(before);
+  expect(second.stderr).toContain(NOTE(10));
+  expect(second.stdout).not.toContain("(as of");
   expect(JSON.parse(second.stdout)).toEqual(JSON.parse(first.stdout));
-  const after = calls(c);
   const text = run(c, "watch", [], T0 + 10);
-  expect(calls(c), "the text view answers from what --json read").toBe(after);
-  expect(lastLine(text)).toBe(NOTE(0));
+  expect(calls(c), "the text view answers from what --json read").toBe(before);
+  expect(lastLine(text)).toBe(NOTE(10));
+  const fresh = run(c, "watch", ["--json", "--fresh"], T0 + 10);
+  expect(calls(c), "--fresh did not read GitHub").toBeGreaterThan(before);
+  expect(fresh.stderr).not.toContain("(as of");
+  expect(JSON.parse(fresh.stdout)).toEqual(JSON.parse(first.stdout));
+  const after = calls(c);
+  const next = run(c, "watch", [], T0 + 10);
+  expect(calls(c), "the text view answers from what --fresh read").toBe(after);
+  expect(lastLine(next)).toBe(NOTE(0));
+});
+
+// --- the comment memo (#347) -----------------------------------------------------------------------------------------
+
+function withUpdatedAt(c: Ctx, updatedAt: string | null): void {
+  const path = c.env.VIEWS_SCENARIO as string;
+  const s = JSON.parse(readFileSync(path, "utf8")) as Row;
+  if (updatedAt === null) delete s.pulls[0].updated_at;
+  else s.pulls[0].updated_at = updatedAt;
+  writeFileSync(path, JSON.stringify(s));
+}
+
+const commentReads = (c: Ctx): number => logCount(c, "issues/1/comments");
+
+test("a pull request whose updated_at has not changed has its comments read once, however often watch collects", () => {
+  const c = ctxFor("watch");
+  withUpdatedAt(c, "2026-10-25T10:00:00Z");
+  const first = run(c, "watch", ["--json", "--fresh"], T0);
+  expect(commentReads(c), first.out).toBe(1);
+  const second = run(c, "watch", ["--json", "--fresh"], T0 + 5);
+  expect(second.code, second.out).toBe(VIEWS.watch.code);
+  expect(commentReads(c), "the comments were read again").toBe(1);
+  expect(logCount(c, "pulls?state=open"), "--fresh must still read the pulls list").toBeGreaterThanOrEqual(2);
+  expect(JSON.parse(second.stdout)).toEqual(JSON.parse(first.stdout));
+});
+
+test("a changed updated_at makes watch read the comments again", () => {
+  const c = ctxFor("watch");
+  withUpdatedAt(c, "2026-10-25T10:00:00Z");
+  run(c, "watch", ["--json", "--fresh"], T0);
+  withUpdatedAt(c, "2026-10-25T11:00:00Z");
+  run(c, "watch", ["--json", "--fresh"], T0 + 5);
+  expect(commentReads(c)).toBe(2);
+});
+
+test("a pull request without updated_at always has its comments read", () => {
+  const c = ctxFor("watch");
+  withUpdatedAt(c, null);
+  run(c, "watch", ["--json", "--fresh"], T0);
+  run(c, "watch", ["--json", "--fresh"], T0 + 5);
+  expect(commentReads(c)).toBe(2);
+});
+
+test("views.cacheSeconds 0 turns the comment memo off", () => {
+  const c = ctxFor("watch", { views: { cacheSeconds: 0 } });
+  withUpdatedAt(c, "2026-10-25T10:00:00Z");
+  run(c, "watch", ["--json", "--fresh"], T0);
+  run(c, "watch", ["--json", "--fresh"], T0 + 5);
+  expect(commentReads(c)).toBe(2);
 });
 
 test("watch keeps its exit code from the cache: 0 when nothing needs anyone", () => {
