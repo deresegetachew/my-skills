@@ -235,7 +235,8 @@ this is the only way to tell the manager's own PRs from the agents'.
 **Below the PRs.** `questions`: open `factory-question` comments with no later `factory-answer`, on open PRs and on
 open issues (issues are searched `--since-days` back, default 14). `ownerAsks`: asks in the open issue titled
 `Dev manager: needs the owner` (comments starting `<!-- factory-owner-ask id=<slug> -->`) that no comment answers; an ask
-is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->`. `agents`:
+is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->` (with
+`trustedReviewers` set, only from those logins; the dev manager's gate refuses to post that marker). `agents`:
 agents that are `silent` or `down`, and `staleTasks`: in-progress tasks quiet for `tasks.staleHours` (issues mode only).
 
 **`--json`**, stable for scripts. A part GitHub could not answer is `{"error": "..."}` in its place.
