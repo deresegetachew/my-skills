@@ -3,7 +3,7 @@
 // (US-6, #302). Each one is a thin wrapper over what exists.
 //
 //   factory owner merge <pr>                 names the protected paths the PR touches, checks it is open, not a draft,
-//                                            mergeable and green (factory_ci_judge.ts), then squash-merges it pinned to
+//                                            mergeable and green (factory_ci_judge.ts), then merges it (a merge commit) pinned to
 //                                            its head (`gh pr merge --match-head-commit`)
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
@@ -28,7 +28,7 @@ const REPO = "repos/{owner}/{repo}";
 const VERSION_FILE = "software-factory/VERSION";
 const USAGE = `factory owner <command>
 
-  merge <pr>                  name the protected paths the pull request touches, then squash-merge it when it is open,
+  merge <pr>                  name the protected paths the pull request touches, then merge it (a merge commit) when it is open,
                               not a draft, mergeable and green, pinned to its head commit
   label <n> <label> [--remove]
                               add a label that exists on the repository to an issue or pull request (--remove: take it off)
@@ -137,7 +137,8 @@ function merge(n: string, me: Who): void {
   if (pr.state !== "open" || pr.merged === true) {
     refuse("pr_not_open", `Pull request #${n} is ${pr.merged === true ? "merged" : str(pr.state) || "not open"}.`, "Nothing to merge; `factory prs` lists the open ones.");
   }
-  const hits = protectedPaths(apiAll<Row>(`${REPO}/pulls/${n}/files`).map((f) => str(f.filename)));
+  // A rename is listed under its new name; the old one (previous_filename) is changed too.
+  const hits = protectedPaths(apiAll<Row>(`${REPO}/pulls/${n}/files`).flatMap((f) => [str(f.filename), str(f.previous_filename)].filter(Boolean)));
   console.log(`Protected paths: ${hits.length ? hits.join(", ") : "none"}`);
   if (hits.length && me === "dev-manager") {
     refuse("protected_owner_merges", `#${n} changes protected paths (${hits.slice(0, 8).join(", ")}), so the owner merges it.`,
@@ -164,7 +165,7 @@ function merge(n: string, me: Who): void {
     refuse("not_mergeable", `#${n} can't be merged as it is (it conflicts with the base branch).`,
       "Merge the main branch into the pull request's branch and push, then run the command again.");
   }
-  const cmd = ["gh", "pr", "merge", n, "--squash", "--delete-branch", "--match-head-commit", head];
+  const cmd = ["gh", "pr", "merge", n, "--merge", "--delete-branch", "--match-head-commit", head];
   if (me === "dev-manager") gate(cmd);
   const p = run(cmd);
   if (p.code !== 0) {

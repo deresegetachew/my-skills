@@ -250,7 +250,7 @@ Maintain
 
 Owner                    what the owner does by hand, shared with the cockpit. The dev manager may run merge and label,
                          under its gate; coding agents can't run any of them
-  owner merge <pr>       name the protected paths the PR touches, then squash-merge it when it is open, not a draft,
+  owner merge <pr>       name the protected paths the PR touches, then merge it (a merge commit) when it is open, not a draft,
                          mergeable and green, pinned to its head commit
   owner label <n> <label> [--remove]
                          add (or remove) a label the repository has, on an issue or a pull request
