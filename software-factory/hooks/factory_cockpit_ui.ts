@@ -722,7 +722,7 @@ export function prDetail(p: Obj, questions: Obj[], cols: number, color: boolean)
   const state = plain(ci.state) || "unknown";
   const notGreen = list(ci.notGreen);
   const jobs = notGreen.map((j) => `${plain(j.name)} ${plain(j.state) === "red" ? bad("✕") : paint(plain(j.state), "amber", color)}`);
-  const others = Math.max(Number(ci.runs ?? 0) - notGreen.length, 0);
+  const others = Math.max(Number(ci.jobs ?? 0) - notGreen.length, 0); // jobs, not runs: re-runs and skipped don't count
   if (others) jobs.push(`${others} other check${others === 1 ? "" : "s"} ${ok("✓")}`);
   const ciLine = `CI ${paint(state, ciColour(state), color)}${jobs.length ? `   ${jobs.join("   ")}` : ""}`;
 
