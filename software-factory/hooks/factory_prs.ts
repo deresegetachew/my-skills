@@ -262,7 +262,8 @@ export interface PullRow {
   labels?: string[];
   agent?: string | null;
   agentPr?: boolean;
-  ci?: { state: string; notGreen: NotGreen[]; runs: number };
+  /** runs: every check run; jobs: the jobs they make, re-runs and skipped runs left out (as `judgeCi` counts them). */
+  ci?: { state: string; notGreen: NotGreen[]; runs: number; jobs: number };
   markers?: MarkerRow[];
   headMarker?: string | null;
   gate?: string | null;
@@ -344,7 +345,8 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
       const [claim, expired] = claimOf(comments, sha, now);
       const agent = labels.find((x) => x.startsWith(prefix))?.slice(prefix.length) ?? null;
       Object.assign(out, { head: { sha, ageMinutes: minutesSince(date, now) }, labels, agent,
-        agentPr: Boolean(agent) || branchTask(branch) !== null, ci: { state, notGreen: bad, runs: runs.length },
+        agentPr: Boolean(agent) || branchTask(branch) !== null, ci: { state, notGreen: bad, runs: runs.length,
+          jobs: newestRuns(runs).size },
         markers: marks, headMarker: headKind, gate: gateWord(comments, sha, trusted), claim,
         staleHold: labels.includes(hold) && expired && claim === null, protected: null });
       const held = labels.includes(hold);
