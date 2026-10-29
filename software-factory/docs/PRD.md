@@ -437,7 +437,9 @@ Then the cockpit, in steps.
   popups that run the existing commands. Read-only in this step. Without tmux 3.2 or newer it stops with
   `{code, message, fix}`. *Built* (#308; `C-a C-a` comes back to the list). (#295)
 - **US-11.** As the owner, I act from the cockpit: merge, label, release, answer, start and stop an agent, say. Each
-  asks me first when it changes GitHub or the machine. *Decided.* (#295; US-6)
+  asks me first when it changes GitHub or the machine. *Built* (#309; the `:` bar runs `factory owner merge`, `label`,
+  `answer`, `release`, `start`, `stop` and `factory say` after a y/N question; `m` in the Pull requests view merges
+  pinned to the head it shows, `s`, `x` and `n` in the list say, stop and start). (#295; US-6)
 - **US-12.** As the owner, the cockpit shows the alerts of US-7 in its own window: the badge, the count and the bell.
   *Built* (#310; the bell rings from the list once per new owner ask, no second desktop notice). (#295)
 - **US-13.** As the owner, the views move towards the canvas boards: pull request detail, CI cards, the settings table,

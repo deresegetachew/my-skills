@@ -122,7 +122,7 @@ const FOR_AGENTS = ["review-pass", "wait", "run-check", "guard", "rereview", "ma
 
 /** Commands that change GitHub or the machine and are not among the owner's actions: run in a shell, not here. */
 const ACTIONS = ["loop", "coding-agent", "dev-manager", "product-owner", "init", "init-roles", "agent", "autostart",
-  "resume", "heartbeat", "reset-run", "worktree", "say", "verify", "fix", "check", "turbo", "bootstrap", "update",
+  "resume", "heartbeat", "reset-run", "worktree", "verify", "fix", "check", "turbo", "bootstrap", "update",
   "release", "rollback", "migrate-to-release", "cockpit", "follow", "lessons", "settings", "remote", "issues", "ci",
   "machine", "agents", "messages", "alerts", "claims", "next", "usage"];
 
