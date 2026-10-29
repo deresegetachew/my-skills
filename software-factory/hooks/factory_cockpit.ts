@@ -13,8 +13,8 @@
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
 // missing or older than FACTORY_COCKPIT_CACHE_SECONDS (default 300: a refresh costs a few GitHub calls per open pull
 // request, on the agents' token) it starts one refresh in the background and says how old the line is. `factory cockpit`
-// alone opens the tmux cockpit (#308, US-10): factory_cockpit_ui.ts. `--prs [<n>]` is its Pull requests view (#338):
-// factory_cockpit_prs.ts.
+// alone opens the tmux cockpit (#308, US-10): factory_cockpit_ui.ts. `--prs [<n>]` is its Pull requests view (#338),
+// there too.
 //
 //   factory cockpit watch <item>   the item's sub-manager in its own tmux window, read-only (#307, PRD US-4)
 import { spawn } from "node:child_process";
@@ -342,7 +342,7 @@ function watch(args: string[]): number {
 export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
-  if (flag === "--prs") return (await import("./factory_cockpit_prs.ts")).prsView(rest); // the Pull requests view (#338)
+  if (flag === "--prs") return (await import("./factory_cockpit_ui.ts")).prsView(rest); // the Pull requests view (#338)
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
