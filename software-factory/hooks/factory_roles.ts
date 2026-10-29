@@ -377,21 +377,23 @@ export async function poQuestions(cfg: Config): Promise<string[]> {
     .map((q) => `question ${q.id} (to=po) on ${q.what} #${q.number} from ${q.frm}, waiting ${(q.age / 60).toFixed(1)} h: ${q.summary}`);
 }
 
-/** One line per owner-queue ask tagged `for=product` that nobody has answered: scope, order, PRD and wording
- * questions the dev manager sends the product owner (`<!-- factory-owner-ask id=<slug> for=product -->`). */
+/** One line per owner-queue ask tagged `for=product` that is the product owner's now: scope, order, PRD and wording
+ * questions the dev manager sends the product owner (`<!-- factory-owner-ask id=<slug> for=product -->`). One nobody
+ * has answered, or one the owner answered after the product owner's reply. One the product owner replied to
+ * (`<!-- factory-po-reply ask=<slug> -->`) waits for the owner and is left out (#352). */
 export async function productAsks(cfg: Config): Promise<string[]> {
   const { ghAll } = await import("./factory_issues.ts");
   const { ownerQueue } = await import("./factory_orchestrator.ts");
-  const { openOwnerAsks } = await import("./factory_prs.ts");
+  const { ownerAskStates, forProduct } = await import("./factory_prs.ts");
   const queue = ownerQueue(cfg, false);
   if (!queue) return [];
   const out: string[] = [];
-  for (const [slug, c] of openOwnerAsks(ghAll<Record<string, unknown>>(`repos/{owner}/{repo}/issues/${queue}/comments`))) {
+  for (const [slug, c, state] of ownerAskStates(ghAll<Record<string, unknown>>(`repos/{owner}/{repo}/issues/${queue}/comments`))) {
+    if (state === "owner" || !forProduct(c)) continue;
     const body = typeof c.body === "string" ? c.body : "";
-    if (/<!--\s*factory-owner-ask\b[^>]*\bfor=product\b/.test(body)) {
-      const text = splitLines(body.replace(/<!--[\s\S]*?-->/g, "").trim());
-      out.push(`owner queue #${queue}, ask ${slug} for product: ${(text[0] ?? "").slice(0, 100)}`);
-    }
+    const text = splitLines(body.replace(/<!--[\s\S]*?-->/g, "").trim());
+    const answered = state === "product" ? ", the owner answered" : "";
+    out.push(`owner queue #${queue}, ask ${slug} for product${answered}: ${(text[0] ?? "").slice(0, 100)}`);
   }
   return out;
 }

@@ -665,7 +665,10 @@ export function needs(): number {
   if (snap === null) console.log("No snapshot yet: `factory cockpit --json` reads one now.");
   else if (!items.length) console.log("Nothing needs you.");
   for (const n of items) {
-    if (n.kind === "owner-ask") console.log(`Owner ask ${plain(n.id)} on #${plain(n.issue)}: ${plain(n.url)}`);
+    if (n.kind === "owner-ask") {
+      const replied = n.state === "owner" ? ", the product owner replied" : "";
+      console.log(`Owner ask ${plain(n.id)} on #${plain(n.issue)}${replied}: ${plain(n.url)}`);
+    }
     else if (n.kind === "owner-merges") console.log(`PR #${plain(n.number)} ${plain(n.title)} is yours to merge: ${plain(n.url)}`);
     else console.log(JSON.stringify(n)); // JSON escapes control characters itself
   }
