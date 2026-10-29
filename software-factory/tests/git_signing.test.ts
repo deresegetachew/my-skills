@@ -29,7 +29,7 @@ test("a test makes commits and tags even when the machine's git config signs the
   // signing that always fails: `false` stands in for gpg
   write(join(home, ".gitconfig"), "[commit]\n\tgpgsign = true\n[tag]\n\tgpgsign = true\n\tforceSignAnnotated = true\n" +
     "[gpg]\n\tprogram = false\n");
-  const env = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), GIT_SIGNING_PROBE: "1",
+  const env: Record<string, string | undefined> = { ...process.env, HOME: home, XDG_CONFIG_HOME: join(home, ".config"), GIT_SIGNING_PROBE: "1",
     BUN_INSTALL_CACHE_DIR: join(home, "bun-cache") };
   delete env.GIT_CONFIG_GLOBAL;
   const p = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(ROOT, "tools", "run_tests.ts"), "git_signing"],
