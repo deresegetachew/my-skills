@@ -8,7 +8,8 @@ import { git, gitRepo, ROOT, sh, tmp, write } from "./support.ts";
 
 const TAG_PUSHES = ["git push origin v1.2.3", "git push --tags", "git push origin --tags", "git push --follow-tags origin task/1-x",
   "git push origin refs/tags/v1.2.3", "git push origin HEAD:refs/tags/v1.2.3", "git push origin HEAD:v1.2.3",
-  "git push origin tag v1.2.3", "git push -u origin v2.0.0-rc.1"];
+  "git push origin tag v1.2.3", "git push -u origin v2.0.0-rc.1", "git push origin tags/v1.2.3", "git push origin 'refs/*:refs/*'",
+  "git push origin 'refs/t*:refs/t*'"];
 const BRANCH_PUSHES = ["git push origin task/1-x", "git push -u origin HEAD", "git push -u origin task/12-validate",
   "git push origin HEAD:task/3-v2-cleanup"];
 
@@ -23,6 +24,10 @@ test("the PR gate refuses a tag push wherever git's options sit, and lets a bran
     expect(code, `${c} ${err}`).toBe(2);
     expect(err).toContain("Agents don't push tags");
     expect(err).toContain("factory owner release");
+  }
+  // settings that make a plain push send tags are refused as git settings on the command line
+  for (const c of ["git -c push.followTags=true push origin task/1-x", "git -c remote.origin.push=refs/tags/*:refs/tags/* push origin"]) {
+    expect(runGate(d, env, c)[0], c).toBe(2);
   }
   for (const c of BRANCH_PUSHES) expect(runGate(d, env, c), c).toEqual([0, ""]);
 });
