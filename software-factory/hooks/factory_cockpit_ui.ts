@@ -14,10 +14,12 @@
 //   factory cockpit --sidebar    the list on the left (off a terminal: one frame, sized by COLUMNS and LINES)
 //   factory cockpit --bar        the `:` command bar: type to pick a factory command (off a terminal: one line on stdin)
 //   factory cockpit --needs      the "Needs you" view, from the cache
-//   factory cockpit --settings   the Settings view (#340), at the end of this file
+//   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json`
+//   factory cockpit --settings   the Settings view (#340), before the Pull requests view
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { load } from "./factory_config.ts";
 import { readCache, refreshIfOld } from "./factory_cockpit.ts";
 import { run, which } from "./factory_lib.ts";
@@ -42,7 +44,7 @@ function str(v: unknown): string {
 }
 
 /** `str`, without escape sequences or control characters: a PR title or session name can't drive the terminal. */
-function plain(v: unknown): string {
+export function plain(v: unknown): string {
   return str(v)
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "") // OSC: a window title, a link
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "") // CSI: colours, cursor moves, clearing the screen
@@ -55,16 +57,18 @@ export interface View {
   key: string;
   title: string;
   commands: string[][];
+  /** Draws its own screen and reads keys (#338): runs in the popup as it is, not through `less -R`. */
+  live?: boolean;
 }
 
-/** The views of US-10, each the existing commands it runs. */
+/** The views of US-10, each the existing commands it runs; US-13 moves them towards their boards one by one. */
 export function views(): View[] {
   const issues = str(obj(obj(load()).tasks).source) === "issues";
   return [
     { key: "1", title: "Needs you", commands: [["cockpit", "--needs"]] },
-    { key: "2", title: "Pull requests", commands: [["prs"]] },
+    { key: "2", title: "Pull requests", commands: [["cockpit", "--prs"]], live: true },
     { key: "3", title: "Tasks & PRD", commands: [issues ? ["issues", "list"] : ["next"]] },
-    { key: "4", title: "CI", commands: [["ci", "status"]] },
+    { key: "4", title: "CI", commands: [["cockpit", "--ci"]] }, // drawn after its board (#339)
     { key: "5", title: "Agents & machines", commands: [["agents", "ls"], ["machine", "show"]] },
     { key: "6", title: "Settings", commands: [["cockpit", "--settings", "--color"]] },
     { key: "7", title: "Health & releases", commands: [["doctor"], ["version"]] },
@@ -164,9 +168,10 @@ function factoryCall(script: string, args: string[]): string {
   return ["bash", dq(script), ...args.map((a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : dq(a)))].join(" ");
 }
 
-/** A view as one sh command: a heading, each command's output, through `less -R`. */
+/** A view as one sh command: a heading, each command's output, through `less -R`; a live view runs as it is. */
 export function viewCommand(script: string, v: View): string {
   const parts = v.commands.map((c) => factoryCall(script, c));
+  if (v.live) return parts.join("; ");
   return `{ echo ${dq(v.title)}; echo; ${parts.join("; echo; ")}; } 2>&1 | less -R`;
 }
 
@@ -577,29 +582,30 @@ interface Paint {
   bold: (s: string) => string;
 }
 
-function paint(on: boolean): Paint {
+// The helpers below are the Settings view's own (the CI view below has its own `paint`, `cut`, `pad`, `wrap`, `width`).
+function settingsPaint(on: boolean): Paint {
   const c = (code: string) => (s: string) => (on && s ? `\x1b[${code}m${s}\x1b[0m` : s);
   return { amber: c("33"), red: c("31"), green: c("32"), grey: c("90"), bold: c("1") };
 }
 
-function width(s: string): number {
+function shownWidth(s: string): number {
   return [...s.replace(ANSI, "")].length;
 }
 
 /** Plain text cut to `n` characters, with … when cut. */
-function cut(s: string, n: number): string {
+function clip(s: string, n: number): string {
   const chars = [...s];
   if (n <= 0) return "";
   return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
 }
 
-function pad(s: string, n: number): string {
-  const shown = cut(s, n);
+function padTo(s: string, n: number): string {
+  const shown = clip(s, n);
   return shown + " ".repeat(Math.max(n - [...shown].length, 0));
 }
 
 /** Words wrapped to `n` columns, each line starting with `lead`. */
-function wrap(text: string, n: number, lead = ""): string[] {
+function wrapWords(text: string, n: number, lead = ""): string[] {
   const out: string[] = [];
   let line = lead;
   for (const w of text.split(" ")) {
@@ -611,11 +617,11 @@ function wrap(text: string, n: number, lead = ""): string[] {
     }
   }
   out.push(line);
-  return out.map((l) => cut(l, n));
+  return out.map((l) => clip(l, n));
 }
 
 /** The terminal's width: COLUMNS, the terminal on stdout, the one on stdin (a popup pipes stdout to less), else 100. */
-function columns(): number {
+function termColumns(): number {
   const given = Number(process.env.COLUMNS);
   if (given > 0) return given;
   if (process.stdout.columns) return process.stdout.columns;
@@ -662,7 +668,7 @@ const WIDE = KEY_W + VALUE_W + FROM_W + 23; // the table needs this much to keep
 
 /** The value in `n` columns; a pending one keeps its "(pending)" however much of the value is cut. */
 function valueText(r: SettingRow, n: number): string {
-  return r.pending ? `${cut(r.value, Math.max(n - 10, 1))} (pending)` : cut(r.value, n);
+  return r.pending ? `${clip(r.value, Math.max(n - 10, 1))} (pending)` : clip(r.value, n);
 }
 
 function tableLines(rows: SettingRow[], cols: number, c: Paint): string[] {
@@ -671,17 +677,17 @@ function tableLines(rows: SettingRow[], cols: number, c: Paint): string[] {
     const mark = r.owner ? " ◆" : "";
     const value = r.pending ? c.amber : (s: string) => s;
     if (cols >= WIDE) {
-      const key = pad(cut(r.key, KEY_W - 2 - mark.length) + mark, KEY_W - 2);
+      const key = padTo(clip(r.key, KEY_W - 2 - mark.length) + mark, KEY_W - 2);
       const keyShown = r.owner ? key.replace(" ◆", c.amber(" ◆")) : key;
-      const help = cut(r.help, cols - KEY_W - VALUE_W - FROM_W - 2);
-      out.push(`  ${keyShown}${value(pad(valueText(r, VALUE_W - 2), VALUE_W - 1))} ${pad(r.from, FROM_W - 1)} ${c.grey(help)}`);
+      const help = clip(r.help, cols - KEY_W - VALUE_W - FROM_W - 2);
+      out.push(`  ${keyShown}${value(padTo(valueText(r, VALUE_W - 2), VALUE_W - 1))} ${padTo(r.from, FROM_W - 1)} ${c.grey(help)}`);
     } else {
-      out.push(cut(`  ${r.key}${mark}`, cols).replace(" ◆", c.amber(" ◆")));
-      out.push(`    ${value(valueText(r, Math.max(cols - 4 - [...r.from].length - 3, 12)))} · ${c.grey(cut(r.from, cols - 4))}`);
-      for (const l of wrap(r.help, cols, "    ").slice(0, 2)) out.push(c.grey(l));
+      out.push(clip(`  ${r.key}${mark}`, cols).replace(" ◆", c.amber(" ◆")));
+      out.push(`    ${value(valueText(r, Math.max(cols - 4 - [...r.from].length - 3, 12)))} · ${c.grey(clip(r.from, cols - 4))}`);
+      for (const l of wrapWords(r.help, cols, "    ").slice(0, 2)) out.push(c.grey(l));
     }
   }
-  return out.map((l) => (width(l) > cols ? cut(l.replace(ANSI, ""), cols) : l));
+  return out.map((l) => (shownWidth(l) > cols ? clip(l.replace(ANSI, ""), cols) : l));
 }
 
 /** The box of staged changes: what `factory settings pr` would open. */
@@ -689,28 +695,28 @@ function stagedBox(staged: Staged | null, problem: string, data: store.Data, col
   const inner = Math.max(cols - 4, 10);
   const body: string[] = [];
   if (problem) {
-    body.push(...wrap(`The staged changes can't be read (${plain(problem)}).`, inner));
-    body.push(...wrap("Run `factory settings unstage` to drop them, then stage again with `factory settings set --stage <key> <value>`.", inner).map(c.grey));
+    body.push(...wrapWords(`The staged changes can't be read (${plain(problem)}).`, inner));
+    body.push(...wrapWords("Run `factory settings unstage` to drop them, then stage again with `factory settings set --stage <key> <value>`.", inner).map(c.grey));
   } else if (!staged || !Object.keys(staged).length) {
-    body.push(...wrap("No project changes waiting.", inner));
-    body.push(...wrap("`factory settings set --stage <key> <value>` stages one; they go to main together as one pull request.", inner).map(c.grey));
+    body.push(...wrapWords("No project changes waiting.", inner));
+    body.push(...wrapWords("`factory settings set --stage <key> <value>` stages one; they go to main together as one pull request.", inner).map(c.grey));
   } else {
     const keys = Object.keys(staged);
-    body.push(...wrap(`${keys.length} project change${keys.length === 1 ? "" : "s"} waiting · they go to main as one pull request`, inner).map(c.bold));
+    body.push(...wrapWords(`${keys.length} project change${keys.length === 1 ? "" : "s"} waiting · they go to main as one pull request`, inner).map(c.bold));
     for (const key of keys) {
       const change = staged[key] as Staged[string];
       const was = lookup(data, key);
-      if (was !== MISSING) body.push(...wrap(`- ${plain(JSON.stringify(key))}: ${plain(JSON.stringify(was))}`, inner).map(c.red));
-      if ("value" in change) body.push(...wrap(`+ ${plain(JSON.stringify(key))}: ${plain(JSON.stringify(change.value))}`, inner).map(c.green));
-      else if (was === MISSING) body.push(...wrap(`  ${plain(JSON.stringify(key))}: back to its default`, inner).map(c.grey));
+      if (was !== MISSING) body.push(...wrapWords(`- ${plain(JSON.stringify(key))}: ${plain(JSON.stringify(was))}`, inner).map(c.red));
+      if ("value" in change) body.push(...wrapWords(`+ ${plain(JSON.stringify(key))}: ${plain(JSON.stringify(change.value))}`, inner).map(c.green));
+      else if (was === MISSING) body.push(...wrapWords(`  ${plain(JSON.stringify(key))}: back to its default`, inner).map(c.grey));
     }
-    body.push(...wrap("`factory settings pr` opens the PR · `factory settings unstage [<key>]` discards · " +
+    body.push(...wrapWords("`factory settings pr` opens the PR · `factory settings unstage [<key>]` discards · " +
       "`factory settings validate` checks · .claude/factory.json is protected: you merge it", inner).map(c.grey));
   }
   const edge = c.amber;
-  const line = "─".repeat(Math.max(cols - 2, 0));
-  return [edge(`┌${line}┐`), ...body.map((b) => `${edge("│")} ${b}${" ".repeat(Math.max(inner - width(b), 0))} ${edge("│")}`),
-    edge(`└${line}┘`)];
+  const rule = "─".repeat(Math.max(cols - 2, 0));
+  return [edge(`┌${rule}┐`), ...body.map((b) => `${edge("│")} ${b}${" ".repeat(Math.max(inner - shownWidth(b), 0))} ${edge("│")}`),
+    edge(`└${rule}┘`)];
 }
 
 const SETTINGS_KEYS = "edit: `factory settings set --stage <key> <value>` · full help: `factory settings help <key>` · " +
@@ -719,7 +725,7 @@ const SETTINGS_KEYS = "edit: `factory settings set --stage <key> <value>` · ful
 
 /** The Settings view as lines, each at most `cols` wide. */
 export function settingsLines(cols: number, color: boolean): string[] {
-  const c = paint(color);
+  const c = settingsPaint(color);
   const [data] = store.readProject();
   const machine = store.readMachine();
   const found = loadStaged();
@@ -729,23 +735,23 @@ export function settingsLines(cols: number, color: boolean): string[] {
   const title = `${c.amber(c.bold("factory"))} ${c.grey(`${repo} · Settings`)}`;
   const source = "factory settings · values from main, this machine's file, defaults";
   const out: string[] = [];
-  if (cols >= width(title) + source.length + 4) out.push(title + " ".repeat(cols - width(title) - source.length) + c.grey(source));
-  else out.push(cut(title, cols), ...wrap(source, cols).map(c.grey));
-  out.push(...wrap("◆ a change to it needs a sign-off: the owner's, or a dev manager's label (`factory settings help <key>`) · " +
+  if (cols >= shownWidth(title) + source.length + 4) out.push(title + " ".repeat(cols - shownWidth(title) - source.length) + c.grey(source));
+  else out.push(clip(title, cols), ...wrapWords(source, cols).map(c.grey));
+  out.push(...wrapWords("◆ a change to it needs a sign-off: the owner's, or a dev manager's label (`factory settings help <key>`) · " +
     "(pending) staged, not on main yet", cols).map(c.grey), "");
   if (cols >= WIDE) {
-    out.push(c.grey(`  ${pad("setting", KEY_W - 2)}${pad("value", VALUE_W - 1)} ${pad("from", FROM_W - 1)} what it does`));
+    out.push(c.grey(`  ${padTo("setting", KEY_W - 2)}${padTo("value", VALUE_W - 1)} ${padTo("from", FROM_W - 1)} what it does`));
   }
   out.push(c.bold("PROJECT (via PR)"));
   for (const [slug, name] of SECTIONS) {
     const rows = Object.values(SETTINGS).filter((s) => s.section === slug).map((s) => projectRow(data, staged, s));
     if (!rows.length) continue;
-    out.push(c.amber(cut(`── ${name} `.padEnd(Math.min(cols, 60), "─"), cols)), ...tableLines(rows, cols, c));
+    out.push(c.amber(clip(`── ${name} `.padEnd(Math.min(cols, 60), "─"), cols)), ...tableLines(rows, cols, c));
   }
-  out.push("", c.bold(cut(`THIS MACHINE (direct) · ${plain(hostname())} · ${repo}`, cols)));
+  out.push("", c.bold(clip(`THIS MACHINE (direct) · ${plain(hostname())} · ${repo}`, cols)));
   out.push(...tableLines(Object.values(MACHINE).map((s) => machineRow(machine, s)), cols, c), "");
   out.push(...stagedBox(problem ? null : staged, problem, data, cols, c), "");
-  out.push(...wrap(SETTINGS_KEYS, cols).map(c.grey));
+  out.push(...wrapWords(SETTINGS_KEYS, cols).map(c.grey));
   return out;
 }
 
@@ -757,6 +763,575 @@ export function settingsView(args: string[]): number {
     }
   }
   const color = args.includes("--color") && !("NO_COLOR" in process.env);
-  console.log(settingsLines(columns(), color).join("\n"));
+  console.log(settingsLines(termColumns(), color).join("\n"));
+  return 0;
+}
+
+// --- the Pull requests view (#338, PRD US-13) ------------------------------------------------------------------------
+//
+// `factory cockpit --prs [<n>]`, the view `C-a 2` runs, towards its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/
+// VPrs.dc.html). One row per open PR (number, title and " · protected", by, CI, the dev manager's word, who acts,
+// next), and the selected PR's detail below it: branch, head, the newest marker, any review claim, CI job by job, open
+// questions, protected paths and the next action. The keys that work are at the bottom. Its data is `factory prs
+// --json` (the views cache keeps it, #305), so CI is judged by the manager's one rule. On a terminal: j k (or ↑ ↓)
+// move, r reads again from GitHub, q closes; NO_COLOR turns the colour off. Off a terminal it prints one frame sized
+// by COLUMNS and LINES, with <n> selected (else the first PR), and no colour. Read-only: actions come with US-11.
+
+/** `factory prs --json`, or null when it printed no JSON. */
+function readPrs(fresh: boolean): Obj | null {
+  const hook = join(import.meta.dir, "factory_prs.ts");
+  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", hook, "--json", ...(fresh ? ["--fresh"] : [])],
+    { timeoutMs: 120_000 });
+  try {
+    const data: unknown = JSON.parse(p.stdout);
+    return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Obj) : null;
+  } catch {
+    return null;
+  }
+}
+
+const PAINT: Record<string, string> = { green: "32", red: "31", amber: "33", dim: "90" };
+
+function prPaint(text: string, colour: string, color: boolean): string {
+  return color && text ? `\x1b[${PAINT[colour]}m${text}\x1b[0m` : text;
+}
+
+function ciColour(state: string): string {
+  return state === "green" ? "green" : state === "red" ? "red" : "amber";
+}
+
+function isProtected(p: Obj): boolean {
+  return p.protected === true || obj(p.next).reason === "protected";
+}
+
+/** The dev manager's word on the head, short: ✓ approved, ✕ must-fix, or what else the gate reads. */
+function reviews(p: Obj): string {
+  const gate = plain(p.gate);
+  if (gate === "approved") return "✓ approved";
+  if (gate.startsWith("must-fix")) return `✕ ${gate}`;
+  if (gate) return gate;
+  return p.headMarker === "pr-watch" ? "watching" : "—";
+}
+
+/** Who acts next, from the next action. */
+function whoActs(p: Obj): string {
+  const next = obj(p.next);
+  const action = plain(next.action);
+  if (["merge", "review", "rerun-flake"].includes(action)) return "manager";
+  if (action === "held") return plain(next.by) || "manager";
+  if (action === "waiting-for-agent") return plain(p.agent) || "author";
+  if (action === "wait-ci") return "CI";
+  if (action === "owner-merges") return "you";
+  return "—";
+}
+
+function nextText(p: Obj): string {
+  const next = obj(p.next);
+  const text = plain(next.text) || plain(next.action) || "—";
+  return next.error !== undefined ? `${text} (${plain(next.error)})` : text;
+}
+
+function prWidth(s: string): number {
+  return [...s.replace(ANSI, "")].length;
+}
+
+/** Cuts `s` to `n` visible characters (an ellipsis when cut), dropping colour when it has to cut. */
+function prCut(s: string, n: number): string {
+  if (prWidth(s) <= n) return s;
+  const chars = [...s.replace(ANSI, "")];
+  return n <= 0 ? "" : `${chars.slice(0, n - 1).join("")}…`;
+}
+
+function prPad(s: string, n: number): string {
+  const c = prCut(s, n);
+  return c + " ".repeat(Math.max(n - prWidth(c), 0));
+}
+
+/** `left` and `right` on one line of `cols`, the right one dropped when both don't fit. */
+function spread(left: string, right: string, cols: number): string {
+  const gap = cols - prWidth(left) - prWidth(right);
+  return gap >= 2 ? left + " ".repeat(gap) + right : prCut(left, cols);
+}
+
+interface Column {
+  head: string;
+  size: number;
+  cell: (p: Obj, color: boolean) => string;
+}
+
+const BY: Column = { head: "by", size: 10, cell: (p) => plain(p.agent) || "—" };
+const CI: Column = { head: "CI", size: 8, cell: (p, color) => {
+  const state = plain(obj(p.ci).state) || "—";
+  return prPaint(state, ciColour(state), color);
+} };
+const REVIEWS: Column = { head: "reviews", size: 12, cell: (p) => reviews(p) };
+const WHO: Column = { head: "who acts", size: 10, cell: (p) => whoActs(p) };
+const NEXT: Column = { head: "next", size: 26, cell: (p) => nextText(p) };
+
+/** The columns after the title that fit in `cols`: the board's, dropping reviews, by, next and who acts in turn. */
+function columns(cols: number): Column[] {
+  const all = [BY, CI, REVIEWS, WHO, NEXT];
+  for (const drop of [REVIEWS, BY, NEXT, WHO]) {
+    if (2 + 6 + 16 + all.reduce((n, c) => n + c.size, 0) <= cols) break;
+    all.splice(all.indexOf(drop), 1);
+  }
+  return all;
+}
+
+function tableRow(cells: string[], sizes: number[]): string {
+  return cells.map((c, i) => prPad(c, sizes[i] as number)).join("");
+}
+
+function prTable(pulls: Obj[], selected: number, cols: number, color: boolean): string[] {
+  const rest = columns(cols);
+  const titleSize = Math.max(cols - 2 - 6 - rest.reduce((n, c) => n + c.size, 0), 8);
+  const sizes = [6, titleSize, ...rest.map((c) => c.size)];
+  const head = "  " + tableRow(["PR", "title", ...rest.map((c) => c.head)], sizes);
+  const rows = pulls.map((p, i) => {
+    const prot = isProtected(p) ? " · protected" : "";
+    const room = titleSize - 1; // a space before the next column
+    const title = prCut(plain(p.title), Math.max(room - prot.length, 1)) + prPaint(prot, "amber", color);
+    const line = (i === selected ? "› " : "  ") + tableRow([`#${plain(p.number)}`, title, ...rest.map((c) => c.cell(p, color))], sizes);
+    return color && i === selected ? `\x1b[1m${line}\x1b[0m` : line;
+  });
+  return [prPaint(head, "dim", color), ...rows];
+}
+
+function short(sha: unknown): string {
+  return plain(sha).slice(0, 7);
+}
+
+function age(minutes: unknown): string {
+  const m = typeof minutes === "number" ? minutes : null;
+  if (m === null) return "age unknown";
+  return m < 120 ? `${Math.round(m)} min old` : m < 2880 ? `${Math.round(m / 60)} h old` : `${Math.round(m / 1440)} days old`;
+}
+
+/** The selected PR's detail, as on the board's card. */
+export function prDetail(p: Obj, questions: Obj[], cols: number, color: boolean): string[] {
+  const head = obj(p.head);
+  const ci = obj(p.ci);
+  const ok = (s: string) => prPaint(s, "green", color);
+  const bad = (s: string) => prPaint(s, "red", color);
+  const n = plain(p.number);
+  const who = [plain(p.branch), plain(p.agent)].filter(Boolean).join(" · ");
+  const labels = Array.isArray(p.labels) ? p.labels.map(plain).filter(Boolean) : [];
+  const facts = [`head ${short(head.sha) || "unknown"}`, age(head.ageMinutes), ...(p.draft ? ["draft"] : []),
+    ...(labels.length ? [`labels ${labels.join(", ")}`] : [])];
+
+  const word = reviews(p);
+  const marked = word.startsWith("✓") ? ok(word) : word.startsWith("✕") ? bad(word) : word;
+  let manager = `dev manager ${word === "—" ? "no marker for the head" : marked}`;
+  const marks = list(p.markers);
+  const last = marks[marks.length - 1];
+  if (!p.headMarker && last) manager += ` (older: ${plain(last.kind).replace(/^factory-/, "")} ${short(last.sha) || "no commit"})`;
+  const claim = obj(p.claim);
+  if (plain(claim.manager)) manager += `   ${plain(claim.manager)} holds the review until ${plain(claim.until)}`;
+
+  const state = plain(ci.state) || "unknown";
+  const notGreen = list(ci.notGreen);
+  const jobs = notGreen.map((j) => `${plain(j.name)} ${plain(j.state) === "red" ? bad("✕") : prPaint(plain(j.state), "amber", color)}`);
+  const others = Math.max(Number(ci.jobs ?? 0) - notGreen.length, 0); // jobs, not runs: re-runs and skipped don't count
+  if (others) jobs.push(`${others} other check${others === 1 ? "" : "s"} ${ok("✓")}`);
+  const ciLine = `CI ${prPaint(state, ciColour(state), color)}${jobs.length ? `   ${jobs.join("   ")}` : ""}`;
+
+  const open = questions.filter((q) => q.kind === "pr" && plain(q.number) === n).length;
+  const prot = isProtected(p) ? prPaint("yes, a person merges it", "amber", color)
+    : p.protected === false ? "none" : "checked once it could merge";
+  const lines = [
+    spread(`#${n} · ${plain(p.title)}`, who, cols),
+    facts.join(" · "),
+    manager,
+    ciLine,
+    `questions ${open ? prPaint(`${open} open`, "amber", color) : "none open"}   protected paths ${prot}`,
+    `next ${nextText(p)}   who acts ${whoActs(p)}`,
+  ];
+  if (plain(p.url)) lines.push(prPaint(plain(p.url), "dim", color));
+  return lines.map((l) => prCut(l, cols));
+}
+
+const PR_KEYS = "j k move · r read again · q close";
+
+/** One screen of the Pull requests view, `rows` lines at most, each at most `cols` wide. */
+export function prsFrame(data: Obj | null, selected: number, cols: number, rows: number, color: boolean, repo: string): string[] {
+  const at0 = data?.generatedAt;
+  const when = typeof at0 === "string" ? Math.max(Date.now() - Date.parse(at0), 0) / 1000 : null;
+  const ago = when === null || Number.isNaN(when) ? "" : when < 120 ? ` · ${Math.floor(when)} s ago` : ` · ${Math.floor(when / 60)} min ago`;
+  const heading = spread(`factory  ${repo} · Pull requests`, `factory prs · CI judged by the manager's rule${ago}`, cols);
+  const pulls = data?.pulls;
+  let body: string[];
+  if (data === null) {
+    body = ["Can't read the pull requests: `factory prs --json` printed no data.",
+      "Run `factory prs` to see the whole error; if it is about GitHub, `gh auth status`."];
+  } else if (!Array.isArray(pulls)) {
+    body = [`Can't read the pull requests from GitHub (${plain(obj(pulls).error).slice(0, 200)}).`,
+      "Run `gh auth status` (and `gh auth login` if it says so), then press r."];
+  } else if (!pulls.length) {
+    body = ["No open pull requests."];
+  } else {
+    const all = pulls.map(obj);
+    const at = Math.min(Math.max(selected, 0), all.length - 1);
+    const card = prDetail(all[at] as Obj, list(data.questions), cols, color);
+    const fixed = 3; // the top line, a blank line before the card, the keys
+    const want = Math.min(all.length, 3) + 1; // at least a few rows and their heads
+    const cardRoom = Math.max(Math.min(card.length, rows - fixed - want), 0);
+    const [head, ...rowLines] = prTable(all, at, cols, color);
+    const room = Math.max(rows - fixed - cardRoom - 1, 1);
+    const start = Math.min(Math.max(at - room + 1, 0), Math.max(rowLines.length - room, 0));
+    body = [head as string, ...rowLines.slice(start, start + room)];
+    const fill = Math.max(rows - fixed - cardRoom - body.length, 0);
+    body.push(...Array<string>(fill).fill(""), "", ...card.slice(0, cardRoom));
+  }
+  const out = [heading, ...body.map((l) => prCut(l, cols))];
+  const keys = prPaint(prCut(PR_KEYS, cols), "dim", color);
+  return [...out.slice(0, Math.max(rows - 1, 0)), keys].slice(-Math.max(rows, 1));
+}
+
+function openPulls(data: Obj | null): Obj[] {
+  return list(data?.pulls);
+}
+
+/** The index of PR `n`, refused when it is not open; 0 when no number is given. */
+function selectedOf(data: Obj | null, n: number | null): number {
+  if (n === null) return 0;
+  const at = openPulls(data).findIndex((p) => Number(p.number) === n);
+  if (at < 0 && Array.isArray(data?.pulls)) {
+    refuse("cockpit_no_pr", `#${n} is not an open pull request.`,
+      "Run `factory cockpit --prs` to see the open ones, or `factory prs` for the list.", 2);
+  }
+  return Math.max(at, 0);
+}
+
+async function prsLoop(n: number | null): Promise<number> {
+  const color = !process.env.NO_COLOR;
+  const repo = basename(top());
+  let data: Obj | null = null;
+  let selected = 0;
+  const draw = (note = "") => {
+    const lines = note ? [note] : prsFrame(data, selected, process.stdout.columns || 100, process.stdout.rows || 30, color, repo);
+    process.stdout.write("\x1b[H\x1b[2J" + lines.join("\r\n"));
+  };
+  process.stdin.setRawMode(true);
+  process.stdout.write("\x1b[?25l");
+  draw("Reading the pull requests…");
+  data = readPrs(false);
+  try {
+    selected = selectedOf(data, n);
+  } catch (e) {
+    process.stdin.setRawMode(false); // the refusal prints on a normal terminal
+    process.stdout.write("\x1b[?25h\r\n");
+    throw e;
+  }
+  process.stdout.on("resize", () => draw());
+  try {
+    draw();
+    // No Esc to close: over a slow ssh link an arrow key can come in two pieces, and its first is a lone Esc.
+    for await (const chunk of process.stdin) {
+      const key = String(chunk);
+      const count = openPulls(data).length;
+      if (key === "q" || key === "\x03") break;
+      if (key === "j" || key === "\x1b[B") selected = Math.min(selected + 1, Math.max(count - 1, 0));
+      else if (key === "k" || key === "\x1b[A") selected = Math.max(selected - 1, 0);
+      else if (key === "r") {
+        draw("Reading the pull requests from GitHub…");
+        data = readPrs(true);
+        selected = Math.min(selected, Math.max(openPulls(data).length - 1, 0));
+      }
+      draw();
+    }
+  } finally {
+    process.stdin.setRawMode(false); // the terminal is given back however the view ends
+    process.stdout.write("\x1b[?25h\x1b[H\x1b[2J");
+  }
+  return 0;
+}
+
+/** `factory cockpit --prs [<n>]`. */
+export function prsView(args: string[]): Promise<number> | number {
+  const word = args[0];
+  if (args.length > 1 || (word !== undefined && !/^#?\d+$/.test(word))) {
+    refuse("cockpit_usage", "factory cockpit --prs takes no argument, or the number of an open pull request.",
+      "Run `factory cockpit --prs` for every open PR, or `factory cockpit --prs 12` to open #12's detail.", 2);
+  }
+  const n = word === undefined ? null : Number(word.replace("#", ""));
+  if (process.stdin.isTTY && process.stdout.isTTY) return prsLoop(n);
+  const data = readPrs(false);
+  const selected = selectedOf(data, n);
+  const cols = Number(process.env.COLUMNS) || 100;
+  const rows = Number(process.env.LINES) || 30;
+  console.log(prsFrame(data, selected, cols, rows, false, basename(top())).join("\n"));
+  return 0;
+}
+
+// --- the CI view (#339, PRD US-13) -----------------------------------------------------------------------------------
+//
+// `factory cockpit --ci`, drawn after its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/VCi.dc.html). Three cards (where
+// jobs run, the heavy runners on this machine, the leftovers), the runners, the queue and recent runs, and the commands
+// that act on them. Its data is the `ci` part of the cockpit's cache (`factory ci status --json`, #304), so it makes no
+// GitHub call; the heavy runner count is this machine's setting (ci_names.ts). Read-only: it names the commands, the
+// owner runs them. A plain terminal: it fits COLUMNS (else the terminal's width, else 80), stacks the cards under 96
+// columns, and the glyphs and words carry every state, so NO_COLOR (or TERM=dumb) only drops the colours.
+
+function listOrNull(v: unknown): Obj[] | null {
+  return Array.isArray(v) ? v.map(obj) : null;
+}
+
+function num(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+/** The board's colours, as 256-colour codes. */
+const STYLE = { bold: "1", dim: "38;5;247", amber: "38;5;215", blue: "38;5;75", green: "38;5;71", red: "38;5;210" } as const;
+type Style = keyof typeof STYLE | "";
+type Seg = [string, Style];
+
+let COLOR = false;
+
+function paint(text: string, style: Style): string {
+  return COLOR && style && text ? `\x1b[${STYLE[style]}m${text}\x1b[0m` : text;
+}
+
+function len(s: string): number {
+  return [...s].length;
+}
+
+function cut(s: string, w: number): string {
+  const cs = [...s];
+  return cs.length <= w ? s : `${cs.slice(0, Math.max(w - 1, 0)).join("")}…`;
+}
+
+function pad(s: string, w: number): string {
+  const t = cut(s, w);
+  return t + " ".repeat(Math.max(w - len(t), 0));
+}
+
+/** One line of segments, cut to `w` visible characters, coloured after cutting. */
+function line(segs: Seg[], w: number): string {
+  let left = w;
+  let out = "";
+  for (const [text, style] of segs) {
+    if (left <= 0) break;
+    const t = len(text) > left ? cut(text, left) : text;
+    out += paint(t, style);
+    left -= len(t);
+  }
+  return out;
+}
+
+/** Words (or the parts between `sep`) wrapped to `w` columns; one longer than that is cut. */
+function wrap(text: string, w: number, sep = " "): string[] {
+  const out: string[] = [];
+  let cur = "";
+  for (const word of text.split(sep).filter(Boolean)) {
+    if (cur && len(cur) + len(sep) + len(word) > w) {
+      out.push(cur);
+      cur = "";
+    }
+    cur = cur ? `${cur}${sep}${word}` : cut(word, w);
+  }
+  if (cur) out.push(cur);
+  return out.length ? out : [""];
+}
+
+function width(): number {
+  const given = Number(process.env.COLUMNS) || process.stdout.columns;
+  if (given) return Math.max(given, 20);
+  if (process.stdin.isTTY) {
+    // In the cockpit's popup stdout is less's pipe, but stdin is the popup's terminal.
+    const p = Bun.spawnSync(["stty", "size"], { stdin: "inherit", stdout: "pipe", stderr: "ignore" });
+    const cols = Number(p.stdout.toString().trim().split(/\s+/)[1]);
+    if (cols) return Math.max(cols, 20);
+  }
+  return 80;
+}
+
+function ago(minutes: number): string {
+  const m = Math.max(Math.floor(minutes), 0);
+  return m < 120 ? `${m} min` : m < 2880 ? `${Math.floor(m / 60)} h` : `${Math.floor(m / 1440)} d`;
+}
+
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+interface Card { title: string; lines: Array<[string, Style]>; warn: boolean }
+
+function host(): string {
+  return plain(hostname().split(".")[0]) || "this machine";
+}
+
+function whereJobsRun(ci: Obj): Card {
+  const mode = plain(ci.mode);
+  const light = obj(ci.light);
+  const lane = plain(light.label) ? ` · light lane ${plain(light.label)}` : "";
+  if (mode === "local") {
+    return { title: "WHERE JOBS RUN", warn: false, lines: [["local · self-hosted", "bold"],
+      [`CI_RUNS_ON ${plain(ci.label)}${lane}`, "dim"], ["switch to GitHub's runners:", "dim"], ["factory ci use github", "dim"]] };
+  }
+  if (mode === "github") {
+    return { title: "WHERE JOBS RUN", warn: false, lines: [["GitHub's runners", "bold"], ["CI_RUNS_ON is not set", "dim"],
+      ["switch to this machine's runners:", "dim"], ["factory ci use local", "dim"]] };
+  }
+  return { title: "WHERE JOBS RUN", warn: true, lines: [["unknown", "bold"],
+    ["gh can't read CI_RUNS_ON; it needs admin on the repository", "dim"]] };
+}
+
+function heavyRunners(ci: Obj): Card {
+  const lines: Array<[string, Style]> = [];
+  try {
+    const { raw, source } = runnerSetting(ciConfig());
+    lines.push([`${plain(raw)} wanted · from ${sourceText(source)}`, "bold"]);
+  } catch {
+    lines.push([".claude/factory.json can't be read", "red"]);
+  }
+  const here = (listOrNull(ci.instances) ?? []).filter((i) => plain(i.id) !== "light");
+  const installed = here.filter((i) => plain(i.state) !== "not_running");
+  const down = here.filter((i) => ["loop_down", "not_loaded"].includes(plain(i.state))).length;
+  lines.push([installed.length ? `${installed.length} installed here${down ? `, ${down} loop down` : ""}` : "none installed here",
+    down ? "amber" : "dim"]);
+  lines.push(["change, then reinstall:", "dim"], ["factory ci runners N", "dim"], ["factory ci install", "dim"]);
+  return { title: `HEAVY RUNNERS ON ${host().toUpperCase()}`, warn: down > 0, lines };
+}
+
+function leftovers(ci: Obj): Card {
+  const all = listOrNull(ci.runners);
+  if (all === null) {
+    return { title: "LEFTOVERS", warn: false, lines: [["the runners can't be read", "dim"], ["factory ci clean lists them", "dim"]] };
+  }
+  const offline = [...all, ...(listOrNull(obj(ci.light).runners) ?? [])].filter((r) => plain(r.status) === "offline").length;
+  return { title: "LEFTOVERS", warn: offline > 0, lines: [[offline ? plural(offline, "offline runner") : "no offline runner", "bold"],
+    ["list, then clean on yes:", "dim"], ["factory ci clean", "dim"], ["runner files up to date?", "dim"], ["factory ci stale", "dim"]] };
+}
+
+/** The cards side by side (one row of boxes), or stacked when the terminal is narrow. */
+function drawCards(cards: Card[], w: number): string[] {
+  const side = w >= 96;
+  const gap = 2;
+  const cw = side ? Math.floor((w - gap * (cards.length - 1)) / cards.length) : w;
+  const inner = cw - 4;
+  const boxes = cards.map((c) => {
+    const body: Array<[string, Style]> = [[c.title, "dim"]];
+    for (const [text, style] of c.lines) for (const l of wrap(text, inner)) body.push([l, style]);
+    return { c, body };
+  });
+  const tall = Math.max(...boxes.map((b) => b.body.length));
+  const drawn = boxes.map(({ c, body }) => {
+    const edge: Style = c.warn ? "amber" : "dim";
+    const rows = [paint(`┌${"─".repeat(cw - 2)}┐`, edge)];
+    for (let i = 0; i < (side ? tall : body.length); i++) {
+      const [text, style] = body[i] ?? ["", ""];
+      rows.push(paint("│", edge) + " " + paint(pad(text, inner), style) + " " + paint("│", edge));
+    }
+    rows.push(paint(`└${"─".repeat(cw - 2)}┘`, edge));
+    return rows;
+  });
+  if (!side) return drawn.flat();
+  return (drawn[0] ?? []).map((_, i) => drawn.map((d) => d[i] ?? "").join(" ".repeat(gap)));
+}
+
+const GLYPH: Record<string, [string, Style]> = { working: ["●", "blue"], idle: ["○", "dim"], down: ["✕", "red"] };
+
+function drawRunners(ci: Obj, w: number): string[] {
+  const heavy = listOrNull(ci.runners);
+  if (heavy === null) return [line([["The runners can't be read: see below.", "dim"]], w)];
+  const rows = [...heavy.map((r) => ({ r, lane: "heavy" })), ...(listOrNull(obj(ci.light).runners) ?? []).map((r) => ({ r, lane: "light" }))];
+  if (!rows.length) {
+    const text = plain(ci.mode) === "local"
+      ? `No runner has the label ${plain(ci.label)}: factory ci install registers this machine's.`
+      : "No self-hosted runner: CI runs on GitHub's runners.";
+    return wrap(text, w).map((l) => line([[l, "dim"]], w));
+  }
+  const nameW = Math.min(Math.max(...rows.map(({ r }) => len(plain(r.name)))), 32);
+  const out: string[] = [];
+  for (const { r, lane } of rows) {
+    const st = plain(r.status) !== "online" ? "down" : r.busy ? "working" : "idle";
+    const [g, gs] = GLYPH[st] as [string, Style];
+    const job = st === "down" ? "offline" : st === "working" ? "running a job" : "waiting for a job";
+    if (w >= 60) {
+      out.push(line([[`${g} `, gs], [`${pad(plain(r.name), nameW)}  `, ""], [`${pad(lane, 6)}  `, "dim"], [job, "dim"]], w));
+    } else {
+      out.push(line([[`${g} `, gs], [plain(r.name), ""]], w), line([[`  ${lane} · ${job}`, "dim"]], w));
+    }
+  }
+  return out;
+}
+
+const ACTIVE = ["queued", "in_progress", "waiting", "pending", "requested"];
+const RUN_STYLE: Record<string, Style> = { queued: "amber", waiting: "amber", pending: "amber", requested: "amber",
+  running: "blue", success: "green", skipped: "dim", neutral: "dim" };
+
+function drawRuns(ci: Obj, w: number): string[] {
+  const runs = listOrNull(ci.runs);
+  if (runs === null) return [line([["The runs can't be read: see below.", "dim"]], w)];
+  if (!runs.length) return [line([["No runs on main or an open pull request.", "dim"]], w)];
+  const active = runs.filter((r) => ACTIVE.includes(plain(r.state))).sort((a, b) => num(b.minutesAgo) - num(a.minutesAgo));
+  const done = runs.filter((r) => !ACTIVE.includes(plain(r.state))).sort((a, b) => num(a.minutesAgo) - num(b.minutesAgo));
+  const out: string[] = [];
+  for (const r of [...active, ...done]) {
+    const state = plain(r.state) === "in_progress" ? "running" : plain(r.state);
+    const style = RUN_STYLE[state] ?? "red";
+    const title = `${plain(r.name) || "CI"} on ${plain(r.branch)}`;
+    const age = ago(num(r.minutesAgo));
+    if (w >= 60) {
+      const titleW = w - 10 - 10 - len(age) - 2;
+      out.push(line([[pad(state, 10), style], [pad(plain(r.ref), 10), "dim"], [pad(title, titleW), ""], [`  ${age}`, "dim"]], w));
+    } else {
+      out.push(line([[pad(state, 10), style], [`${plain(r.ref)}  `, "dim"], [age, "dim"]], w), line([[`  ${title}`, ""]], w));
+    }
+  }
+  const q = obj(ci.queuedLong);
+  if (num(q.count)) {
+    out.push(...wrap(`${plural(num(q.count), "run")} queued over ${num(q.thresholdMinutes)} min (the longest ${num(q.longestMinutes)} min)`, w)
+      .map((l) => line([[l, "amber"]], w)));
+  }
+  if (q.noRunnerOnline === true) {
+    out.push(...wrap(`No runner with the label ${plain(ci.label)} is online, so they wait: factory ci install`, w).map((l) => line([[l, "red"]], w)));
+  }
+  return out;
+}
+
+function drawProblems(problems: Obj[], w: number): string[] {
+  const out: string[] = [];
+  for (const p of problems) {
+    out.push(...wrap(plain(p.message), w).map((l) => line([[l, "red"]], w)));
+    if (plain(p.fix)) out.push(...wrap(`fix: ${plain(p.fix)}`, w).map((l) => line([[l, "dim"]], w)));
+  }
+  return out;
+}
+
+const KEYS = "job log: factory ci log <pr or run> · runner logs: factory ci logs · runners: factory ci runners N · " +
+  "clean: factory ci clean · reinstall: factory ci install · local or GitHub: factory ci use local|github · " +
+  "shared build cache: factory turbo status";
+
+/** The CI view of a snapshot (the cockpit's cache), as lines at most `w` wide. */
+export function renderCi(snap: Obj | null, w: number, nowMs: number): string[] {
+  if (snap === null) return wrap("No snapshot yet: `factory cockpit --json` reads one now.", w);
+  const ci = snap.ci === null || snap.ci === undefined ? null : obj(snap.ci);
+  const repo = plain(ci?.repo);
+  const right = `factory ci status · this machine: ${host()}`;
+  const left: Seg[] = [["factory", "amber"], [`  ${repo ? `${repo} · ` : ""}CI`, "dim"]];
+  const leftW = len("factory") + 2 + len(repo ? `${repo} · CI` : "CI");
+  const out = [w - leftW >= len(right) + 2 ? line([...left, [" ".repeat(w - leftW - len(right)), ""], [right, "dim"]], w) : line(left, w), ""];
+  if (ci === null) {
+    const missing = (listOrNull(snap.missing) ?? []).filter((m) => plain(m.code) === "ci_unreadable");
+    out.push(...drawProblems(missing.length ? missing : [{ message: "The snapshot has no CI part.", fix: "Run `factory ci status`." }], w));
+  } else {
+    out.push(...drawCards([whereJobsRun(ci), heavyRunners(ci), leftovers(ci)], w), "");
+    out.push(line([["Runners", "bold"]], w), ...drawRunners(ci, w), "");
+    out.push(line([["Queue and recent runs", "bold"]], w), ...drawRuns(ci, w));
+    const errors = listOrNull(ci.errors) ?? [];
+    if (errors.length) out.push("", ...drawProblems(errors, w));
+  }
+  const at = Date.parse(plain(snap.generatedAt));
+  const mins = (nowMs - at) / 60_000;
+  const age = Number.isNaN(at) ? "age unknown" : mins < 1 ? "as of now" : `as of ${ago(mins)} ago`;
+  // Wrapped between the commands, so none is split over two lines.
+  out.push("", ...wrap(`${KEYS} · ${age}`, w, " · ").map((l) => line([[l, "dim"]], w)));
+  return out;
+}
+
+export function ciView(): number {
+  COLOR = !process.env.NO_COLOR && !["", "dumb"].includes(process.env.TERM ?? "");
+  console.log(renderCi(readCache(), width(), Date.now()).join("\n"));
   return 0;
 }

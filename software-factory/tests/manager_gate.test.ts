@@ -231,13 +231,23 @@ test("no profile has a Write(path) rule: Claude Code never matches one and warns
   }
 });
 
+const OWNER_WIDE = ["Bash(factory owner*)", "Bash(./factory owner*)", "Bash(*factory_owner*)"];
+
 test("the profile keeps every factory protecting deny of the shared settings except the gh api one", () => {
   const shared = (JSON.parse(readFileSync(join(KIT, ".claude", "factory", "settings.json"), "utf8")) as Profile).permissions;
   expect(shared.deny).toContain("Bash(gh api *)"); // the reason the manager needs its own profile
   const mine = new Set(loadProfile().permissions.deny);
   const left = shared.deny.filter((d) => d !== "Bash(gh api *)" && !mine.has(d) && !d.startsWith("Bash(gh pr ")
-    && !d.startsWith("Bash(git push") && !d.startsWith("Bash(git branch") && !d.includes("manager-claims") && !d.includes("manager_claims"));
+    && !d.startsWith("Bash(git push") && !d.startsWith("Bash(git branch") && !d.includes("manager-claims") && !d.includes("manager_claims")
+    && !OWNER_WIDE.includes(d));
   expect(left).toEqual([]);
+  // a builder may not run `factory owner` at all (#335); the dev manager may merge and label, never answer or release
+  for (const d of OWNER_WIDE) expect(shared.deny, d).toContain(d);
+  for (const sub of ["answer", "release"]) {
+    for (const d of [`Bash(factory owner ${sub}*)`, `Bash(./factory owner ${sub}*)`, `Bash(*factory_owner*${sub}*)`]) {
+      expect(mine.has(d), d).toBe(true);
+    }
+  }
   // a builder may not run the claim commands (#99), but the dev manager is the one who does
   const claims = shared.deny.filter((d) => d.includes("manager-claims") || d.includes("manager_claims"));
   expect(claims.length).toBeGreaterThan(0);
