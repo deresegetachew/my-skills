@@ -2,20 +2,24 @@
 // `factory owner`: what the owner does by hand, as factory commands, so the cockpit and the command line share them
 // (US-6, #302). Each one is a thin wrapper over what exists.
 //
-//   factory owner merge <pr>                 names the protected paths the PR touches, checks it is open, not a draft,
+//   factory owner merge <pr> [--head <sha>]  names the protected paths the PR touches, checks it is open, not a draft,
 //                                            mergeable and green (factory_ci_judge.ts), then merges it (a merge commit) pinned to
-//                                            its head (`gh pr merge --match-head-commit`)
+//                                            its head (`gh pr merge --match-head-commit`). --head: only when the head is still
+//                                            that commit (the one the cockpit showed, #309), else `pr_changed`
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
 //   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`
 //   factory owner release <X.Y.Z>            tags main's commit vX.Y.Z and pushes the tag, when software-factory/VERSION
 //                                            on main says X.Y.Z (the release workflow then publishes it)
+//   factory owner start <role> [name]        starts `factory loop -i` as that role in its own tmux window on this machine,
+//                                            the step `factory loop -i` uses (factory_window.ts), without attaching (#309)
+//   factory owner stop <name>                ends that session's tmux session on this machine; one already ended is said so
 //
 // Who may run them (D12): the owner, in a terminal or the owner's own Claude session (no FACTORY_AGENT or FACTORY_LOOP).
 // The dev manager (FACTORY_ROLE=dev-manager) may merge and label, each first checked by the manager gate
-// (manager_gate.ts) on the exact gh command it runs, and never a pull request that touches protected paths. Answers and
-// releases stay the owner's. Every other factory session (a coding agent, the product owner) is refused before anything
-// is read or written. Errors are one JSON line `{code, message, fix}` on stderr.
+// (manager_gate.ts) on the exact gh command it runs, and never a pull request that touches protected paths. Answers,
+// releases, starting and stopping stay the owner's. Every other factory session (a coding agent, the product owner) is
+// refused before anything is read or written. Errors are one JSON line `{code, message, fix}` on stderr.
 import { join } from "node:path";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { type Config, load, loadFromMain } from "./factory_config.ts";
@@ -23,17 +27,21 @@ import { type Comment, type Issue } from "./factory_issues.ts";
 import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 import { OWNER_ASK, OWNER_QUEUE_TITLE, openOwnerAsks, trustedOf } from "./factory_prs.ts";
 import { TAG_RE } from "./factory_release.ts";
+import { running, sessionName, startLoop } from "./factory_window.ts";
 
 const REPO = "repos/{owner}/{repo}";
 const VERSION_FILE = "software-factory/VERSION";
 const USAGE = `factory owner <command>
 
-  merge <pr>                  name the protected paths the pull request touches, then merge it (a merge commit) when it is open,
-                              not a draft, mergeable and green, pinned to its head commit
+  merge <pr> [--head <sha>]   name the protected paths the pull request touches, then merge it (a merge commit) when it is open,
+                              not a draft, mergeable and green, pinned to its head commit (--head: only if that is still the head)
   label <n> <label> [--remove]
                               add a label that exists on the repository to an issue or pull request (--remove: take it off)
   answer <ask-id> <text>      answer an ask in the owner queue ("Dev manager: needs the owner")
   release <X.Y.Z>             tag main vX.Y.Z and push the tag, when ${VERSION_FILE} on main says X.Y.Z
+  start <role> [name]         start a coding-agent, dev-manager or product-owner session (factory loop -i) in its own tmux
+                              window on this machine, without attaching
+  stop <name>                 end that session's tmux session on this machine (one already ended: nothing to stop)
 
 The owner runs these; the dev manager may merge and label, under the manager gate. Coding agents can't.`;
 
@@ -129,11 +137,15 @@ function protectedPaths(files: string[]): string[] {
   return files.filter((f) => !cfg.alwaysAllowed.includes(f) && cfg.protected.some((rx) => new RegExp(rx).test(f)));
 }
 
-function merge(n: string, me: Who): void {
+function merge(n: string, me: Who, seen: string | null): void {
   const pr = row(api<Row>("GET", `${REPO}/pulls/${n}`, undefined, true));
   if (!Object.keys(pr).length) refuse("no_such_pr", `There is no pull request #${n}.`, "Check the number with `factory prs`.");
   const head = str(row(pr.head).sha);
   console.log(`PR #${n} ${str(pr.title)}`);
+  if (seen !== null && !head.toLowerCase().startsWith(seen.toLowerCase())) {
+    refuse("pr_changed", `#${n} changed since you looked: its head is now ${head.slice(0, 12)}, not ${seen.slice(0, 12)}.`,
+      `Look at it again (r in the cockpit's Pull requests view, or \`factory prs\`), then merge: factory owner merge ${n}`);
+  }
   if (pr.state !== "open" || pr.merged === true) {
     refuse("pr_not_open", `Pull request #${n} is ${pr.merged === true ? "merged" : str(pr.state) || "not open"}.`, "Nothing to merge; `factory prs` lists the open ones.");
   }
@@ -280,7 +292,60 @@ function release(given: string | undefined): void {
   console.log(`Tagged ${tag} at ${sha.slice(0, 12)} (${main}) and pushed it. The release workflow builds and publishes it.`);
 }
 
+// --- start and stop (#309) ------------------------------------------------------------------------------------------
+//
+// This machine's tmux, never the cockpit's own server: TMUX is dropped, so the session is where `factory follow`, `say`
+// and the heartbeat look for it.
+
+const ROLES = ["coding-agent", "dev-manager", "product-owner"];
+
+function agentName(name: string | undefined, example: string): string {
+  if (!name || !/^[A-Za-z0-9_.-]+$/.test(name)) {
+    refuse("bad_name", `Name the session by its agent name, such as taytu (got ${name ? `\`${name}\`` : "nothing"}).`, example);
+  }
+  return name;
+}
+
+function start(role: string | undefined, name: string | undefined): void {
+  if (!role || !ROLES.includes(role)) {
+    refuse("bad_role", `Say which role to start: ${ROLES.join(", ")} (got ${role ? `\`${role}\`` : "nothing"}).`,
+      "factory owner start coding-agent taytu");
+  }
+  delete process.env.TMUX;
+  startLoop(role, name === undefined ? "" : agentName(name, `factory owner start ${role} taytu`), ["-i"]);
+  console.log("`factory follow <name>` shows it, or Enter on it in the cockpit.");
+}
+
+function stop(name: string): void {
+  delete process.env.TMUX;
+  const session = sessionName(name);
+  if (!running(session)) {
+    console.log(`${name} is not running on this machine (no tmux session ${session}); nothing to stop.`);
+    return;
+  }
+  const p = run(["tmux", "kill-session", "-t", `=${session}`]);
+  if (p.code !== 0 && running(session)) {
+    refuse("stop_failed", `tmux could not end ${session}: ${(p.stderr || p.stdout).trim().slice(0, 200)}`,
+      `Run \`tmux ls\` to see it, then \`tmux kill-session -t ${session}\`.`);
+  }
+  console.log(`Stopped ${name} (tmux session ${session}). Its task stays claimed for it: start it again to go on, ` +
+    `or \`factory release ${name}\` to give its claims back.`);
+}
+
 // --- the command ----------------------------------------------------------------------------------------------------
+
+/** `merge <pr> [--head <sha>]`: the number and the head the owner saw, if given. */
+function mergeArgs(rest: string[]): [string, string | null] {
+  const at = rest.indexOf("--head");
+  if (at < 0) return [number(rest[0], "pull request", "factory owner merge 12"), null];
+  const sha = rest[at + 1] ?? "";
+  if (!/^[0-9a-fA-F]{7,40}$/.test(sha)) {
+    refuse("needs_head", `--head needs the commit you saw, 7 to 40 hex characters (got ${sha ? `\`${sha}\`` : "nothing"}).`,
+      "factory owner merge 12 --head 0123abc");
+  }
+  const words = rest.filter((_, i) => i !== at && i !== at + 1);
+  return [number(words[0], "pull request", "factory owner merge 12"), sha];
+}
 
 export function main(argv: string[]): number {
   const [cmd, ...rest] = argv;
@@ -288,12 +353,24 @@ export function main(argv: string[]): number {
     console.log(USAGE);
     return 0;
   }
-  if (!["merge", "label", "answer", "release"].includes(cmd)) {
-    refuse("unknown_command", `factory owner has no command \`${cmd}\`.`, "Use one of: merge, label, answer, release (`factory owner help`).", 2);
+  if (!["merge", "label", "answer", "release", "start", "stop"].includes(cmd)) {
+    refuse("unknown_command", `factory owner has no command \`${cmd}\`.`,
+      "Use one of: merge, label, answer, release, start, stop (`factory owner help`).", 2);
   }
   const me = who();
-  if (cmd === "merge") merge(number(rest[0], "pull request", "factory owner merge 12"), me);
-  else if (cmd === "label") {
+  if (cmd === "merge") {
+    const [n, seen] = mergeArgs(rest);
+    merge(n, me, seen);
+  }
+  else if (cmd === "start" || cmd === "stop") {
+    if (me === "dev-manager") ownerOnly(cmd === "start" ? "Starting a session" : "Stopping a session");
+    if (rest.length > (cmd === "start" ? 2 : 1)) {
+      refuse("bad_args", `factory owner ${cmd} takes ${cmd === "start" ? "a role and a name" : "one name"}, not \`${rest.join(" ")}\`.`,
+        cmd === "start" ? "factory owner start coding-agent taytu" : "factory owner stop taytu", 2);
+    }
+    if (cmd === "start") start(rest[0], rest[1]);
+    else stop(agentName(rest[0], "factory owner stop taytu"));
+  } else if (cmd === "label") {
     const remove = rest.includes("--remove");
     const words = rest.filter((w) => w !== "--remove");
     label(number(words[0], "issue or pull request", "factory owner label 12 factory:ready"), words[1], remove, me);

@@ -42,6 +42,7 @@ manager's name, `--manager dm-1`.
 | `<!-- factory-answer-claim manager=<name> question=<comment id> until=<ISO time> -->` | A manager | The same for a `factory-question` |
 | `<!-- factory-claim-release manager=<name> sha=<head> -->` (or `question=<id>`) | A manager | "I gave this up before the lease ran out" |
 | `<!-- factory-owner-ask id=<slug> -->` | A manager | One ask on the owner-queue issue, "Dev manager: needs the owner" |
+| `<!-- factory-po-reply ask=<slug> -->` (`done` may follow) | The product owner | Its reply to an ask tagged `for=product`: the ask waits for the owner; `done` closes it |
 
 How a review is claimed (`factory manager-claims review <pr>`, or `next` for every free PR and question):
 
@@ -237,7 +238,12 @@ this is the only way to tell the manager's own PRs from the agents'.
 open issues (issues are searched `--since-days` back, default 14). `ownerAsks`: asks in the open issue titled
 `Dev manager: needs the owner` (comments starting `<!-- factory-owner-ask id=<slug> -->`) that no comment answers; an ask
 is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->` (with
-`trustedReviewers` set, only from those logins; the dev manager's gate refuses to post that marker). `agents`:
+`trustedReviewers` set, the owner's replies count only from those logins; the dev manager's gate refuses to post that
+marker). The product owner replies to an ask tagged `for=product` with `<!-- factory-po-reply ask=<slug> -->` (#352): the ask then
+waits for the owner (`state` `owner`, "waiting ... for the owner (the product owner replied)"), and is not the
+product owner's work again until the owner answers after that reply, marked or not (`state` `product`). A plain comment
+answers the newest ask or product owner reply before it. `<!-- factory-po-reply ask=<slug> done -->` closes the ask.
+An ask tagged `for=product` that nobody answered is `state` `open`, "waiting ... for the product owner". `agents`:
 agents that are `silent` or `down`, and `staleTasks`: in-progress tasks quiet for `tasks.staleHours` (issues mode only).
 
 **`--json`**, stable for scripts. A part GitHub could not answer is `{"error": "..."}` in its place.
@@ -261,7 +267,7 @@ agents that are `silent` or `down`, and `staleTasks`: in-progress tasks quiet fo
                "text": "review", "reason": "protected|not-agent-pr", "by": "ana", "jobs": ["e2e"], "error": "..."}
   } ],                                                                 // "reason", "by", "jobs", "error": only when they apply
   "questions": [{"kind": "pr|issue", "number": 13, "title": "...", "url": "...", "ageMinutes": 40}],
-  "ownerAsks": [{"id": "slug", "issue": 60, "url": "...", "ageMinutes": 300}],
+  "ownerAsks": [{"id": "slug", "issue": 60, "url": "...", "ageMinutes": 300, "forProduct": false, "state": "open|owner|product"}],
   "agents": [{"name": "taytu", "status": "silent|down", "minutesAgo": 95}],
   "staleTasks": [{"number": 7, "title": "...", "quietHours": 4.2}],
   "note": "..."                                                        // only outside issues mode

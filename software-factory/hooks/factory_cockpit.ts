@@ -133,9 +133,11 @@ function pullRequests(s: Step, missing: Problem[]): Prs {
   return { pulls, asks };
 }
 
-/** What waits on the owner: unanswered owner-queue asks, and pull requests only a person merges. */
+/** What waits on the owner: owner-queue asks nobody answered or the product owner replied to (not those still the
+ * product owner's, #352), and pull requests only a person merges. */
 function needsYou(prs: Prs): Obj[] {
-  const out: Obj[] = prs.asks.map((a) => ({ kind: "owner-ask", id: a.id, issue: a.issue, url: a.url ?? null, ageMinutes: a.ageMinutes ?? null }));
+  const out: Obj[] = prs.asks.filter((a) => !(a.forProduct === true && a.state !== "owner"))
+    .map((a) => ({ kind: "owner-ask", id: a.id, issue: a.issue, url: a.url ?? null, ageMinutes: a.ageMinutes ?? null, state: a.state ?? "open" }));
   for (const p of prs.pulls ?? []) {
     if (p.next === "owner-merges") out.push({ kind: "owner-merges", number: p.number, title: p.title, url: p.url });
   }
@@ -290,12 +292,12 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci or watch <item>.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --usage or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, `factory cockpit --prs` for the pull requests, or `factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci"];
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--usage"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -343,16 +345,17 @@ export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
   if (flag === "--prs") return (await import("./factory_cockpit_ui.ts")).prsView(rest); // the Pull requests view (#338)
+  if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
   }
-  if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci"].includes(flag)) {
+  if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci", "--usage"].includes(flag)) {
     const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
     if (flag === "--sidebar") return ui.sidebar();
-    if (flag === "--bar") return ui.bar();
     if (flag === "--needs") return ui.needs();
     if (flag === "--ci") return ui.ciView(); // the CI view (#339)
+    if (flag === "--usage") return await ui.usageView(); // the usage view (#341)
     return ui.open();
   }
   if (flag === "--status") return status();

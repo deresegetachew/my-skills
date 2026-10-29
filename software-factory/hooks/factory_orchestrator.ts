@@ -23,6 +23,7 @@
 //
 //   factory_orchestrator.ts cycle [--name N] [--dry-run] [--interactive] [--wait]
 //         exit 0: there was work (started, posted or already running)   exit 3: nothing to do
+//         exit 4: GitHub was rate-limited or unreachable (the loop waits for it, factory_views_cache.ts limit-wait)
 //         --dry-run   read everything and print what it would do; write nothing
 //         --interactive  run the first item in a session you can type into (Remote Control), one item, then return
 //         --wait      wait for the sub-managers it started
@@ -35,7 +36,8 @@ import { comment, type Comment, gh, ghAll, type Issue, taskIssues } from "./fact
 import * as lease from "./factory_lease.ts";
 import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_roles.ts";
 import { ciState, collect, isoformat, issueOf, isOwn, type Item, minutes, type Pull, reviewState } from "./factory_watch.ts";
-import { bunCmd, Exit, parseArgs, run, runMain, which } from "./factory_lib.ts";
+import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./factory_lib.ts";
+import { remember, settled } from "./factory_views_cache.ts";
 import { type Job, running as sessionRunning, sessionName, startWindow, type Started, WindowError, windowName } from "./factory_window.ts";
 
 export const OWNER_TITLE = "Dev manager: needs the owner";
@@ -150,9 +152,13 @@ export function lifecycle(cfg: Config, _name: string, out: Out): number[] {
   if (tasks.source !== "issues") return [];
   const L = taskLabels(cfg);
   const did: number[] = [];
+  // An issue's comments are read again only when the issue changed since (#347); a dry run writes nothing, so it keeps nothing.
+  // Only a note that was found is kept: "no note" is acted on (a note is posted), so it is always read again.
+  const version = (i: Issue): string => (out.dry ? "" : settled(i.updated_at));
   for (const i of taskIssues("open", L.inProgress)) {
     const n = i.number;
-    if (findNote(ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`))) continue;
+    if (remember(cfg, `note-${n}`, version(i), () => findNote(ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`)) !== null,
+      (found) => found)) continue;
     if (out.dry) out(`would open the thread note on issue #${n}`);
     else {
       comment(n, noteBody(`issue-${n}`, "open", `opened ${lease.iso(lease.now())} (label ${L.inProgress})`));
@@ -165,18 +171,22 @@ export function lifecycle(cfg: Config, _name: string, out: Out): number[] {
   for (const i of ghAll<Issue>(`repos/{owner}/{repo}/issues?state=closed&since=${since}`)) {
     if ("pull_request" in i || seen >= 20 || !(i.labels ?? []).some((l) => l.name.startsWith("factory:"))) continue;
     seen += 1;
-    const found = findNote(ghAll<Comment>(`repos/{owner}/{repo}/issues/${i.number}/comments`));
-    if (found && found[2] === "open") {
-      const c = found[0];
-      if (out.dry) out(`would close the thread note on issue #${i.number}`);
-      else {
-        const body = (c.body || "").replace(NOTE_RX, `<!-- factory-manager-note thread=${found[1]} status=closed -->`);
-        gh("PATCH", `repos/{owner}/{repo}/issues/comments/${c.id}`,
-          { body: body + `- closed ${lease.iso(lease.now())}: the issue was closed, so the thread ends.\n` });
-        out(`closed the thread note on issue #${i.number}`);
+    // Kept once its note is closed (or it has none), so a closed issue is not read again until it changes.
+    remember(cfg, `note-closed-${i.number}`, version(i), () => {
+      const found = findNote(ghAll<Comment>(`repos/{owner}/{repo}/issues/${i.number}/comments`));
+      if (found && found[2] === "open") {
+        const c = found[0];
+        if (out.dry) out(`would close the thread note on issue #${i.number}`);
+        else {
+          const body = (c.body || "").replace(NOTE_RX, `<!-- factory-manager-note thread=${found[1]} status=closed -->`);
+          gh("PATCH", `repos/{owner}/{repo}/issues/comments/${c.id}`,
+            { body: body + `- closed ${lease.iso(lease.now())}: the issue was closed, so the thread ends.\n` });
+          out(`closed the thread note on issue #${i.number}`);
+        }
+        did.push(i.number);
       }
-      did.push(i.number);
-    }
+      return true;
+    });
   }
   return did;
 }
@@ -559,10 +569,10 @@ export async function main(argv: string[]): Promise<number> {
   try {
     if (cmd === "cycle") return await cycle(cfg, name, Boolean(a["dry-run"]), Boolean(a.interactive), Boolean(a.wait));
     return runSub(cfg, name, a.item as string, Boolean(a.interactive));
-  } catch (e) { // a gh call that failed: one line, and the loop counts it as a failed cycle
+  } catch (e) { // a gh call that failed: one line; the loop counts it as a failed cycle, or waits when GitHub was busy (#347)
     if (e instanceof Exit && e.text !== null) {
       process.stderr.write(`[${name}] ${e.text}\n`);
-      return 1;
+      return e.exitCode === GITHUB_BUSY ? GITHUB_BUSY : 1;
     }
     throw e;
   }

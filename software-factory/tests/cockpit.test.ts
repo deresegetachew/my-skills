@@ -207,6 +207,25 @@ test("an answered owner ask does not need you", () => {
   expect((j.needsYou as Row[]).filter((x) => x.kind === "owner-ask")).toEqual([]);
 }, T);
 
+test("only asks waiting on the owner need you, and --needs says the product owner replied (#352)", () => {
+  const s = scenario();
+  const c = (body: string, at: string): Row => ({ body, user: { login: "dm" }, created_at: at, html_url: "https://github.com/o/r/issues/77#cx" });
+  s["issues/77/comments"] = [
+    c("<!-- factory-owner-ask id=ship-it -->\nThis needs your yes: ship it", "2020-01-01T00:00:00Z"),
+    c("<!-- factory-owner-ask id=waits for=product -->\nThis needs your yes: a", "2020-01-01T01:00:00Z"),
+    c("<!-- factory-po-reply ask=waits -->\nmy reply", "2020-01-01T02:00:00Z"),
+    c("<!-- factory-owner-ask id=withpo for=product -->\nThis needs your yes: b", "2020-01-01T03:00:00Z"),
+  ];
+  const p = setup(s);
+  const asks = (snapshot(p).needsYou as Row[]).filter((x) => x.kind === "owner-ask");
+  expect(asks.map((x) => x.id).sort()).toEqual(["ship-it", "waits"]);
+  expect(asks.find((x) => x.id === "waits")).toMatchObject({ state: "owner" });
+  const needs = cockpit(p, "--needs");
+  expect(needs.code, needs.out).toBe(0);
+  expect(needs.stdout).toContain("Owner ask waits on #77, the product owner replied: https://github.com/o/r/issues/77#cx");
+  expect(needs.stdout).not.toContain("withpo");
+}, T);
+
 test("a pull request the owner merges needs you and is a pull row", () => {
   const p = setup(scenario());
   const j = snapshot(p);
