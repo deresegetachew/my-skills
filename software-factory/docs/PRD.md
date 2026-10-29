@@ -435,7 +435,7 @@ Then the cockpit, in steps.
   need you"; at the bottom, the keys that work now. `:` opens a fuzzy command bar over the factory commands; `/` inside
   a session stays Claude's. The cockpit has its own prefix, `C-a`, so tmux nested over ssh keeps `C-b`. Views open as
   popups that run the existing commands. Read-only in this step. Without tmux 3.2 or newer it stops with
-  `{code, message, fix}`. *Decided.* (#295)
+  `{code, message, fix}`. *Built* (#308; `C-a C-a` comes back to the list). (#295)
 - **US-11.** As the owner, I act from the cockpit: merge, label, release, answer, start and stop an agent, say. Each
   asks me first when it changes GitHub or the machine. *Decided.* (#295; US-6)
 - **US-12.** As the owner, the cockpit shows the alerts of US-7 in its own window: the badge, the count and the bell.
