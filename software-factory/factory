@@ -242,7 +242,7 @@ Maintain
                          taking releases in a project that has no pin yet. --archive FILE [--sums FILE]: install a release
                          archive from disk (no network; for a rehearsal or an offline machine)
   rollback               back to the release installed before (needs no network)
-  migrate-to-release    a project linked to the my-skills submodule: replace the links the release owns with the
+  migrate-to-release     a project linked to the my-skills submodule: replace the links the release owns with the
                          release's files, keep the others, print the pull-request steps (refuses a dirty tree)
   update [--layout new]  a project still on the my-skills submodule (no pin yet): pull the newest my-skills and relink;
                          then commit it in a PR (links made through kit/ are moved to the factory's own folders)

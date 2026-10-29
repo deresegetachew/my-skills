@@ -408,6 +408,33 @@ test("release tags origin/main's commit with an annotated tag vX.Y.Z and pushes 
   expect(sh(["git", "-C", origin, "rev-parse", "v1.2.3^{commit}"]).stdout.trim()).toBe(head);
 });
 
+const gitIn = (r: Rig, ...args: string[]) => sh(["git", "-C", r.work, ...args], { env: { ...process.env, ...GIT } });
+
+test("release never moves a tag origin already has at another commit", () => {
+  const r = rig({}, VERSION_FILE);
+  gitIn(r, "commit", "-q", "--allow-empty", "-m", "elsewhere");
+  const other = gitIn(r, "rev-parse", "HEAD").stdout.trim();
+  expect(gitIn(r, "push", "-q", "origin", "HEAD:refs/tags/v1.2.3").code).toBe(0);
+  refused(owner(r, OWNER, "release", "1.2.3"), "tag_exists");
+  expect(sh(["git", "-C", originOf(r), "rev-parse", "v1.2.3^{commit}"]).stdout.trim()).toBe(other);
+});
+
+test("release refuses a local tag that names another commit, and pushes nothing", () => {
+  const r = rig({}, VERSION_FILE);
+  gitIn(r, "commit", "-q", "--allow-empty", "-m", "elsewhere");
+  gitIn(r, "tag", "v1.2.3");
+  refused(owner(r, OWNER, "release", "1.2.3"), "local_tag_differs");
+  expect(tags(originOf(r))).toBe("");
+});
+
+test("release whose push fails leaves no local tag behind", () => {
+  const r = rig({}, VERSION_FILE);
+  gitIn(r, "remote", "set-url", "--push", "origin", join(r.d, "no-such-origin.git"));
+  refused(owner(r, OWNER, "release", "1.2.3"), "push_failed");
+  expect(tags(r.work)).toBe("");
+  expect(tags(originOf(r))).toBe("");
+});
+
 test("release accepts vX.Y.Z and, run again, says it is already published", () => {
   const r = rig({}, VERSION_FILE);
   expect(owner(r, OWNER, "release", "v1.2.3").code).toBe(0);
