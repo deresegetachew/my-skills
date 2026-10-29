@@ -37,7 +37,7 @@ function str(v: unknown): string {
 }
 
 /** `str`, without escape sequences or control characters: a PR title or session name can't drive the terminal. */
-function plain(v: unknown): string {
+export function plain(v: unknown): string {
   return str(v)
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "") // OSC: a window title, a link
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "") // CSI: colours, cursor moves, clearing the screen
@@ -59,7 +59,7 @@ export function views(): View[] {
     { key: "1", title: "Needs you", commands: [["cockpit", "--needs"]] },
     { key: "2", title: "Pull requests", commands: [["prs"]] },
     { key: "3", title: "Tasks & PRD", commands: [issues ? ["issues", "list"] : ["next"]] },
-    { key: "4", title: "CI", commands: [["ci", "status"]] },
+    { key: "4", title: "CI", commands: [["cockpit", "--ci"]] }, // drawn after its board (#339)
     { key: "5", title: "Agents & machines", commands: [["agents", "ls"], ["machine", "show"]] },
     { key: "6", title: "Settings", commands: [["settings", "list"]] },
     { key: "7", title: "Health & releases", commands: [["doctor"], ["version"]] },

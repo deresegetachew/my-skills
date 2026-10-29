@@ -289,12 +289,12 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit takes no argument, or --json, --status, --needs or watch <item>.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs, --ci or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, or `factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs"];
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -352,6 +352,7 @@ export async function main(argv: string[]): Promise<number> {
     if (flag === "--needs") return ui.needs();
     return ui.open();
   }
+  if (flag === "--ci") return (await import("./factory_cockpit_ci.ts")).ciView(); // the CI view (#339)
   if (flag === "--status") return status();
   if (flag === "--refresh") return refresh();
   const snap = await snapshot();
