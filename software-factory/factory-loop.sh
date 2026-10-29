@@ -253,14 +253,15 @@ role_sleep() {
 # GitHub's API limit (#347): a pass or a task lookup that exits 4 met the limit or a network error, which is not a
 # failure. github_wait waits for GitHub (until the limit resets, else 1, 2, 4 ... 15 min for the $1th busy pass in a row);
 # idle_minutes is how long an idle wait of $1 minutes should be: twice that while the hour's calls run low
-# (`github.reserve`). A project whose release has no factory_ratelimit.ts waits a minute, or the given time.
+# (`github.reserve`). Both are factory_views_cache.ts commands; where it can't answer, the loop waits a minute, or the
+# given time.
 github_wait() {
-  if [ -f "$hooks/factory_ratelimit.ts" ]; then fh "$hooks/factory_ratelimit" wait --attempt "$1" --name "$agent"
-  else echo "[$agent] GitHub did not answer; trying again in 1 min"; sleep 60; fi
+  [ -f "$hooks/factory_views_cache.ts" ] && fh "$hooks/factory_views_cache" limit-wait --attempt "$1" --name "$agent" && return
+  echo "[$agent] GitHub did not answer; trying again in 1 min"; sleep 60
 }
 idle_minutes() {
   local m
-  [ -f "$hooks/factory_ratelimit.ts" ] && m="$(fh "$hooks/factory_ratelimit" idle "$1")" && [ -n "$m" ] && { echo "$m"; return; }
+  [ -f "$hooks/factory_views_cache.ts" ] && m="$(fh "$hooks/factory_views_cache" limit-idle "$1")" && [ -n "$m" ] && { echo "$m"; return; }
   echo "$1"
 }
 

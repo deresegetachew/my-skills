@@ -25,7 +25,7 @@ export class Exit extends Error {
 }
 
 /** The exit code of a command whose GitHub call met the API limit or the network, not a fault (#347): the loops wait
- * for GitHub (factory_ratelimit.ts) instead of counting a failed pass. */
+ * for GitHub (factory_views_cache.ts limit-wait) instead of counting a failed pass. */
 export const GITHUB_BUSY = 4;
 
 const BUSY = /API rate limit exceeded|secondary rate limit|HTTP 429|TLS handshake timeout|connection reset by peer|i\/o timeout|HTTP 50[234]\b/i;

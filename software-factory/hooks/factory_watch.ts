@@ -35,7 +35,7 @@ import { parseComment, verdicts } from "./factory_messages.ts";
 import { questions } from "./factory_po.ts";
 import { type Pull as WaitPull, precheckItems, waitingTasks } from "./factory_wait.ts";
 import { Exit, isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
-import { answer, remember, sayAge } from "./factory_views_cache.ts";
+import { answer, remember, sayAge, settled } from "./factory_views_cache.ts";
 
 export const WATCH = /<!--\s*pr-watch\s+sha=([0-9a-f]{7,40})/g;
 export const OWNER_LABEL = "factory:needs-owner";
@@ -179,7 +179,7 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
   // A pull request's comments are read again only when the PR changed since the last read (#347).
   const commentsOf = (n: number): Comment[] => {
     if (!cache.has(n)) {
-      cache.set(n, remember(cfg, `comments-${n}`, byPr.get(n)?.updated_at ?? "",
+      cache.set(n, remember(cfg, `comments-${n}`, settled(byPr.get(n)?.updated_at),
         () => ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`)));
     }
     return cache.get(n) as Comment[];

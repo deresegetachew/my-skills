@@ -100,7 +100,7 @@ Look
                          the newest marker per commit, any review claim and the next action; then unanswered questions
                          and owner asks, and agents gone quiet. Read-only, REST only. prs, watch and messages ls answer
                          from one cache while it is fresh (views.cacheSeconds, 45) and say how old it is; --fresh asks
-                         GitHub now (watch --json always does)
+                         GitHub now
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply

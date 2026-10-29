@@ -23,7 +23,7 @@
 //
 //   factory_orchestrator.ts cycle [--name N] [--dry-run] [--interactive] [--wait]
 //         exit 0: there was work (started, posted or already running)   exit 3: nothing to do
-//         exit 4: GitHub was rate-limited or unreachable (the loop waits for it, factory_ratelimit.ts)
+//         exit 4: GitHub was rate-limited or unreachable (the loop waits for it, factory_views_cache.ts limit-wait)
 //         --dry-run   read everything and print what it would do; write nothing
 //         --interactive  run the first item in a session you can type into (Remote Control), one item, then return
 //         --wait      wait for the sub-managers it started
@@ -37,7 +37,7 @@ import * as lease from "./factory_lease.ts";
 import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_roles.ts";
 import { ciState, collect, isoformat, issueOf, isOwn, type Item, minutes, type Pull, reviewState } from "./factory_watch.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./factory_lib.ts";
-import { remember } from "./factory_views_cache.ts";
+import { remember, settled } from "./factory_views_cache.ts";
 import { type Job, running as sessionRunning, sessionName, startWindow, type Started, WindowError, windowName } from "./factory_window.ts";
 
 export const OWNER_TITLE = "Dev manager: needs the owner";
@@ -153,10 +153,12 @@ export function lifecycle(cfg: Config, _name: string, out: Out): number[] {
   const L = taskLabels(cfg);
   const did: number[] = [];
   // An issue's comments are read again only when the issue changed since (#347); a dry run writes nothing, so it keeps nothing.
-  const version = (i: Issue): string => (out.dry ? "" : i.updated_at ?? "");
+  // Only a note that was found is kept: "no note" is acted on (a note is posted), so it is always read again.
+  const version = (i: Issue): string => (out.dry ? "" : settled(i.updated_at));
   for (const i of taskIssues("open", L.inProgress)) {
     const n = i.number;
-    if (remember(cfg, `note-${n}`, version(i), () => findNote(ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`)) !== null)) continue;
+    if (remember(cfg, `note-${n}`, version(i), () => findNote(ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`)) !== null,
+      (found) => found)) continue;
     if (out.dry) out(`would open the thread note on issue #${n}`);
     else {
       comment(n, noteBody(`issue-${n}`, "open", `opened ${lease.iso(lease.now())} (label ${L.inProgress})`));
