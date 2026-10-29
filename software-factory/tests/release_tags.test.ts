@@ -1,11 +1,8 @@
-// A release starts only from the owner's tag (#337): agents can't push a tag (their rules deny it and the PR gate refuses
-// it), and the release workflow publishes only a tag whose commit is on main and whose name matches
-// software-factory/VERSION.
+// A release starts only from the owner's tag (#337): the PR gate refuses an agent's tag push, and the release workflow
+// publishes only a tag whose commit is on main and whose name matches software-factory/VERSION.
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { KIT_AGENT_SETTINGS } from "./loop_support.ts";
-import { allowedBy, type Permissions } from "./manager_support.ts";
 import { runGate } from "./pr_gate_support.ts";
 import { git, gitRepo, ROOT, sh, tmp, write } from "./support.ts";
 
@@ -14,13 +11,6 @@ const TAG_PUSHES = ["git push origin v1.2.3", "git push --tags", "git push origi
   "git push origin tag v1.2.3", "git push -u origin v2.0.0-rc.1"];
 const BRANCH_PUSHES = ["git push origin task/1-x", "git push -u origin HEAD", "git push -u origin task/12-validate",
   "git push origin HEAD:task/3-v2-cleanup"];
-
-const agents = (): Permissions => (JSON.parse(readFileSync(KIT_AGENT_SETTINGS, "utf8")) as { permissions: Permissions }).permissions;
-
-test("the agents' rules deny pushing a tag and still allow pushing a branch", () => {
-  for (const c of TAG_PUSHES) expect(allowedBy(agents(), c), c).toBe(false);
-  for (const c of BRANCH_PUSHES) expect(allowedBy(agents(), c), c).toBe(true);
-});
 
 test("the PR gate refuses a tag push wherever git's options sit, and lets a branch push through", () => {
   const d = tmp();

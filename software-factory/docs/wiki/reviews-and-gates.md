@@ -132,7 +132,9 @@ It also blocks:
   GET passes the gate (the agents' settings still deny `gh api`);
 - a force push: `git push` with `-f`, `--force`, `--force-with-lease`, `--force-if-includes`, `--mirror` or a `+`
   refspec, wherever git's global options (`-C`, `-c`) sit, also inside `bash -c` or `xargs`; and deleting a remote
-  branch (`git push <remote> :<branch>`).
+  branch (`git push <remote> :<branch>`);
+- a tag push: `git push` with `--tags`, `--follow-tags`, a `refs/tags/...` refspec, a version name (`v1.2.3`) or
+  `tag <name>`. A version tag starts the release workflow, and publishing is the owner's (`factory owner release`).
 
 It finds `gh` and `git` in the words as the shell reads them, so quoting (`g\h`, `"g"h`) does not hide them.
 
