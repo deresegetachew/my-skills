@@ -14,7 +14,7 @@
 //   factory alerts check              one look: a bell and a notice per new ask, else `nothing new`
 //   factory alerts watch [--every S]  look every S seconds (default 60, at least 10) in this terminal, until stopped
 //
-// Read only on GitHub. The cockpit shows the same alerts in its own window later (US-12).
+// Read only on GitHub. The cockpit rings the bell for the same asks in its own window (#310, US-12), never a notice.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ghAll } from "./factory_issues.ts";
