@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pull requests</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:#FFD08A}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #0D1117; color: #E6EAF0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; border: 1px solid #2A3340; border-radius: 10px; overflow: hidden;">
+  <div style="height: 34px; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #151B23; border-bottom: 1px solid #2A3340;">
+    <span style="font-weight: 700; color: #F0B35A;">factory</span><span style="color: #9AA4B2;">remanual · Pull requests</span><span style="flex-grow: 1;"></span>
+    <span style="color: #9AA4B2;">factory prs · CI judged by the manager's rule · 1 min ago</span>
+  </div>
+  <div style="flex-grow: 1; display: flex; min-height: 0;">
+    <nav aria-label="Sessions and views" style="width: 270px; flex-shrink: 0; background: #11161D; border-right: 1px solid #2A3340; display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 8px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">SESSIONS</div>
+      <sc-for list="{{sessions}}" as="r" hint-placeholder-count="6"><a href="Main.dc.html" style="display: flex; gap: 10px; padding: 5px 16px 5px 19px;"><span style="{{r.gs}}">{{r.g}}</span><span style="font-weight: 700;">{{r.name}}</span><span style="color: #9AA4B2; font-size: 11px;">{{r.role}}</span></a></sc-for>
+      <div style="padding: 14px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">VIEWS</div>
+      <sc-for list="{{views}}" as="v" hint-placeholder-count="8"><a href="{{v.href}}" style="{{v.style}}"><span style="color: #9AA4B2; width: 12px;">{{v.key}}</span><span>{{v.name}}</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2; font-size: 12px;">{{v.count}}</span></a></sc-for>
+    </nav>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+      <div style="display: flex; gap: 0; padding: 10px 16px; color: #9AA4B2; font-size: 12px; border-bottom: 1px solid #2A3340;">
+        <span style="width: 60px;">PR</span><span style="flex-grow: 1;">title</span><span style="width: 100px;">by</span><span style="width: 90px;">CI</span><span style="width: 120px;">reviews</span><span style="width: 110px;">who acts</span><span style="width: 220px;">next</span>
+      </div>
+      <sc-for list="{{prs}}" as="p" hint-placeholder-count="7">
+        <div style="{{p.style}}">
+          <span style="width: 60px; color: #9AA4B2;">#{{p.n}}</span>
+          <span style="flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-right: 12px;">{{p.title}}<span style="color: #F0B35A;">{{p.prot}}</span></span>
+          <span style="width: 100px;">{{p.by}}</span>
+          <span style="width: 90px; {{p.ciStyle}}">{{p.ci}}</span>
+          <span style="width: 120px; color: #9AA4B2;">{{p.rev}}</span>
+          <span style="width: 110px;">{{p.who}}</span>
+          <span style="width: 220px; color: #9AA4B2;">{{p.next}}</span>
+        </div>
+      </sc-for>
+      <div style="margin: 14px 16px; background: #11161D; border: 1px solid #2A3340; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px;">
+        <div style="display: flex; gap: 12px;"><span style="font-weight: 700;">#435 · 3.3w: Run the agents after reading and save the draft and questions</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2;">task/410-draft-after-read · haile</span></div>
+        <div style="color: #9AA4B2;">head 7c41e09 · 3 commits · budget 183k of 300k</div>
+        <div>reviewer pass <span style="color: #3FB950;">✓ 7c41e09</span>   architecture <span style="color: #3FB950;">✓</span>   security <span style="color: #9AA4B2;">not needed (no auth paths)</span></div>
+        <div>Factory guard <span style="color: #FF7B72;">✕ tests-reviewed</span>   Worker tests 2/3 <span style="color: #FF7B72;">✕</span>   9 other checks <span style="color: #3FB950;">✓</span></div>
+        <div>questions <span style="color: #F0B35A;">2 open</span> (fasil holds the lease, 20 min)   re-review round 2</div>
+        <div style="display: flex; gap: 10px; margin-top: 6px; flex-wrap: wrap;">
+          <span style="border: 1px solid #3A4554; border-radius: 6px; padding: 6px 12px;">d diff in a pane</span>
+          <span style="border: 1px solid #3A4554; border-radius: 6px; padding: 6px 12px;">l add tests-reviewed</span>
+          <span style="border: 1px solid #3A4554; border-radius: 6px; padding: 6px 12px;">c comment</span>
+          <a href="Main.dc.html" style="border: 1px solid #3A4554; border-radius: 6px; padding: 6px 12px;">o open haile</a>
+          <span style="border: 1px solid #3A4554; border-radius: 6px; padding: 6px 12px;">L CI log of the failed job</span>
+          <span style="border: 1px solid #3A4554; border-radius: 6px; padding: 6px 12px;">h hold</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #151B23; border-top: 1px solid #2A3340; color: #9AA4B2; font-size: 12px;">
+    <span><span style="color: #E6EAF0;">j k</span> move</span><span><span style="color: #E6EAF0;">m</span> merge (asks first; protected files listed)</span><span><span style="color: #E6EAF0;">d</span> diff</span><span><span style="color: #E6EAF0;">f</span> filter: mine · agents · protected · red</span><span><span style="color: #E6EAF0;">g</span> GitHub</span><span style="flex-grow: 1;"></span><span><span style="color: #E6EAF0;">:</span> command</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = { working: ['●', '#6CB6FF'], waiting: ['◐', '#F0B35A'], idle: ['○', '#9AA4B2'], down: ['✕', '#FF7B72'] };
+    const sessions = [['fasil', 'manager', 'working'], ['mentewab', 'po', 'idle'], ['haile', '', 'waiting'], ['tewodros', '', 'idle'], ['menelik', 'mac', 'idle'], ['taytu', 'mac', 'down']]
+      .map(([name, role, st]) => ({ name, role, g: S[st][0], gs: 'color: ' + S[st][1] + ';' }));
+    const here = 'VPrs.dc.html';
+    const views = [['i', 'Needs you', '5', 'VInbox.dc.html'], ['p', 'Pull requests', '7', 'VPrs.dc.html'], ['t', 'Tasks & PRD', '0 ready', 'VTasks.dc.html'], ['c', 'CI', '2 queued', 'VCi.dc.html'], ['a', 'Agents & machines', '1 down', 'VAgents.dc.html'], ['s', 'Settings', '', 'VSettings.dc.html'], ['h', 'Health & releases', 'ok', 'VHealth.dc.html'], ['u', 'Usage & lessons', '', 'VUsage.dc.html']]
+      .map(([key, name, count, href]) => ({ key, name, count, href, style: 'display: flex; gap: 10px; padding: 5px 16px; border-left: 3px solid ' + (href === here ? '#F0B35A' : 'transparent') + '; background: ' + (href === here ? '#1C2430' : 'transparent') + ';' }));
+    const ci = { green: 'color: #3FB950;', red: 'color: #FF7B72;', queued: 'color: #F0B35A;' };
+    const rows = [
+      [450, 'Update the factory to v0.2.4', ' · protected', 'you', 'green', 'not needed', 'you', 'merge'],
+      [444, 'CI: run the Bun hooks without bunfig.toml', ' · protected', 'you', 'green', 'not needed', 'fasil', 'queued for review'],
+      [442, 'CI: four heavy runners per machine', ' · protected', 'fasil', 'green', '—', 'you', 'owner ask: close?'],
+      [439, '3.3z: Check 5: a page bottom ends a sentence', '', 'tewodros', 'green', '✓ ✓', 'fasil', 'merge when reviewed'],
+      [438, 'docs: sync business canvas with the PRD', '', 'mentewab', 'queued', '—', 'CI', 'waiting for a runner'],
+      [435, '3.3w: Run the agents after reading', '', 'haile', 'red', '✓ ✓', 'you', 'tests-reviewed, fix shard 2'],
+      [434, 'PRD: bring up to date with decisions', '', 'mentewab', 'green', '—', 'you', 'PRD change: your yes']
+    ];
+    return {
+      sessions, views,
+      prs: rows.map(([n, title, prot, by, c, rev, who, next]) => ({ n, title, prot, by, ci: c, ciStyle: ci[c], rev, who, next,
+        style: 'display: flex; padding: 8px 16px; border-bottom: 1px solid #1C2430; border-left: 3px solid ' + (n === 435 ? '#F0B35A' : 'transparent') + '; background: ' + (n === 435 ? '#1C2430' : 'transparent') + ';' }))
+    };
+  }
+}
+</script>
+</body>
+</html>

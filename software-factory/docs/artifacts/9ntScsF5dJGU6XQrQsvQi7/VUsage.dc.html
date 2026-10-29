@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Usage and lessons</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:#FFD08A}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #0D1117; color: #E6EAF0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; border: 1px solid #2A3340; border-radius: 10px; overflow: hidden;">
+  <div style="height: 34px; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #151B23; border-bottom: 1px solid #2A3340;">
+    <span style="font-weight: 700; color: #F0B35A;">factory</span><span style="color: #9AA4B2;">remanual · Usage, budgets, report and lessons</span><span style="flex-grow: 1;"></span>
+    <span style="color: #9AA4B2;">factory usage (this machine's logs) · factory report (GitHub) · last 7 days</span>
+  </div>
+  <div style="flex-grow: 1; display: flex; min-height: 0;">
+    <nav aria-label="Sessions and views" style="width: 270px; flex-shrink: 0; background: #11161D; border-right: 1px solid #2A3340; display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 8px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">SESSIONS</div>
+      <sc-for list="{{sessions}}" as="r" hint-placeholder-count="6"><a href="Main.dc.html" style="display: flex; gap: 10px; padding: 5px 16px 5px 19px;"><span style="{{r.gs}}">{{r.g}}</span><span style="font-weight: 700;">{{r.name}}</span><span style="color: #9AA4B2; font-size: 11px;">{{r.role}}</span></a></sc-for>
+      <div style="padding: 14px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">VIEWS</div>
+      <sc-for list="{{views}}" as="v" hint-placeholder-count="8"><a href="{{v.href}}" style="{{v.style}}"><span style="color: #9AA4B2; width: 12px;">{{v.key}}</span><span>{{v.name}}</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2; font-size: 12px;">{{v.count}}</span></a></sc-for>
+    </nav>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 14px 18px; gap: 10px;">
+      <div style="display: flex; gap: 10px;"><span style="font-weight: 700;">Tasks against their budget</span><span style="color: #9AA4B2;">fresh input + output, cache reads not counted</span></div>
+      <div style="display: flex; padding: 4px 8px; color: #9AA4B2; font-size: 12px; border-bottom: 1px solid #2A3340;"><span style="width: 70px;">task</span><span style="width: 120px;">agent</span><span style="width: 120px;">budget</span><span style="width: 320px;">used</span><span style="flex-grow: 1;">spent most</span></div>
+      <sc-for list="{{tasks}}" as="t" hint-placeholder-count="4">
+        <div style="display: flex; padding: 6px 8px; align-items: center;">
+          <span style="width: 70px; color: #9AA4B2;">#{{t.n}}</span><span style="width: 120px;">{{t.agent}}</span><span style="width: 120px;">{{t.budget}}</span>
+          <span style="width: 320px; display: flex; gap: 10px; align-items: center;"><span style="width: 180px; height: 8px; background: #1C2430; border-radius: 4px; display: flex;"><span style="{{t.bar}}"></span></span><span style="{{t.pctStyle}}">{{t.pct}}</span></span>
+          <span style="flex-grow: 1; color: #9AA4B2;">{{t.top}}</span>
+        </div>
+      </sc-for>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 8px;">
+        <sc-for list="{{stats}}" as="s" hint-placeholder-count="4">
+          <div style="background: #11161D; border: 1px solid #2A3340; border-radius: 8px; padding: 12px 14px;"><div style="color: #9AA4B2; font-size: 12px;">{{s.label}}</div><div style="font-size: 20px; font-weight: 700;">{{s.value}}</div></div>
+        </sc-for>
+      </div>
+      <span style="flex-grow: 1;"></span>
+      <div style="color: #9AA4B2; font-size: 12px;">Logs are per machine: tasks built on the Mac show here once the Mac is added as a remote.</div>
+    </div>
+    <div style="width: 400px; flex-shrink: 0; border-left: 1px solid #2A3340; display: flex; flex-direction: column; padding: 14px 18px; gap: 8px;">
+      <div style="display: flex;"><span style="font-weight: 700;">Lessons</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2;">[n] of lessonsCap</span></div>
+      <div style="color: #9AA4B2; font-size: 12px;">.claude/factory/lessons.md, read first by builders and reviewers</div>
+      <div style="background: #11161D; border: 1px solid #2A3340; border-radius: 6px; padding: 10px 12px;">[lesson line from lessons.md]</div>
+      <div style="background: #11161D; border: 1px solid #2A3340; border-radius: 6px; padding: 10px 12px;">[lesson line from lessons.md]</div>
+      <div style="margin-top: 8px; font-weight: 700;">Suggested from recent must-fixes</div>
+      <div style="background: #11161D; border: 1px solid #F0B35A; border-radius: 6px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px;">
+        <div>A test changed after implementation needs a reason in the PR body.</div>
+        <div style="color: #9AA4B2; font-size: 12px;">from #435 · a add (dev manager) · x skip</div>
+      </div>
+    </div>
+  </div>
+  <div style="height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #151B23; border-top: 1px solid #2A3340; color: #9AA4B2; font-size: 12px;">
+    <span><span style="color: #E6EAF0;">b</span> by task · role · agent · model</span><span><span style="color: #E6EAF0;">[ ]</span> period</span><span><span style="color: #E6EAF0;">⏎</span> the task's sessions</span><span><span style="color: #E6EAF0;">a</span> add lesson</span><span><span style="color: #E6EAF0;">P</span> prune</span><span style="flex-grow: 1;"></span><span><span style="color: #E6EAF0;">:</span> command</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = { working: ['●', '#6CB6FF'], waiting: ['◐', '#F0B35A'], idle: ['○', '#9AA4B2'], down: ['✕', '#FF7B72'] };
+    const sessions = [['fasil', 'manager', 'working'], ['mentewab', 'po', 'idle'], ['haile', '', 'waiting'], ['tewodros', '', 'idle'], ['menelik', 'mac', 'idle'], ['taytu', 'mac', 'down']]
+      .map(([name, role, st]) => ({ name, role, g: S[st][0], gs: 'color: ' + S[st][1] + ';' }));
+    const here = 'VUsage.dc.html';
+    const views = [['i', 'Needs you', '5', 'VInbox.dc.html'], ['p', 'Pull requests', '7', 'VPrs.dc.html'], ['t', 'Tasks & PRD', '0 ready', 'VTasks.dc.html'], ['c', 'CI', '2 queued', 'VCi.dc.html'], ['a', 'Agents & machines', '1 down', 'VAgents.dc.html'], ['s', 'Settings', '', 'VSettings.dc.html'], ['h', 'Health & releases', 'ok', 'VHealth.dc.html'], ['u', 'Usage & lessons', '', 'VUsage.dc.html']]
+      .map(([key, name, count, href]) => ({ key, name, count, href, style: 'display: flex; gap: 10px; padding: 5px 16px; border-left: 3px solid ' + (href === here ? '#F0B35A' : 'transparent') + '; background: ' + (href === here ? '#1C2430' : 'transparent') + ';' }));
+    const row = (n, agent, budget, pct, top) => {
+      const c = pct >= 100 ? '#FF7B72' : pct >= 80 ? '#F0B35A' : '#6CB6FF';
+      return { n, agent, budget, top, pct: pct ? pct + '%' : '—', pctStyle: 'color: ' + c + ';',
+        bar: 'width: ' + Math.min(pct, 100) + '%; height: 8px; border-radius: 4px; background: ' + c + ';' };
+    };
+    return { sessions, views,
+      tasks: [row(410, 'haile', '300k', 61, 'test-writer'), row(390, 'tewodros', 'none', 0, '[subagent]'), row('[n]', '[agent]', '[budget]', 84, '[subagent]'), row('[n]', '[agent]', '[budget]', 112, '[subagent]')],
+      stats: [{ label: 'merged tasks', value: '[n]' }, { label: 'budget vs used, median', value: '[x.xx]' }, { label: 'rework rounds per task', value: '[n]' }, { label: 'CI runs per task', value: '[n]' }] };
+  }
+}
+</script>
+</body>
+</html>

@@ -68,5 +68,9 @@
       ]
     }
   },
+  "artifacts": {
+    "dir": "software-factory/docs/artifacts",
+    "manifest": "software-factory/docs/artifacts.json"
+  },
   "waitMinutes": 5
 }
