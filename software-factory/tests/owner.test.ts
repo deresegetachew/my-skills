@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { GIT, project, type Row } from "./roles_support.ts";
-import { type Proc, SF, sh, WIKI, writeExe } from "./support.ts";
+import { KIT, type Proc, SF, sh, WIKI, writeExe } from "./support.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -469,5 +469,27 @@ test("factory help and the wiki's commands page list the owner commands", () => 
   for (const sub of ["merge", "label", "answer", "release"]) {
     expect(help.out, help.out).toContain(`owner ${sub}`);
     expect(page).toContain(`factory owner ${sub}`);
+  }
+});
+
+// An agent that clears FACTORY_AGENT and FACTORY_LOOP looks like the owner to `who()`, so the shipped settings deny the
+// command itself (#335, the owner's yes on #293): coding agents and the product owner never reach it, the dev manager
+// reaches only merge and label.
+test("the shipped settings deny factory owner to agents, and answer and release to the dev manager", () => {
+  const deny = (role: string): string[] =>
+    (JSON.parse(readFileSync(join(KIT, ".claude", role, "settings.json"), "utf8")).permissions.deny) as string[];
+  for (const role of ["factory", "product-owner"]) {
+    for (const rule of ["Bash(factory owner*)", "Bash(./factory owner*)", "Bash(*factory_owner*)"]) {
+      expect(deny(role), `${role} ${rule}`).toContain(rule);
+    }
+  }
+  const manager = deny("manager");
+  for (const sub of ["answer", "release"]) {
+    for (const rule of [`Bash(factory owner ${sub}*)`, `Bash(./factory owner ${sub}*)`, `Bash(*factory_owner*${sub}*)`]) {
+      expect(manager, rule).toContain(rule);
+    }
+  }
+  for (const sub of ["merge", "label"]) {
+    expect(manager.some((r) => r.startsWith("Bash(factory owner*") || r.startsWith(`Bash(factory owner ${sub}`)), sub).toBe(false);
   }
 });
