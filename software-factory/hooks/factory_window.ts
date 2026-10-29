@@ -116,17 +116,9 @@ function carried(): Record<string, string> {
   return out;
 }
 
-/** `factory loop -i` on a terminal: start the loop in its window, then show it here. */
-function loop(argv: string[]): number {
-  const cut = argv.indexOf("--");
-  const own = cut < 0 ? argv : argv.slice(0, cut);
-  const rest = cut < 0 ? [] : argv.slice(cut + 1);
-  const value = (flag: string) => {
-    const i = own.indexOf(flag);
-    return i >= 0 ? own[i + 1] ?? "" : "";
-  };
-  const role = value("--role") || "coding-agent";
-  let name = value("--name");
+/** Starts `factory loop <rest>` as `role` (and `name`, else the first free one) in its window, without attaching:
+ * what `factory loop -i` and `factory owner start` share. Says what it did; refuses with {code, message, fix}. */
+export function startLoop(role: string, name: string, rest: string[]): Started {
   const top = run(["git", "rev-parse", "--show-toplevel"]).stdout.trim();
   let s: Started;
   try {
@@ -149,6 +141,19 @@ function loop(argv: string[]): number {
   }
   if (s.started) console.log(`Started ${s.window} in tmux session ${s.session}.`);
   else console.log(`${s.window} is already running in tmux session ${s.session}; not starting a second one.`);
+  return s;
+}
+
+/** `factory loop -i` on a terminal: start the loop in its window, then show it here. */
+function loop(argv: string[]): number {
+  const cut = argv.indexOf("--");
+  const own = cut < 0 ? argv : argv.slice(0, cut);
+  const rest = cut < 0 ? [] : argv.slice(cut + 1);
+  const value = (flag: string) => {
+    const i = own.indexOf(flag);
+    return i >= 0 ? own[i + 1] ?? "" : "";
+  };
+  const s = startLoop(value("--role") || "coding-agent", value("--name"), rest);
   const nested = Boolean(process.env.TMUX);
   console.log(nested ? `Switching to it; come back with your tmux prefix and s.` :
     `Attaching to it; detach with Ctrl-b d, come back with: tmux attach -t ${s.session}`);

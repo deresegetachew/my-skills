@@ -348,6 +348,7 @@ export async function main(argv: string[]): Promise<number> {
   if (flag === "--settings" && rest.every((a) => a === "--color") && rest.length <= 1) {
     return (await import("./factory_cockpit_ui.ts")).settingsView(rest);
   }
+  if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
@@ -355,7 +356,6 @@ export async function main(argv: string[]): Promise<number> {
   if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci", "--usage"].includes(flag)) {
     const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
     if (flag === "--sidebar") return ui.sidebar();
-    if (flag === "--bar") return ui.bar();
     if (flag === "--needs") return ui.needs();
     if (flag === "--ci") return ui.ciView(); // the CI view (#339)
     if (flag === "--usage") return await ui.usageView(); // the usage view (#341)
