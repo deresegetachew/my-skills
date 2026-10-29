@@ -116,6 +116,23 @@ test("a plain reply closes an owner ask only from a trusted login", () => {
   expect(asks({}, said("noted", "me")), "with no trusted logins any reply counts, as before").toEqual(["ci-queued"]);
 });
 
+function afterPoReply(cfg: Row, answer: Row): string[] {
+  const thread = [said("<!-- factory-owner-ask id=palette for=product -->\nWhich colour?", "me"),
+    said("<!-- factory-po-reply ask=palette -->\nI suggest blue.", "me"), answer];
+  const db = { issues: [issue(40, "Dev manager: needs the owner")], comments: { "40": thread } };
+  const [, work, env] = poProject({ db, cfg });
+  const p = factory(work, env, ["handover", "snapshot", "--json"]);
+  expect(p.code, p.out).toBe(0);
+  return (JSON.parse(p.stdout).ownerAsks as { id: string }[]).map((a) => a.id);
+}
+
+test("after a product owner reply, the ask goes back only on a trusted login's answer", () => {
+  const trusted = { trustedReviewers: ["boss"] };
+  expect(afterPoReply(trusted, said("Blue it is.", "me")), "the agents' reply took the ask from the owner").toEqual(["palette"]);
+  expect(afterPoReply(trusted, said("Blue it is.", "boss"))).toEqual([]);
+  expect(afterPoReply({}, said("Blue it is.", "me")), "with no trusted logins any reply counts, as before").toEqual([]);
+});
+
 function stageApproval(cfg: Row, answer: Row): string {
   const ask = said("<!-- factory-owner-ask id=stage-vision -->\nIs the vision right?", "me");
   const db = { issues: [issue(101, "Dev manager: needs the owner")], comments: { "101": [ask, answer] } };
