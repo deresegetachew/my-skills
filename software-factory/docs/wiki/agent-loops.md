@@ -105,6 +105,10 @@ as defaults.
   same agent in the same folder. No need to stop and start it.
 - **Waiting.** When nothing is ready (every task done, blocked or taken), the loop checks again every `waitMinutes`
   (default 1) and stays `idle` on its agent issue. `"waitMinutes": 0` makes it exit instead. Ctrl-C stops it.
+  While fewer than `github.reserve` (500) GitHub calls are left this hour, it waits twice as long.
+- **GitHub's limit.** Every agent on the account shares GitHub's 5,000 calls an hour. When a lookup meets the limit,
+  the loop says `GitHub limit reached; waiting until HH:MM UTC`, waits for the reset and carries on. A secondary limit
+  or a network timeout is tried again after 1, 2, 4, 8, then 15 minutes. Neither counts as a failed pass.
 - **Waiting for a PR slot** (issues mode). When the agent's issue has its branch pushed, no PR yet, and `maxOpenPRs`
   ready PRs are open, the loop waits and takes no new work. As soon as a slot frees, it gives the agent that issue
   again, and the session opens the PR. Nobody has to restart it.

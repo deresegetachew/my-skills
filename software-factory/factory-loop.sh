@@ -250,7 +250,23 @@ role_sleep() {
   done
 }
 
-# One pass of a manager or a product owner. Returns 0 (it had work and did it), 3 (nothing to do) or 1 (it failed).
+# GitHub's API limit (#347): a pass or a task lookup that exits 4 met the limit or a network error, which is not a
+# failure. github_wait waits for GitHub (until the limit resets, else 1, 2, 4 ... 15 min for the $1th busy pass in a row);
+# idle_minutes is how long an idle wait of $1 minutes should be: twice that while the hour's calls run low
+# (`github.reserve`). Both are factory_views_cache.ts commands; where it can't answer, the loop waits a minute, or the
+# given time.
+github_wait() {
+  [ -f "$hooks/factory_views_cache.ts" ] && fh "$hooks/factory_views_cache" limit-wait --attempt "$1" --name "$agent" && return
+  echo "[$agent] GitHub did not answer; trying again in 1 min"; sleep 60
+}
+idle_minutes() {
+  local m
+  [ -f "$hooks/factory_views_cache.ts" ] && m="$(fh "$hooks/factory_views_cache" limit-idle "$1")" && [ -n "$m" ] && { echo "$m"; return; }
+  echo "$1"
+}
+
+# One pass of a manager or a product owner. Returns 0 (it had work and did it), 3 (nothing to do), 4 (GitHub was busy)
+# or 1 (it failed).
 # When factory_roles.ts finds work, one fresh `claude -p` runs the role's skill (`claude` without -p under -i).
 role_pass() {
   local found rc prompt discover=0
@@ -258,10 +274,11 @@ role_pass() {
     # No model here: the orchestrator reads GitHub, posts to the owner queue and starts one-item sub-managers.
     fh "$hooks/factory_orchestrator" cycle --name "$agent" $([ "$interactive" = 1 ] && echo --interactive); rc=$?
     stty sane 2>/dev/null
-    [ "$rc" = 0 ] || [ "$rc" = 3 ] || return 1
+    [ "$rc" = 0 ] || [ "$rc" = 3 ] || [ "$rc" = 4 ] || return 1
     return "$rc"
   fi
   found="$(fh "$hooks/factory_roles" work "$role" --name "$agent")"; rc=$?
+  [ "$rc" = 4 ] && return 4
   # A product owner started with -i and nothing queued is the start of a project: a discovery session (vision, design,
   # plan; #103) instead of "nothing to do". It runs once; the loop does not restart it when you /exit.
   if [ "$rc" = 3 ] && [ "$interactive" = 1 ] && [ "$role" = product-owner ]; then
@@ -307,7 +324,7 @@ give_back() {
   else echo "[$agent] Could not give the claim back. Free it by hand: factory issues release ${1#issue-}"; fi
 }
 
-last=""; repeats=0; last_item=""; fails=0
+last=""; repeats=0; last_item=""; fails=0; busy=0
 for ((n = 1; n <= limit; n++)); do
   if [ "$resume_first" = 1 ]; then
     echo "[$agent] resuming after a restart: leaving $PWD as it is (branch $(git branch --show-current 2>/dev/null))."
@@ -318,15 +335,18 @@ for ((n = 1; n <= limit; n++)); do
   reload_if_changed $((limit - n + 1))
   if [ "$role" != coding-agent ]; then
     role_pass; rc=$?
-    if [ "$rc" = 1 ]; then
-      fails=$((fails + 1))
+    # A busy GitHub (exit 4) is neither a failure nor a success: it leaves the count of failed passes as it was.
+    if [ "$rc" = 4 ]; then busy=$((busy + 1))
+    elif [ "$rc" = 1 ]; then
+      busy=0; fails=$((fails + 1))
       echo "[$agent] (the pass exited with an error; the next one picks up from GitHub)"
       if [ "$fails" -ge 3 ]; then echo "[$agent] 3 passes failed in a row; stopping so a person can look."; exit 1; fi
-    else fails=0; fi
+    else busy=0; fails=0; fi
     [ "$n" -lt "$limit" ] || break
-    if [ "$rc" = 3 ]; then
+    if [ "$rc" = 4 ]; then github_wait "$busy"
+    elif [ "$rc" = 3 ]; then
       [ "$role_idle" != 0 ] || { echo "[$agent] Nothing to do; exiting (idleMinutes is 0)."; exit 0; }
-      role_sleep "$role_idle"
+      role_sleep "$(idle_minutes "$role_idle")"
     else role_sleep "$role_busy"; fi
     continue
   fi
@@ -340,15 +360,21 @@ for ((n = 1; n <= limit; n++)); do
       if [ "$task_rc" = 1 ]; then echo "[$agent] Nothing ready (every task is done, blocked or taken); --once stops here."; exit 0; fi
       echo "[$agent] The task lookup failed (exit $task_rc); --once stops here." >&2; exit "$task_rc"
     fi
+    if [ "$task_rc" = 4 ]; then  # GitHub was busy: wait for it, then look again
+      busy=$((busy + 1)); github_wait "$busy"
+      tidy; reload_if_changed $((limit - n + 1)); continue
+    fi
+    busy=0
     [ "$wait_minutes" -gt 0 ] 2>/dev/null || {
       echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }
     [ "$waited" = 0 ] && echo "[$agent] $(date '+%H:%M') nothing ready (every task is done, blocked or taken). Checking again every $wait_minutes min; Ctrl-C stops."
     waited=1
     fh "$hooks/factory_agents" ping --agent "$agent" --status idle >/dev/null 2>&1 || true
-    sleep $((wait_minutes * 60))
+    sleep $(($(idle_minutes "$wait_minutes") * 60))
     tidy
     reload_if_changed $((limit - n + 1))
   done
+  busy=0
   id="${next%% *}"
   if [ "$id" = "$last" ]; then repeats=$((repeats + 1)); else repeats=1; last="$id"; fi
   if [ "$repeats" -ge 3 ]; then

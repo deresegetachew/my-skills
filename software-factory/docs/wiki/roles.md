@@ -31,8 +31,8 @@ type into, with Remote Control (the Claude app on your phone is the screen).
 
 **One runner.** `factory-loop.sh` runs all three. What is shared is written once: tidy the folder to main, reload when
 main brings a new script, the isolated MCP config, register and ping as a live agent (the agent issue carries the
-role), the stop rule (the same item three times, or three failed passes in a row), interactive mode, and the wait
-between passes. What differs is small:
+role), the stop rule (the same item three times, or three failed passes in a row; a pass that met GitHub's limit waits for
+it and is not a failure, see [agent loops](agent-loops.md)), interactive mode, and the wait between passes. What differs is small:
 
 | | coding agent | dev manager | product owner |
 |---|---|---|---|
