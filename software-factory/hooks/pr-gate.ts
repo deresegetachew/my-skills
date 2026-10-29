@@ -194,8 +194,9 @@ export function pushForces(tokens: string[]): boolean {
   return false;
 }
 
-/** Whether this simple command is a `git push` that sends a tag: --tags, --follow-tags, a refspec under refs/tags/, one
- * named like a version (v1.2.3, which starts the release workflow) or git's `tag <name>` form (#337). */
+/** Whether this simple command is a `git push` that sends a tag: --tags, --follow-tags, a refspec under refs/tags/ (or
+ * tags/, which git expands), a pattern (`refs/*:refs/*` sends every tag), one named like a version (v1.2.3, which starts
+ * the release workflow) or git's `tag <name>` form (#337). */
 export function pushTags(tokens: string[]): boolean {
   const args = pushArgs(tokens) ?? [];
   for (let k = 0; k < args.length; k++) {
@@ -203,7 +204,7 @@ export function pushTags(tokens: string[]): boolean {
     if (PUSH_VALUE_FLAGS.has(t)) k++;
     else if (t === "--tags" || t === "--follow-tags") return true;
     else if (t.startsWith("-")) continue;
-    else if (t === "tag" || t.split(":").some((side) => /^\+?(refs\/tags\/|v\d)/.test(side))) return true;
+    else if (t === "tag" || t.includes("*") || t.split(":").some((side) => /^\+?(refs\/tags\/|tags\/|v\d)/.test(side))) return true;
   }
   return false;
 }

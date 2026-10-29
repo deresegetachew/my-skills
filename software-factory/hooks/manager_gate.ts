@@ -12,9 +12,10 @@
 //     `<!-- factory-role role=dev-manager ... -->`): its own PRs wait for the owner;
 //   - deleting refs (`git push --delete`, `git push origin :branch`, `git branch -d`, `git update-ref -d`,
 //     `gh api -X DELETE .../git/refs/...`), force-pushing, and pushing to the main branch;
-//   - a gh command that carries `<!-- factory-owner-answer` (in the command or a body file it names): that marker is
-//     the owner's answer, and only the owner writes it (#337); for the same reason, a comment body it can't read
-//     (built with $(...) or $VARIABLES, or piped in on stdin);
+//   - a gh command that carries `<!-- factory-owner-answer` (in the command or a body file it names, also written with
+//     `\u` escapes): that marker is the owner's answer, and only the owner writes it (#337); for the same reason, a
+//     comment body it can't read (built with $(...) or $VARIABLES, piped in on stdin, or a file it can't find from the
+//     command's folder), including `--comment` on `gh issue close|reopen` and `gh pr close`;
 //   - writes through `gh api` to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks
 //     and deploy keys (reading them is fine);
 //   - reading secrets files (`.env*`, `secrets/`, keys) with a shell command.
@@ -22,8 +23,8 @@
 // Like the PR gate it is a guard rail, not a security boundary: branch protection and required CI on GitHub are. It fails
 // closed: an error, or a command it cannot read (gh or git hidden in bash -c, eval, xargs ...), blocks the command.
 // Exit 2 blocks the command and tells Claude why.
-import { basename } from "node:path";
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, resolve } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { load, loadFromMain } from "./factory_config.ts";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { Exit, run, runMain } from "./factory_lib.ts";
@@ -34,6 +35,8 @@ import {
 
 const API_VALUE_FLAGS = new Set(["-X", "--method", "-f", "--raw-field", "-F", "--field", "-H", "--header", "--input", "-q",
   "--jq", "-t", "--template", "--cache", "--hostname", "-p", "--preview"]);
+/** The flags that carry a body besides --body: `gh issue close|reopen` and `gh pr close` post `-c/--comment` as a comment. */
+const COMMENT_FLAGS = new Set(["-b", "--body", "-c", "--comment", "--body-file"]);
 const ASK = "Write an owner-queue ask instead (a comment on the owner-queue issue starting `<!-- factory-owner-ask id=<slug> -->`).";
 const OWN_BRANCH = /^manager\//;
 const OWN_BODY = /<!--\s*factory-role\s+role=dev-manager\b/;
@@ -250,26 +253,32 @@ function regularFile(path: string): boolean {
   }
 }
 
+/** The text with `\uXXXX` escapes decoded, as GitHub decodes them in a JSON body (--input) or a GraphQL string. */
+function unescaped(text: string): string {
+  return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 /** Whether a gh call would post the owner-answer marker: in the command's text or its tokens, or in a body file it
- * names. */
-function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
-  if (OWNER_ANSWER.test(cmd) || args.some((t) => OWNER_ANSWER.test(t))) return true;
-  return bodyFiles(flags).some((p) => regularFile(p) && OWNER_ANSWER.test(readFileSync(p, "utf8")));
+ * names (paths from the command's own folder, `cwd`), also when written with `\u` escapes. */
+function postsOwnerAnswer(flags: Flags, args: string[], cmd: string, cwd: string): boolean {
+  const marked = (t: string): boolean => OWNER_ANSWER.test(t) || OWNER_ANSWER.test(unescaped(t));
+  if (marked(cmd) || args.some(marked)) return true;
+  return bodyFiles(flags).map((p) => resolve(cwd, p)).some((p) => regularFile(p) && marked(readFileSync(p, "utf8")));
 }
 
 /** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`); read from
- * stdin or anything else that is not a regular file (`-`, `/dev/stdin`); from a path the shell expands (a glob, `~`);
- * or from a file in a command that runs
- * more than the gh call, which could write the file first. A missing file is left to gh to report. */
-function hidesBody(flags: Flags, cmd: string, parts: number): boolean {
+ * stdin or anything else that is not a regular file the gate can read from the command's folder (`-`, `/dev/stdin`, a
+ * missing file); from a path the shell expands (a glob, `~`); or from a file in a command that runs more than the gh
+ * call, which could write the file first. */
+function hidesBody(flags: Flags, cmd: string, parts: number, cwd: string): boolean {
   const files = bodyFiles(flags);
-  const texts = [...values(flags, "--body", "-b"),
+  const texts = [...values(flags, "--body", "-b", "--comment", "-c"),
     ...values(flags, "-f", "--raw-field", "-F", "--field").filter((v) => v.startsWith("body="))];
   if (!files.length && !texts.length) return false;
   if (SHELL_EXPANSION.test(cmd)) return true;
   if (files.length && parts > 1) return true;
   // a glob or ~ names another file once the shell expands it
-  return files.some((p) => p === "-" || /[*?[{]|^~/.test(p) || (existsSync(p) && !regularFile(p)));
+  return files.some((p) => p === "-" || /[*?[{]|^~/.test(p) || !regularFile(resolve(cwd, p)));
 }
 
 function gitCall(args: string[]): void {
@@ -299,6 +308,7 @@ function main(): void {
   const data = JSON.parse(readFileSync(0, "utf8")) as unknown;
   const input = row(row(data).tool_input);
   const cmd = String(input.command || "");
+  const cwd = String(row(data).cwd || process.cwd()); // the folder the command runs in, for its relative paths
   let parts: string[][];
   try {
     parts = simpleCommands(cmd);
@@ -314,8 +324,9 @@ function main(): void {
     }
     if (prog === "git") gitCall(args);
     else if (prog === "gh") {
-      const [flags, pos] = parseArgs(args, new Set([...API_VALUE_FLAGS, ...MERGE_VALUE_FLAGS, ...GLOBAL_WITH_VALUE]));
-      if (postsOwnerAnswer(flags, args, cmd)) {
+      const [flags, pos] = parseArgs(args, new Set([...API_VALUE_FLAGS, ...MERGE_VALUE_FLAGS, ...GLOBAL_WITH_VALUE,
+        ...COMMENT_FLAGS]));
+      if (postsOwnerAnswer(flags, args, cmd, cwd)) {
         refuse("The manager does not post `<!-- factory-owner-answer -->`: that marker is the owner's answer, and only the " +
           "owner writes it. Leave the ask open for the owner to answer; post your own note without the marker.");
       }
@@ -329,7 +340,7 @@ function main(): void {
         const heads = flags["--match-head-commit"] ?? [];
         gateMerge("repos/{owner}/{repo}", pos[2] as string, heads.length ? (heads[heads.length - 1] as string) : "");
       }
-      if (hidesBody(flags, cmd, parts.length)) { // after the checks above, which say more about the commands they cover
+      if (hidesBody(flags, cmd, parts.length, cwd)) { // after the checks above, which say more about the commands they cover
         refuse("Write the comment's body as plain text (-f body=\"...\"), or write the file with the Write tool and post it " +
           "in a command of its own (-F body=@<file>): the gate reads the body before the shell runs, so it can't check one " +
           "built with $(...) or $VARIABLES, read from stdin, or written by the same command.");
