@@ -350,6 +350,16 @@ test("answer posts a marked comment on the owner-queue issue", () => {
   expect(posted[0]?.body).toContain("Use the blue one");
 });
 
+test("answer works on an ask the product owner replied to (#352)", () => {
+  const r = rig(queue(ask("palette"), "<!-- factory-po-reply ask=palette -->\nI suggest blue."));
+  const p = owner(r, OWNER, "answer", "palette", "Yes, blue");
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("Answered palette on #40.");
+  const posted = dbOf(r).posted as { issue: string; body: string }[];
+  expect(posted).toHaveLength(1);
+  expect(posted[0]?.body.startsWith("<!-- factory-owner-answer id=palette -->")).toBe(true);
+});
+
 test("answer without an owner queue says no_owner_queue", () => {
   const r = rig({ issues: [{ number: 5, state: "open", title: "Something else" }] });
   refused(owner(r, OWNER, "answer", "x", "y"), "no_owner_queue");

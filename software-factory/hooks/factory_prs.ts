@@ -27,6 +27,8 @@ const QUESTION = /<!--\s*factory-question\b/;
 const ANSWER = /<!--\s*factory-answer\b/;
 export const OWNER_ASK = /<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\s*-->/; // for=product may follow
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
+const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
+
 export const OWNER_QUEUE_TITLE = "Dev manager: needs the owner";
 const PERSON_MERGES = "a person merges this one";
 const GREEN = ["success", "neutral"];
@@ -224,24 +226,58 @@ export function openQuestions(comments: Obj[]): Obj[] {
   return asked;
 }
 
-/** Owner-queue asks nobody has answered: no later comment before the next ask, and no owner-answer marker. */
-export function openOwnerAsks(comments: Obj[]): [string, Obj][] {
+/** Where an owner-queue ask stands (#352). open: nobody answered it. owner: the product owner replied
+ * (`factory-po-reply ask=<slug>`) and nothing newer came from the owner. product: the owner answered after that reply,
+ * so it is the product owner's again. */
+export type AskState = "open" | "owner" | "product";
+
+/** The newest reply on an ask: the owner answered with no product owner reply before (closed), the product owner
+ * replied, the product owner closed it (`... done -->`), or the owner answered after a product owner reply. */
+type Reply = "answered" | "po" | "done" | "back";
+
+/** Owner-queue asks still waiting for someone, with their state. The owner answers with `factory-owner-answer id=<slug>`
+ * or a plain comment, which belongs to the newest ask or product owner reply before it. An ask the owner answered
+ * before any product owner reply, or one the product owner closed, is left out. */
+export function ownerAskStates(comments: Obj[]): [string, Obj, AskState][] {
   const asks: [string, Obj][] = [];
-  const answered = new Set<string>();
+  const last = new Map<string, Reply>();
+  let under: string | null = null; // the thread a plain comment answers
   for (const c of comments) {
     const body = str(c.body);
     const ask = OWNER_ASK.exec(body);
     if (ask) {
       asks.push([ask[1] as string, c]);
+      under = ask[1] as string;
       continue;
     }
-    const marked = OWNER_ANSWER.exec(body);
-    if (marked) answered.add(marked[1] as string);
-    else if (asks.length && !answered.has((asks[asks.length - 1] as [string, Obj])[0])) {
-      answered.add((asks[asks.length - 1] as [string, Obj])[0]); // a reply under the newest ask, before the next one
+    const po = PO_REPLY.exec(body);
+    if (po) {
+      last.set(po[1] as string, /\bdone\b/.test(po[2] ?? "") ? "done" : "po");
+      under = po[1] as string;
+      continue;
     }
+    const slug = OWNER_ANSWER.exec(body)?.[1] ?? under;
+    if (slug === null) continue;
+    const before = last.get(slug);
+    last.set(slug, before === undefined || before === "answered" ? "answered" : "back");
   }
-  return asks.filter(([slug]) => !answered.has(slug));
+  const state = (r: Reply | undefined): AskState | null =>
+    r === undefined ? "open" : r === "po" ? "owner" : r === "back" ? "product" : null;
+  return asks.flatMap(([slug, c]) => {
+    const s = state(last.get(slug));
+    return s === null ? [] : [[slug, c, s] as [string, Obj, AskState]];
+  });
+}
+
+/** Owner-queue asks that wait for the owner or nobody has answered (an ask the owner answered is the product owner's
+ * again, or closed). */
+export function openOwnerAsks(comments: Obj[]): [string, Obj][] {
+  return ownerAskStates(comments).filter(([, , s]) => s !== "product").map(([slug, c]) => [slug, c]);
+}
+
+/** Whether an ask is tagged `for=product`: the product owner's to answer first. */
+export function forProduct(c: Obj): boolean {
+  return /<!--\s*factory-owner-ask\b[^>]*\bfor=product\b/.test(str(c.body));
 }
 
 // --- the next action ---------------------------------------------------------------------------------------------
@@ -372,7 +408,13 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
 }
 
 export type QuestionOut = { kind: string; number: number; title: string; url: unknown; ageMinutes: number | null };
-export type AskOut = { id: string; issue: number; url: unknown; ageMinutes: number | null };
+export type AskOut = { id: string; issue: number; url: unknown; ageMinutes: number | null; forProduct: boolean; state: AskState };
+
+/** Who an ask waits for, after "waiting <age>" in the plain list: nothing for a plain ask. */
+function askFor(a: AskOut): string {
+  if (!a.forProduct) return "";
+  return a.state === "owner" ? " for the owner (the product owner replied)" : " for the product owner";
+}
 
 /** Unanswered questions on open PRs and open issues, and unanswered owner-queue asks. */
 function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, now: number, sinceDays: number): [QuestionOut[], AskOut[]] {
@@ -402,8 +444,10 @@ function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, no
   const asks: AskOut[] = [];
   for (const [n, i] of plain) {
     if (str(i.title).startsWith(OWNER_QUEUE_TITLE)) {
-      for (const [slug, c] of openOwnerAsks(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`))) {
-        asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now) });
+      for (const [slug, c, state] of ownerAskStates(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`))) {
+        const product = forProduct(c);
+        if (state === "product" && !product) continue; // a plain ask the owner answered
+        asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now), forProduct: product, state });
       }
     }
   }
@@ -512,7 +556,7 @@ function show(r: Built): void {
   console.log("Owner asks");
   const a = r.ownerAsks;
   if (!Array.isArray(a)) console.log(failed(a));
-  for (const x of Array.isArray(a) ? a : []) console.log(`  ${x.id} waiting ${human(x.ageMinutes)}: ${String(x.url)}`);
+  for (const x of Array.isArray(a) ? a : []) console.log(`  ${x.id} waiting ${human(x.ageMinutes)}${askFor(x)}: ${String(x.url)}`);
   if (Array.isArray(a) && !a.length) console.log("  none waiting");
   console.log("Agents");
   const ag = r.agents;

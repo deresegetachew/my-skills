@@ -133,9 +133,11 @@ function pullRequests(s: Step, missing: Problem[]): Prs {
   return { pulls, asks };
 }
 
-/** What waits on the owner: unanswered owner-queue asks, and pull requests only a person merges. */
+/** What waits on the owner: owner-queue asks nobody answered or the product owner replied to (not those still the
+ * product owner's, #352), and pull requests only a person merges. */
 function needsYou(prs: Prs): Obj[] {
-  const out: Obj[] = prs.asks.map((a) => ({ kind: "owner-ask", id: a.id, issue: a.issue, url: a.url ?? null, ageMinutes: a.ageMinutes ?? null }));
+  const out: Obj[] = prs.asks.filter((a) => !(a.forProduct === true && a.state !== "owner"))
+    .map((a) => ({ kind: "owner-ask", id: a.id, issue: a.issue, url: a.url ?? null, ageMinutes: a.ageMinutes ?? null, state: a.state ?? "open" }));
   for (const p of prs.pulls ?? []) {
     if (p.next === "owner-merges") out.push({ kind: "owner-merges", number: p.number, title: p.title, url: p.url });
   }

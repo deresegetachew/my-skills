@@ -79,13 +79,18 @@ in `<roles.dir>/product-owner/` hold the product's voice, what the owner decides
 There is no custom UI: the owner reads progress and queues as plain text, below.
 
 **What gives the role work** (`factory_roles.ts work product-owner`, one line each): an open issue or PR with
-`roles.product-owner.workLabel`; an owner-queue ask tagged `for=product` that nobody has answered; a test plan that waits
+`roles.product-owner.workLabel`; an owner-queue ask tagged `for=product` that nobody has answered, or that the owner
+answered after the product owner's reply ("ask <slug> for product, the owner answered"); a test plan that waits
 for the owner or for a run; sign-off items. `factory product-owner loop --once --dry-run` prints where the role reads, then
 that list, and the command it would run. It writes nothing.
 
 **Asks for the product owner.** The dev manager writes scope, order and PRD questions to the owner queue as
 `<!-- factory-owner-ask id=<slug> for=product -->`. The product owner replies under it with a proposal (the options and a
 recommendation); the owner's yes comes in a reply there. Asks without the tag stay with the owner.
+The reply starts with `<!-- factory-po-reply ask=<slug> -->` (#352): the ask then waits for the owner, is not offered
+to the product owner again (so the loop never stops on it), and `factory prs` and the cockpit's Needs you show it as
+waiting for the owner. An owner comment after it, `factory owner answer <slug>` or a plain reply, gives it back to the
+product owner. `<!-- factory-po-reply ask=<slug> done -->`, once the change is recorded, closes it.
 
 **`factory prd [--open] [--story N] [--json]`** shows progress against the PRD, computed from GitHub. A story's id is `US-<n>`
 at the start of its heading or list item in the PRD file (`prd` in `factory.json`). A task issue says which stories it serves
