@@ -47,7 +47,7 @@ if (p === "contents/.claude/factory.json") {
   console.log(db.factoryJson); process.exit(0);
 }
 if ((m = /^pulls\/(\d+)$/.exec(p))) { const pr = db.prs?.[m[1] as string]; if (!pr) fail("gh: Not Found (HTTP 404)"); out(pr); }
-if ((m = /^pulls\/(\d+)\/files$/.exec(p))) paged((db.files?.[m[1] as string] ?? []).map((f: string) => ({ filename: f })));
+if ((m = /^pulls\/(\d+)\/files$/.exec(p))) paged((db.files?.[m[1] as string] ?? []).map((f: string | object) => (typeof f === "string" ? { filename: f } : f)));
 if ((m = /^commits\/([0-9a-f]+)\/check-runs$/.exec(p))) out({ check_runs: db.checkRuns?.[m[1] as string] ?? [] });
 if ((m = /^commits\/([0-9a-f]+)\/status$/.exec(p))) out({ statuses: db.statuses?.[m[1] as string] ?? [] });
 if (p === "labels" && method === "GET") paged((db.labels ?? []).map((name: string) => ({ name })));
@@ -181,7 +181,7 @@ test("merge pins the merge to the full head sha, names the protected paths first
   expect(p.stdout.indexOf("Protected paths")).toBeLessThan(p.stdout.indexOf("Merged #7"));
   const m = merges(r);
   expect(m).toHaveLength(1);
-  expect(m[0]?.argv).toEqual(["pr", "merge", "7", "--squash", "--delete-branch", "--match-head-commit", SHA]);
+  expect(m[0]?.argv).toEqual(["pr", "merge", "7", "--merge", "--delete-branch", "--match-head-commit", SHA]);
 });
 
 test("merge says 'Protected paths: none' when no path matches", () => {
@@ -248,6 +248,19 @@ test("the dev manager may not merge a PR with protected paths, even approved: pr
   const p = owner(r, MANAGER, "merge", "7");
   refused(p, "protected_owner_merges");
   expect(err(p).message).toContain(".github/workflows/ci.yml");
+  expect(merges(r)).toEqual([]);
+});
+
+test("a protected file renamed away still counts: the old path is listed and the dev manager is refused", () => {
+  const renamed = { files: { "7": [{ filename: "old/ci.yml", previous_filename: ".github/workflows/ci.yml", status: "renamed" }] } };
+  const owned = openPr({}, 7, { ...PROTECTED_DB, ...renamed });
+  const p = owner(owned, OWNER, "merge", "7");
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("Protected paths: .github/workflows/ci.yml");
+  const r = openPr({}, 7, { ...PROTECTED_DB, ...renamed, comments: { "7": [approval()] } });
+  const q = owner(r, MANAGER, "merge", "7");
+  refused(q, "protected_owner_merges");
+  expect(err(q).message).toContain(".github/workflows/ci.yml");
   expect(merges(r)).toEqual([]);
 });
 
