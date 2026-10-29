@@ -195,6 +195,23 @@ test("--prs <n> selects that PR: its CI jobs, its must-fix and its open question
   expect(lines(r.stdout).some((l) => /^\s*#12 · /.test(l))).toBe(false);
 }, T);
 
+test("the other checks are counted by job: a re-run job and a skipped check are not counted as passing", () => {
+  const s = scenario();
+  s[`commits/${B}/check-runs`] = { check_runs: [
+    { id: 1, name: "unit shard 2", status: "completed", conclusion: "failure", started_at: "2020-01-01T00:00:00Z" },
+    { id: 2, name: "unit shard 2", status: "completed", conclusion: "failure", started_at: "2020-01-01T01:00:00Z" },
+    { id: 3, name: "check", status: "completed", conclusion: "success", started_at: "2020-01-01T00:00:00Z" },
+    { id: 4, name: "deploy", status: "completed", conclusion: "skipped", started_at: "2020-01-01T00:00:00Z" },
+  ] };
+  const p = setup(s);
+  const r = prs(p, ["13"]);
+  expect(r.code, r.out).toBe(0);
+  const d = detail(r.stdout, 13);
+  expect(d).toContain("unit shard 2");
+  expect(d).toMatch(/1 other check\b/);
+  expect(d).not.toMatch(/[2-9] other checks/);
+}, T);
+
 test("the keys that work are at the bottom", () => {
   const p = setup();
   const all = lines(prs(p).stdout.trimEnd());
