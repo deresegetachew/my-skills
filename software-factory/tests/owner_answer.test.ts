@@ -62,8 +62,6 @@ test("the manager gate refuses a comment body it cannot read before the shell ru
     "gh issue close 40 --comment \"$(cat answer.md)\"",
     "gh issue reopen 40 -c \"$TEXT\"",
     "gh pr close 7 --comment=\"$TEXT\"",
-    "gh issue comment 40 --body-file missing.md",
-    "gh api -X POST repos/{owner}/{repo}/issues/40/comments -F body=@missing.md",
   ]) {
     const [d, env] = world({ comments: [comment("hi")] });
     write(join(d, "old.md"), "harmless\n");

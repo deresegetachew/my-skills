@@ -14,7 +14,7 @@
 //     `gh api -X DELETE .../git/refs/...`), force-pushing, and pushing to the main branch;
 //   - a gh command that carries `<!-- factory-owner-answer` (in the command or a body file it names, also written with
 //     `\u` escapes): that marker is the owner's answer, and only the owner writes it (#337); for the same reason, a
-//     comment body it can't read (built with $(...) or $VARIABLES, piped in on stdin, or a file it can't find from the
+//     comment body it can't read (built with $(...) or $VARIABLES, or piped in on stdin; body files are read from the
 //     command's folder), including `--comment` on `gh issue close|reopen` and `gh pr close`;
 //   - writes through `gh api` to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks
 //     and deploy keys (reading them is fine);
@@ -24,7 +24,7 @@
 // closed: an error, or a command it cannot read (gh or git hidden in bash -c, eval, xargs ...), blocks the command.
 // Exit 2 blocks the command and tells Claude why.
 import { basename, resolve } from "node:path";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { load, loadFromMain } from "./factory_config.ts";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { Exit, run, runMain } from "./factory_lib.ts";
@@ -267,9 +267,9 @@ function postsOwnerAnswer(flags: Flags, args: string[], cmd: string, cwd: string
 }
 
 /** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`); read from
- * stdin or anything else that is not a regular file the gate can read from the command's folder (`-`, `/dev/stdin`, a
- * missing file); from a path the shell expands (a glob, `~`); or from a file in a command that runs more than the gh
- * call, which could write the file first. */
+ * stdin or anything else in the command's folder that is not a regular file (`-`, `/dev/stdin`); from a path the shell
+ * expands (a glob, `~`); or from a file in a command that runs more than the gh call, which could write the file first.
+ * A missing file is left to gh, which then posts nothing. */
 function hidesBody(flags: Flags, cmd: string, parts: number, cwd: string): boolean {
   const files = bodyFiles(flags);
   const texts = [...values(flags, "--body", "-b", "--comment", "-c"),
@@ -278,7 +278,7 @@ function hidesBody(flags: Flags, cmd: string, parts: number, cwd: string): boole
   if (SHELL_EXPANSION.test(cmd)) return true;
   if (files.length && parts > 1) return true;
   // a glob or ~ names another file once the shell expands it
-  return files.some((p) => p === "-" || /[*?[{]|^~/.test(p) || !regularFile(resolve(cwd, p)));
+  return files.some((p) => p === "-" || /[*?[{]|^~/.test(p) || (existsSync(resolve(cwd, p)) && !regularFile(resolve(cwd, p))));
 }
 
 function gitCall(args: string[]): void {
