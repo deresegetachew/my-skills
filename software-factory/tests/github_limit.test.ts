@@ -1,14 +1,15 @@
 // GitHub being busy is not a failure (#347): a rate-limit or transient answer from `gh api` makes a factory command exit 4,
 // the loops wait (on the fake clock FACTORY_NOW time stands still, so nothing really sleeps) and carry on, and the idle
-// waits get longer when few calls are left. `factory_ratelimit.ts wait|idle` read `gh api rate_limit` through one small cache.
+// waits get longer when few calls are left. `factory_views_cache.ts limit-wait|limit-idle` read `gh api rate_limit` through
+// one small cache.
 //
 // Runs the real hooks and loop script in a throwaway project with a fake `gh` that logs every call and answers a rate-limit
 // error for the first calls, and a fake `claude`. The comment memo and the cached `watch --json` are in views_cache.test.ts.
 import { expect, test } from "bun:test";
 import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { GH as ORCH_GH, hook } from "./orchestrator_support.ts";
-import { type Env, factory, project, type Row } from "./roles_support.ts";
+import { comment, cycle, GH as ORCH_GH, hook, iso, posted, world } from "./orchestrator_support.ts";
+import { type Env, factory, log, project, type Row } from "./roles_support.ts";
 import { envWith, gitRepo, HOOKS, type Proc, runBun, sh, tmp, write, writeExe } from "./support.ts";
 
 const NOW = 1_900_000_000;
@@ -121,6 +122,45 @@ test("the product owner's work lookup and the builder's next task exit 4 on a ra
   }
 });
 
+// --- the orchestrator's thread notes read an issue's comments only when the issue changed ----------------------------
+
+const NOTE_OPEN = (n: number): string => `<!-- factory-manager-note thread=issue-${n} status=open -->\nNote.\n- opened`;
+
+function commentReads(env: Env, n: number): number {
+  return log(env).filter((l) => l.startsWith("gh ") && l.includes(`issues/${n}/comments`) && !/ (POST|PATCH) /.test(l)).length;
+}
+
+/** Three cycles on one task issue: [the dev manager's folder, its comment reads]. The watcher's own checks read an
+ * in-progress issue's comments too, so a test compares with the same issue updated just now (`iso(0)`: under a minute
+ * old, so the thread-note step reads it every cycle). */
+function threeCycles(n: number, state: string, label: string, updatedAt: string, note: boolean): [string, number] {
+  const task = { number: n, state, title: "Task", body: "", labels: [{ name: label }], updated_at: updatedAt };
+  const [d, work, env] = world({ db: { issues: [task], comments: note ? { [String(n)]: [comment(7, NOTE_OPEN(n), 120)] } : {} } });
+  for (let i = 0; i < 3; i++) cycle(work, env);
+  return [d, commentReads(env, n)];
+}
+
+test("an unchanged in-progress issue that has its note is not read again by the thread-note step", () => {
+  const [, kept] = threeCycles(20, "open", "factory:in-progress", iso(120), true);
+  const [, fresh] = threeCycles(20, "open", "factory:in-progress", iso(0), true);
+  expect(kept, "read once, then kept for two cycles").toBe(fresh - 2);
+});
+
+test("an issue with no note yet is read again, so its note is posted once even when updated_at stays the same", () => {
+  const [d, kept] = threeCycles(21, "open", "factory:in-progress", iso(120), false);
+  const [, fresh] = threeCycles(21, "open", "factory:in-progress", iso(0), false);
+  expect(posted(d, 21).filter((b) => b.includes("factory-manager-note")).length).toBe(1);
+  expect(kept, "read and posted; read and found; then kept").toBe(fresh - 1);
+});
+
+test("a closed issue's note is closed once, and the issue is not read again until it changes", () => {
+  const [d, kept] = threeCycles(22, "closed", "factory:in-review", iso(120), true);
+  expect((posted(d, 22)[0] as string).split("issue was closed").length - 1).toBe(1);
+  expect(kept).toBe(1);
+  const [, fresh] = threeCycles(22, "closed", "factory:in-review", iso(0), true);
+  expect(fresh, "updated under a minute ago: read every cycle").toBe(3);
+});
+
 // --- the dev manager's loop -----------------------------------------------------------------------------------------
 
 /** The cycle's first GitHub call (the open pull requests): failing it makes one busy pass, whatever else the loop reads. */
@@ -191,7 +231,7 @@ test("a rate-limited issue lookup in the builder's loop waits, looks again, and 
   expect(rlLog(d).filter((l) => l.includes("labels=agent:menelik")).length, "the lookup was made again after the wait").toBeGreaterThanOrEqual(2);
 }, 120_000);
 
-// --- factory_ratelimit.ts -------------------------------------------------------------------------------------------
+// --- factory_views_cache.ts limit-wait and limit-idle ---------------------------------------------------------------
 
 const RL_GH = `#!/usr/bin/env bash
 echo "gh $*" >> "$RL_LOG"
@@ -226,8 +266,11 @@ function reads(c: Lone): number {
   return readFileSync(c.env.RL_LOG as string, "utf8").split("\n").filter((l) => l.includes("rate_limit")).length;
 }
 
+/** `wait ...` or `idle ...`: the limit-wait and limit-idle commands of factory_views_cache.ts. */
 function ratelimit(c: Lone, args: string[], now: number = NOW): Proc {
-  return runBun(join(HOOKS, "factory_ratelimit.ts"), args, { cwd: c.d, env: { ...c.env, FACTORY_NOW: String(now) }, timeoutMs: 30_000 });
+  const [cmd, ...rest] = args;
+  return runBun(join(HOOKS, "factory_views_cache.ts"), [`limit-${cmd}`, ...rest],
+    { cwd: c.d, env: { ...c.env, FACTORY_NOW: String(now) }, timeoutMs: 30_000 });
 }
 
 test("wait with the limit used up names the reset time in UTC, returns at once on the fake clock and exits 0", () => {

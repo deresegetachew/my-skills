@@ -243,10 +243,21 @@ function withUpdatedAt(c: Ctx, updatedAt: string | null): void {
 }
 
 const commentReads = (c: Ctx): number => logCount(c, "issues/1/comments");
+const isoAt = (t: number): string => new Date(t * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
+const OLD_UPDATE = isoAt(T0 - 7200); // well before every FACTORY_NOW used here
+const NEWER_UPDATE = isoAt(T0 - 3600);
+
+test("a pull request updated under a minute ago has its comments read every time (GitHub's times are to the second)", () => {
+  const c = ctxFor("watch");
+  withUpdatedAt(c, isoAt(T0 - 10));
+  run(c, "watch", ["--json", "--fresh"], T0);
+  run(c, "watch", ["--json", "--fresh"], T0 + 5);
+  expect(commentReads(c)).toBe(2);
+});
 
 test("a pull request whose updated_at has not changed has its comments read once, however often watch collects", () => {
   const c = ctxFor("watch");
-  withUpdatedAt(c, "2026-10-25T10:00:00Z");
+  withUpdatedAt(c, OLD_UPDATE);
   const first = run(c, "watch", ["--json", "--fresh"], T0);
   expect(commentReads(c), first.out).toBe(1);
   const second = run(c, "watch", ["--json", "--fresh"], T0 + 5);
@@ -258,9 +269,9 @@ test("a pull request whose updated_at has not changed has its comments read once
 
 test("a changed updated_at makes watch read the comments again", () => {
   const c = ctxFor("watch");
-  withUpdatedAt(c, "2026-10-25T10:00:00Z");
+  withUpdatedAt(c, OLD_UPDATE);
   run(c, "watch", ["--json", "--fresh"], T0);
-  withUpdatedAt(c, "2026-10-25T11:00:00Z");
+  withUpdatedAt(c, NEWER_UPDATE);
   run(c, "watch", ["--json", "--fresh"], T0 + 5);
   expect(commentReads(c)).toBe(2);
 });
@@ -275,7 +286,7 @@ test("a pull request without updated_at always has its comments read", () => {
 
 test("views.cacheSeconds 0 turns the comment memo off", () => {
   const c = ctxFor("watch", { views: { cacheSeconds: 0 } });
-  withUpdatedAt(c, "2026-10-25T10:00:00Z");
+  withUpdatedAt(c, OLD_UPDATE);
   run(c, "watch", ["--json", "--fresh"], T0);
   run(c, "watch", ["--json", "--fresh"], T0 + 5);
   expect(commentReads(c)).toBe(2);
