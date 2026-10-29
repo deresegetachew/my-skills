@@ -249,6 +249,17 @@ Maintain
   update [--layout new]  a project still on the my-skills submodule (no pin yet): pull the newest my-skills and relink;
                          then commit it in a PR (links made through kit/ are moved to the factory's own folders)
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
+
+Owner                    what the owner does by hand, shared with the cockpit. The dev manager may run merge and label,
+                         under its gate; coding agents can't run any of them
+  owner merge <pr>       name the protected paths the PR touches, then merge it (a merge commit) when it is open, not a draft,
+                         mergeable and green, pinned to its head commit
+  owner label <n> <label> [--remove]
+                         add (or remove) a label the repository has, on an issue or a pull request
+  owner answer <ask-id> <text>
+                         answer an ask in the owner queue (factory cockpit --needs lists them)
+  owner release <X.Y.Z>  tag main vX.Y.Z and push the tag when software-factory/VERSION on main says X.Y.Z; the release
+                         workflow publishes it
 EOF
 }
 
@@ -334,6 +345,7 @@ case "$cmd" in
   status)    fh "$hooks/factory_status" "$@" ;;
   cockpit)   FACTORY_SELF="$here" fh "$hooks/factory_cockpit" "$@" ;;
   prs)       fh "$hooks/factory_prs" "$@" ;;
+  owner)     fh "$hooks/factory_owner" "$@" ;;
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
   release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;
   clean)     fh "$hooks/factory_claims" clean ;;
