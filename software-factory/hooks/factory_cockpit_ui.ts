@@ -7,12 +7,16 @@
 // own tmux, and a tmux nested over ssh keeps C-b. The config is written to this machine's state folder each time it
 // opens. The right pane runs `factory follow <name>`, which attaches to the agent's real Claude Code session (on this
 // machine with its tmux, elsewhere over ssh). Views are popups that run the existing commands through `less -R`.
-// Read-only in this step: the commands that change GitHub or the machine come with US-11, and the commands that agents
-// and the gate use are never offered. A new owner ask rings the bell from the list, once (#310, US-12). The panes and
-// popups run these, which are not for typing:
+// The owner's actions (#309, US-11) run the factory commands the command line runs (`factory owner merge|label|answer|
+// release|start|stop`, `factory say`), each after a y/N question; the commands that agents and the gate use are never
+// offered. A new owner ask rings the bell from the list, once (#310, US-12). The panes and popups run these, which are
+// not for typing:
 //
-//   factory cockpit --sidebar    the list on the left (off a terminal: one frame, sized by COLUMNS and LINES)
-//   factory cockpit --bar        the `:` command bar: type to pick a factory command (off a terminal: one line on stdin)
+//   factory cockpit --sidebar    the list on the left (off a terminal: one frame, sized by COLUMNS and LINES); on a
+//                                session s says, x stops it, n starts one (the bar, with the action typed in)
+//   factory cockpit --bar [<words>]
+//                                the `:` command bar: type to pick a factory command, the words typed in already (off a
+//                                terminal: the words, else one line on stdin, and the next line answers an action's question)
 //   factory cockpit --needs      the "Needs you" view, from the cache
 //   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json`
 //   factory cockpit --ci         the CI view (#339), from the cache
@@ -74,10 +78,24 @@ export function views(): View[] {
   ];
 }
 
-/** The read-only commands the `:` bar offers. */
+/** The read-only commands the `:` bar offers (the owner's actions are ACTIONS_OFFERED). */
 export const OFFERED = ["status", "prs", "next", "claims list", "agents ls", "messages ls", "issues list", "issues show",
   "ci status", "ci log", "ci runners", "settings list", "settings show", "settings get", "settings help", "settings diff",
   "usage", "report", "lessons show", "doctor", "version", "env", "machine show", "remote list", "help"];
+
+/** The owner's actions (#309, US-11), each the factory command the command line runs, and what it changes. The bar asks
+ *  before it runs one; the rest of the line (flags too, such as `--remove` or `--head`) goes to that command as typed. */
+export const ACTIONS_OFFERED: Record<string, string> = {
+  "owner merge": "GitHub: it merges the pull request",
+  "owner label": "GitHub: it adds or removes a label",
+  "owner answer": "GitHub: it posts the answer in the owner queue",
+  "owner release": "GitHub: it tags main and pushes the tag, which publishes a release",
+  "owner start": "this machine: it starts a session in tmux",
+  "owner stop": "this machine: it ends that session",
+  say: "a session: it types the message into it",
+};
+
+const ACTION_NAMES = Object.keys(ACTIONS_OFFERED);
 
 /** The offered commands that take words after them (an issue, a run, a setting), never a flag: `factory <cmd>` passes
  *  the rest of the line on, and flags such as `next --claim` or `usage --record` change things. */
@@ -86,18 +104,25 @@ const TAKES_WORDS = ["issues show", "ci log", "settings show", "settings get", "
 /** The offered command the words start with, when the rest is allowed after it; else undefined. */
 function offeredLine(words: string[]): string | undefined {
   const text = words.join(" ");
-  const n = OFFERED.filter((o) => text === o || text.startsWith(`${o} `)).sort((a, b) => b.length - a.length)[0];
+  const n = [...OFFERED, ...ACTION_NAMES].filter((o) => text === o || text.startsWith(`${o} `)).sort((a, b) => b.length - a.length)[0];
   if (n === undefined) return undefined;
+  if (ACTION_NAMES.includes(n)) return n;
   const rest = words.slice(n.split(" ").length);
   return !rest.length || (TAKES_WORDS.includes(n) && rest.every((w) => !w.startsWith("-"))) ? n : undefined;
+}
+
+/** The action the words run, or undefined for a read-only command. */
+export function actionOf(words: string[]): string | undefined {
+  const n = offeredLine(words);
+  return n !== undefined && ACTION_NAMES.includes(n) ? n : undefined;
 }
 
 /** What agents and the gate use: never in the cockpit (US-10). */
 const FOR_AGENTS = ["review-pass", "wait", "run-check", "guard", "rereview", "manager-claims"];
 
-/** Commands that change GitHub or the machine: from the cockpit with US-11, not in this read-only step. */
+/** Commands that change GitHub or the machine and are not among the owner's actions: run in a shell, not here. */
 const ACTIONS = ["loop", "coding-agent", "dev-manager", "product-owner", "init", "init-roles", "agent", "autostart",
-  "resume", "heartbeat", "reset-run", "worktree", "say", "verify", "fix", "check", "turbo", "bootstrap", "update",
+  "resume", "heartbeat", "reset-run", "worktree", "verify", "fix", "check", "turbo", "bootstrap", "update",
   "release", "rollback", "migrate-to-release", "cockpit", "follow", "lessons", "settings", "remote", "issues", "ci",
   "machine", "agents", "messages", "alerts", "claims", "next", "usage"];
 
@@ -114,7 +139,7 @@ export function rank(name: string, typed: string): number | null {
 }
 
 export function matches(typed: string): string[] {
-  const ranked = OFFERED.map((n) => [n, rank(n, typed)] as const).filter((x): x is readonly [string, number] => x[1] !== null);
+  const ranked = [...OFFERED, ...ACTION_NAMES].map((n) => [n, rank(n, typed)] as const).filter((x): x is readonly [string, number] => x[1] !== null);
   return ranked.sort((a, b) => a[1] - b[1]).map((x) => x[0]);
 }
 
@@ -133,13 +158,13 @@ export function resolve(line: string): string[] {
   const startsOne = words.length === 1 && OFFERED.some((n) => n.startsWith(first));
   const extra = words.some((w) => w.startsWith("-")) || OFFERED.some((n) => text.startsWith(`${n} `));
   if (extra || (ACTIONS.includes(first) && !startsOne)) {
-    refuse("cockpit_not_offered", `\`factory ${text}\` changes things, and the cockpit is read-only in this step.`,
-      `Run \`factory ${text}\` in a shell; type \`help\` here to see every command.`, 2);
+    refuse("cockpit_not_offered", `\`factory ${text}\` goes past what the cockpit offers.`,
+      `Run \`factory ${text}\` in a shell. Here: the read-only commands, and ${ACTION_NAMES.join(", ")} (each asks first).`, 2);
   }
   const best = matches(text)[0];
   if (best === undefined) {
     refuse("cockpit_no_match", `No factory command the cockpit offers matches "${text}".`,
-      `Type part of one of: ${OFFERED.join(", ")}.`, 2);
+      `Type part of one of: ${[...OFFERED, ...ACTION_NAMES].join(", ")}.`, 2);
   }
   return best.split(" ");
 }
@@ -211,7 +236,7 @@ export function config(root: string, script: string): string {
     "bind Right select-pane -t :.1",
     "bind d detach-client",
     "bind q detach-client",
-    "# : the command bar over the factory's read-only commands.",
+    "# : the command bar over the factory's read-only commands and the owner's actions (each asks first).",
     `bind : ${popup("-w 80% -h 60%", factoryCall(script, ["cockpit", "--bar"]))}`,
     "# The views, as popups running the existing commands through less -R (q closes).",
   ];
@@ -357,8 +382,10 @@ export function frame(snap: Obj | null, vs: View[], selected: number, cols: numb
   all.forEach((e, i) => {
     if (e.kind === "view") body.push(mark(e, i));
   });
-  const keys = rows < 16 ? ["↑↓ Enter · 1-8 · : · q"] :
-    ["", all[selected]?.kind === "session" ? "Enter shows the session" : "Enter opens the view", "↑↓ move · 1-8 views", ": commands · q leave"];
+  const onSession = all[selected]?.kind === "session";
+  const keys = rows < 16 ? [onSession ? "↑↓ Enter · s say · x stop · q" : "↑↓ Enter · 1-8 · : · q"] :
+    ["", onSession ? "Enter shows it · s say · x stop" : "Enter opens the view", "↑↓ move · 1-8 views · n start",
+      ": commands · q leave"];
   const room = Math.max(rows - keys.length, 1);
   const start = Math.min(Math.max(selLine - room + 1, 0), Math.max(body.length - room, 0));
   const shown = body.slice(start, start + room);
@@ -470,7 +497,13 @@ async function sidebarLoop(): Promise<number> {
       const v = vs.find((x) => x.key === key);
       if (v) openView(v);
     } else if (key === ":") popup(["-w", "80%", "-h", "60%"], factoryCall(script, ["cockpit", "--bar"]));
-    else if (key === "q") tmux(sock, ["detach-client"]);
+    else if (key === "s" || key === "x" || key === "n") {
+      // The bar, with the action typed in already: the owner adds the message or the name, then answers its question.
+      const e = entries(snap, vs)[selected];
+      const name = e?.kind === "session" ? e.name : "";
+      const words = key === "n" ? ["owner", "start"] : name ? (key === "s" ? ["say", name] : ["owner", "stop", name]) : [];
+      if (words.length) popup(["-w", "80%", "-h", "60%"], factoryCall(script, ["cockpit", "--bar", ...words]));
+    } else if (key === "q") tmux(sock, ["detach-client"]);
     else if (key === "r") {
       snap = readCache();
     } else if (key === "\x03") break;
@@ -499,13 +532,65 @@ function runOffered(args: string[], paged: boolean): number {
   return p.exitCode ?? 1;
 }
 
-async function barLoop(): Promise<number> {
-  let typed = "";
+// --- the owner's actions (#309, PRD US-11) ---------------------------------------------------------------------------
+//
+// Each runs the factory command the command line runs (`factory owner ...`, `factory say`), and only after the owner
+// answers y to a question that names the command and what it changes. Any other answer, an empty one or none at all
+// runs nothing. They run on this machine's tmux, never the cockpit's own server, so TMUX is dropped.
+
+export const NOT_RUN = "Not run: nothing changed.";
+
+/** The question asked before an action runs. */
+export function question(words: string[]): string {
+  const what = ACTIONS_OFFERED[actionOf(words) ?? ""] ?? "things";
+  return `Run \`factory ${words.join(" ")}\`? It changes ${what}. [y/N] `;
+}
+
+export function yes(answer: string): boolean {
+  return /^\s*y(es)?\s*$/i.test(answer);
+}
+
+/** The arguments an action's words become: `say [--on R] <name>` takes the rest of the line as one message. */
+export function actionArgs(words: string[]): string[] {
+  if (words[0] !== "say") return words;
+  const at = words[1] === "--on" ? 3 : 1;
+  const message = words.slice(at + 1).join(" ");
+  return [...words.slice(0, at + 1), ...(message ? [message] : [])];
+}
+
+/** Runs the action's factory command here, its output on this terminal; returns its exit code. */
+export function runAction(words: string[]): number {
+  const env: Record<string, string | undefined> = { ...process.env };
+  delete env.TMUX;
+  const p = Bun.spawnSync(["bash", factoryScript(top()), ...actionArgs(words)], { stdin: "ignore", stdout: "inherit", stderr: "inherit", env });
+  return p.exitCode ?? 1;
+}
+
+/** On a terminal: answers the question with one key, runs the action on y, and leaves its output on screen. Returns
+ *  the exit code, or null when the answer was no. The caller waits for the next key before closing. */
+function answerAction(words: string[], key: string): number | null {
+  process.stdin.setRawMode(false);
+  process.stdout.write("\x1b[H\x1b[2J");
+  const code = yes(key) ? runAction(words) : null;
+  if (code === null) console.log(NOT_RUN);
+  process.stdout.write("\r\nPress a key to go on.");
+  process.stdin.setRawMode(true);
+  return code;
+}
+
+async function barLoop(prefill: string): Promise<number> {
+  let typed = prefill;
   let at = 0;
+  let asking: string[] | null = null;
+  let finished: number | null = null;
   const draw = () => {
+    if (asking) {
+      process.stdout.write("\x1b[H\x1b[2J" + question(asking) + "\r\ny runs it · any other key does nothing");
+      return;
+    }
     const rows = Math.max((process.stdout.rows || 20) - 3, 1);
     const found = matches(typed).slice(0, rows);
-    const lines = [`factory ${typed}`, "Type to pick · ↑↓ · Enter runs it · Esc closes", "",
+    const lines = [`factory ${typed}`, "Type to pick · ↑↓ · Enter runs it (an action asks first) · Esc closes", "",
       ...found.map((m, i) => (i === at ? `\x1b[7m› ${m}\x1b[0m` : `  ${m}`))];
     if (!found.length) lines.push("  no command the cockpit offers matches");
     process.stdout.write("\x1b[H\x1b[2J" + lines.join("\r\n"));
@@ -514,6 +599,11 @@ async function barLoop(): Promise<number> {
   draw();
   for await (const chunk of process.stdin) {
     const key = String(chunk);
+    if (finished !== null) break;
+    if (asking) {
+      finished = answerAction(asking, key) ?? 0;
+      continue;
+    }
     if (key === "\x1b" || key === "\x03") return 0;
     if (key === "\r" || key === "\n") {
       const pick = matches(typed)[at];
@@ -522,14 +612,23 @@ async function barLoop(): Promise<number> {
       // A line with a flag or extra words is left as typed, so resolve() refuses it rather than running the pick.
       const asTyped = offeredLine(words) || words.some((w) => w.startsWith("-")) || OFFERED.some((n) => words.join(" ").startsWith(`${n} `));
       const line = asTyped ? typed : pick ?? typed;
-      process.stdin.setRawMode(false);
-      process.stdout.write("\x1b[H\x1b[2J");
+      let resolved: string[];
       try {
-        return runOffered(resolve(line), true);
+        resolved = resolve(line);
       } catch (e) {
+        process.stdin.setRawMode(false);
+        process.stdout.write("\x1b[H\x1b[2J");
         await Bun.sleep(4_000); // the refusal stays on screen a moment before the popup closes
         throw e;
       }
+      if (actionOf(resolved)) {
+        asking = resolved;
+        draw();
+        continue;
+      }
+      process.stdin.setRawMode(false);
+      process.stdout.write("\x1b[H\x1b[2J");
+      return runOffered(resolved, true);
     }
     if (key === "\x7f" || key === "\b") typed = typed.slice(0, -1);
     else if (key === "\x1b[A") at = Math.max(at - 1, 0);
@@ -538,13 +637,24 @@ async function barLoop(): Promise<number> {
     if (key !== "\x1b[A" && key !== "\x1b[B") at = 0;
     draw();
   }
-  return 0;
+  process.stdin.setRawMode(false);
+  return finished ?? 0;
 }
 
-export async function bar(): Promise<number> {
-  if (process.stdin.isTTY && process.stdout.isTTY) return barLoop();
-  const line = (await new Response(Bun.stdin.stream()).text()).split(/\r?\n/)[0] ?? "";
-  return runOffered(resolve(line), false);
+/** `factory cockpit --bar [<words>]`: on a terminal the words are typed in already; off one, the command is the words
+ *  (else the first line on stdin) and the next line on stdin answers an action's question. */
+export async function bar(words: string[] = []): Promise<number> {
+  if (process.stdin.isTTY && process.stdout.isTTY) return barLoop(words.length ? `${words.join(" ")} ` : "");
+  const lines = (await new Response(Bun.stdin.stream()).text()).split(/\r?\n/);
+  const line = words.length ? words.join(" ") : lines.shift() ?? "";
+  const resolved = resolve(line);
+  if (!actionOf(resolved)) return runOffered(resolved, false);
+  console.log(question(resolved));
+  if (!yes(lines[0] ?? "")) {
+    console.log(NOT_RUN);
+    return 0;
+  }
+  return runAction(resolved);
 }
 
 // --- the Needs you view ----------------------------------------------------------------------------------------------
@@ -570,7 +680,8 @@ export function needs(): number {
 // questions, protected paths and the next action. The keys that work are at the bottom. Its data is `factory prs
 // --json` (the views cache keeps it, #305), so CI is judged by the manager's one rule. On a terminal: j k (or ↑ ↓)
 // move, r reads again from GitHub, q closes; NO_COLOR turns the colour off. Off a terminal it prints one frame sized
-// by COLUMNS and LINES, with <n> selected (else the first PR), and no colour. Read-only: actions come with US-11.
+// by COLUMNS and LINES, with <n> selected (else the first PR), and no colour. m merges the selected PR after a y/N
+// question, through `factory owner merge <n> --head <the head shown>` (#309), so one that moved since is not merged.
 
 /** `factory prs --json`, or null when it printed no JSON. */
 function readPrs(fresh: boolean): Obj | null {
@@ -745,7 +856,15 @@ export function prDetail(p: Obj, questions: Obj[], cols: number, color: boolean)
   return lines.map((l) => prCut(l, cols));
 }
 
-const PR_KEYS = "j k move · r read again · q close";
+const PR_KEYS = "j k move · m merge · r read again · q close";
+
+/** What `m` runs for a PR: `factory owner merge` pinned to the head this view showed (#309), or null when the view has
+ *  no head for it. A PR that moved since is refused by that command (`pr_changed`), never merged at a newer head. */
+export function mergeWords(p: Obj): string[] | null {
+  const sha = plain(obj(p.head).sha);
+  const n = plain(p.number);
+  return /^[0-9a-f]{7,40}$/i.test(sha) && /^\d+$/.test(n) ? ["owner", "merge", n, "--head", sha] : null;
+}
 
 /** One screen of the Pull requests view, `rows` lines at most, each at most `cols` wide. */
 export function prsFrame(data: Obj | null, selected: number, cols: number, rows: number, color: boolean, repo: string): string[] {
@@ -817,15 +936,41 @@ async function prsLoop(n: number | null): Promise<number> {
     process.stdout.write("\x1b[?25h\r\n");
     throw e;
   }
-  process.stdout.on("resize", () => draw());
+  let asking: string[] | null = null;
+  let shown = false; // an action's output is on screen: the next key goes back to the list
+  // A pending question stays on screen through a resize, and so does an action's output.
+  process.stdout.on("resize", () => {
+    if (asking) draw(`${question(asking)}\r\ny runs it · any other key does nothing`);
+    else if (!shown) draw();
+  });
   try {
     draw();
     // No Esc to close: over a slow ssh link an arrow key can come in two pieces, and its first is a lone Esc.
     for await (const chunk of process.stdin) {
       const key = String(chunk);
       const count = openPulls(data).length;
-      if (key === "q" || key === "\x03") break;
-      if (key === "j" || key === "\x1b[B") selected = Math.min(selected + 1, Math.max(count - 1, 0));
+      if (shown) {
+        shown = false;
+        draw("Reading the pull requests from GitHub…");
+        data = readPrs(true);
+        selected = Math.min(selected, Math.max(openPulls(data).length - 1, 0));
+      } else if (asking) {
+        answerAction(asking, key);
+        asking = null;
+        shown = true;
+        continue;
+      } else if (key === "q" || key === "\x03") break;
+      else if (key === "m") {
+        const p = openPulls(data)[selected];
+        const words = p ? mergeWords(p) : null;
+        if (words) {
+          asking = words;
+          draw(`${question(words)}\r\ny runs it · any other key does nothing`);
+          continue;
+        }
+        draw("This view has no head commit for that pull request: press r to read it again.");
+        continue;
+      } else if (key === "j" || key === "\x1b[B") selected = Math.min(selected + 1, Math.max(count - 1, 0));
       else if (key === "k" || key === "\x1b[A") selected = Math.max(selected - 1, 0);
       else if (key === "r") {
         draw("Reading the pull requests from GitHub…");
