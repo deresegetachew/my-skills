@@ -5,7 +5,10 @@
 // the review claim, and the next action. Below them: unanswered questions, unanswered owner asks, agents that went
 // quiet. `factory status` uses the same CI rule and the same reading of the dev manager's markers (this file).
 //
-//   bun --no-env-file --config=/dev/null .claude/hooks/factory_prs.ts [--json] [--since-days N]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_prs.ts [--json] [--since-days N] [--fresh]
+//
+// The list comes from the views' cache while it is fresh (factory_views_cache.ts, `views.cacheSeconds`); `--fresh`
+// reads GitHub now. A list with a part GitHub couldn't give is never kept.
 //
 // The CI rule: per job name, the newest run that was not skipped decides (a re-run replaces a failure; a skipped run
 // decides nothing). One state for the PR: red (a job failed), running, queued, green; `none` when GitHub shows no
@@ -16,6 +19,7 @@ import { type Config, branchTask, load, loadFromMain, taskLabels, taskSource } f
 import * as fi from "./factory_issues.ts";
 import { Exit, isoUtc, parseArgs, parseIso, pyDumps, pyInt, runMain } from "./factory_lib.ts";
 import * as claims from "./factory_manager_claims.ts";
+import { answer, sayAge } from "./factory_views_cache.ts";
 
 const SHA_IN = /sha=([0-9a-f]{7,40})/;
 const MARKER = /<!--\s*(factory-approved|factory-mustfix|pr-watch)\b([^>]*?)-->/g;
@@ -520,10 +524,10 @@ function show(r: Built): void {
 }
 
 const PROG = "factory_prs.ts";
-const USAGE = `usage: ${PROG} [-h] [--json] [--since-days SINCE_DAYS]`;
+const USAGE = `usage: ${PROG} [-h] [--json] [--since-days SINCE_DAYS] [--fresh]`;
 
 export function main(argv: string[]): number {
-  const a = parseArgs(argv, { valued: ["--since-days"], flags: ["--json"] }, PROG, USAGE);
+  const a = parseArgs(argv, { valued: ["--since-days"], flags: ["--json", "--fresh"] }, PROG, USAGE);
   let sinceDays = 14;
   if (a["since-days"] !== undefined) {
     const v = String(a["since-days"]);
@@ -534,9 +538,13 @@ export function main(argv: string[]): number {
     }
     sinceDays = n;
   }
-  const r = build(load(), sinceDays);
-  if (a.json) console.log(pyDumps(r, { indent: 2 }));
-  else show(r);
+  const cfg = load();
+  const view = { name: "prs" as const, hook: import.meta.path, args: ["--since-days", String(sinceDays)] };
+  const got = answer(cfg, view, Boolean(a.fresh), () => build(cfg, sinceDays),
+    (r) => ![r.pulls, r.questions, r.ownerAsks, r.agents].some(isFailed));
+  if (a.json) console.log(pyDumps(got.data, { indent: 2 }));
+  else show(got.data);
+  sayAge(got.age, Boolean(a.json));
   return 0;
 }
 

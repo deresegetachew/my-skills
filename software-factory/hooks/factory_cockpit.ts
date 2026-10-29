@@ -12,7 +12,8 @@
 //
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
 // missing or older than FACTORY_COCKPIT_CACHE_SECONDS (default 300: a refresh costs a few GitHub calls per open pull
-// request, on the agents' token) it starts one refresh in the background and says how old the line is. The cockpit itself (tmux) is later (US-10): `factory cockpit` alone says so.
+// request, on the agents' token) it starts one refresh in the background and says how old the line is. `factory cockpit`
+// alone opens the tmux cockpit (#308, US-10): factory_cockpit_ui.ts.
 //
 //   factory cockpit watch <item>   the item's sub-manager in its own tmux window, read-only (#307, PRD US-4)
 import { spawn } from "node:child_process";
@@ -177,7 +178,7 @@ function version(missing: Problem[]): Obj {
 export async function snapshot(): Promise<Obj> {
   const [ls, prs, ciStep, doc] = await Promise.all([
     step(hook("factory_agents", "ls", "--json")),
-    step(hook("factory_prs", "--json")),
+    step(hook("factory_prs", "--json", "--fresh")), // read now: this snapshot is the cockpit's own cache
     step(["bash", join(HOOKS, "..", "ci", "ci.sh"), "status", "--json"]),
     step(hook("factory_doctor")),
   ]);
@@ -214,7 +215,7 @@ function writeCache(snap: Obj): void {
   renameSync(tmp, path);
 }
 
-function readCache(): Obj | null {
+export function readCache(): Obj | null {
   const data = parseJson(existsSync(cachePath()) ? readFileSync(cachePath(), "utf8") : "");
   return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Obj) : null;
 }
@@ -262,13 +263,18 @@ export function statusLine(snap: Obj | null, ageSeconds: number | null, ttl: num
   return parts.join(" · ");
 }
 
-function status(): number {
+/** Starts a refresh in the background when the cache is missing or old; returns [snapshot, age in s, ttl]. */
+export function refreshIfOld(): [Obj | null, number | null, number] {
   const ttl = toFloat(process.env.FACTORY_COCKPIT_CACHE_SECONDS || 300) ?? 300;
   const snap = readCache();
   const at = snap ? parseIso(str(snap.generatedAt)) : null;
   const age = at === null ? null : Math.max(Date.now() / 1000 - at, 0);
   if (snap === null || age === null || age >= ttl) refreshInBackground();
-  console.log(statusLine(snap, age, ttl));
+  return [snap, age, ttl];
+}
+
+function status(): number {
+  console.log(statusLine(...refreshIfOld()));
   return 0;
 }
 
@@ -283,10 +289,12 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit needs --json, --status or watch <item>; the tmux cockpit itself comes later (PRD US-10).",
-  fix: "Run `factory cockpit --json` for the snapshot, `factory cockpit --status` for the one line, or " +
-    "`factory cockpit watch <item>` to watch a sub-manager.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs or watch <item>.",
+  fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
+    "one line, or `factory cockpit watch <item>` to watch a sub-manager.",
 };
+
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -333,9 +341,16 @@ function watch(args: string[]): number {
 export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
-  if (rest.length || !["--json", "--status", "--refresh"].includes(flag ?? "")) {
+  if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
+  }
+  if (flag === undefined || ["--sidebar", "--bar", "--needs"].includes(flag)) {
+    const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
+    if (flag === "--sidebar") return ui.sidebar();
+    if (flag === "--bar") return ui.bar();
+    if (flag === "--needs") return ui.needs();
+    return ui.open();
   }
   if (flag === "--status") return status();
   if (flag === "--refresh") return refresh();
