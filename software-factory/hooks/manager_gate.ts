@@ -252,14 +252,14 @@ function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
 }
 
 /** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`) or read
- * from stdin other than a heredoc in the command itself (`cat f | gh ... --body-file -`). */
+ * from stdin (`cat f | gh ... --body-file -`, `-F body=@/dev/stdin`). */
 function hidesBody(flags: Flags, cmd: string): boolean {
   // a body field of gh api, or a bare -F value (gh pr merge's --body-file)
   const fields = values(flags, "-f", "--raw-field", "-F", "--field").filter((v) => v.startsWith("body=") || !v.includes("="));
   const bodies = [...values(flags, "--body", "-b", "--body-file", "--input"), ...fields];
   if (!bodies.length) return false;
   if (SHELL_EXPANSION.test(cmd)) return true;
-  return bodies.some((v) => v === "-" || v.endsWith("=@-")) && !cmd.includes("<<");
+  return bodies.some((v) => /^(\w+=@)?(-|\/dev\/|\/proc\/)/.test(v));
 }
 
 function gitCall(args: string[]): void {
@@ -310,8 +310,8 @@ function main(): void {
           "owner writes it. Leave the ask open for the owner to answer; post your own note without the marker.");
       }
       if (hidesBody(flags, cmd)) {
-        refuse("Write the comment's body as plain text, a heredoc in the command, or a file (--body-file <file>): the gate " +
-          "reads it before the shell runs, so it can't check a body built with $(...) or $VARIABLES or piped in on stdin.");
+        refuse("Write the comment's body as plain text (-f body=\"...\") or in a file you wrote first (-F body=@<file>): the " +
+          "gate reads it before the shell runs, so it can't check a body built with $(...) or $VARIABLES or read from stdin.");
       }
       if (pos[0] === "api") apiCall(flags, pos, cmd);
       else if (pos[0] === "pr" && pos[1] === "merge") {
