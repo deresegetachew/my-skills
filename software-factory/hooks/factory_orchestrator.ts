@@ -11,6 +11,12 @@
 //     `claude -p "/manage-pass <item>"` on the manager settings profile, with the item's fact sheet and thread note in its
 //     prompt, under a lease (factory_lease.ts). A sub-manager does its item and exits. The orchestrator never starts builders.
 //
+// A sub-manager gets a screen (#307, PRD US-4): when the dev manager itself runs in a factory window (FACTORY_WINDOW, as
+// `factory resume` and `loop -i` start it) and tmux is installed, each sub-manager runs in its own tmux window, through
+// the shared step of factory_window.ts: session <repo>-<name>-<item>, window dev-manager-<name>-<item>. Its output is
+// shown there as readable lines and kept in <item>.out; `factory cockpit watch <item>` shows the window read-only.
+// Otherwise it runs with no screen, as before.
+//
 // Labels and comments on GitHub are the source of truth; the only local state is `.git/factory-manager/<name>.log` and the
 // pid files of the sub-managers it started. A thread's memory is a note comment on the task issue (on the PR when there is
 // no issue); it is a memory for the sub-managers, not a cache.
@@ -22,14 +28,15 @@
 //         --wait      wait for the sub-managers it started
 //   factory_orchestrator.ts sub --name N --item <ref> [--interactive]     one sub-manager (what cycle starts)
 import { createHash } from "node:crypto";
-import { appendFileSync, closeSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type Config, load, managerSetting, roleNames, safeAgent, taskLabels, toFloat } from "./factory_config.ts";
 import { comment, type Comment, gh, ghAll, type Issue, taskIssues } from "./factory_issues.ts";
 import * as lease from "./factory_lease.ts";
 import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_roles.ts";
 import { ciState, collect, isoformat, issueOf, isOwn, type Item, minutes, type Pull, reviewState } from "./factory_watch.ts";
-import { bunCmd, Exit, parseArgs, run, runMain } from "./factory_lib.ts";
+import { bunCmd, Exit, parseArgs, run, runMain, which } from "./factory_lib.ts";
+import { type Job, running as sessionRunning, sessionName, startWindow, type Started, WindowError, windowName } from "./factory_window.ts";
 
 export const OWNER_TITLE = "Dev manager: needs the owner";
 export const ASK_RX = /<!--\s*factory-owner-ask\s+id=([^\s>]+)(?:\s+[^>]*?)?\s*-->/; // for=product may follow
@@ -298,6 +305,79 @@ export function leaveVerdict(cfg: Config, name: string, item: Item, before: Set<
 
 // --- one sub-manager ---------------------------------------------------------------------------------------------------
 
+/** The tmux session and window of the sub-manager `name` starts for `ref`. */
+export function subWindow(name: string, ref: string): { session: string; window: string } {
+  return { session: sessionName(`${name}-${ref}`), window: windowName("dev-manager", `${name}-${ref}`) };
+}
+
+/** Where a sub-manager for `ref` is on this clone: the dev manager that runs it now, else one whose run has ended. */
+export function findSub(ref: string): { name: string; live: boolean; out: string } | null {
+  const top = join(commonDir(), "factory-manager");
+  let names: string[];
+  try {
+    names = readdirSync(top).filter((f) => f.endsWith(".d")).map((f) => f.slice(0, -2)).sort();
+  } catch {
+    return null;
+  }
+  const out = (name: string) => join(top, `${name}.d`, `${ref}.out`);
+  const name = names.find((n) => running(n).includes(ref));
+  if (name) return { name, live: true, out: out(name) };
+  const ended = names.find((n) => existsSync(out(n)));
+  return ended ? { name: ended, live: false, out: out(ended) } : null;
+}
+
+/** Runs one sub-manager in its own tmux window and waits for it. Its exit code, null when no window could be made
+ * (the caller then runs it with no screen), or "busy" when a window from an earlier run is still open (it may still
+ * be working, so the caller leaves the item to the next cycle). */
+function inWindow(name: string, ref: string, job: Job, limit: number, out: Out): number | null | "busy" {
+  const d = stateDir(name);
+  const file = join(d, `${ref}.job.json`);
+  rmSync(job.rc, { force: true });
+  const { window } = subWindow(name, ref);
+  writeFileSync(file, JSON.stringify({ ...job, env: { ...job.env, FACTORY_WINDOW: window } }), { mode: 0o600 });
+  let s: Started;
+  try {
+    s = startWindow({ role: "dev-manager", name: `${name}-${ref}`, dir: process.cwd(),
+      argv: [...bunCmd(join(import.meta.dir, "factory_window.ts")), "job", file] });
+  } catch (e) {
+    if (!(e instanceof WindowError)) throw e;
+    if (!existsSync(file)) { // the window took its job and ended before tmux was asked: it ran, so don't run it twice
+      s = { ...subWindow(name, ref), started: true, note: "" };
+    } else {
+      rmSync(file, { force: true });
+      out(`${ref}: no tmux window (${e.message}); running it without one`);
+      return null;
+    }
+  }
+  if (!s.started) {
+    rmSync(file, { force: true });
+    out(`${ref}: its window ${s.window} is still open from an earlier run; leaving it (tmux kill-session -t ${s.session} ends it)`);
+    return "busy";
+  }
+  out(`${ref}: running in tmux window ${s.window} (watch it read-only: factory cockpit watch ${ref})`);
+  const deadline = limit > 0 ? Date.now() + limit * 1000 : Infinity;
+  while (sessionRunning(s.session)) {
+    if (existsSync(job.rc)) { // done; a tmux with remain-on-exit keeps the session, so close it here
+      run(["tmux", "kill-session", "-t", `=${s.session}`]);
+      break;
+    }
+    if (Date.now() >= deadline) {
+      run(["tmux", "kill-session", "-t", `=${s.session}`]);
+      out(`${ref}: stopped after ${(limit / 60).toFixed(0)} minutes (manager.subManagerMinutes)`);
+      return 1;
+    }
+    Bun.sleepSync(500);
+  }
+  try {
+    const rc = Number(readFileSync(job.rc, "utf8").trim());
+    return Number.isInteger(rc) ? rc : 1;
+  } catch {
+    return 1; // the window ended without saying how
+  } finally {
+    rmSync(job.rc, { force: true });
+  }
+}
+
 export function runSub(cfg: Config, name: string, ref: string, interactive = false): number {
   const out = makeOut(name, false);
   const pidfile = join(stateDir(name), `${ref}.pid`);
@@ -335,20 +415,30 @@ export function runSub(cfg: Config, name: string, ref: string, interactive = fal
       rc = run([...args, text], { env, inherit: true }).code;
     } else {
       const logfile = join(stateDir(name), `${ref}.out`);
-      const fd = openSync(logfile, "w");
-      try {
-        const p = Bun.spawnSync(["claude", ...flags, ...permissionFlags(cfg), "-p", text], {
-          env: Object.fromEntries(Object.entries(env).filter((kv): kv is [string, string] => kv[1] !== undefined)),
-          stdin: "ignore", stdout: fd, stderr: fd, timeout: limit * 1000, killSignal: "SIGKILL",
-        });
-        if (p.exitedDueToTimeout) {
-          out(`${ref}: stopped after ${(limit / 60).toFixed(0)} minutes (manager.subManagerMinutes)`);
-          rc = 1;
-        } else rc = p.exitCode ?? 1;
-      } catch {
-        rc = 127;
-      } finally {
-        closeSync(fd);
+      const clean = Object.fromEntries(Object.entries(env).filter((kv): kv is [string, string] => kv[1] !== undefined));
+      let windowed: number | null | "busy" = null;
+      if (process.env.FACTORY_WINDOW && which("tmux")) { // the dev manager has a window, so its sub-managers get one
+        const { TMUX: _t, TMUX_PANE: _p, ...rest } = clean;
+        windowed = inWindow(name, ref, { argv: ["claude", ...flags, ...permissionFlags(cfg), "--output-format", "stream-json",
+          "--verbose", "-p", text], env: rest, log: logfile, rc: join(stateDir(name), `${ref}.rc`) }, limit, out);
+      }
+      if (windowed === "busy") return 0; // no verdict: the open window may still post its own
+      if (windowed !== null) rc = windowed;
+      else {
+        const fd = openSync(logfile, "w");
+        try {
+          const p = Bun.spawnSync(["claude", ...flags, ...permissionFlags(cfg), "-p", text], {
+            env: clean, stdin: "ignore", stdout: fd, stderr: fd, timeout: limit * 1000, killSignal: "SIGKILL",
+          });
+          if (p.exitedDueToTimeout) {
+            out(`${ref}: stopped after ${(limit / 60).toFixed(0)} minutes (manager.subManagerMinutes)`);
+            rc = 1;
+          } else rc = p.exitCode ?? 1;
+        } catch {
+          rc = 127;
+        } finally {
+          closeSync(fd);
+        }
       }
     }
     out(`${ref}: the session ended (${rc === 0 ? "ok" : `exit ${rc}`})`);
