@@ -33,7 +33,7 @@ import { readFileSync } from "node:fs";
 import { type Config, load, taskLabels, toFloat } from "./factory_config.ts";
 import { claimRecord } from "./factory_budget.ts";
 import { machineId } from "./factory_machine.ts";
-import { die, Exit, parseArgs, parseIso, pyDumps, pyQuote, run, runMain, sleepSync } from "./factory_lib.ts";
+import { die, Exit, GITHUB_BUSY, githubBusy, parseArgs, parseIso, pyDumps, pyQuote, run, runMain, sleepSync } from "./factory_lib.ts";
 
 export const CLAIM = /<!--\s*factory-claim\s+agent=([\w.-]+)(?:\s+machine=([\w-]+))?\s*-->/;
 export const RELEASE = /<!--\s*factory-release\s+agent=([\w.-]+)\s*-->/;
@@ -73,14 +73,16 @@ function pyStr(v: unknown): string {
 }
 
 /** `gh api -X <method> <path>` with `data` as the JSON body; the parsed answer (null for an empty one). Stops with
- * the error on a failure, or gives null for a 404 when `ok404`. */
+ * the error on a failure (exit GITHUB_BUSY when GitHub was rate-limited or unreachable, #347), or gives null for a 404
+ * when `ok404`. */
 export function gh<T = unknown>(method: string, path: string, data?: unknown, ok404 = false): T {
   const args = ["gh", "api", "-X", method, path, "-H", "Accept: application/vnd.github+json"];
   if (data !== undefined && data !== null) args.push("--input", "-");
   const p = run(args, data !== undefined && data !== null ? { input: pyDumps(data) } : {});
   if (p.code !== 0) {
     if (ok404 && (p.stderr.includes("404") || (p.stdout + p.stderr).includes("Not Found"))) return null as T;
-    die(`gh api ${method} ${path} failed: ${(p.stderr || p.stdout).trim().slice(0, 300)}`);
+    const said = (p.stderr || p.stdout).trim();
+    throw new Exit(`gh api ${method} ${path} failed: ${said.slice(0, 300)}`, githubBusy(said) ? GITHUB_BUSY : 1);
   }
   return (p.stdout.trim() ? JSON.parse(p.stdout) : null) as T;
 }
