@@ -14,6 +14,7 @@
 //   factory cockpit --sidebar    the list on the left (off a terminal: one frame, sized by COLUMNS and LINES)
 //   factory cockpit --bar        the `:` command bar: type to pick a factory command (off a terminal: one line on stdin)
 //   factory cockpit --needs      the "Needs you" view, from the cache
+//   factory cockpit --settings   the Settings view (#340, factory_cockpit_settings.ts)
 import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "./factory_config.ts";
@@ -37,7 +38,7 @@ function str(v: unknown): string {
 }
 
 /** `str`, without escape sequences or control characters: a PR title or session name can't drive the terminal. */
-function plain(v: unknown): string {
+export function plain(v: unknown): string {
   return str(v)
     .replace(/\x1b\][^\x07\x1b]*(\x07|\x1b\\)?/g, "") // OSC: a window title, a link
     .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "") // CSI: colours, cursor moves, clearing the screen
@@ -61,7 +62,7 @@ export function views(): View[] {
     { key: "3", title: "Tasks & PRD", commands: [issues ? ["issues", "list"] : ["next"]] },
     { key: "4", title: "CI", commands: [["ci", "status"]] },
     { key: "5", title: "Agents & machines", commands: [["agents", "ls"], ["machine", "show"]] },
-    { key: "6", title: "Settings", commands: [["settings", "list"]] },
+    { key: "6", title: "Settings", commands: [["cockpit", "--settings", "--color"]] },
     { key: "7", title: "Health & releases", commands: [["doctor"], ["version"]] },
     { key: "8", title: "Usage & lessons", commands: [["usage"], ["lessons", "show"]] },
   ];

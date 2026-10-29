@@ -92,6 +92,10 @@ Look
   cockpit --status       one line for tmux's status line (counts and "N need you"), from a cache: no GitHub call;
                          an old or empty cache is refreshed in the background
   cockpit --needs        what needs you (owner asks, PRs only a person merges), with links, from the same cache
+  cockpit --settings [--color]
+                         the Settings view (view 6): every setting with its value, where it comes from (main, your
+                         staged change, this machine, default) and what it does, and the staged changes that go out as
+                         one pull request. Read-only; agents can't open it
   cockpit watch <item>   watch the item's sub-manager (pr-12, issue-7) in its own tmux window, read-only: it never
                          sends keys; one that ended points at its log
   prs [--json] [--fresh] what a manager decides from, one list: each open PR with its head, CI judged by one rule,

@@ -289,12 +289,12 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit takes no argument, or --json, --status, --needs or watch <item>.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs, --settings [--color] or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
-    "one line, or `factory cockpit watch <item>` to watch a sub-manager.",
+    "one line, `factory cockpit --settings` for the Settings view, or `factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs"];
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--settings"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -341,6 +341,9 @@ function watch(args: string[]): number {
 export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
+  if (flag === "--settings" && rest.every((a) => a === "--color") && rest.length <= 1) {
+    return (await import("./factory_cockpit_settings.ts")).settingsView(rest);
+  }
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
