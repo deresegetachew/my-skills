@@ -82,7 +82,7 @@ test("settings that need the owner's decision carry the ◆ mark, others do not"
 }, T);
 
 test("project settings are grouped under PROJECT (via PR) by section, machine ones under THIS MACHINE (direct)", () => {
-  const p = setup(BASE, { ci: { runners: 4 }, agents: ["menelik"] });
+  const p = setup(BASE, { "ci.runners": 4, agents: ["menelik"] });
   const r = view(p);
   expect(r.code, r.out).toBe(0);
   const out = r.stdout;
@@ -98,6 +98,8 @@ test("project settings are grouped under PROJECT (via PR) by section, machine on
   expect(agents, out).toBeDefined();
   expect(agents).toContain("menelik");
   expect(agents).toContain("this machine");
+  const runners = lines.find((l) => /^[\s›>│|]*ci\.runners\s/.test(l));
+  expect(runners, out).toMatch(/ci\.runners\s+4\s+this machine/);
 }, T);
 
 test("staged project changes show as pending, and the box lists them as one pull request", () => {

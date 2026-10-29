@@ -564,7 +564,7 @@ export function needs(): number {
 // `factory cockpit --settings [--color]`, towards its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/VSettings.dc.html).
 // The settings as a table: setting, value, from (main, your change, this machine, default), what it does. Project
 // settings by section under PROJECT (via PR), this machine's own under THIS MACHINE (direct). A ◆ marks a setting whose
-// change is the owner's decision. Staged project changes (#306) show as "(pending)" in the table and together in a box,
+// change needs a sign-off (the owner's, or a dev manager's label: the schema's `needs`). Staged project changes (#306) show as "(pending)" in the table and together in a box,
 // as the one pull request `factory settings pr` opens. The keys line names the commands that edit: the view itself only
 // reads. Plain text unless `--color` (and no NO_COLOR); a terminal narrower than the table gets two lines per setting.
 // Agents can't open it: it refuses in an agent session, as `factory settings` refuses their changes.
@@ -650,7 +650,8 @@ function projectRow(data: store.Data, staged: Staged, s: Setting): SettingRow {
 
 function machineRow(data: store.Data, s: Setting): SettingRow {
   const set = Object.hasOwn(data, s.key);
-  return { key: s.key, owner: Boolean(s.needs), help: plain(s.short), value: plain(asText(set ? data[s.key] : s.default)),
+  // No ◆ here: a machine setting is saved at once, with no pull request to sign off (its `needs` says so).
+  return { key: s.key, owner: false, help: plain(s.short), value: plain(asText(set ? data[s.key] : s.default)),
     from: set ? "this machine" : "default", pending: false };
 }
 
@@ -730,7 +731,8 @@ export function settingsLines(cols: number, color: boolean): string[] {
   const out: string[] = [];
   if (cols >= width(title) + source.length + 4) out.push(title + " ".repeat(cols - width(title) - source.length) + c.grey(source));
   else out.push(cut(title, cols), ...wrap(source, cols).map(c.grey));
-  out.push(...wrap("◆ a change to it is the owner's decision · (pending) staged, not on main yet", cols).map(c.grey), "");
+  out.push(...wrap("◆ a change to it needs a sign-off: the owner's, or a dev manager's label (`factory settings help <key>`) · " +
+    "(pending) staged, not on main yet", cols).map(c.grey), "");
   if (cols >= WIDE) {
     out.push(c.grey(`  ${pad("setting", KEY_W - 2)}${pad("value", VALUE_W - 1)} ${pad("from", FROM_W - 1)} what it does`));
   }
