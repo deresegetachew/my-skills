@@ -814,22 +814,26 @@ async function prsLoop(n: number | null): Promise<number> {
     throw e;
   }
   process.stdout.on("resize", () => draw());
-  draw();
-  for await (const chunk of process.stdin) {
-    const key = String(chunk);
-    const count = openPulls(data).length;
-    if (key === "q" || key === "\x1b" || key === "\x03") break;
-    if (key === "j" || key === "\x1b[B") selected = Math.min(selected + 1, Math.max(count - 1, 0));
-    else if (key === "k" || key === "\x1b[A") selected = Math.max(selected - 1, 0);
-    else if (key === "r") {
-      draw("Reading the pull requests from GitHub…");
-      data = readPrs(true);
-      selected = Math.min(selected, Math.max(openPulls(data).length - 1, 0));
-    }
+  try {
     draw();
+    // No Esc to close: over a slow ssh link an arrow key can come in two pieces, and its first is a lone Esc.
+    for await (const chunk of process.stdin) {
+      const key = String(chunk);
+      const count = openPulls(data).length;
+      if (key === "q" || key === "\x03") break;
+      if (key === "j" || key === "\x1b[B") selected = Math.min(selected + 1, Math.max(count - 1, 0));
+      else if (key === "k" || key === "\x1b[A") selected = Math.max(selected - 1, 0);
+      else if (key === "r") {
+        draw("Reading the pull requests from GitHub…");
+        data = readPrs(true);
+        selected = Math.min(selected, Math.max(openPulls(data).length - 1, 0));
+      }
+      draw();
+    }
+  } finally {
+    process.stdin.setRawMode(false); // the terminal is given back however the view ends
+    process.stdout.write("\x1b[?25h\x1b[H\x1b[2J");
   }
-  process.stdin.setRawMode(false);
-  process.stdout.write("\x1b[?25h\x1b[H\x1b[2J");
   return 0;
 }
 
