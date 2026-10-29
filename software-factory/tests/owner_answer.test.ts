@@ -34,6 +34,9 @@ test("the manager gate refuses a comment body it cannot read before the shell ru
     "cat a.md | gh api -X POST repos/{owner}/{repo}/issues/40/comments -F body=@/dev/stdin",
     "cat a.md | gh issue comment 40 --body-file - # <<",
     "gh issue comment 40 --body-file - <<'EOF'\nhi\nEOF",
+    "cat a.md | gh api -X POST repos/{owner}/{repo}/issues/40/comments -F body=@//dev/stdin",
+    "cat a.md | gh issue comment 40 --body-file /./dev/stdin",
+    "printf '<!-- factory-owner-%s' answer > new.md; gh issue comment 40 --body-file new.md",
   ]) {
     const [d, env] = world({ comments: [comment("hi")] });
     const [rc, err] = gate(d, env, command);
@@ -44,7 +47,10 @@ test("the manager gate refuses a comment body it cannot read before the shell ru
 
 test("the manager gate still lets the manager read and write ordinary comments", () => {
   const [d, env] = world({ comments: [comment("hi")] });
+  write(join(d, "tmp", "manager-40.md"), "<!-- factory-owner-ask id=ci-queued -->\nCI is `queued`: $5\n");
   for (const command of [
+    "gh issue comment 40 --body \"- one\n- two\"",
+    "gh issue comment 40 --body-file tmp/manager-40.md",
     "gh issue comment 40 --body \"<!-- factory-owner-ask id=ci-queued -->\nCI is queued\"",
     "gh api -X POST repos/{owner}/{repo}/issues/40/comments -F body=@tmp/manager-40.md",
     "gh api repos/{owner}/{repo}/issues/40/comments -F per_page=100",

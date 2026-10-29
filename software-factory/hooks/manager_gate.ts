@@ -23,7 +23,7 @@
 // closed: an error, or a command it cannot read (gh or git hidden in bash -c, eval, xargs ...), blocks the command.
 // Exit 2 blocks the command and tells Claude why.
 import { basename } from "node:path";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { load, loadFromMain } from "./factory_config.ts";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { Exit, run, runMain } from "./factory_lib.ts";
@@ -40,7 +40,6 @@ const OWN_BODY = /<!--\s*factory-role\s+role=dev-manager\b/;
 const APPROVED = /<!--\s*factory-approved\s+sha=([0-9a-f]{7,40})/;
 const MUSTFIX = /<!--\s*factory-mustfix\b/;
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\b/;
-const BODY_FILE_FLAGS = ["--body-file", "-F", "--field", "--input"];
 const MERGE_PATH = /^(?<repo>repos\/[^/]+\/[^/]+)\/pulls\/(?<n>\d+)\/merge\/?$/;
 const PULL_PATH = /^(?<repo>repos\/[^/]+\/[^/]+)\/pulls\/(?<n>\d+)\/?$/;
 const AGENT_BRANCH = /^task\//;
@@ -234,32 +233,39 @@ function apiCall(flags: Flags, pos: string[], cmd: string): void {
   }
 }
 
-/** Whether a gh call would post the owner-answer marker: in the command's text or its tokens, or in a body file it
- * names (`--body-file f`, `-F body=@f`, `--input f`). A file that can't be read is left to gh to report. */
-function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
-  if (OWNER_ANSWER.test(cmd) || args.some((t) => OWNER_ANSWER.test(t))) return true;
-  for (const v of values(flags, ...BODY_FILE_FLAGS)) {
-    const at = v.indexOf("=@");
-    const path = at >= 0 ? v.slice(at + 2) : v.includes("=") ? "" : v;
-    if (!path || path === "-") continue;
-    try {
-      if (OWNER_ANSWER.test(readFileSync(path, "utf8"))) return true;
-    } catch {
-      // missing or unreadable: gh fails on it the same way
-    }
-  }
-  return false;
+/** The files a gh call reads a body or field from: `--body-file f`, `--input f`, `-F key=@f`, and a bare `-F f`
+ * (gh pr merge's --body-file). */
+function bodyFiles(flags: Flags): string[] {
+  const fields = values(flags, "-F", "--field").filter((v) => !v.includes("=") || /^[\w.[\]-]+=@/.test(v))
+    .map((v) => v.replace(/^[\w.[\]-]+=@/, ""));
+  return [...values(flags, "--body-file", "--input"), ...fields];
 }
 
-/** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`) or read
- * from stdin (`cat f | gh ... --body-file -`, `-F body=@/dev/stdin`). */
+/** Whether a path is a regular file now (after links), so the gate reads what gh will read. */
+function regularFile(path: string): boolean {
+  try {
+    return statSync(realpathSync(path)).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Whether a gh call would post the owner-answer marker: in the command's text or its tokens, or in a body file it
+ * names. */
+function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
+  if (OWNER_ANSWER.test(cmd) || args.some((t) => OWNER_ANSWER.test(t))) return true;
+  return bodyFiles(flags).some((p) => regularFile(p) && OWNER_ANSWER.test(readFileSync(p, "utf8")));
+}
+
+/** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`), or read
+ * from anything but a regular file that exists now (stdin, `/dev/stdin`, a file the same command writes). */
 function hidesBody(flags: Flags, cmd: string): boolean {
-  // a body field of gh api, or a bare -F value (gh pr merge's --body-file)
-  const fields = values(flags, "-f", "--raw-field", "-F", "--field").filter((v) => v.startsWith("body=") || !v.includes("="));
-  const bodies = [...values(flags, "--body", "-b", "--body-file", "--input"), ...fields];
-  if (!bodies.length) return false;
+  const files = bodyFiles(flags);
+  const texts = [...values(flags, "--body", "-b"),
+    ...values(flags, "-f", "--raw-field", "-F", "--field").filter((v) => v.startsWith("body="))];
+  if (!files.length && !texts.length) return false;
   if (SHELL_EXPANSION.test(cmd)) return true;
-  return bodies.some((v) => /^(\w+=@)?(-|\/dev\/|\/proc\/)/.test(v));
+  return files.some((p) => !regularFile(p));
 }
 
 function gitCall(args: string[]): void {
@@ -309,10 +315,6 @@ function main(): void {
         refuse("The manager does not post `<!-- factory-owner-answer -->`: that marker is the owner's answer, and only the " +
           "owner writes it. Leave the ask open for the owner to answer; post your own note without the marker.");
       }
-      if (hidesBody(flags, cmd)) {
-        refuse("Write the comment's body as plain text (-f body=\"...\") or in a file you wrote first (-F body=@<file>): the " +
-          "gate reads it before the shell runs, so it can't check a body built with $(...) or $VARIABLES or read from stdin.");
-      }
       if (pos[0] === "api") apiCall(flags, pos, cmd);
       else if (pos[0] === "pr" && pos[1] === "merge") {
         if (pos.length < 3 || !/^\d+$/.test(pos[2] as string)) refuse("Name the pull request by its number, so the gate checks the one you mean.");
@@ -322,6 +324,10 @@ function main(): void {
         }
         const heads = flags["--match-head-commit"] ?? [];
         gateMerge("repos/{owner}/{repo}", pos[2] as string, heads.length ? (heads[heads.length - 1] as string) : "");
+      }
+      if (hidesBody(flags, cmd)) { // after the checks above, which say more about the commands they cover
+        refuse("Write the comment's body as plain text (-f body=\"...\") or in a file you wrote first (-F body=@<file>): the " +
+          "gate reads it before the shell runs, so it can't check a body built with $(...) or $VARIABLES or read from stdin.");
       }
     } else if (args.some((t) => !t.startsWith("-") && SECRET.test(t))) {
       refuse("The manager does not read secrets files (.env*, secrets/, keys). " + ASK);
