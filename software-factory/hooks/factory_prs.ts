@@ -225,7 +225,7 @@ export function openQuestions(comments: Obj[]): Obj[] {
 }
 
 /** Owner-queue asks nobody has answered: no later comment before the next ask, and no owner-answer marker. With
- * `trusted` logins, a marked answer from anyone else is not the owner's and is skipped (#337). */
+ * `trusted` logins, a reply from anyone else (marked or not) is not the owner's and is skipped (#337). */
 export function openOwnerAsks(comments: Obj[], trusted: Set<string> = new Set()): [string, Obj][] {
   const asks: [string, Obj][] = [];
   const answered = new Set<string>();
@@ -236,8 +236,8 @@ export function openOwnerAsks(comments: Obj[], trusted: Set<string> = new Set())
       asks.push([ask[1] as string, c]);
       continue;
     }
+    if (trusted.size && !trusted.has(loginOf(c))) continue;
     const marked = OWNER_ANSWER.exec(body);
-    if (marked && trusted.size && !trusted.has(loginOf(c))) continue;
     if (marked) answered.add(marked[1] as string);
     else if (asks.length && !answered.has((asks[asks.length - 1] as [string, Obj])[0])) {
       answered.add((asks[asks.length - 1] as [string, Obj])[0]); // a reply under the newest ask, before the next one

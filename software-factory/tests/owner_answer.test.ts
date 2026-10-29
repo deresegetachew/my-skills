@@ -25,10 +25,26 @@ test("the manager gate refuses a comment that carries the owner answer marker", 
   refusedByGate(`printf '%s' '${MARK}' > a.md && gh issue comment 40 --body-file a.md`);
 });
 
+test("the manager gate refuses a comment body it cannot read before the shell runs", () => {
+  for (const command of [
+    "gh issue comment 40 --body \"$(printf '<!-- factory-owner-%s' answer)\"",
+    "gh api -X POST repos/{owner}/{repo}/issues/40/comments -f body=\"$TEXT\"",
+    "cat a.md | gh issue comment 40 --body-file -",
+    "cat a.md | gh api -X POST repos/{owner}/{repo}/issues/40/comments -F body=@-",
+  ]) {
+    const [d, env] = world({ comments: [comment("hi")] });
+    const [rc, err] = gate(d, env, command);
+    expect(rc, `${command} ${err}`).toBe(2);
+    expect(err).toContain("plain text");
+  }
+});
+
 test("the manager gate still lets the manager read and write ordinary comments", () => {
   const [d, env] = world({ comments: [comment("hi")] });
   for (const command of [
     "gh issue comment 40 --body \"<!-- factory-owner-ask id=ci-queued -->\nCI is queued\"",
+    "gh issue comment 40 --body-file - <<'EOF'\n<!-- factory-owner-ask id=ci-queued -->\nCI is queued\nEOF",
+    "gh api repos/{owner}/{repo}/issues/40/comments -F per_page=100",
     "gh api repos/{owner}/{repo}/issues/40/comments --jq '.[] | select(.body | contains(\"factory-owner-answer\"))'",
   ]) {
     const [rc, err] = gate(d, env, command);
@@ -55,6 +71,13 @@ test("a marked owner answer counts only from a trusted login", () => {
   expect(asks(trusted, said(`${MARK}\nok`, "boss"))).toEqual(["renumber"]);
   expect(asks(trusted, said(`${MARK}\nok`, "me")), "the agents' answer closed the ask").toEqual(["ci-queued", "renumber"]);
   expect(asks({}, said(`${MARK}\nok`, "me")), "with no trusted logins any answer counts, as before").toEqual(["renumber"]);
+});
+
+test("a plain reply closes an owner ask only from a trusted login", () => {
+  const trusted = { trustedReviewers: ["boss"] };
+  expect(asks(trusted, said("noted", "me")), "the agents' reply closed the ask").toEqual(["ci-queued", "renumber"]);
+  expect(asks(trusted, said("Yes, renumber them.", "boss"))).toEqual(["ci-queued"]);
+  expect(asks({}, said("noted", "me")), "with no trusted logins any reply counts, as before").toEqual(["ci-queued"]);
 });
 
 function stageApproval(cfg: Row, answer: Row): string {

@@ -13,7 +13,8 @@
 //   - deleting refs (`git push --delete`, `git push origin :branch`, `git branch -d`, `git update-ref -d`,
 //     `gh api -X DELETE .../git/refs/...`), force-pushing, and pushing to the main branch;
 //   - a gh command that carries `<!-- factory-owner-answer` (in the command or a body file it names): that marker is
-//     the owner's answer, and only the owner writes it (#337);
+//     the owner's answer, and only the owner writes it (#337); for the same reason, a comment body it can't read
+//     (built with $(...) or $VARIABLES, or piped in on stdin);
 //   - writes through `gh api` to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks
 //     and deploy keys (reading them is fine);
 //   - reading secrets files (`.env*`, `secrets/`, keys) with a shell command.
@@ -250,6 +251,17 @@ function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
   return false;
 }
 
+/** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`) or read
+ * from stdin other than a heredoc in the command itself (`cat f | gh ... --body-file -`). */
+function hidesBody(flags: Flags, cmd: string): boolean {
+  // a body field of gh api, or a bare -F value (gh pr merge's --body-file)
+  const fields = values(flags, "-f", "--raw-field", "-F", "--field").filter((v) => v.startsWith("body=") || !v.includes("="));
+  const bodies = [...values(flags, "--body", "-b", "--body-file", "--input"), ...fields];
+  if (!bodies.length) return false;
+  if (SHELL_EXPANSION.test(cmd)) return true;
+  return bodies.some((v) => v === "-" || v.endsWith("=@-")) && !cmd.includes("<<");
+}
+
 function gitCall(args: string[]): void {
   let i = 0;
   while (i < args.length && (args[i] as string).startsWith("-")) i += GIT_VALUE_FLAGS.has(args[i] as string) ? 2 : 1;
@@ -296,6 +308,10 @@ function main(): void {
       if (postsOwnerAnswer(flags, args, cmd)) {
         refuse("The manager does not post `<!-- factory-owner-answer -->`: that marker is the owner's answer, and only the " +
           "owner writes it. Leave the ask open for the owner to answer; post your own note without the marker.");
+      }
+      if (hidesBody(flags, cmd)) {
+        refuse("Write the comment's body as plain text, a heredoc in the command, or a file (--body-file <file>): the gate " +
+          "reads it before the shell runs, so it can't check a body built with $(...) or $VARIABLES or piped in on stdin.");
       }
       if (pos[0] === "api") apiCall(flags, pos, cmd);
       else if (pos[0] === "pr" && pos[1] === "merge") {
