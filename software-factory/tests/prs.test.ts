@@ -307,10 +307,10 @@ test("owner asks carry forProduct and a state: open, owner or product (#352)", (
   expect(asks.get("back")).toMatchObject({ forProduct: true, state: "product" });
   expect(asks.has("gone")).toBe(false);
   const text = prs(sc)[1].stdout;
-  expect(text).toMatch(/^ {2}waits waiting \S+ for the owner \(the product owner replied\): https:\/\/github\.com\/o\/r\/issues\/60#c3$/m);
-  expect(text).toMatch(/^ {2}fresh waiting \S+ for the product owner: https:/m);
-  expect(text).toMatch(/^ {2}back waiting \S+ for the product owner: https:/m);
-  expect(text).toMatch(/^ {2}plain waiting \S+: https:/m);
+  expect(text).toMatch(/^ {2}waits waiting \d+ \w+ for the owner \(the product owner replied\): https:\/\/github\.com\/o\/r\/issues\/60#c3$/m);
+  expect(text).toMatch(/^ {2}fresh waiting \d+ \w+ for the product owner: https:/m);
+  expect(text).toMatch(/^ {2}back waiting \d+ \w+ for the product owner: https:/m);
+  expect(text).toMatch(/^ {2}plain waiting \d+ \w+: https:/m);
 });
 
 test("plain text is compact and has every part", () => {
