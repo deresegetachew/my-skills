@@ -201,7 +201,8 @@ Agents
 **CI, judged by one rule.** For each job name, the newest run that was not skipped decides: a re-run replaces a
 failure, and a skipped run decides nothing. The PR gets one state: `red` (a job failed, was cancelled or timed out),
 else `running`, else `queued`, else `green`. `none` means GitHub shows no runs yet; `unknown` means they could not be
-read (the other PRs still show). `notGreen` names the jobs that are not green. `factory status` uses the same rule
+read (the other PRs still show). `notGreen` names the jobs that are not green. `runs` counts every check run; `jobs` counts the
+job names the rule judged, so a re-run or a skipped run is not counted again. `factory status` uses the same rule
 and the same reading of the markers (both come from `factory_prs.ts`).
 
 **Markers per commit.** `markers` holds the newest `factory-approved`, `factory-mustfix` or `pr-watch` for each
@@ -249,7 +250,7 @@ agents that are `silent` or `down`, and `staleTasks`: in-progress tasks quiet fo
       "head": {"sha": "<40 hex>", "ageMinutes": 14},                  // age of the head commit
       "labels": ["factory-hold", "agent:taytu"],
       "agent": "taytu" | null, "agentPr": true,
-      "ci": {"state": "green|red|running|queued|none|unknown", "notGreen": [{"name": "lint", "state": "red"}], "runs": 3},
+      "ci": {"state": "green|red|running|queued|none|unknown", "notGreen": [{"name": "lint", "state": "red"}], "runs": 3, "jobs": 2},
       "markers": [{"kind": "factory-approved|factory-mustfix|pr-watch", "sha": "<hex>" | null, "at": "<ISO>", "namesHead": true}],
       "headMarker": "factory-approved|factory-mustfix|pr-watch" | null,
       "gate": "approved|approval stale|must-fix|must-fix (older commit)" | null,   // the merge gate's reading

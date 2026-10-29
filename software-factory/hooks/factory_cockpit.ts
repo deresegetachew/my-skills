@@ -13,7 +13,8 @@
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
 // missing or older than FACTORY_COCKPIT_CACHE_SECONDS (default 300: a refresh costs a few GitHub calls per open pull
 // request, on the agents' token) it starts one refresh in the background and says how old the line is. `factory cockpit`
-// alone opens the tmux cockpit (#308, US-10): factory_cockpit_ui.ts.
+// alone opens the tmux cockpit (#308, US-10): factory_cockpit_ui.ts. `--prs [<n>]` is its Pull requests view (#338),
+// there too.
 //
 //   factory cockpit watch <item>   the item's sub-manager in its own tmux window, read-only (#307, PRD US-4)
 import { spawn } from "node:child_process";
@@ -289,12 +290,12 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit takes no argument, or --json, --status, --needs or watch <item>.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
-    "one line, or `factory cockpit watch <item>` to watch a sub-manager.",
+    "one line, `factory cockpit --prs` for the pull requests, or `factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs"];
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -341,15 +342,17 @@ function watch(args: string[]): number {
 export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
+  if (flag === "--prs") return (await import("./factory_cockpit_ui.ts")).prsView(rest); // the Pull requests view (#338)
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
   }
-  if (flag === undefined || ["--sidebar", "--bar", "--needs"].includes(flag)) {
+  if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci"].includes(flag)) {
     const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
     if (flag === "--sidebar") return ui.sidebar();
     if (flag === "--bar") return ui.bar();
     if (flag === "--needs") return ui.needs();
+    if (flag === "--ci") return ui.ciView(); // the CI view (#339)
     return ui.open();
   }
   if (flag === "--status") return status();
