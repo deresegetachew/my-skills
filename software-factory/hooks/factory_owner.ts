@@ -21,7 +21,7 @@ import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { type Config, load, loadFromMain } from "./factory_config.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
 import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
-import { OWNER_ASK, OWNER_QUEUE_TITLE, openOwnerAsks } from "./factory_prs.ts";
+import { OWNER_ASK, OWNER_QUEUE_TITLE, openOwnerAsks, trustedOf } from "./factory_prs.ts";
 import { TAG_RE } from "./factory_release.ts";
 
 const REPO = "repos/{owner}/{repo}";
@@ -207,7 +207,7 @@ function answer(id: string | undefined, text: string): void {
   }
   const comments = apiAll<Comment>(`${REPO}/issues/${queue.number}/comments`) as Row[];
   const asked = comments.map((c) => OWNER_ASK.exec(str(c.body))?.[1]).filter((s): s is string => Boolean(s));
-  const open = openOwnerAsks(comments).map(([slug]) => slug);
+  const open = openOwnerAsks(comments, trustedOf(load())).map(([slug]) => slug);
   if (!asked.includes(id)) {
     refuse("no_such_ask", `There is no ask \`${id}\` in #${queue.number}. Open: ${open.length ? open.join(", ") : "none"}.`,
       "`factory cockpit --needs` lists the open asks with their ids.");
