@@ -12,6 +12,8 @@
 //     `<!-- factory-role role=dev-manager ... -->`): its own PRs wait for the owner;
 //   - deleting refs (`git push --delete`, `git push origin :branch`, `git branch -d`, `git update-ref -d`,
 //     `gh api -X DELETE .../git/refs/...`), force-pushing, and pushing to the main branch;
+//   - a gh command that carries `<!-- factory-owner-answer` (in the command or a body file it names): that marker is
+//     the owner's answer, and only the owner writes it (#337);
 //   - writes through `gh api` to `.github/` content, branch protection, rulesets, Actions secrets and variables, webhooks
 //     and deploy keys (reading them is fine);
 //   - reading secrets files (`.env*`, `secrets/`, keys) with a shell command.
@@ -36,6 +38,8 @@ const OWN_BRANCH = /^manager\//;
 const OWN_BODY = /<!--\s*factory-role\s+role=dev-manager\b/;
 const APPROVED = /<!--\s*factory-approved\s+sha=([0-9a-f]{7,40})/;
 const MUSTFIX = /<!--\s*factory-mustfix\b/;
+const OWNER_ANSWER = /<!--\s*factory-owner-answer\b/;
+const BODY_FILE_FLAGS = ["--body-file", "-F", "--field", "--input"];
 const MERGE_PATH = /^(?<repo>repos\/[^/]+\/[^/]+)\/pulls\/(?<n>\d+)\/merge\/?$/;
 const PULL_PATH = /^(?<repo>repos\/[^/]+\/[^/]+)\/pulls\/(?<n>\d+)\/?$/;
 const AGENT_BRANCH = /^task\//;
@@ -229,6 +233,23 @@ function apiCall(flags: Flags, pos: string[], cmd: string): void {
   }
 }
 
+/** Whether a gh call would post the owner-answer marker: in the command's text or its tokens, or in a body file it
+ * names (`--body-file f`, `-F body=@f`, `--input f`). A file that can't be read is left to gh to report. */
+function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
+  if (OWNER_ANSWER.test(cmd) || args.some((t) => OWNER_ANSWER.test(t))) return true;
+  for (const v of values(flags, ...BODY_FILE_FLAGS)) {
+    const at = v.indexOf("=@");
+    const path = at >= 0 ? v.slice(at + 2) : v.includes("=") ? "" : v;
+    if (!path || path === "-") continue;
+    try {
+      if (OWNER_ANSWER.test(readFileSync(path, "utf8"))) return true;
+    } catch {
+      // missing or unreadable: gh fails on it the same way
+    }
+  }
+  return false;
+}
+
 function gitCall(args: string[]): void {
   let i = 0;
   while (i < args.length && (args[i] as string).startsWith("-")) i += GIT_VALUE_FLAGS.has(args[i] as string) ? 2 : 1;
@@ -272,6 +293,10 @@ function main(): void {
     if (prog === "git") gitCall(args);
     else if (prog === "gh") {
       const [flags, pos] = parseArgs(args, new Set([...API_VALUE_FLAGS, ...MERGE_VALUE_FLAGS, ...GLOBAL_WITH_VALUE]));
+      if (postsOwnerAnswer(flags, args, cmd)) {
+        refuse("The manager does not post `<!-- factory-owner-answer -->`: that marker is the owner's answer, and only the " +
+          "owner writes it. Leave the ask open for the owner to answer; post your own note without the marker.");
+      }
       if (pos[0] === "api") apiCall(flags, pos, cmd);
       else if (pos[0] === "pr" && pos[1] === "merge") {
         if (pos.length < 3 || !/^\d+$/.test(pos[2] as string)) refuse("Name the pull request by its number, so the gate checks the one you mean.");

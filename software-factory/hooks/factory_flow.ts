@@ -20,6 +20,7 @@ import { comment, type Comment, ghAll, type Issue, names } from "./factory_issue
 import { refuse } from "./factory_machine.ts";
 import { ownerQueue } from "./factory_orchestrator.ts";
 import { parseStories, storyRefs } from "./factory_prd.ts";
+import { trustedOf } from "./factory_prs.ts";
 import { pyDumps, runMain } from "./factory_lib.ts";
 
 export const GATES = ["vision", "design", "plan"] as const;
@@ -63,8 +64,9 @@ export function hasFiles(folder: string): boolean {
 }
 
 /** {stage: 'approved' | 'asked' | 'answered'} from the owner-queue comments, oldest first. A reply under a stage ask
- * that says yes (or carries the answer marker) approves it; any other reply leaves it open as `answered`. */
-export function approvals(comments: Comment[]): Record<string, string> {
+ * that says yes (or carries the answer marker) approves it; any other reply leaves it open as `answered`. With
+ * `trusted` logins, only their replies count: an agent's yes is not the owner's (#337). */
+export function approvals(comments: Comment[], trusted: Set<string> = new Set()): Record<string, string> {
   const state: Record<string, string> = {};
   let last: string | null = null;
   for (const c of comments) {
@@ -75,6 +77,7 @@ export function approvals(comments: Comment[]): Record<string, string> {
       state[last] = "asked";
       continue;
     }
+    if (trusted.size && !trusted.has(c.user?.login ?? "")) continue;
     const m = ANSWER.exec(body);
     if (m && (m[1] as string) in state) state[m[1] as string] = "approved";
     else if (last && (state[last] === "asked" || state[last] === "answered")) {
@@ -129,7 +132,7 @@ export function status(cfg: Config, comments: Comment[] | null = null, issues: I
   const cs = comments ?? (queue ? ghAll<Comment>(`repos/{owner}/{repo}/issues/${queue}/comments`) : []);
   const all = issues ?? ghAll<Issue>("repos/{owner}/{repo}/issues?state=all");
   const ev = evidence(cfg, all);
-  const approved = approvals(cs);
+  const approved = approvals(cs, trustedOf(cfg));
   const rows: Row[] = [];
   for (const name of GATES) {
     const [done, line] = ev[name] as [boolean, string];

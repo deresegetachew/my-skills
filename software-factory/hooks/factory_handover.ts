@@ -17,7 +17,7 @@ import { cards } from "./factory_cards.ts";
 import { type Comment, ghAll, taskIssues } from "./factory_issues.ts";
 import { folders, number } from "./factory_numbers.ts";
 import { ownerQueue } from "./factory_orchestrator.ts";
-import { openOwnerAsks } from "./factory_prs.ts";
+import { openOwnerAsks, trustedOf } from "./factory_prs.ts";
 import { type Pull, precheck } from "./factory_wait.ts";
 import { die, pyDumps, run, runMain, splitLines } from "./factory_lib.ts";
 
@@ -78,7 +78,7 @@ export function snapshot(cfg: Config): Snapshot {
   const queue = ownerQueue(cfg, false);
   const asks: { id: string; line: string }[] = [];
   if (queue) {
-    for (const [slug, c] of openOwnerAsks(ghAll<Comment>(`repos/{owner}/{repo}/issues/${queue}/comments`))) {
+    for (const [slug, c] of openOwnerAsks(ghAll<Comment>(`repos/{owner}/{repo}/issues/${queue}/comments`), trustedOf(cfg))) {
       asks.push({ id: slug, line: firstLine(typeof c.body === "string" ? c.body : "") });
     }
   }

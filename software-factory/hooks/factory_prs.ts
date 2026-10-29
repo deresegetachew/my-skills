@@ -224,8 +224,9 @@ export function openQuestions(comments: Obj[]): Obj[] {
   return asked;
 }
 
-/** Owner-queue asks nobody has answered: no later comment before the next ask, and no owner-answer marker. */
-export function openOwnerAsks(comments: Obj[]): [string, Obj][] {
+/** Owner-queue asks nobody has answered: no later comment before the next ask, and no owner-answer marker. With
+ * `trusted` logins, a marked answer from anyone else is not the owner's and is skipped (#337). */
+export function openOwnerAsks(comments: Obj[], trusted: Set<string> = new Set()): [string, Obj][] {
   const asks: [string, Obj][] = [];
   const answered = new Set<string>();
   for (const c of comments) {
@@ -236,6 +237,7 @@ export function openOwnerAsks(comments: Obj[]): [string, Obj][] {
       continue;
     }
     const marked = OWNER_ANSWER.exec(body);
+    if (marked && trusted.size && !trusted.has(loginOf(c))) continue;
     if (marked) answered.add(marked[1] as string);
     else if (asks.length && !answered.has((asks[asks.length - 1] as [string, Obj])[0])) {
       answered.add((asks[asks.length - 1] as [string, Obj])[0]); // a reply under the newest ask, before the next one
@@ -373,7 +375,8 @@ export type QuestionOut = { kind: string; number: number; title: string; url: un
 export type AskOut = { id: string; issue: number; url: unknown; ageMinutes: number | null };
 
 /** Unanswered questions on open PRs and open issues, and unanswered owner-queue asks. */
-function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, now: number, sinceDays: number): [QuestionOut[], AskOut[]] {
+function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, now: number, sinceDays: number,
+  trusted: Set<string>): [QuestionOut[], AskOut[]] {
   const issues = fi.ghAll<Obj>("repos/{owner}/{repo}/issues?state=open");
   const plain = new Map<number, Obj>(issues.filter((i) => !("pull_request" in i)).map((i) => [Number(i.number), i]));
   const prs = new Map(openPrs.map((p) => [p.number, p]));
@@ -400,7 +403,7 @@ function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, no
   const asks: AskOut[] = [];
   for (const [n, i] of plain) {
     if (str(i.title).startsWith(OWNER_QUEUE_TITLE)) {
-      for (const [slug, c] of openOwnerAsks(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`))) {
+      for (const [slug, c] of openOwnerAsks(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`), trusted)) {
         asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now) });
       }
     }
@@ -464,7 +467,7 @@ export function build(cfg: Config, sinceDays = 14): Built {
     result.questions = { error: got.error };
     result.ownerAsks = { error: got.error };
   } else {
-    const both = section(() => questionsAndAsks(got.pulls, got.comments, now, sinceDays));
+    const both = section(() => questionsAndAsks(got.pulls, got.comments, now, sinceDays, trustedOf(gateCfg)));
     if (isFailed(both)) {
       result.questions = both;
       result.ownerAsks = both;

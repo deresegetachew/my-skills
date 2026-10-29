@@ -17,10 +17,11 @@
 // Read only on GitHub. The cockpit rings the bell for the same asks in its own window (#310, US-12), never a notice.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { load } from "./factory_config.ts";
 import { ghAll } from "./factory_issues.ts";
 import { Exit, FactoryError, fail, pyDumps, pyRepr, run, runMain, which } from "./factory_lib.ts";
 import { refuse, stateDir } from "./factory_machine.ts";
-import { OWNER_ASK, OWNER_QUEUE_TITLE, openOwnerAsks } from "./factory_prs.ts";
+import { OWNER_ASK, OWNER_QUEUE_TITLE, openOwnerAsks, trustedOf } from "./factory_prs.ts";
 
 const FILE = "alerts.json";
 const TITLE = "Factory: needs you";
@@ -52,11 +53,12 @@ function firstLine(body: string): string {
 
 /** The open owner-queue asks, oldest first. Stops with {code: alerts-github} when GitHub can't be read. */
 export function openAsks(): Ask[] {
+  const trusted = trustedOf(load());
   try {
     const asks: Ask[] = [];
     for (const i of ghAll<Obj>("repos/{owner}/{repo}/issues?state=open")) {
       if (i.title !== OWNER_QUEUE_TITLE || "pull_request" in i) continue;
-      for (const [slug, c] of openOwnerAsks(ghAll<Obj>(`repos/{owner}/{repo}/issues/${i.number}/comments`))) {
+      for (const [slug, c] of openOwnerAsks(ghAll<Obj>(`repos/{owner}/{repo}/issues/${i.number}/comments`), trusted)) {
         asks.push({ key: `${i.number}:${slug}`, slug, text: firstLine(String(c.body ?? "")),
           url: typeof c.html_url === "string" ? c.html_url : null });
       }

@@ -5,7 +5,7 @@
 // Files run in parallel (--jobs N, or FACTORY_TEST_JOBS, default min(CPU count, 8)), biggest first. Each file's report
 // is printed whole when it finishes, so output never interleaves. Arguments that are not options pick files by name
 // (`bun tools/run_tests.ts issues` runs tests/issues.test.ts).
-import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
@@ -77,6 +77,17 @@ function removeScratch(path: string): void {
   }
 }
 
+/** A git config for the tests: the machine's own (~/.gitconfig, then git's XDG file) with signing turned off, so a test
+ * that commits or tags passes on a machine that signs them (#337). A file that is missing is skipped by git. */
+function gitConfig(scratch: string): string {
+  const home = process.env.HOME ?? "";
+  const xdg = process.env.XDG_CONFIG_HOME || join(home, ".config");
+  const path = join(scratch, "gitconfig");
+  writeFileSync(path, [join(xdg, "git", "config"), join(home, ".gitconfig")].map((p) => `[include]\n\tpath = ${JSON.stringify(p)}\n`)
+    .join("") + "[commit]\n\tgpgsign = false\n[tag]\n\tgpgsign = false\n\tforceSignAnnotated = false\n");
+  return path;
+}
+
 async function runFile(path: string): Promise<Result> {
   const start = Date.now();
   const rel = relative(ROOT, path);
@@ -89,6 +100,7 @@ async function runFile(path: string): Promise<Result> {
     FACTORY_CONFIG_DIR: join(scratch, "config"),
     XDG_STATE_HOME: join(scratch, "state"),
     TMPDIR: join(scratch, "tmp"),
+    GIT_CONFIG_GLOBAL: gitConfig(scratch),
     // `pick` waits 2 s after claiming for a simultaneous claim; the tests' claims are made up in advance.
     FACTORY_CLAIM_SETTLE_SECONDS: "0",
     FORCE_COLOR: "0",
