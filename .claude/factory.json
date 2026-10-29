@@ -1,13 +1,19 @@
 {
   "_about": "my-skills builds itself with its own factory (#112). Only what differs from the defaults is set here; `factory settings` shows the rest. Tests: bun tools/run_tests.ts (also CI). protected: pull requests that touch these paths are merged by the dev manager or the owner. The kit's own files (agents, skills, hooks that guard, CI, the release) are listed one by one so ordinary factory changes can still merge themselves.",
-  "agents": ["menelik", "taytu", "haile"],
+  "agents": [
+    "menelik",
+    "taytu",
+    "haile"
+  ],
   "tasks": {
     "source": "issues",
     "staleHours": 3
   },
   "mainBranch": "main",
   "prd": "software-factory/docs/PRD.md",
-  "trustedReviewers": ["deresegetachew"],
+  "trustedReviewers": [
+    "deresegetachew"
+  ],
   "permissions": {
     "allow": [
       "Bash(bun tools/run_tests.ts*)",
@@ -67,5 +73,6 @@
         "^\\.github/workflows/"
       ]
     }
-  }
+  },
+  "waitMinutes": 5
 }
