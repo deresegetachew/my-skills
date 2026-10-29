@@ -343,6 +343,7 @@ export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
   if (flag === "--prs") return (await import("./factory_cockpit_ui.ts")).prsView(rest); // the Pull requests view (#338)
+  if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
@@ -350,7 +351,6 @@ export async function main(argv: string[]): Promise<number> {
   if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci"].includes(flag)) {
     const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
     if (flag === "--sidebar") return ui.sidebar();
-    if (flag === "--bar") return ui.bar();
     if (flag === "--needs") return ui.needs();
     if (flag === "--ci") return ui.ciView(); // the CI view (#339)
     return ui.open();
