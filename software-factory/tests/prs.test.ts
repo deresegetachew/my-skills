@@ -286,6 +286,33 @@ test("questions owner asks and agents below the pull requests", () => {
   expect((out.staleTasks as Row[]).map((x) => x.number)).toEqual([7]);
 });
 
+test("owner asks carry forProduct and a state: open, owner or product (#352)", () => {
+  const c = (n: number, body: string): Row => ({ id: n, body, created_at: `2020-01-01T0${n}:00:00Z`,
+    html_url: `https://github.com/o/r/issues/60#c${n}`, issue_url: "x/issues/60" });
+  const a = (slug: string, tag: string, n: number): Row => c(n, `<!-- factory-owner-ask id=${slug}${tag} -->\nthis needs your yes`);
+  const po = (slug: string, n: number): Row => c(n, `<!-- factory-po-reply ask=${slug} -->\nmy reply`);
+  const sc = scenario({});
+  sc.issues = [{ number: 60, title: "Dev manager: needs the owner", state: "open", labels: [], body: "" }];
+  sc["issues/60/comments"] = [
+    a("plain", "", 1), a("fresh", " for=product", 2), a("waits", " for=product", 3), po("waits", 4),
+    a("back", " for=product", 5), po("back", 6), c(7, "<!-- factory-owner-answer id=back -->\nno, do it so"),
+    a("gone", " for=product", 8), c(9, "<!-- factory-owner-answer id=gone -->\nok"), // answered with no po reply: left out
+  ];
+  const [, p] = prs(sc, "--json");
+  expect(p.code, p.out).toBe(0);
+  const asks = new Map(((JSON.parse(p.stdout) as Row).ownerAsks as Row[]).map((x) => [x.id as string, x]));
+  expect(asks.get("plain")).toMatchObject({ forProduct: false, state: "open" });
+  expect(asks.get("fresh")).toMatchObject({ forProduct: true, state: "open" });
+  expect(asks.get("waits")).toMatchObject({ forProduct: true, state: "owner" });
+  expect(asks.get("back")).toMatchObject({ forProduct: true, state: "product" });
+  expect(asks.has("gone")).toBe(false);
+  const text = prs(sc)[1].stdout;
+  expect(text).toMatch(/^ {2}waits waiting \S+ for the owner \(the product owner replied\): https:\/\/github\.com\/o\/r\/issues\/60#c3$/m);
+  expect(text).toMatch(/^ {2}fresh waiting \S+ for the product owner: https:/m);
+  expect(text).toMatch(/^ {2}back waiting \S+ for the product owner: https:/m);
+  expect(text).toMatch(/^ {2}plain waiting \S+: https:/m);
+});
+
 test("plain text is compact and has every part", () => {
   const p1 = run(1, [check("t")], [marker("factory-approved", SHAS[1] as string)], { labels: ["agent:taytu"] });
   const p2 = run(2, [check("lint", "failure")], [], { draft: true });

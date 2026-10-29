@@ -182,3 +182,48 @@ test("the watcher still sees an old style question on a pull request", () => {
   const kinds = (JSON.parse(p.stdout) as { kind: string; ref: string }[]).map((i) => [i.kind, i.ref]);
   expect(kinds).toContainEqual(["question", "question-7"]);
 });
+
+// --- the product owner's replies wait for the owner (#352) ---------------------------------------------------------------
+
+const PO_REPLY = (slug: string, done = ""): string => `<!-- factory-po-reply ask=${slug}${done} -->\nI looked: here is my reply.`;
+
+function workOf(comments: string[]): { out: string; code: number } {
+  const [, work, env] = poProject({ db: { issues: [QUEUE], comments: { "40": comments } } });
+  const p = factory(work, env, ["product-owner", "loop", "--once", "--dry-run"]);
+  return { out: p.stdout, code: p.code };
+}
+
+test("an ask the product owner replied to waits for the owner and is not offered again (#352)", () => {
+  const r = workOf([ask("a", "for=product"), PO_REPLY("a")]);
+  expect(r.code).toBe(0);
+  expect(r.out).not.toContain("ask a for product");
+});
+
+test("an owner answer after the po reply puts the ask back to the product owner, marked or not (#352)", () => {
+  for (const answer of ["<!-- factory-owner-answer id=a -->\nUse the blue one.", "Use the blue one."]) {
+    const r = workOf([ask("a", "for=product"), PO_REPLY("a"), answer]);
+    expect(r.out, answer).toContain("ask a for product");
+  }
+});
+
+test("an unmarked comment answers the newest ask or po reply before it (#352)", () => {
+  // b was posted before the po reply to a, so the unmarked comment belongs to a's thread
+  const r = workOf([ask("a", "for=product"), ask("b", "for=product", "this needs your yes: b?"), PO_REPLY("a"), "Fine, go on."]);
+  expect(r.out).toContain("ask a for product");
+  expect(r.out).toContain("ask b for product");
+});
+
+test("a po reply marked done closes the ask, and a later owner comment brings it back (#352)", () => {
+  expect(workOf([ask("a", "for=product"), PO_REPLY("a", " done")]).out).not.toContain("ask a for product");
+  expect(workOf([ask("a", "for=product"), PO_REPLY("a", " done"), "One more thing."]).out).toContain("ask a for product");
+});
+
+test("the product owner loop with only waiting asks exits at once with nothing to do (#352)", () => {
+  const [, work, env] = poProject({ db: { issues: [QUEUE], comments: { "40": [
+    ask("a", "for=product"), ask("b", "for=product", "this needs your yes: b?"), PO_REPLY("a"), PO_REPLY("b")] } } });
+  const p = factory(work, env, ["product-owner", "loop", "3"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.out).toContain("Nothing to do");
+  expect(p.out).not.toContain("came up 3 times");
+  expect(claudeCalls(env)).toEqual([]);
+});
