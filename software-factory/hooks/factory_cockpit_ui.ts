@@ -8,12 +8,13 @@
 // opens. The right pane runs `factory follow <name>`, which attaches to the agent's real Claude Code session (on this
 // machine with its tmux, elsewhere over ssh). Views are popups that run the existing commands through `less -R`.
 // Read-only in this step: the commands that change GitHub or the machine come with US-11, and the commands that agents
-// and the gate use are never offered. The panes and popups run these, which are not for typing:
+// and the gate use are never offered. A new owner ask rings the bell from the list, once (#310, US-12). The panes and
+// popups run these, which are not for typing:
 //
 //   factory cockpit --sidebar    the list on the left (off a terminal: one frame, sized by COLUMNS and LINES)
 //   factory cockpit --bar        the `:` command bar: type to pick a factory command (off a terminal: one line on stdin)
 //   factory cockpit --needs      the "Needs you" view, from the cache
-import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { load } from "./factory_config.ts";
 import { readCache, refreshIfOld } from "./factory_cockpit.ts";
@@ -221,6 +222,10 @@ export function config(root: string, script: string): string {
     `set -g status-right ${tq(`#(${status}) `)}`,
     "set -g window-status-format ''",
     "set -g window-status-current-format ''",
+    "# A new owner ask rings the bell in the list (#310); tmux passes it on to the owner's terminal from any pane.",
+    "set -g monitor-bell on",
+    "set -g bell-action any",
+    "set -g visual-bell off",
     "set -g pane-border-status bottom",
     "set -g pane-border-format '#{?#{==:#{pane_index},0}, the list ,"
       + " C-a C-a the list · C-a : commands · C-a 1-8 views · C-a d leave }'",
@@ -353,10 +358,58 @@ export function frame(snap: Obj | null, vs: View[], selected: number, cols: numb
   return [...shown, ...keys].slice(0, Math.max(rows, 1)).map((l) => fit(l, Math.max(cols, 1)));
 }
 
+// --- the bell (#310, PRD US-12) --------------------------------------------------------------------------------------
+//
+// The alerts of US-7 (#303) in the cockpit: a new owner ask in the cache rings the terminal bell from the list, once,
+// and the badge and the count show it at the same look. Never a desktop notice: `factory alerts` gives that one, so it
+// is not doubled. Each ask rung is a marker file in `cockpit-rung/` in the state folder, made with O_EXCL, so of several
+// cockpits (or lists) looking at once only one rings. The first look with a snapshot only records the asks already
+// open: they are not new.
+
+const BEL = "\x07";
+
+function rungDir(): string {
+  return join(stateDir(), "cockpit-rung");
+}
+
+function askKey(n: Obj): string {
+  return `ask-${str(n.issue)}-${str(n.id)}`.replace(/[^A-Za-z0-9_.-]/g, "_");
+}
+
+/** Marks the snapshot's owner asks as seen; returns how many were new, and so ring. None on the first look. */
+export function newAsks(snap: Obj | null): number {
+  if (snap === null) return 0; // no snapshot yet: the first one is the first look
+  const asks = list(snap.needsYou).filter((n) => n.kind === "owner-ask");
+  const dir = rungDir();
+  if (!existsSync(dir)) {
+    // The first look, made whole in a folder of its own and renamed into place: of two at once, one wins.
+    const tmp = `${dir}.${process.pid}.tmp`;
+    try {
+      mkdirSync(tmp, { recursive: true });
+      for (const a of asks) writeFileSync(join(tmp, askKey(a)), "");
+      renameSync(tmp, dir);
+      return 0;
+    } catch {
+      rmSync(tmp, { recursive: true, force: true }); // another look was first: go on as a later one
+    }
+  }
+  let fresh = 0;
+  for (const a of asks) {
+    try {
+      writeFileSync(join(dir, askKey(a)), "", { flag: "wx" });
+      fresh += 1;
+    } catch {
+      // rung already, by this cockpit or another just now
+    }
+  }
+  return fresh;
+}
+
 function sidebarOnce(): number {
   const cols = Number(process.env.COLUMNS) || 32;
   const rows = Number(process.env.LINES) || 30;
-  console.log(frame(readCache(), views(), 0, cols, rows, false).join("\n"));
+  const snap = readCache();
+  console.log(BEL.repeat(newAsks(snap)) + frame(snap, views(), 0, cols, rows, false).join("\n"));
   return 0;
 }
 
@@ -370,7 +423,7 @@ async function sidebarLoop(): Promise<number> {
   let selected = 0;
   const draw = () => {
     const lines = frame(snap, vs, selected, process.stdout.columns || 32, process.stdout.rows || 30, true);
-    process.stdout.write("\x1b[H\x1b[2J" + lines.join("\r\n"));
+    process.stdout.write(BEL.repeat(newAsks(snap)) + "\x1b[H\x1b[2J" + lines.join("\r\n"));
   };
   // display-popup waits until the popup closes, so it has no timeout: a view stays open as long as the owner reads it.
   const popup = (size: string[], cmd: string) =>

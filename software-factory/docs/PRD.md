@@ -439,7 +439,7 @@ Then the cockpit, in steps.
 - **US-11.** As the owner, I act from the cockpit: merge, label, release, answer, start and stop an agent, say. Each
   asks me first when it changes GitHub or the machine. *Decided.* (#295; US-6)
 - **US-12.** As the owner, the cockpit shows the alerts of US-7 in its own window: the badge, the count and the bell.
-  *Decided.* (#295)
+  *Built* (#310; the bell rings from the list once per new owner ask, no second desktop notice). (#295)
 - **US-13.** As the owner, the views move towards the canvas boards: pull request detail, CI cards, the settings table,
   usage bars. *Decided.* (#295)
 

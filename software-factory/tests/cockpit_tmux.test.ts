@@ -450,3 +450,99 @@ test("factory help lists the bare cockpit command", () => {
 test("the commands page has a row for factory cockpit", () => {
   expect(read(join(WIKI, "commands.md"))).toMatch(/^\| `factory cockpit` \|/m);
 });
+
+// --- E: alerts in the cockpit (#310) --------------------------------------------------------------------------------------
+
+const ASK = { kind: "owner-ask", id: "pick-db", issue: 42, url: "https://x/1" };
+const SIZE = { COLUMNS: "60", LINES: "30" };
+const bells = (s: string) => s.split("\x07").length - 1;
+const sidebar = (p: Proj) => cockpit(p, ["--sidebar"], undefined, SIZE);
+
+test("a new owner ask rings the bell once, and the sidebar and status say so", () => {
+  const p = setup();
+  seed(p, [TAYTU], []);
+  const first = sidebar(p);
+  expect(first.code, first.out).toBe(0);
+  expect(first.stdout).not.toContain("\x07");
+  seed(p, [TAYTU], [ASK]);
+  const r = sidebar(p);
+  expect(r.code, r.out).toBe(0);
+  noTrace(r.out);
+  expect(bells(r.stdout)).toBe(1);
+  const text = stripAnsi(r.stdout);
+  expect(text).toContain("Needs you (1)");
+  expect(text.split("\n").find((l) => l.includes("taytu")) ?? "").toContain("needs you");
+  expect(bells(sidebar(p).stdout)).toBe(0);
+}, T);
+
+test("the first look rings nothing for asks already open, then one bell for a new one", () => {
+  const p = setup();
+  seed(p, [TAYTU], [ASK, { ...ASK, id: "two", issue: 43 }]);
+  const first = sidebar(p);
+  expect(first.code, first.out).toBe(0);
+  expect(bells(first.stdout)).toBe(0);
+  seed(p, [TAYTU], [ASK, { ...ASK, id: "two", issue: 43 }, { ...ASK, id: "three", issue: 44 }]);
+  expect(bells(sidebar(p).stdout)).toBe(1);
+}, T);
+
+test("having no snapshot yet does not swallow a later ask", () => {
+  const p = setup();
+  const none = sidebar(p);
+  expect(bells(none.stdout)).toBe(0);
+  seed(p, [TAYTU], [ASK]);
+  expect(bells(sidebar(p).stdout)).toBe(0);
+  seed(p, [TAYTU], [ASK, { ...ASK, id: "two", issue: 43 }]);
+  expect(bells(sidebar(p).stdout)).toBe(1);
+}, T);
+
+test("the bell does not add a desktop notice or touch the state of factory alerts", () => {
+  const p = setup();
+  const bin = join(p.root, "notifybin");
+  const logFile = join(p.root, "notify.log");
+  mkdirSync(bin);
+  for (const n of ["notify-send", "osascript"]) write(join(bin, n), `#!/usr/bin/env bash\necho "${n} $*" >>"${logFile}"\n`, 0o755);
+  p.env.PATH = `${bin}:${p.env.PATH ?? ""}`;
+  p.env.DISPLAY = ":0";
+  seed(p, [TAYTU], []);
+  sidebar(p);
+  seed(p, [TAYTU], [ASK]);
+  const r = sidebar(p);
+  expect(bells(r.stdout)).toBe(1);
+  expect(existsSync(logFile) ? read(logFile) : "").toBe("");
+  const found = readdirSync(p.xdg, { recursive: true }).map(String).filter((f) => f.endsWith("alerts.json"));
+  expect(found).toEqual([]);
+}, T);
+
+test("several cockpits at once ring the bell once between them", async () => {
+  const p = setup();
+  seed(p, [TAYTU], []);
+  sidebar(p);
+  seed(p, [TAYTU], [ASK]);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries({ ...p.env, ...SIZE })) if (v !== undefined) env[k] = v;
+  const run = () => Bun.spawn(["bash", join(SF, "factory"), "cockpit", "--sidebar"], { cwd: p.d, env, stdout: "pipe", stderr: "pipe" });
+  const procs = [run(), run()];
+  const outs = await Promise.all(procs.map(async (x) => { const t = await new Response(x.stdout).text(); await x.exited; return t; }));
+  expect(outs.reduce((n, o) => n + bells(o), 0)).toBe(1);
+}, T);
+
+test("only owner asks ring: a new owner-merges item does not", () => {
+  const p = setup();
+  seed(p, [TAYTU], []);
+  sidebar(p);
+  seed(p, [TAYTU], [{ kind: "owner-merges", number: 7, title: "x", url: "u" }]);
+  const r = sidebar(p);
+  expect(r.code, r.out).toBe(0);
+  expect(bells(r.stdout)).toBe(0);
+  expect(stripAnsi(r.stdout)).toContain("Needs you (1)");
+}, T);
+
+test("the tmux config passes a bell from the list to the owner's terminal", async () => {
+  const p = setup();
+  const [rc, shown] = await onATerminal(p, []);
+  expect(rc, shown).toBe(0);
+  const text = read(checkOpened(p, shown));
+  expect(text).toMatch(/^set(-option)? -g bell-action any$/m);
+  expect(text).toMatch(/^set(-option)? -g monitor-bell on$/m);
+  expect(text).not.toMatch(/visual-bell\s+on/);
+}, T);
