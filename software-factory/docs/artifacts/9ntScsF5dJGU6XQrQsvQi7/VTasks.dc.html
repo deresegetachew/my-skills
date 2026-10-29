@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tasks and PRD</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:#FFD08A}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #0D1117; color: #E6EAF0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; border: 1px solid #2A3340; border-radius: 10px; overflow: hidden;">
+  <div style="height: 34px; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #151B23; border-bottom: 1px solid #2A3340;">
+    <span style="font-weight: 700; color: #F0B35A;">factory</span><span style="color: #9AA4B2;">remanual · Tasks and PRD</span><span style="flex-grow: 1;"></span>
+    <span style="color: #9AA4B2;">factory issues · factory prd · factory next</span>
+  </div>
+  <div style="flex-grow: 1; display: flex; min-height: 0;">
+    <nav aria-label="Sessions and views" style="width: 270px; flex-shrink: 0; background: #11161D; border-right: 1px solid #2A3340; display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 8px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">SESSIONS</div>
+      <sc-for list="{{sessions}}" as="r" hint-placeholder-count="6"><a href="Main.dc.html" style="display: flex; gap: 10px; padding: 5px 16px 5px 19px;"><span style="{{r.gs}}">{{r.g}}</span><span style="font-weight: 700;">{{r.name}}</span><span style="color: #9AA4B2; font-size: 11px;">{{r.role}}</span></a></sc-for>
+      <div style="padding: 14px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">VIEWS</div>
+      <sc-for list="{{views}}" as="v" hint-placeholder-count="8"><a href="{{v.href}}" style="{{v.style}}"><span style="color: #9AA4B2; width: 12px;">{{v.key}}</span><span>{{v.name}}</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2; font-size: 12px;">{{v.count}}</span></a></sc-for>
+    </nav>
+    <div style="width: 330px; flex-shrink: 0; border-right: 1px solid #2A3340; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+      <div style="font-weight: 700;">PRD progress</div>
+      <div style="color: #9AA4B2; font-size: 12px;">[n] of [m] stories done · from docs/PRD.md</div>
+      <sc-for list="{{stories}}" as="s" hint-placeholder-count="6">
+        <div style="display: flex; gap: 8px;"><span style="color: #9AA4B2; width: 44px;">{{s.id}}</span><span style="flex-grow: 1;">[story title]</span><span style="{{s.style}}">{{s.state}}</span></div>
+      </sc-for>
+      <span style="flex-grow: 1;"></span>
+      <div style="color: #9AA4B2; font-size: 12px;">⏎ on a story lists its tasks · w open docs/PRD.md in a pane</div>
+    </div>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 14px 18px; gap: 10px;">
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <sc-for list="{{lanes}}" as="l" hint-placeholder-count="5"><span style="{{l.style}}">{{l.name}} {{l.n}}</span></sc-for>
+      </div>
+      <div style="background: #11161D; border: 1px solid #F0B35A; border-radius: 8px; padding: 12px 14px; color: #E6EAF0;">No task is factory:ready, so 2 coding agents wait. <span style="color: #F0B35A;">r</span> marks the selected ones ready · <span style="color: #F0B35A;">n</span> asks mentewab to propose the next tasks.</div>
+      <sc-for list="{{tasks}}" as="t" hint-placeholder-count="6">
+        <div style="{{t.style}}">
+          <span style="width: 60px; color: #9AA4B2;">#{{t.n}}</span>
+          <span style="flex-grow: 1;">{{t.title}}</span>
+          <span style="width: 140px; color: #9AA4B2;">{{t.label}}</span>
+          <span style="width: 120px;">{{t.who}}</span>
+          <span style="width: 110px; color: #9AA4B2;">{{t.budget}}</span>
+        </div>
+      </sc-for>
+      <span style="flex-grow: 1;"></span>
+      <div style="background: #11161D; border: 1px solid #2A3340; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+        <div style="font-weight: 700;">#410 · Run the agents after reading and save the draft and questions</div>
+        <div style="color: #9AA4B2;">PRD: US-[n] · Budget: 300k (taken at claim) · factory:in-progress</div>
+        <div>held by <span style="color: #FF7B72;">taytu (down)</span> on its Agent issue · built by haile on PR #435</div>
+        <div style="color: #9AA4B2;">R release · b budget (owner only) · e edit in $EDITOR · o open haile</div>
+      </div>
+    </div>
+  </div>
+  <div style="height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #151B23; border-top: 1px solid #2A3340; color: #9AA4B2; font-size: 12px;">
+    <span><span style="color: #E6EAF0;">r</span> ready</span><span><span style="color: #E6EAF0;">x</span> block</span><span><span style="color: #E6EAF0;">R</span> release</span><span><span style="color: #E6EAF0;">b</span> budget</span><span><span style="color: #E6EAF0;">n</span> new via the product owner</span><span><span style="color: #E6EAF0;">A</span> artifacts status</span><span style="flex-grow: 1;"></span><span><span style="color: #E6EAF0;">:</span> command</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = { working: ['●', '#6CB6FF'], waiting: ['◐', '#F0B35A'], idle: ['○', '#9AA4B2'], down: ['✕', '#FF7B72'] };
+    const sessions = [['fasil', 'manager', 'working'], ['mentewab', 'po', 'idle'], ['haile', '', 'waiting'], ['tewodros', '', 'idle'], ['menelik', 'mac', 'idle'], ['taytu', 'mac', 'down']]
+      .map(([name, role, st]) => ({ name, role, g: S[st][0], gs: 'color: ' + S[st][1] + ';' }));
+    const here = 'VTasks.dc.html';
+    const views = [['i', 'Needs you', '5', 'VInbox.dc.html'], ['p', 'Pull requests', '7', 'VPrs.dc.html'], ['t', 'Tasks & PRD', '0 ready', 'VTasks.dc.html'], ['c', 'CI', '2 queued', 'VCi.dc.html'], ['a', 'Agents & machines', '1 down', 'VAgents.dc.html'], ['s', 'Settings', '', 'VSettings.dc.html'], ['h', 'Health & releases', 'ok', 'VHealth.dc.html'], ['u', 'Usage & lessons', '', 'VUsage.dc.html']]
+      .map(([key, name, count, href]) => ({ key, name, count, href, style: 'display: flex; gap: 10px; padding: 5px 16px; border-left: 3px solid ' + (href === here ? '#F0B35A' : 'transparent') + '; background: ' + (href === here ? '#1C2430' : 'transparent') + ';' }));
+    const st = { done: 'color: #3FB950;', 'in progress': 'color: #6CB6FF;', planned: 'color: #9AA4B2;', 'no task': 'color: #F0B35A;' };
+    const stories = [['US-1', 'done'], ['US-2', 'done'], ['US-3', 'in progress'], ['US-4', 'planned'], ['US-5', 'no task'], ['US-6', 'no task']].map(([id, state]) => ({ id, state, style: st[state] }));
+    const lanes = [['ready', '0', true], ['in progress', '1', false], ['in review', '3', false], ['blocked', '6', false], ['no label', '9', false]]
+      .map(([name, n, hot]) => ({ name, n, style: 'border: 1px solid ' + (hot ? '#F0B35A' : '#3A4554') + '; color: ' + (hot ? '#F0B35A' : '#E6EAF0') + '; border-radius: 6px; padding: 4px 10px;' }));
+    const tasks = [
+      [410, 'Run the agents after reading and save the draft', 'in progress', 'taytu ✕ / haile', '300k'],
+      [390, 'Check 5: a page bottom ends a sentence', 'in review', 'tewodros', '—'],
+      ['[n]', '[blocked task title]', 'blocked', '—', '—'],
+      ['[n]', '[unlabelled issue title]', 'no label', '—', '—']
+    ];
+    return { sessions, views, stories, lanes,
+      tasks: tasks.map(([n, title, label, who, budget]) => ({ n, title, label, who, budget, style: 'display: flex; padding: 7px 10px; border-bottom: 1px solid #1C2430; background: ' + (n === 410 ? '#1C2430' : 'transparent') + '; border-left: 3px solid ' + (n === 410 ? '#F0B35A' : 'transparent') + ';' })) };
+  }
+}
+</script>
+</body>
+</html>

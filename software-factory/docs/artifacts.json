@@ -1,0 +1,28 @@
+{
+  "artifacts": [
+    {
+      "dest": "software-factory/docs/artifacts/9ntScsF5dJGU6XQrQsvQi7",
+      "files": {
+        "CommandMap.dc.html": "4235c1504389deeab26559ead875c2c4a723372f017e03801be21f4e68196081",
+        "Main.dc.html": "809c712f2d61787b21cc0c6d8ab19d558e0edfbc95cba6a592f04688174d3aae",
+        "Palette.dc.html": "4d106aa48d3cfd390fe5e1daec7abb3fa1b67f0d6a149e408619185a46d681a7",
+        "VAgents.dc.html": "f154ac8428624ad8aa6ffe4296b98341c8c2177392af27840af2501b12d8718b",
+        "VCi.dc.html": "d0439347792ea4b5d2a60bda2369153f13ca130cca17377f87f288b36f2f5e9f",
+        "VHealth.dc.html": "72ec7a7c35719a3654da162458415ee2ccac6d6d4c6b2f288eb85f2bfb61e6ce",
+        "VInbox.dc.html": "56268b37767510c7f7a82cc4516aba9e007400cbf1bd02705f0038e1c237eaac",
+        "VPrs.dc.html": "d4d190095ca0da621f7d198e44b6106f3e449828660d002ec2779c8b22ac6fe8",
+        "VSettings.dc.html": "4db3f97c760042843ebb90783848ac5785516145861d98b42e09c925a7e42efe",
+        "VTasks.dc.html": "56de7727c25dfe9b2451f20f40b7304f90aa6a2100050b7b4f0612ad55e23e34",
+        "VUsage.dc.html": "51ec32138379048be0840a2c64fe93227a5300dc4f5ba51393b70d453b1ba6ac"
+      },
+      "id": "9ntScsF5dJGU6XQrQsvQi7",
+      "pulledAt": "2026-10-29T04:19:52Z",
+      "pulledBy": "deresegetachew",
+      "title": "Factory cockpit",
+      "updated": "",
+      "url": "https://claude.ai/artifact/9ntScsF5dJGU6XQrQsvQi7",
+      "version": ""
+    }
+  ],
+  "version": 1
+}

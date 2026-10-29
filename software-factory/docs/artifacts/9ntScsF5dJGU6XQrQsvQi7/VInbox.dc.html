@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Needs you</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:#FFD08A}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #0D1117; color: #E6EAF0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; border: 1px solid #2A3340; border-radius: 10px; overflow: hidden;">
+  <div style="height: 34px; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #151B23; border-bottom: 1px solid #2A3340;">
+    <span style="font-weight: 700; color: #F0B35A;">factory</span><span style="color: #9AA4B2;">remanual · dev-pc · v0.2.4</span><span style="flex-grow: 1;"></span>
+    <span style="color: #9AA4B2;">from factory watch, owner queue, messages, signoff · refreshed 40 s ago</span>
+  </div>
+  <div style="flex-grow: 1; display: flex; min-height: 0;">
+    <nav aria-label="Sessions and views" style="width: 270px; flex-shrink: 0; background: #11161D; border-right: 1px solid #2A3340; display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 8px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">SESSIONS</div>
+      <sc-for list="{{sessions}}" as="r" hint-placeholder-count="6"><a href="Main.dc.html" style="display: flex; gap: 10px; padding: 5px 16px 5px 19px;"><span style="{{r.gs}}">{{r.g}}</span><span style="font-weight: 700;">{{r.name}}</span><span style="color: #9AA4B2; font-size: 11px;">{{r.role}}</span></a></sc-for>
+      <div style="padding: 14px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">VIEWS</div>
+      <sc-for list="{{views}}" as="v" hint-placeholder-count="8"><a href="{{v.href}}" style="{{v.style}}"><span style="color: #9AA4B2; width: 12px;">{{v.key}}</span><span>{{v.name}}</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2; font-size: 12px;">{{v.count}}</span></a></sc-for>
+    </nav>
+    <div style="width: 560px; flex-shrink: 0; border-right: 1px solid #2A3340; display: flex; flex-direction: column;">
+      <sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+        <div style="padding: 12px 16px 6px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">{{g.label}}</div>
+        <sc-for list="{{g.items}}" as="it" hint-placeholder-count="4">
+          <div style="{{it.style}}">
+            <div style="display: flex; gap: 10px;"><span style="color: #F0B35A; width: 130px;">{{it.kind}}</span><span style="font-weight: 700; flex-grow: 1;">{{it.title}}</span><span style="color: #9AA4B2; font-size: 12px;">{{it.age}}</span></div>
+            <div style="color: #9AA4B2; font-size: 12px; padding-left: 140px;">{{it.sub}}</div>
+          </div>
+        </sc-for>
+      </sc-for>
+    </div>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 18px 22px; gap: 12px;">
+      <div style="color: #F0B35A;">owner ask · ci-runners-442 · from fasil (dev manager)</div>
+      <div style="font-size: 16px; font-weight: 700;">Close #442 and set the runner count per machine instead?</div>
+      <div style="color: #C9D1D9; line-height: 1.6;">PR #442 sets ci.runners to 4 in .claude/factory.json, which every machine reads. Since v0.2.2, `factory ci runners 4` saves the count for remanual on dev-pc only and survives updates. I propose closing #442.</div>
+      <div style="background: #11161D; border: 1px solid #2A3340; border-radius: 6px; padding: 12px 14px; color: #9AA4B2;">Options: 1 close #442 and run `factory ci runners 4` on dev-pc (recommended) · 2 merge #442 (all machines get 4) · 3 leave it</div>
+      <label for="ans" style="color: #9AA4B2; font-size: 12px;">Your answer (posted as the owner answer on the queue issue)</label>
+      <input id="ans" type="text" value="1" style="font: inherit; background: #0D1117; color: #E6EAF0; border: 1px solid #F0B35A; border-radius: 6px; padding: 10px 12px;">
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button type="button" style="font: inherit; background: #F0B35A; color: #0D1117; border: 0; border-radius: 6px; padding: 9px 14px; font-weight: 700;">⏎ answer</button>
+        <button type="button" style="font: inherit; background: transparent; color: #E6EAF0; border: 1px solid #3A4554; border-radius: 6px; padding: 9px 14px;">1 do option 1 now (asks first)</button>
+        <a href="Main.dc.html" style="border: 1px solid #3A4554; border-radius: 6px; padding: 9px 14px;">o open fasil's session</a>
+        <button type="button" style="font: inherit; background: transparent; color: #E6EAF0; border: 1px solid #3A4554; border-radius: 6px; padding: 9px 14px;">z snooze</button>
+      </div>
+      <span style="flex-grow: 1;"></span>
+      <div style="color: #9AA4B2; font-size: 12px;">Merges and labels here run as you (the owner). Protected PRs are shown with their protected files before you confirm.</div>
+    </div>
+  </div>
+  <div style="height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #151B23; border-top: 1px solid #2A3340; color: #9AA4B2; font-size: 12px;">
+    <span><span style="color: #E6EAF0;">j k</span> move</span><span><span style="color: #E6EAF0;">⏎</span> answer / act</span><span><span style="color: #E6EAF0;">o</span> open the session</span><span><span style="color: #E6EAF0;">m</span> merge</span><span><span style="color: #E6EAF0;">l</span> label</span><span><span style="color: #E6EAF0;">R</span> release</span><span><span style="color: #E6EAF0;">z</span> snooze</span><span><span style="color: #E6EAF0;">g</span> GitHub</span><span style="flex-grow: 1;"></span><span><span style="color: #E6EAF0;">:</span> command</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = { working: ['●', '#6CB6FF'], waiting: ['◐', '#F0B35A'], idle: ['○', '#9AA4B2'], down: ['✕', '#FF7B72'] };
+    const sessions = [['fasil', 'manager', 'working'], ['mentewab', 'po', 'idle'], ['haile', '', 'waiting'], ['tewodros', '', 'idle'], ['menelik', 'mac', 'idle'], ['taytu', 'mac', 'down']]
+      .map(([name, role, st]) => ({ name, role, g: S[st][0], gs: 'color: ' + S[st][1] + ';' }));
+    const here = 'VInbox.dc.html';
+    const views = [['i', 'Needs you', '5', 'VInbox.dc.html'], ['p', 'Pull requests', '7', 'VPrs.dc.html'], ['t', 'Tasks & PRD', '0 ready', 'VTasks.dc.html'], ['c', 'CI', '2 queued', 'VCi.dc.html'], ['a', 'Agents & machines', '1 down', 'VAgents.dc.html'], ['s', 'Settings', '', 'VSettings.dc.html'], ['h', 'Health & releases', 'ok', 'VHealth.dc.html'], ['u', 'Usage & lessons', '', 'VUsage.dc.html']]
+      .map(([key, name, count, href]) => ({ key, name, count, href, style: 'display: flex; gap: 10px; padding: 5px 16px; border-left: 3px solid ' + (href === here ? '#F0B35A' : 'transparent') + '; background: ' + (href === here ? '#1C2430' : 'transparent') + ';' }));
+    const item = (kind, title, sub, age, sel) => ({ kind, title, sub, age, style: 'padding: 9px 16px; border-left: 3px solid ' + (sel ? '#F0B35A' : 'transparent') + '; background: ' + (sel ? '#1C2430' : 'transparent') + ';' });
+    return {
+      sessions, views,
+      groups: [
+        { label: 'FOR YOU · 5', items: [
+          item('owner ask', 'Close #442, runners per machine?', 'fasil · from the owner queue', '8 min', true),
+          item('merge', '#450 Update the factory to v0.2.4', 'protected · CI green · you merge', '12 min', false),
+          item('tests-reviewed', '#435 draft after read', 'haile · guard finding · fasil read it', '3 h', false),
+          item('agent down', 'taytu holds #410', 'mac · last ping Oct 24', '4 d', false),
+          item('no ready tasks', '2 coding agents idle', 'ask mentewab for the next tasks', '52 min', false)
+        ] },
+        { label: 'THE DEV MANAGER HAS THESE · 2', items: [
+          item('question', '#435 · 2 questions from haile', 'fasil holds the lease', '20 min', false),
+          item('review', '#444 bunfig in CI', 'queued for fasil (cap 1)', '46 min', false)
+        ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

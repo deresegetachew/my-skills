@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:#FFD08A}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #0D1117; color: #E6EAF0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; border: 1px solid #2A3340; border-radius: 10px; overflow: hidden;">
+  <div style="height: 34px; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #151B23; border-bottom: 1px solid #2A3340;">
+    <span style="font-weight: 700; color: #F0B35A;">factory</span><span style="color: #9AA4B2;">remanual · Settings</span><span style="flex-grow: 1;"></span>
+    <span style="color: #9AA4B2;">factory settings · values from main, this machine's file, defaults</span>
+  </div>
+  <div style="flex-grow: 1; display: flex; min-height: 0;">
+    <nav aria-label="Sessions and views" style="width: 270px; flex-shrink: 0; background: #11161D; border-right: 1px solid #2A3340; display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 8px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">SESSIONS</div>
+      <sc-for list="{{sessions}}" as="r" hint-placeholder-count="6"><a href="Main.dc.html" style="display: flex; gap: 10px; padding: 5px 16px 5px 19px;"><span style="{{r.gs}}">{{r.g}}</span><span style="font-weight: 700;">{{r.name}}</span><span style="color: #9AA4B2; font-size: 11px;">{{r.role}}</span></a></sc-for>
+      <div style="padding: 14px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">VIEWS</div>
+      <sc-for list="{{views}}" as="v" hint-placeholder-count="8"><a href="{{v.href}}" style="{{v.style}}"><span style="color: #9AA4B2; width: 12px;">{{v.key}}</span><span>{{v.name}}</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2; font-size: 12px;">{{v.count}}</span></a></sc-for>
+    </nav>
+    <div style="width: 220px; flex-shrink: 0; border-right: 1px solid #2A3340; padding: 12px 0; display: flex; flex-direction: column;">
+      <div style="padding: 0 16px 6px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">PROJECT (via PR)</div>
+      <sc-for list="{{sections}}" as="s" hint-placeholder-count="8"><div style="{{s.style}}">{{s.name}}</div></sc-for>
+      <div style="padding: 14px 16px 6px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">THIS MACHINE (direct)</div>
+      <div style="padding: 4px 16px;">dev-pc · remanual</div>
+    </div>
+    <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; padding: 14px 18px; gap: 6px;">
+      <div style="display: flex; padding: 6px 0; color: #9AA4B2; font-size: 12px; border-bottom: 1px solid #2A3340;"><span style="width: 290px;">setting</span><span style="width: 170px;">value</span><span style="width: 130px;">from</span><span style="flex-grow: 1;">what it does</span></div>
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+        <div style="{{r.style}}"><span style="width: 290px;">{{r.key}}<span style="color: #F0B35A;">{{r.gov}}</span></span><span style="width: 170px; {{r.vs}}">{{r.value}}</span><span style="width: 130px; color: #9AA4B2;">{{r.from}}</span><span style="flex-grow: 1; color: #9AA4B2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.help}}</span></div>
+      </sc-for>
+      <span style="flex-grow: 1;"></span>
+      <div style="background: #11161D; border: 1px solid #F0B35A; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px;">
+        <div style="font-weight: 700;">2 project changes waiting · they go to main as one pull request</div>
+        <div style="color: #FF7B72;">- "roles.product-owner.artifacts": false</div>
+        <div style="color: #3FB950;">+ "roles.product-owner.artifacts": true</div>
+        <div style="color: #3FB950;">+ "budget.builder": "300k"</div>
+        <div style="color: #9AA4B2;">P open the PR (settings pr) · D discard · v validate · .claude/factory.json is protected: you merge it</div>
+      </div>
+    </div>
+  </div>
+  <div style="height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #151B23; border-top: 1px solid #2A3340; color: #9AA4B2; font-size: 12px;">
+    <span><span style="color: #E6EAF0;">⏎</span> edit</span><span><span style="color: #E6EAF0;">?</span> full help for the setting</span><span><span style="color: #E6EAF0;">u</span> back to default</span><span><span style="color: #E6EAF0;">/</span> search</span><span><span style="color: #E6EAF0;">P</span> open the PR</span><span><span style="color: #E6EAF0;">○</span> agents can't open this view: it refuses in an agent session</span><span style="flex-grow: 1;"></span><span><span style="color: #E6EAF0;">:</span> command</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = { working: ['●', '#6CB6FF'], waiting: ['◐', '#F0B35A'], idle: ['○', '#9AA4B2'], down: ['✕', '#FF7B72'] };
+    const sessions = [['fasil', 'manager', 'working'], ['mentewab', 'po', 'idle'], ['haile', '', 'waiting'], ['tewodros', '', 'idle'], ['menelik', 'mac', 'idle'], ['taytu', 'mac', 'down']]
+      .map(([name, role, st]) => ({ name, role, g: S[st][0], gs: 'color: ' + S[st][1] + ';' }));
+    const here = 'VSettings.dc.html';
+    const views = [['i', 'Needs you', '5', 'VInbox.dc.html'], ['p', 'Pull requests', '7', 'VPrs.dc.html'], ['t', 'Tasks & PRD', '0 ready', 'VTasks.dc.html'], ['c', 'CI', '2 queued', 'VCi.dc.html'], ['a', 'Agents & machines', '1 down', 'VAgents.dc.html'], ['s', 'Settings', '', 'VSettings.dc.html'], ['h', 'Health & releases', 'ok', 'VHealth.dc.html'], ['u', 'Usage & lessons', '', 'VUsage.dc.html']]
+      .map(([key, name, count, href]) => ({ key, name, count, href, style: 'display: flex; gap: 10px; padding: 5px 16px; border-left: 3px solid ' + (href === here ? '#F0B35A' : 'transparent') + '; background: ' + (href === here ? '#1C2430' : 'transparent') + ';' }));
+    const sections = ['Agents & loops', 'Issues mode', 'Reviews', 'Dev manager', 'Roles', 'Budgets', 'CI', 'Ports & env'].map((name, i) => ({ name,
+      style: 'padding: 4px 16px; border-left: 3px solid ' + (i === 4 ? '#F0B35A' : 'transparent') + '; background: ' + (i === 4 ? '#1C2430' : 'transparent') + ';' }));
+    const rows = [
+      ['roles.product-owner.artifacts', ' ◆', 'true (pending)', 'your change', 'the PO -i session may read claude.ai artifacts', true],
+      ['roles.product-owner.names', '', '["mentewab", …]', 'default', 'names the product owner loops take', false],
+      ['roles.dev-manager.names', '', '["fasil", …]', 'default', 'names the dev manager loops take', false],
+      ['budget.builder', ' ◆', '300k (pending)', 'your change', 'token budget for a task without a Budget: line', false],
+      ['trustedReviewers', ' ◆', '["deresegetachew"]', 'main', 'whose approvals and must-fixes count', false],
+      ['ci.runners', '', '4', 'this machine', 'heavy runners here (project default 1)', false],
+      ['agents', '', 'haile, tewodros', 'this machine', 'the coding agent names this machine runs', false],
+      ['autostart', '', 'false', 'this machine', 'bring agents back after a reboot', false]
+    ];
+    return { sessions, views, sections,
+      rows: rows.map(([key, gov, value, from, help, sel]) => ({ key, gov, value, from, help,
+        vs: from === 'your change' ? 'color: #F0B35A;' : 'color: #E6EAF0;',
+        style: 'display: flex; padding: 6px 8px; border-bottom: 1px solid #1C2430; background: ' + (sel ? '#1C2430' : 'transparent') + '; border-left: 3px solid ' + (sel ? '#F0B35A' : 'transparent') + ';' })) };
+  }
+}
+</script>
+</body>
+</html>

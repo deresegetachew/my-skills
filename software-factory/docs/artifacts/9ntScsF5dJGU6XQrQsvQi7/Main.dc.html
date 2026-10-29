@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cockpit home</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:#FFD08A}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #0D1117; color: #E6EAF0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; border: 1px solid #2A3340; border-radius: 10px; overflow: hidden;">
+
+  <div style="height: 34px; display: flex; align-items: center; gap: 18px; padding: 0 16px; background: #151B23; border-bottom: 1px solid #2A3340;">
+    <span style="font-weight: 700; color: #F0B35A;">factory</span>
+    <span style="color: #9AA4B2;">remanual · dev-pc · v0.2.4</span>
+    <span style="flex-grow: 1;"></span>
+    <span><span style="color: #6CB6FF;">● 1</span>  <span style="color: #F0B35A;">◐ 1</span>  <span style="color: #9AA4B2;">○ 3</span>  <span style="color: #FF7B72;">✕ 1</span></span>
+    <span style="color: #9AA4B2;">CI 2 queued</span>
+    <a href="VInbox.dc.html" style="background: #F0B35A; color: #0D1117; padding: 1px 8px; border-radius: 4px; font-weight: 700;">4 need you</a>
+  </div>
+
+  <div style="flex-grow: 1; display: flex; min-height: 0;">
+    <nav aria-label="Sessions and views" style="width: 270px; flex-shrink: 0; background: #11161D; border-right: 1px solid #2A3340; display: flex; flex-direction: column; padding: 8px 0;">
+      <div style="padding: 8px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">SESSIONS</div>
+      <sc-for list="{{sessions}}" as="r" hint-placeholder-count="6">
+        <button type="button" onClick="{{r.pick}}" style="{{r.style}}">
+          <span style="display: flex; gap: 10px; align-items: baseline;">
+            <span style="{{r.glyphStyle}}">{{r.glyph}}</span>
+            <span style="font-weight: 700;">{{r.name}}</span>
+            <span style="color: #9AA4B2; font-size: 11px;">{{r.role}}</span>
+            <span style="flex-grow: 1;"></span>
+            <sc-if value="{{r.hasBadge}}" hint-placeholder-val="{{false}}"><span style="background: #F0B35A; color: #0D1117; border-radius: 9px; padding: 0 7px; font-size: 11px; font-weight: 700;">{{r.badge}}</span></sc-if>
+          </span>
+        </button>
+      </sc-for>
+      <div style="padding: 14px 16px 2px; color: #9AA4B2; font-size: 11px; letter-spacing: 0.08em;">VIEWS</div>
+      <sc-for list="{{views}}" as="v" hint-placeholder-count="8">
+        <a href="{{v.href}}" style="display: flex; gap: 10px; padding: 5px 16px 5px 19px;">
+          <span style="color: #9AA4B2; width: 12px;">{{v.key}}</span>
+          <span>{{v.name}}</span>
+          <span style="flex-grow: 1;"></span>
+          <span style="{{v.countStyle}}">{{v.count}}</span>
+        </a>
+      </sc-for>
+      <span style="flex-grow: 1;"></span>
+      <div style="padding: 8px 16px; color: #9AA4B2; font-size: 12px; border-top: 1px solid #2A3340;">n new session   : command</div>
+    </nav>
+
+    <main style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+      <div style="height: 42px; display: flex; align-items: center; gap: 14px; padding: 0 18px; border-bottom: 1px solid #2A3340;">
+        <span style="{{cur.glyphStyle}}">{{cur.glyph}}</span>
+        <span style="font-weight: 700; font-size: 14px;">{{cur.name}}</span>
+        <span style="color: #9AA4B2;">{{cur.role}} · {{cur.where}}</span>
+        <span style="flex-grow: 1;"></span>
+        <span style="color: #9AA4B2;">{{cur.task}}</span>
+        <span style="{{cur.modeStyle}}">{{cur.mode}}</span>
+      </div>
+      <div style="flex-grow: 1; padding: 16px 22px; display: flex; flex-direction: column; gap: 6px; overflow: hidden;">
+        <div style="color: #9AA4B2;">╭─ ✻ Claude Code · the real session, shown by tmux · remote control: {{cur.name}} ─╮</div>
+        <sc-for list="{{cur.lines}}" as="l" hint-placeholder-count="8">
+          <div style="{{l.style}}">{{l.text}}</div>
+        </sc-for>
+      </div>
+      <div style="margin: 0 18px 12px; border: 1px solid #3A4554; border-radius: 6px; padding: 10px 14px; color: #9AA4B2; display: flex; gap: 10px;">
+        <span style="color: #F0B35A;">›</span><span>{{cur.prompt}}</span>
+      </div>
+    </main>
+
+    <aside aria-label="Needs you" style="width: 320px; flex-shrink: 0; background: #11161D; border-left: 1px solid #2A3340; display: flex; flex-direction: column; padding: 14px; gap: 10px;">
+      <div style="display: flex;"><span style="font-weight: 700;">Needs you</span><span style="flex-grow: 1;"></span><a href="VInbox.dc.html" style="color: #9AA4B2; font-size: 12px;">i  all</a></div>
+      <sc-for list="{{asks}}" as="a" hint-placeholder-count="4">
+        <div style="background: #151B23; border: 1px solid #2A3340; border-radius: 6px; padding: 9px 11px; display: flex; flex-direction: column; gap: 4px;">
+          <div style="display: flex;"><span style="color: #F0B35A;">{{a.kind}}</span><span style="flex-grow: 1;"></span><span style="color: #9AA4B2; font-size: 12px;">{{a.age}}</span></div>
+          <div>{{a.text}}</div>
+          <div style="color: #9AA4B2; font-size: 12px;">{{a.keys}}</div>
+        </div>
+      </sc-for>
+      <span style="flex-grow: 1;"></span>
+      <div style="color: #9AA4B2; font-size: 12px;">The rail hides at under 160 columns; i opens it full size.</div>
+    </aside>
+  </div>
+
+  <div style="height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: #1F2A1F; border-top: 1px solid #2EA043; color: #C9D1D9; font-size: 12px;">
+    <span style="color: #3FB950; font-weight: 700;">[factory-remanual]</span>
+    <span>keys go to {{cur.name}}</span>
+    <span><span style="color: #E6EAF0;">C-a</span> back to the cockpit</span>
+    <span><span style="color: #E6EAF0;">C-a z</span> full screen</span>
+    <span><span style="color: #E6EAF0;">C-a r</span> watch only</span>
+    <span><span style="color: #E6EAF0;">C-a d</span> leave (agents keep running)</span>
+    <span style="flex-grow: 1;"></span>
+    <span>/ inside a session is Claude's · : is the factory's</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { picked: 'haile' }; }
+  renderVals() {
+    const S = { working: ['●', '#6CB6FF'], waiting: ['◐', '#F0B35A'], idle: ['○', '#9AA4B2'], down: ['✕', '#FF7B72'] };
+    const agents = [
+      { name: 'fasil', role: 'dev manager', state: 'working', where: 'dev-pc', task: 'pr-442 · ci.runners 4', badge: 0, prompt: 'type to talk to fasil (one PR at a time)',
+        lines: [['dim', '› Follow the manage-pass skill for pr-442: read .claude/skills/manage-pass/SKILL.md'],
+          ['', '● PR #442 touches .claude/factory.json (protected). CI is green on 2508b6a.'],
+          ['warn', '● `factory ci runners 4` (v0.2.2) replaces this PR. Asking the owner to close it.'],
+          ['dim', '  ⎿ posted owner ask ci-runners-442']] },
+      { name: 'mentewab', role: 'product owner', state: 'idle', where: 'dev-pc', task: 'nothing queued', badge: 0, prompt: 'ask mentewab: where are we against the PRD, what next?',
+        lines: [['dim', '› /product-pass discover'], ['', '● Nothing waits for the product owner. Ask me for the next tasks and I will draft them.']] },
+      { name: 'haile', role: 'coding agent', state: 'waiting', where: 'dev-pc', task: '#410 · budget 300k · 61% used', badge: 1, prompt: 'type to talk to haile',
+        lines: [['dim', '› /next-task #410 Run the agents after reading and save the draft and questions'],
+          ['', '● Plan: 4 steps, estimate 240k of the 300k budget.'],
+          ['', '● Pushed 3 commits; PR #435 open.'],
+          ['err', '● Worker tests (shard 2/3) failed: 2 assertions in draft-store.test.ts'],
+          ['warn', '● The Factory guard asks for tests-reviewed (a test changed after implementation)'],
+          ['', '● Bash(factory usage --task 410 --budget)'],
+          ['dim', '  ⎿ 183k of 300k (61%) · fresh input + output'],
+          ['dim', '● factory wait ci 435 …  no tokens while waiting']] },
+      { name: 'tewodros', role: 'coding agent', state: 'idle', where: 'dev-pc', task: 'no factory:ready task', badge: 0, prompt: 'type to talk to tewodros',
+        lines: [['dim', '› factory next'], ['', '● No issue is labelled factory:ready. Checking every minute, no tokens.']] },
+      { name: 'menelik', role: 'coding agent', state: 'idle', where: 'mac over ssh', task: 'idle', badge: 0, prompt: 'type to talk to menelik (ssh to the mac)',
+        lines: [['dim', 'ssh mac tmux attach -t =remanual-menelik'], ['', '● No factory:ready task.']] },
+      { name: 'taytu', role: 'coding agent', state: 'down', where: 'mac', task: 'down since Oct 24', badge: 1, prompt: 'no session: s starts it, R releases #410',
+        lines: [['err', 'No session. Last ping 2026-10-24.'], ['warn', 'Still holds #410: R releases it (factory issues release 410).']] }
+    ];
+    const styleOf = (k) => k === 'dim' ? 'color: #9AA4B2;' : k === 'warn' ? 'color: #F0B35A;' : k === 'err' ? 'color: #FF7B72;' : 'color: #E6EAF0;';
+    const picked = this.state.picked;
+    const sessions = agents.map((a) => {
+      const sel = a.name === picked;
+      return { name: a.name, role: a.role === 'coding agent' ? (a.where.indexOf('mac') === 0 ? 'mac' : '') : a.role === 'dev manager' ? 'manager' : 'po',
+        glyph: S[a.state][0], glyphStyle: 'color: ' + S[a.state][1] + ';', badge: a.badge, hasBadge: a.badge > 0,
+        style: 'display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 6px 16px; border: 0; border-left: 3px solid ' + (sel ? '#F0B35A' : 'transparent') + '; background: ' + (sel ? '#1C2430' : 'transparent') + ';',
+        pick: () => this.setState({ picked: a.name }) };
+    });
+    const a = agents.find((x) => x.name === picked) || agents[0];
+    const live = a.state !== 'down';
+    const views = [
+      ['i', 'Needs you', '4', true, 'VInbox.dc.html'], ['p', 'Pull requests', '7', false, 'VPrs.dc.html'], ['t', 'Tasks & PRD', '0 ready', false, 'VTasks.dc.html'],
+      ['c', 'CI', '2 queued', false, 'VCi.dc.html'], ['a', 'Agents & machines', '1 down', false, 'VAgents.dc.html'], ['s', 'Settings', '', false, 'VSettings.dc.html'],
+      ['h', 'Health & releases', 'ok', false, 'VHealth.dc.html'], ['u', 'Usage & lessons', '', false, 'VUsage.dc.html']
+    ].map(([key, name, count, hot, href]) => ({ key, name, count, href, countStyle: hot ? 'background: #F0B35A; color: #0D1117; border-radius: 9px; padding: 0 7px; font-size: 11px; font-weight: 700;' : 'color: #9AA4B2; font-size: 12px;' }));
+    return {
+      sessions, views,
+      cur: { name: a.name, role: a.role, where: a.where, task: a.task, prompt: a.prompt, glyph: S[a.state][0], glyphStyle: 'color: ' + S[a.state][1] + ';',
+        mode: live ? 'LIVE · you can type' : 'NO SESSION',
+        modeStyle: live ? 'border: 1px solid #3FB950; color: #3FB950; padding: 0 8px; border-radius: 4px; font-size: 11px;' : 'border: 1px solid #FF7B72; color: #FF7B72; padding: 0 8px; border-radius: 4px; font-size: 11px;',
+        lines: a.lines.map(([k, text]) => ({ text, style: styleOf(k) })) },
+      asks: [
+        { kind: 'merge', age: '12 min', text: '#450 v0.2.4 · protected', keys: 'm merge   d diff' },
+        { kind: 'tests-reviewed', age: '3 h', text: '#435 · haile', keys: 'l label   d diff' },
+        { kind: 'agent down', age: '4 d', text: 'taytu holds #410', keys: 'R release   s start' },
+        { kind: 'no ready tasks', age: '52 min', text: '2 coding agents idle', keys: '⏎ ask mentewab' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

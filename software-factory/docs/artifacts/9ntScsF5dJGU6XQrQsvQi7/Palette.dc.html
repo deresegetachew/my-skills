@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Command bar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}a:hover{color:#FFD08A}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #070A0E; color: #E6EAF0; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; line-height: 1.5; display: flex; flex-direction: column; align-items: center; border: 1px solid #2A3340; border-radius: 10px; overflow: hidden; position: relative;">
+  <div style="position: absolute; inset: 0; display: flex; opacity: 0.35;">
+    <div style="width: 270px; background: #11161D; border-right: 1px solid #2A3340;"></div>
+    <div style="flex-grow: 1; background: #0D1117;"></div>
+  </div>
+  <div style="position: relative; margin-top: 90px; width: 900px; background: #151B23; border: 1px solid #F0B35A; border-radius: 10px; display: flex; flex-direction: column; overflow: hidden;">
+    <div style="display: flex; gap: 10px; padding: 14px 18px; border-bottom: 1px solid #2A3340; font-size: 15px;">
+      <span style="color: #F0B35A; font-weight: 700;">:</span><span>ci cl</span><span style="background: #E6EAF0; width: 8px;"></span>
+      <span style="flex-grow: 1;"></span><span style="color: #9AA4B2; font-size: 12px;">every factory command · fuzzy</span>
+    </div>
+    <sc-for list="{{results}}" as="r" hint-placeholder-count="7">
+      <div style="{{r.style}}">
+        <span style="width: 250px; font-weight: 700;">{{r.cmd}}</span>
+        <span style="flex-grow: 1; color: #C9D1D9;">{{r.what}}</span>
+        <span style="{{r.tagStyle}}">{{r.tag}}</span>
+      </div>
+    </sc-for>
+    <div style="padding: 12px 18px; border-top: 1px solid #2A3340; color: #9AA4B2; font-size: 12px; display: flex; gap: 18px; flex-wrap: wrap;">
+      <span><span style="color: #E6EAF0;">⏎</span> run</span><span><span style="color: #E6EAF0;">tab</span> add arguments</span><span><span style="color: #E6EAF0;">?</span> help for it</span><span><span style="color: #E6EAF0;">esc</span> close</span>
+    </div>
+  </div>
+  <div style="position: relative; margin-top: 30px; width: 900px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;">
+    <sc-for list="{{kinds}}" as="k" hint-placeholder-count="4">
+      <div style="background: #11161D; border: 1px solid #2A3340; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+        <span style="{{k.tagStyle}}">{{k.tag}}</span>
+        <span style="color: #C9D1D9; font-size: 12px;">{{k.text}}</span>
+      </div>
+    </sc-for>
+  </div>
+  <div style="position: relative; margin-top: 18px; width: 900px; color: #9AA4B2; font-size: 12px;">In a Claude session, / is Claude's own (skills, /model). The cockpit takes : only when the sidebar or a view has focus, or after C-a.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const T = {
+      view: 'color: #6CB6FF; border: 1px solid #6CB6FF; border-radius: 4px; padding: 0 6px; font-size: 11px; align-self: flex-start;',
+      act: 'color: #F0B35A; border: 1px solid #F0B35A; border-radius: 4px; padding: 0 6px; font-size: 11px; align-self: flex-start;',
+      pane: 'color: #3FB950; border: 1px solid #3FB950; border-radius: 4px; padding: 0 6px; font-size: 11px; align-self: flex-start;',
+      session: 'color: #D2A8FF; border: 1px solid #D2A8FF; border-radius: 4px; padding: 0 6px; font-size: 11px; align-self: flex-start;'
+    };
+    const res = [
+      ['ci clean', 'offline runners and exited containers: list, then yes', 'act'],
+      ['ci log 435', 'the failed job log of #435', 'pane'],
+      ['ci logs', 'the runner services on this machine', 'pane'],
+      ['ci status', 'opens the CI view', 'view'],
+      ['ci install', 'reinstall the runners (asks first)', 'act'],
+      ['claims', 'which agent holds which folder and task', 'pane'],
+      ['agent haile', 'open haile in its own worktree', 'session']
+    ];
+    const kinds = [
+      ['view', 'opens one of the eight views in the right pane'],
+      ['act', 'does one thing, asks first if it changes GitHub or the machine'],
+      ['pane', 'runs the command in a pane under the view; stays until esc'],
+      ['session', 'opens or starts a live Claude session in SESSIONS']
+    ];
+    return {
+      results: res.map(([cmd, what, tag], i) => ({ cmd, what, tag, tagStyle: T[tag], style: 'display: flex; gap: 14px; align-items: center; padding: 9px 18px; background: ' + (i === 0 ? '#1C2430' : 'transparent') + '; border-left: 3px solid ' + (i === 0 ? '#F0B35A' : 'transparent') + ';' })),
+      kinds: kinds.map(([tag, text]) => ({ tag, text, tagStyle: T[tag] }))
+    };
+  }
+}
+</script>
+</body>
+</html>

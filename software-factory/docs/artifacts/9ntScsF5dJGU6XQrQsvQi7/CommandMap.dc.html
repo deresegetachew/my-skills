@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Command map and gaps</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 2960px; height: 1300px; box-sizing: border-box; background: #0D1117; color: #E6EAF0; font-family: Inter, system-ui, sans-serif; padding: 44px 52px; display: flex; gap: 48px; border: 1px solid #2A3340; border-radius: 10px;">
+  <div style="width: 1640px; display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-size: 30px; font-weight: 700;">Where every factory command lives</div>
+    <div style="color: #9AA4B2; font-size: 16px;">64 commands from factory help. Each has one home; the : bar reaches all of them.</div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;">
+      <sc-for list="{{homes}}" as="h" hint-placeholder-count="12">
+        <div style="background: #11161D; border: 1px solid #2A3340; border-radius: 10px; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px;">
+          <div style="display: flex; gap: 10px; align-items: baseline;"><span style="font-weight: 700; font-size: 17px;">{{h.name}}</span><span style="color: #9AA4B2; font-size: 14px;">{{h.how}}</span></div>
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 14px; color: #C9D1D9; line-height: 1.6;">{{h.cmds}}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-size: 30px; font-weight: 700; color: #F0B35A;">Gaps the cockpit needs closed</div>
+    <div style="color: #9AA4B2; font-size: 16px;">Found by placing each command. Each becomes a task before or with the cockpit.</div>
+    <sc-for list="{{gaps}}" as="g" hint-placeholder-count="11">
+      <div style="display: flex; gap: 14px; background: #11161D; border: 1px solid #2A3340; border-radius: 10px; padding: 12px 16px;">
+        <span style="color: #F0B35A; font-weight: 700; width: 28px; font-size: 16px;">{{g.n}}</span>
+        <span style="display: flex; flex-direction: column; gap: 3px;"><span style="font-weight: 700; font-size: 16px;">{{g.title}}</span><span style="color: #C9D1D9; font-size: 14px; line-height: 1.5;">{{g.fix}}</span></span>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":2960,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const homes = [
+      ['Sessions (left list)', 'live Claude windows, swapped in by tmux', 'loop · loop -i · coding-agent / dev-manager / product-owner loop · agent · follow · say · worktree · env'],
+      ['1 Home', 'top bar and the Needs you rail', 'status (the top bar replaces it here; the command stays for scripts)'],
+      ['2 Needs you', 'everything only you can decide', 'watch · prs (owner asks) · messages ls · messages new · signoff ls / add / plan / confirm / result · manager-claims list'],
+      ['3 Pull requests', 'one row per PR, detail below', 'prs · reviews · claims · rereview plan · the guard result · merge and label (new owner commands)'],
+      ['4 Tasks & PRD', 'stories, task lanes, budgets', 'issues list / show / new / stale / setup · next · prd · release <agent> · artifacts pull / status / list'],
+      ['5 CI', 'where jobs run, runners, queue', 'ci status · use · runners · clean · stale · install · uninstall · start · log · logs · turbo status / install'],
+      ['6 Settings', 'project via one PR, machine direct', 'settings list · help · show · get · set · diff · validate · pr · --local · docs'],
+      ['7 Agents & machines', 'per machine, start and stop', 'agents ls / list / card / sweep · machine show / setup · remote add / cloud / list / remove · autostart · heartbeat · resume · clean'],
+      ['8 Health & releases', 'doctor and the factory itself', 'doctor · bootstrap status · version · releases · update · rollback · migrate-to-release · install-shim · reset-run'],
+      ['9 Usage & lessons', 'cost against budget, what was learned', 'usage · usage --task N --budget · report · lessons show / check / suggest / add / prune'],
+      [': bar only', 'rare or one-time, runs in a pane', 'init · init-roles · bootstrap machine / project / all · handover snapshot · verify · fix · check · precheck · manage-tick · turbo install'],
+      ['Not shown (agents use them)', 'the gate and loops call these', 'review-pass · rereview prompt / record / reply · wait · run-check · guard · manager-claims next / review / answer / merge / ask / sweep']
+    ].map(([name, how, cmds]) => ({ name, how, cmds }));
+    const gaps = [
+      ['Dev managers and product owners are not in the heartbeat', 'Its rows are coding agents only. Add the role, so all sessions show a live state without GitHub.'],
+      ['Sub-managers have no screen', 'They run as claude -p. Start them in their own tmux window (read-only in the cockpit), or show their log.'],
+      ['loop -i runs in the current terminal', 'One "start a session in its own tmux window" step, shared by the cockpit, autostart and resume.'],
+      ['follow finds local sessions only through a remote', 'Find this machine\'s tmux sessions directly.'],
+      ['The owner\'s actions are gh commands', 'Add factory owner merge / label / answer / release, with the protected-file check, so the cockpit and the CLI share them.'],
+      ['No alerts besides GitHub mentions', 'A bell in the cockpit and a desktop notice (osascript, notify-send), when a new item needs you.'],
+      ['ci status has no --json', 'Add it, as prs and watch have.'],
+      ['GitHub views are slow', 'prs, watch and messages take seconds. One shared cache refreshed in the background, like agents ls (45 s).'],
+      ['Settings edits go one PR each', 'Collect project changes and open one settings pr. Machine settings save at once.'],
+      ['Other machines inside our tmux', 'ssh plus tmux attach nests tmux. Give the cockpit its own prefix (C-a) so the inner one keeps C-b.'],
+      ['PRD decision D1 says no custom UI', 'Replace it with a decision for the terminal cockpit, and drop "no console" from out of scope.']
+    ].map(([title, fix], i) => ({ n: String(i + 1), title, fix }));
+    return { homes, gaps };
+  }
+}
+</script>
+</body>
+</html>
