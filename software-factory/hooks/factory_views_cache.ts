@@ -7,7 +7,8 @@
 // also starts one refresh in the background (`<view> ... --fresh`), so the next open is fresh too. A `wx` lock next to
 // the entry lets only one of several views opened at once start it. `--fresh` reads GitHub now. A file that can't be
 // read, or that an older release wrote, counts as missing. Only the command line uses it: the orchestrator and the
-// other modules that import a view's `collect` read GitHub as before.
+// other modules that import a view's `collect` read GitHub as before, except what `remember` keeps (#347): a pull
+// request's comments until the PR changes, and whether an issue has its thread note, in `views/memo/`.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -124,6 +125,31 @@ export function answer<T>(cfg: Config, view: View, fresh: boolean, read: () => T
     // only the background refresh that took this entry's lock gives it back; any other read leaves it alone
     if (process.env[LOCK_ENV] === `${path}.lock`) rmSync(`${path}.lock`, { force: true });
   }
+}
+
+/** `read()`, kept as `views/memo/<hash>.json` with `version` (for a pull request, its `updated_at`), and given back
+ * without reading while the version is the same (#347). An empty version, or `views.cacheSeconds` 0, reads every time. */
+export function remember<T>(cfg: Config, key: string, version: string, read: () => T): T {
+  if (!version || ttl(cfg) <= 0) return read();
+  const hash = createHash("sha256").update(JSON.stringify([projectRoot(), key])).digest("hex").slice(0, 16);
+  const path = join(stateDir(), "views", "memo", `${hash}.json`);
+  try {
+    const e = JSON.parse(readFileSync(path, "utf8")) as { schema?: unknown; key?: unknown; version?: unknown; data?: T };
+    if (e.schema === SCHEMA && e.key === key && e.version === version && "data" in e) return e.data as T;
+  } catch {
+    // not kept yet, or unreadable: read it
+  }
+  const data = read();
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(`${path}.${process.pid}.tmp`, pyDumps({ schema: SCHEMA, key, version, data }));
+    renameSync(`${path}.${process.pid}.tmp`, path);
+  } catch {
+    // the next read asks GitHub again
+  } finally {
+    rmSync(`${path}.${process.pid}.tmp`, { force: true });
+  }
+  return data;
 }
 
 /** The line that says a view came from the cache, or null when it was read now. */

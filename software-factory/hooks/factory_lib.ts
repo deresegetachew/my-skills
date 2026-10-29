@@ -12,15 +12,27 @@ export const AGENT_SETTINGS = ".claude/factory/settings.json";
 export const LEGACY_SETTINGS = ".claude/settings.json";
 
 /** A stop with a message (like Python's `raise SystemExit("text")`) or a bare exit code (`SystemExit(2)`).
- * Thrown, not exited, so a caller (or a test) can catch it; `runMain` prints the message and exits. */
+ * Thrown, not exited, so a caller (or a test) can catch it; `runMain` prints the message and exits. A message exits 1
+ * unless `code` says otherwise. */
 export class Exit extends Error {
   readonly exitCode: number;
   readonly text: string | null;
-  constructor(what: string | number | null = 1) {
+  constructor(what: string | number | null = 1, code = 1) {
     super(typeof what === "string" ? what : `exit ${what ?? 0}`);
     this.text = typeof what === "string" ? what : null;
-    this.exitCode = typeof what === "string" ? 1 : (what ?? 0);
+    this.exitCode = typeof what === "string" ? code : (what ?? 0);
   }
+}
+
+/** The exit code of a command whose GitHub call met the API limit or the network, not a fault (#347): the loops wait
+ * for GitHub (factory_ratelimit.ts) instead of counting a failed pass. */
+export const GITHUB_BUSY = 4;
+
+const BUSY = /API rate limit exceeded|secondary rate limit|HTTP 429|TLS handshake timeout|connection reset by peer|i\/o timeout|HTTP 50[234]\b/i;
+
+/** True when `gh`'s answer says GitHub was busy (a rate limit, a timeout, a 502/503/504) rather than that the call is wrong. */
+export function githubBusy(text: string): boolean {
+  return BUSY.test(text);
 }
 
 /** An error a person can act on: printed as JSON {code, message, fix} on stderr, exit 1. */
