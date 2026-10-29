@@ -23,7 +23,7 @@
 // closed: an error, or a command it cannot read (gh or git hidden in bash -c, eval, xargs ...), blocks the command.
 // Exit 2 blocks the command and tells Claude why.
 import { basename } from "node:path";
-import { readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { load, loadFromMain } from "./factory_config.ts";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { Exit, run, runMain } from "./factory_lib.ts";
@@ -257,15 +257,17 @@ function postsOwnerAnswer(flags: Flags, args: string[], cmd: string): boolean {
   return bodyFiles(flags).some((p) => regularFile(p) && OWNER_ANSWER.test(readFileSync(p, "utf8")));
 }
 
-/** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`), or read
- * from anything but a regular file that exists now (stdin, `/dev/stdin`, a file the same command writes). */
-function hidesBody(flags: Flags, cmd: string): boolean {
+/** Whether a gh call's body is one the gate can't read before it runs: built by the shell (`$(...)`, `$VAR`); read from
+ * stdin or anything else that is not a regular file (`-`, `/dev/stdin`); or read from a file in a command that runs
+ * more than the gh call, which could write the file first. A missing file is left to gh to report. */
+function hidesBody(flags: Flags, cmd: string, parts: number): boolean {
   const files = bodyFiles(flags);
   const texts = [...values(flags, "--body", "-b"),
     ...values(flags, "-f", "--raw-field", "-F", "--field").filter((v) => v.startsWith("body="))];
   if (!files.length && !texts.length) return false;
   if (SHELL_EXPANSION.test(cmd)) return true;
-  return files.some((p) => !regularFile(p));
+  if (files.length && parts > 1) return true;
+  return files.some((p) => p === "-" || (existsSync(p) && !regularFile(p)));
 }
 
 function gitCall(args: string[]): void {
@@ -325,9 +327,10 @@ function main(): void {
         const heads = flags["--match-head-commit"] ?? [];
         gateMerge("repos/{owner}/{repo}", pos[2] as string, heads.length ? (heads[heads.length - 1] as string) : "");
       }
-      if (hidesBody(flags, cmd)) { // after the checks above, which say more about the commands they cover
-        refuse("Write the comment's body as plain text (-f body=\"...\") or in a file you wrote first (-F body=@<file>): the " +
-          "gate reads it before the shell runs, so it can't check a body built with $(...) or $VARIABLES or read from stdin.");
+      if (hidesBody(flags, cmd, parts.length)) { // after the checks above, which say more about the commands they cover
+        refuse("Write the comment's body as plain text (-f body=\"...\"), or write the file with the Write tool and post it " +
+          "in a command of its own (-F body=@<file>): the gate reads the body before the shell runs, so it can't check one " +
+          "built with $(...) or $VARIABLES, read from stdin, or written by the same command.");
       }
     } else if (args.some((t) => !t.startsWith("-") && SECRET.test(t))) {
       refuse("The manager does not read secrets files (.env*, secrets/, keys). " + ASK);
