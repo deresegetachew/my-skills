@@ -97,6 +97,8 @@ Look
                          again, q closes. Off a terminal, one frame sized by COLUMNS and LINES
   cockpit --ci           the CI view, from the same cache: where jobs run, the heavy runners, leftovers, the runners and
                          the queue, with the commands that act on them; fits COLUMNS, no colour with NO_COLOR
+  cockpit --usage        the usage view, from this machine's logs (no GitHub call): each task of the last 7 days
+                         against its budget as a bar, with its agent and top subagent, and the lessons
   cockpit --settings [--color]
                          the Settings view (view 6): every setting with its value, where it comes from (main, your
                          staged change, this machine, default) and what it does, and the staged changes that go out as
@@ -107,7 +109,7 @@ Look
                          the newest marker per commit, any review claim and the next action; then unanswered questions
                          and owner asks, and agents gone quiet. Read-only, REST only. prs, watch and messages ls answer
                          from one cache while it is fresh (views.cacheSeconds, 45) and say how old it is; --fresh asks
-                         GitHub now (watch --json always does)
+                         GitHub now
   claims                 which agent holds which folder and task
   reviews                which extra reviews and checks the current change needs
   rereview plan|prompt|record|reply

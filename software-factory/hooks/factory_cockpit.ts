@@ -290,14 +290,14 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --settings [--color] or " +
-    "watch <item>.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --usage, " +
+    "--settings [--color] or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, or " +
     "`factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--settings"];
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--usage", "--settings"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -352,12 +352,13 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
   }
-  if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci"].includes(flag)) {
+  if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci", "--usage"].includes(flag)) {
     const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
     if (flag === "--sidebar") return ui.sidebar();
     if (flag === "--bar") return ui.bar();
     if (flag === "--needs") return ui.needs();
     if (flag === "--ci") return ui.ciView(); // the CI view (#339)
+    if (flag === "--usage") return await ui.usageView(); // the usage view (#341)
     return ui.open();
   }
   if (flag === "--status") return status();

@@ -143,8 +143,10 @@ export function hook(work: string, env: Env, script: string, ...args: string[]):
   return sh([process.execPath, "--no-env-file", join(work, ".claude", "hooks", script), ...args], { cwd: work, env, timeoutMs: 90_000 });
 }
 
+/** The seven checks read now: --fresh, since a test changes the fake GitHub between two reads and --json answers from
+ * the views' cache while it is fresh (#347). */
 export function watch(work: string, env: Env): Record<string, Row> {
-  const p = hook(work, env, "factory_watch.ts", "--json");
+  const p = hook(work, env, "factory_watch.ts", "--json", "--fresh");
   if (p.code !== 0 && p.code !== 3) throw new Error(p.out);
   const out: Record<string, Row> = {};
   if (p.stdout.trim().startsWith("[")) for (const i of JSON.parse(p.stdout) as Row[]) out[i.ref as string] = i;

@@ -16,8 +16,10 @@
 //   factory cockpit --needs      the "Needs you" view, from the cache
 //   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json`
 //   factory cockpit --settings   the Settings view (#340), before the Pull requests view
-import { chmodSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
+//   factory cockpit --ci         the CI view (#339), from the cache
+//   factory cockpit --usage      the Usage and lessons view (#341), from this machine's logs
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, hostname } from "node:os";
 import { basename, join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { load } from "./factory_config.ts";
@@ -72,7 +74,7 @@ export function views(): View[] {
     { key: "5", title: "Agents & machines", commands: [["agents", "ls"], ["machine", "show"]] },
     { key: "6", title: "Settings", commands: [["cockpit", "--settings", "--color"]] },
     { key: "7", title: "Health & releases", commands: [["doctor"], ["version"]] },
-    { key: "8", title: "Usage & lessons", commands: [["usage"], ["lessons", "show"]] },
+    { key: "8", title: "Usage & lessons", commands: [["cockpit", "--usage"]] }, // drawn after its board (#341)
   ];
 }
 
@@ -1333,5 +1335,196 @@ export function renderCi(snap: Obj | null, w: number, nowMs: number): string[] {
 export function ciView(): number {
   COLOR = !process.env.NO_COLOR && !["", "dumb"].includes(process.env.TERM ?? "");
   console.log(renderCi(readCache(), width(), Date.now()).join("\n"));
+  return 0;
+}
+
+// --- the usage view (#341, PRD US-13) --------------------------------------------------------------------------------
+//
+// `factory cockpit --usage`, drawn after its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/VUsage.dc.html): each task of
+// the last 7 days against its budget as a bar, with its agent and the subagent that spent most, a few figures, and the
+// lessons. Its data is on this machine, so it makes no GitHub call: the tokens from Claude Code's logs (as `factory
+// usage` counts them: fresh input + output), the budget from the `Budget for this task:` line the loop puts in the
+// task's first prompt (else `budget.builder`), the agent from its worktree (`<project>-agents/<name>`), and the lessons
+// file. Rework rounds and CI runs are on GitHub, so it names `factory report` for them. A plain terminal, as the CI view.
+
+const DAY_MS = 86_400_000;
+const PROMPT_BUDGET = /Budget for this task:\s*([0-9][0-9.,_]*\s*[km]?)\s+tokens/i;
+
+interface TaskUse { task: string; agent: string; budget: number | null; used: number; top: string }
+
+/** What a session's log says before its first reply: the budget in its first prompt, and the folder it ran in. */
+function sessionStart(path: string): { budget: string; cwd: string } {
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return { budget: "", cwd: "" };
+  }
+  let cwd = "";
+  for (const raw of text.split("\n")) {
+    let d: Obj;
+    try {
+      d = obj(JSON.parse(raw));
+    } catch {
+      continue;
+    }
+    cwd ||= str(d.cwd);
+    if (d.type !== "user") continue;
+    const c = obj(d.message).content;
+    const said = Array.isArray(c) ? c.map((b) => str(obj(b).text)).join(" ") : str(c);
+    return { budget: PROMPT_BUDGET.exec(said)?.[1] ?? "", cwd };
+  }
+  return { budget: "", cwd };
+}
+
+function agentOf(cwd: string, root: string): string {
+  const rest = cwd.startsWith(`${root}-agents/`) ? cwd.slice(root.length + 8) : "";
+  return plain(rest.split("/")[0]) || "—";
+}
+
+/** The tasks of the last 7 days on this machine, newest task number first. */
+async function taskUse(root: string, nowMs: number): Promise<TaskUse[]> {
+  const { collect, counted, projectDirs, summarise } = await import("./factory_usage.ts");
+  const { parseBudget, roleDefault } = await import("./factory_budget.ts");
+  const base = join(process.env.HOME || homedir(), ".claude", "projects");
+  const until = Math.floor(nowMs / DAY_MS) * DAY_MS + DAY_MS; // the same period as `factory usage`
+  const sessions = collect(root, base, until - 8 * DAY_MS, until);
+  const starts = new Map<string, { budget: string; cwd: string }>();
+  for (const d of projectDirs(root, base)) {
+    for (const f of readdirSync(d).filter((n) => n.endsWith(".jsonl"))) starts.set(f.slice(0, -6), sessionStart(join(d, f)));
+  }
+  let builder: number | null = null;
+  try {
+    builder = roleDefault(load());
+  } catch {
+    // no readable factory.json: no default budget
+  }
+  const tasks = [...new Set([...sessions.values()].map((s) => s.task))].filter((t) => t !== "-");
+  const out: TaskUse[] = [];
+  for (const task of tasks) {
+    const mine = new Map([...sessions].filter(([, s]) => s.task === task));
+    const [groups, total] = summarise(mine, "agent");
+    const begun = [...mine.keys()].map((sid) => starts.get(sid) ?? { budget: "", cwd: "" });
+    const said = begun.map((b) => (b.budget ? parseBudget(`Budget: ${b.budget}`) : null)).find((b) => b !== null);
+    const subs = [...groups].filter(([k]) => k !== "main").map(([k, g]): [string, number] => [k, counted(g.tokens)])
+      .filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+    out.push({ task, agent: begun.map((b) => agentOf(b.cwd, root)).find((a) => a !== "—") ?? "—", budget: said ?? builder,
+      used: counted(total.tokens), top: plain(subs[0]?.[0]) || "—" });
+  }
+  const n = (t: string) => Number(t.split(".")[0]) || 0;
+  return out.sort((a, b) => n(b.task) - n(a.task) || b.task.localeCompare(a.task));
+}
+
+function median(xs: number[]): number | null {
+  const s = [...xs].sort((a, b) => a - b);
+  if (!s.length) return null;
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? (s[mid] as number) : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
+}
+
+function tokensShort(n: number): string {
+  return n >= 1_000_000 ? `${Number((n / 1_000_000).toFixed(1))}m` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
+function barStyle(pct: number): Style {
+  return pct >= 100 ? "red" : pct >= 80 ? "amber" : "blue";
+}
+
+/** `cells` wide: filled for what is used (full at 100% and over), the rest light. */
+function usageBar(t: TaskUse, cells: number): Seg[] {
+  if (t.budget === null) return [["░".repeat(cells), "dim"]];
+  const pct = Math.round((t.used / t.budget) * 100);
+  const full = Math.min(Math.round((pct / 100) * cells), cells);
+  return [["█".repeat(full), barStyle(pct)], ["░".repeat(cells - full), "dim"]];
+}
+
+function percentText(t: TaskUse): [string, Style] {
+  if (t.budget === null) return ["—", "dim"];
+  const pct = Math.round((t.used / t.budget) * 100);
+  return [pct >= 100 ? `${pct}% over` : `${pct}%`, barStyle(pct)];
+}
+
+function drawTasks(tasks: TaskUse[], w: number): string[] {
+  if (!tasks.length) return wrap("No task on this machine in the last 7 days.", w).map((l) => line([[l, "dim"]], w));
+  const out: string[] = [];
+  if (w >= 80) {
+    const cells = 20;
+    out.push(line([[`${pad("task", 8)}${pad("agent", 12)}${pad("budget", 9)}${pad("used", cells + 11)}spent most`, "dim"]], w));
+    for (const t of tasks) {
+      const [p, ps] = percentText(t);
+      const budget = t.budget === null ? "none" : tokensShort(t.budget);
+      out.push(line([[pad(`#${plain(t.task)}`, 8), "dim"], [pad(t.agent, 12), ""], [pad(budget, 9), ""], ...usageBar(t, cells),
+        [` ${pad(p, 10)}`, ps], [t.top, "dim"]], w));
+    }
+    return out;
+  }
+  for (const t of tasks) {
+    const [p, ps] = percentText(t);
+    out.push(line([[`#${plain(t.task)}  `, "dim"], [`${t.agent}  `, ""], [t.budget === null ? "none" : tokensShort(t.budget), ""]], w));
+    out.push(line([["  ", ""], ...usageBar(t, 10), [` ${p}  `, ps], [t.top, "dim"]], w));
+  }
+  return out;
+}
+
+function drawFigures(tasks: TaskUse[], w: number): string[] {
+  const budgeted = tasks.filter((t) => t.budget !== null);
+  const ratio = median(budgeted.map((t) => t.used / (t.budget as number)));
+  const per = median(tasks.map((t) => t.used));
+  const figures: Array<[string, string]> = [["tasks", String(tasks.length)],
+    ["budget vs used, median", ratio === null ? "—" : ratio.toFixed(2)],
+    ["over budget", String(budgeted.filter((t) => t.used > (t.budget as number)).length)],
+    ["per task, median", per === null ? "—" : tokensShort(per)]];
+  const out = w >= 96
+    ? drawCards(figures.map(([label, value]) => ({ title: label, warn: false, lines: [[value, "bold"]] })), w)
+    : figures.map(([label, value]) => line([[`${label}: `, "dim"], [value, "bold"]], w));
+  out.push(...wrap("Rework rounds and CI runs per task are on GitHub: factory report. Logs are per machine: a task built " +
+    "on another machine shows in its own factory usage.", w).map((l) => line([[l, "dim"]], w)));
+  return out;
+}
+
+function drawLessons(w: number): string[] {
+  const cfg = obj(load());
+  const path = str(cfg.lessons) || ".claude/factory/lessons.md";
+  const cap = Math.max(Math.trunc(Number(cfg.lessonsCap ?? 40)) || 40, 1);
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    // no lessons file yet
+  }
+  const lessons = text.split("\n").filter((l) => l.startsWith("- ")).map((l) => plain(l.slice(2)));
+  const out = [line([["Lessons", "bold"], [`  ${lessons.length} of ${cap}`, "dim"]], w)];
+  out.push(...wrap(`${plain(path)}, read first by builders and reviewers`, w).map((l) => line([[l, "dim"]], w)));
+  if (!lessons.length) out.push(line([["No lessons yet.", "dim"]], w));
+  for (const l of lessons) out.push(...wrap(l, w - 2).map((x, i) => line([[i ? "  " : "- ", "dim"], [x, ""]], w)));
+  const keys = "suggest from recent must-fixes: factory lessons suggest · add: factory lessons add \"<rule>\" (dev manager) · " +
+    "prune: factory lessons prune (dev manager)";
+  out.push(...wrap(keys, w, " · ").map((l) => line([[l, "dim"]], w)));
+  return out;
+}
+
+const USAGE_KEYS = "by task, role, agent or model: factory usage --by agent · a period: factory usage --since <date> · " +
+  "one task: factory usage --task <n> --budget · rework and CI runs: factory report";
+
+/** The usage view of the project at `root`, as lines at most `w` wide. */
+export async function renderUsage(root: string, w: number, nowMs: number): Promise<string[]> {
+  const title = `${plain(basename(root))} · Usage and lessons`;
+  const left: Seg[] = [["factory", "amber"], [`  ${title}`, "dim"]];
+  const right = "factory usage (this machine's logs) · last 7 days";
+  const leftW = len("factory") + 2 + len(title);
+  const out = w - leftW >= len(right) + 2
+    ? [line([...left, [" ".repeat(w - leftW - len(right)), ""], [right, "dim"]], w)]
+    : [line(left, w), ...wrap(right, w).map((l) => line([[l, "dim"]], w))];
+  out.push("", ...wrap("Tasks against their budget · fresh input + output, cache reads not counted", w, " · ")
+    .map((l, i) => line([[l, i ? "dim" : "bold"]], w)));
+  const tasks = await taskUse(root, nowMs);
+  out.push(...drawTasks(tasks, w), "", ...drawFigures(tasks, w), "", ...drawLessons(w));
+  out.push("", ...wrap(USAGE_KEYS, w, " · ").map((l) => line([[l, "dim"]], w)));
+  return out;
+}
+
+export async function usageView(): Promise<number> {
+  COLOR = !process.env.NO_COLOR && !["", "dumb"].includes(process.env.TERM ?? "");
+  console.log((await renderUsage(process.cwd(), width(), Date.now())).join("\n"));
   return 0;
 }
