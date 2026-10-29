@@ -13,7 +13,11 @@
       "Bash(bun tools/run_tests.ts*)",
       "Bash(bun tools/check_skills.ts*)",
       "Bash(bun x tsc*)",
-      "Bash(./factory run-check*)"
+      "Bash(./factory run-check*)",
+      "Bash(./factory settings list*)",
+      "Bash(./factory settings get*)",
+      "Bash(./factory settings help*)",
+      "Bash(./factory ci status*)"
     ]
   },
   "commands": {
