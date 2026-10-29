@@ -375,6 +375,17 @@ test("answer for an ask that already has an answer says so, posts nothing and ex
   expect(dbOf(r).posted).toBeUndefined();
 });
 
+test("with trustedReviewers, an agent's reply under an ask leaves it for the owner to answer (#337)", () => {
+  const db: Db = { ...queue(), comments: { "40": [ask("palette"),
+    { body: "<!-- factory-owner-answer id=palette -->\nyes", user: { login: "agents-bot" } },
+    { body: "blue then", user: { login: "agents-bot" } }] } };
+  const r = rig(db, { ".claude/factory.json": JSON.stringify({ trustedReviewers: ["the-owner"] }) });
+  const p = owner(r, OWNER, "answer", "palette", "Use the blue one");
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("Answered palette on #40.");
+  expect((dbOf(r).posted as { body: string }[])[0]?.body).toContain("Use the blue one");
+});
+
 test("answer with empty text says needs_text", () => {
   const r = rig(queue(ask("renumber")));
   refused(owner(r, OWNER, "answer", "renumber", "  "), "needs_text");
