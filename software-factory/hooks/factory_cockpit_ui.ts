@@ -50,14 +50,16 @@ export interface View {
   key: string;
   title: string;
   commands: string[][];
+  /** Draws its own screen and reads keys (#338): runs in the popup as it is, not through `less -R`. */
+  live?: boolean;
 }
 
-/** The views of US-10, each the existing commands it runs. */
+/** The views of US-10, each the existing commands it runs; US-13 moves them towards their boards one by one. */
 export function views(): View[] {
   const issues = str(obj(obj(load()).tasks).source) === "issues";
   return [
     { key: "1", title: "Needs you", commands: [["cockpit", "--needs"]] },
-    { key: "2", title: "Pull requests", commands: [["prs"]] },
+    { key: "2", title: "Pull requests", commands: [["cockpit", "--prs"]], live: true },
     { key: "3", title: "Tasks & PRD", commands: [issues ? ["issues", "list"] : ["next"]] },
     { key: "4", title: "CI", commands: [["ci", "status"]] },
     { key: "5", title: "Agents & machines", commands: [["agents", "ls"], ["machine", "show"]] },
@@ -159,9 +161,10 @@ function factoryCall(script: string, args: string[]): string {
   return ["bash", dq(script), ...args.map((a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : dq(a)))].join(" ");
 }
 
-/** A view as one sh command: a heading, each command's output, through `less -R`. */
+/** A view as one sh command: a heading, each command's output, through `less -R`; a live view runs as it is. */
 export function viewCommand(script: string, v: View): string {
   const parts = v.commands.map((c) => factoryCall(script, c));
+  if (v.live) return parts.join("; ");
   return `{ echo ${dq(v.title)}; echo; ${parts.join("; echo; ")}; } 2>&1 | less -R`;
 }
 
