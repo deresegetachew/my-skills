@@ -550,11 +550,19 @@ export function yes(answer: string): boolean {
   return /^\s*y(es)?\s*$/i.test(answer);
 }
 
+/** The arguments an action's words become: `say [--on R] <name>` takes the rest of the line as one message. */
+export function actionArgs(words: string[]): string[] {
+  if (words[0] !== "say") return words;
+  const at = words[1] === "--on" ? 3 : 1;
+  const message = words.slice(at + 1).join(" ");
+  return [...words.slice(0, at + 1), ...(message ? [message] : [])];
+}
+
 /** Runs the action's factory command here, its output on this terminal; returns its exit code. */
 export function runAction(words: string[]): number {
   const env: Record<string, string | undefined> = { ...process.env };
   delete env.TMUX;
-  const p = Bun.spawnSync(["bash", factoryScript(top()), ...words], { stdin: "ignore", stdout: "inherit", stderr: "inherit", env });
+  const p = Bun.spawnSync(["bash", factoryScript(top()), ...actionArgs(words)], { stdin: "ignore", stdout: "inherit", stderr: "inherit", env });
   return p.exitCode ?? 1;
 }
 
@@ -928,9 +936,13 @@ async function prsLoop(n: number | null): Promise<number> {
     process.stdout.write("\x1b[?25h\r\n");
     throw e;
   }
-  process.stdout.on("resize", () => draw());
   let asking: string[] | null = null;
   let shown = false; // an action's output is on screen: the next key goes back to the list
+  // A pending question stays on screen through a resize, and so does an action's output.
+  process.stdout.on("resize", () => {
+    if (asking) draw(`${question(asking)}\r\ny runs it · any other key does nothing`);
+    else if (!shown) draw();
+  });
   try {
     draw();
     // No Esc to close: over a slow ssh link an arrow key can come in two pieces, and its first is a lone Esc.

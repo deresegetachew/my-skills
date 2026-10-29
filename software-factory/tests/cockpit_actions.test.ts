@@ -75,6 +75,7 @@ echo "$*" >>"$FAKE_TMUX_DIR/tmux.log"
 case "$1" in
   -V) echo "tmux 3.4" ;;
   has-session) [ -n "$FAKE_HAS" ] || [ -e "$FAKE_TMUX_DIR/up" ] ;;
+  list-sessions) if [ -n "$FAKE_HAS" ] || [ -e "$FAKE_TMUX_DIR/up" ]; then echo work-taytu; fi ;;
   new-session) touch "$FAKE_TMUX_DIR/up" ;;
   kill-session) rm -f "$FAKE_TMUX_DIR/up" ;;
 esac
@@ -329,6 +330,14 @@ test("bar: a yes to owner stop kills the running session", () => {
   expect(r.code, r.out).toBe(0);
   expect(r.stdout).toContain("Stopped taytu");
   expect(tmuxCalled(p, "kill-session")).toHaveLength(1);
+}, T);
+
+test("bar: a yes to say sends a message of several words to the session as one message", () => {
+  const p = setup({ has: true });
+  const r = bar(p, "say taytu please rebase on main", "y");
+  expect(r.code, r.out).toBe(0);
+  const sent = tmuxCalled(p, "send-keys").join("\n");
+  expect(sent, r.out).toContain("please rebase on main");
 }, T);
 
 test("bar: flags are allowed after an action command (--remove, --head)", () => {
