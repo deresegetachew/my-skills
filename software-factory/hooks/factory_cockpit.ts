@@ -12,13 +12,18 @@
 //
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
 // missing or older than FACTORY_COCKPIT_CACHE_SECONDS (default 300: a refresh costs a few GitHub calls per open pull
-// request, on the agents' token) it starts one refresh in the background and says how old the line is. The cockpit itself (tmux) is later (US-10): `factory cockpit` alone says so.
+// request, on the agents' token) it starts one refresh in the background and says how old the line is. `factory cockpit`
+// alone opens the tmux cockpit (#308, US-10): factory_cockpit_ui.ts.
+//
+//   factory cockpit watch <item>   the item's sub-manager in its own tmux window, read-only (#307, PRD US-4)
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { toFloat } from "./factory_config.ts";
 import { isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
 import { stateDir } from "./factory_machine.ts";
+import { findSub, subWindow } from "./factory_orchestrator.ts";
+import { checkTmux, running as sessionRunning, WindowError } from "./factory_window.ts";
 
 const HOOKS = import.meta.dir;
 const PIN = ".claude/factory/release.json";
@@ -210,7 +215,7 @@ function writeCache(snap: Obj): void {
   renameSync(tmp, path);
 }
 
-function readCache(): Obj | null {
+export function readCache(): Obj | null {
   const data = parseJson(existsSync(cachePath()) ? readFileSync(cachePath(), "utf8") : "");
   return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Obj) : null;
 }
@@ -258,13 +263,18 @@ export function statusLine(snap: Obj | null, ageSeconds: number | null, ttl: num
   return parts.join(" · ");
 }
 
-function status(): number {
+/** Starts a refresh in the background when the cache is missing or old; returns [snapshot, age in s, ttl]. */
+export function refreshIfOld(): [Obj | null, number | null, number] {
   const ttl = toFloat(process.env.FACTORY_COCKPIT_CACHE_SECONDS || 300) ?? 300;
   const snap = readCache();
   const at = snap ? parseIso(str(snap.generatedAt)) : null;
   const age = at === null ? null : Math.max(Date.now() / 1000 - at, 0);
   if (snap === null || age === null || age >= ttl) refreshInBackground();
-  console.log(statusLine(snap, age, ttl));
+  return [snap, age, ttl];
+}
+
+function status(): number {
+  console.log(statusLine(...refreshIfOld()));
   return 0;
 }
 
@@ -279,15 +289,68 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit needs --json or --status; the tmux cockpit itself comes later (PRD US-10).",
-  fix: "Run `factory cockpit --json` for the snapshot, or `factory cockpit --status` for the one line.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs or watch <item>.",
+  fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
+    "one line, or `factory cockpit watch <item>` to watch a sub-manager.",
 };
+
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs"];
+
+function fail(p: Problem, code = 1): number {
+  process.stderr.write(JSON.stringify(p) + "\n");
+  return code;
+}
+
+/** `factory cockpit watch <item>` (#307, PRD US-4): the item's sub-manager in its tmux window, read-only (`attach -r`).
+ * Nothing here sends keys to it. */
+function watch(args: string[]): number {
+  const ref = args[0] ?? "";
+  if (args.length !== 1 || !/^[A-Za-z0-9_.-]+$/.test(ref)) {
+    return fail({ code: "cockpit_usage", message: "factory cockpit watch needs one item, such as pr-12.",
+      fix: "Run `factory cockpit watch <item>`; `factory watch` lists the items." }, 2);
+  }
+  const sub = findSub(ref);
+  if (!sub) {
+    return fail({ code: "no-sub-manager", message: `No sub-manager has run for ${ref} on this clone.`,
+      fix: "`factory watch` lists what needs a manager; the dev manager's loop (`factory dev-manager loop`) starts a " +
+        "sub-manager for each." });
+  }
+  if (!sub.live) {
+    return fail({ code: "sub-manager-ended", message: `The sub-manager for ${ref} has ended, so there is nothing left to watch.`,
+      fix: `Read what it did: less ${sub.out}` });
+  }
+  const { session, window } = subWindow(sub.name, ref);
+  try {
+    checkTmux();
+  } catch (e) {
+    if (e instanceof WindowError) return fail({ code: e.code, message: e.message, fix: e.fix });
+    throw e;
+  }
+  if (!sessionRunning(session)) {
+    return fail({ code: "no-window", message: `The sub-manager for ${ref} runs without a tmux window: its dev manager's ` +
+      "loop does not run in one.", fix: `Follow its output: tail -f ${sub.out}. A dev manager started by ` +
+      "`factory dev-manager loop -i` on a terminal, or by `factory resume`, gives its sub-managers windows." });
+  }
+  console.log(`Watching ${window} read-only; detach with your tmux prefix and d (twice inside tmux).`);
+  const p = Bun.spawnSync(["tmux", "attach-session", "-r", "-t", `=${session}`], {
+    stdin: "inherit", stdout: "inherit", stderr: "inherit", env: { ...process.env, TMUX: undefined },
+  });
+  return p.exitCode ?? 1;
+}
 
 export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
-  if (rest.length || !["--json", "--status", "--refresh"].includes(flag ?? "")) {
+  if (flag === "watch") return watch(rest);
+  if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
+  }
+  if (flag === undefined || ["--sidebar", "--bar", "--needs"].includes(flag)) {
+    const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
+    if (flag === "--sidebar") return ui.sidebar();
+    if (flag === "--bar") return ui.bar();
+    if (flag === "--needs") return ui.needs();
+    return ui.open();
   }
   if (flag === "--status") return status();
   if (flag === "--refresh") return refresh();

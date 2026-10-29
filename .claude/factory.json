@@ -67,5 +67,6 @@
         "^\\.github/workflows/"
       ]
     }
-  }
+  },
+  "waitMinutes": 5
 }

@@ -12,6 +12,13 @@
 // place. Without tmux the step stops with {code, message, fix} (resume, autostart); `factory loop -i` checks first and
 // runs in place instead, with a note. The cockpit needs tmux 3.2 or newer; an older tmux still
 // starts the session, with a note.
+//
+//   factory_window.ts job <file>
+//       what a sub-manager's window runs (#307, PRD US-4): the job file (mode 600, written by the orchestrator and
+//       removed once read, so neither the prompt nor the environment is on tmux's command line) names the command,
+//       its environment, the log and where the exit code goes. claude's stream-json output is shown as readable lines,
+//       in the window and in the log.
+import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { load, toFloat } from "./factory_config.ts";
 import { freeNames } from "./factory_claims.ts";
@@ -42,15 +49,21 @@ export function running(session: string): boolean {
   return run(["tmux", "has-session", "-t", `=${session}`]).code === 0;
 }
 
+/** The installed tmux is older than 3.2, which the cockpit needs: its version ("3.1"), else "" (newer, or no number). */
+export function tmuxTooOld(): string {
+  const m = /(\d+)\.(\d+)/.exec(run(["tmux", "-V"]).stdout);
+  return m && (Number(m[1]) < 3 || (Number(m[1]) === 3 && Number(m[2]) < 2)) ? m[0] : "";
+}
+
 /** Throws WindowError when there is no tmux; returns a note when it is older than 3.2, else "". */
 export function checkTmux(): string {
   if (!which("tmux")) {
     throw new WindowError("no-tmux", "tmux is not installed, and every factory session runs in its own tmux window.",
       "Install tmux (for example `sudo apt install tmux` or `brew install tmux`), then run the command again.");
   }
-  const m = /(\d+)\.(\d+)/.exec(run(["tmux", "-V"]).stdout);
-  if (m && (Number(m[1]) < 3 || (Number(m[1]) === 3 && Number(m[2]) < 2))) {
-    return `Note: ${m[0]} is older than tmux 3.2: the session starts, but the cockpit needs 3.2 or newer. ` +
+  const old = tmuxTooOld();
+  if (old) {
+    return `Note: ${old} is older than tmux 3.2: the session starts, but the cockpit needs 3.2 or newer. ` +
       "Upgrade tmux before you use `factory cockpit`.";
   }
   return "";
@@ -144,10 +157,104 @@ function loop(argv: string[]): number {
   return p.exitCode ?? 1;
 }
 
-function main(argv: string[]): number {
+/** What a window runs for a sub-manager: the command, its whole environment, its log and the exit code's file. */
+export interface Job {
+  argv: string[];
+  env: Record<string, string>;
+  log: string;
+  rc: string;
+}
+
+function brief(input: unknown): string {
+  const text = JSON.stringify(input ?? {});
+  return text.length > 120 ? text.slice(0, 117) + "..." : text;
+}
+
+/** The lines a person reads for one line of claude's stream-json output: the assistant's text, one line per tool it
+ * uses, the final result. Other events show nothing; a line that is not a JSON event shows as it is. */
+export function readable(line: string): string[] {
+  let ev: unknown;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return [line];
+  }
+  if (typeof ev !== "object" || ev === null || Array.isArray(ev)) return [line];
+  const e = ev as { type?: unknown; result?: unknown; message?: { content?: unknown } };
+  if (e.type === "result") return typeof e.result === "string" ? [e.result] : [];
+  const content = e.type === "assistant" ? e.message?.content : undefined;
+  if (!Array.isArray(content)) return [];
+  const out: string[] = [];
+  for (const c of content as { type?: unknown; text?: unknown; name?: unknown; input?: unknown }[]) {
+    if (c.type === "text" && typeof c.text === "string" && c.text) out.push(c.text);
+    else if (c.type === "tool_use") out.push(`> ${typeof c.name === "string" ? c.name : "tool"} ${brief(c.input)}`);
+  }
+  return out;
+}
+
+async function eachLine(stream: ReadableStream<Uint8Array>, each: (line: string) => void): Promise<void> {
+  const dec = new TextDecoder();
+  let rest = "";
+  for await (const chunk of stream) {
+    rest += dec.decode(chunk, { stream: true });
+    const lines = rest.split("\n");
+    rest = lines.pop() ?? "";
+    lines.forEach(each);
+  }
+  rest += dec.decode();
+  if (rest) each(rest);
+}
+
+function readJob(file: string): Job {
+  const j = JSON.parse(readFileSync(file, "utf8")) as Partial<Job>;
+  if (!Array.isArray(j.argv) || !j.argv.length || typeof j.log !== "string" || typeof j.rc !== "string") {
+    throw new WindowError("bad-job", `the job file ${file} is not a job.`, "Let the dev manager's next cycle start it again.");
+  }
+  return { argv: j.argv.map(String), env: j.env ?? {}, log: j.log, rc: j.rc };
+}
+
+/** A sub-manager's window: runs the job, shows it and logs it, and leaves the exit code for the orchestrator. */
+async function job(file: string): Promise<number> {
+  let j: Job;
+  try {
+    j = readJob(file);
+  } finally {
+    rmSync(file, { force: true });
+  }
+  writeFileSync(j.log, ""); // emptied here, once this window has started, so an earlier window's log is never cut short
+  const show = (text: string): void => {
+    process.stdout.write(text);
+    appendFileSync(j.log, text);
+  };
+  let rc = 127;
+  try {
+    const p = Bun.spawn(j.argv, { env: j.env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    await Promise.all([
+      eachLine(p.stdout, (l) => show(readable(l).map((x) => x + "\n").join(""))),
+      eachLine(p.stderr, (l) => show(l + "\n")),
+    ]);
+    rc = await p.exited;
+  } catch (e) {
+    show(`could not start ${j.argv[0]}: ${e instanceof Error ? e.message : String(e)}\n`);
+  } finally { // the orchestrator reads the file once it exists: write it whole
+    writeFileSync(j.rc + ".tmp", String(rc));
+    renameSync(j.rc + ".tmp", j.rc);
+  }
+  return rc;
+}
+
+async function main(argv: string[]): Promise<number> {
   if (argv[0] === "loop") return loop(argv.slice(1));
+  if (argv[0] === "job" && argv[1]) {
+    try {
+      return await job(argv[1]);
+    } catch (e) {
+      if (e instanceof WindowError) refuse(e.code, e.message, e.fix);
+      throw e;
+    }
+  }
   refuse("unknown-command", `unknown command ${JSON.stringify(argv[0] ?? "")}.`,
-    "Use: factory_window.ts loop --role R [--name N] -- <loop arguments>");
+    "Use: factory_window.ts loop --role R [--name N] -- <loop arguments>, or factory_window.ts job <file>");
 }
 
 if (import.meta.main) await runMain(() => main(process.argv.slice(2)));

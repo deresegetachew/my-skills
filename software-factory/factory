@@ -14,6 +14,8 @@ if [ "${1:-}" = bootstrap ]; then
   self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
   fh "$(dirname "$self")/hooks/factory_bootstrap" "${@:2}"; exit $?
 fi
+# This script's own path, before the cd: the cockpit's panes and popups run the factory through it (#308).
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
 cd "$root"
 hooks="$root/.claude/hooks"
@@ -81,10 +83,17 @@ Build
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
                          the CI queue and runners, and the tasks; read-only
+  cockpit                one terminal window over tmux 3.2+ (its own prefix, C-a): sessions and views on the left, the
+                         selected agent's real Claude Code session on the right (type into it; C-a C-a comes back),
+                         the counts on top. `:` is a command bar over the read-only commands, 1-8 open the views
+                         as popups. Read-only for now; C-a d leaves it, everything keeps running
   cockpit --json         the factory as data, one snapshot: sessions on every machine, what needs you, PRs, CI, the
                          version and the doctor's summary; a part that can't be read is listed under "missing"
   cockpit --status       one line for tmux's status line (counts and "N need you"), from a cache: no GitHub call;
                          an old or empty cache is refreshed in the background
+  cockpit --needs        what needs you (owner asks, PRs only a person merges), with links, from the same cache
+  cockpit watch <item>   watch the item's sub-manager (pr-12, issue-7) in its own tmux window, read-only: it never
+                         sends keys; one that ended points at its log
   prs [--json] [--fresh] what a manager decides from, one list: each open PR with its head, CI judged by one rule,
                          the newest marker per commit, any review claim and the next action; then unanswered questions
                          and owner asks, and agents gone quiet. Read-only, REST only. prs, watch and messages ls answer
@@ -321,7 +330,7 @@ case "$cmd" in
   autostart) fh "$hooks/factory_autostart" "$@" ;;
   resume)    fh "$hooks/factory_resume" "$@" ;;
   status)    fh "$hooks/factory_status" "$@" ;;
-  cockpit)   fh "$hooks/factory_cockpit" "$@" ;;
+  cockpit)   FACTORY_SELF="$here" fh "$hooks/factory_cockpit" "$@" ;;
   prs)       fh "$hooks/factory_prs" "$@" ;;
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;
   release)   fh "$hooks/factory_claims" release --agent "${1:?usage: factory release <agent>}" ;;

@@ -442,3 +442,113 @@ test("the scripts are bun scripts with no forwarder and are documented", () => {
   for (const part of ["factory follow", "factory say", "factory remote add", "--detach", "Remote Control", "sub-manager", "sudo",
     "ControlMaster", "Ctrl-b d"]) expect(readme).toContain(part);
 });
+
+// ---- factory follow on this machine (#301): a tmux session here is found directly, with no ssh remote ----
+
+const sshAttaches = (w: World): string[] => w.logged("ssh").filter((l) => l.includes("attach"));
+
+test("follow attaches to a session on this machine with no remote and no ssh", () => {
+  const w = new World([]);
+  w.session("local", "app-haile", SCREEN);
+  const p = w.factory(["follow", "haile"]);
+  expect(p.code, p.stderr).toBe(0);
+  expect(attaches(w)).toEqual(["local: attach -t =app-haile"]);
+  expect(sshAttaches(w)).toEqual([]);
+  expect(p.stderr).toContain("Ctrl-b d");
+  expect(p.stderr).toContain("this machine");
+  const r = w.factory(["follow", "haile", "--read"]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(attaches(w)).toEqual(["local: attach -t =app-haile", "local: attach -r -t =app-haile"]);
+  expect(r.stderr).toContain("Watching only");
+});
+
+test("the list shows a session on this machine as this machine and asks for a remote only when there is nothing", () => {
+  const w = new World([]);
+  w.session("local", "app-haile", SCREEN);
+  const p = w.factory(["follow"]);
+  expect(p.code, p.stderr).toBe(0);
+  const line = p.stdout.split("\n").find((l) => l.split(/\s+/)[0] === "haile") ?? "";
+  expect(line, p.stdout).toContain("this machine");
+  expect(p.stdout).not.toContain("No remotes yet");
+  const data = JSON.parse(w.factory(["follow", "--json"]).stdout) as { agents: { name: string; where: string }[] };
+  expect(data.agents.find((a) => a.name === "haile")?.where).toBe("this machine");
+  const q = new World([]).factory(["follow"]);
+  expect(q.code, q.stderr).toBe(0);
+  expect(q.stdout + q.stderr).toContain("factory remote add");
+});
+
+test("an unknown name or an ended session is no-such-agent and the fix lists the known names and this machine", () => {
+  const w = new World([]);
+  w.session("local", "app-haile", SCREEN);
+  let e = error(w.factory(["follow", "zzz"]));
+  expect(e.code).toBe("no-such-agent");
+  expect(e.fix).toContain("Known names: haile, tewodros");
+  expect(e.fix).toContain("this machine");
+  e = error(w.factory(["follow", "tewodros"]));
+  expect(e.code).toBe("no-such-agent");
+  expect(e.fix).toContain("Known names: haile, tewodros");
+  expect(attaches(w)).toEqual([]);
+});
+
+test("log and say work on this machine without ssh", () => {
+  const w = new World([]);
+  w.session("local", "app-haile", "line 1\nline 2\n");
+  const l = w.factory(["follow", "haile", "--log", "--polls", "1"]);
+  expect(l.code, l.stderr).toBe(0);
+  expect(l.stdout).toBe("line 1\nline 2\n");
+  const p = w.factory(["say", "haile", "hello"]);
+  expect(p.code, p.stderr).toBe(0);
+  const sends = w.logged("tmux").filter((x) => x.includes("send-keys"));
+  expect(sends).toEqual(["local: send-keys -t =app-haile: -l -- hello", "local: send-keys -t =app-haile: Enter"]);
+  expect(p.stdout).toContain("this machine");
+  expect(w.logged("ssh")).toEqual([]);
+});
+
+test("the same name here and on a remote is ambiguous and on local or the remote name picks one", () => {
+  const w = new World(["pc"]);
+  w.session("local", "app-haile", SCREEN);
+  w.session("pc", "haile", SCREEN);
+  w.factory(["remote", "add", "dev-pc", "factory@pc"]);
+  const e = error(w.factory(["follow", "haile"]));
+  expect(e.code).toBe("ambiguous");
+  expect(e.message).toContain("this machine");
+  expect(e.message).toContain("dev-pc");
+  expect(e.fix).toContain("--on local");
+  expect(attaches(w)).toEqual([]);
+  expect(w.factory(["follow", "haile", "--on", "local"]).code).toBe(0);
+  expect(attaches(w)).toEqual(["local: attach -t =app-haile"]);
+  expect(w.factory(["follow", "haile", "--on", "dev-pc"]).code).toBe(0);
+  expect(attaches(w)).toEqual(["local: attach -t =app-haile", "pc: attach -t =haile"]);
+});
+
+test("a remote session still attaches over ssh when nothing runs on this machine", () => {
+  const w = new World(["pc"]);
+  w.session("pc", "haile", SCREEN);
+  w.factory(["remote", "add", "dev-pc", "factory@pc"]);
+  expect(w.factory(["follow", "haile"]).code).toBe(0);
+  expect(attaches(w)).toEqual(["pc: attach -t =haile"]);
+});
+
+test("this machine is not refused for having sudo", () => {
+  const w = new World([]);
+  w.session("local", "app-haile", SCREEN);
+  write(join(w.state, "local", "has-sudo"), "");
+  const p = w.factory(["follow", "haile"]);
+  expect(p.code, p.stderr).toBe(0);
+  expect(attaches(w)).toEqual(["local: attach -t =app-haile"]);
+});
+
+test("a remote cannot be named local because that name is kept for this machine", () => {
+  const w = new World([]);
+  const e = error(w.factory(["remote", "add", "local", "factory@host"]));
+  expect(e.code).toBe("bad-name");
+  expect(e.fix).toBeTruthy();
+});
+
+test("help and the docs explain following on this machine", () => {
+  const w = new World([]);
+  const help = w.factory(["help"]).stdout;
+  expect(help).toContain("this machine");
+  expect(help).toContain("--on local");
+  expect(readmeAndWiki()).toContain("--on local");
+});
