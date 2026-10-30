@@ -8,6 +8,8 @@
 //   mustfix) from the dev manager names its current head commit (nothing pushed since) is printed as
 //   "pr-42 Rework #42: <title> (<branch>)". With `trustedReviewers` set, only must-fixes from those logins count.
 //   A PR with the `holdLabel` label (default `factory-hold`) is the dev manager's to review: it's never rework.
+//   A rework is claimed on the PR as well as locally (`factory-rework-claim`, factory_claims.ts, #355), so every
+//   machine sees it: a PR whose rework another agent holds is skipped (one line on stderr says who holds it).
 //   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --note    -> what `factory next` runs: the same line, then "Not claimed. To claim it: ..."
 //   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --pid 123
 //       -> the first task no other running loop holds, claimed for taytu (factory-loop.sh does this; see
@@ -30,14 +32,15 @@
 // working copy can't make the agent skip or repeat a task.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { blockedIds, type Config, load, taskSource, tasks } from "./factory_config.ts";
+import { blockedIds, type Config, load, taskSource, tasks, toFloat } from "./factory_config.ts";
 import { staleClaims } from "./factory_agents.ts";
-import { claimTask } from "./factory_claims.ts";
-import { type Issue, pick, pickNamed, readyIssues } from "./factory_issues.ts";
+import { claimRework, claimTask, describeRework, isMine, release, reworkHolder } from "./factory_claims.ts";
+import { type Comment, type Issue, pick, pickNamed, readyIssues } from "./factory_issues.ts";
+import { machineId } from "./factory_machine.ts";
 import { verdicts } from "./factory_messages.ts";
 import { bunCmd, Exit, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
 
-type Job = [id: string, title: string];
+type Job = [id: string, title: string, head?: string];
 
 function read(cfg: Config, path: string): string {
   const p = run(["git", "show", `origin/${cfg.mainBranch}:${path}`]);
@@ -56,13 +59,10 @@ interface Pull {
   head: { sha: string; ref: string };
 }
 
-interface Comment {
-  body?: string | null;
-  user?: { login?: string } | null;
-}
-
-/** [[id, title]] for open PRs with a must-fix on their current head commit, oldest first. Needs `gh`. */
-function rework(cfg: Config): Job[] {
+/** [[id, title, head]] for open PRs with a must-fix on their current head commit, oldest first, leaving out those whose
+ * rework another agent holds (#355: a claim on the PR that every machine sees). `me` is the agent picking, if any. Needs
+ * `gh`. */
+function rework(cfg: Config, me: string | null): Job[] {
   const ghAll = <T>(path: string): T[] => {
     const p = run(["gh", "api", "--paginate", path]);
     if (p.code !== 0) return [];
@@ -76,17 +76,39 @@ function rework(cfg: Config): Job[] {
   const hold = (cfg.holdLabel as string | undefined) ?? "factory-hold";
   // With `trustedReviewers`, only those logins' must-fixes count, so an agent can't send the loops to rework (#260).
   const trusted = new Set(Array.isArray(cfg.trustedReviewers) ? (cfg.trustedReviewers as unknown[]).map(String) : []);
+  const hours = toFloat(cfg.claimStaleHours ?? 6) ?? 6;
+  const machine = me ? machineId() : "";
   const prs = ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open&per_page=100").sort((a, b) => a.number - b.number);
   for (const pr of prs) {
     if ((pr.labels ?? []).some((l) => l.name === hold)) continue; // the dev manager is reviewing it: not rework
-    const shas = ghAll<Comment>(`repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`)
-      .filter((c) => !trusted.size || trusted.has(String(c.user?.login ?? "")))
+    const comments = ghAll<Comment>(`repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`);
+    const shas = comments.filter((c) => !trusted.size || trusted.has(String(c.user?.login ?? "")))
       .flatMap((c) => verdicts(c.body || "")).filter(([kind, sha]) => kind === "mustfix" && sha).map(([, sha]) => sha as string); // either form
-    if (shas.length && pr.head.sha.startsWith(shas[shas.length - 1] as string)) {
-      out.push([`pr-${pr.number}`, `Rework #${pr.number}: ${pr.title} (${pr.head.ref})`]);
+    if (!shas.length || !pr.head.sha.startsWith(shas[shas.length - 1] as string)) continue;
+    const held = reworkHolder(comments, pr.head.sha, Date.now() / 1000, hours);
+    if (held && !(me && isMine(held, me, machine))) {
+      process.stderr.write(`Skipped #${pr.number}: ${describeRework(held)} is reworking it.\n`);
+      continue;
     }
+    out.push([`pr-${pr.number}`, `Rework #${pr.number}: ${pr.title} (${pr.head.ref})`, pr.head.sha]);
   }
   return out;
+}
+
+/** The first of `jobs` this agent may take, claimed: the local claim (factory_claims.ts) and, for a rework, the claim
+ * on the PR. A rework lost to another agent lets its local claim go and the next job is tried. [] when none is left. */
+function claimFirst(cfg: Config, jobs: Job[], agent: string, pid: string | number): Job[] {
+  let left = jobs;
+  while (left.length) {
+    const tid = claimTask(left.map(([i]) => i), agent, pid, cfg);
+    const job = left.find(([i]) => i === tid);
+    if (!job) return [];
+    const [id, , head] = job;
+    if (!head || claimRework(cfg, Number(id.slice(3)), head, agent)) return [job];
+    release(agent, true);
+    left = left.filter(([i]) => i !== id);
+  }
+  return [];
 }
 
 interface Args {
@@ -151,11 +173,8 @@ function main(argv: string[]): number {
     if (ids.includes(a.after)) openTasks = openTasks.slice(ids.indexOf(a.after) + 1);
   }
   const remaining = openTasks.length;
-  if (!a.noRework && !a.after) openTasks = [...rework(cfg), ...openTasks]; // fixing a reviewed PR comes before new work
-  if (a.claim && openTasks.length) {
-    const tid = claimTask(openTasks.map(([i]) => i), a.claim, a.pid || process.ppid, cfg);
-    openTasks = openTasks.filter(([i]) => i === tid);
-  }
+  if (!a.noRework && !a.after) openTasks = [...rework(cfg, me(a)), ...openTasks]; // fixing a reviewed PR comes before new work
+  if (a.claim && openTasks.length) openTasks = claimFirst(cfg, openTasks, a.claim, a.pid || process.ppid);
   const blockedSorted = [...blocked].sort();
   if (!openTasks.length) {
     console.log(a.json ? pyDumps({ id: null, remaining: 0, blocked: blockedSorted }) : "none");
@@ -168,6 +187,11 @@ function main(argv: string[]): number {
     note(a);
   }
   return 0;
+}
+
+/** Whose own rework claim doesn't hold a PR back: the agent claiming, else (`factory next` only looks) FACTORY_AGENT. */
+function me(a: Args): string | null {
+  return a.claim || (process.env.FACTORY_AGENT ?? "").trim() || null;
 }
 
 /** `factory next` only looks: say so, and show the command that claims. Other programs read one line, so only --note adds it. */
@@ -205,11 +229,8 @@ function sayStaleClaims(cfg: Config): void {
 function issuesMode(cfg: Config, a: Args): number {
   if (a.issue) return namedIssue(cfg, a);
   sayStaleClaims(cfg);
-  let jobs = a.noRework ? [] : rework(cfg);
-  if (jobs.length && a.claim) {
-    const tid = claimTask(jobs.map(([i]) => i), a.claim, a.pid || process.ppid, cfg);
-    jobs = jobs.filter(([i]) => i === tid);
-  }
+  let jobs = a.noRework ? [] : rework(cfg, me(a));
+  if (jobs.length && a.claim) jobs = claimFirst(cfg, jobs, a.claim, a.pid || process.ppid);
   if (!jobs.length) {
     let i: Issue | null;
     if (a.claim) i = pick(cfg, a.claim);

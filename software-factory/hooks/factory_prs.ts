@@ -15,11 +15,17 @@
 // runs yet; `unknown` when they could not be read. The next action is one of: review, merge, wait CI, rerun flake,
 // waiting for agent, owner merges (protected), owner merges (own PR), held by <manager>, none.
 import { agentIssues, current, stateOf } from "./factory_agents.ts";
-import { type Config, branchTask, load, loadFromMain, taskLabels, taskSource } from "./factory_config.ts";
+import { type Config, branchTask, load, loadFromMain, taskLabels, taskSource, toFloat } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
 import { Exit, isoUtc, parseArgs, parseIso, pyDumps, pyInt, runMain } from "./factory_lib.ts";
 import * as claims from "./factory_manager_claims.ts";
+import { reworkHolder } from "./factory_claims.ts";
 import { answer, sayAge } from "./factory_views_cache.ts";
+
+/** "haile on dev-pc (machine 1a2b3c) is reworking it until <time>": who holds a PR's rework (#355). */
+export function reworkText(r: { agent: string; machine: string; host: string; until: string }): string {
+  return `${r.agent}${r.host ? ` on ${r.host}` : ""}${r.machine ? ` (machine ${r.machine})` : ""} is reworking it until ${r.until}`;
+}
 
 const SHA_IN = /sha=([0-9a-f]{7,40})/;
 const MARKER = /<!--\s*(factory-approved|factory-mustfix|pr-watch)\b([^>]*?)-->/g;
@@ -304,6 +310,8 @@ export interface PullRow {
   headMarker?: string | null;
   gate?: string | null;
   claim?: ClaimRow | null;
+  /** The agent reworking this head (#355); only there when one holds it. */
+  rework?: { agent: string; machine: string; host: string; until: string };
   staleHold?: boolean;
   protected?: boolean | null;
   next?: Action;
@@ -395,6 +403,8 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
           out.protected = null;
         }
       }
+      const rework = reworkHolder(comments as fi.Comment[], sha, now, toFloat(gateCfg.claimStaleHours ?? 6) ?? 6);
+      if (rework) out.rework = { agent: rework.agent, machine: rework.machine, host: rework.host, until: claims.stamp(rework.until) };
       const runsByJob = new Map([...newestRuns(runs)].map(([k, [, c]]) => [k, c]));
       out.next = nextAction(out, held, runsByJob, flakes);
     } catch (e) {
@@ -546,7 +556,8 @@ function show(r: Built): void {
       mark += ` (older: ${last.kind} ${last.sha ? last.sha.slice(0, 7) : "None"})`;
     }
     const claim = p.claim ? `claim ${p.claim.manager} until ${p.claim.until}` : "no claim";
-    console.log(`    CI ${ci.state}${names && ci.state !== "green" ? " (" + names + ")" : ""} | ${mark} | ${claim}`);
+    const rw = p.rework ? ` | ${reworkText(p.rework)}` : "";
+    console.log(`    CI ${ci.state}${names && ci.state !== "green" ? " (" + names + ")" : ""} | ${mark} | ${claim}${rw}`);
   }
   console.log("Questions");
   const q = r.questions;

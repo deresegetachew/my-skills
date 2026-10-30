@@ -10,7 +10,9 @@
 //
 // A claim belongs to a live process: when the pid that made it has exited (or the claim is older than
 // `claimStaleHours`), it no longer counts. Loops on other machines or clones can't see this file, so a task whose
-// `task/<id>-...` branch got a commit on the remote within `claimStaleHours` counts as taken too.
+// `task/<id>-...` branch got a commit on the remote within `claimStaleHours` counts as taken too, and a PR's rework
+// (`pr-<n>`) is also claimed on the PR itself ("Rework claims" below, #355): `release` takes that claim off, and
+// `list` shows the ones GitHub holds as `rework` lines.
 //
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts checkout --pid $$     -> prints "<agent> <directory>" to work in
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts checkout --pid $$ --role dev-manager [--name lead]
@@ -33,9 +35,11 @@ import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { agentName, agentSlot, branchTask, type Config, load, roleNames, safeAgent, taskSource, tasks as planTasks,
   toFloat } from "./factory_config.ts";
-import { machineNames } from "./factory_machine.ts";
+import * as fi from "./factory_issues.ts";
+import { machineId, machineNames } from "./factory_machine.ts";
 import { isClaude } from "./factory_session.ts";
-import { type ArgSpec, die, Exit, flock, parseArgs, pyDumps, run, runMain, splitLines } from "./factory_lib.ts";
+import { type ArgSpec, die, Exit, flock, isoUtc, now, parseArgs, parseIso, pyDumps, run, runMain, sleepSync,
+  splitLines } from "./factory_lib.ts";
 
 export const HOST = hostname();
 
@@ -476,6 +480,165 @@ export function clean(cfg: Config, staleHours: number): void {
   console.log("deleted merged task branches: " + (branches.join(", ") || "none"));
 }
 
+// ---------------------------------------------------------------------------------------------------- rework claims
+// A task issue is claimed on GitHub (factory_issues.ts), but a PR's rework was claimed only in this clone's claims file,
+// so two machines (or two clones) both started it (#355). Starting a rework now also posts a lease on the PR, as the
+// dev manager's review claims do (factory_manager_claims.ts):
+//
+//   <!-- factory-rework-claim agent=<name> machine=<id> host=<host name> sha=<head> until=<ISO time> -->
+//   <!-- factory-rework-release agent=<name> machine=<id> -->
+//
+// The earliest unexpired claim for the PR's current head wins, in the order GitHub lists the comments. A release drops
+// that agent's (on that machine) earlier claims. A claim ends when its `until` passes, and never counts for longer than
+// `claimStaleHours` after its comment was posted, so a crashed run doesn't hold a PR forever. A new head (the fix was
+// pushed) makes an old claim mean nothing. next_task.ts claims, `release` and `list` below release and list, and
+// factory_prs.ts shows the holder in the cockpit.
+
+const REWORK_CLAIM = /<!--\s*factory-rework-claim\s+([^>]*?)-->/;
+const REWORK_RELEASE = /<!--\s*factory-rework-release\s+([^>]*?)-->/;
+const REWORK_NAME = /^[\w.-]+$/;
+
+export interface ReworkClaim {
+  agent: string;
+  machine: string;
+  host: string;
+  sha: string;
+  /** Seconds since the epoch. */
+  until: number;
+}
+
+export interface HeldRework extends ReworkClaim {
+  number: number;
+}
+
+/** This machine's host name, as a rework claim shows it. */
+export function hostLabel(): string {
+  return HOST.replace(/[^\w.-]/g, "-") || "unknown";
+}
+
+function attrs(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const a of text.matchAll(/(\w+)=(\S+)/g)) out[a[1] as string] = a[2] as string;
+  return out;
+}
+
+function sameSha(a: string, b: string): boolean {
+  return Boolean(a && b) && (a.startsWith(b) || b.startsWith(a));
+}
+
+/** Whether a rework claim is this agent on this machine. A machine without an id matches by name alone. */
+export function isMine(c: ReworkClaim, agent: string, machine: string): boolean {
+  return fi.isMe([c.agent, c.machine || null], agent, machine);
+}
+
+/** Unexpired rework claims in comment order, each agent's own release dropping its earlier ones; only those for `head`
+ * when it is given. `hours` is `claimStaleHours`. */
+export function liveReworkClaims(comments: fi.Comment[], head: string | null, at: number, hours: number): ReworkClaim[] {
+  let claims: ReworkClaim[] = [];
+  for (const c of comments) {
+    const body = c.body || "";
+    const r = REWORK_RELEASE.exec(body);
+    if (r) {
+      const a = attrs(r[1] as string);
+      claims = claims.filter((x) => !(x.agent === a.agent && x.machine === (a.machine ?? "")));
+      continue;
+    }
+    const m = REWORK_CLAIM.exec(body);
+    if (!m) continue;
+    const a = attrs(m[1] as string);
+    let until = parseIso(a.until);
+    if (!REWORK_NAME.test(a.agent ?? "") || !a.sha || until === null) continue;
+    const posted = parseIso(c.created_at);
+    if (posted !== null) until = Math.min(until, posted + hours * 3600);
+    claims.push({ agent: a.agent as string, machine: a.machine ?? "", host: a.host ?? "", sha: a.sha, until });
+  }
+  return claims.filter((x) => x.until > at && (head === null || sameSha(x.sha, head)));
+}
+
+/** The claim that holds the rework of `head`, or null. */
+export function reworkHolder(comments: fi.Comment[], head: string, at: number, hours: number): ReworkClaim | null {
+  return liveReworkClaims(comments, head, at, hours)[0] ?? null;
+}
+
+function commentsOf(n: number): fi.Comment[] {
+  return fi.ghAll<fi.Comment>(`repos/{owner}/{repo}/issues/${n}/comments`);
+}
+
+function postReworkRelease(n: number, agent: string, machine: string): void {
+  const where = machine ? ` machine=${machine}` : "";
+  fi.comment(n, `<!-- factory-rework-release agent=${agent}${where} -->\n**${agent}** stopped reworking this.`);
+}
+
+/** Claim the rework of PR `n` at `head` for this agent; true when the claim is this agent's (new or held already). A
+ * claim that lost a simultaneous race is released at once, so it never holds the PR after the winner lets go. */
+export function claimRework(cfg: Config, n: number, head: string, agent: string): boolean {
+  const hours = staleOf(cfg);
+  const machine = machineId();
+  const held = reworkHolder(commentsOf(n), head, now(), hours);
+  if (held) return isMine(held, agent, machine);
+  const until = now() + hours * 3600;
+  const host = hostLabel();
+  const where = machine ? ` machine=${machine}` : "";
+  fi.comment(n, `<!-- factory-rework-claim agent=${agent}${where} host=${host} sha=${head} until=${isoUtc(until)} -->\n` +
+    `**${agent}** on ${host} is reworking ${head.slice(0, 7)} until ${isoUtc(until).slice(11, 16)} UTC. It's released when ` +
+    "the run ends, or when that time passes.");
+  sleepSync(fi.claimSettleSeconds()); // let a simultaneous claim land, then let the earliest comment decide
+  const winner = reworkHolder(commentsOf(n), head, now(), hours);
+  if (winner && isMine(winner, agent, machine)) return true;
+  postReworkRelease(n, agent, machine);
+  return false;
+}
+
+/** Release this agent's live rework claim on PR `n`, if it has one; true when a release was posted. */
+export function releaseRework(cfg: Config, n: number, agent: string): boolean {
+  const machine = machineId();
+  const mine = liveReworkClaims(commentsOf(n), null, now(), staleOf(cfg)).some((c) => isMine(c, agent, machine));
+  if (mine) postReworkRelease(n, agent, machine);
+  return mine;
+}
+
+/** Every open PR whose rework is held, with its holder, in PR order. */
+export function heldReworks(cfg: Config): HeldRework[] {
+  const hours = staleOf(cfg);
+  const out: HeldRework[] = [];
+  const pulls = fi.ghAll<{ number: number; head: { sha: string } }>("repos/{owner}/{repo}/pulls?state=open");
+  for (const p of pulls.sort((a, b) => a.number - b.number)) {
+    const h = reworkHolder(commentsOf(p.number), p.head.sha, now(), hours);
+    if (h) out.push({ number: p.number, ...h });
+  }
+  return out;
+}
+
+/** "haile on dev-pc (machine 1a2b3c) until 23:40 UTC": who holds a rework. */
+export function describeRework(c: ReworkClaim): string {
+  const where = c.host ? ` on ${c.host}` : "";
+  const mach = c.machine ? ` (machine ${c.machine})` : "";
+  return `${c.agent}${where}${mach} until ${isoUtc(c.until).slice(11, 16)} UTC`;
+}
+
+/** The run that held a PR's rework ended: take its claim off the PR too, so another machine may start it. */
+function releaseReworks(cfg: Config, agent: string, tids: string[]): void {
+  for (const t of tids.filter((x) => /^pr-\d+$/.test(x))) {
+    try {
+      if (releaseRework(cfg, Number(t.slice(3)), agent)) console.log(`Released ${agent}'s rework claim on #${t.slice(3)}.`);
+    } catch (e) {
+      console.log(`Could not take ${agent}'s rework claim off #${t.slice(3)} (${e instanceof Error ? e.message : String(e)}); ` +
+        "it ends by itself after claimStaleHours.");
+    }
+  }
+}
+
+/** Rework claims on open PRs, from GitHub; none when GitHub can't be read (the local claims still show). */
+function reworkClaims(cfg: Config): HeldRework[] {
+  try {
+    return heldReworks(cfg);
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- command line
+
 const USAGE = "usage: factory_claims.ts [-h] {checkout,free,release,worktree,list,done,take-done,tidy-branches,clean} ...";
 const PROG = "factory_claims.ts";
 
@@ -522,6 +685,7 @@ function main(argv: string[]): void {
     const tasksOnly = Boolean(a["tasks-only"]);
     const [had, tids] = release(s("agent"), tasksOnly);
     console.log(releaseMessage(s("agent"), tasksOnly, had, tids));
+    releaseReworks(cfg, s("agent"), tids);
   } else {
     locked((data) => {
       for (const kind of ["checkouts", "tasks"] as const) {
@@ -532,6 +696,7 @@ function main(argv: string[]): void {
         }
       }
     });
+    for (const h of reworkClaims(cfg)) console.log(`${"rework".padEnd(8)} ${`pr-${h.number}`.padEnd(10)} ${describeRework(h)} (on GitHub)`);
   }
 }
 
