@@ -46,7 +46,7 @@ interface Seen {
 
 /** The first line of an ask's text after its marker. */
 function firstLine(body: string): string {
-  const rest = body.replace(OWNER_ASK, "");
+  const rest = body.replace(new RegExp(OWNER_ASK.source, "g"), "");
   return rest.split("\n").map((l) => l.trim()).find((l) => l) ?? "";
 }
 
