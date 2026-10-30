@@ -313,6 +313,37 @@ test("owner asks carry forProduct and a state: open, owner or product (#352)", (
   expect(text).toMatch(/^ {2}plain waiting \d+ \w+: https:/m);
 });
 
+test("one comment with two answer markers answers both asks, and one with two ask markers opens both (#357)", () => {
+  const c = (n: number, body: string): Row => ({ id: n, body, created_at: `2020-01-01T0${n}:00:00Z`,
+    html_url: `https://github.com/o/r/issues/60#c${n}`, issue_url: "x/issues/60" });
+  const sc = scenario({});
+  sc.issues = [{ number: 60, title: "Dev manager: needs the owner", state: "open", labels: [], body: "" }];
+  sc["issues/60/comments"] = [
+    c(1, "<!-- factory-owner-ask id=draft-limit for=product -->\nno draft limit?"),
+    c(2, "<!-- factory-owner-ask id=free-visits for=product -->\nfree visits on starter?"),
+    c(3, "<!-- factory-owner-answer id=draft-limit -->\n<!-- factory-owner-answer id=free-visits -->\nyes to both"),
+    c(4, "<!-- factory-owner-ask id=one -->\n<!-- factory-owner-ask id=two -->\ntwo asks in one comment"),
+  ];
+  const [, p] = prs(sc, "--json");
+  expect(p.code, p.out).toBe(0);
+  const ids = ((JSON.parse(p.stdout) as Row).ownerAsks as Row[]).map((x) => x.id);
+  expect(ids).toEqual(["one", "two"]);
+});
+
+test("a plain reply under a comment with two ask markers answers both (#357)", () => {
+  const c = (n: number, body: string): Row => ({ id: n, body, created_at: `2020-01-01T0${n}:00:00Z`,
+    html_url: `https://github.com/o/r/issues/60#c${n}`, issue_url: "x/issues/60" });
+  const sc = scenario({});
+  sc.issues = [{ number: 60, title: "Dev manager: needs the owner", state: "open", labels: [], body: "" }];
+  sc["issues/60/comments"] = [
+    c(1, "<!-- factory-owner-ask id=one -->\n<!-- factory-owner-ask id=two -->\ntwo asks in one comment"),
+    c(2, "yes to both"),
+  ];
+  const [, p] = prs(sc, "--json");
+  expect(p.code, p.out).toBe(0);
+  expect(((JSON.parse(p.stdout) as Row).ownerAsks as Row[]).map((x) => x.id)).toEqual([]);
+});
+
 test("plain text is compact and has every part", () => {
   const p1 = run(1, [check("t")], [marker("factory-approved", SHAS[1] as string)], { labels: ["agent:taytu"] });
   const p2 = run(2, [check("lint", "failure")], [], { draft: true });

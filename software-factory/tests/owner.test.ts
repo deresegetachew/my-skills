@@ -360,6 +360,15 @@ test("answer works on an ask the product owner replied to (#352)", () => {
   expect(posted[0]?.body.startsWith("<!-- factory-owner-answer id=palette -->")).toBe(true);
 });
 
+test("answer finds the second ask in a comment that carries two (#357)", () => {
+  const r = rig(queue(`<!-- factory-owner-ask id=renumber -->\n${ask("palette")}`));
+  const p = owner(r, OWNER, "answer", "palette", "Use the blue one");
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("Answered palette on #40.");
+  const posted = dbOf(r).posted as { issue: string; body: string }[];
+  expect(posted[0]?.body.startsWith("<!-- factory-owner-answer id=palette -->")).toBe(true);
+});
+
 test("answer without an owner queue says no_owner_queue", () => {
   const r = rig({ issues: [{ number: 5, state: "open", title: "Something else" }] });
   refused(owner(r, OWNER, "answer", "x", "y"), "no_owner_queue");

@@ -118,7 +118,7 @@ export function comment(n: number | string, body: string): void {
 // Comments the factory writes about its own work (claims, reviews, usage ...). `show` leaves them out; a person's
 // comment, and a question or answer that carries words, is read as part of the task.
 export const FACTORY_NOISE = new RegExp("^\\s*<!--\\s*factory-(?:claim|release|approved|mustfix|review-claim|claim-release|" +
-  "answer-claim|item-claim|usage|agent|role|manager-note)\\b");
+  "answer-claim|item-claim|rework-claim|rework-release|usage|agent|role|manager-note)\\b");
 
 /** The comments on issue n that people wrote, oldest first (a decision may live in one: #204). */
 export function humanComments(n: number | string): Comment[] {

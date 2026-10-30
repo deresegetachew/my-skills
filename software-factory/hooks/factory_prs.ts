@@ -15,11 +15,17 @@
 // runs yet; `unknown` when they could not be read. The next action is one of: review, merge, wait CI, rerun flake,
 // waiting for agent, owner merges (protected), owner merges (own PR), held by <manager>, none.
 import { agentIssues, current, stateOf } from "./factory_agents.ts";
-import { type Config, branchTask, load, loadFromMain, taskLabels, taskSource } from "./factory_config.ts";
+import { type Config, branchTask, load, loadFromMain, taskLabels, taskSource, toFloat } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
 import { Exit, isoUtc, parseArgs, parseIso, pyDumps, pyInt, runMain } from "./factory_lib.ts";
 import * as claims from "./factory_manager_claims.ts";
+import { reworkHolder } from "./factory_claims.ts";
 import { answer, sayAge } from "./factory_views_cache.ts";
+
+/** "haile on dev-pc (machine 1a2b3c) is reworking it until <time>": who holds a PR's rework (#355). */
+export function reworkText(r: { agent: string; machine: string; host: string; until: string }): string {
+  return `${r.agent}${r.host ? ` on ${r.host}` : ""}${r.machine ? ` (machine ${r.machine})` : ""} is reworking it until ${r.until}`;
+}
 
 const SHA_IN = /sha=([0-9a-f]{7,40})/;
 const MARKER = /<!--\s*(factory-approved|factory-mustfix|pr-watch)\b([^>]*?)-->/g;
@@ -28,6 +34,16 @@ const ANSWER = /<!--\s*factory-answer\b/;
 export const OWNER_ASK = /<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\s*-->/; // for=product may follow
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
+
+/** Every id a marker carries in one comment, in order: a comment may answer or ask more than one (#357). */
+function markerIds(marker: RegExp, body: string): string[] {
+  return [...body.matchAll(new RegExp(marker.source, "g"))].map((m) => m[1] as string);
+}
+
+/** The ids of every `factory-owner-ask` marker in a comment. */
+export function ownerAskIds(body: string): string[] {
+  return markerIds(OWNER_ASK, body);
+}
 
 export const OWNER_QUEUE_TITLE = "Dev manager: needs the owner";
 const PERSON_MERGES = "a person merges this one";
@@ -242,26 +258,27 @@ type Reply = "answered" | "po" | "done" | "back";
 export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()): [string, Obj, AskState][] {
   const asks: [string, Obj][] = [];
   const last = new Map<string, Reply>();
-  let under: string | null = null; // the thread a plain comment answers
+  let under: string[] = []; // the threads a plain comment answers
   for (const c of comments) {
     const body = str(c.body);
-    const ask = OWNER_ASK.exec(body);
-    if (ask) {
-      asks.push([ask[1] as string, c]);
-      under = ask[1] as string;
+    const asked = ownerAskIds(body);
+    if (asked.length) {
+      for (const slug of asked) asks.push([slug, c]);
+      under = asked;
       continue;
     }
     const po = PO_REPLY.exec(body);
     if (po) {
       last.set(po[1] as string, /\bdone\b/.test(po[2] ?? "") ? "done" : "po");
-      under = po[1] as string;
+      under = [po[1] as string];
       continue;
     }
     if (trusted.size && !trusted.has(loginOf(c))) continue;
-    const slug = OWNER_ANSWER.exec(body)?.[1] ?? under;
-    if (slug === null) continue;
-    const before = last.get(slug);
-    last.set(slug, before === undefined || before === "answered" ? "answered" : "back");
+    const answered = markerIds(OWNER_ANSWER, body);
+    for (const slug of answered.length ? answered : under) {
+      const before = last.get(slug);
+      last.set(slug, before === undefined || before === "answered" ? "answered" : "back");
+    }
   }
   const state = (r: Reply | undefined): AskState | null =>
     r === undefined ? "open" : r === "po" ? "owner" : r === "back" ? "product" : null;
@@ -306,6 +323,8 @@ export interface PullRow {
   headMarker?: string | null;
   gate?: string | null;
   claim?: ClaimRow | null;
+  /** The agent reworking this head (#355); only there when one holds it. */
+  rework?: { agent: string; machine: string; host: string; until: string };
   staleHold?: boolean;
   protected?: boolean | null;
   next?: Action;
@@ -397,6 +416,8 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
           out.protected = null;
         }
       }
+      const rework = reworkHolder(comments as fi.Comment[], sha, now, toFloat(gateCfg.claimStaleHours ?? 6) ?? 6);
+      if (rework) out.rework = { agent: rework.agent, machine: rework.machine, host: rework.host, until: claims.stamp(rework.until) };
       const runsByJob = new Map([...newestRuns(runs)].map(([k, [, c]]) => [k, c]));
       out.next = nextAction(out, held, runsByJob, flakes);
     } catch (e) {
@@ -549,7 +570,8 @@ function show(r: Built): void {
       mark += ` (older: ${last.kind} ${last.sha ? last.sha.slice(0, 7) : "None"})`;
     }
     const claim = p.claim ? `claim ${p.claim.manager} until ${p.claim.until}` : "no claim";
-    console.log(`    CI ${ci.state}${names && ci.state !== "green" ? " (" + names + ")" : ""} | ${mark} | ${claim}`);
+    const rw = p.rework ? ` | ${reworkText(p.rework)}` : "";
+    console.log(`    CI ${ci.state}${names && ci.state !== "green" ? " (" + names + ")" : ""} | ${mark} | ${claim}${rw}`);
   }
   console.log("Questions");
   const q = r.questions;

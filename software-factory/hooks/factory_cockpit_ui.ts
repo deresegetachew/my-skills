@@ -836,6 +836,11 @@ export function prDetail(p: Obj, questions: Obj[], cols: number, color: boolean)
   if (!p.headMarker && last) manager += ` (older: ${plain(last.kind).replace(/^factory-/, "")} ${short(last.sha) || "no commit"})`;
   const claim = obj(p.claim);
   if (plain(claim.manager)) manager += `   ${plain(claim.manager)} holds the review until ${plain(claim.until)}`;
+  const rw = obj(p.rework); // who is reworking this head, on which machine (#355)
+  if (plain(rw.agent)) {
+    manager += `   ${plain(rw.agent)}${plain(rw.host) ? ` on ${plain(rw.host)}` : ""}` +
+      `${plain(rw.machine) ? ` (machine ${plain(rw.machine)})` : ""} is reworking it until ${plain(rw.until)}`;
+  }
 
   const state = plain(ci.state) || "unknown";
   const notGreen = list(ci.notGreen);
