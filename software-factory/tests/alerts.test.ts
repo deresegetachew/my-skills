@@ -88,6 +88,16 @@ test("several new asks at once give one bell and one notice each", () => {
   expect(log.filter((l) => l.includes("two"))).toHaveLength(1);
 });
 
+test("a comment with two ask markers alerts both, each with the ask's text (#357)", () => {
+  const r = rig([]);
+  check(r);
+  addComments(r, `<!-- factory-owner-ask id=one -->\n${ask("two", "both of these?")}`);
+  const p = check(r);
+  expect(count(p.stdout, BEL)).toBe(2);
+  expect(p.stdout).toContain("needs you: one: both of these?");
+  expect(p.stdout).toContain("needs you: two: both of these?");
+});
+
 test("an answered ask is never alerted", () => {
   const r = rig([]);
   check(r);

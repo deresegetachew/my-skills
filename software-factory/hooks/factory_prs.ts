@@ -35,6 +35,16 @@ export const OWNER_ASK = /<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
 
+/** Every id a marker carries in one comment, in order: a comment may answer or ask more than one (#357). */
+function markerIds(marker: RegExp, body: string): string[] {
+  return [...body.matchAll(new RegExp(marker.source, "g"))].map((m) => m[1] as string);
+}
+
+/** The ids of every `factory-owner-ask` marker in a comment. */
+export function ownerAskIds(body: string): string[] {
+  return markerIds(OWNER_ASK, body);
+}
+
 export const OWNER_QUEUE_TITLE = "Dev manager: needs the owner";
 const PERSON_MERGES = "a person merges this one";
 const GREEN = ["success", "neutral"];
@@ -247,25 +257,26 @@ type Reply = "answered" | "po" | "done" | "back";
 export function ownerAskStates(comments: Obj[]): [string, Obj, AskState][] {
   const asks: [string, Obj][] = [];
   const last = new Map<string, Reply>();
-  let under: string | null = null; // the thread a plain comment answers
+  let under: string[] = []; // the threads a plain comment answers
   for (const c of comments) {
     const body = str(c.body);
-    const ask = OWNER_ASK.exec(body);
-    if (ask) {
-      asks.push([ask[1] as string, c]);
-      under = ask[1] as string;
+    const asked = ownerAskIds(body);
+    if (asked.length) {
+      for (const slug of asked) asks.push([slug, c]);
+      under = asked;
       continue;
     }
     const po = PO_REPLY.exec(body);
     if (po) {
       last.set(po[1] as string, /\bdone\b/.test(po[2] ?? "") ? "done" : "po");
-      under = po[1] as string;
+      under = [po[1] as string];
       continue;
     }
-    const slug = OWNER_ANSWER.exec(body)?.[1] ?? under;
-    if (slug === null) continue;
-    const before = last.get(slug);
-    last.set(slug, before === undefined || before === "answered" ? "answered" : "back");
+    const answered = markerIds(OWNER_ANSWER, body);
+    for (const slug of answered.length ? answered : under) {
+      const before = last.get(slug);
+      last.set(slug, before === undefined || before === "answered" ? "answered" : "back");
+    }
   }
   const state = (r: Reply | undefined): AskState | null =>
     r === undefined ? "open" : r === "po" ? "owner" : r === "back" ? "product" : null;
