@@ -7,7 +7,7 @@ import { copyFileSync, cpSync, mkdirSync, readdirSync, writeFileSync } from "nod
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { CI, envWith, gitRepo, HOOKS, runHook, SF, sh, tmp, write, writeExe } from "./support.ts";
-import { type Db, type Env, FAKE_GH, loadDb, nextTask, saveDb, setup } from "./issues_support.ts";
+import { type Db, type Env, FAKE_GH, issue, loadDb, nextTask, pull, run, saveDb, setup } from "./issues_support.ts";
 
 const T = 120_000;
 const HEAD = "a".repeat(40);
@@ -150,6 +150,48 @@ test("losing a simultaneous claim takes nothing and gives the losing claim back"
   writeExe(join(d, "bin", "gh"), FAKE_GH);
   const [d2, , e2] = setup([]);
   expect(pick(d2, machine(e2, "mach-c", db), "taytu"), "haile still holds it").toBe("none");
+}, T);
+
+// --- GitHub refuses the claim ------------------------------------------------------------------------------------
+
+/** The fake GitHub, failing with `said` when a rework claim is posted. */
+function refusingClaims(d: string, said: string): void {
+  const gh = FAKE_GH.replace('if (method === "POST") { cs.push(',
+    `if (method === "POST" && String(body.body).includes("factory-rework-claim")) fail(${JSON.stringify(said)}); if (method === "POST") { cs.push(`);
+  expect(gh).not.toBe(FAKE_GH);
+  writeExe(join(d, "bin", "gh"), gh);
+}
+
+test("when GitHub refuses the rework claim, the pick lets that rework go and takes the next job", () => {
+  const [d, db, env] = setup([issue(7)]);
+  withRework(db);
+  refusingClaims(d, "gh: Validation Failed (HTTP 422)");
+  const [rc, out, err] = nextTask(d, machine(env, "mach-a"), "--claim", "haile", "--pid", PID);
+  expect(rc, `${out}\n${err}`).toBe(0);
+  expect(out).toMatch(/^issue-7 /);
+  expect(err).toContain("#5");
+  const r = runHook("factory_claims", ["list"], { cwd: d, env: machine(env, "mach-a") });
+  expect(r.stdout, "the local claim on pr-5 was let go").not.toContain("pr-5");
+}, T);
+
+test("when GitHub is busy while claiming a rework, the pick stops with the busy code", () => {
+  const [d, db, env] = setup([issue(7)]);
+  withRework(db);
+  refusingClaims(d, "gh: API rate limit exceeded (HTTP 429)");
+  const [rc, out, err] = nextTask(d, machine(env, "mach-a"), "--claim", "haile", "--pid", PID);
+  expect(rc, `${out}\n${err}`).toBe(4);
+  const r = runHook("factory_claims", ["list"], { cwd: d, env: machine(env, "mach-a") });
+  expect(r.stdout, "the local claim on pr-5 was let go").not.toContain("pr-5");
+}, T);
+
+test("factory_issues.ts show leaves rework claims and releases out, as it does other factory comments", () => {
+  const [d, db, env] = setup([pull(5)]);
+  withRework(db, [claim("haile", "mach-a", HEAD, iso(3600)),
+    { body: "<!-- factory-rework-release agent=haile machine=mach-a -->\n**haile** stopped reworking this.", at: 3 }]);
+  const [rc, out] = run(d, env, "show", "5");
+  expect(rc, out).toBe(0);
+  expect(out).not.toContain("factory-rework-claim");
+  expect(out).not.toContain("factory-rework-release");
 }, T);
 
 // --- what people see ---------------------------------------------------------------------------------------------
