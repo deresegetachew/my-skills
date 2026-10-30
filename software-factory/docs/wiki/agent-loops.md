@@ -343,6 +343,12 @@ a task. The branch is `task/<id with dashes>-<name>`, and the PR ticks its own t
 - On one clone: a lock file in the shared git folder (`<git-common-dir>/factory/claims.json`, never committed). A
   claim lasts while the loop's process is alive, up to `claimStaleHours` (default 6).
 - Across machines: a `task/<id>-...` branch on the remote with a commit within `claimStaleHours` counts as taken.
+- A PR's rework (`pr-<n>`, both modes) is also claimed on the PR, so every machine sees it: a
+  `<!-- factory-rework-claim agent=<name> machine=<id> host=<host> sha=<head> until=<time> -->` comment. The earliest
+  unexpired claim for the PR's head wins, and a loop skips a PR another agent holds. The claim is released when the run
+  ends (`factory release <agent>`, or the loop's own release posts `factory-rework-release`), counts for no more than
+  `claimStaleHours` after it was posted, and means nothing once a new commit is pushed. `factory claims` lists them as
+  `rework` lines with the agent and machine, and the cockpit's Pull requests view shows who is reworking a PR.
 
 ### Issues mode
 
