@@ -546,3 +546,14 @@ test("the tmux config passes a bell from the list to the owner's terminal", asyn
   expect(text).toMatch(/^set(-option)? -g monitor-bell on$/m);
   expect(text).not.toMatch(/visual-bell\s+on/);
 }, T);
+
+test("view 6, Settings, opens the settings view (#340) in colour through less -R", async () => {
+  const p = setup();
+  const [rc, shown] = await onATerminal(p, []);
+  expect(rc, shown).toBe(0);
+  const text = read(checkOpened(p, shown));
+  const six = text.split("\n").find((l) => l.startsWith("bind 6 "));
+  expect(six, text).toBeDefined();
+  expect(six).toContain("cockpit --settings --color");
+  expect(six).toContain("less -R");
+}, T);

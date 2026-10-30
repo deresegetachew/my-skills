@@ -292,12 +292,14 @@ async function refresh(): Promise<number> {
 
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --usage or watch <item>.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --usage, " +
+    "--settings [--color] or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
-    "one line, `factory cockpit --prs` for the pull requests, or `factory cockpit watch <item>` to watch a sub-manager.",
+    "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, or " +
+    "`factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--usage"];
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--usage", "--settings"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -345,6 +347,9 @@ export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
   if (flag === "--prs") return (await import("./factory_cockpit_ui.ts")).prsView(rest); // the Pull requests view (#338)
+  if (flag === "--settings" && rest.every((a) => a === "--color") && rest.length <= 1) {
+    return (await import("./factory_cockpit_ui.ts")).settingsView(rest);
+  }
   if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");

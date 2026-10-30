@@ -19,6 +19,7 @@
 //                                terminal: the words, else one line on stdin, and the next line answers an action's question)
 //   factory cockpit --needs      the "Needs you" view, from the cache
 //   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json`
+//   factory cockpit --settings   the Settings view (#340), before the Pull requests view
 //   factory cockpit --ci         the CI view (#339), from the cache
 //   factory cockpit --usage      the Usage and lessons view (#341), from this machine's logs
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -29,6 +30,9 @@ import { load } from "./factory_config.ts";
 import { readCache, refreshIfOld } from "./factory_cockpit.ts";
 import { run, which } from "./factory_lib.ts";
 import { refuse, repoKey, stateDir } from "./factory_machine.ts";
+import { asText, lookup, MACHINE, MISSING, SECTIONS, SETTINGS, type Setting } from "./factory_settings_schema.ts";
+import { loadStaged, type Staged } from "./factory_settings_staged.ts";
+import * as store from "./factory_settings_store.ts";
 import { sessionName, tmuxTooOld } from "./factory_window.ts";
 
 type Obj = { [key: string]: unknown };
@@ -72,7 +76,7 @@ export function views(): View[] {
     { key: "3", title: "Tasks & PRD", commands: [issues ? ["issues", "list"] : ["next"]] },
     { key: "4", title: "CI", commands: [["cockpit", "--ci"]] }, // drawn after its board (#339)
     { key: "5", title: "Agents & machines", commands: [["agents", "ls"], ["machine", "show"]] },
-    { key: "6", title: "Settings", commands: [["settings", "list"]] },
+    { key: "6", title: "Settings", commands: [["cockpit", "--settings", "--color"]] },
     { key: "7", title: "Health & releases", commands: [["doctor"], ["version"]] },
     { key: "8", title: "Usage & lessons", commands: [["cockpit", "--usage"]] }, // drawn after its board (#341)
   ];
@@ -672,6 +676,209 @@ export function needs(): number {
     else if (n.kind === "owner-merges") console.log(`PR #${plain(n.number)} ${plain(n.title)} is yours to merge: ${plain(n.url)}`);
     else console.log(JSON.stringify(n)); // JSON escapes control characters itself
   }
+  return 0;
+}
+
+// --- the Settings view (#340, PRD US-13) -----------------------------------------------------------------------------
+//
+// `factory cockpit --settings [--color]`, towards its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/VSettings.dc.html).
+// The settings as a table: setting, value, from (main, your change, this machine, default), what it does. Project
+// settings by section under PROJECT (via PR), this machine's own under THIS MACHINE (direct). A ◆ marks a setting whose
+// change needs a sign-off (the owner's, or a dev manager's label: the schema's `needs`). Staged project changes (#306) show as "(pending)" in the table and together in a box,
+// as the one pull request `factory settings pr` opens. The keys line names the commands that edit: the view itself only
+// reads. Plain text unless `--color` (and no NO_COLOR); a terminal narrower than the table puts each setting over several lines.
+// Agents can't open it: it refuses in an agent session, as `factory settings` refuses their changes.
+
+interface Paint {
+  amber: (s: string) => string;
+  red: (s: string) => string;
+  green: (s: string) => string;
+  grey: (s: string) => string;
+  bold: (s: string) => string;
+}
+
+// The helpers below are the Settings view's own (the CI view below has its own `paint`, `cut`, `pad`, `wrap`, `width`).
+function settingsPaint(on: boolean): Paint {
+  const c = (code: string) => (s: string) => (on && s ? `\x1b[${code}m${s}\x1b[0m` : s);
+  return { amber: c("33"), red: c("31"), green: c("32"), grey: c("90"), bold: c("1") };
+}
+
+function shownWidth(s: string): number {
+  return [...s.replace(ANSI, "")].length;
+}
+
+/** Plain text cut to `n` characters, with … when cut. */
+function clip(s: string, n: number): string {
+  const chars = [...s];
+  if (n <= 0) return "";
+  return chars.length <= n ? s : `${chars.slice(0, n - 1).join("")}…`;
+}
+
+function padTo(s: string, n: number): string {
+  const shown = clip(s, n);
+  return shown + " ".repeat(Math.max(n - [...shown].length, 0));
+}
+
+/** Words wrapped to `n` columns, each line starting with `lead`. */
+function wrapWords(text: string, n: number, lead = ""): string[] {
+  const out: string[] = [];
+  let line = lead;
+  for (const w of text.split(" ")) {
+    const next = line === lead ? lead + w : `${line} ${w}`;
+    if ([...next].length <= n || line === lead) line = next;
+    else {
+      out.push(line);
+      line = lead + w;
+    }
+  }
+  out.push(line);
+  return out.map((l) => clip(l, n));
+}
+
+/** The terminal's width: COLUMNS, the terminal on stdout, the one on stdin (a popup pipes stdout to less), else 100. */
+function termColumns(): number {
+  const given = Number(process.env.COLUMNS);
+  if (given > 0) return given;
+  if (process.stdout.columns) return process.stdout.columns;
+  if (process.stdin.isTTY) {
+    const p = Bun.spawnSync(["stty", "size"], { stdin: "inherit", stdout: "pipe", stderr: "ignore" });
+    const n = Number(p.stdout.toString().trim().split(/\s+/)[1]);
+    if (n > 0) return n;
+  }
+  return 100;
+}
+
+interface SettingRow {
+  key: string;
+  owner: boolean;
+  value: string;
+  from: string;
+  pending: boolean;
+  help: string;
+}
+
+function projectRow(data: store.Data, staged: Staged, s: Setting): SettingRow {
+  const here = lookup(data, s.key);
+  const change = Object.hasOwn(staged, s.key) ? staged[s.key] : undefined;
+  const base = { key: s.key, owner: Boolean(s.needs), help: plain(s.short) };
+  if (change) {
+    const v = "value" in change ? change.value : s.default;
+    return { ...base, value: plain(asText(v)), from: "your change", pending: true };
+  }
+  return { ...base, value: plain(asText(here === MISSING ? s.default : here)), from: here === MISSING ? "default" : "main",
+    pending: false };
+}
+
+function machineRow(data: store.Data, s: Setting): SettingRow {
+  const set = Object.hasOwn(data, s.key);
+  // No ◆ here: a machine setting is saved at once, with no pull request to sign off (its `needs` says so).
+  return { key: s.key, owner: false, help: plain(s.short), value: plain(asText(set ? data[s.key] : s.default)),
+    from: set ? "this machine" : "default", pending: false };
+}
+
+const KEY_W = 34;
+const VALUE_W = 20;
+const FROM_W = 13;
+const WIDE = KEY_W + VALUE_W + FROM_W + 23; // the table needs this much to keep a useful "what it does"
+
+/** The value in `n` columns; a pending one keeps its "(pending)" however much of the value is cut. */
+function valueText(r: SettingRow, n: number): string {
+  return r.pending ? `${clip(r.value, Math.max(n - 10, 1))} (pending)` : clip(r.value, n);
+}
+
+function tableLines(rows: SettingRow[], cols: number, c: Paint): string[] {
+  const out: string[] = [];
+  for (const r of rows) {
+    const mark = r.owner ? " ◆" : "";
+    const value = r.pending ? c.amber : (s: string) => s;
+    if (cols >= WIDE) {
+      const key = padTo(clip(r.key, KEY_W - 2 - mark.length) + mark, KEY_W - 2);
+      const keyShown = r.owner ? key.replace(" ◆", c.amber(" ◆")) : key;
+      const help = clip(r.help, cols - KEY_W - VALUE_W - FROM_W - 2);
+      out.push(`  ${keyShown}${value(padTo(valueText(r, VALUE_W - 2), VALUE_W - 1))} ${padTo(r.from, FROM_W - 1)} ${c.grey(help)}`);
+    } else {
+      out.push(clip(`  ${r.key}${mark}`, cols).replace(" ◆", c.amber(" ◆")));
+      out.push(`    ${value(valueText(r, Math.max(cols - 4 - [...r.from].length - 3, 12)))} · ${c.grey(clip(r.from, cols - 4))}`);
+      for (const l of wrapWords(r.help, cols, "    ").slice(0, 2)) out.push(c.grey(l));
+    }
+  }
+  return out.map((l) => (shownWidth(l) > cols ? clip(l.replace(ANSI, ""), cols) : l));
+}
+
+/** The box of staged changes: what `factory settings pr` would open. */
+function stagedBox(staged: Staged | null, problem: string, data: store.Data, cols: number, c: Paint): string[] {
+  const inner = Math.max(cols - 4, 10);
+  const body: string[] = [];
+  if (problem) {
+    body.push(...wrapWords(`The staged changes can't be read (${plain(problem)}).`, inner));
+    body.push(...wrapWords("Run `factory settings unstage` to drop them, then stage again with `factory settings set --stage <key> <value>`.", inner).map(c.grey));
+  } else if (!staged || !Object.keys(staged).length) {
+    body.push(...wrapWords("No project changes waiting.", inner));
+    body.push(...wrapWords("`factory settings set --stage <key> <value>` stages one; they go to main together as one pull request.", inner).map(c.grey));
+  } else {
+    const keys = Object.keys(staged);
+    body.push(...wrapWords(`${keys.length} project change${keys.length === 1 ? "" : "s"} waiting · they go to main as one pull request`, inner).map(c.bold));
+    for (const key of keys) {
+      const change = staged[key] as Staged[string];
+      const was = lookup(data, key);
+      if (was !== MISSING) body.push(...wrapWords(`- ${plain(JSON.stringify(key))}: ${plain(JSON.stringify(was))}`, inner).map(c.red));
+      if ("value" in change) body.push(...wrapWords(`+ ${plain(JSON.stringify(key))}: ${plain(JSON.stringify(change.value))}`, inner).map(c.green));
+      else if (was === MISSING) body.push(...wrapWords(`  ${plain(JSON.stringify(key))}: back to its default`, inner).map(c.grey));
+    }
+    body.push(...wrapWords("`factory settings pr` opens the PR · `factory settings unstage [<key>]` discards · " +
+      "`factory settings validate` checks · .claude/factory.json is protected: you merge it", inner).map(c.grey));
+  }
+  const edge = c.amber;
+  const rule = "─".repeat(Math.max(cols - 2, 0));
+  return [edge(`┌${rule}┐`), ...body.map((b) => `${edge("│")} ${b}${" ".repeat(Math.max(inner - shownWidth(b), 0))} ${edge("│")}`),
+    edge(`└${rule}┘`)];
+}
+
+const SETTINGS_KEYS = "edit: `factory settings set --stage <key> <value>` · full help: `factory settings help <key>` · " +
+  "back to default: `factory settings unset --stage <key>` · search: / here · open the PR: `factory settings pr` · " +
+  "this machine: `factory settings --local set <key> <value>`, saved at once · agents can't open this view";
+
+/** The Settings view as lines, each at most `cols` wide. */
+export function settingsLines(cols: number, color: boolean): string[] {
+  const c = settingsPaint(color);
+  const [data] = store.readProject();
+  const machine = store.readMachine();
+  const found = loadStaged();
+  const staged = "changes" in found ? found.changes : {};
+  const problem = "problem" in found ? found.problem : "";
+  const repo = plain(repoKey());
+  const title = `${c.amber(c.bold("factory"))} ${c.grey(`${repo} · Settings`)}`;
+  const source = "factory settings · values from main, this machine's file, defaults";
+  const out: string[] = [];
+  if (cols >= shownWidth(title) + source.length + 4) out.push(title + " ".repeat(cols - shownWidth(title) - source.length) + c.grey(source));
+  else out.push(clip(title, cols), ...wrapWords(source, cols).map(c.grey));
+  out.push(...wrapWords("◆ a change to it needs a sign-off: the owner's, or a dev manager's label (`factory settings help <key>`) · " +
+    "(pending) staged, not on main yet", cols).map(c.grey), "");
+  if (cols >= WIDE) {
+    out.push(c.grey(`  ${padTo("setting", KEY_W - 2)}${padTo("value", VALUE_W - 1)} ${padTo("from", FROM_W - 1)} what it does`));
+  }
+  out.push(c.bold("PROJECT (via PR)"));
+  for (const [slug, name] of SECTIONS) {
+    const rows = Object.values(SETTINGS).filter((s) => s.section === slug).map((s) => projectRow(data, staged, s));
+    if (!rows.length) continue;
+    out.push(c.amber(clip(`── ${name} `.padEnd(Math.min(cols, 60), "─"), cols)), ...tableLines(rows, cols, c));
+  }
+  out.push("", c.bold(clip(`THIS MACHINE (direct) · ${plain(hostname())} · ${repo}`, cols)));
+  out.push(...tableLines(Object.values(MACHINE).map((s) => machineRow(machine, s)), cols, c), "");
+  out.push(...stagedBox(problem ? null : staged, problem, data, cols, c), "");
+  out.push(...wrapWords(SETTINGS_KEYS, cols).map(c.grey));
+  return out;
+}
+
+export function settingsView(args: string[]): number {
+  for (const name of ["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"]) {
+    if (name in process.env) {
+      refuse("cockpit_agent_session", `The Settings view is the owner's, and ${name} is set, so this looks like an agent session.`,
+        "Open it from the cockpit in your own terminal (`factory cockpit`, then 6), or run `factory cockpit --settings` there.");
+    }
+  }
+  const color = args.includes("--color") && !("NO_COLOR" in process.env);
+  console.log(settingsLines(termColumns(), color).join("\n"));
   return 0;
 }
 
