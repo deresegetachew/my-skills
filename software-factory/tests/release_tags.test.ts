@@ -1,0 +1,87 @@
+// A release starts only from the owner's tag (#337): the PR gate refuses an agent's tag push, and the release workflow
+// publishes only a tag whose commit is on main and whose name matches software-factory/VERSION.
+import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { runGate } from "./pr_gate_support.ts";
+import { git, gitRepo, ROOT, sh, tmp, write } from "./support.ts";
+
+const TAG_PUSHES = ["git push origin v1.2.3", "git push --tags", "git push origin --tags", "git push --follow-tags origin task/1-x",
+  "git push origin refs/tags/v1.2.3", "git push origin HEAD:refs/tags/v1.2.3", "git push origin HEAD:v1.2.3",
+  "git push origin tag v1.2.3", "git push -u origin v2.0.0-rc.1", "git push origin tags/v1.2.3", "git push origin 'refs/*:refs/*'",
+  "git push origin 'refs/t*:refs/t*'"];
+const BRANCH_PUSHES = ["git push origin task/1-x", "git push -u origin HEAD", "git push -u origin task/12-validate",
+  "git push origin HEAD:task/3-v2-cleanup"];
+
+test("the PR gate refuses a tag push wherever git's options sit, and lets a branch push through", () => {
+  const d = tmp();
+  sh(["git", "init", "-q", d]);
+  write(join(d, ".claude", "factory.json"), "{}");
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: d };
+  for (const c of [...TAG_PUSHES, "git -C . push origin v1.2.3", "timeout 5 git push origin refs/tags/v1",
+    "bash -c 'git push origin v1.2.3'"]) {
+    const [code, err] = runGate(d, env, c);
+    expect(code, `${c} ${err}`).toBe(2);
+    expect(err).toContain("Agents don't push tags");
+    expect(err).toContain("factory owner release");
+  }
+  // settings that make a plain push send tags are refused as git settings on the command line
+  for (const c of ["git -c push.followTags=true push origin task/1-x", "git -c remote.origin.push=refs/tags/*:refs/tags/* push origin"]) {
+    expect(runGate(d, env, c)[0], c).toBe(2);
+  }
+  for (const c of BRANCH_PUSHES) expect(runGate(d, env, c), c).toEqual([0, ""]);
+});
+
+/** The `run: |` script of the release workflow's step called `name`. */
+function step(name: string): string {
+  const lines = readFileSync(join(ROOT, ".github", "workflows", "release.yml"), "utf8").split("\n");
+  const at = lines.findIndex((l) => l.trim() === `- name: ${name}`);
+  expect(at, name).toBeGreaterThan(-1);
+  const run = lines.findIndex((l, i) => i > at && l.trim() === "run: |");
+  const indent = (lines[run] as string).search(/\S/);
+  const body: string[] = [];
+  for (const l of lines.slice(run + 1)) {
+    if (l.trim() && l.search(/\S/) <= indent) break;
+    body.push(l);
+  }
+  return body.join("\n");
+}
+
+function runStep(name: string, cwd: string, env: Record<string, string>) {
+  return sh(["bash", "-e", "-c", step(name)], { cwd, env: { ...process.env, ...env } });
+}
+
+test("the release workflow publishes only a tag on main", () => {
+  const origin = tmp();
+  git(origin, "init", "-q", "--bare", "-b", "main");
+  const work = gitRepo();
+  git(work, "remote", "add", "origin", origin);
+  git(work, "push", "-q", "origin", "main");
+  const onMain = git(work, "rev-parse", "HEAD").trim();
+  git(work, "checkout", "-q", "-b", "side");
+  git(work, "commit", "-q", "--allow-empty", "-m", "not merged");
+  const offMain = git(work, "rev-parse", "HEAD").trim();
+  const off = runStep("Tag must be on main", work, { TAG: "v1.0.0", GITHUB_SHA: offMain });
+  expect(off.code, off.out).not.toBe(0);
+  expect(off.out).toContain("is not on main");
+  const on = runStep("Tag must be on main", work, { TAG: "v1.0.0", GITHUB_SHA: onMain });
+  expect(on.code, on.out).toBe(0);
+});
+
+test("the release workflow publishes only the tag software-factory/VERSION names", () => {
+  const work = tmp();
+  write(join(work, "software-factory", "VERSION"), "1.2.0\n");
+  const wrong = runStep("Tag must match the manifest version", work, { TAG: "v1.2.1" });
+  expect(wrong.code, wrong.out).not.toBe(0);
+  expect(wrong.out).toContain("does not match software-factory/VERSION (v1.2.0)");
+  expect(runStep("Tag must match the manifest version", work, { TAG: "v1.2.0" }).code).toBe(0);
+});
+
+test("the release workflow checks the tag before it builds or publishes", () => {
+  const text = readFileSync(join(ROOT, ".github", "workflows", "release.yml"), "utf8");
+  const at = (name: string): number => text.indexOf(`- name: ${name}`);
+  for (const later of ["Build", "Publish"]) {
+    expect(at("Tag must be on main"), later).toBeLessThan(at(later));
+    expect(at("Tag must match the manifest version"), later).toBeLessThan(at(later));
+  }
+});

@@ -384,11 +384,12 @@ export async function poQuestions(cfg: Config): Promise<string[]> {
 export async function productAsks(cfg: Config): Promise<string[]> {
   const { ghAll } = await import("./factory_issues.ts");
   const { ownerQueue } = await import("./factory_orchestrator.ts");
-  const { ownerAskStates, forProduct } = await import("./factory_prs.ts");
+  const { ownerAskStates, forProduct, trustedOf } = await import("./factory_prs.ts");
   const queue = ownerQueue(cfg, false);
   if (!queue) return [];
   const out: string[] = [];
-  for (const [slug, c, state] of ownerAskStates(ghAll<Record<string, unknown>>(`repos/{owner}/{repo}/issues/${queue}/comments`))) {
+  const comments = ghAll<Record<string, unknown>>(`repos/{owner}/{repo}/issues/${queue}/comments`);
+  for (const [slug, c, state] of ownerAskStates(comments, trustedOf(cfg))) {
     if (state === "owner" || !forProduct(c)) continue;
     const body = typeof c.body === "string" ? c.body : "";
     const text = splitLines(body.replace(/<!--[\s\S]*?-->/g, "").trim());

@@ -237,8 +237,9 @@ this is the only way to tell the manager's own PRs from the agents'.
 **Below the PRs.** `questions`: open `factory-question` comments with no later `factory-answer`, on open PRs and on
 open issues (issues are searched `--since-days` back, default 14). `ownerAsks`: asks in the open issue titled
 `Dev manager: needs the owner` (comments starting `<!-- factory-owner-ask id=<slug> -->`) that no comment answers; an ask
-is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->`. The
-product owner replies to an ask tagged `for=product` with `<!-- factory-po-reply ask=<slug> -->` (#352): the ask then
+is answered by any comment after it and before the next ask, or by `<!-- factory-owner-answer id=<slug> -->` (with
+`trustedReviewers` set, the owner's replies count only from those logins; the dev manager's gate refuses to post that
+marker). The product owner replies to an ask tagged `for=product` with `<!-- factory-po-reply ask=<slug> -->` (#352): the ask then
 waits for the owner (`state` `owner`, "waiting ... for the owner (the product owner replied)"), and is not the
 product owner's work again until the owner answers after that reply, marked or not (`state` `product`). A plain comment
 answers the newest ask or product owner reply before it. `<!-- factory-po-reply ask=<slug> done -->` closes the ask.

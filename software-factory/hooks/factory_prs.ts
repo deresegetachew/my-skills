@@ -253,8 +253,9 @@ type Reply = "answered" | "po" | "done" | "back";
 
 /** Owner-queue asks still waiting for someone, with their state. The owner answers with `factory-owner-answer id=<slug>`
  * or a plain comment, which belongs to the newest ask or product owner reply before it. An ask the owner answered
- * before any product owner reply, or one the product owner closed, is left out. */
-export function ownerAskStates(comments: Obj[]): [string, Obj, AskState][] {
+ * before any product owner reply, or one the product owner closed, is left out. With `trusted` logins, an owner reply
+ * from anyone else (marked or not) is not the owner's and is skipped (#337). */
+export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()): [string, Obj, AskState][] {
   const asks: [string, Obj][] = [];
   const last = new Map<string, Reply>();
   let under: string[] = []; // the threads a plain comment answers
@@ -272,6 +273,7 @@ export function ownerAskStates(comments: Obj[]): [string, Obj, AskState][] {
       under = [po[1] as string];
       continue;
     }
+    if (trusted.size && !trusted.has(loginOf(c))) continue;
     const answered = markerIds(OWNER_ANSWER, body);
     for (const slug of answered.length ? answered : under) {
       const before = last.get(slug);
@@ -288,8 +290,8 @@ export function ownerAskStates(comments: Obj[]): [string, Obj, AskState][] {
 
 /** Owner-queue asks that wait for the owner or nobody has answered (an ask the owner answered is the product owner's
  * again, or closed). */
-export function openOwnerAsks(comments: Obj[]): [string, Obj][] {
-  return ownerAskStates(comments).filter(([, , s]) => s !== "product").map(([slug, c]) => [slug, c]);
+export function openOwnerAsks(comments: Obj[], trusted: Set<string> = new Set()): [string, Obj][] {
+  return ownerAskStates(comments, trusted).filter(([, , s]) => s !== "product").map(([slug, c]) => [slug, c]);
 }
 
 /** Whether an ask is tagged `for=product`: the product owner's to answer first. */
@@ -438,7 +440,8 @@ function askFor(a: AskOut): string {
 }
 
 /** Unanswered questions on open PRs and open issues, and unanswered owner-queue asks. */
-function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, now: number, sinceDays: number): [QuestionOut[], AskOut[]] {
+function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, now: number, sinceDays: number,
+  trusted: Set<string>): [QuestionOut[], AskOut[]] {
   const issues = fi.ghAll<Obj>("repos/{owner}/{repo}/issues?state=open");
   const plain = new Map<number, Obj>(issues.filter((i) => !("pull_request" in i)).map((i) => [Number(i.number), i]));
   const prs = new Map(openPrs.map((p) => [p.number, p]));
@@ -465,7 +468,7 @@ function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, no
   const asks: AskOut[] = [];
   for (const [n, i] of plain) {
     if (str(i.title).startsWith(OWNER_QUEUE_TITLE)) {
-      for (const [slug, c, state] of ownerAskStates(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`))) {
+      for (const [slug, c, state] of ownerAskStates(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`), trusted)) {
         const product = forProduct(c);
         if (state === "product" && !product) continue; // a plain ask the owner answered
         asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now), forProduct: product, state });
@@ -531,7 +534,7 @@ export function build(cfg: Config, sinceDays = 14): Built {
     result.questions = { error: got.error };
     result.ownerAsks = { error: got.error };
   } else {
-    const both = section(() => questionsAndAsks(got.pulls, got.comments, now, sinceDays));
+    const both = section(() => questionsAndAsks(got.pulls, got.comments, now, sinceDays, trustedOf(gateCfg)));
     if (isFailed(both)) {
       result.questions = both;
       result.ownerAsks = both;

@@ -140,7 +140,7 @@ finds it.
 
 `factory prd --stage` prints the stages, what is done and what the owner has approved. An approval is the owner's reply under
 the ask `stage-<name>` in the owner queue: a first word of yes, approved, ok or go ahead, or the marker `<!-- factory-owner-answer
-id=stage-<name> -->`. Anything else is a question, the stage stays open and the product owner reads it. While the owner is away,
+id=stage-<name> -->`. With `trustedReviewers` set, only a reply from one of those logins counts. Anything else is a question, the stage stays open and the product owner reads it. While the owner is away,
 the stages wait: no role proceeds on its own at a gate. Errors are `{code, message, fix}`.
 
 Tested end to end in `tests/flow.test.ts` with fakes (a fake `claude` that runs the session's steps, a fake `gh`): init, the

@@ -29,7 +29,8 @@
 //         plain gh commands are the checked way. Other writes have their fields and --input read: markers and messages
 //         are checked as for comments, and `POST repos/<o>/<r>/pulls` gets the create checks (#260).
 // Pushes: agents may not delete remote branches (`git push <remote> :<branch>` or `+:<branch>`), also inside bash -c,
-//         nor force-push (-f, --force*, --mirror, a +refspec), wherever git's global options sit (#260).
+//         nor force-push (-f, --force*, --mirror, a +refspec), wherever git's global options sit (#260), nor push a tag
+//         (--tags, --follow-tags, refs/tags/..., a v1.2.3 name): a version tag starts the release workflow (#337).
 // Quoting: gh and git are found in the parsed words, so `g\h` and `"g"h` are gh, and `$'...'` is decoded (#260).
 // Programs: a program word the shell works out first (`$x`, `g${IFS}h`, `$(echo gh)`, `` `echo gh` ``, a pattern)
 //         is refused, and so are expansions in gh's words: the gate can't know what they'd run (#260). A git push is
@@ -189,6 +190,21 @@ export function pushForces(tokens: string[]): boolean {
     else if (t === "--mirror" || t.startsWith("--force")) return true;
     else if (/^-[^-]/.test(t) && (t.slice(1).split("o")[0] as string).includes("f")) return true; // -o takes the rest as its value
     else if (t.startsWith("+")) return true;
+  }
+  return false;
+}
+
+/** Whether this simple command is a `git push` that sends a tag: --tags, --follow-tags, a refspec under refs/tags/ (or
+ * tags/, which git expands), a pattern (`refs/*:refs/*` sends every tag), one named like a version (v1.2.3, which starts
+ * the release workflow) or git's `tag <name>` form (#337). */
+export function pushTags(tokens: string[]): boolean {
+  const args = pushArgs(tokens) ?? [];
+  for (let k = 0; k < args.length; k++) {
+    const t = args[k] as string;
+    if (PUSH_VALUE_FLAGS.has(t)) k++;
+    else if (t === "--tags" || t === "--follow-tags") return true;
+    else if (t.startsWith("-")) continue;
+    else if (t === "tag" || t.includes("*") || t.split(":").some((side) => /^\+?(refs\/tags\/|tags\/|v\d)/.test(side))) return true;
   }
   return false;
 }
@@ -459,6 +475,11 @@ function main(): void {
       block("Agents don't force-push (-f, --force, --force-with-lease, --force-if-includes, --mirror or a +refspec): " +
         "it overwrites commits a reviewer or another agent saw. Push new commits on top instead (`git push origin " +
         "<branch>`), or ask the dev manager with <!-- factory-question --> if the branch really needs rewriting.");
+    }
+    if (pushes.some(pushTags)) {
+      block("Agents don't push tags (--tags, --follow-tags, refs/tags/..., a v1.2.3 name): a version tag starts the " +
+        "release workflow, and publishing is the owner's call (`factory owner release`). Push your branch instead " +
+        "(`git push origin <branch>`).");
     }
   }
   // no gh at all: the fast path for every other Bash call. On the text without quotes, so `g\h` and `"g"h` are seen;
