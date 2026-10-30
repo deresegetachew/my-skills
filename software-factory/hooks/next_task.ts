@@ -38,7 +38,7 @@ import { claimRework, claimTask, describeRework, isMine, release, reworkHolder }
 import { type Comment, type Issue, pick, pickNamed, readyIssues } from "./factory_issues.ts";
 import { machineId } from "./factory_machine.ts";
 import { verdicts } from "./factory_messages.ts";
-import { bunCmd, Exit, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
+import { bunCmd, Exit, GITHUB_BUSY, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
 
 type Job = [id: string, title: string, head?: string];
 
@@ -96,7 +96,8 @@ function rework(cfg: Config, me: string | null): Job[] {
 }
 
 /** The first of `jobs` this agent may take, claimed: the local claim (factory_claims.ts) and, for a rework, the claim
- * on the PR. A rework lost to another agent lets its local claim go and the next job is tried. [] when none is left. */
+ * on the PR. A rework lost to another agent, or one GitHub refused to claim, lets its local claim go and the next job is
+ * tried; GitHub being busy stops the pick with its code. [] when none is left. */
 function claimFirst(cfg: Config, jobs: Job[], agent: string, pid: string | number): Job[] {
   let left = jobs;
   while (left.length) {
@@ -104,11 +105,27 @@ function claimFirst(cfg: Config, jobs: Job[], agent: string, pid: string | numbe
     const job = left.find(([i]) => i === tid);
     if (!job) return [];
     const [id, , head] = job;
-    if (!head || claimRework(cfg, Number(id.slice(3)), head, agent)) return [job];
+    if (!head || onPr(cfg, id, head, agent)) return [job];
     release(agent, true);
     left = left.filter(([i]) => i !== id);
   }
   return [];
+}
+
+/** Claim rework `id` on the PR; false when another agent holds it or GitHub refused the claim. Busy: the local claim
+ * is let go and the error stops the pick. */
+function onPr(cfg: Config, id: string, head: string, agent: string): boolean {
+  try {
+    return claimRework(cfg, Number(id.slice(3)), head, agent);
+  } catch (e) {
+    if (!(e instanceof Exit)) throw e;
+    if (e.exitCode === GITHUB_BUSY) {
+      release(agent, true);
+      throw e;
+    }
+    process.stderr.write(`Skipped #${id.slice(3)}: could not claim its rework on GitHub (${e.message}).\n`);
+    return false;
+  }
 }
 
 interface Args {
