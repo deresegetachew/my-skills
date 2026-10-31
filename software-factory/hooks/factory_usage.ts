@@ -12,6 +12,9 @@
 //                                       with a budget (#183) it adds used against budget and the top subagent
 //   factory usage --task 96 --budget    the checkpoint: used, budget, what is left and the percent; a warning from 80%.
 //                                       Always exit 0: a budget is advice (factory_budget.ts says where it comes from)
+//   factory usage --github [--json]     this machine's GitHub calls in the last hour (#371), by agent, command and
+//                                       endpoint, biggest first, and what GitHub counts on the account (factory_lib.ts
+//                                       counts them; the other options don't apply)
 //   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
 //                                       factory.json, default docs/factory-usage.md), to commit in a PR
 //
@@ -27,7 +30,9 @@ import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { COUNTED, short, taskBudget, WARN_PERCENT } from "./factory_budget.ts";
 import { type Config, load } from "./factory_config.ts";
-import { die, pyDumps, pyRepr, runMain, splitLines } from "./factory_lib.ts";
+import { now as clockNow } from "./factory_clock.ts";
+import { die, GITHUB_CALLS_DIR, hourFile, pyDumps, pyRepr, runMain, splitLines } from "./factory_lib.ts";
+import { limitStatus } from "./factory_views_cache.ts";
 
 const TASK = /^task\/(\d+(?:[.-]\d+)*?)-/;
 export const FIELDS = ["input", "cache_write", "cache_read", "output"] as const;
@@ -410,7 +415,7 @@ function isoformat(ms: number): string {
 
 const USAGE = `usage: factory usage [-h] [--since SINCE] [--until UNTIL]
                      [--by {task,agent,model,role}] [--json] [--record LABEL]
-                     [--task TASK] [--markdown] [--budget]
+                     [--task TASK] [--markdown] [--budget] [--github]
 `;
 
 const HELP = `${USAGE}
@@ -428,6 +433,8 @@ options:
   --markdown            print a PR comment (use with --task)
   --budget              the task's tokens against its budget (use with
                         --task): used, budget, left, percent; warns at 80%
+  --github              this machine's GitHub calls in the last hour, by
+                        agent, command and endpoint (with --json too)
 `;
 
 interface Args {
@@ -439,6 +446,7 @@ interface Args {
   task: string | null;
   markdown: boolean;
   budget: boolean;
+  github: boolean;
   logs: string;
 }
 
@@ -447,12 +455,12 @@ function argError(message: string): never {
   die(2);
 }
 
-const OPTIONS = ["--help", "--since", "--until", "--by", "--json", "--record", "--task", "--markdown", "--budget", "--logs"];
+const OPTIONS = ["--help", "--since", "--until", "--by", "--json", "--record", "--task", "--markdown", "--budget", "--github", "--logs"];
 const TAKES_VALUE = new Set(["--since", "--until", "--by", "--record", "--task", "--logs"]);
 
 /** argparse, by hand: the same options, abbreviations, errors (exit 2) and help. */
 export function parseArgs(argv: string[]): Args {
-  const a: Args = { since: null, until: null, by: "task", json: false, record: null, task: null, markdown: false, budget: false,
+  const a: Args = { since: null, until: null, by: "task", json: false, record: null, task: null, markdown: false, budget: false, github: false,
     logs: join(process.env.HOME || homedir(), ".claude", "projects") };
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i] as string;
@@ -506,6 +514,9 @@ export function parseArgs(argv: string[]): Args {
       case "--budget":
         a.budget = true;
         break;
+      case "--github":
+        a.github = true;
+        break;
       case "--record":
         a.record = v;
         break;
@@ -516,6 +527,9 @@ export function parseArgs(argv: string[]): Args {
         a.logs = v;
         break;
     }
+  }
+  if (a.github && (a.task || a.markdown || a.budget || a.record !== null || a.since !== null || a.until !== null)) {
+    argError("--github shows the last hour of GitHub calls: use it alone or with --json");
   }
   if (a.budget && !a.task) argError("--budget needs --task: factory usage --task <n> --budget");
   return a;
@@ -532,8 +546,83 @@ function budgetOf(cfg: Config, task: string): { tokens: number | null; source: s
   }
 }
 
+const TOP = 10;
+
+interface HourCounts {
+  since: number;
+  total: number;
+  agents: [string, number][];
+  commands: [string, number][];
+  endpoints: [string, number][];
+}
+
+/** The calls factory_lib.ts counted in the last hour, in every project's state folder on this machine (they all share
+ * the account's limit), grouped and biggest first. An agent is shown with its project: `haile (my-skills)`. */
+function lastHour(): HourCounts {
+  const since = Math.floor(clockNow()) - 3600;
+  const first = hourFile(since);
+  const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
+  const rows: { agent: string; command: string; endpoint: string }[] = [];
+  for (const state of listDir(base).filter((d) => d.endsWith("-factory"))) {
+    const dir = join(base, state, GITHUB_CALLS_DIR);
+    const project = state.slice(0, -"-factory".length);
+    for (const f of listDir(dir).filter((x) => x.endsWith(".log") && x >= first)) {
+      let text = "";
+      try {
+        text = readFileSync(join(dir, f), "utf8");
+      } catch {
+        continue;
+      }
+      for (const line of text.split("\n")) {
+        const [at, agent, command, endpoint] = line.split("\t");
+        if (endpoint === undefined || !(Number(at) >= since)) continue;
+        rows.push({ agent: `${agent} (${project})`, command: command ?? "", endpoint });
+      }
+    }
+  }
+  const group = (key: (r: (typeof rows)[number]) => string): [string, number][] => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(key(r), (m.get(key(r)) ?? 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  };
+  return { since, total: rows.length, agents: group((r) => r.agent), commands: group((r) => r.command),
+    endpoints: group((r) => r.endpoint) };
+}
+
+/** `--github` (#371): this machine's GitHub calls in the last hour, from factory_github_calls.ts, biggest first; and
+ * what GitHub itself counts on the account (agents' own `gh` and other machines included), when it can be read. */
+function githubReport(json: boolean): number {
+  const h = lastHour();
+  const core = limitStatus();
+  if (json) {
+    out(pyDumps({ since: isoformat(h.since * 1000), total: h.total, agents: Object.fromEntries(h.agents),
+      commands: Object.fromEntries(h.commands), endpoints: Object.fromEntries(h.endpoints),
+      github: core ? { used: core.limit - core.remaining, limit: core.limit, reset: isoformat(core.reset * 1000) } : null },
+    { indent: 2 }));
+    return 0;
+  }
+  const account = core ? `GitHub counts ${core.limit - core.remaining} of ${core.limit} used on the account this hour ` +
+    `(resets ${isoformat(core.reset * 1000).slice(11, 16)} UTC), from every machine and agents' own gh.` : null;
+  if (h.total === 0) {
+    out("No GitHub calls counted on this machine in the last hour.");
+    if (account) out(account);
+    return 0;
+  }
+  out(`${h.total} GitHub calls in the last hour from the factory's commands on this machine.`);
+  if (account) out(account);
+  for (const [title, rows] of [["By agent (project)", h.agents], ["By command", h.commands], ["By endpoint", h.endpoints]] as const) {
+    out();
+    out(`${title}:`);
+    const width = Math.max(...rows.slice(0, TOP).map(([k]) => k.length));
+    for (const [k, n] of rows.slice(0, TOP)) out(`  ${k.padEnd(width)}  ${String(n).padStart(5)}`);
+    if (rows.length > TOP) out(`  ... ${rows.length - TOP} more (--json lists them all)`);
+  }
+  return 0;
+}
+
 export function main(argv: string[]): number {
   const a = parseArgs(argv);
+  if (a.github) return githubReport(a.json);
   const today = Math.floor(Date.now() / DAY_MS) * DAY_MS;
   const until = a.until ?? today + DAY_MS;
   const since = a.since ?? until - 8 * DAY_MS;
