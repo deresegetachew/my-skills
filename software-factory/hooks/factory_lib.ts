@@ -226,9 +226,9 @@ function commandName(): string {
 
 /** Count one `gh <args>` this process is about to run (in `cwd`). Never throws. */
 function countGithubCall(args: string[], cwd: string = process.cwd()): void {
-  const endpoint = githubEndpoint(args);
-  if (endpoint === null) return;
   try {
+    const endpoint = githubEndpoint(args);
+    if (endpoint === null) return;
     const t = clockSeconds();
     const dir = githubCallsDir(cwd);
     const file = join(dir, hourFile(t));
