@@ -13,7 +13,12 @@
 // not for typing:
 //
 //   factory cockpit --sidebar    the list on the left (off a terminal: one frame, sized by COLUMNS and LINES); on a
-//                                session s says, x stops it, n starts one (the bar, with the action typed in)
+//                                session s says, x stops it, n starts one (the bar, with the action typed in). On Ink
+//                                (#366, cockpit/sidebar.tsx) when its UI is installed, else drawn here
+//   factory cockpit --sidebar-data
+//                                what the Ink list draws: the cached snapshot, the views, the new asks to ring for
+//   factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | leave
+//                                a key of the Ink list, done in the cockpit's tmux
 //   factory cockpit --bar [<words>]
 //                                the `:` command bar: type to pick a factory command, the words typed in already (off a
 //                                terminal: the words, else one line on stdin, and the next line answers an action's question)
@@ -452,11 +457,42 @@ function sidebarOnce(): number {
   return 0;
 }
 
-async function sidebarLoop(): Promise<number> {
-  const session = process.env.FACTORY_COCKPIT ?? "";
-  const sock = socket();
+/** Where the list's actions go: the cockpit's tmux server and session (FACTORY_COCKPIT, set by `factory cockpit`). */
+interface Pane {
+  sock: string;
+  session: string;
+  root: string;
+  script: string;
+}
+
+function pane(): Pane {
   const root = top();
-  const script = factoryScript(root);
+  return { sock: socket(), session: process.env.FACTORY_COCKPIT ?? "", root, script: factoryScript(root) };
+}
+
+// display-popup waits until the popup closes, so it has no timeout: a view stays open as long as the owner reads it.
+function popup(p: Pane, size: string[], cmd: string): void {
+  Bun.spawnSync(["tmux", "-L", p.sock, "display-popup", "-E", ...size, "-d", p.root, cmd], { stdout: "ignore", stderr: "ignore" });
+}
+
+function openView(p: Pane, v: View): void {
+  popup(p, ["-w", "90%", "-h", "90%"], viewCommand(p.script, v));
+}
+
+/** The bar, with `words` typed in already (an action such as `say taytu`, or nothing). */
+function openBar(p: Pane, words: string[]): void {
+  popup(p, ["-w", "80%", "-h", "60%"], factoryCall(p.script, ["cockpit", "--bar", ...words]));
+}
+
+/** The session `name` in the right pane, through `factory follow`, and the focus there. */
+function showSession(p: Pane, name: string): void {
+  const after = idleCommand(`The session ${plain(name)} closed here. C-a C-a comes back to the list.`);
+  tmux(p.sock, ["respawn-pane", "-k", "-t", `=${p.session}:0.1`, `${factoryCall(p.script, ["follow", name])}; ${after}`]);
+  tmux(p.sock, ["select-pane", "-t", `=${p.session}:0.1`]);
+}
+
+async function sidebarLoop(): Promise<number> {
+  const p = pane();
   const vs = views();
   let snap = readCache();
   let selected = 0;
@@ -464,21 +500,15 @@ async function sidebarLoop(): Promise<number> {
     const lines = frame(snap, vs, selected, process.stdout.columns || 32, process.stdout.rows || 30, true);
     process.stdout.write(BEL.repeat(newAsks(snap)) + "\x1b[H\x1b[2J" + lines.join("\r\n"));
   };
-  // display-popup waits until the popup closes, so it has no timeout: a view stays open as long as the owner reads it.
-  const popup = (size: string[], cmd: string) =>
-    Bun.spawnSync(["tmux", "-L", sock, "display-popup", "-E", ...size, "-d", root, cmd], { stdout: "ignore", stderr: "ignore" });
-  const openView = (v: View) => popup(["-w", "90%", "-h", "90%"], viewCommand(script, v));
   const act = () => {
     const e = entries(snap, vs)[selected];
     if (!e) return;
     if (e.kind === "view") {
       const v = vs.find((x) => x.key === e.name);
-      if (v) openView(v);
+      if (v) openView(p, v);
       return;
     }
-    const after = idleCommand(`The session ${plain(e.name)} closed here. C-a C-a comes back to the list.`);
-    tmux(sock, ["respawn-pane", "-k", "-t", `=${session}:0.1`, `${factoryCall(script, ["follow", e.name])}; ${after}`]);
-    tmux(sock, ["select-pane", "-t", `=${session}:0.1`]);
+    showSession(p, e.name);
   };
   process.stdin.setRawMode(true);
   process.stdout.write("\x1b[?25l");
@@ -499,15 +529,15 @@ async function sidebarLoop(): Promise<number> {
     else if (key === "\r" || key === "\n") act();
     else if (/^[1-8]$/.test(key)) {
       const v = vs.find((x) => x.key === key);
-      if (v) openView(v);
-    } else if (key === ":") popup(["-w", "80%", "-h", "60%"], factoryCall(script, ["cockpit", "--bar"]));
+      if (v) openView(p, v);
+    } else if (key === ":") openBar(p, []);
     else if (key === "s" || key === "x" || key === "n") {
       // The bar, with the action typed in already: the owner adds the message or the name, then answers its question.
       const e = entries(snap, vs)[selected];
       const name = e?.kind === "session" ? e.name : "";
       const words = key === "n" ? ["owner", "start"] : name ? (key === "s" ? ["say", name] : ["owner", "stop", name]) : [];
-      if (words.length) popup(["-w", "80%", "-h", "60%"], factoryCall(script, ["cockpit", "--bar", ...words]));
-    } else if (key === "q") tmux(sock, ["detach-client"]);
+      if (words.length) openBar(p, words);
+    } else if (key === "q") tmux(p.sock, ["detach-client"]);
     else if (key === "r") {
       snap = readCache();
     } else if (key === "\x03") break;
@@ -519,8 +549,43 @@ async function sidebarLoop(): Promise<number> {
   return 0;
 }
 
+/** `factory cockpit --sidebar`: the list on Ink (#366) when its UI is installed (the release's bundle, or the source in
+ *  my-skills); else the list drawn here, for a release without the bundle. */
 export function sidebar(): Promise<number> | number {
+  const ui = inkUi();
+  if (ui) {
+    // --no-install: offline, as the rest of the factory; Bun never fetches a package the bundle doesn't hold
+    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, "--sidebar",
+      "--factory", factoryScript(top())], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    return p.exitCode ?? 1;
+  }
   return process.stdin.isTTY && process.stdout.isTTY ? sidebarLoop() : sidebarOnce();
+}
+
+/** `factory cockpit --sidebar-data`: what the Ink list draws, as JSON: the cached snapshot (a refresh starts when it is
+ *  old), the views, and how many new owner asks ring the bell (each rings once, as in the list drawn here). */
+export function sidebarData(): number {
+  refreshIfOld();
+  const snap = readCache();
+  console.log(JSON.stringify({ snapshot: snap, views: views().map((v) => ({ key: v.key, title: v.title })), bell: newAsks(snap) }));
+  return 0;
+}
+
+/** `factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | leave`: a key of the Ink list, done in
+ *  the cockpit's tmux. */
+export function sidebarOpen(args: string[]): number {
+  const [what, ...rest] = args;
+  const p = pane();
+  const v = views().find((x) => x.key === rest[0]);
+  if (what === "session" && rest.length === 1 && rest[0]) showSession(p, rest[0]);
+  else if (what === "view" && rest.length === 1 && v) openView(p, v);
+  else if (what === "bar") openBar(p, rest);
+  else if (what === "leave" && !rest.length) tmux(p.sock, ["detach-client"]);
+  else {
+    refuse("cockpit_usage", `factory cockpit --sidebar-open takes session <name>, view <key>, bar [<words>] or leave, not "${plain(args.join(" "))}".`,
+      "The cockpit's list runs it for its keys; to open the cockpit, run `factory cockpit`.", 2);
+  }
+  return 0;
 }
 
 // --- the command bar -------------------------------------------------------------------------------------------------

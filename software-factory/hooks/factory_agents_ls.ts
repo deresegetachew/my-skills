@@ -9,11 +9,12 @@
 // mode), cached for FACTORY_AGENTS_CACHE_SECONDS (default 45) so a quick repeat costs nothing; `--fresh` asks again and
 // `--local` never asks. What a remote agent shows is what its machine posted: the hidden marker's kind, task, wait and
 // `since` (an issue with no kind, from an older release, takes its role marker's), and the tmux session and follow
-// link only when its project sets `tasks.showWhere`. A GitHub failure shows
-// this machine alone, with a line saying so.
+// link only when its project sets `tasks.showWhere`. A name that is down here but reported from another machine shows
+// that machine's row (#366). A GitHub failure shows this machine alone, with a line saying so.
 //
 // --json prints {agents: [...], github: {...}, daemon: {...}, machine}; every row has name, kind, where, state, detail,
-// task, on, since, lastSeen, follow, session, activity and source (local or github).
+// task, on, since, lastSeen, follow, session, activity, machine, source (local or github) and expected: this machine's
+// names file (or FACTORY_AGENTS) names it, so the cockpit lists it even when it is down (#366).
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Config, taskSource, toFloat } from "./factory_config.ts";
@@ -21,10 +22,11 @@ import { now as clockNow } from "./factory_clock.ts";
 import { agentIssues, current, fields, roleOf, stateOf } from "./factory_agents.ts";
 import { type HeartbeatRow, isFresh, loadLocal, observe } from "./factory_heartbeat.ts";
 import type { Issue } from "./factory_issues.ts";
-import { machineId, stateDir } from "./factory_machine.ts";
+import { machineId, machineNames, stateDir } from "./factory_machine.ts";
 import { Exit, isoUtc, parseIso, pyDumps } from "./factory_lib.ts";
 
 const CACHE_FILE = "agents-cache.json";
+const LIVE = ["working", "waiting", "idle"];
 
 function iso(epoch: number | null | undefined): string | null {
   return epoch ? isoUtc(epoch) : null;
@@ -49,6 +51,7 @@ export interface LsRow {
   activity: string | null;
   machine: string | null;
   source: string;
+  expected: boolean;
 }
 
 interface DaemonInfo {
@@ -64,11 +67,13 @@ function localRows(cfg: Config): [LsRow[], DaemonInfo] {
   const agents = (fresh ? data.agents || {} : observe(cfg)) as Record<string, HeartbeatRow>;
   const seen = fresh ? (data.updated as number | undefined) : clockNow();
   const rows: LsRow[] = [];
+  const names = machineNames();
   for (const name of Object.keys(agents).sort()) {
     const r = agents[name] as HeartbeatRow;
     rows.push({ name, kind: kindText(r.kind), where: "this machine", state: r.state, detail: r.detail || r.state,
       task: r.task ?? null, on: r.on ?? null, since: r.since ?? null, lastSeen: r.state !== "down" ? iso(seen) : null,
-      follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: machineId(), source: "local" });
+      follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: machineId(), source: "local",
+      expected: names.includes(name) });
   }
   return [rows, { running: fresh, updated: Object.keys(data).length ? iso(data.updated as number | undefined) : null,
     errors: fresh ? ((data.errors as string[] | undefined) || []) : [] }];
@@ -150,7 +155,7 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
     const kind = f.kind && f.kind !== "coding-agent" ? f.kind : roleOf(issue);
     rows.push({ name, kind: kindText(kind), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
-      session: f.session ?? null, activity: null, machine, source: "github" });
+      session: f.session ?? null, activity: null, machine, source: "github", expected: false });
   }
   return rows;
 }
@@ -178,7 +183,12 @@ export async function run(cfg: Config, asJson = false, localOnly = false, fresh 
   if (!localOnly && taskSource(cfg) === "issues") {
     let issues: Issue[];
     [issues, github] = githubIssues(fresh, now);
-    rows.push(...remoteRows(cfg, issues, new Set(rows.map((r) => r.name))));
+    // A name down here may run on another machine (#366): its live row from there replaces this machine's `down`.
+    // One that is down or silent there too keeps this machine's row, which says whether it is expected here.
+    const elsewhere = remoteRows(cfg, issues, new Set(rows.filter((r) => r.state !== "down").map((r) => r.name)))
+      .filter((r) => !rows.some((l) => l.name === r.name) || (r.where !== "this machine" && LIVE.includes(r.state)));
+    const replaced = new Set(elsewhere.map((r) => r.name));
+    rows.splice(0, rows.length, ...rows.filter((r) => !replaced.has(r.name)), ...elsewhere);
   }
   rows.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   if (asJson) {

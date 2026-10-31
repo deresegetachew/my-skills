@@ -10,10 +10,12 @@
 //                                        On a terminal it reads the keys; off one it draws one frame, sized by COLUMNS
 //                                        and LINES, without colour, and exits within a time limit
 //   ui.tsx --check                       print "ok": every module loaded (`factory doctor` runs it)
+//   ui.tsx --sidebar --factory <script>  the cockpit's left pane, sessions and views (#366, sidebar-host.tsx)
 import { readFileSync } from "node:fs";
 import { render, useApp, useInput, useStdout } from "ink";
 import { type ReactElement, useEffect, useState } from "react";
 import { App } from "./app.tsx";
+import { sidebarMain } from "./sidebar-host.tsx";
 import { Lines, obj, plain } from "./views/lines.tsx";
 import { needsLines, NeedsView } from "./views/needs.tsx";
 import { type Problem, prsLines, PrsView, selectedOf } from "./views/prs.tsx";
@@ -126,6 +128,11 @@ async function main(argv: string[]): Promise<number> {
   if (argv.length === 1 && argv[0] === "--check") {
     console.log("ok");
     return 0;
+  }
+  if (argv[0] === "--sidebar") {
+    const code = await sidebarMain(argv.slice(1));
+    if (code !== null) return code;
+    return fail("cockpit_ui_usage", "The cockpit's list takes --sidebar --factory <script>.", "Run `factory cockpit`; its left pane starts the list.");
   }
   const view = argv[0] === "--view" && argv.length === 4 && argv[2] === "--data" ? argv[1] : undefined;
   const file = view !== undefined ? argv[3] : argv[0] === "--data" && argv.length === 2 ? argv[1] : undefined;
