@@ -14,6 +14,7 @@ import * as H from "../hooks/factory_heartbeat.ts";
 import { type Env, hook as autostartHook, log as aLog, machine, parsePlist, project } from "./autostart_support.ts";
 import { FAKE_GH, type IssueRow, issue, setup } from "./issues_support.ts";
 import { HOOKS, type Proc, read, runHook, SF, sh, tmp, write, writeExe } from "./support.ts";
+import { utimesSync } from "node:fs";
 
 const FAKE_TMUX = `#!/bin/sh
 case "$1" in
@@ -974,4 +975,61 @@ test("ls shows another machines dev manager from its role marker when an older r
   write(w.db, JSON.stringify(db));
   const rows = lsRows(w, "--fresh");
   expect(rows.lead?.kind).toBe("dev manager");
+});
+
+// --- the real state when no task is held, and names that run elsewhere (#366, bugs 1 and 2 of #362) -----------------
+
+function localRows(w: World): Record<string, Record<string, unknown>> {
+  return (JSON.parse(read(w.stateFile())) as { agents: Record<string, Record<string, unknown>> }).agents;
+}
+
+test("an agent with no task whose session shows output is working, and idle once it has been quiet two minutes", () => {
+  expect(H.derive({ alive: true, task: null, wait: null, active: true })).toEqual({ state: "working", detail: "working", task: null, on: null });
+  expect(H.derive({ alive: true, task: null, wait: null, active: false }).state).toBe("idle");
+  expect(H.derive({ alive: false, task: null, wait: null, active: true }).state).toBe("down");
+  const w = world();
+  w.startLoop();
+  w.tmuxSession(null, w.clock + 40); // a coding agent on its PR after it gave its task claim back
+  w.runFor(40);
+  expect([localRows(w).taytu?.state, localRows(w).taytu?.detail]).toEqual(["working", "working"]);
+  w.runFor(60);
+  expect(marker(w.db, World.AGENT_ISSUE).status).toBe("working");
+  w.runFor(140);
+  expect(localRows(w).taytu?.state).toBe("idle");
+});
+
+test("a dev manager reviewing, with no tmux session, is working while its transcript is written", () => {
+  const w = world({ agentIssue: false });
+  setRoles(w, ROLES);
+  const config = tmp();
+  w.env.CLAUDE_CONFIG_DIR = config;
+  startRoleLoop(w, "lead", "dev-manager");
+  const log = write(join(config, "projects", w.d.replace(/[^A-Za-z0-9]/g, "-"), "session.jsonl"), "{}\n");
+  utimesSync(log, w.clock + 20, w.clock + 20);
+  w.runFor(20);
+  expect(lsRows(w, "--local").lead?.state).toBe("working");
+  w.runFor(200);
+  expect(lsRows(w, "--local").lead?.state).toBe("idle");
+});
+
+test("ls shows a name that is down here but runs on another machine as that machine's row", () => {
+  const w = world({ agentIssue: false }); // taytu is in this machine's names and does not run here
+  w.addAgentIssue(90, "taytu", "working", w.clock - 30, "bbbb2222", true, { kind: "coding-agent", task: "551" });
+  w.cycle();
+  expect(taytuRows(w)).toEqual([["working", "machine bbbb2222", "github"]]);
+});
+
+/** Every row of `ls --json --fresh` named taytu, as [state, where, source]. */
+function taytuRows(w: World): string[][] {
+  const p = ls(w, "--json", "--fresh");
+  expect(p.code, p.out).toBe(0);
+  return (JSON.parse(p.stdout) as { agents: Record<string, string>[] }).agents.filter((r) => r.name === "taytu")
+    .map((r) => [r.state as string, r.where as string, r.source as string]);
+}
+
+test("ls keeps this machine's down row when GitHub says the same machine", () => {
+  const w = world({ agentIssue: false });
+  w.addAgentIssue(90, "taytu", "down", w.clock - 30, "aaaa1111", true);
+  w.cycle();
+  expect(taytuRows(w)).toEqual([["down", "this machine", "local"]]);
 });
