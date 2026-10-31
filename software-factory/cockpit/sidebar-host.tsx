@@ -90,7 +90,8 @@ export async function sidebarMain(argv: string[]): Promise<number | null> {
   ring(first);
   const data: Data = first ?? { snapshot: null, views: [] };
   if (process.stdin.isTTY && process.stdout.isTTY) {
-    await render(<Live factory={factory} first={data} />).waitUntilExit();
+    // interactive: on a terminal, even when CI is set, else Ink draws only the last frame, when it ends
+    await render(<Live factory={factory} first={data} />, { interactive: true }).waitUntilExit();
     return 0;
   }
   const cols = Number(process.env.COLUMNS) || 32;

@@ -49,7 +49,8 @@ async function main(argv: string[]): Promise<number> {
       "Run `factory cockpit --json` to see what the snapshot holds, then `factory cockpit --ink` again.");
   }
   if (process.stdin.isTTY && process.stdout.isTTY) {
-    await render(<Interactive snapshot={snapshot} />).waitUntilExit();
+    // interactive: on a terminal, even when CI is set, else Ink draws only the last frame, when it ends
+    await render(<Interactive snapshot={snapshot} />, { interactive: true }).waitUntilExit();
     return 0;
   }
   const ink = render(<App snapshot={snapshot} />, { patchConsole: false });

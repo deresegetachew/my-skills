@@ -53,7 +53,8 @@ function machineOf(r: Obj): string {
   const where = plain(r.where);
   if (where === "this machine" || plain(r.source) === "local") return "";
   if (where === "cloud") return "cloud";
-  return plain(r.machine) || where.replace(/^machine /, "") || "elsewhere";
+  const named = (s: string) => (s === "-" ? "" : s); // "-" is a row that names no machine
+  return named(plain(r.machine)) || named(where.replace(/^machine /, "")) || "another machine";
 }
 
 /** The sessions to list, this machine's first. */
@@ -80,6 +81,10 @@ type Entry = { kind: "session"; row: Row } | { kind: "view"; view: ViewItem };
 function entriesOf(data: Data): Entry[] {
   return [...sessionRows(data.snapshot).map((row): Entry => ({ kind: "session", row })),
     ...data.views.map((view): Entry => ({ kind: "view", view }))];
+}
+
+function entryId(e: Entry): string {
+  return e.kind === "session" ? `session ${e.row.name}` : `view ${e.view.key}`;
 }
 
 const COLOUR: Record<State, string> = { working: "blue", waiting: "yellow", idle: "gray", down: "red", unknown: "gray" };
@@ -129,13 +134,16 @@ export interface SidebarProps {
 
 /** The list: at most `rows` lines, each cut to `cols`; the selected row always shows. */
 export function Sidebar({ data, cols, rows, color, actions, keys = true }: SidebarProps): ReactElement {
-  const [picked, setPicked] = useState(0);
+  // kept by name, so a reload that reorders the list keeps the same row; where it was when that row is gone
+  const [picked, setPicked] = useState({ id: "", at: 0 });
   const entries = entriesOf(data);
-  const selected = Math.min(picked, Math.max(entries.length - 1, 0));
+  const found = entries.findIndex((e) => entryId(e) === picked.id);
+  const selected = found >= 0 ? found : Math.min(picked.at, Math.max(entries.length - 1, 0));
   const current = entries[selected];
+  const pick = (i: number) => setPicked({ id: entries[i] ? entryId(entries[i]) : "", at: i });
   useInput((input, key) => {
-    if (key.upArrow || input === "k") setPicked(Math.max(selected - 1, 0));
-    else if (key.downArrow || input === "j") setPicked(Math.min(selected + 1, Math.max(entries.length - 1, 0)));
+    if (key.upArrow || input === "k") pick(Math.max(selected - 1, 0));
+    else if (key.downArrow || input === "j") pick(Math.min(selected + 1, Math.max(entries.length - 1, 0)));
     else if (key.return && current?.kind === "session") actions.openSession(current.row.name);
     else if (key.return && current?.kind === "view") actions.openView(current.view.key);
     else if (data.views.some((v) => v.key === input)) actions.openView(input);
