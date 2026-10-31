@@ -333,3 +333,22 @@ test("on a terminal q leaves the cockpit (detach) and the list keeps running for
   proc.terminal?.close();
   expect(code, shown).toBe(0);
 }, T);
+
+test("on a terminal the Ink list is drawn when CI is set in the environment (GitHub Actions sets it)", async () => {
+  const p = project([here("haile", "working")]);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.env)) if (v !== undefined) env[k] = v;
+  env.CI = "true";
+  let shown = "";
+  const proc = Bun.spawn(["bash", join(SF, "factory"), "cockpit", "--sidebar"], {
+    cwd: p.d, env, terminal: { cols: 50, rows: 24, data(_t, d) { shown += new TextDecoder().decode(d); } },
+  });
+  const timer = setTimeout(() => proc.kill(9), 60_000);
+  for (let i = 0; i < 400 && !shown.includes("haile"); i++) await Bun.sleep(50);
+  expect(shown, "the list is drawn while it runs, not only when it ends").toContain("haile");
+  proc.terminal?.write("\x03");
+  const code = await proc.exited;
+  clearTimeout(timer);
+  proc.terminal?.close();
+  expect(code, shown).toBe(0);
+}, T);
