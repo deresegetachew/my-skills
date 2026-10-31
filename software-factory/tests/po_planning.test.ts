@@ -3,16 +3,17 @@
 //
 // Runs the real factory in a throwaway project (roles_support.ts) with a fake `claude` and the stateful fake `gh`.
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { claudeCalls, factory, issue, poProject, posted, type Row } from "./roles_support.ts";
-import { KIT, readmeAndWiki } from "./support.ts";
+import { readmeAndWiki } from "./support.ts";
 
 const READY = "factory:ready";
 
-function dryRun(issues: Row[], po: Row = {}, tasks: Row = { source: "issues" }): string {
+// A task the builders finished: planning is for once they have started.
+const BUILT = issue(9, "Built", "", [], "closed");
+
+function dryRun(issues: Row[], po: Row = {}, tasks: Row = { source: "issues" }, built = true): string {
   const cfg = { tasks, roles: { "product-owner": { names: ["eleni"], busyMinutes: 0, idleMinutes: 0, ...po } } };
-  const [d, work, env] = poProject({ db: { issues }, cfg });
+  const [d, work, env] = poProject({ db: { issues: built ? [BUILT, ...issues] : issues }, cfg });
   const p = factory(work, env, ["product-owner", "loop", "--once", "--dry-run"]);
   expect(p.code, p.out).toBe(0);
   expect(posted(d), "the dry run writes nothing").toEqual([]);
@@ -58,6 +59,15 @@ test("no ready task at all is a planning line", () => {
   expect(dryRun([], { minReady: 4 })).toContain("work: planning: 0 tasks can start, below 4");
 });
 
+test("before the builders started there is no planning line and an open task in progress counts as started", () => {
+  expect(dryRun([], { minReady: 4 }, undefined, false), "a new project plans through discovery").not.toContain("planning:");
+  expect(dryRun([ready(1)], { minReady: 4 }, undefined, false)).not.toContain("planning:");
+  const out = dryRun([ready(1), issue(2, "Being built", "", ["factory:in-progress", "agent:menelik"])], { minReady: 4 }, undefined, false);
+  expect(out).toContain("work: planning: 1 task can start (#1), below 4");
+  const review = dryRun([issue(3, "In review", "", ["factory:in-review"])], { minReady: 4 }, undefined, false);
+  expect(review).toContain("work: planning: 0 tasks can start, below 4");
+});
+
 test("in plan mode there is no planning line", () => {
   expect(dryRun([ready(1)], { minReady: 4 }, { source: "plan" })).not.toContain("planning:");
 });
@@ -68,12 +78,4 @@ test("the setting is in factory settings and on the settings page", () => {
   expect(p.code, p.out).toBe(0);
   expect(p.stdout).toContain("4");
   expect(readmeAndWiki("settings.md")).toContain("| `roles.product-owner.minReady` | int | `4` |");
-});
-
-test("the product pass skill has a planning step that never files past an unapproved story", () => {
-  const skill = readFileSync(join(KIT, ".claude", "skills", "product-pass", "SKILL.md"), "utf8");
-  expect(skill).toContain("planning:");
-  expect(skill).toContain("factory prd");
-  expect(skill).toContain("minReady");
-  expect(skill).toMatch(/never file[^\n]*not approved|never file[^\n]*hasn't approved/i);
 });

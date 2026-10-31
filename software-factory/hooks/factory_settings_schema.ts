@@ -181,6 +181,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("roles.product-owner.names", "list", "agents", "The product owners' names: `factory product-owner [name|N] loop`."),
   S("roles.product-owner.profile", "str", "agents", "The Claude settings file the product owner's sessions run on (read only when it exists)."),
   S("roles.product-owner.workLabel", "str", "agents", "An open issue or pull request with this label is work for the product owner. Empty: it never has any."),
+  S("roles.product-owner.minReady", "int", "agents", "Issues mode: when fewer `factory:ready` tasks than this can start now (no open `Depends on #n`, not claimed), the product owner's work has a planning line, and its pass files the next tasks from approved stories. 0: off.", { default: 4, minimum: 0, read_by: "factory_roles.ts (the product owner's work)" }),
   S("roles.product-owner.busyMinutes", "int", "agents", "Minutes the product owner's loop waits after a pass that had work."),
   S("roles.product-owner.idleMinutes", "int", "agents", "Minutes it waits when there was none. 0: it exits instead."),
   S("roles.product-owner.escalateMinutes", "int", "agents", "A question addressed `to=po` that nobody answered moves up one level after this many minutes: product owner, then dev manager, then the owner. With no product owner running it starts at the dev manager."),

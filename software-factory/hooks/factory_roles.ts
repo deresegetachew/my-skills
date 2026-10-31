@@ -27,7 +27,7 @@
 //   factory_roles.ts reads [role]                every path in reads.md that does not exist (exit 1 when any)
 import { existsSync, mkdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Config, DEFAULTS, load, ROLE_NAMES, roleNames, roleSetting, roleWait, rolesDir, safeAgent, toFloat } from "./factory_config.ts";
+import { type Config, DEFAULTS, load, ROLE_NAMES, roleNames, roleSetting, roleWait, rolesDir, safeAgent, taskLabels, taskSource, toFloat } from "./factory_config.ts";
 import { ARTIFACT_TOOLS } from "./factory_agent_settings.ts";
 import { mainBranch } from "./factory_mcp.ts";
 import { flags as modelFlags, ModelsError, validate } from "./factory_models.ts";
@@ -363,10 +363,30 @@ export async function work(cfg: Config, role: string, _name = ""): Promise<strin
       const items = ghAll(`repos/{owner}/{repo}/issues?state=open&labels=${label}`);
       lines.push(...items.map((i) => `${i.pull_request ? "PR" : "issue"} #${i.number}: ${i.title} (${label})`));
     }
-    return [...lines, ...await poQuestions(cfg), ...await productAsks(cfg), ...signoffDigest(cfg)];
+    return [...lines, ...await poQuestions(cfg), ...await productAsks(cfg), ...signoffDigest(cfg), ...await planning(cfg)];
   }
   if (role === "dev-manager") return (await import("./factory_wait.ts")).precheck(cfg);
   die("factory: a coding agent's work is `factory next`.");
+}
+
+/** The planning line (#378): in issues mode, when fewer ready tasks can start now (no open dependency, not claimed, not
+ * blocked) than `roles.product-owner.minReady`, so the builders are about to run out. 0 turns it off. Only once the
+ * builders have started (a task is in progress, in review or closed): before that the first plan is discovery's, with
+ * the owner's gates (`factory prd --stage`). */
+export async function planning(cfg: Config): Promise<string[]> {
+  if (taskSource(cfg) !== "issues") return [];
+  const { SETTINGS } = await import("./factory_settings_schema.ts");
+  const min = toFloat(roleSetting(cfg, "product-owner", "minReady", SETTINGS["roles.product-owner.minReady"]?.default as number)) ?? 0;
+  if (!(min > 0)) return [];
+  const { names, readyIssues, taskIssues } = await import("./factory_issues.ts");
+  const L = taskLabels(cfg);
+  const openNow = taskIssues();
+  const can = readyIssues(cfg, openNow).map((i) => i.number).sort((a, b) => a - b);
+  if (can.length >= min) return [];
+  const started = openNow.some((i) => names(i).has(L.inProgress) || names(i).has(L.inReview)) || taskIssues("closed").length > 0;
+  if (!started) return [];
+  const list = can.length ? ` (${can.map((n) => `#${n}`).join(", ")})` : "";
+  return [`planning: ${can.length} task${can.length === 1 ? "" : "s"} can start${list}, below ${min}`];
 }
 
 /** One line per question addressed `to=po` that is the product owner's to answer now (#110): not yet moved up to the
