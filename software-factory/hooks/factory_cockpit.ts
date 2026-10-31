@@ -314,7 +314,8 @@ async function ink(): Promise<number> {
   try {
     const file = join(dir, "snapshot.json");
     writeFileSync(file, JSON.stringify(snap));
-    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", ui, "--data", file],
+    // --no-install: offline, as the rest of the factory; Bun never fetches a package the bundle doesn't hold
+    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, "--data", file],
       { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
     return p.exitCode ?? 1;
   } finally {
@@ -327,7 +328,8 @@ const USAGE_ERROR: Problem = {
   message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --usage, " +
     "--settings [--color], --ink or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
-    "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, or " +
+    "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, " +
+    "`factory cockpit --ink` for the cockpit on Ink, or " +
     "`factory cockpit watch <item>` to watch a sub-manager.",
 };
 

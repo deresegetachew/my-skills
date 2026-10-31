@@ -58,6 +58,11 @@ function factory(p: Proj, ...args: string[]): Proc {
   return sh(["bash", join(SF, "factory"), ...args], { cwd: p.d, env: p.env, timeoutMs: T });
 }
 
+/** The bundle run under Bun with auto-install off: offline means nothing is fetched, and the test must show it. */
+function runBundle(file: string, args: string[], cwd: string, env?: Env): Proc {
+  return sh([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", file, ...args], { cwd, env });
+}
+
 function noTrace(out: string): void {
   expect(out).not.toMatch(/^\s+at .*(:\d+|\))/m);
   expect(out).not.toMatch(/\b(TypeError|ReferenceError|SyntaxError|Unhandled)\b/);
@@ -97,22 +102,29 @@ test("the bundle runs on its own, offline, from a folder with no node_modules", 
   writeFileSync(join(dir, "factory_cockpit_ink.js"), bundle);
   writeFileSync(join(dir, "snap.json"), JSON.stringify({ sessions: SESSIONS }));
   const env: Env = { PATH: process.env.PATH, HOME: dir, NODE_PATH: undefined, BUN_INSTALL_CACHE_DIR: join(dir, "no-cache") };
-  const r = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(dir, "factory_cockpit_ink.js"), "--data", "snap.json"],
-    { cwd: dir, env });
+  const r = runBundle(join(dir, "factory_cockpit_ink.js"), ["--data", "snap.json"], dir, env);
   expect(r.code, r.out).toBe(0);
   expect(r.stdout).toContain("cockpit (Ink)");
   expect(r.stdout).toMatch(/haile\s+working/);
-  const check = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(dir, "factory_cockpit_ink.js"), "--check"], { cwd: dir, env });
+  const check = runBundle(join(dir, "factory_cockpit_ink.js"), ["--check"], dir, env);
   expect(check.code, check.out).toBe(0);
   expect(check.stdout.trim()).toBe("ok");
+  // Ink looks for react-devtools-core when DEV=true; the bundle holds an empty one and must still run
+  const dev = runBundle(join(dir, "factory_cockpit_ink.js"), ["--data", "snap.json"], dir, { ...env, DEV: "true" });
+  expect(dev.code, dev.out).toBe(0);
+  expect(dev.stdout).toContain("cockpit (Ink)");
   expect(existsSync(join(dir, "node_modules"))).toBe(false);
 });
+
+test("the real bundle is the same bytes when built again", () => {
+  expect(Buffer.compare(Buffer.from(bundleCockpit(SF)), Buffer.from(bundle))).toBe(0);
+}, T);
 
 test("bad arguments or an unreadable snapshot give {code, message, fix}, not a stack trace", () => {
   const dir = tmp();
   writeFileSync(join(dir, "ui.js"), bundle);
   for (const args of [[], ["--data", join(dir, "missing.json")], ["--what"]]) {
-    const r = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(dir, "ui.js"), ...args], { cwd: dir });
+    const r = runBundle(join(dir, "ui.js"), args, dir);
     expect(r.code, r.out).toBe(2);
     noTrace(r.out);
     const err = JSON.parse(r.stderr.trim()) as Record<string, string>;

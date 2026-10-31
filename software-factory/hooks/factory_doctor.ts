@@ -607,7 +607,7 @@ export function cockpit(r: Reporter): void {
       "run `factory update` to a release that carries it");
     return;
   }
-  const [rc, out, err] = run([process.execPath, "--no-env-file", "--config=/dev/null", ui, "--check"]);
+  const [rc, out, err] = run([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, "--check"]);
   if (ui === bundle) {
     if (rc === 0 && out === "ok") r.ok("cockpit bundle: present and loads");
     else r.fix("cockpit bundle", `${bundle} doesn't load (${firstLine(err || out).slice(0, 160) || `exit ${rc}`}): run \`factory update\``);

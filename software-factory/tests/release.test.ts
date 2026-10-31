@@ -286,7 +286,7 @@ test("the cockpit's UI is bundled into one file, installed beside the hooks, the
   expect(paths).toEqual([...paths].sort());
   const dir = tmp();
   writeFileSync(join(dir, "ui.js"), js.data);
-  const ran = sh([...BUN, join(dir, "ui.js")], { cwd: dir });
+  const ran = sh([...BUN, "--no-install", join(dir, "ui.js")], { cwd: dir });
   expect(ran.stdout.trim(), ran.out).toBe("cockpit bundled");
 });
 
@@ -297,8 +297,20 @@ test("a release without the cockpit's UI has no bundle", () => {
   expect(names.some((n) => n.endsWith("factory_cockpit_ink.js"))).toBe(false);
 });
 
-test("a cockpit that can't be bundled (Ink not installed) stops the build with the fix", () => {
-  const d = withCockpit('import { render } from "ink";\nrender(null);\n');
+test("a checkout without node_modules takes Ink from the builder's own, pinned install", () => {
+  const d = withCockpit('import { Text } from "ink";\nconsole.log(typeof Text);\n');
+  const out = tmp();
+  const r = run(d, out);
+  expect(r.code, r.out).toBe(0);
+  const js = member(members(join(out, "software-factory-1.2.3.tar.gz")), "software-factory-1.2.3/hooks/factory_cockpit_ink.js");
+  const dir = tmp();
+  writeFileSync(join(dir, "ui.js"), js.data);
+  const ran = sh([...BUN, "--no-install", join(dir, "ui.js")], { cwd: dir });
+  expect(ran.stdout.trim(), ran.out).toBe("function");
+});
+
+test("a cockpit that can't be bundled (a package not installed) stops the build with the fix", () => {
+  const d = withCockpit('import { thing } from "no-such-package-365";\nconsole.log(thing);\n');
   const out = tmp();
   const r = run(d, out);
   expect(r.code, r.out).toBe(1);

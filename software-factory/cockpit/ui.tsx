@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The cockpit's Ink UI (decision 0002, #365). A release carries it as one JavaScript file, built with `bun build`
-// (cockpit/build.ts), installed as .claude/hooks/factory_cockpit_ink.js: a project runs it with Bun and needs no
+// (tools/build_cockpit.ts), installed as .claude/hooks/factory_cockpit_ink.js: a project runs it with Bun and needs no
 // node_modules. In this repo it runs from this source.
 //
 //   ui.tsx --data <file>   draw the snapshot in <file> (`factory cockpit --json`); on a terminal q or Esc leaves,
