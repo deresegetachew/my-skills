@@ -310,3 +310,26 @@ test("on a terminal the Ink list opens the session Enter picks, and C-c ends it"
   expect(code, shown).toBe(0);
   expect(tmuxCalls(p).find((c) => c.includes("respawn-pane"))).toMatch(/follow menelik/);
 }, T);
+
+test("on a terminal q leaves the cockpit (detach) and the list keeps running for the next visit", async () => {
+  const p = project([here("haile", "working")]);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.env)) if (v !== undefined) env[k] = v;
+  let shown = "";
+  const proc = Bun.spawn(["bash", join(SF, "factory"), "cockpit", "--sidebar"], {
+    cwd: p.d, env, terminal: { cols: 50, rows: 24, data(_t, d) { shown += new TextDecoder().decode(d); } },
+  });
+  const timer = setTimeout(() => proc.kill(9), 60_000);
+  for (let i = 0; i < 400 && !shown.includes("haile"); i++) await Bun.sleep(50);
+  expect(shown, "the list is drawn").toContain("haile");
+  proc.terminal?.write("q");
+  for (let i = 0; i < 400 && !tmuxCalls(p).some((c) => c.includes("detach-client")); i++) await Bun.sleep(50);
+  expect(tmuxCalls(p).some((c) => c.includes("detach-client")), shown).toBe(true);
+  await Bun.sleep(500);
+  expect(proc.exitCode, "the list must keep running, or its pane closes").toBeNull();
+  proc.terminal?.write("\x03");
+  const code = await proc.exited;
+  clearTimeout(timer);
+  proc.terminal?.close();
+  expect(code, shown).toBe(0);
+}, T);

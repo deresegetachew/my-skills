@@ -1047,3 +1047,12 @@ test("ls says which of this machine's rows its names file expects, so the cockpi
   expect(rows.haile).toEqual(["idle", "local", false]);
   expect(rows.kassa).toEqual(["working", "github", false]);
 });
+
+test("ls keeps this machine's down row when another machine last said down or went silent", () => {
+  for (const [state, ago] of [["down", 30], ["working", 3 * 3600]] as const) {
+    const w = world({ agentIssue: false }); // this machine's names file names taytu, which does not run here
+    w.addAgentIssue(92, "taytu", state, w.clock - ago, "bbbb2222", true);
+    w.cycle();
+    expect(taytuRows(w), state).toEqual([["down", "this machine", "local"]]);
+  }
+});
