@@ -1,6 +1,9 @@
-# 0003: Plugins for the factory, with messaging over NATS as the first one
+# 0004: Plugins for the factory, with messaging over NATS as the first one
 
 Date: 31 Oct 2026. Status: **proposed**, waiting for the owner's yes (#373). Nothing is built until then.
+**Builds on decision 0003** (#374, the factory's core as ports and adapters), which is not yet approved. NATS is one
+adapter of 0003's messaging port, shipped as a plugin. Where the two differ, 0003 wins, and this file is brought in line
+with it before it is accepted.
 When accepted it amends PRD D10 ("GitHub is the state and the transport"), D13 and CLAUDE.md (no npm package at
 runtime) and `docs/messages.md` ("GitHub stays the transport"), and widens decision 0002's bundling into a general rule.
 
@@ -17,9 +20,10 @@ the owner must see. The NATS client is an npm package, so it ships as the factor
 
 ## Decision
 
-### 1. Messaging is a setting, behind one interface
+### 1. Messaging is a setting, behind 0003's messaging port
 
-The core defines one small interface. Roles call it and never a transport directly:
+The messaging port is defined in decision 0003. Roles receive it from the composition root and never import an adapter.
+This decision needs these calls from it:
 
 | Call | What it does |
 |---|---|
@@ -29,9 +33,9 @@ The core defines one small interface. Roles call it and never a transport direct
 | `claim(key, holder, ttl)` | Take a lock if nobody holds it, or say who does. `release(key)` gives it back. |
 
 `claim` is a fourth call the owner's list did not have: claims need a real compare-and-set. Without one, two agents can
-both believe they won.
+both believe they won. If 0003 puts claims behind another port (its Claim type), `claim` belongs there instead.
 
-Two transports:
+Two adapters, chosen by a setting:
 
 - `"messaging": {"transport": "github"}`: the default. It needs no setup and is today's behaviour: comments, markers and
   labels.
@@ -62,8 +66,9 @@ The settings go into `factory_settings_schema.ts` and the settings page, like an
 ### 3. Machines: one hub, a leaf server on each machine, in Docker
 
 - **`factory nats up`** starts `nats-server` from a compose file (a pinned image), with JetStream on. `factory nats down`
-  and `factory nats status` go with it. Nothing is installed on the host apart from Docker, which `factory bootstrap
-  machine` already sets up on Linux. On macOS, Docker Desktop or Colima is needed, and `factory doctor` says so.
+  and `factory nats status` go with it. Nothing is installed on the host apart from Docker. On a sandboxed Linux
+  machine, the compose file runs under the user's rootless Docker, which `factory bootstrap project` already sets up. On
+  macOS, Docker Desktop or Colima is needed, and `factory doctor` says so.
 - **One hub, leaf nodes on the others.** The always-on machine (dev-pc today) runs the hub, which holds JetStream. Every
   other machine runs a leaf server that connects to the hub over Tailscale. Agents connect only to their own machine's
   server. A cluster was set aside because JetStream needs three servers for a quorum, and the owner has fewer always-on
@@ -86,17 +91,22 @@ The settings go into `factory_settings_schema.ts` and the settings page, like an
 - **Permissions by subject, with the sender in the subject** (point 6). An agent may publish only on subjects that end in
   its own name, so a builder cannot publish as the dev manager. Hand-offs can only be published by a dev manager.
 - **Listen on the Tailscale address only**, both for clients and for the hub's leaf port, never `0.0.0.0`. On a
-  sandboxed machine the network guard drops the tailnet, so when NATS is on, `factory bootstrap machine` adds
-  `--allow-host <this machine's Tailscale address>:4222` and nothing wider.
+  sandboxed machine the network guard drops the tailnet. When NATS is on, the guard is installed by `factory bootstrap
+  machine` (as root) with `--allow-host <this machine's Tailscale address>:4222` and nothing wider.
 - **`factory doctor` checks** that the server answers, that the agent's seed exists with the right modes, that the
   agent can publish on its own subject, and that a publish **as another agent is refused**. A server that accepts that
   publish fails the doctor.
 - **The limit, said plainly:** agents on one machine run as one OS user, so a builder that reads another agent's seed
   file can use it. Per-agent credentials stop mistakes and an agent using its own key, not a hostile agent on the same
-  user, which is no worse than today's single GitHub account (D9). The defence that matters is the one above: the PR
-  gate reads only GitHub.
+  user, which is no worse than today's single GitHub account (D9). The claims bucket has a second gap: writes go
+  through JetStream's own subjects, which carry no sender. Every agent may write it, so a builder could overwrite another
+  agent's claim. Each claim's value names its holder, a reader drops one whose holder doesn't match the event on
+  `claims.<from>`, and the label on GitHub stays what the PR gate reads. So a forged claim can hold up work but can't
+  merge anything. The defence that matters is the one above: the PR gate reads only GitHub.
 
 ### 5. Plugins
+
+Decision 0003 says that an adapter with npm dependencies is a plugin. This point says how a plugin is built and run.
 
 - **A plugin is a folder:** `software-factory/plugins/<name>/` with its own `package.json` (pinned dependencies), an
   entry `index.ts` that implements a core interface, and its own `tests/`. The core holds the interfaces and imports
@@ -110,8 +120,8 @@ The settings go into `factory_settings_schema.ts` and the settings page, like an
 - **Missing or failing to load:** the command goes on with GitHub and says so:
   `{code: "plugin-missing" | "plugin-load", message, fix}`, once per process, on stderr and in the alerts.
   `factory doctor` fails until it is fixed. It is never silent.
-- **Tested:** the core's tests use a fake transport through the interface. A plugin's tests start a real `nats-server`
-  on a free port (CI installs a pinned one). A release test loads each bundle with Bun from a folder that has no
+- **Tested:** the core's tests use 0003's in-memory adapter. The NATS adapter passes 0003's contract suite for the
+  messaging port against a real `nats-server` on a free port (CI installs a pinned one). A release test loads each bundle with Bun from a folder that has no
   `node_modules`.
 - **`check_skills.ts`** refuses an import of a plugin's packages (the names in its `package.json`) from anywhere outside
   that plugin's folder. In this repo, the core loads a plugin from its source when no bundle is present.
@@ -150,7 +160,7 @@ A message is JSON with the fields of the `factory-msg` envelope v1 (`docs/messag
 
 ### 8. Moving over, one kind at a time
 
-1. The interface and the GitHub transport come first, with no change in behaviour.
+1. 0003's messaging port with its GitHub adapter comes first, with no change in behaviour.
 2. A kind moves when it is added to `messaging.kinds`. For its first week it is sent to NATS **and** to GitHub. The
    readers use NATS and count anything they find on GitHub but not on NATS (`factory status` shows the count).
 3. After a week with nothing missed, the owner stops the GitHub copy for that kind. That is a settings change, the
@@ -179,12 +189,12 @@ A message is JSON with the fields of the `factory-msg` envelope v1 (`docs/messag
 ## Build tasks (a draft; filed once this decision is accepted)
 
 The order is set by the numbers `factory usage --github` gives after #371's cuts. The list below assumes wake-ups and
-claims are the biggest remaining cost. Each task is one PR.
+claims are the biggest remaining cost. Each task is one PR. The messaging port with its GitHub and in-memory adapters is
+0003's first migration task (#374), so it is not repeated here. These tasks start after it.
 
 1. **Docs:** PRD D10 and D13, CLAUDE.md, `messages.md` and decision 0002 brought in line with this decision. CLAUDE.md
    is protected: the owner merges it.
-2. **The interface and the GitHub transport:** the four calls, the `messaging` settings in the schema and the table,
-   and the roles moved onto the interface. No change in behaviour.
+2. **The `messaging` settings** in the schema and the table, read by the composition root to pick the adapter.
 3. **The plugin mechanism:** the folder layout, bundling in `build_release.ts` (protected), the version check, the
    `check_skills.ts` rule, the loader with its errors and the GitHub fallback, and the doctor's check. Tested with a tiny
    test plugin.
