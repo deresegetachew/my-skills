@@ -9,8 +9,8 @@
 // mode), cached for FACTORY_AGENTS_CACHE_SECONDS (default 45) so a quick repeat costs nothing; `--fresh` asks again and
 // `--local` never asks. What a remote agent shows is what its machine posted: the hidden marker's kind, task, wait and
 // `since` (an issue with no kind, from an older release, takes its role marker's), and the tmux session and follow
-// link only when its project sets `tasks.showWhere`. A GitHub failure shows
-// this machine alone, with a line saying so.
+// link only when its project sets `tasks.showWhere`. A name that is down here but reported from another machine shows
+// that machine's row (#366). A GitHub failure shows this machine alone, with a line saying so.
 //
 // --json prints {agents: [...], github: {...}, daemon: {...}, machine}; every row has name, kind, where, state, detail,
 // task, on, since, lastSeen, follow, session, activity and source (local or github).
@@ -178,7 +178,11 @@ export async function run(cfg: Config, asJson = false, localOnly = false, fresh 
   if (!localOnly && taskSource(cfg) === "issues") {
     let issues: Issue[];
     [issues, github] = githubIssues(fresh, now);
-    rows.push(...remoteRows(cfg, issues, new Set(rows.map((r) => r.name))));
+    // A name down here may run on another machine (#366): its row from there replaces this machine's `down`.
+    const elsewhere = remoteRows(cfg, issues, new Set(rows.filter((r) => r.state !== "down").map((r) => r.name)))
+      .filter((r) => r.where !== "this machine" || !rows.some((l) => l.name === r.name));
+    const replaced = new Set(elsewhere.map((r) => r.name));
+    rows.splice(0, rows.length, ...rows.filter((r) => !replaced.has(r.name)), ...elsewhere);
   }
   rows.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   if (asJson) {
