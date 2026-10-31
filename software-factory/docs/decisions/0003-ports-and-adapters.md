@@ -8,8 +8,8 @@ and the transport"). Decision 0004 (messaging over NATS, #373) builds on it.
 Every part of the factory talks to GitHub directly. The commands under `software-factory/hooks/` run `gh` through
 `run()` in `factory_lib.ts` or `gh()` in `factory_issues.ts`, and the rules (who may claim a task, when a must-fix
 blocks a merge, when an owner ask is answered) sit in the same functions as the calls. Plan mode and issues mode
-(`tasks.source`) are two task sources chosen by `if`s on `taskSource()` in 16 files besides `factory_config.ts`,
-`next_task.ts`, `factory_claims.ts` and the PR gate among them. Tests reach the code through a fake `gh` on the `PATH` (`tests/fakegh.ts`) and a fake clock
+(`tasks.source`) are two task sources chosen by `if`s on `taskSource()` in 16 files besides `factory_config.ts`
+(`next_task.ts`, `factory_claims.ts` and the PR gate among them). Tests reach the code through a fake `gh` on the `PATH` (`tests/fakegh.ts`) and a fake clock
 (`FACTORY_NOW`, `factory_clock.ts`).
 
 The owner's direction (31 Oct): "if you're going to build things as plugins you need to use hexagonal and DDD; IoC is
