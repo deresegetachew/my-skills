@@ -39,6 +39,8 @@
       "Bash(git merge --no-ff origin/*)",
       "Bash(git merge --no-ff --no-edit origin/*)",
       "Bash(git merge --no-edit --no-ff origin/*)",
+      "Bash(./factory issues show*)",
+      "Bash(factory issues show*)",
       "Edit(tmp/**)",
       "Bash(cd *)",
       "Bash(ls *)",
