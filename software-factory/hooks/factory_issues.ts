@@ -13,7 +13,7 @@
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts pick --agent taytu      the agent's own in-progress issue, else claim
 //                                                                          the next ready one: prints "issue-42 <title>"
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts peek                     the next ready issue, without claiming it
-//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts show 42                  title, labels, body, then the people's comments
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts show 42 [--comments]     title, labels, body, then the people's comments
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts tick 42 3                tick the 3rd checkbox (1-based) in the body
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts review 42                in-progress -> in-review (after opening the PR);
 //                                                                          prints which labels changed
@@ -449,7 +449,7 @@ function main(argv: string[]): number {
   }
   const specs: Record<string, Parameters<typeof parseArgs>[1]> = {
     pick: { valued: ["--agent"], required: ["--agent"] },
-    show: { positionals: ["n"] },
+    show: { positionals: ["n"], flags: ["--comments"] }, // people's comments are always shown; the flag is gh's habit (#354)
     tick: { positionals: ["n", "index"] },
     review: { positionals: ["n"] },
     block: { positionals: ["n", "reason"] },
