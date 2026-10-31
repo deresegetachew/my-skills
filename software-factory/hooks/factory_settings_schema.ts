@@ -181,6 +181,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("roles.product-owner.names", "list", "agents", "The product owners' names: `factory product-owner [name|N] loop`."),
   S("roles.product-owner.profile", "str", "agents", "The Claude settings file the product owner's sessions run on (read only when it exists)."),
   S("roles.product-owner.workLabel", "str", "agents", "An open issue or pull request with this label is work for the product owner. Empty: it never has any."),
+  S("roles.product-owner.minReady", "int", "agents", "Issues mode: when fewer `factory:ready` tasks than this can start now (no open `Depends on`, not claimed), the product owner has a planning pass: it files the next tasks from approved stories. 0: off.", { default: 4, minimum: 0 }),
   S("roles.product-owner.busyMinutes", "int", "agents", "Minutes the product owner's loop waits after a pass that had work."),
   S("roles.product-owner.idleMinutes", "int", "agents", "Minutes it waits when there was none. 0: it exits instead."),
   S("roles.product-owner.escalateMinutes", "int", "agents", "A question addressed `to=po` that nobody answered moves up one level after this many minutes: product owner, then dev manager, then the owner. With no product owner running it starts at the dev manager."),
@@ -385,6 +386,14 @@ const MORE: Record<string, More> = {
     "manager and the coding agents are always denied them. Standalone Claude Design closes on 2026-12-14 (designs are " +
     "Artifact types now), so nothing is built on `DesignSync`.",
   examples: ["factory settings set roles.product-owner.artifacts true"] },
+  "roles.product-owner.minReady": { long: "The product owner's loop starts a pass when the builders are about to run out " +
+    "of work (#378). A task can start now when it is labelled ready, is not blocked or claimed (no `agent:` label), and has " +
+    "no `Depends on #n` whose issue is still open. When fewer than this many can, `work product-owner` adds a line such as " +
+    "`planning: 2 tasks can start (#584, #569), below 4`, and the pass's Planning step files the next tasks from stories " +
+    "the owner approved, until the count is back. Only in issues mode, and only once the project has a task issue (before " +
+    "that it is discovery). 0: off.",
+  read_by: "factory_roles.ts work (the product owner's loop)",
+  examples: ["factory settings set roles.product-owner.minReady 6", "factory settings set roles.product-owner.minReady 0"] },
   permissionMode: { long: "Nobody can answer a permission prompt in an unattended run, so every headless `claude -p` the loops and the dev " +
     "manager start gets `--permission-mode acceptEdits`: edits inside the project need no answer, and the allow list in " +
     ".claude/factory/settings.json (plus `permissions.allow` here) covers the commands. Anything not allowed or denied stops the run, " +

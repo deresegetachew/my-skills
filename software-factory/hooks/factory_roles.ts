@@ -27,7 +27,7 @@
 //   factory_roles.ts reads [role]                every path in reads.md that does not exist (exit 1 when any)
 import { existsSync, mkdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Config, DEFAULTS, load, ROLE_NAMES, roleNames, roleSetting, roleWait, rolesDir, safeAgent, toFloat } from "./factory_config.ts";
+import { type Config, DEFAULTS, load, ROLE_NAMES, roleNames, roleSetting, roleWait, rolesDir, safeAgent, taskLabels, toFloat } from "./factory_config.ts";
 import { ARTIFACT_TOOLS } from "./factory_agent_settings.ts";
 import { mainBranch } from "./factory_mcp.ts";
 import { flags as modelFlags, ModelsError, validate } from "./factory_models.ts";
@@ -363,7 +363,7 @@ export async function work(cfg: Config, role: string, _name = ""): Promise<strin
       const items = ghAll(`repos/{owner}/{repo}/issues?state=open&labels=${label}`);
       lines.push(...items.map((i) => `${i.pull_request ? "PR" : "issue"} #${i.number}: ${i.title} (${label})`));
     }
-    return [...lines, ...await poQuestions(cfg), ...await productAsks(cfg), ...signoffDigest(cfg)];
+    return [...lines, ...await poQuestions(cfg), ...await productAsks(cfg), ...signoffDigest(cfg), ...await planning(cfg)];
   }
   if (role === "dev-manager") return (await import("./factory_wait.ts")).precheck(cfg);
   die("factory: a coding agent's work is `factory next`.");
@@ -397,6 +397,29 @@ export async function productAsks(cfg: Config): Promise<string[]> {
     out.push(`owner queue #${queue}, ask ${slug} for product${answered}: ${(text[0] ?? "").slice(0, 100)}`);
   }
   return out;
+}
+
+/** A planning line when fewer ready tasks can start now than `roles.product-owner.minReady` (#378): ready, not
+ * blocked or claimed, no open dependency. Issues mode only; 0 turns it off. A project where no issue has ever been a
+ * task is still in discovery (`/product-pass discover`), so it gets none. */
+export async function planning(cfg: Config): Promise<string[]> {
+  if (cfg.tasks?.source !== "issues") return [];
+  const { SETTINGS } = await import("./factory_settings_schema.ts");
+  const dflt = SETTINGS["roles.product-owner.minReady"]?.default;
+  const raw = roleSetting(cfg, "product-owner", "minReady", typeof dflt === "number" ? dflt : 0);
+  const min = typeof raw === "number" && Number.isInteger(raw) ? raw : 0;
+  if (min <= 0) return [];
+  const { names, readyIssues, taskIssues } = await import("./factory_issues.ts");
+  const can = readyIssues(cfg).map((i) => `#${i.number}`);
+  if (can.length >= min) return [];
+  if (!can.length) {
+    // A task keeps its label when it is closed; the owner queue and the sign-off queue never carry one.
+    const L = taskLabels(cfg);
+    const labels = [L.ready, L.inProgress, L.inReview, L.blocked];
+    if (!taskIssues("all").some((i) => labels.some((l) => names(i).has(l)))) return [];
+  }
+  const list = can.length ? ` (${can.join(", ")})` : "";
+  return [`planning: ${can.length} task${can.length === 1 ? "" : "s"} can start${list}, below ${min}`];
 }
 
 /** What `factory <role> loop --dry-run` prints besides the work: where the role's instructions are, and whether

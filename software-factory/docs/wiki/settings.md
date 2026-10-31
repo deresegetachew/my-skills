@@ -188,6 +188,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `roles.product-owner.names` | list | `["mentewab", "eleni", "sabla"]` | The product owners' names: `factory product-owner [name\|N] loop`. |
 | `roles.product-owner.profile` | str | `".claude/product-owner/settings.json"` | The Claude settings file the product owner's sessions run on (read only when it exists). |
 | `roles.product-owner.workLabel` | str | `"factory:needs-product"` | An open issue or pull request with this label is work for the product owner. Empty: it never has any. |
+| `roles.product-owner.minReady` | int | `4` | Issues mode: when fewer `factory:ready` tasks than this can start now (no open `Depends on`, not claimed), the product owner has a planning pass: it files the next tasks from approved stories. 0: off. |
 | `roles.product-owner.busyMinutes` | int | `30` | Minutes the product owner's loop waits after a pass that had work. |
 | `roles.product-owner.idleMinutes` | int | `60` | Minutes it waits when there was none. 0: it exits instead. |
 | `roles.product-owner.escalateMinutes` | int | `120` | A question addressed `to=po` that nobody answered moves up one level after this many minutes: product owner, then dev manager, then the owner. With no product owner running it starts at the dev manager. |

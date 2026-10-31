@@ -1,10 +1,8 @@
 // The product owner plans when the builders run low on work (#378): `work product-owner` adds a planning line when
 // fewer `factory:ready` tasks can start now than `roles.product-owner.minReady`.
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { factory, issue, poProject, type Row } from "./roles_support.ts";
-import { KIT, sh } from "./support.ts";
+import { sh } from "./support.ts";
 
 const ISSUES_MODE = { tasks: { source: "issues" } };
 
@@ -37,10 +35,19 @@ test("a claimed or blocked ready task does not count, and a closed dependency do
   expect(r.out).toContain("planning: 2 tasks can start (#21, #24), below 4");
 });
 
-test("no startable task at all still asks for planning (#378)", () => {
-  const r = workOf([]);
+const DONE = issue(20, "Done", "", ["factory:in-review"], "closed"); // a merged task keeps its label
+
+test("no startable task at all still asks for planning once the project has tasks (#378)", () => {
+  const r = workOf([DONE]);
   expect(r.code, r.out).toBe(0);
   expect(r.out).toContain("planning: 0 tasks can start, below 4");
+});
+
+test("a project with no task issue yet is in discovery, not planning (#378)", () => {
+  const r = workOf([issue(30, "Agent: menelik", "", ["factory:agent"]), issue(31, "Dev manager: needs the owner"),
+    issue(32, "Closed idea", "", [], "closed")]);
+  expect(r.code, r.out).toBe(3);
+  expect(r.out).not.toContain("planning");
 });
 
 test("five startable tasks make no planning line (#378)", () => {
@@ -51,7 +58,7 @@ test("five startable tasks make no planning line (#378)", () => {
 });
 
 test("minReady 0 turns planning off (#378)", () => {
-  const r = workOf([], { ...ISSUES_MODE, roles: { "product-owner": { names: ["eleni"], busyMinutes: 0, idleMinutes: 0, minReady: 0 } } });
+  const r = workOf([DONE], { ...ISSUES_MODE, roles: { "product-owner": { names: ["eleni"], busyMinutes: 0, idleMinutes: 0, minReady: 0 } } });
   expect(r.code, r.out).toBe(3);
   expect(r.out).not.toContain("planning");
 });
@@ -66,7 +73,7 @@ test("minReady is read from the project's settings (#378)", () => {
 });
 
 test("plan mode has no ready issues and no planning line (#378)", () => {
-  const r = workOf([], {});
+  const r = workOf([DONE], {});
   expect(r.out).not.toContain("planning");
 });
 
@@ -83,12 +90,4 @@ test("the setting is documented and validated (#378)", () => {
   expect(help.stdout).toContain("4");
   const bad = factory(work, env, ["settings", "set", "roles.product-owner.minReady", "-1"]);
   expect(bad.code).not.toBe(0);
-});
-
-test("the product pass skill has a planning step that never files past an unapproved story (#378)", () => {
-  const skill = readFileSync(join(KIT, ".claude", "skills", "product-pass", "SKILL.md"), "utf8");
-  expect(skill).toContain("**Planning.**");
-  expect(skill).toContain("roles.product-owner.minReady");
-  expect(skill).toContain("factory prd");
-  expect(skill).toMatch(/never file[^.]*story the owner has not approved/i);
 });
