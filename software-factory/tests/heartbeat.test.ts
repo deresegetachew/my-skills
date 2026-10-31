@@ -1033,3 +1033,17 @@ test("ls keeps this machine's down row when GitHub says the same machine", () =>
   w.cycle();
   expect(taytuRows(w)).toEqual([["down", "this machine", "local"]]);
 });
+
+test("ls says which of this machine's rows its names file expects, so the cockpit lists those when they are down", () => {
+  const w = world({ agentIssue: false }); // this machine's names file names taytu, which does not run
+  w.addAgentIssue(91, "kassa", "working", w.clock - 30, "bbbb2222", true);
+  w.startLoop("haile"); // runs here without being in the names file
+  w.cycle();
+  const p = ls(w, "--json", "--fresh");
+  expect(p.code, p.out).toBe(0);
+  const rows = Object.fromEntries((JSON.parse(p.stdout) as { agents: Record<string, unknown>[] }).agents
+    .map((r) => [r.name, [r.state, r.source, r.expected]]));
+  expect(rows.taytu).toEqual(["down", "local", true]);
+  expect(rows.haile).toEqual(["idle", "local", false]);
+  expect(rows.kassa).toEqual(["working", "github", false]);
+});
