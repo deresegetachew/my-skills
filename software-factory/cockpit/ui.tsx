@@ -77,6 +77,10 @@ function specOf(v: unknown): Spec {
   };
 }
 
+/** Only used when stdin and stdout are terminals. Ink would otherwise treat a set `CI` as "not interactive" and draw
+ * nothing until it unmounts: a blank view that still takes keys. */
+const ON_A_TERMINAL = { interactive: true } as const;
+
 /** Draws one frame and waits until it is written. */
 async function once(el: ReactElement): Promise<void> {
   const ink = render(el, { patchConsole: false });
@@ -111,7 +115,7 @@ async function onTerminal(view: string, spec: Spec): Promise<number> {
     : (cols: number, rows: number) => (
       <NeedsView repo={spec.repo} snapshot={spec.snapshot} cols={cols} rows={rows} color={color}
         load={() => readJson(spec.read, limit)} />);
-  await render(<Sized draw={draw} />).waitUntilExit();
+  await render(<Sized draw={draw} />, ON_A_TERMINAL).waitUntilExit();
   const r = refused.p;
   return r ? fail(r.code, r.message, r.fix) : 0;
 }
@@ -139,7 +143,7 @@ async function main(argv: string[]): Promise<number> {
   const tty = Boolean(process.stdin.isTTY && process.stdout.isTTY);
   if (view !== undefined) return tty ? onTerminal(view, specOf(data)) : offTerminal(view, specOf(data));
   if (tty) {
-    await render(<Interactive snapshot={data} />).waitUntilExit();
+    await render(<Interactive snapshot={data} />, ON_A_TERMINAL).waitUntilExit();
     return 0;
   }
   await once(<App snapshot={data} />);
