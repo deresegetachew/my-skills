@@ -2,7 +2,7 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { HOOKS, envWith, runBun, runHook, tmp, write, writeExe } from "./support.ts";
+import { HOOKS, envWith, git, gitRepo, runBun, runHook, tmp, write, writeExe } from "./support.ts";
 
 const T = 1_793_000_000; // a fixed "now", on the hour or not, it doesn't matter
 
@@ -37,14 +37,24 @@ function report(s: ReturnType<typeof setup>, ...args: string[]) {
     FACTORY_NOW: String(T) }) });
 }
 
+/** A project `proj` and an agent's worktree of it, `proj-agents/haile`. */
+function project(): { main: string; agent: string } {
+  const main = join(tmp(), "proj");
+  mkdirSync(main);
+  gitRepo(main);
+  const agent = join(main + "-agents", "haile");
+  git(main, "worktree", "add", "-q", "--detach", agent);
+  return { main, agent };
+}
+
 test("each gh call is counted by agent, command and endpoint; auth and rate_limit are not", () => {
   const s = setup();
-  const root = tmp();
-  calls(s, join(root, "proj-agents", "haile"), "haile", T - 60,
+  const { main, agent } = project();
+  calls(s, agent, "haile", T - 60,
     "api repos/{owner}/{repo}/issues/12/comments", "api --paginate repos/{owner}/{repo}/issues/13/comments?since=x",
     "api -X POST repos/{owner}/{repo}/issues/12/comments -f body=hi", "pr view 5 --json number",
     "auth status", "api rate_limit");
-  calls(s, join(root, "proj"), undefined, T - 30, "api repos/{owner}/{repo}/pulls?state=open");
+  calls(s, main, undefined, T - 30, "api repos/{owner}/{repo}/pulls?state=open");
   const p = report(s, "--json");
   expect(p.code, p.out).toBe(0);
   const r = JSON.parse(p.stdout) as Report;
@@ -56,7 +66,7 @@ test("each gh call is counted by agent, command and endpoint; auth and rate_limi
 
 test("only the last hour counts, and the text lists the biggest first", () => {
   const s = setup();
-  const cwd = join(tmp(), "proj");
+  const cwd = project().main;
   calls(s, cwd, "taytu", T - 3_700, "api repos/{owner}/{repo}/issues", "api repos/{owner}/{repo}/issues");
   calls(s, cwd, "taytu", T - 100, "api repos/{owner}/{repo}/issues");
   calls(s, cwd, "menelik", T - 50, "api repos/{owner}/{repo}/pulls", "api repos/{owner}/{repo}/pulls");
@@ -79,9 +89,9 @@ test("no calls yet says so", () => {
 
 test("hour files older than two days are removed when a new hour starts", () => {
   const s = setup();
-  const cwd = join(tmp(), "proj");
+  const cwd = project().main;
   calls(s, cwd, "haile", T - 3 * 86_400, "api user");
-  const dir = join(s.state, "software-factory", "github-calls");
+  const dir = join(s.state, "proj-factory", "github-calls");
   expect(readdirSync(dir).length).toBe(1);
   calls(s, cwd, "haile", T, "api user");
   const left = readdirSync(dir);

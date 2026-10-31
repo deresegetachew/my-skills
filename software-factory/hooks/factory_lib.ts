@@ -1,7 +1,8 @@
 // Shared helpers for the factory's Bun scripts: processes, errors, JSON, small Python-like utilities.
 // Bun built-ins and node:* modules only; no npm package.
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
 import { dlopen, FFIType } from "bun:ffi";
 
 /** The factory's rules for its agents (deny list, PR gate and the other hooks), in a project (#258). Claude Code never
@@ -114,6 +115,7 @@ function cleanEnv(env: Record<string, string | undefined>): Record<string, strin
 /** Run a command and wait for it (Python's subprocess.run with capture_output=True, text=True).
  * A missing program gives code 127 and the error in stderr instead of throwing. */
 export function run(cmd: string[], opts: RunOptions = {}): RunResult {
+  if (cmd[0] === "gh") countGithubCall(cmd.slice(1), opts.cwd);
   try {
     const p = Bun.spawnSync(cmd, {
       cwd: opts.cwd,
@@ -148,6 +150,99 @@ export function gh(args: string[], opts: RunOptions = {}): RunResult {
 /** `git <args>`; returns the result, never throws. */
 export function git(args: string[], opts: RunOptions = {}): RunResult {
   return run(["git", ...args], opts);
+}
+
+// The factory's own GitHub calls, counted on this machine (#371), so `factory usage --github` can say which agent and
+// which command spend the 5,000 calls an hour every agent on the owner's account shares. run() counts every `gh` it
+// starts: one line in an hour file of the project's state folder (factory_machine.ts stateDir, rebuilt here because
+// that module imports this one), `<state>/<project>-factory/github-calls/<YYYY-MM-DDTHH>.log` (UTC):
+//
+//   <seconds since 1970> TAB <agent or -> TAB <command> TAB <endpoint>
+//
+// <command> is the factory script and its first word (`factory_issues show`); <endpoint> is what was asked, without the
+// repo and the numbers (`issues/:n/comments`, `POST issues/:n/comments`, `pr view`). `gh auth ...` and `gh api
+// rate_limit` are not counted: GitHub does not count them. A `--paginate` call counts once, whatever its pages; `gh`
+// that an agent runs in its own shell is not seen (GitHub's own count, which `factory usage --github` shows next to
+// it, has both). A line is appended in one write, so loops writing at once don't mix lines. Starting a new hour file
+// removes the ones older than two days. Counting never fails or stops the call.
+export const GITHUB_CALLS_DIR = "github-calls";
+const KEEP_HOURS = 48;
+/** gh flags that take a value, so the value is not taken for the endpoint. */
+const GH_VALUED = new Set(["-X", "--method", "-H", "--header", "-f", "--raw-field", "-F", "--field", "-q", "--jq", "-t",
+  "--template", "--input", "--hostname", "--cache", "-R", "--repo"]);
+const callsDirs = new Map<string, string>();
+
+/** The hour file's name for a time in seconds: `2026-10-31T07.log`. */
+export function hourFile(t: number): string {
+  return `${new Date(t * 1000).toISOString().slice(0, 13)}.log`;
+}
+
+/** The time in seconds (FACTORY_NOW in tests, as factory_clock.ts, which imports this module). */
+function clockSeconds(): number {
+  const given = Number((process.env.FACTORY_NOW ?? "").trim() || NaN);
+  return Number.isFinite(given) ? given : Date.now() / 1000;
+}
+
+/** What a gh call asks for, without the repo and the numbers; null for a call GitHub does not count. */
+export function githubEndpoint(args: string[]): string | null {
+  const words: string[] = [];
+  let method = "GET";
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] as string;
+    if (GH_VALUED.has(a)) {
+      if (a === "-X" || a === "--method") method = (args[i + 1] ?? "GET").toUpperCase();
+      i++;
+    } else if (a.startsWith("--method=")) method = a.slice(9).toUpperCase();
+    else if (!a.startsWith("-")) words.push(a);
+  }
+  const [sub, target] = words;
+  if (!sub || sub === "auth" || sub === "help" || sub === "version") return null;
+  if (sub !== "api") return words.slice(0, 2).join(" ");
+  const path = (target ?? "").split("?")[0]?.replace(/^\/+/, "").replace(/^repos\/[^/]+\/[^/]+\/?/, "") ?? "";
+  if (path === "rate_limit") return null;
+  const shape = path.split("/").map((p) => (/^\d+$/.test(p) ? ":n" : /^[0-9a-f]{40}$/.test(p) ? ":sha" : p)).join("/");
+  return (method === "GET" ? "" : `${method} `) + (shape || "(none)");
+}
+
+/** `<state>/<project>-factory/github-calls` for the project `cwd` is in, worked out once per folder. */
+function githubCallsDir(cwd: string): string {
+  let dir = callsDirs.get(cwd);
+  if (dir === undefined) {
+    const p = run(["git", "rev-parse", "--git-common-dir"], { cwd });
+    const common = resolve(cwd, p.code === 0 && p.stdout.trim() ? p.stdout.trim() : ".git");
+    const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
+    dir = join(base, `${basename(dirname(common))}-factory`, GITHUB_CALLS_DIR);
+    callsDirs.set(cwd, dir);
+  }
+  return dir;
+}
+
+/** The running factory script and its first word: `factory_issues show`. */
+function commandName(): string {
+  const script = basename(process.argv[1] ?? "?").replace(/\.ts$/, "");
+  const first = process.argv[2] ?? "";
+  return /^[a-z][a-z-]*$/.test(first) ? `${script} ${first}` : script;
+}
+
+/** Count one `gh <args>` this process is about to run (in `cwd`). Never throws. */
+function countGithubCall(args: string[], cwd: string = process.cwd()): void {
+  const endpoint = githubEndpoint(args);
+  if (endpoint === null) return;
+  try {
+    const t = clockSeconds();
+    const dir = githubCallsDir(cwd);
+    const file = join(dir, hourFile(t));
+    const fresh = !existsSync(file);
+    mkdirSync(dir, { recursive: true });
+    const line = [String(Math.floor(t)), process.env.FACTORY_AGENT || "-", commandName(), endpoint]
+      .map((s) => s.replace(/[\t\n]/g, " ")).join("\t") + "\n";
+    appendFileSync(file, line);
+    if (!fresh) return;
+    const oldest = hourFile(t - KEEP_HOURS * 3600);
+    for (const f of readdirSync(dir)) if (f.endsWith(".log") && f < oldest) rmSync(join(dir, f), { force: true });
+  } catch {
+    // counting is a measurement: a full disk or a read-only home must not stop the call
+  }
 }
 
 /** The JSON in a file, or `fallback` when it is missing or not valid JSON. */
