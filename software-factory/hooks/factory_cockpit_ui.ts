@@ -22,8 +22,8 @@
 //   factory cockpit --bar [<words>]
 //                                the `:` command bar: type to pick a factory command, the words typed in already (off a
 //                                terminal: the words, else one line on stdin, and the next line answers an action's question)
-//   factory cockpit --needs      the "Needs you" view, from the cache
-//   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json`
+//   factory cockpit --needs      the "Needs you" view, from the cache (drawn by the Ink UI, #367)
+//   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json` (drawn by the Ink UI, #367)
 //   factory cockpit --settings   the Settings view (#340), before the Pull requests view
 //   factory cockpit --ci         the CI view (#339), from the cache
 //   factory cockpit --usage      the Usage and lessons view (#341), from this machine's logs
@@ -32,7 +32,7 @@ import { homedir, hostname } from "node:os";
 import { basename, join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { load } from "./factory_config.ts";
-import { inkUi, readCache, refreshIfOld } from "./factory_cockpit.ts";
+import { inkUi, readCache, refreshIfOld, runUi, UI_MISSING } from "./factory_cockpit.ts";
 import { run, which } from "./factory_lib.ts";
 import { refuse, repoKey, stateDir } from "./factory_machine.ts";
 import { asText, lookup, MACHINE, MISSING, SECTIONS, SETTINGS, type Setting } from "./factory_settings_schema.ts";
@@ -76,7 +76,7 @@ export interface View {
 export function views(): View[] {
   const issues = str(obj(obj(load()).tasks).source) === "issues";
   return [
-    { key: "1", title: "Needs you", commands: [["cockpit", "--needs"]] },
+    { key: "1", title: "Needs you", commands: [["cockpit", "--needs"]], live: true },
     { key: "2", title: "Pull requests", commands: [["cockpit", "--prs"]], live: true },
     { key: "3", title: "Tasks & PRD", commands: [issues ? ["issues", "list"] : ["next"]] },
     { key: "4", title: "CI", commands: [["cockpit", "--ci"]] }, // drawn after its board (#339)
@@ -726,22 +726,33 @@ export async function bar(words: string[] = []): Promise<number> {
   return runAction(resolved);
 }
 
-// --- the Needs you view ----------------------------------------------------------------------------------------------
+// --- the views drawn by the Ink UI (#367, decision 0002) -------------------------------------------------------------
+//
+// A view is a component in cockpit/views/, run by the Ink UI (`ui.tsx --view <name>`). This side says only what it
+// reads and what it may run: the commands, the cache, the action's question. The UI does the rest, on a terminal or off.
 
+function view(name: string, data: Obj): number {
+  const ui = inkUi(true);
+  if (!ui) refuse(UI_MISSING.code, UI_MISSING.message, UI_MISSING.fix, 1);
+  return runUi(ui,["--view", name], { repo: basename(top()), ...data });
+}
+
+/** `factory cockpit --needs`: the Needs you view, from the cache; r reads the snapshot again. */
 export function needs(): number {
-  const snap = readCache();
-  const items = list(snap?.needsYou);
-  if (snap === null) console.log("No snapshot yet: `factory cockpit --json` reads one now.");
-  else if (!items.length) console.log("Nothing needs you.");
-  for (const n of items) {
-    if (n.kind === "owner-ask") {
-      const replied = n.state === "owner" ? ", the product owner replied" : "";
-      console.log(`Owner ask ${plain(n.id)} on #${plain(n.issue)}${replied}: ${plain(n.url)}`);
-    }
-    else if (n.kind === "owner-merges") console.log(`PR #${plain(n.number)} ${plain(n.title)} is yours to merge: ${plain(n.url)}`);
-    else console.log(JSON.stringify(n)); // JSON escapes control characters itself
+  return view("needs", { snapshot: readCache(), read: ["bash", factoryScript(top()), "cockpit", "--json"] });
+}
+
+/** `factory cockpit --prs [<n>]`: the Pull requests view (#338), from `factory prs --json`, with <n> selected; m merges
+ *  through `factory owner merge <n> --head <the head shown>` after its question. */
+export function prsView(args: string[]): number {
+  const word = args[0];
+  if (args.length > 1 || (word !== undefined && !/^#?\d+$/.test(word))) {
+    refuse("cockpit_usage", "factory cockpit --prs takes no argument, or the number of an open pull request.",
+      "Run `factory cockpit --prs` for every open PR, or `factory cockpit --prs 12` to open #12's detail.", 2);
   }
-  return 0;
+  const read = [process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_prs.ts"), "--json"];
+  return view("prs", { select: word === undefined ? null : Number(word.replace("#", "")), read, fresh: [...read, "--fresh"],
+    act: ["bash", factoryScript(top())], changes: ACTIONS_OFFERED["owner merge"] });
 }
 
 // --- the Settings view (#340, PRD US-13) -----------------------------------------------------------------------------
@@ -944,342 +955,6 @@ export function settingsView(args: string[]): number {
   }
   const color = args.includes("--color") && !("NO_COLOR" in process.env);
   console.log(settingsLines(termColumns(), color).join("\n"));
-  return 0;
-}
-
-// --- the Pull requests view (#338, PRD US-13) ------------------------------------------------------------------------
-//
-// `factory cockpit --prs [<n>]`, the view `C-a 2` runs, towards its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/
-// VPrs.dc.html). One row per open PR (number, title and " · protected", by, CI, the dev manager's word, who acts,
-// next), and the selected PR's detail below it: branch, head, the newest marker, any review claim, CI job by job, open
-// questions, protected paths and the next action. The keys that work are at the bottom. Its data is `factory prs
-// --json` (the views cache keeps it, #305), so CI is judged by the manager's one rule. On a terminal: j k (or ↑ ↓)
-// move, r reads again from GitHub, q closes; NO_COLOR turns the colour off. Off a terminal it prints one frame sized
-// by COLUMNS and LINES, with <n> selected (else the first PR), and no colour. m merges the selected PR after a y/N
-// question, through `factory owner merge <n> --head <the head shown>` (#309), so one that moved since is not merged.
-
-/** `factory prs --json`, or null when it printed no JSON. */
-function readPrs(fresh: boolean): Obj | null {
-  const hook = join(import.meta.dir, "factory_prs.ts");
-  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", hook, "--json", ...(fresh ? ["--fresh"] : [])],
-    { timeoutMs: 120_000 });
-  try {
-    const data: unknown = JSON.parse(p.stdout);
-    return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Obj) : null;
-  } catch {
-    return null;
-  }
-}
-
-const PAINT: Record<string, string> = { green: "32", red: "31", amber: "33", dim: "90" };
-
-function prPaint(text: string, colour: string, color: boolean): string {
-  return color && text ? `\x1b[${PAINT[colour]}m${text}\x1b[0m` : text;
-}
-
-function ciColour(state: string): string {
-  return state === "green" ? "green" : state === "red" ? "red" : "amber";
-}
-
-function isProtected(p: Obj): boolean {
-  return p.protected === true || obj(p.next).reason === "protected";
-}
-
-/** The dev manager's word on the head, short: ✓ approved, ✕ must-fix, or what else the gate reads. */
-function reviews(p: Obj): string {
-  const gate = plain(p.gate);
-  if (gate === "approved") return "✓ approved";
-  if (gate.startsWith("must-fix")) return `✕ ${gate}`;
-  if (gate) return gate;
-  return p.headMarker === "pr-watch" ? "watching" : "—";
-}
-
-/** Who acts next, from the next action. */
-function whoActs(p: Obj): string {
-  const next = obj(p.next);
-  const action = plain(next.action);
-  if (["merge", "review", "rerun-flake"].includes(action)) return "manager";
-  if (action === "held") return plain(next.by) || "manager";
-  if (action === "waiting-for-agent") return plain(p.agent) || "author";
-  if (action === "wait-ci") return "CI";
-  if (action === "owner-merges") return "you";
-  return "—";
-}
-
-function nextText(p: Obj): string {
-  const next = obj(p.next);
-  const text = plain(next.text) || plain(next.action) || "—";
-  return next.error !== undefined ? `${text} (${plain(next.error)})` : text;
-}
-
-function prWidth(s: string): number {
-  return [...s.replace(ANSI, "")].length;
-}
-
-/** Cuts `s` to `n` visible characters (an ellipsis when cut), dropping colour when it has to cut. */
-function prCut(s: string, n: number): string {
-  if (prWidth(s) <= n) return s;
-  const chars = [...s.replace(ANSI, "")];
-  return n <= 0 ? "" : `${chars.slice(0, n - 1).join("")}…`;
-}
-
-function prPad(s: string, n: number): string {
-  const c = prCut(s, n);
-  return c + " ".repeat(Math.max(n - prWidth(c), 0));
-}
-
-/** `left` and `right` on one line of `cols`, the right one dropped when both don't fit. */
-function spread(left: string, right: string, cols: number): string {
-  const gap = cols - prWidth(left) - prWidth(right);
-  return gap >= 2 ? left + " ".repeat(gap) + right : prCut(left, cols);
-}
-
-interface Column {
-  head: string;
-  size: number;
-  cell: (p: Obj, color: boolean) => string;
-}
-
-const BY: Column = { head: "by", size: 10, cell: (p) => plain(p.agent) || "—" };
-const CI: Column = { head: "CI", size: 8, cell: (p, color) => {
-  const state = plain(obj(p.ci).state) || "—";
-  return prPaint(state, ciColour(state), color);
-} };
-const REVIEWS: Column = { head: "reviews", size: 12, cell: (p) => reviews(p) };
-const WHO: Column = { head: "who acts", size: 10, cell: (p) => whoActs(p) };
-const NEXT: Column = { head: "next", size: 26, cell: (p) => nextText(p) };
-
-/** The columns after the title that fit in `cols`: the board's, dropping reviews, by, next and who acts in turn. */
-function columns(cols: number): Column[] {
-  const all = [BY, CI, REVIEWS, WHO, NEXT];
-  for (const drop of [REVIEWS, BY, NEXT, WHO]) {
-    if (2 + 6 + 16 + all.reduce((n, c) => n + c.size, 0) <= cols) break;
-    all.splice(all.indexOf(drop), 1);
-  }
-  return all;
-}
-
-function tableRow(cells: string[], sizes: number[]): string {
-  return cells.map((c, i) => prPad(c, sizes[i] as number)).join("");
-}
-
-function prTable(pulls: Obj[], selected: number, cols: number, color: boolean): string[] {
-  const rest = columns(cols);
-  const titleSize = Math.max(cols - 2 - 6 - rest.reduce((n, c) => n + c.size, 0), 8);
-  const sizes = [6, titleSize, ...rest.map((c) => c.size)];
-  const head = "  " + tableRow(["PR", "title", ...rest.map((c) => c.head)], sizes);
-  const rows = pulls.map((p, i) => {
-    const prot = isProtected(p) ? " · protected" : "";
-    const room = titleSize - 1; // a space before the next column
-    const title = prCut(plain(p.title), Math.max(room - prot.length, 1)) + prPaint(prot, "amber", color);
-    const line = (i === selected ? "› " : "  ") + tableRow([`#${plain(p.number)}`, title, ...rest.map((c) => c.cell(p, color))], sizes);
-    return color && i === selected ? `\x1b[1m${line}\x1b[0m` : line;
-  });
-  return [prPaint(head, "dim", color), ...rows];
-}
-
-function short(sha: unknown): string {
-  return plain(sha).slice(0, 7);
-}
-
-function age(minutes: unknown): string {
-  const m = typeof minutes === "number" ? minutes : null;
-  if (m === null) return "age unknown";
-  return m < 120 ? `${Math.round(m)} min old` : m < 2880 ? `${Math.round(m / 60)} h old` : `${Math.round(m / 1440)} days old`;
-}
-
-/** The selected PR's detail, as on the board's card. */
-export function prDetail(p: Obj, questions: Obj[], cols: number, color: boolean): string[] {
-  const head = obj(p.head);
-  const ci = obj(p.ci);
-  const ok = (s: string) => prPaint(s, "green", color);
-  const bad = (s: string) => prPaint(s, "red", color);
-  const n = plain(p.number);
-  const who = [plain(p.branch), plain(p.agent)].filter(Boolean).join(" · ");
-  const labels = Array.isArray(p.labels) ? p.labels.map(plain).filter(Boolean) : [];
-  const facts = [`head ${short(head.sha) || "unknown"}`, age(head.ageMinutes), ...(p.draft ? ["draft"] : []),
-    ...(labels.length ? [`labels ${labels.join(", ")}`] : [])];
-
-  const word = reviews(p);
-  const marked = word.startsWith("✓") ? ok(word) : word.startsWith("✕") ? bad(word) : word;
-  let manager = `dev manager ${word === "—" ? "no marker for the head" : marked}`;
-  const marks = list(p.markers);
-  const last = marks[marks.length - 1];
-  if (!p.headMarker && last) manager += ` (older: ${plain(last.kind).replace(/^factory-/, "")} ${short(last.sha) || "no commit"})`;
-  const claim = obj(p.claim);
-  if (plain(claim.manager)) manager += `   ${plain(claim.manager)} holds the review until ${plain(claim.until)}`;
-  const rw = obj(p.rework); // who is reworking this head, on which machine (#355)
-  if (plain(rw.agent)) {
-    manager += `   ${plain(rw.agent)}${plain(rw.host) ? ` on ${plain(rw.host)}` : ""}` +
-      `${plain(rw.machine) ? ` (machine ${plain(rw.machine)})` : ""} is reworking it until ${plain(rw.until)}`;
-  }
-
-  const state = plain(ci.state) || "unknown";
-  const notGreen = list(ci.notGreen);
-  const jobs = notGreen.map((j) => `${plain(j.name)} ${plain(j.state) === "red" ? bad("✕") : prPaint(plain(j.state), "amber", color)}`);
-  const others = Math.max(Number(ci.jobs ?? 0) - notGreen.length, 0); // jobs, not runs: re-runs and skipped don't count
-  if (others) jobs.push(`${others} other check${others === 1 ? "" : "s"} ${ok("✓")}`);
-  const ciLine = `CI ${prPaint(state, ciColour(state), color)}${jobs.length ? `   ${jobs.join("   ")}` : ""}`;
-
-  const open = questions.filter((q) => q.kind === "pr" && plain(q.number) === n).length;
-  const prot = isProtected(p) ? prPaint("yes, a person merges it", "amber", color)
-    : p.protected === false ? "none" : "checked once it could merge";
-  const lines = [
-    spread(`#${n} · ${plain(p.title)}`, who, cols),
-    facts.join(" · "),
-    manager,
-    ciLine,
-    `questions ${open ? prPaint(`${open} open`, "amber", color) : "none open"}   protected paths ${prot}`,
-    `next ${nextText(p)}   who acts ${whoActs(p)}`,
-  ];
-  if (plain(p.url)) lines.push(prPaint(plain(p.url), "dim", color));
-  return lines.map((l) => prCut(l, cols));
-}
-
-const PR_KEYS = "j k move · m merge · r read again · q close";
-
-/** What `m` runs for a PR: `factory owner merge` pinned to the head this view showed (#309), or null when the view has
- *  no head for it. A PR that moved since is refused by that command (`pr_changed`), never merged at a newer head. */
-export function mergeWords(p: Obj): string[] | null {
-  const sha = plain(obj(p.head).sha);
-  const n = plain(p.number);
-  return /^[0-9a-f]{7,40}$/i.test(sha) && /^\d+$/.test(n) ? ["owner", "merge", n, "--head", sha] : null;
-}
-
-/** One screen of the Pull requests view, `rows` lines at most, each at most `cols` wide. */
-export function prsFrame(data: Obj | null, selected: number, cols: number, rows: number, color: boolean, repo: string): string[] {
-  const at0 = data?.generatedAt;
-  const when = typeof at0 === "string" ? Math.max(Date.now() - Date.parse(at0), 0) / 1000 : null;
-  const ago = when === null || Number.isNaN(when) ? "" : when < 120 ? ` · ${Math.floor(when)} s ago` : ` · ${Math.floor(when / 60)} min ago`;
-  const heading = spread(`factory  ${repo} · Pull requests`, `factory prs · CI judged by the manager's rule${ago}`, cols);
-  const pulls = data?.pulls;
-  let body: string[];
-  if (data === null) {
-    body = ["Can't read the pull requests: `factory prs --json` printed no data.",
-      "Run `factory prs` to see the whole error; if it is about GitHub, `gh auth status`."];
-  } else if (!Array.isArray(pulls)) {
-    body = [`Can't read the pull requests from GitHub (${plain(obj(pulls).error).slice(0, 200)}).`,
-      "Run `gh auth status` (and `gh auth login` if it says so), then press r."];
-  } else if (!pulls.length) {
-    body = ["No open pull requests."];
-  } else {
-    const all = pulls.map(obj);
-    const at = Math.min(Math.max(selected, 0), all.length - 1);
-    const card = prDetail(all[at] as Obj, list(data.questions), cols, color);
-    const fixed = 3; // the top line, a blank line before the card, the keys
-    const want = Math.min(all.length, 3) + 1; // at least a few rows and their heads
-    const cardRoom = Math.max(Math.min(card.length, rows - fixed - want), 0);
-    const [head, ...rowLines] = prTable(all, at, cols, color);
-    const room = Math.max(rows - fixed - cardRoom - 1, 1);
-    const start = Math.min(Math.max(at - room + 1, 0), Math.max(rowLines.length - room, 0));
-    body = [head as string, ...rowLines.slice(start, start + room)];
-    const fill = Math.max(rows - fixed - cardRoom - body.length, 0);
-    body.push(...Array<string>(fill).fill(""), "", ...card.slice(0, cardRoom));
-  }
-  const out = [heading, ...body.map((l) => prCut(l, cols))];
-  const keys = prPaint(prCut(PR_KEYS, cols), "dim", color);
-  return [...out.slice(0, Math.max(rows - 1, 0)), keys].slice(-Math.max(rows, 1));
-}
-
-function openPulls(data: Obj | null): Obj[] {
-  return list(data?.pulls);
-}
-
-/** The index of PR `n`, refused when it is not open; 0 when no number is given. */
-function selectedOf(data: Obj | null, n: number | null): number {
-  if (n === null) return 0;
-  const at = openPulls(data).findIndex((p) => Number(p.number) === n);
-  if (at < 0 && Array.isArray(data?.pulls)) {
-    refuse("cockpit_no_pr", `#${n} is not an open pull request.`,
-      "Run `factory cockpit --prs` to see the open ones, or `factory prs` for the list.", 2);
-  }
-  return Math.max(at, 0);
-}
-
-async function prsLoop(n: number | null): Promise<number> {
-  const color = !process.env.NO_COLOR;
-  const repo = basename(top());
-  let data: Obj | null = null;
-  let selected = 0;
-  const draw = (note = "") => {
-    const lines = note ? [note] : prsFrame(data, selected, process.stdout.columns || 100, process.stdout.rows || 30, color, repo);
-    process.stdout.write("\x1b[H\x1b[2J" + lines.join("\r\n"));
-  };
-  process.stdin.setRawMode(true);
-  process.stdout.write("\x1b[?25l");
-  draw("Reading the pull requests…");
-  data = readPrs(false);
-  try {
-    selected = selectedOf(data, n);
-  } catch (e) {
-    process.stdin.setRawMode(false); // the refusal prints on a normal terminal
-    process.stdout.write("\x1b[?25h\r\n");
-    throw e;
-  }
-  let asking: string[] | null = null;
-  let shown = false; // an action's output is on screen: the next key goes back to the list
-  // A pending question stays on screen through a resize, and so does an action's output.
-  process.stdout.on("resize", () => {
-    if (asking) draw(`${question(asking)}\r\ny runs it · any other key does nothing`);
-    else if (!shown) draw();
-  });
-  try {
-    draw();
-    // No Esc to close: over a slow ssh link an arrow key can come in two pieces, and its first is a lone Esc.
-    for await (const chunk of process.stdin) {
-      const key = String(chunk);
-      const count = openPulls(data).length;
-      if (shown) {
-        shown = false;
-        draw("Reading the pull requests from GitHub…");
-        data = readPrs(true);
-        selected = Math.min(selected, Math.max(openPulls(data).length - 1, 0));
-      } else if (asking) {
-        answerAction(asking, key);
-        asking = null;
-        shown = true;
-        continue;
-      } else if (key === "q" || key === "\x03") break;
-      else if (key === "m") {
-        const p = openPulls(data)[selected];
-        const words = p ? mergeWords(p) : null;
-        if (words) {
-          asking = words;
-          draw(`${question(words)}\r\ny runs it · any other key does nothing`);
-          continue;
-        }
-        draw("This view has no head commit for that pull request: press r to read it again.");
-        continue;
-      } else if (key === "j" || key === "\x1b[B") selected = Math.min(selected + 1, Math.max(count - 1, 0));
-      else if (key === "k" || key === "\x1b[A") selected = Math.max(selected - 1, 0);
-      else if (key === "r") {
-        draw("Reading the pull requests from GitHub…");
-        data = readPrs(true);
-        selected = Math.min(selected, Math.max(openPulls(data).length - 1, 0));
-      }
-      draw();
-    }
-  } finally {
-    process.stdin.setRawMode(false); // the terminal is given back however the view ends
-    process.stdout.write("\x1b[?25h\x1b[H\x1b[2J");
-  }
-  return 0;
-}
-
-/** `factory cockpit --prs [<n>]`. */
-export function prsView(args: string[]): Promise<number> | number {
-  const word = args[0];
-  if (args.length > 1 || (word !== undefined && !/^#?\d+$/.test(word))) {
-    refuse("cockpit_usage", "factory cockpit --prs takes no argument, or the number of an open pull request.",
-      "Run `factory cockpit --prs` for every open PR, or `factory cockpit --prs 12` to open #12's detail.", 2);
-  }
-  const n = word === undefined ? null : Number(word.replace("#", ""));
-  if (process.stdin.isTTY && process.stdout.isTTY) return prsLoop(n);
-  const data = readPrs(false);
-  const selected = selectedOf(data, n);
-  const cols = Number(process.env.COLUMNS) || 100;
-  const rows = Number(process.env.LINES) || 30;
-  console.log(prsFrame(data, selected, cols, rows, false, basename(top())).join("\n"));
   return 0;
 }
 

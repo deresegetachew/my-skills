@@ -319,6 +319,26 @@ test("on a terminal j moves to the next PR and q closes the view", async () => {
   expect(code).toBe(0);
 }, T);
 
+test("on a terminal with CI set the view is still drawn before any key, and q closes it", async () => {
+  const p = setup();
+  let shown = "";
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.env)) if (v !== undefined) env[k] = v;
+  env.CI = "true"; // GitHub Actions sets it, and Ink then draws nothing until it unmounts unless told it is interactive
+  const proc = Bun.spawn(["bash", join(SF, "factory"), "cockpit", "--prs"], {
+    cwd: p.d, env, terminal: { cols: 140, rows: 40, data(_t, d) { shown += new TextDecoder().decode(d); } },
+  });
+  const timer = setTimeout(() => proc.kill(9), 40_000);
+  for (let i = 0; i < 300 && !/#12 · /.test(shown); i++) await Bun.sleep(100);
+  const drawn = /#12 · /.test(shown);
+  proc.terminal?.write("q");
+  const code = await proc.exited;
+  clearTimeout(timer);
+  proc.terminal?.close();
+  expect(drawn, shown).toBe(true);
+  expect(code).toBe(0);
+}, T);
+
 // --- the cockpit's view 2, help and docs ----------------------------------------------------------------------------
 
 test("the cockpit's Pull requests view runs this view, not a pager", () => {

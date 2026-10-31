@@ -20,7 +20,7 @@
 //   factory cockpit --ink          the cockpit's Ink UI (decision 0002, #365) on the cached snapshot: the release's
 //                                  bundle (factory_cockpit_ink.js beside this file), else cockpit/ui.tsx in my-skills
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { toFloat } from "./factory_config.ts";
@@ -294,33 +294,42 @@ async function refresh(): Promise<number> {
 }
 
 /** The Ink UI to run (decision 0002, #365): the bundle a release installs beside this file, else the source in a
- * my-skills checkout (linked), else null. */
-export function inkUi(): string | null {
+ * my-skills checkout (linked), else null. A view (#367) also takes the source beside the `factory` script that started
+ * it (FACTORY_SELF): my-skills' own script run in a project whose hooks are copies. */
+export function inkUi(forView = false): string | null {
   const bundle = join(HOOKS, "factory_cockpit_ink.js");
   if (existsSync(bundle)) return bundle;
   const source = join(HOOKS, "..", "cockpit", "ui.tsx");
-  return existsSync(source) ? source : null;
+  if (existsSync(source)) return source;
+  const self = process.env.FACTORY_SELF;
+  if (!forView || !self || !existsSync(self)) return null;
+  const beside = join(dirname(realpathSync(self)), "cockpit", "ui.tsx");
+  return existsSync(beside) ? beside : null;
 }
 
-/** `factory cockpit --ink`: the Ink UI on the cached snapshot (read now when there is none), passed as a file. */
-async function ink(): Promise<number> {
-  const ui = inkUi();
-  if (!ui) {
-    return fail({ code: "cockpit_ui_missing", message: "The cockpit's Ink UI isn't installed: there is no factory_cockpit_ink.js " +
-      `in ${HOOKS}.`, fix: "Run `factory update` to a release that carries it (`factory releases` lists them)." });
-  }
-  const snap = refreshIfOld()[0] ?? await snapshot();
+/** Runs the Ink UI on the terminal with `args`, then `--data <file>` holding `data`; the file is gone afterwards. */
+export function runUi(ui: string, args: string[], data: unknown): number {
   const dir = mkdtempSync(join(tmpdir(), "factory-cockpit-"));
   try {
-    const file = join(dir, "snapshot.json");
-    writeFileSync(file, JSON.stringify(snap));
+    const file = join(dir, "data.json");
+    writeFileSync(file, JSON.stringify(data));
     // --no-install: offline, as the rest of the factory; Bun never fetches a package the bundle doesn't hold
-    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, "--data", file],
+    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, ...args, "--data", file],
       { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
     return p.exitCode ?? 1;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+export const UI_MISSING: Problem = { code: "cockpit_ui_missing", message: "The cockpit's Ink UI isn't installed: there is no " +
+  `factory_cockpit_ink.js in ${HOOKS}.`, fix: "Run `factory update` to a release that carries it (`factory releases` lists them)." };
+
+/** `factory cockpit --ink`: the Ink UI on the cached snapshot (read now when there is none), passed as a file. */
+async function ink(): Promise<number> {
+  const ui = inkUi();
+  if (!ui) return fail(UI_MISSING);
+  return runUi(ui, [], refreshIfOld()[0] ?? await snapshot());
 }
 
 const USAGE_ERROR: Problem = {
