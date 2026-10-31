@@ -250,3 +250,67 @@ test("real checkout has a valid version", async () => {
   expect(existsSync(join(ROOT, "software-factory", "VERSION"))).toBe(true);
   expect(/^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.]*)?$/.test(mod.readVersion(ROOT))).toBe(true);
 });
+
+/** The repo above with the cockpit's UI entry point (and any other files) committed. */
+function withCockpit(ui: string, more: Record<string, string> = {}): string {
+  const d = repo();
+  for (const [rel, body] of Object.entries({ "software-factory/cockpit/ui.tsx": ui, ...more })) {
+    mkdirSync(dirname(join(d, rel)), { recursive: true });
+    writeFileSync(join(d, rel), body);
+  }
+  git(d, "add", "-f", "-A");
+  git(d, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "cockpit");
+  return d;
+}
+
+test("the cockpit's UI is bundled into one file, installed beside the hooks, the same bytes each time (#365)", () => {
+  const d = withCockpit('import { word } from "./word.ts";\nconsole.log(`cockpit ${word}`);\n',
+    { "software-factory/cockpit/word.ts": 'export const word = "bundled";\n' });
+  const a = tmp();
+  const b = tmp();
+  for (const out of [a, b]) {
+    const r = run(d, out);
+    expect(r.code, r.out).toBe(0);
+  }
+  const name = "software-factory-1.2.3.tar.gz";
+  expect(Buffer.compare(readFileSync(join(a, name)), readFileSync(join(b, name)))).toBe(0);
+  const list = members(join(a, name));
+  const js = member(list, "software-factory-1.2.3/hooks/factory_cockpit_ink.js");
+  expect(js.mode & 0o777).toBe(0o644);
+  const manifest = JSON.parse(text(member(list, "software-factory-1.2.3/MANIFEST.json"))) as
+    { files: { path: string; sha256: string; install: { kind: string; to: string } | null }[] };
+  const entry = manifest.files.find((f) => f.path === "hooks/factory_cockpit_ink.js");
+  expect(entry?.install).toEqual({ kind: "engine", to: ".claude/hooks/factory_cockpit_ink.js" });
+  expect(entry?.sha256).toBe(sha(js.data));
+  const paths = manifest.files.map((f) => f.path);
+  expect(paths).toEqual([...paths].sort());
+  const dir = tmp();
+  writeFileSync(join(dir, "ui.js"), js.data);
+  const ran = sh([...BUN, join(dir, "ui.js")], { cwd: dir });
+  expect(ran.stdout.trim(), ran.out).toBe("cockpit bundled");
+});
+
+test("a release without the cockpit's UI has no bundle", () => {
+  const out = tmp();
+  expect(run(repo(), out).code).toBe(0);
+  const names = members(join(out, "software-factory-1.2.3.tar.gz")).map((m) => m.name);
+  expect(names.some((n) => n.endsWith("factory_cockpit_ink.js"))).toBe(false);
+});
+
+test("a cockpit that can't be bundled (Ink not installed) stops the build with the fix", () => {
+  const d = withCockpit('import { render } from "ink";\nrender(null);\n');
+  const out = tmp();
+  const r = run(d, out);
+  expect(r.code, r.out).toBe(1);
+  const err = JSON.parse(r.stderr.trim()) as Record<string, string>;
+  expect(err.code).toBe("cockpit_build_failed");
+  expect(err.fix).toContain("bun install --frozen-lockfile");
+  expect(existsSync(join(out, "software-factory-1.2.3.tar.gz"))).toBe(false);
+});
+
+test("a tracked bundle is refused: the release builds it", () => {
+  const d = withCockpit('console.log("x");\n', { "software-factory/hooks/factory_cockpit_ink.js": "old\n" });
+  const r = run(d, tmp());
+  expect(r.code, r.out).toBe(1);
+  expect((JSON.parse(r.stderr.trim()) as Record<string, string>).code).toBe("bundle_tracked");
+});
