@@ -47,6 +47,47 @@ test("ci times out with exit 2 and a merged pr exits 3", () => {
   expect(out).toContain("merged");
 });
 
+/** A run of a check at a time: GitHub keeps every run, a label event cancels the one before (#360). */
+function runAt(id: number, name: string, at: string, status = "completed", conclusion: string | null = "success") {
+  return { id, name, status, conclusion, started_at: `2026-10-31T10:${at}:00Z` };
+}
+
+test("ci ignores a run cancelled by a newer run of the same check", () => {
+  const [d, env] = world({ pulls: { "7": pr(7) }, runs: [runAt(2, "Factory guard", "05"),
+    runAt(1, "Factory guard", "01", "completed", "cancelled"), runAt(3, "tests", "02")] });
+  const [rc, out] = wait(d, env, "ci", "7");
+  expect(rc, out).toBe(0);
+  expect(out).toContain("CI green");
+});
+
+test("ci waits for the newer run when the older one was cancelled", () => {
+  const cancelled = runAt(1, "Factory guard", "01", "completed", "cancelled");
+  const [d, env] = world({ pulls: { "7": pr(7) }, runs: [cancelled, runAt(2, "Factory guard", "05", "in_progress", null)],
+    steps: [{}, {}, { runs: [cancelled, runAt(2, "Factory guard", "05")] }] });
+  const [rc, out] = wait(d, env, "ci", "7", "5");
+  expect(rc, out).toBe(0);
+  expect(out).toContain("CI green");
+});
+
+test("ci judges a check by its newest run: a newer failure fails, a re-run that passed is green", () => {
+  let [d, env] = world({ pulls: { "7": pr(7) }, runs: [runAt(1, "tests", "01"), runAt(2, "tests", "05", "completed", "failure")] });
+  let [rc, out] = wait(d, env, "ci", "7");
+  expect(rc, out).toBe(1);
+  expect(out).toContain("tests");
+  [d, env] = world({ pulls: { "7": pr(7) }, runs: [runAt(1, "tests", "01", "completed", "failure"), runAt(2, "tests", "05")] });
+  [rc, out] = wait(d, env, "ci", "7");
+  expect(rc, out).toBe(0);
+  expect(out).toContain("CI green");
+});
+
+test("ci still fails on a cancelled run nothing replaced", () => {
+  const [d, env] = world({ pulls: { "7": pr(7) }, runs: [runAt(1, "Factory guard", "01", "completed", "cancelled"),
+    runAt(2, "tests", "05")] });
+  const [rc, out] = wait(d, env, "ci", "7");
+  expect(rc, out).toBe(1);
+  expect(out).toContain("Factory guard");
+});
+
 test("answer returns once the question has a later answer", () => {
   const [d, env] = world({ pulls: { "7": pr(7) }, steps_comments: [{ "7": [Q] }, { "7": [Q] }, { "7": [Q, "chat", A] }] });
   const [rc, out] = wait(d, env, "answer", "7", "5");

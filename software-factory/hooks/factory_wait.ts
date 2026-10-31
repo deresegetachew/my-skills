@@ -5,6 +5,7 @@
 // 3 = the PR is closed or merged, 4 = CI never started (billing; see factory_ci.ts).
 //
 //   factory_wait.ts ci <pr> [minutes]       until every check on the PR's head commit has finished: 0 green, 1 failed
+//                                           (each check by its newest run: a run a newer one replaced doesn't count)
 //   factory_wait.ts answer <pr> [minutes]   until every question on the PR (a `factory-msg` question or an old
 //                                           `<!-- factory-question -->`) is answered: 0 answered, or 0 at once when the
 //                                           addressee asked for more information (input-required: your turn), 1 when
@@ -31,6 +32,7 @@ with one short line. Exit codes: 0 = it happened, 2 = timed out (do other work),
 3 = the PR is closed or merged, 4 = CI never started (billing; see factory_ci.ts).
 
   factory_wait.ts ci <pr> [minutes]       until every check on the PR's head commit has finished: 0 green, 1 failed
+                                          (each check by its newest run: a run a newer one replaced doesn't count)
   factory_wait.ts answer <pr> [minutes]   until every question on the PR (a \`factory-msg\` question or an old
                                           \`<!-- factory-question -->\`) is answered: 0 answered, or 0 at once when the
                                           addressee asked for more information (input-required: your turn), 1 when
@@ -82,9 +84,11 @@ export function prOf(n: number): Pull {
 }
 
 interface Run {
+  id?: number;
   name: string;
   status?: string;
   conclusion?: string | null;
+  started_at?: string | null;
 }
 
 interface Status {
@@ -92,9 +96,23 @@ interface Status {
   state: string;
 }
 
-/** ['green' | 'failed' | 'pending', detail] for the commit, from its check runs and commit statuses. */
+/** The newest run of each check (by start time, then id): a run cancelled or failed before a newer run of the same
+ * check (a label event cancels the run before it, a re-run replaces a failure) is not judged (#360). */
+function newestRuns(runs: Run[]): Run[] {
+  const newest = new Map<string, Run>();
+  for (const r of runs) {
+    const have = newest.get(r.name);
+    const [a, b] = [r.started_at ?? "", have?.started_at ?? ""];
+    if (!have || a > b || (a === b && (r.id ?? 0) > (have.id ?? 0))) newest.set(r.name, r);
+  }
+  return [...newest.values()];
+}
+
+/** ['green' | 'failed' | 'pending', detail] for the commit, from the newest run of each check and its commit
+ * statuses. */
 export function ciState(sha: string): ["green" | "failed" | "pending", string] {
-  const runs = gh<{ check_runs?: Run[] }>("GET", `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`)?.check_runs ?? [];
+  const all = gh<{ check_runs?: Run[] }>("GET", `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`)?.check_runs ?? [];
+  const runs = newestRuns(all);
   const st = gh<{ statuses?: Status[] }>("GET", `repos/{owner}/{repo}/commits/${sha}/status?per_page=100`)?.statuses ?? [];
   const bad = [...runs.filter((r) => BAD.has(String(r.conclusion))).map((r) => r.name),
     ...st.filter((s) => s.state === "failure" || s.state === "error").map((s) => s.context)];
