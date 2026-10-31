@@ -7,7 +7,8 @@ import { expect, test } from "bun:test";
 import { cpSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { calls, type Env, fakeClaude, hookShape, KIT_AGENT_SETTINGS, loopProject, NO_CONNECTORS, quiet, startedSettings } from "./loop_support.ts";
-import { HOOKS, read, SF, sh, tmp, write } from "./support.ts";
+import { allowedBy } from "./manager_support.ts";
+import { HOOKS, KIT, read, SF, sh, tmp, write } from "./support.ts";
 
 type Settings = { permissions: { allow: string[]; deny: string[] }; hooks: Record<string, unknown> };
 
@@ -198,4 +199,26 @@ test("factory agent starts claude with the same rules and starts nothing without
   expect(p.code, p.out).not.toBe(0);
   expect(calls(env).length, "no second claude").toBe(1);
   expect(p.out).toContain("no_agent_settings");
+});
+
+// Seen on remanual (#354): builders stopped for approval on the forms they really type. `--no-edit` before the ref
+// missed `git merge origin/*`, and `gh issue view` is not allowed: the factory's way to read an issue is
+// `factory issues show`, which the rules allow and the skill names.
+test("the agents' rules allow the merge and issue-reading forms agents use, and still refuse gh issue view", () => {
+  const perms = kit().permissions;
+  for (const c of ["git merge origin/main", "git merge --no-edit origin/main", "git merge --no-ff origin/main",
+    "gh pr create --title '354: x' --body-file tmp/pr.md", "./factory issues show 354", "./factory issues show 354 --comments",
+    "factory issues show 354 --comments"]) {
+    expect(allowedBy(perms, c), c).toBe(true);
+  }
+  for (const c of ["gh issue view 354", "gh issue view 354 --comments", "git merge --no-edit feature/x", "git merge feature/x",
+    "./factory issues block 354 x"]) {
+    expect(allowedBy(perms, c), c).toBe(false);
+  }
+});
+
+test("the next-task skill says to read an issue with factory issues show and to try the factory command first", () => {
+  const skill = join(KIT, ".claude", "skills", "next-task");
+  for (const f of ["SKILL.md", "rework.md"]) expect(read(join(skill, f)), f).toContain("factory issues show");
+  expect(read(join(skill, "SKILL.md"))).toContain("try the factory command first");
 });
