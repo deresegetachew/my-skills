@@ -385,6 +385,8 @@ export async function main(argv: string[]): Promise<number> {
     return (await import("./factory_cockpit_ui.ts")).settingsView(rest);
   }
   if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
+  if (flag === "--sidebar-open") return (await import("./factory_cockpit_ui.ts")).sidebarOpen(rest); // the Ink list's keys (#366)
+  if (flag === "--sidebar-data" && !rest.length) return (await import("./factory_cockpit_ui.ts")).sidebarData();
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;

@@ -419,9 +419,9 @@ which tmux session and Remote Control link it has, and when it last produced out
 
 | State | Meaning |
 |---|---|
-| `working` | Alive and holds a task |
+| `working` | Alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (a dev manager reviewing, a coding agent on its PR) |
 | `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge) |
-| `idle` | Alive, no task |
+| `idle` | Alive, no task, and quiet for 2 minutes |
 | `down` | No live process holds its checkout (a killed session, a power cut after a reboot) |
 
 - **Cheap on GitHub.** It always writes its local state file (`factory agents ls` reads that, instantly). GitHub gets
@@ -433,7 +433,8 @@ which tmux session and Remote Control link it has, and when it last produced out
   daemon-written keepalive is missing for `tasks.heartbeatMissMinutes` (12), such as a machine that lost power. Without
   the daemon, everything works as before (30 minutes, `tasks.downMinutes`).
 - **`factory agents ls`** shows this machine from the state file and the other machines and the cloud agents from their
-  agent issues, cached 45 seconds (`--fresh` asks again, `--local` never asks, `--json` for tools). The tmux session,
+  agent issues, cached 45 seconds (`--fresh` asks again, `--local` never asks, `--json` for tools). A name that is
+  `down` here but runs on another machine shows that machine's row. The tmux session,
   folder, machine name and follow link reach GitHub only with `tasks.showWhere`, since agent issues are readable by
   anyone who can read the repo.
 - **Every role has a row.** The `Kind` column is the role: coding agent, dev manager, product owner (from the loop's

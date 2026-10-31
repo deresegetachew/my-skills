@@ -6,10 +6,13 @@
 //   ui.tsx --data <file>   draw the snapshot in <file> (`factory cockpit --json`); on a terminal q or Esc leaves,
 //                          off one it draws once and exits
 //   ui.tsx --check         print "ok": every module loaded (`factory doctor` runs it)
+//   ui.tsx --sidebar --factory <script>
+//                          the cockpit's left pane, sessions and views (#366, sidebar-host.tsx)
 import { readFileSync } from "node:fs";
 import { render, useApp, useInput } from "ink";
 import type { ReactElement } from "react";
 import { App } from "./app.tsx";
+import { sidebarMain } from "./sidebar-host.tsx";
 
 function Interactive({ snapshot }: { snapshot: unknown }): ReactElement {
   const { exit } = useApp();
@@ -29,6 +32,11 @@ async function main(argv: string[]): Promise<number> {
     console.log("ok");
     return 0;
   }
+  if (argv[0] === "--sidebar") {
+    const code = await sidebarMain(argv.slice(1));
+    if (code !== null) return code;
+    return fail("cockpit_ui_usage", "The cockpit's list takes --sidebar --factory <script>.", "Run `factory cockpit`; its left pane starts the list.");
+  }
   const file = argv[0] === "--data" && argv.length === 2 ? argv[1] : undefined;
   if (file === undefined) {
     return fail("cockpit_ui_usage", "The cockpit UI takes --data <file> or --check.", "Run `factory cockpit --ink`; it passes the snapshot.");
@@ -41,7 +49,8 @@ async function main(argv: string[]): Promise<number> {
       "Run `factory cockpit --json` to see what the snapshot holds, then `factory cockpit --ink` again.");
   }
   if (process.stdin.isTTY && process.stdout.isTTY) {
-    await render(<Interactive snapshot={snapshot} />).waitUntilExit();
+    // interactive: on a terminal, even when CI is set, else Ink draws only the last frame, when it ends
+    await render(<Interactive snapshot={snapshot} />, { interactive: true }).waitUntilExit();
     return 0;
   }
   const ink = render(<App snapshot={snapshot} />, { patchConsole: false });

@@ -22,8 +22,8 @@
 // that exits in seconds is simply gone at the next look.
 //   down      no live loop or Claude process holds the agent's checkout
 //   waiting   alive, and a `factory wait` runs below it: deliberately blocked (a PR slot, CI, an answer, a merge)
-//   working   alive and holds a task
-//   idle      alive, no task
+//   working   alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (#366)
+//   idle      alive, no task, and quiet
 //
 // What it saw goes to this machine's state file every cycle (`heartbeat.json` in the state folder, see `factory
 // machine show`), which `factory agents ls` reads: instant, no network. GitHub is written (one PATCH of the agent's own
@@ -211,8 +211,13 @@ export interface Derived {
   on: string | null;
 }
 
-/** The state of one agent from what was seen: {alive, task (claim key or null), wait (parseWait or null)}. */
-export function derive(inp: { alive: boolean; task: string | null; wait: Pick<Wait, "on" | "text"> | null }): Derived {
+/** How recent the session's output or transcript must be for an agent with no task to count as working (#366): a dev
+ * manager reviewing, or a coding agent on its PR after it gave its task claim back, holds no task claim. */
+export const ACTIVE_SECONDS = 120;
+
+/** The state of one agent from what was seen: {alive, task (claim key or null), wait (parseWait or null), active (its
+ * session or transcript changed within ACTIVE_SECONDS)}. */
+export function derive(inp: { alive: boolean; task: string | null; wait: Pick<Wait, "on" | "text"> | null; active?: boolean }): Derived {
   if (!inp.alive) return { state: "down", detail: "down", task: null, on: null };
   const number = taskNumber(inp.task);
   const wait = inp.wait;
@@ -221,6 +226,7 @@ export function derive(inp: { alive: boolean; task: string | null; wait: Pick<Wa
     const shown = String(inp.task).startsWith("issue-") ? `#${number}` : number;
     return { state: "working", detail: `working on ${shown}`, task: number, on: null };
   }
+  if (inp.active) return { state: "working", detail: "working", task: null, on: null };
   return { state: "idle", detail: "idle", task: null, on: null };
 }
 
@@ -442,6 +448,7 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
   const ps = procs ?? processes();
   const sessions = tmuxSessions();
   const me = machineId();
+  const now = clockNow();
   const rows: Record<string, HeartbeatRow> = {};
   for (const name of knownAgents(checkouts)) {
     const claim = checkouts[name] || {};
@@ -449,17 +456,18 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
     const pid = alive ? Math.trunc(Number(claim.pid)) : null;
     const task = alive ? (Object.entries(tasks).find(([, c]) => c.agent === name && claimAlive(c, stale))?.[0] ?? null) : null;
     const wait = alive ? waitsInTree(ps, pid as number) : null;
-    const row: HeartbeatRow = { ...derive({ alive, task, wait }), name, kind: roleFor(cfg, name, claim), machine: me,
-      path: claim.path ?? null, pid,
-      session: null, follow: null, activity: null };
     const session = sessionName(name);
+    let activity: number | null = null;
+    if (alive) {
+      const times = [sessions.get(session) ?? null, transcriptActivity(claim.path)].filter((t): t is number => Boolean(t));
+      activity = times.length ? Math.max(...times) : null;
+    }
+    const active = activity !== null && now - activity <= ACTIVE_SECONDS;
+    const row: HeartbeatRow = { ...derive({ alive, task, wait, active }), name, kind: roleFor(cfg, name, claim), machine: me,
+      path: claim.path ?? null, pid, session: null, follow: null, activity };
     if (sessions.has(session)) {
       row.session = session;
       if (alive) row.follow = followUrl(tmux("capture-pane", "-p", "-J", "-S", "-300", "-t", `=${session}`));
-    }
-    if (alive) {
-      const times = [sessions.get(session) ?? null, transcriptActivity(claim.path)].filter((t): t is number => Boolean(t));
-      row.activity = times.length ? Math.max(...times) : null;
     }
     rows[name] = row;
   }

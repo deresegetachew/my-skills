@@ -97,6 +97,25 @@ test("factory cockpit --ink runs the bundle under Bun in a project with no node_
   for (const dir of [p.d, p.root, join(p.d, ".claude"), p.hooks]) expect(existsSync(join(dir, "node_modules"))).toBe(false);
 }, T);
 
+test("factory cockpit --ink on a terminal draws the screen while it runs, also when CI is set (GitHub Actions sets it)", async () => {
+  const p = setup(true);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(p.env)) if (v !== undefined) env[k] = v;
+  env.CI = "true";
+  let shown = "";
+  const proc = Bun.spawn(["bash", join(SF, "factory"), "cockpit", "--ink"], {
+    cwd: p.d, env, terminal: { cols: 100, rows: 30, data(_t, d) { shown += new TextDecoder().decode(d); } },
+  });
+  const timer = setTimeout(() => proc.kill(9), 60_000);
+  for (let i = 0; i < 400 && !shown.includes("menelik"); i++) await Bun.sleep(50);
+  expect(shown, "the screen is drawn while it runs, not only when it ends").toContain("menelik");
+  proc.terminal?.write("q");
+  const code = await proc.exited;
+  clearTimeout(timer);
+  proc.terminal?.close();
+  expect(code, shown).toBe(0);
+}, T);
+
 test("the bundle runs on its own, offline, from a folder with no node_modules", () => {
   const dir = tmp();
   writeFileSync(join(dir, "factory_cockpit_ink.js"), bundle);
