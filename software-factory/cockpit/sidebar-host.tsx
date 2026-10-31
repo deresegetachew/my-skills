@@ -2,7 +2,7 @@
 // It reads its data from `factory cockpit --sidebar-data` (the cached snapshot, the views and how many new owner asks
 // ring the bell), again every 5 s and on r, and runs each key's action with `factory cockpit --sidebar-open`, which
 // talks to the cockpit's tmux. Off a terminal it draws one frame sized by COLUMNS and LINES, with no colour.
-import { render, useApp } from "ink";
+import { render } from "ink";
 import { type ReactElement, useEffect, useState } from "react";
 import { type Actions, type Data, Sidebar, type ViewItem } from "./sidebar.tsx";
 
@@ -32,19 +32,32 @@ function load(factory: string): Loaded | null {
   }
 }
 
+/** `load` without blocking: the list keeps reading keys while Bun starts the factory. */
+async function loadLater(factory: string): Promise<Loaded | null> {
+  const p = Bun.spawn(["bash", factory, "cockpit", "--sidebar-data"], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  const out = await new Response(p.stdout).text();
+  await p.exited;
+  try {
+    const d = JSON.parse(out) as Record<string, unknown>;
+    return { snapshot: d.snapshot ?? null, views: views(d.views), bell: Number(d.bell) || 0 };
+  } catch {
+    return null;
+  }
+}
+
 function ring(d: Loaded | null): void {
   if (d && d.bell > 0) process.stdout.write(BEL.repeat(d.bell));
 }
 
 function Live({ factory, first }: { factory: string; first: Data }): ReactElement {
-  const { exit } = useApp();
   const stdout = process.stdout;
   const [data, setData] = useState<Data>(first);
   const [size, setSize] = useState({ cols: stdout.columns || 32, rows: stdout.rows || 30 });
   const reload = () => {
-    const d = load(factory);
-    ring(d);
-    if (d) setData(d);
+    void loadLater(factory).then((d) => {
+      ring(d);
+      if (d) setData(d);
+    });
   };
   useEffect(() => {
     const timer = setInterval(reload, RELOAD_MS);
@@ -61,10 +74,8 @@ function Live({ factory, first }: { factory: string; first: Data }): ReactElemen
     openView: (key) => open("view", key),
     bar: (words) => open("bar", ...words),
     reload,
-    leave: () => {
-      open("leave");
-      exit();
-    },
+    // Only detach: the pane runs this list with exec, so the list ending would close the pane for the next visit.
+    leave: () => open("leave"),
   };
   return <Sidebar data={data} cols={size.cols} rows={size.rows} color={true} actions={actions} />;
 }

@@ -26,6 +26,7 @@ import { machineId, machineNames, stateDir } from "./factory_machine.ts";
 import { Exit, isoUtc, parseIso, pyDumps } from "./factory_lib.ts";
 
 const CACHE_FILE = "agents-cache.json";
+const LIVE = ["working", "waiting", "idle"];
 
 function iso(epoch: number | null | undefined): string | null {
   return epoch ? isoUtc(epoch) : null;
@@ -182,9 +183,10 @@ export async function run(cfg: Config, asJson = false, localOnly = false, fresh 
   if (!localOnly && taskSource(cfg) === "issues") {
     let issues: Issue[];
     [issues, github] = githubIssues(fresh, now);
-    // A name down here may run on another machine (#366): its row from there replaces this machine's `down`.
+    // A name down here may run on another machine (#366): its live row from there replaces this machine's `down`.
+    // One that is down or silent there too keeps this machine's row, which says whether it is expected here.
     const elsewhere = remoteRows(cfg, issues, new Set(rows.filter((r) => r.state !== "down").map((r) => r.name)))
-      .filter((r) => r.where !== "this machine" || !rows.some((l) => l.name === r.name));
+      .filter((r) => !rows.some((l) => l.name === r.name) || (r.where !== "this machine" && LIVE.includes(r.state)));
     const replaced = new Set(elsewhere.map((r) => r.name));
     rows.splice(0, rows.length, ...rows.filter((r) => !replaced.has(r.name)), ...elsewhere);
   }
