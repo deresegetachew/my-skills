@@ -19,6 +19,8 @@ export interface SidebarRun {
   press(keys: string): Promise<void>;
   /** Each action a key asked for, as words: "session haile", "view 2", "bar say haile", "reload", "leave". */
   calls: string[];
+  /** Draws the list again with new data, as a reload does. */
+  update(data: Data): Promise<void>;
   unmount(): void;
 }
 
@@ -40,6 +42,10 @@ export function sidebarOf(data: Data, cols = 40, rows = 30, color = false): Side
       await new Promise((done) => setTimeout(done, 30));
     },
     calls,
+    update: async (next) => {
+      r.rerender(<Sidebar data={next} cols={cols} rows={rows} color={color} actions={actions} />);
+      await new Promise((done) => setTimeout(done, 30));
+    },
     unmount: () => r.unmount(),
   };
 }

@@ -159,6 +159,29 @@ test("arrows move, and Enter opens the selected session, or the selected view", 
   s.unmount();
 });
 
+test("after a reload that reorders the list, the same session stays selected", async () => {
+  const s = sidebarOf(data([here("haile", "working"), here("menelik", "idle"), here("taytu", "idle")]), 60);
+  await s.press(DOWN);
+  expect(lineOf(s.frame(), "menelik").startsWith("›")).toBe(true);
+  await s.update(data([here("taytu", "idle"), here("haile", "working"), here("menelik", "idle")]));
+  expect(lineOf(s.frame(), "menelik").startsWith("›"), s.frame()).toBe(true);
+  await s.press(ENTER);
+  expect(s.calls).toEqual(["session menelik"]);
+  // the selected session is gone: the cursor stays where it was in the list
+  await s.update(data([here("taytu", "idle"), here("haile", "working")]));
+  expect(lineOf(s.frame(), "haile").startsWith("›"), s.frame()).toBe(true);
+  s.unmount();
+});
+
+test("a live session from a machine with no name says another machine, not on -", () => {
+  const s = sidebarOf(data([there("kebede", "working", "-"), { name: "zewdu", state: "idle", source: "github", where: "" }]), 80);
+  const f = s.frame();
+  expect(lineOf(f, "kebede")).toMatch(/kebede\s+working\s+on another machine/);
+  expect(lineOf(f, "zewdu")).toMatch(/zewdu\s+idle\s+on another machine/);
+  expect(f).not.toContain("on -");
+  s.unmount();
+});
+
 test("a number opens its view, : the command bar, r reloads and q leaves", async () => {
   const s = sidebarOf(MANY, 60);
   for (const k of ["2", ":", "r", "q", "9"]) await s.press(k);
