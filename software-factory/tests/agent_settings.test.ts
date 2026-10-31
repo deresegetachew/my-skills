@@ -7,6 +7,7 @@ import { expect, test } from "bun:test";
 import { cpSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { calls, type Env, fakeClaude, hookShape, KIT_AGENT_SETTINGS, loopProject, NO_CONNECTORS, quiet, startedSettings } from "./loop_support.ts";
+import { allowedBy } from "./manager_support.ts";
 import { HOOKS, read, SF, sh, tmp, write } from "./support.ts";
 
 type Settings = { permissions: { allow: string[]; deny: string[] }; hooks: Record<string, unknown> };
@@ -198,4 +199,27 @@ test("factory agent starts claude with the same rules and starts nothing without
   expect(p.code, p.out).not.toBe(0);
   expect(calls(env).length, "no second claude").toBe(1);
   expect(p.out).toContain("no_agent_settings");
+});
+
+// #354: the forms agents really type to bring main in and to read an issue run unattended, checked against the shipped
+// rules the way #335 checked `factory owner`. `gh issue view` stays out: `factory issues show` is the factory's way.
+test("the shipped rules let a coding agent merge main in and read an issue the factory's way", () => {
+  const rules = kit().permissions;
+  for (const command of [
+    "git merge origin/main",
+    "git merge --no-edit origin/main",
+    "git merge --no-ff origin/main",
+    "git merge --no-ff --no-edit origin/main",
+    "factory issues show 354",
+    "./factory issues show 354 --comments",
+    "bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts show 354 --comments",
+    "gh pr create --title '354: x' --body-file tmp/pr.md",
+  ]) expect(allowedBy(rules, command), command).toBe(true);
+  for (const command of [
+    "gh issue view 354",
+    "gh issue view 354 --comments",
+    "git merge --no-edit main",
+    "factory issues block 354 x",
+    "./factory issues new --title x --body-file y",
+  ]) expect(allowedBy(rules, command), command).toBe(false);
 });

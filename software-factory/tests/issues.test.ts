@@ -245,3 +245,16 @@ test("show without comments is unchanged", () => {
   const [, out] = run(d, env, "show", "1");
   expect(out).toBe("#1 Task 1  [factory:ready]  open\n\nAdd truncate.");
 });
+
+test("show takes --comments, the habit from gh issue view, and prints the same", () => {
+  // #354: the comments are always shown; the flag must not turn a read into a usage error
+  const [d, db, env] = setup([issue(1, undefined, "Add truncate.")]);
+  const data = loadDb(db);
+  data.comments = { 1: [{ body: "Decision: keep it short.", at: 1, user: { login: "boss" } }] };
+  saveDb(db, data);
+  const plain = run(d, env, "show", "1");
+  const flagged = run(d, env, "show", "1", "--comments");
+  expect(flagged[0], flagged[1]).toBe(0);
+  expect(flagged[1]).toBe(plain[1]);
+  expect(flagged[1]).toContain("Decision: keep it short.");
+});
