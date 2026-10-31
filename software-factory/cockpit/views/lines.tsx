@@ -109,12 +109,21 @@ function styled(s: Seg, i: number): ReactElement | string {
   }
 }
 
+/** `l` without the spaces at its end: padding after the last column is not drawn, in colour or not. */
+function trimEnd(l: Line): Line {
+  const out = [...l];
+  while (out.length && !(out[out.length - 1] as Seg).text.trimEnd()) out.pop();
+  const last = out[out.length - 1];
+  if (last) out[out.length - 1] = { ...last, text: last.text.trimEnd() };
+  return out;
+}
+
 /** The lines as Ink draws them; with `color` off, plain text. */
 export function Lines({ lines, color }: { lines: Line[]; color: boolean }): ReactElement {
   return (
     <Box flexDirection="column">
-      {lines.map((l, i) => (
-        <Text key={i} wrap="truncate">{l.length && width(l) ? l.map((s, j) => (color ? styled(s, j) : s.text)) : " "}</Text>
+      {lines.map(trimEnd).map((l, i) => (
+        <Text key={i} wrap="truncate">{l.length ? l.map((s, j) => (color ? styled(s, j) : s.text)) : " "}</Text>
       ))}
     </Box>
   );
