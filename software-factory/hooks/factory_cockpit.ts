@@ -17,8 +17,11 @@
 // there too.
 //
 //   factory cockpit watch <item>   the item's sub-manager in its own tmux window, read-only (#307, PRD US-4)
+//   factory cockpit --ink          the cockpit's Ink UI (decision 0002, #365) on the cached snapshot: the release's
+//                                  bundle (factory_cockpit_ink.js beside this file), else cockpit/ui.tsx in my-skills
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { toFloat } from "./factory_config.ts";
 import { isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
@@ -290,16 +293,45 @@ async function refresh(): Promise<number> {
   return 0;
 }
 
+/** The Ink UI to run (decision 0002, #365): the bundle a release installs beside this file, else the source in a
+ * my-skills checkout (linked), else null. */
+export function inkUi(): string | null {
+  const bundle = join(HOOKS, "factory_cockpit_ink.js");
+  if (existsSync(bundle)) return bundle;
+  const source = join(HOOKS, "..", "cockpit", "ui.tsx");
+  return existsSync(source) ? source : null;
+}
+
+/** `factory cockpit --ink`: the Ink UI on the cached snapshot (read now when there is none), passed as a file. */
+async function ink(): Promise<number> {
+  const ui = inkUi();
+  if (!ui) {
+    return fail({ code: "cockpit_ui_missing", message: "The cockpit's Ink UI isn't installed: there is no factory_cockpit_ink.js " +
+      `in ${HOOKS}.`, fix: "Run `factory update` to a release that carries it (`factory releases` lists them)." });
+  }
+  const snap = refreshIfOld()[0] ?? await snapshot();
+  const dir = mkdtempSync(join(tmpdir(), "factory-cockpit-"));
+  try {
+    const file = join(dir, "snapshot.json");
+    writeFileSync(file, JSON.stringify(snap));
+    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", ui, "--data", file],
+      { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    return p.exitCode ?? 1;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
   message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --usage, " +
-    "--settings [--color] or watch <item>.",
+    "--settings [--color], --ink or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, or " +
     "`factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--usage", "--settings"];
+const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--usage", "--settings", "--ink"];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -363,6 +395,7 @@ export async function main(argv: string[]): Promise<number> {
     if (flag === "--usage") return await ui.usageView(); // the usage view (#341)
     return ui.open();
   }
+  if (flag === "--ink") return ink();
   if (flag === "--status") return status();
   if (flag === "--refresh") return refresh();
   const snap = await snapshot();
