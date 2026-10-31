@@ -84,6 +84,25 @@ test("check 3 must fix failed ci and a conflict each wait for staleMinutes then 
   expect(watch(work, env)["pr-5"]?.line).toContain("merge conflict");
 });
 
+test("check 3 a must-fix newer than the failed CI result covers it until a new CI result or a new commit (#361)", () => {
+  const failedAt = (ago: number): Row => ({ ...badRun("lint"), started_at: iso(ago + 5), completed_at: iso(ago) });
+  const [d, work, env] = world({ db: { pulls: [pr(5)], commits: { [H]: iso(60) }, checks: { [H]: [failedAt(30)] },
+    comments: { "5": [comment(1, `<!-- factory-mustfix sha=${H} -->`, 5)] } } });
+  expect("pr-5" in watch(work, env), "the must-fix came after the CI result and already explains it").toBe(false);
+  put(d, { comments: { "5": [comment(1, `<!-- factory-mustfix sha=${H} -->`, 40)] } });
+  let line = watch(work, env)["pr-5"]?.line as string;
+  expect(line).toContain("must-fix");
+  expect(line, "an old must-fix still waits, but not for the failure it covers").not.toContain("CI failed");
+  put(d, { comments: { "5": [comment(1, `<!-- factory-mustfix sha=${H} -->`, 5)] }, checks: { [H]: [{ ...failedAt(2), id: 3 }] } });
+  line = watch(work, env)["pr-5"]?.line as string;
+  expect(line, "a CI result newer than the must-fix is a new failure").toContain("CI failed");
+  put(d, { checks: { [H]: [failedAt(30)] }, comments: { "5": [comment(1, `<!-- factory-mustfix sha=${H} -->`, 40)] } });
+  put(d, { pulls: [pr(5, { sha: H2 })], commits: { [H2]: iso(30) }, checks: { [H2]: [failedAt(20)] } });
+  expect(watch(work, env)["pr-5"]?.kind, "a new commit is reviewed again, the old must-fix does not cover it").toBe("review");
+  put(d, { comments: { "5": [comment(1, `<!-- factory-mustfix sha=${H} -->`, 40), comment(2, `<!-- factory-approved sha=${H2} -->`, 10)] } });
+  expect(watch(work, env)["pr-5"]?.line, "a new commit's failure is queued again").toContain("CI failed");
+});
+
 test("check 4 approved and green is a merge item but the manager's own pr goes to the owner", () => {
   const ok = { commits: { [H]: iso(60) }, checks: { [H]: [okRun()] }, comments: { "5": [comment(1, `<!-- factory-approved sha=${H} -->`, 30)] } };
   const [d, work, env] = world({ db: { pulls: [pr(5)], ...ok } });
