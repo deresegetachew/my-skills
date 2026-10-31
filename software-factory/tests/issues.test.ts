@@ -245,3 +245,15 @@ test("show without comments is unchanged", () => {
   const [, out] = run(d, env, "show", "1");
   expect(out).toBe("#1 Task 1  [factory:ready]  open\n\nAdd truncate.");
 });
+
+test("show takes --comments, as gh issue view does, and prints the same", () => {
+  // #354: agents reach for `gh issue view N --comments`; `factory issues show N --comments` must not refuse the flag
+  const [d, db, env] = setup([issue(1, undefined, "Add truncate.")]);
+  const data = loadDb(db);
+  data.comments = { 1: [{ body: "Decision: n <= 0 returns an empty string.", at: 1, user: { login: "boss" } }] };
+  saveDb(db, data);
+  const [rc, out] = run(d, env, "show", "1", "--comments");
+  expect(rc, out).toBe(0);
+  expect(out).toContain("Decision: n <= 0 returns an empty string.");
+  expect(out).toBe(run(d, env, "show", "1")[1]);
+});
