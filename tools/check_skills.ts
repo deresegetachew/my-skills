@@ -2,7 +2,10 @@
 // CI check: every top-level skill folder is well formed.
 //
 // - SKILL.md exists, with frontmatter: `name:` matching the folder and a non-empty `description:`.
-// - Every .sh parses (bash -n), every .ts parses (and uses no `any`), every .json loads, and the factory has no .py file.
+// - Every .sh parses (bash -n), every .ts and .tsx parses (and uses no `any`), every .json loads, and the factory has no
+//   .py file.
+// - Only the cockpit's UI (software-factory/cockpit/) imports Ink or React (decision 0002): they are build-time
+//   dependencies, bundled into one file at release, and a project never installs them.
 // - No compiled .pyc file is tracked by git.
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -46,17 +49,28 @@ for (const d of skills) {
 
 const files = walk(root);
 const rel = (f: string): string => relative(root, f);
-const transpiler = new Bun.Transpiler({ loader: "ts" });
+const transpilers = { ts: new Bun.Transpiler({ loader: "ts" }), tsx: new Bun.Transpiler({ loader: "tsx" }) };
+// Decision 0002: Ink, React and their helpers (ink-testing-library, react-reconciler, ...) only in the cockpit's UI.
+const UI_PACKAGES = /^(ink|ink-[\w.-]+|react|react-[\w.-]+)(\/|$)/;
+const UI_FOLDER = "software-factory/cockpit/";
 const pyFiles: string[] = [];
 for (const f of files) {
   if (f.endsWith(".sh")) {
     if (Bun.spawnSync(["bash", "-n", f], { stdout: "ignore", stderr: "ignore" }).exitCode !== 0) errors.push(`${rel(f)}: bash -n fails`);
-  } else if (f.endsWith(".ts") && !f.endsWith(".d.ts")) {
+  } else if ((f.endsWith(".ts") && !f.endsWith(".d.ts")) || f.endsWith(".tsx")) {
     const text = readFileSync(f, "utf8");
     // #252: strict TypeScript and no `any` in the factory's code (test fakes written inside strings are not code).
     if (!rel(f).includes("/tests/") && rel(f) !== "tools/check_skills.ts" && /(:\s*any\b|\bas any\b|<any>|\bany\[\])/.test(text)) errors.push(`${rel(f)}: uses \`any\`; use unknown and narrow it`);
+    const transpiler = f.endsWith(".tsx") ? transpilers.tsx : transpilers.ts;
     try {
       transpiler.transformSync(text);
+      if (!rel(f).startsWith(UI_FOLDER)) {
+        for (const i of transpiler.scanImports(text.replace(/^#!.*/, ""))) { // the scan doesn't take a #! line
+          if (UI_PACKAGES.test(i.path)) {
+            errors.push(`${rel(f)}: imports ${i.path}; only the cockpit's UI (${UI_FOLDER}) may import Ink or React (decision 0002)`);
+          }
+        }
+      }
     } catch (e) {
       errors.push(`${rel(f)}: does not parse: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
     }

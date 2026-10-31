@@ -8,7 +8,8 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "skipLibCheck": true,
+    "jsx": "react-jsx",
     "types": ["bun"]
   },
-  "include": ["hooks", "ci", "tests", "../tools"]
+  "include": ["hooks", "ci", "cockpit", "tests", "../tools"]
 }

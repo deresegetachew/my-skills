@@ -57,7 +57,7 @@ jobs:
       - name: Type check
         working-directory: software-factory
         run: |
-          bun install
+          bun install --frozen-lockfile
           bun x tsc --noEmit -p tsconfig.json
       - name: Factory tests
         run: |

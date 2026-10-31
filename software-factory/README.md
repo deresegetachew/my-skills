@@ -338,6 +338,7 @@ software-factory/
   VERSION                       the release number (a `vX.Y.Z` tag must match it)
   hooks/                        every hook and every `factory_*.ts` command, next_task.ts, pr-gate.ts, check.ts ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
+  cockpit/                      the cockpit's Ink UI (decision 0002): a release bundles it into hooks/factory_cockpit_ink.js
   tests/                        the tests (run with tools/run_tests.ts at the repo root)
   docs/                         reference pages (PRD.md, messages.md, manager-handover.md) and the wiki
     wiki/                       the long parts of this guide, one page per topic (links in the Wiki list above)

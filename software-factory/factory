@@ -105,6 +105,8 @@ Look
                          the Settings view (view 6): every setting with its value, where it comes from (main, your
                          staged change, this machine, default) and what it does, and the staged changes that go out as
                          one pull request. Read-only; agents can't open it
+  cockpit --ink          the cockpit on Ink (decision 0002), being built: for now the title and the sessions, from the
+                         same cache. A release carries it as one file run by Bun, with nothing to install; q leaves
   cockpit watch <item>   watch the item's sub-manager (pr-12, issue-7) in its own tmux window, read-only: it never
                          sends keys; one that ended points at its log
   prs [--json] [--fresh] what a manager decides from, one list: each open PR with its head, CI judged by one rule,
