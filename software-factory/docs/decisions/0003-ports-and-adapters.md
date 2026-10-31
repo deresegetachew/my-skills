@@ -175,7 +175,7 @@ It has no `check`: CI already runs `check_skills.ts`.
 - #373's decision becomes 0004 and covers only NATS: the messaging port, the plugin mechanism and the trust rule come
   from here.
 - The first tasks, filed as `factory:ready` and starting once this decision is merged: the messaging port with its GitHub
-  and in-memory adapters, `compose.ts` and the boundary rule; then the task tracker port with its GitHub-Issues,
-  plan-file and in-memory adapters. The owner inbox, code host and CI follow, one task each, filed when the step before
+  and in-memory adapters, `compose.ts` and the boundary rule (#376); then the task tracker port with its GitHub-Issues,
+  plan-file and in-memory adapters (#377). The owner inbox, code host and CI follow, one task each, filed when the step before
   them is merged.
 - The owner adds the styles entry above to `.claude/factory.json`.
