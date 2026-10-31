@@ -240,6 +240,18 @@ test("rework comes only from a trusted reviewers must-fix when trustedReviewers 
   expect(go("agent-bot", null)[1], "no list: anyone, as before").toBe("pr-5 Rework #5: Add truncate (task/5-x)");
 });
 
+test("show takes --comments, the form agents know from gh issue view, and prints the people's comments", () => {
+  // #354: agents reach for `gh issue view --comments`, which their rules refuse; the factory's command takes the same flag
+  const [d, db, env] = setup([issue(1, undefined, "Add truncate.")]);
+  const data = loadDb(db);
+  data.comments = { 1: [{ body: "Decision: n <= 0 returns an empty string.", at: 1, user: { login: "boss" } }] };
+  saveDb(db, data);
+  const [rc, out] = run(d, env, "show", "1", "--comments");
+  expect(rc, out).toBe(0);
+  expect(out).toBe(run(d, env, "show", "1")[1]);
+  expect(out).toContain("--- comment by boss ---\nDecision: n <= 0 returns an empty string.");
+});
+
 test("show without comments is unchanged", () => {
   const [d, , env] = setup([issue(1, undefined, "Add truncate.")]);
   const [, out] = run(d, env, "show", "1");
