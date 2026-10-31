@@ -7,7 +7,8 @@ import { expect, test } from "bun:test";
 import { cpSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { calls, type Env, fakeClaude, hookShape, KIT_AGENT_SETTINGS, loopProject, NO_CONNECTORS, quiet, startedSettings } from "./loop_support.ts";
-import { HOOKS, read, SF, sh, tmp, write } from "./support.ts";
+import { allowedBy } from "./manager_support.ts";
+import { HOOKS, KIT, read, SF, sh, tmp, write } from "./support.ts";
 
 type Settings = { permissions: { allow: string[]; deny: string[] }; hooks: Record<string, unknown> };
 
@@ -198,4 +199,29 @@ test("factory agent starts claude with the same rules and starts nothing without
   expect(p.code, p.out).not.toBe(0);
   expect(calls(env).length, "no second claude").toBe(1);
   expect(p.out).toContain("no_agent_settings");
+});
+
+// #354: builders stopped for approval on the forms they really use to bring main in (`--no-edit`, unattended) and on
+// `gh issue view`. The merge forms are allowed; an issue is read with `factory issues show N` (and `--comments`),
+// which the skills name, not with `gh issue view`.
+test("the shipped rules allow the merge forms and the issue reads an agent uses, and still ask for gh issue view", () => {
+  const rules = kit().permissions;
+  const issues = "bun --no-env-file --config=/dev/null .claude/hooks/factory_issues.ts";
+  for (const c of ["git merge origin/main", "git merge --no-edit origin/main", "git merge --no-ff origin/main",
+    "git merge --no-ff --no-edit origin/main", "git merge --no-edit --no-ff origin/main",
+    `${issues} show 354`, `${issues} show 354 --comments`,
+    "gh pr create --title '354: x' --body-file tmp/pr.md", "gh pr view 7 --comments"]) {
+    expect(allowedBy(rules, c), c).toBe(true);
+  }
+  for (const c of ["gh issue view 354", "gh issue view 354 --comments", "git merge --no-edit feature/x",
+    "git merge --no-edit -s ours origin/main && git push origin main"]) {
+    expect(allowedBy(rules, c), c).toBe(false);
+  }
+});
+
+test("the builder's skill says to read an issue with factory issues show and to try the factory command before stopping", () => {
+  const skill = read(join(KIT, ".claude", "skills", "next-task", "SKILL.md"));
+  const rework = read(join(KIT, ".claude", "skills", "next-task", "rework.md"));
+  for (const text of [skill, rework]) expect(text).toContain(".claude/hooks/factory_issues.ts show <n> --comments");
+  expect(skill).toMatch(/refused[^\n]*factory command first/i);
 });

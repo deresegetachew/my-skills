@@ -240,6 +240,17 @@ test("rework comes only from a trusted reviewers must-fix when trustedReviewers 
   expect(go("agent-bot", null)[1], "no list: anyone, as before").toBe("pr-5 Rework #5: Add truncate (task/5-x)");
 });
 
+test("show --comments prints the same issue and people's comments as show (#354)", () => {
+  const [d, db, env] = setup([issue(1, undefined, "Add truncate.")]);
+  const data = loadDb(db);
+  data.comments = { 1: [{ body: "Decision: keep it short.", at: 1, user: { login: "boss" } }] };
+  saveDb(db, data);
+  const [rc, out] = run(d, env, "show", "1", "--comments");
+  expect(rc, out).toBe(0);
+  expect(out).toBe(run(d, env, "show", "1")[1]);
+  expect(out).toContain("--- comment by boss ---\nDecision: keep it short.");
+});
+
 test("show without comments is unchanged", () => {
   const [d, , env] = setup([issue(1, undefined, "Add truncate.")]);
   const [, out] = run(d, env, "show", "1");
