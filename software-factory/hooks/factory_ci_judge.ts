@@ -131,11 +131,27 @@ function pages(path: string, key: string): Row[] {
   return items;
 }
 
-/** judge() for a commit on GitHub. Throws JudgeError when GitHub can't be read. */
-export function state(sha: string, repo = "repos/{owner}/{repo}"): [Verdict, string[]] {
+/** When the newest CI result came in (ISO time), from the same rows judge() reads: a run's completed_at, else its
+ * started_at or created_at, and a status's updated_at or created_at. Null when no row has a time (#361). */
+export function resultAt(runs: readonly Row[], statuses: readonly Row[] = []): string | null {
+  const times = [
+    ...runs.filter((r) => r.conclusion !== "skipped").map((r) => r.completed_at || r.started_at || r.created_at),
+    ...statuses.map((s) => s.updated_at || s.created_at),
+  ].filter((t): t is string => typeof t === "string" && !Number.isNaN(Date.parse(t)));
+  return times.reduce<string | null>((a, b) => (a === null || Date.parse(b) > Date.parse(a) ? b : a), null);
+}
+
+/** judge() for a commit on GitHub, with resultAt(). Throws JudgeError when GitHub can't be read. */
+export function stateAt(sha: string, repo = "repos/{owner}/{repo}"): [Verdict, string[], string | null] {
   const runs = pages(`${repo}/commits/${sha}/check-runs?per_page=100`, "check_runs");
   const statuses = pages(`${repo}/commits/${sha}/status?per_page=100`, "statuses");
-  return judge(runs, statuses);
+  return [...judge(runs, statuses), resultAt(runs, statuses)];
+}
+
+/** judge() for a commit on GitHub. Throws JudgeError when GitHub can't be read. */
+export function state(sha: string, repo = "repos/{owner}/{repo}"): [Verdict, string[]] {
+  const [verdict, jobs] = stateAt(sha, repo);
+  return [verdict, jobs];
 }
 
 export function main(argv: string[]): number {

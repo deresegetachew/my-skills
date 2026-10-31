@@ -98,7 +98,7 @@ and exits. The orchestrator never starts a builder, and it never merges or revie
 |---|---|---|---|
 | 1 | an unreviewed head commit | a sub-manager | the PR has no verdict or `pr-watch` for its head, and the commit is older than `manager.quietMinutes` (5) |
 | 2 | an open question | a sub-manager | a `factory-question` (or `factory-msg kind=question to=dev-manager`) has no later answer |
-| 3 | must-fix, red CI, a conflict | a sub-manager | the head was reviewed and the problem is older than `manager.staleMinutes` (15) |
+| 3 | must-fix, red CI, a conflict | a sub-manager | the head was reviewed and the problem is older than `manager.staleMinutes` (15); red CI does not count when a must-fix on the head is newer than the CI result (#361) |
 | 4 | approved and green | a sub-manager to merge; the owner if the manager opened the PR | the verdict names the head and CI is green by the manager's rule |
 | 5 | an owner wait | the owner queue | a PR has had `roles.product-owner.workLabel` or `factory:needs-owner` for `manager.ownerWaitMinutes` (120) |
 | 6 | agents | a sub-manager (silent agent); the owner queue (down, or idle) | a coding agent is silent, down, or idle for `manager.agentIdleMinutes` (45) while tasks are ready |
