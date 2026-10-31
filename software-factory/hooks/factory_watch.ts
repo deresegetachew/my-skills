@@ -14,7 +14,8 @@
 //                been quiet for `quietMinutes` (5)
 //   2 question   a question with no later answer (`<!-- factory-question -->`, or `<!-- factory-msg ... kind=question
 //                to=dev-manager -->` as #107 defines it)
-//   3 fix        a must-fix, failing CI or a merge conflict on a PR with no new commit for `staleMinutes` (15)
+//   3 fix        a must-fix, failing CI or a merge conflict on a PR with no new commit for `staleMinutes` (15); failing CI
+//                does not count when a must-fix on the head is newer than the CI result (#361)
 //   4 merge      an approved, green, unmerged PR (a PR the manager opened itself waits for the owner instead)
 //   5 owner-wait a PR labelled for the product owner (`roles.product-owner.workLabel`) or the owner (`factory:needs-owner`)
 //                that has waited `ownerWaitMinutes` (120)
@@ -28,7 +29,7 @@
 // question that has an answer, a claim that is unexpired, all clear their item.
 import { type Config, load, managerSetting, roleSetting, toFloat } from "./factory_config.ts";
 import { agentIssues, current, fields, nameOf, roleOf, stateOf } from "./factory_agents.ts";
-import { JudgeError, state as judgeState, type Verdict } from "./factory_ci_judge.ts";
+import { JudgeError, stateAt as judgeState, type Verdict } from "./factory_ci_judge.ts";
 import { type Comment, gh, ghAll, type Issue, readyIssues } from "./factory_issues.ts";
 import { now as leaseNow } from "./factory_lease.ts";
 import { parseComment, verdicts } from "./factory_messages.ts";
@@ -115,12 +116,14 @@ export function isOwn(pr: { body?: string | null; head?: { ref?: string } }): bo
   return OWN_BRANCH.test(pr.head?.ref ?? "") || OWN_BODY.test(pr.body || "");
 }
 
-/** The manager's CI verdict for a commit; "unknown" when GitHub cannot be read (nothing is acted on then). */
-export function ciState(head: string): [Verdict | "unknown", string[]] {
+/** The manager's CI verdict for a commit, and when its newest result came in (seconds since the epoch, null when
+ * unknown); "unknown" when GitHub cannot be read (nothing is acted on then). */
+export function ciState(head: string): [Verdict | "unknown", string[], number | null] {
   try {
-    return judgeState(head);
+    const [verdict, jobs, at] = judgeState(head);
+    return [verdict, jobs, when(at)];
   } catch (e) {
-    if (e instanceof JudgeError) return ["unknown", []];
+    if (e instanceof JudgeError) return ["unknown", [], null];
     throw e;
   }
 }
@@ -270,9 +273,12 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
     const t = commitTime(head);
     const reasons: string[] = [];
     let green = false;
-    const [verdict, jobs] = ciState(head);
+    const [verdict, jobs, ciAt] = ciState(head);
     if (state === "approved" && verdict === "green") green = true;
-    if (verdict === "failed" && t && minutes(t, now) >= stale) reasons.push(`CI failed (${jobs.join(", ")})`);
+    // A must-fix on this head posted after the CI result already explains the failure (#361): it waits for a new commit
+    // or a new CI result, not for another sub-manager.
+    const covered = state === "mustfix" && markedAt !== null && ciAt !== null && markedAt >= ciAt;
+    if (verdict === "failed" && !covered && t && minutes(t, now) >= stale) reasons.push(`CI failed (${jobs.join(", ")})`);
     if (state === "mustfix" && markedAt && minutes(markedAt, now) >= stale) reasons.push("a must-fix waits for a new commit");
     if ((state === "approved" || state === "mustfix" || state === "watch") && t && minutes(t, now) >= stale) {
       const detail = gh<Pull | null>("GET", `repos/{owner}/{repo}/pulls/${n}`) ?? ({} as Partial<Pull>);
