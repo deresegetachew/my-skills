@@ -449,7 +449,7 @@ function main(argv: string[]): number {
   }
   const specs: Record<string, Parameters<typeof parseArgs>[1]> = {
     pick: { valued: ["--agent"], required: ["--agent"] },
-    show: { positionals: ["n"] },
+    show: { positionals: ["n"], flags: ["--comments"] }, // comments are always shown; the flag is gh's habit (#354)
     tick: { positionals: ["n", "index"] },
     review: { positionals: ["n"] },
     block: { positionals: ["n", "reason"] },
