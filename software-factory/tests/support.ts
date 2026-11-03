@@ -1,5 +1,5 @@
 // Shared helpers for the factory's Bun tests. Not a test file.
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -10,6 +10,14 @@ export const CI = join(SF, "ci");
 export const KIT = join(SF, "kit");
 export const WIKI = join(SF, "docs", "wiki");
 export const TOOLS = join(ROOT, "tools");
+
+/** Copy the hooks' folders (hooks/core/, decision 0003) into a test project's hooks folder `dest`, beside the
+ * top-level hooks the test copied there itself: those import them. */
+export function copyHookFolders(dest: string): void {
+  for (const e of readdirSync(HOOKS, { withFileTypes: true })) {
+    if (e.isDirectory()) cpSync(join(HOOKS, e.name), join(dest, e.name), { recursive: true });
+  }
+}
 
 export interface Proc {
   code: number;

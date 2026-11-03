@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { HOOKS, CI, SF, envWith, gitRepo, read, sh, tmp, write, type Proc } from "./support.ts";
+import { HOOKS, CI, copyHookFolders, SF, envWith, gitRepo, read, sh, tmp, write, type Proc } from "./support.ts";
 
 const SHA = "c".repeat(40);
 const T = 180_000; // doctor is slow: generous per-test timeouts
@@ -41,6 +41,7 @@ function setup(scenario: Row, cfg: Row = ISSUES_MODE): Proj {
   gitRepo(d);
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(d, ".claude", "hooks", f));
+  copyHookFolders(join(d, ".claude", "hooks"));
   cpSync(CI, join(d, ".claude", "ci"), { recursive: true });
   write(join(d, ".claude", "factory.json"), JSON.stringify(cfg));
   write(join(root, "bin", "gh"), FAKE_GH, 0o755);
