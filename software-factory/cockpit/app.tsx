@@ -2,6 +2,7 @@
 // It only draws what it is given; the snapshot is read by factory_cockpit.ts, so this file has no factory logic.
 import { Box, Text } from "ink";
 import type { ReactElement } from "react";
+import { listed } from "./sidebar.tsx";
 
 export type Session = { name: string; state: string; role: string; machine: string };
 
@@ -13,11 +14,12 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-/** The sessions of a snapshot; anything that isn't a list of rows is no sessions. */
+/** The sessions of a snapshot; anything that isn't a list of rows is no sessions. A down session is shown only when it
+ * is this machine's and expected here, as in the list (#383); a machine by its name, the id only when it has none. */
 export function sessionsOf(snapshot: unknown): Session[] {
   const rows = obj(snapshot).sessions;
-  return (Array.isArray(rows) ? rows : []).map(obj).map((r) => ({
-    name: str(r.name), state: str(r.state) || "unknown", role: str(r.role), machine: str(r.machine),
+  return (Array.isArray(rows) ? rows : []).map(obj).filter(listed).map((r) => ({
+    name: str(r.name), state: str(r.state) || "unknown", role: str(r.role), machine: str(r.machineName) || str(r.machine),
   }));
 }
 

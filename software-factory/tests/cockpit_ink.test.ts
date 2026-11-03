@@ -77,6 +77,24 @@ test("the screen shows the title and each session with its state, role and machi
   expect(lines.find((l) => l.includes("menelik"))).toMatch(/menelik\s+idle\s+dev-manager\s+on laptop/);
 });
 
+test("a session from another machine is drawn with the machine's name, not its id (#383)", () => {
+  const frame = frameOf({ sessions: [{ name: "fasil", state: "idle", machine: "469ae1ea6a9e", machineName: "dev-pc",
+    where: "machine 469ae1ea6a9e", source: "github" }] });
+  expect(frame.split("\n").find((l) => l.includes("fasil"))).toMatch(/fasil\s+idle.*on dev-pc/);
+  expect(frame).not.toContain("469ae1ea6a9e");
+});
+
+test("a down session is listed only when it is from this machine and expected here (#383)", () => {
+  const frame = frameOf({ sessions: [
+    { name: "menelik", state: "down", source: "github", where: "machine x", machine: "x" },
+    { name: "mentewab", state: "down", source: "local", where: "this machine", expected: false },
+    { name: "taytu", state: "down", source: "local", where: "this machine", expected: true },
+  ] });
+  expect(frame).toMatch(/taytu\s+down/);
+  expect(frame).not.toContain("menelik");
+  expect(frame).not.toContain("mentewab");
+});
+
 test("no sessions, or a snapshot that isn't one, says so instead of failing", () => {
   for (const snap of [{ sessions: [] }, {}, null, { sessions: "nope" }]) {
     const frame = frameOf(snap);

@@ -76,6 +76,14 @@ test("only sessions that run or are expected here are listed, plus the other mac
   s.unmount();
 });
 
+test("a session from another machine shows the machine's name, not its id (#383)", () => {
+  const s = sidebarOf(data([there("fasil", "idle", "469ae1ea6a9e", { machineName: "dev-pc" })]), 80);
+  const f = s.frame();
+  expect(lineOf(f, "fasil")).toMatch(/fasil\s+idle\s+on dev-pc/);
+  expect(f).not.toContain("469ae1ea6a9e");
+  s.unmount();
+});
+
 test("no sessions says so and names the command that starts one; the views are still there", () => {
   for (const snapshot of [{ sessions: [] }, null, { sessions: "nope" }, { sessions: [there("taytu", "down", "x")] }]) {
     const s = sidebarOf({ snapshot, views: VIEWS });

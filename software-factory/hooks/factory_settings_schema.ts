@@ -219,6 +219,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("tasks.heartbeatMissMinutes", "int", "issues", "An agent the daemon writes for counts as silent after this many minutes without a keepalive (instead of downMinutes)."),
   S("tasks.releaseDownMinutes", "int", "issues", "An agent that is plainly down (its loop or the daemon said so) gets its in-progress issues back to ready by the sweep after this long."),
   S("tasks.showWhere", "bool", "issues", "Post the machine, folder, tmux session and Remote Control link on agent issues (anyone who can read the repo sees them).", { default: false }),
+  S("machines", "dict", "issues", 'Names for the machines, by machine id (`factory machine id` prints it): {"469ae1ea6a9e": {"name": "dev-pc"}}. The cockpit and `factory agents ls --json` show the name; with none, the hostname (another machine\'s only with tasks.showWhere), else the id.', { default: {}, read_by: "factory_agents_ls.ts (`factory agents ls`, the cockpit)" }),
   // #251, #258: the factory adds main's rules to the agents' settings each time it starts one.
   S("permissions.allow", "list", "agents", 'Extra Claude Code allow rules for this project\'s agents, like "Edit(src/**)". A rule applies on an agent\'s next run once the pull request from `factory settings pr` is merged: the factory adds them to the agents\' settings, after the release\'s own.'),
   S("reviews.safety-auditor.paths", "list", "gate", "Regexes of paths that need the safety auditor."),
