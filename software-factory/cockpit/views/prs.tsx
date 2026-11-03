@@ -192,6 +192,9 @@ export function prsLines(data: Got | undefined, selected: number, cols: number, 
   } else if (data === null) {
     body = [[seg("Can't read the pull requests: `factory prs --json` printed no data.")],
       [seg("Run `factory prs` to see the whole error; if it is about GitHub, `gh auth status`.")]];
+  } else if (!Array.isArray(pulls) && typeof data.limit === "string") { // GitHub's limit, not the login (#383)
+    body = [[seg(plain(data.limit) || "GitHub is limiting this account's calls for now.")],
+      [seg("Press r once it is back; `factory usage --github` shows what used the calls.")]];
   } else if (!Array.isArray(pulls)) {
     body = [[seg(`Can't read the pull requests from GitHub (${plain(obj(pulls).error).slice(0, 200)}).`)],
       [seg("Run `gh auth status` (and `gh auth login` if it says so), then press r.")]];

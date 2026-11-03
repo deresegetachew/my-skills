@@ -24,6 +24,9 @@
 //                                terminal: the words, else one line on stdin, and the next line answers an action's question)
 //   factory cockpit --needs      the "Needs you" view, from the cache (drawn by the Ink UI, #367)
 //   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json` (drawn by the Ink UI, #367)
+//   factory cockpit --prs-data [--fresh]
+//                                what the Pull requests view reads: `factory prs --json`, and when GitHub's limit stopped
+//                                it, when the limit is back (#383)
 //   factory cockpit --settings   the Settings view (#340), before the Pull requests view
 //   factory cockpit --ci         the CI view (#339), from the cache
 //   factory cockpit --usage      the Usage and lessons view (#341), from this machine's logs
@@ -32,12 +35,13 @@ import { homedir, hostname } from "node:os";
 import { basename, join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { load } from "./factory_config.ts";
-import { inkUi, readCache, refreshIfOld, runUi, UI_MISSING } from "./factory_cockpit.ts";
+import { inkUi, LIMITED, limitSentence, readCache, refreshIfOld, runUi, UI_MISSING } from "./factory_cockpit.ts";
 import { run, which } from "./factory_lib.ts";
 import { refuse, repoKey, stateDir } from "./factory_machine.ts";
 import { asText, lookup, MACHINE, MISSING, SECTIONS, SETTINGS, type Setting } from "./factory_settings_schema.ts";
 import { loadStaged, type Staged } from "./factory_settings_staged.ts";
 import * as store from "./factory_settings_store.ts";
+import { limitStatus } from "./factory_views_cache.ts";
 import { sessionName, tmuxTooOld } from "./factory_window.ts";
 
 type Obj = { [key: string]: unknown };
@@ -750,9 +754,33 @@ export function prsView(args: string[]): number {
     refuse("cockpit_usage", "factory cockpit --prs takes no argument, or the number of an open pull request.",
       "Run `factory cockpit --prs` for every open PR, or `factory cockpit --prs 12` to open #12's detail.", 2);
   }
-  const read = [process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_prs.ts"), "--json"];
+  const read = [process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_cockpit.ts"), "--prs-data"];
   return view("prs", { select: word === undefined ? null : Number(word.replace("#", "")), read, fresh: [...read, "--fresh"],
     act: ["bash", factoryScript(top())], changes: ACTIONS_OFFERED["owner merge"] });
+}
+
+/** `factory cockpit --prs-data [--fresh]`: what `factory prs --json` printed (nothing when it printed no JSON object), with
+ *  `limit` saying when GitHub's limit is back when that limit stopped it (#383). */
+export function prsData(args: string[]): number {
+  if (args.length > 1 || (args[0] !== undefined && args[0] !== "--fresh")) {
+    refuse("cockpit_usage", "factory cockpit --prs-data takes no argument, or --fresh.",
+      "The Pull requests view runs it; to open the view, run `factory cockpit --prs`.", 2);
+  }
+  const hook = join(import.meta.dir, "factory_prs.ts");
+  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", hook, "--json", ...args], { timeoutMs: 120_000 });
+  let data: unknown;
+  try {
+    data = JSON.parse(p.stdout);
+  } catch {
+    return 0;
+  }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return 0;
+  const pulls = (data as Obj).pulls;
+  if (!Array.isArray(pulls) && LIMITED.test(str(obj(pulls).error))) {
+    (data as Obj).limit = limitSentence(limitStatus(), Date.now() / 1000);
+  }
+  console.log(JSON.stringify(data));
+  return 0;
 }
 
 // --- the Settings view (#340, PRD US-13) -----------------------------------------------------------------------------

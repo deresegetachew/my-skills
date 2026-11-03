@@ -16,6 +16,15 @@ appendFileSync(process.env.COCKPIT_LOG as string, a.join(" ") + "\n");
 function fail(m: string): never { console.error(m); process.exit(1); }
 const out = (x: unknown): never => { console.log(JSON.stringify(x)); process.exit(0); };
 if (s.fail_all) fail("gh: not logged in");
+if (s.unauthorized && a[0] === "api") fail("gh: Bad credentials (HTTP 401)");
+if (s.secondary_limited && a[0] === "api") { // a secondary limit: core still has calls, its reset an hour away (#385)
+  if (a[1] === "rate_limit") out({ resources: { core: { limit: 5000, remaining: 4000, reset: s.secondary_limited } } });
+  fail("gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)");
+}
+if (s.rate_limited && a[0] === "api") {
+  if (a[1] === "rate_limit") out({ resources: { core: { limit: 5000, remaining: 0, reset: s.rate_limited } } });
+  fail("gh: API rate limit exceeded for user ID 1. (HTTP 403)");
+}
 if (a[0] === "repo" && a[1] === "view") { console.log(a.includes("nameWithOwner") ? "o/r" : "main"); process.exit(0); }
 if (a[0] !== "api") { console.log("ok"); process.exit(0); }
 const raw = a.slice(1).filter((x) => !x.startsWith("-") && x !== "GET" && x !== "POST" && x !== "PATCH" && x !== "Accept: application/vnd.github+json")[0] as string;
@@ -359,3 +368,143 @@ test("the commands page has a row for factory cockpit", () => {
   expect(page).toMatch(/^\| `factory cockpit[^`]*`/m);
   expect(page).toContain("--status");
 });
+
+// --- the GitHub limit, machine names, no snapshot (#383) ----------------------------------------------------------------
+
+/** The reset the fake gh reports: 8 minutes from now, in whole seconds, and the HH:MM UTC the cockpit should print. */
+function resetIn8(): { epoch: number; hhmm: string } {
+  const epoch = Math.floor(Date.now() / 1000) + 8 * 60;
+  return { epoch, hhmm: new Date(epoch * 1000).toISOString().slice(11, 16) };
+}
+
+function setScenario(p: Proj, s: Row): void {
+  writeFileSync(p.env.COCKPIT_SCENARIO as string, JSON.stringify(s));
+}
+
+test("with the hourly limit used up, missing says so with the reset time and no login hint", () => {
+  const { epoch, hhmm } = resetIn8();
+  const p = setup({ ...scenario(), rate_limited: epoch });
+  const j = snapshot(p);
+  const miss = j.missing as Row[];
+  const lim = miss.find((m) => m.code === "github_limit");
+  expect(lim, JSON.stringify(miss)).toBeDefined();
+  expect(lim?.message).toContain(`GitHub's hourly limit is used up; back at ${hhmm} UTC (in `);
+  expect(lim?.message).toMatch(/\(in [78] min\)/);
+  expect(lim?.message).toContain("The cockpit shows the last snapshot meanwhile.");
+  for (const m of miss) expect(m.fix, JSON.stringify(m)).not.toContain("gh auth login");
+}, T);
+
+test("when the limit hits after a good snapshot, the cache keeps the earlier data and its time", () => {
+  const p = setup(scenario());
+  const first = snapshot(p);
+  expect((first.pulls as Row[]).length).toBeGreaterThan(0);
+  setScenario(p, { ...scenario(), rate_limited: resetIn8().epoch });
+  const r = cockpit(p, "--json");
+  expect(r.code, r.out).toBe(0);
+  const [file] = caches(p.xdg) as [string];
+  const cached = JSON.parse(read(file)) as Row;
+  expect(cached.pulls).toEqual(first.pulls);
+  expect((cached.sessions as Row[]).map((x) => x.name)).toEqual((first.sessions as Row[]).map((x) => x.name));
+  expect(cached.generatedAt).toBe(first.generatedAt);
+  expect((cached.missing as Row[]).map((m) => m.code)).toContain("github_limit");
+}, T);
+
+test("status on a cache with the limit used up says when it is back, not that it can't read", () => {
+  const { epoch, hhmm } = resetIn8();
+  const p = setup(scenario());
+  seedCache(p, { sessions: 1, working: 0, pulls: 0, needYou: 0 },
+    [{ code: "github_limit", message: "GitHub's hourly limit is used up.", fix: "Wait." }]);
+  const [file] = caches(p.xdg) as [string];
+  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), limit: { reset: epoch } }));
+  const r = cockpit(p, "--status");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
+  expect(r.stdout).toContain(`GitHub limit used up, back at ${hhmm} UTC`);
+  expect(r.stdout).not.toContain("can't read");
+  expect(r.stdout).not.toContain("gh auth");
+}, T);
+
+test("a secondary limit while calls remain keeps no reset time, says no 'used up' and does not hold refreshes back (#385)", async () => {
+  const later = Math.floor(Date.now() / 1000) + 50 * 60;
+  const p = setup({ ...scenario(), secondary_limited: later });
+  const j = snapshot(p);
+  expect((j.missing as Row[]).map((m) => m.code)).toContain("github_limit");
+  expect((j.limit as Row).reset, JSON.stringify(j.limit)).toBeNull();
+  const lim = (j.missing as Row[]).find((m) => m.code === "github_limit");
+  expect(lim?.message).not.toContain("used up");
+
+  setScenario(p, scenario()); // GitHub answers again
+  writeFileSync(p.log, "");
+  const r = cockpit(p, "--status");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
+  expect(r.stdout).not.toContain("used up, back at");
+  expect(r.stdout).not.toContain("gh auth");
+
+  const [file] = caches(p.xdg) as [string];
+  const old = new Date(Date.now() - 3600_000).toISOString();
+  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), generatedAt: old }));
+  const again = cockpit(p, "--status");
+  expect(again.code, again.out).toBe(0);
+  let fresh: Row = {};
+  for (let i = 0; i < 120; i++) {
+    fresh = JSON.parse(read(file)) as Row;
+    if (fresh.generatedAt !== old) break;
+    await Bun.sleep(500);
+  }
+  expect(fresh.generatedAt, "an old cache is refreshed in the background").not.toBe(old);
+  expect(fresh.limit).toBeUndefined();
+}, T);
+
+test("a cache that kept a reset time while calls remained does not say used up nor hold refreshes back (#385)", async () => {
+  const p = setup(scenario());
+  seedCache(p, { sessions: 1, working: 0, pulls: 0, needYou: 0 },
+    [{ code: "github_limit", message: "GitHub is limiting this account's calls for now.", fix: "Wait." }]);
+  const [file] = caches(p.xdg) as [string];
+  const old = new Date(Date.now() - 3600_000).toISOString();
+  const later = Math.floor(Date.now() / 1000) + 50 * 60;
+  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), generatedAt: old,
+    limit: { reset: later, remaining: 5000 } }));
+  const r = cockpit(p, "--status");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).not.toContain("used up, back at");
+  let fresh: Row = {};
+  for (let i = 0; i < 120; i++) {
+    fresh = JSON.parse(read(file)) as Row;
+    if (fresh.generatedAt !== old) break;
+    await Bun.sleep(500);
+  }
+  expect(fresh.generatedAt, "an old cache is refreshed in the background").not.toBe(old);
+}, T);
+
+test("a real 401 keeps the login hint and is not reported as the limit", () => {
+  const j = snapshot(setup({ ...scenario(), unauthorized: true }));
+  const miss = j.missing as Row[];
+  expect(miss.length).toBeGreaterThan(0);
+  expect(miss.map((m) => m.code)).not.toContain("github_limit");
+  expect(miss.some((m) => String(m.fix).includes("gh auth login")), JSON.stringify(miss)).toBe(true);
+}, T);
+
+test("a session from another machine carries the name set in machines, else the hostname in its marker, else the id", () => {
+  const named = setup(scenario(), { ...ISSUES_MODE, machines: { "m-other": { name: "dev-pc" } } });
+  const a = (snapshot(named).sessions as Row[]).find((r) => r.name === "zemen");
+  expect(a).toMatchObject({ machine: "m-other", machineName: "dev-pc" });
+
+  const s = scenario();
+  s.issues[0] = agentIssue("zemen", "working", "2020-01-01T00:00:00Z", "kind=dev-manager where=builder-box ");
+  const host = (snapshot(setup(s)).sessions as Row[]).find((r) => r.name === "zemen");
+  expect(host).toMatchObject({ machine: "m-other", machineName: "builder-box" });
+
+  const bare = (snapshot(setup(scenario())).sessions as Row[]).find((r) => r.name === "zemen");
+  expect(bare).toMatchObject({ machine: "m-other", machineName: "m-other" });
+}, T);
+
+test("status with no snapshot says there is none and how to get one", async () => {
+  const p = setup(scenario());
+  const r = cockpit(p, "--status");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
+  expect(r.stdout).toContain("no snapshot yet");
+  expect(r.stdout).toContain("factory cockpit --json");
+  for (let i = 0; i < 60 && caches(p.xdg).length === 0; i++) await Bun.sleep(500);
+}, T);
