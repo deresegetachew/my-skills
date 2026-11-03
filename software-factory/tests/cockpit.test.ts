@@ -17,6 +17,10 @@ function fail(m: string): never { console.error(m); process.exit(1); }
 const out = (x: unknown): never => { console.log(JSON.stringify(x)); process.exit(0); };
 if (s.fail_all) fail("gh: not logged in");
 if (s.unauthorized && a[0] === "api") fail("gh: Bad credentials (HTTP 401)");
+if (s.secondary_limited && a[0] === "api") { // a secondary limit: core still has calls, its reset an hour away (#385)
+  if (a[1] === "rate_limit") out({ resources: { core: { limit: 5000, remaining: 4000, reset: s.secondary_limited } } });
+  fail("gh: You have exceeded a secondary rate limit. Please wait a few minutes before you try again. (HTTP 403)");
+}
 if (s.rate_limited && a[0] === "api") {
   if (a[1] === "rate_limit") out({ resources: { core: { limit: 5000, remaining: 0, reset: s.rate_limited } } });
   fail("gh: API rate limit exceeded for user ID 1. (HTTP 403)");
@@ -418,6 +422,59 @@ test("status on a cache with the limit used up says when it is back, not that it
   expect(r.stdout).toContain(`GitHub limit used up, back at ${hhmm} UTC`);
   expect(r.stdout).not.toContain("can't read");
   expect(r.stdout).not.toContain("gh auth");
+}, T);
+
+test("a secondary limit while calls remain keeps no reset time, says no 'used up' and does not hold refreshes back (#385)", async () => {
+  const later = Math.floor(Date.now() / 1000) + 50 * 60;
+  const p = setup({ ...scenario(), secondary_limited: later });
+  const j = snapshot(p);
+  expect((j.missing as Row[]).map((m) => m.code)).toContain("github_limit");
+  expect((j.limit as Row).reset, JSON.stringify(j.limit)).toBeNull();
+  const lim = (j.missing as Row[]).find((m) => m.code === "github_limit");
+  expect(lim?.message).not.toContain("used up");
+
+  setScenario(p, scenario()); // GitHub answers again
+  writeFileSync(p.log, "");
+  const r = cockpit(p, "--status");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
+  expect(r.stdout).not.toContain("used up, back at");
+  expect(r.stdout).not.toContain("gh auth");
+
+  const [file] = caches(p.xdg) as [string];
+  const old = new Date(Date.now() - 3600_000).toISOString();
+  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), generatedAt: old }));
+  const again = cockpit(p, "--status");
+  expect(again.code, again.out).toBe(0);
+  let fresh: Row = {};
+  for (let i = 0; i < 120; i++) {
+    fresh = JSON.parse(read(file)) as Row;
+    if (fresh.generatedAt !== old) break;
+    await Bun.sleep(500);
+  }
+  expect(fresh.generatedAt, "an old cache is refreshed in the background").not.toBe(old);
+  expect(fresh.limit).toBeUndefined();
+}, T);
+
+test("a cache that kept a reset time while calls remained does not say used up nor hold refreshes back (#385)", async () => {
+  const p = setup(scenario());
+  seedCache(p, { sessions: 1, working: 0, pulls: 0, needYou: 0 },
+    [{ code: "github_limit", message: "GitHub is limiting this account's calls for now.", fix: "Wait." }]);
+  const [file] = caches(p.xdg) as [string];
+  const old = new Date(Date.now() - 3600_000).toISOString();
+  const later = Math.floor(Date.now() / 1000) + 50 * 60;
+  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), generatedAt: old,
+    limit: { reset: later, remaining: 5000 } }));
+  const r = cockpit(p, "--status");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).not.toContain("used up, back at");
+  let fresh: Row = {};
+  for (let i = 0; i < 120; i++) {
+    fresh = JSON.parse(read(file)) as Row;
+    if (fresh.generatedAt !== old) break;
+    await Bun.sleep(500);
+  }
+  expect(fresh.generatedAt, "an old cache is refreshed in the background").not.toBe(old);
 }, T);
 
 test("a real 401 keeps the login hint and is not reported as the limit", () => {

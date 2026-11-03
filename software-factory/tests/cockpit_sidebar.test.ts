@@ -76,6 +76,16 @@ test("only sessions that run or are expected here are listed, plus the other mac
   s.unmount();
 });
 
+test("a down row GitHub reports for this machine, not expected here, stays hidden (#385)", () => {
+  const s = sidebarOf(data([here("haile", "working"),
+    { name: "abebe", state: "down", kind: "coding agent", where: "this machine", source: "github", machine: "aaaa1111",
+      expected: false }]), 80);
+  const f = s.frame();
+  expect(f).toMatch(/\bhaile\b/);
+  expect(f).not.toMatch(/\babebe\b/);
+  s.unmount();
+});
+
 test("a session from another machine shows the machine's name, not its id (#383)", () => {
   const s = sidebarOf(data([there("fasil", "idle", "469ae1ea6a9e", { machineName: "dev-pc" })]), 80);
   const f = s.frame();
