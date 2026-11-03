@@ -48,13 +48,19 @@ function taskNumber(v: unknown): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** The machine a row runs on, "" for this one. */
+/** The machine a row runs on, by its name (#383; the id when it has none), "" for this one. */
 function machineOf(r: Obj): string {
   const where = plain(r.where);
   if (where === "this machine" || plain(r.source) === "local") return "";
   if (where === "cloud") return "cloud";
   const named = (s: string) => (s === "-" ? "" : s); // "-" is a row that names no machine
-  return named(plain(r.machine)) || named(where.replace(/^machine /, "")) || "another machine";
+  return named(plain(r.machineName)) || named(plain(r.machine)) || named(where.replace(/^machine /, "")) || "another machine";
+}
+
+/** False for a down row that is not this machine's or not expected here (#366, #383): a ghost of another project or
+ * machine, listed nowhere. */
+export function listed(r: Obj): boolean {
+  return plain(r.state) !== "down" || (machineOf(r) === "" && r.expected === true);
 }
 
 /** The sessions to list, this machine's first. */
@@ -68,7 +74,7 @@ export function sessionRows(snapshot: unknown): Row[] {
     const raw = plain(r.state);
     const state: State = SHOWN[raw] ?? "unknown";
     const machine = machineOf(r);
-    if (state === "down" && (machine !== "" || r.expected !== true)) continue; // not run, nor expected, here
+    if (!listed(r)) continue; // not run, nor expected, here
     const task = taskNumber(r.task);
     rows.push({ name, state, task: task === null ? "" : `#${task}`, machine,
       needsYou: raw === "input-required" || (task !== null && asks.includes(task)) });

@@ -23,6 +23,11 @@ appendFileSync(process.env.COCKPIT_LOG as string, a.join(" ") + "\n");
 function fail(m: string): never { console.error(m); process.exit(1); }
 const out = (x: unknown): never => { console.log(JSON.stringify(x)); process.exit(0); };
 if (s.fail_all) fail("gh: not logged in");
+if (s.unauthorized && a[0] === "api") fail("gh: Bad credentials (HTTP 401)");
+if (s.rate_limited && a[0] === "api") {
+  if (a[1] === "rate_limit") out({ resources: { core: { limit: 5000, remaining: 0, reset: s.rate_limited } } });
+  fail("gh: API rate limit exceeded for user ID 1. (HTTP 403)");
+}
 if (a[0] === "repo" && a[1] === "view") { console.log(a.includes("nameWithOwner") ? "o/r" : "main"); process.exit(0); }
 if (a[0] !== "api") { console.log("ok"); process.exit(0); }
 const raw = a.slice(1).filter((x) => !x.startsWith("-") && x !== "GET" && x !== "POST" && x !== "PATCH" && x !== "Accept: application/vnd.github+json")[0] as string;
@@ -291,6 +296,23 @@ test("a word that is not a number is refused with code, message and fix", () => 
   const e = JSON.parse(r.stderr.trim().split("\n").at(-1) ?? "") as Row;
   expect(e.code).toBe("cockpit_usage");
   for (const k of ["message", "fix"]) expect(typeof e[k]).toBe("string");
+}, T);
+
+test("when the hourly limit is used up the view says so and does not send the person to gh auth login (#383)", () => {
+  const p = setup({ ...scenario(), rate_limited: Math.floor(Date.now() / 1000) + 8 * 60 });
+  const r = prs(p);
+  expect(r.code, r.out).toBe(0);
+  noTrace(r.out);
+  expect(r.stdout).toContain("GitHub's hourly limit is used up");
+  expect(r.stdout).not.toContain("gh auth login");
+}, T);
+
+test("a real 401 still sends the person to gh auth login (#383)", () => {
+  const p = setup({ ...scenario(), unauthorized: true });
+  const r = prs(p);
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("gh auth login");
+  expect(r.stdout).not.toContain("hourly limit");
 }, T);
 
 // --- on a terminal --------------------------------------------------------------------------------------------------

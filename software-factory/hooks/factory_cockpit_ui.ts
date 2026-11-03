@@ -32,12 +32,13 @@ import { homedir, hostname } from "node:os";
 import { basename, join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { load } from "./factory_config.ts";
-import { inkUi, readCache, refreshIfOld } from "./factory_cockpit.ts";
+import { inkUi, LIMITED, limitSentence, readCache, refreshIfOld } from "./factory_cockpit.ts";
 import { run, which } from "./factory_lib.ts";
 import { refuse, repoKey, stateDir } from "./factory_machine.ts";
 import { asText, lookup, MACHINE, MISSING, SECTIONS, SETTINGS, type Setting } from "./factory_settings_schema.ts";
 import { loadStaged, type Staged } from "./factory_settings_staged.ts";
 import * as store from "./factory_settings_store.ts";
+import { limitStatus } from "./factory_views_cache.ts";
 import { sessionName, tmuxTooOld } from "./factory_window.ts";
 
 type Obj = { [key: string]: unknown };
@@ -958,17 +959,24 @@ export function settingsView(args: string[]): number {
 // by COLUMNS and LINES, with <n> selected (else the first PR), and no colour. m merges the selected PR after a y/N
 // question, through `factory owner merge <n> --head <the head shown>` (#309), so one that moved since is not merged.
 
-/** `factory prs --json`, or null when it printed no JSON. */
+/** `factory prs --json`, or null when it printed no JSON. When GitHub's limit stopped it (#383), `limit` says when it
+ *  is back. */
 function readPrs(fresh: boolean): Obj | null {
   const hook = join(import.meta.dir, "factory_prs.ts");
   const p = run([process.execPath, "--no-env-file", "--config=/dev/null", hook, "--json", ...(fresh ? ["--fresh"] : [])],
     { timeoutMs: 120_000 });
+  let data: unknown;
   try {
-    const data: unknown = JSON.parse(p.stdout);
-    return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Obj) : null;
+    data = JSON.parse(p.stdout);
   } catch {
     return null;
   }
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return null;
+  const pulls = (data as Obj).pulls;
+  if (!Array.isArray(pulls) && LIMITED.test(str(obj(pulls).error))) {
+    return { ...(data as Obj), limit: limitSentence(limitStatus(), Date.now() / 1000) };
+  }
+  return data as Obj;
 }
 
 const PAINT: Record<string, string> = { green: "32", red: "31", amber: "33", dim: "90" };
@@ -1157,6 +1165,9 @@ export function prsFrame(data: Obj | null, selected: number, cols: number, rows:
   if (data === null) {
     body = ["Can't read the pull requests: `factory prs --json` printed no data.",
       "Run `factory prs` to see the whole error; if it is about GitHub, `gh auth status`."];
+  } else if (!Array.isArray(pulls) && LIMITED.test(plain(obj(pulls).error))) {
+    body = [plain(data.limit) || "GitHub is limiting this account's calls for now.",
+      "Press r once it is back; `factory usage --github` shows what used the calls."];
   } else if (!Array.isArray(pulls)) {
     body = [`Can't read the pull requests from GitHub (${plain(obj(pulls).error).slice(0, 200)}).`,
       "Run `gh auth status` (and `gh auth login` if it says so), then press r."];
