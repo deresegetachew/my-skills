@@ -352,7 +352,7 @@ export function refreshIfOld(): [Obj | null, number | null, number] {
   const at = snap ? parseIso(str(snap.generatedAt)) : null;
   const age = at === null ? null : Math.max(Date.now() / 1000 - at, 0);
   const waiting = cachedReset(snap?.limit) !== null;
-  if (!waiting &&(snap === null || age === null || age >= ttl)) refreshInBackground();
+  if (!waiting && (snap === null || age === null || age >= ttl)) refreshInBackground();
   return [snap, age, ttl];
 }
 
