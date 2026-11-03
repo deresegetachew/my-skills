@@ -111,7 +111,7 @@ function hhmm(epoch: number): string {
  * (which does not count against the limit); `core` is null when even that can't be read. */
 export function limitProblem(core: Limit | null, t: number): Problem {
   const message = `${limitSentence(core, t)} The cockpit shows the last snapshot meanwhile.`;
-  if (core && core.remaining <= 0 && core.reset > t) {
+  if (usedUp(core, t)) {
     return { code: "github_limit", message, fix: `Nothing to do: the cockpit reads GitHub again after ${hhmm(core.reset)} ` +
       "UTC. `factory usage --github` shows what used the calls." };
   }
@@ -122,7 +122,7 @@ export function limitProblem(core: Limit | null, t: number): Problem {
 /** "GitHub's hourly limit is used up; back at HH:MM UTC (in N min)." when `core` says so, else a limit with no time
  * (a secondary limit, or `gh api rate_limit` unreadable). */
 export function limitSentence(core: Limit | null, t: number): string {
-  if (!core || core.remaining > 0 || core.reset <= t) return "GitHub is limiting this account's calls for now.";
+  if (!usedUp(core, t)) return "GitHub is limiting this account's calls for now.";
   return `GitHub's hourly limit is used up; back at ${hhmm(core.reset)} UTC (in ${Math.max(Math.ceil((core.reset - t) / 60), 1)} min).`;
 }
 
@@ -133,7 +133,21 @@ function limited(missing: Problem[]): { missing: Problem[]; limit: Obj } | null 
   const t = Date.now() / 1000;
   const core = limitStatus();
   const rest = missing.filter((m) => !LIMITED.test(m.message) && !m.fix.includes("gh auth"));
-  return { missing: [limitProblem(core, t), ...rest], limit: { reset: core?.reset ?? null, remaining: core?.remaining ?? null } };
+  return { missing: [limitProblem(core, t), ...rest], limit: { reset: usedUp(core, t) ? core.reset : null,
+    remaining: core?.remaining ?? null } };
+}
+
+/** True when the hourly limit is used up and its reset is still ahead; a secondary limit leaves calls (#385). */
+function usedUp(core: Limit | null, t: number): core is Limit {
+  return core !== null && core.remaining <= 0 && core.reset > t;
+}
+
+/** The cached limit's reset time, only while it is still ahead and no call is known to remain (an older cache could
+ * keep one with calls left, #385). */
+function cachedReset(limit: unknown): number | null {
+  const { reset, remaining } = obj(limit);
+  if (typeof reset !== "number" || reset <= Date.now() / 1000) return null;
+  return typeof remaining === "number" && remaining > 0 ? null : reset;
 }
 
 /** What to cache: a snapshot made while the limit is reached keeps the last good one's data and time (with the limit's
@@ -314,7 +328,7 @@ export function statusLine(snap: Obj | null, ageSeconds: number | null, ttl: num
   if (main) parts.push(`CI main ${str(main.state)}`);
   parts.push(`${n("needYou")} need you`);
   const codes = Array.isArray(snap.missing) ? snap.missing.map(obj).map((m) => str(m.code)).filter(Boolean) : [];
-  if (codes.includes("github_limit")) parts.push(limitText(obj(snap.limit).reset));
+  if (codes.includes("github_limit")) parts.push(limitText(snap.limit));
   const missing = codes.filter((c) => c !== "github_limit");
   if (missing.length) parts.push(`can't read: ${[...new Set(missing)].join(", ")}`);
   if (ageSeconds === null) parts.push("age unknown");
@@ -322,11 +336,12 @@ export function statusLine(snap: Obj | null, ageSeconds: number | null, ttl: num
   return parts.join(" · ");
 }
 
-/** "GitHub limit used up, back at HH:MM UTC (in N min)" for the status line; without the time when it isn't known. */
-function limitText(reset: unknown): string {
-  if (typeof reset !== "number") return "GitHub limit used up";
-  const left = reset - Date.now() / 1000;
-  return `GitHub limit used up, back at ${hhmm(reset)} UTC` + (left > 0 ? ` (in ${Math.max(Math.ceil(left / 60), 1)} min)` : "");
+/** "GitHub limit used up, back at HH:MM UTC (in N min)" for the status line; "GitHub is limiting calls" when no reset
+ * is ahead (a secondary limit, or the time is unknown). */
+function limitText(limit: unknown): string {
+  const reset = cachedReset(limit);
+  if (reset === null) return "GitHub is limiting calls";
+  return `GitHub limit used up, back at ${hhmm(reset)} UTC (in ${Math.max(Math.ceil((reset - Date.now() / 1000) / 60), 1)} min)`;
 }
 
 /** Starts a refresh in the background when the cache is missing or old, and not while GitHub's limit is still used
@@ -336,9 +351,8 @@ export function refreshIfOld(): [Obj | null, number | null, number] {
   const snap = readCache();
   const at = snap ? parseIso(str(snap.generatedAt)) : null;
   const age = at === null ? null : Math.max(Date.now() / 1000 - at, 0);
-  const reset = obj(snap?.limit).reset;
-  const waiting = typeof reset === "number" && reset > Date.now() / 1000;
-  if (!waiting && (snap === null || age === null || age >= ttl)) refreshInBackground();
+  const waiting = cachedReset(snap?.limit) !== null;
+  if (!waiting &&(snap === null || age === null || age >= ttl)) refreshInBackground();
   return [snap, age, ttl];
 }
 
