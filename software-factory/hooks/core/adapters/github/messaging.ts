@@ -2,8 +2,9 @@
 // an agent's status is the envelope on its agent issue (its card). A read asks GitHub what `factory messages ls`
 // always has: the open issues and PRs (or the one a scope names), then the comments of each one that has any.
 //
-// The cursor is the newest comment's time and the ids of the comments at that time, so a comment is read once even
-// when several share a second. A card is what an agent is now, not something said: it is read only with no cursor.
+// The cursor holds, for each thread, its newest comment's time and the ids of the comments at that time, so a comment
+// is read once even when several share a second, and a comment on one thread is never hidden by a newer one on
+// another. A card is what an agent is now, not something said: it is read only with no cursor.
 import { type Comment, gh, ghAll, type Issue } from "../../../factory_issues.ts";
 import { CoreError } from "../../domain/error.ts";
 import { badCursor, commentBody, type CommentLike, type Message, messagesOf, needsRef, parseComment, REF, refNumber,
@@ -30,35 +31,38 @@ export class GithubMessaging implements Messaging {
 
   read(cursor: Cursor | null, scope: Scope = {}): Read {
     const after = cursor === null ? null : decode(cursor);
-    const mark: Mark = { at: after?.at ?? "", ids: [...(after?.ids ?? [])] };
+    const marks: Record<string, Mark> = { ...(after ?? {}) };
     const messages: Message[] = [];
-    const ids = new Set<string>();
-    const take = (m: Message, thread: string, card: boolean): void => {
-      m.thread = thread;
-      m.card = card;
-      if (ids.has(m.id)) return; // the same message twice (posted again, or a comment on two pages): read once
-      ids.add(m.id);
-      this.known.add(m.id);
-      messages.push(m);
-    };
     for (const item of items(scope.ref)) {
       const thread = (item.pull_request ? "pr#" : "issue#") + item.number;
+      const ids = new Set<string>(); // per thread, as fold reads it: the same message twice (posted again) is read once
+      const take = (m: Message, card: boolean): void => {
+        m.thread = thread;
+        m.card = card;
+        if (ids.has(m.id)) return;
+        ids.add(m.id);
+        this.known.add(m.id);
+        messages.push(m);
+      };
       if (item.labels.some((x) => x.name === "factory:agent")) {
-        if (!after) for (const m of messagesOf([{ body: item.body || "", html_url: item.html_url ?? null }], thread)) take(m, thread, true);
+        if (!after) for (const m of messagesOf([{ body: item.body || "", html_url: item.html_url ?? null }], thread)) take(m, true);
         continue;
       }
       if (!(item.comments ?? 1)) continue; // nothing was said there: no call
       const comments = once(ghAll<Comment>(`repos/{owner}/{repo}/issues/${item.number}/comments`));
+      const before = after?.[thread] ?? null;
+      const mark: Mark = { at: before?.at ?? "", ids: [...(before?.ids ?? [])] };
       comments.forEach((c, i) => {
-        if (!isNew(c, after)) return;
+        if (!isNew(c, before)) return;
         advance(mark, c);
         for (const m of parseComment(c as CommentLike, i)) {
           m.ref = m.ref || thread;
-          take(m, thread, false);
+          take(m, false);
         }
       });
+      if (mark.at) marks[thread] = mark;
     }
-    return { messages, cursor: `${PREFIX}${mark.at}|${mark.ids.join(",")}` };
+    return { messages, cursor: PREFIX + Buffer.from(JSON.stringify(marks)).toString("base64url") };
   }
 
   ack(id: string): void {
@@ -105,8 +109,23 @@ function advance(mark: Mark, c: Comment): void {
   if (at === mark.at) mark.ids.push(String(c.id ?? ""));
 }
 
-function decode(cursor: Cursor): Mark {
-  const m = /^gh1:([^|]*)\|([\w,]*)$/.exec(cursor);
-  if (!m) throw badCursor(cursor);
-  return { at: m[1] as string, ids: m[2] ? (m[2] as string).split(",") : [] };
+/** {thread: mark} from a cursor this adapter gave. */
+function decode(cursor: Cursor): Record<string, Mark> {
+  if (!cursor.startsWith(PREFIX)) throw badCursor(cursor);
+  let got: unknown;
+  try {
+    got = JSON.parse(Buffer.from(cursor.slice(PREFIX.length), "base64url").toString("utf8"));
+  } catch {
+    throw badCursor(cursor);
+  }
+  if (!got || typeof got !== "object" || Array.isArray(got)) throw badCursor(cursor);
+  const out: Record<string, Mark> = {};
+  for (const [thread, v] of Object.entries(got)) {
+    const mark = v as { at?: unknown; ids?: unknown };
+    if (!REF.test(thread) || typeof mark.at !== "string" || !Array.isArray(mark.ids) || !mark.ids.every((x) => typeof x === "string")) {
+      throw badCursor(cursor);
+    }
+    out[thread] = { at: mark.at, ids: mark.ids as string[] };
+  }
+  return out;
 }

@@ -22,11 +22,12 @@ export class MemoryMessaging implements Messaging {
 
   read(cursor: Cursor | null, scope: Scope = {}): Read {
     const from = cursor === null ? 0 : position(cursor);
-    const before = new Set(this.said.slice(0, from).map((m) => m.id));
+    const key = (m: Message): string => `${m.thread} ${m.id}`; // an id is read once per thread, as GitHub's is
+    const before = new Set(this.said.slice(0, from).map(key));
     const messages: Message[] = [];
     for (const m of this.said.slice(from)) {
-      if (before.has(m.id) || (scope.ref && !refMatches(m.thread, scope.ref))) continue;
-      before.add(m.id);
+      if (before.has(key(m)) || (scope.ref && !refMatches(m.thread, scope.ref))) continue;
+      before.add(key(m));
       this.known.add(m.id);
       messages.push(m);
     }

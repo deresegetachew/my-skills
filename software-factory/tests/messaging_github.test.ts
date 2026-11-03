@@ -86,6 +86,26 @@ test("github: a comment newer than the cursor is read, an older one is not", () 
   expect(ids(port.read(first.cursor).messages)).toEqual(["c11"]);
 });
 
+test("github: a comment on one thread is not hidden by a newer one already read on another", () => {
+  const d = world([issue(5), issue(7)], {
+    5: [{ id: 10, body: "<!-- factory-question -->\nFive?", created_at: "2026-10-25T09:00:00Z" }],
+    7: [{ id: 20, body: "<!-- factory-question -->\nSeven?", created_at: "2026-10-25T10:00:00Z" }],
+  });
+  const port = new GithubMessaging();
+  const first = port.read(null);
+  expect(ids(first.messages)).toEqual(["c10", "c20"]);
+  const db = JSON.parse(readFileSync(join(d, "db.json"), "utf8")) as { comments: Record<string, unknown[]> };
+  db.comments["5"]?.push({ id: 11, body: "<!-- factory-question -->\nLater on five?", created_at: "2026-10-25T09:30:00Z" });
+  write(join(d, "db.json"), JSON.stringify(db));
+  expect(ids(port.read(first.cursor).messages)).toEqual(["c11"]);
+});
+
+test("github: the same message id in two threads is read in each, as each thread is folded on its own", () => {
+  const q = "<!-- factory-msg v=1 id=q1abc kind=question from=haile -->\nSame?";
+  world([issue(5), issue(7)], { 5: [q], 7: [q] });
+  expect(new GithubMessaging().read(null).messages.map((m) => [m.id, m.thread])).toEqual([["q1abc", "issue#5"], ["q1abc", "issue#7"]]);
+});
+
 test("github: an agent's card is read from its issue body on a full read, without reading its comments", () => {
   const card = "<!-- factory-msg v=1 id=st1abc kind=status from=haile to=dev-manager state=idle -->\nhaile is idle";
   const d = world([issue(9, { body: card, labels: [{ name: "factory:agent" }] })], { 9: ["<!-- factory-question -->\nNot read?"] });

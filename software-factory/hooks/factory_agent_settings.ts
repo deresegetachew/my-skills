@@ -53,6 +53,8 @@ function gitIn(dir: string, ...args: string[]): { code: number; stdout: Uint8Arr
 /** A git read that failed (an error, a timeout under load), as opposed to one that found nothing: the caller refuses
  * rather than take it for a file main does not have. */
 export class ReadFailed extends Error {}
+/** main's hooks folder goes more than 8 folders deep (most likely a link that leads back up into it). */
+export class TooDeep extends Error {}
 
 const READ_TRIES = 3;
 
@@ -182,7 +184,7 @@ function mainHooks(): Unpacked[] | null {
  * plain file or folder is read by the id the listing gives; a link (or submodule) is followed the way the checkout
  * would, into a file or a folder. */
 function listFiles(files: Unpacked[], at: Entry, rel: string, depth: number): void {
-  if (depth > 8) throw new ReadFailed(`${HOOKS_DIR} is nested deeper than 8 folders`);
+  if (depth > 8) throw new TooDeep(`${HOOKS_DIR}/${rel}`);
   const listing = gitRead(at.dir, "ls-tree", "-z", at.sha);
   for (const line of text(listing).split("\0")) {
     if (line === "") continue;
@@ -416,6 +418,11 @@ export function main(): number {
   try {
     return start();
   } catch (e) {
+    if (e instanceof TooDeep) {
+      return refuse("hooks_too_deep", `main's ${HOOKS_DIR} goes more than 8 folders deep (at ${e.message}), so its hooks ` +
+        "can't be unpacked. No session was started.",
+        `look for a link in ${HOOKS_DIR} on main that points back up into it, remove it on main, then start it again.`);
+    }
     if (!(e instanceof ReadFailed)) throw e;
     return refuse("hooks_not_read", `main's files could not all be read from git (${e.message}), so the agent would start ` +
       "with part of its rules or hooks. No session was started.",
@@ -454,7 +461,7 @@ function start(): number {
   try {
     folder = unpackMainHooks();
   } catch (e) {
-    if (e instanceof ReadFailed) throw e;
+    if (e instanceof ReadFailed || e instanceof TooDeep) throw e;
     return refuse("hooks_not_unpacked", `main's ${HOOKS_DIR} could not be unpacked into the git folder ` +
       `(${e instanceof Error ? e.message : String(e)}), so the agent's hooks would run its own folder's copy. No session was started.`,
       "check that this project's git folder (`git rev-parse --git-common-dir`) is writable and has free space, " +
