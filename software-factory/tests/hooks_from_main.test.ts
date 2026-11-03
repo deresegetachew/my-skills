@@ -262,16 +262,35 @@ function flakySettings(work: string, word: string, times?: number) {
 
 const blobOf = (work: string, path: string): string => sh(["git", "rev-parse", `HEAD:${path}`], { cwd: work }).stdout.trim();
 
-/** The folder the hook lines name, checked to hold every hook main has, unchanged and read-only. */
+/** Every file and folder under `dir`, as paths relative to it, subfolders included (hooks/core/, decision 0003). */
+function entriesUnder(dir: string, sub = ""): { files: string[]; folders: string[] } {
+  const out = { files: [] as string[], folders: [] as string[] };
+  for (const e of readdirSync(sub ? join(dir, sub) : dir, { withFileTypes: true })) {
+    const rel = sub ? `${sub}/${e.name}` : e.name;
+    if (!e.isDirectory()) out.files.push(rel);
+    else {
+      const inner = entriesUnder(dir, rel);
+      out.folders.push(rel, ...inner.folders);
+      out.files.push(...inner.files);
+    }
+  }
+  return out;
+}
+
+/** The folder the hook lines name, checked to hold every hook main has (its subfolders too), unchanged and read-only. */
 function completeCopy(s: Settings): string {
   const dirs = [...new Set(commands(s).map((c) => scriptOf(c).replace(/\/[^/]+$/, "")))];
   expect(dirs.length).toBe(1);
   const dir = dirs[0] as string;
-  expect(readdirSync(dir).sort()).toEqual(readdirSync(HOOKS).sort());
-  for (const f of readdirSync(HOOKS)) {
+  const want = entriesUnder(HOOKS);
+  const got = entriesUnder(dir);
+  expect(got.files.sort()).toEqual(want.files.sort());
+  expect(got.folders.sort()).toEqual(want.folders.sort());
+  for (const f of want.files) {
     expect(readFileSync(join(dir, f), "utf8"), f).toBe(read(join(HOOKS, f)));
     expect(writable(join(dir, f)), f).toBe(false);
   }
+  for (const f of want.folders) expect(writable(join(dir, f)), f).toBe(false);
   return dir;
 }
 
