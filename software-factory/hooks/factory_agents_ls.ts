@@ -13,9 +13,12 @@
 // that machine's row (#366). A GitHub failure shows this machine alone, with a line saying so.
 //
 // --json prints {agents: [...], github: {...}, daemon: {...}, machine}; every row has name, kind, where, state, detail,
-// task, on, since, lastSeen, follow, session, activity, machine, source (local or github) and expected: this machine's
-// names file (or FACTORY_AGENTS) names it, so the cockpit lists it even when it is down (#366).
+// task, on, since, lastSeen, follow, session, activity, machine (the id), machineName (`machines.<id>.name` in
+// factory.json, else the hostname, which another machine posts only with tasks.showWhere, else the id; #383), source
+// (local or github) and expected: this machine's names file (or FACTORY_AGENTS) names it, so the cockpit lists it even
+// when it is down (#366).
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { type Config, taskSource, toFloat } from "./factory_config.ts";
 import { now as clockNow } from "./factory_clock.ts";
@@ -50,8 +53,18 @@ export interface LsRow {
   session: string | null;
   activity: string | null;
   machine: string | null;
+  machineName: string | null;
   source: string;
   expected: boolean;
+}
+
+/** The name to show for machine `id` (#383): `machines.<id>.name` in factory.json, else the hostname it posted (only
+ * with tasks.showWhere), else the id. */
+function nameOf(cfg: Config, id: string | null, host: string | null): string | null {
+  const machines = cfg.machines;
+  const set = id && typeof machines === "object" && machines !== null ? (machines as Record<string, unknown>)[id] : null;
+  const name = typeof set === "object" && set !== null ? (set as Record<string, unknown>).name : null;
+  return (typeof name === "string" && name.trim()) || host || id;
 }
 
 interface DaemonInfo {
@@ -68,12 +81,14 @@ function localRows(cfg: Config): [LsRow[], DaemonInfo] {
   const seen = fresh ? (data.updated as number | undefined) : clockNow();
   const rows: LsRow[] = [];
   const names = machineNames();
+  const mine = machineId();
+  const myName = nameOf(cfg, mine || null, hostname());
   for (const name of Object.keys(agents).sort()) {
     const r = agents[name] as HeartbeatRow;
     rows.push({ name, kind: kindText(r.kind), where: "this machine", state: r.state, detail: r.detail || r.state,
       task: r.task ?? null, on: r.on ?? null, since: r.since ?? null, lastSeen: r.state !== "down" ? iso(seen) : null,
-      follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: machineId(), source: "local",
-      expected: names.includes(name) });
+      follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: mine, machineName: myName,
+      source: "local", expected: names.includes(name) });
   }
   return [rows, { running: fresh, updated: Object.keys(data).length ? iso(data.updated as number | undefined) : null,
     errors: fresh ? ((data.errors as string[] | undefined) || []) : [] }];
@@ -155,7 +170,8 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
     const kind = f.kind && f.kind !== "coding-agent" ? f.kind : roleOf(issue);
     rows.push({ name, kind: kindText(kind), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
-      session: f.session ?? null, activity: null, machine, source: "github", expected: false });
+      session: f.session ?? null, activity: null, machine,
+      machineName: cloud ? "cloud" : nameOf(cfg, machine, f.where || null), source: "github", expected: false });
   }
   return rows;
 }

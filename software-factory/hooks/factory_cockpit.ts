@@ -12,7 +12,8 @@
 //
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
 // missing or older than FACTORY_COCKPIT_CACHE_SECONDS (default 300: a refresh costs a few GitHub calls per open pull
-// request, on the agents' token) it starts one refresh in the background and says how old the line is. `factory cockpit`
+// request, on the agents' token) it starts one refresh in the background and says how old the line is. While GitHub's
+// hourly limit is used up (#383) a refresh keeps the last snapshot, says when the limit is back, and none starts until then. `factory cockpit`
 // alone opens the tmux cockpit (#308, US-10): factory_cockpit_ui.ts. `--prs [<n>]` is its Pull requests view (#338),
 // there too.
 //
@@ -27,6 +28,7 @@ import { toFloat } from "./factory_config.ts";
 import { isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
 import { stateDir } from "./factory_machine.ts";
 import { findSub, subWindow } from "./factory_orchestrator.ts";
+import { type Limit, limitStatus } from "./factory_views_cache.ts";
 import { checkTmux, running as sessionRunning, WindowError } from "./factory_window.ts";
 
 const HOOKS = import.meta.dir;
@@ -96,6 +98,53 @@ function problemOf(s: Step, code: string, what: string, command: string): Proble
 }
 
 const GH_FIX = "Run `gh auth status` (and `gh auth login` if it says so); the cockpit shows the rest meanwhile.";
+
+// GitHub's answer when the account's calls are used up (a 403 or 429 saying so, #383). `gh auth status` then says
+// "Failed to log in" too, so the login hint would send the owner after a login that is fine.
+export const LIMITED = /rate limit|x-ratelimit-remaining:\s*0\b|\bHTTP 429\b/i;
+
+function hhmm(epoch: number): string {
+  return isoUtc(epoch).slice(11, 16);
+}
+
+/** The one problem that replaces every GitHub one while the limit is reached: when it is back, from `gh api rate_limit`
+ * (which does not count against the limit); `core` is null when even that can't be read. */
+export function limitProblem(core: Limit | null, t: number): Problem {
+  const message = `${limitSentence(core, t)} The cockpit shows the last snapshot meanwhile.`;
+  if (core && core.remaining <= 0 && core.reset > t) {
+    return { code: "github_limit", message, fix: `Nothing to do: the cockpit reads GitHub again after ${hhmm(core.reset)} ` +
+      "UTC. `factory usage --github` shows what used the calls." };
+  }
+  return { code: "github_limit", message, fix: "Wait a few minutes; the cockpit reads GitHub again on its own. " +
+    "`factory usage --github` shows what used the calls." };
+}
+
+/** "GitHub's hourly limit is used up; back at HH:MM UTC (in N min)." when `core` says so, else a limit with no time
+ * (a secondary limit, or `gh api rate_limit` unreadable). */
+export function limitSentence(core: Limit | null, t: number): string {
+  if (!core || core.remaining > 0 || core.reset <= t) return "GitHub is limiting this account's calls for now.";
+  return `GitHub's hourly limit is used up; back at ${hhmm(core.reset)} UTC (in ${Math.max(Math.ceil((core.reset - t) / 60), 1)} min).`;
+}
+
+/** `missing` with every GitHub problem replaced by the limit's, when one of them is the limit; else null. A problem
+ * that sends the owner to `gh auth` (CI's says only that GitHub can't be read) is the limit's too. */
+function limited(missing: Problem[]): { missing: Problem[]; limit: Obj } | null {
+  if (!missing.some((m) => LIMITED.test(m.message))) return null;
+  const t = Date.now() / 1000;
+  const core = limitStatus();
+  const rest = missing.filter((m) => !LIMITED.test(m.message) && !m.fix.includes("gh auth"));
+  return { missing: [limitProblem(core, t), ...rest], limit: { reset: core?.reset ?? null, remaining: core?.remaining ?? null } };
+}
+
+/** What to cache: a snapshot made while the limit is reached keeps the last good one's data and time (with the limit's
+ * problem and its age said), so the screens show what was known rather than empty parts. */
+function keepLast(snap: Obj, last: Obj | null): Obj {
+  if (!snap.limit || last === null) return snap;
+  const at = parseIso(str(last.generatedAt));
+  const age = at === null ? "" : ` It is from ${hhmm(at)} UTC (${ageText(Math.max(Date.now() / 1000 - at, 0))} ago).`;
+  const missing = (snap.missing as Problem[]).map((m) => (m.code === "github_limit" ? { ...m, message: m.message + age } : m));
+  return { ...last, limit: snap.limit, missing };
+}
 
 function sessions(s: Step, missing: Problem[]): Obj[] | null {
   const data = obj(parseJson(s.stdout));
@@ -195,11 +244,13 @@ export async function snapshot(): Promise<Obj> {
   const ciData = ci(ciStep, missing);
   const checks = doctor(doc, missing);
   const ver = version(missing);
+  const limit = limited(missing);
   return {
     generatedAt: isoUtc(Date.now() / 1000), version: ver, sessions: rows ?? [], needsYou: needs, pulls: p.pulls, ci: ciData,
     doctor: checks, counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
       pulls: (p.pulls ?? []).length, needYou: needs.length },
-    missing,
+    missing: limit?.missing ?? missing,
+    ...(limit ? { limit: limit.limit } : {}),
   };
 }
 
@@ -255,27 +306,39 @@ function ageText(seconds: number): string {
 
 /** The one line: counts, CI on main, "N need you", and what is old or missing. */
 export function statusLine(snap: Obj | null, ageSeconds: number | null, ttl: number): string {
-  if (snap === null) return "factory: no snapshot yet, reading it now";
+  if (snap === null) return "factory: no snapshot yet; one is being read (`factory cockpit --json` reads it now)";
   const c = obj(snap.counts);
   const n = (k: string): number => Number(c[k] ?? 0) || 0;
   const parts = [`factory: ${plural(n("sessions"), "session")}, ${n("working")} working`, plural(n("pulls"), "PR")];
   const main = (Array.isArray(obj(snap.ci).runs) ? (obj(snap.ci).runs as unknown[]).map(obj) : []).find((r) => r.ref === "main");
   if (main) parts.push(`CI main ${str(main.state)}`);
   parts.push(`${n("needYou")} need you`);
-  const missing = Array.isArray(snap.missing) ? snap.missing.map(obj).map((m) => str(m.code)).filter(Boolean) : [];
+  const codes = Array.isArray(snap.missing) ? snap.missing.map(obj).map((m) => str(m.code)).filter(Boolean) : [];
+  if (codes.includes("github_limit")) parts.push(limitText(obj(snap.limit).reset));
+  const missing = codes.filter((c) => c !== "github_limit");
   if (missing.length) parts.push(`can't read: ${[...new Set(missing)].join(", ")}`);
   if (ageSeconds === null) parts.push("age unknown");
   else if (ageSeconds >= ttl) parts.push(`as of ${ageText(ageSeconds)} ago`);
   return parts.join(" · ");
 }
 
-/** Starts a refresh in the background when the cache is missing or old; returns [snapshot, age in s, ttl]. */
+/** "GitHub limit used up, back at HH:MM UTC (in N min)" for the status line; without the time when it isn't known. */
+function limitText(reset: unknown): string {
+  if (typeof reset !== "number") return "GitHub limit used up";
+  const left = reset - Date.now() / 1000;
+  return `GitHub limit used up, back at ${hhmm(reset)} UTC` + (left > 0 ? ` (in ${Math.max(Math.ceil(left / 60), 1)} min)` : "");
+}
+
+/** Starts a refresh in the background when the cache is missing or old, and not while GitHub's limit is still used
+ * up (a refresh would only fail again); returns [snapshot, age in s, ttl]. */
 export function refreshIfOld(): [Obj | null, number | null, number] {
   const ttl = toFloat(process.env.FACTORY_COCKPIT_CACHE_SECONDS || 300) ?? 300;
   const snap = readCache();
   const at = snap ? parseIso(str(snap.generatedAt)) : null;
   const age = at === null ? null : Math.max(Date.now() / 1000 - at, 0);
-  if (snap === null || age === null || age >= ttl) refreshInBackground();
+  const reset = obj(snap?.limit).reset;
+  const waiting = typeof reset === "number" && reset > Date.now() / 1000;
+  if (!waiting && (snap === null || age === null || age >= ttl)) refreshInBackground();
   return [snap, age, ttl];
 }
 
@@ -286,7 +349,8 @@ function status(): number {
 
 async function refresh(): Promise<number> {
   try {
-    writeCache(await snapshot());
+    const snap = await snapshot();
+    writeCache(keepLast(snap, readCache()));
   } finally {
     rmSync(lockPath(), { force: true });
   }
@@ -402,7 +466,7 @@ export async function main(argv: string[]): Promise<number> {
   if (flag === "--ink") return ink();
   if (flag === "--status") return status();
   if (flag === "--refresh") return refresh();
-  const snap = await snapshot();
+  const snap = keepLast(await snapshot(), readCache());
   try {
     writeCache(snap);
   } catch (e) {
