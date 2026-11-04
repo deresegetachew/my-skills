@@ -3,7 +3,10 @@
 How agents, the dev manager and the product owner (PO) talk to each other: one structured, versioned envelope for
 questions, answers, must-fixes, approvals and status, shaped like [A2A](https://github.com/a2aproject/A2A) tasks and
 kept in the GitHub comments and issues the factory already uses. Issue #107. The code is
-`hooks/factory_messages.ts` (the envelope, the states, `factory messages`) and `hooks/factory_cards.ts` (agent cards).
+`hooks/core/domain/message.ts` (the envelope and the states, with no I/O), `hooks/core/ports/messaging.ts` (the
+Messaging port: send, read what is new since a cursor, acknowledge; decision 0003, #376) with its GitHub and in-memory
+adapters under `hooks/core/adapters/`, `hooks/factory_messages.ts` (`factory messages`, and the library the other
+hooks import) and `hooks/factory_cards.ts` (agent cards).
 
 GitHub stays the transport: asynchronous, durable, auditable, and it works when a machine or a cloud session is
 offline. Nothing here opens a port or adds a service. An A2A adapter in the heartbeat daemon (#108) is a later step

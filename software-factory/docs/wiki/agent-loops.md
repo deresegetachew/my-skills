@@ -336,7 +336,8 @@ one, and unattended nobody answers. The script takes the agent's name from `FACT
 
 Tasks are the unticked lines of `docs/build-plan.md` (`- [ ] **1.3 Title**`), in order, minus the ids in
 `docs/blocked.md` (`- 1.3: needs ...`). Both are read from `origin/main`, so a stale checkout can't skip or repeat
-a task. The branch is `task/<id with dashes>-<name>`, and the PR ticks its own task.
+a task. A task whose text says `Depends on 1.2, 2.1` waits until those lines are ticked. The branch is
+`task/<id with dashes>-<name>`, and the PR ticks its own task.
 
 **Claims, so two agents never build the same task:**
 

@@ -141,6 +141,26 @@ test("a copy install holds real files from the new folders with the same modes",
   for (const rel of ["factory", "factory-loop.sh", ".claude/ci/ci.sh", BUN_HOOK]) expect(statSync(join(d, rel)).mode & 0o100, rel).toBeTruthy();
 });
 
+test("the factory's core (hooks/core/, decision 0003) reaches a copied and a linked project, and factory messages runs on it", () => {
+  const core = [".claude/hooks/core/compose.ts", ".claude/hooks/core/domain/message.ts", ".claude/hooks/core/ports/messaging.ts",
+    ".claude/hooks/core/adapters/github/messaging.ts", ".claude/hooks/core/adapters/memory/messaging.ts"];
+  const copied = tmp();
+  sh(copied, "bash", join(SF, "install.sh"), copied);
+  const linked = project();
+  install(linked, "--link");
+  for (const [d, how] of [[copied, "copy"], [linked, "link"]] as const) {
+    for (const rel of core) {
+      expect(isFile(join(d, rel)), `${how}: ${rel}`).toBe(true);
+      const mode = statSync(join(d, rel)).mode;
+      expect(mode & 0o444, `${how}: ${rel} is readable`).toBe(0o444);
+      expect(mode & 0o002, `${how}: ${rel} is not writable by others`).toBe(0);
+    }
+    expect(isLink(join(d, ".claude/hooks/core/domain/message.ts")), how).toBe(how === "link");
+    const p = sh(d, process.execPath, "--no-env-file", ".claude/hooks/factory_messages.ts", "new", "--kind", "question", "--from", "haile", "--id", "q1abc");
+    expect(p.stdout, how).toContain("<!-- factory-msg v=1 id=q1abc kind=question from=haile to=dev-manager state=submitted -->");
+  }
+});
+
 // --- factory update, with the factory as a real submodule of the project ---
 
 function upstream(): string {

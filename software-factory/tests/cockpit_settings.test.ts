@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { CI, envWith, git, gitRepo, HOOKS, SF, sh, tmp, WIKI, write, type Proc } from "./support.ts";
+import { CI, copyHookFolders, envWith, git, gitRepo, HOOKS, SF, sh, tmp, WIKI, write, type Proc } from "./support.ts";
 
 const T = 60_000;
 type Env = Record<string, string | undefined>;
@@ -21,6 +21,7 @@ function setup(factory: Record<string, unknown>, machine?: Record<string, unknow
   gitRepo(d);
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(d, ".claude", "hooks", f));
+  copyHookFolders(join(d, ".claude", "hooks"));
   cpSync(CI, join(d, ".claude", "ci"), { recursive: true }); // the cockpit's views import ../ci/ci_names.ts (#339)
   write(join(d, ".claude", "factory.json"), JSON.stringify(factory, null, 2) + "\n");
   git(d, "add", "-A");

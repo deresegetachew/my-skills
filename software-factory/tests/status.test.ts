@@ -3,7 +3,7 @@
 import { expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { HOOKS, SF, envWith, gitRepo, sh, tmp, write, type Proc } from "./support.ts";
+import { copyHookFolders, HOOKS, SF, envWith, gitRepo, sh, tmp, write, type Proc } from "./support.ts";
 
 const SHA = "c".repeat(40);
 
@@ -38,6 +38,7 @@ function setup(scenario: Row, cfg: Row): [string, Env] {
   gitRepo(d);
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(d, ".claude", "hooks", f));
+  copyHookFolders(join(d, ".claude", "hooks"));
   write(join(d, ".claude", "factory.json"), JSON.stringify(cfg));
   write(join(root, "bin", "gh"), FAKE_GH, 0o755);
   write(join(root, "scenario.json"), JSON.stringify(scenario));

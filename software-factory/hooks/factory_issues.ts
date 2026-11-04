@@ -29,16 +29,21 @@
 // Claims are race-free across machines: a claim is labels plus a `<!-- factory-claim agent=<name> machine=<id> -->`
 // comment, and when two agents claim at once (even with the same name, on two machines) the earlier comment wins; the
 // other takes its label off and picks again. Everything goes through the GitHub REST API (`gh api`).
+//
+// The commands that pick, claim, show, tick, review, block, release and file a task go through the TaskTracker port
+// (core/ports/task_tracker.ts, #377), on its GitHub Issues adapter. The helpers here are still shared with other
+// commands until their own step of decision 0003.
 import { readFileSync } from "node:fs";
-import { type Config, load, taskLabels, toFloat } from "./factory_config.ts";
-import { claimRecord } from "./factory_budget.ts";
+import { type Config, load, type TaskLabels, taskLabels, toFloat } from "./factory_config.ts";
+import { taskTracker } from "./core/compose.ts";
+import { type ClaimEvent, isMe as isMyClaim, standing, winner } from "./core/domain/claim.ts";
+import { CoreError } from "./core/domain/error.ts";
+import { dependencies } from "./core/domain/task.ts";
 import { machineId } from "./factory_machine.ts";
-import { die, Exit, GITHUB_BUSY, githubBusy, parseArgs, parseIso, pyDumps, pyQuote, run, runMain, sleepSync } from "./factory_lib.ts";
+import { die, Exit, GITHUB_BUSY, githubBusy, parseArgs, parseIso, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 
 export const CLAIM = /<!--\s*factory-claim\s+agent=([\w.-]+)(?:\s+machine=([\w-]+))?\s*-->/;
 export const RELEASE = /<!--\s*factory-release\s+agent=([\w.-]+)\s*-->/;
-const DEPENDS = /depends on\s+((?:#\d+[\s,and]*)+)/gi;
-const BOX = /^(\s*[-*]\s+\[)([ xX])(\]\s+)/gm;
 const COLORS: Record<string, string> = { ready: "0e8a16", inProgress: "1d76db", inReview: "5319e7", blocked: "b60205" };
 
 /** A GitHub issue (or pull request) as the REST API gives it; only the fields the factory reads are typed. */
@@ -126,15 +131,6 @@ export function humanComments(n: number | string): Comment[] {
     .filter((c) => (c.body ?? "").trim() && !FACTORY_NOISE.test(c.body as string));
 }
 
-export function showText(n: number | string, i: Issue): string {
-  let text = `#${n} ${i.title}  [${[...names(i)].sort().join(", ")}]  ${i.state}\n\n${i.body || ""}`;
-  for (const c of humanComments(n)) {
-    const who = c.user?.login || "someone";
-    text += `\n\n--- comment by ${who} ---\n${(c.body as string).trim()}`;
-  }
-  return text;
-}
-
 export function taskIssues(state = "open", label: string | null = null): Issue[] {
   const q = `repos/{owner}/{repo}/issues?state=${state}` + (label ? `&labels=${label}` : "");
   return ghAll(q).filter((i) => !("pull_request" in i) &&
@@ -157,10 +153,8 @@ export function sortedByOrder(issues: Issue[]): Issue[] {
  * looked up once, since `openNumbers` holds no pull requests. A number that doesn't exist doesn't hold it back.
  * `lookedUp` caches the answers across issues. */
 export function openDependencies(issue: Issue, openNumbers: Set<number>, lookedUp: Map<number, boolean> = new Map()): number[] {
-  const deps = new Set<number>();
-  for (const m of (issue.body ?? "").matchAll(DEPENDS)) for (const d of (m[1] as string).matchAll(/#(\d+)/g)) deps.add(Number(d[1]));
   const stillOpen: number[] = [];
-  for (const d of [...deps].sort((x, y) => x - y)) {
+  for (const d of dependencies(issue.body ?? "", "issue").map(Number)) {
     if (!openNumbers.has(d) && !lookedUp.has(d)) {
       const found = gh<Issue | null>("GET", `repos/{owner}/{repo}/issues/${d}`, undefined, true);
       lookedUp.set(d, Boolean(found) && found?.state === "open");
@@ -175,12 +169,17 @@ export type ClaimMark = [agent: string, machine: string | null];
 /** [agent, machine] for the claim comments since the last release, oldest first. `machine` is null for a claim
  * made before claims carried one. */
 export function claimsSinceRelease(n: number | string): ClaimMark[] {
-  let out: ClaimMark[] = [];
+  return standing(claimEvents(n)).map((c): ClaimMark => [c.agent, c.machine]);
+}
+
+/** The claim and release comments on issue n, oldest first (a comment that is both releases, then claims). */
+function claimEvents(n: number | string): ClaimEvent[] {
+  const out: ClaimEvent[] = [];
   for (const c of ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`)) {
     const body = c.body || "";
-    if (RELEASE.test(body)) out = [];
+    if (RELEASE.test(body)) out.push({ release: true });
     const m = CLAIM.exec(body);
-    if (m) out.push([m[1] as string, m[2] ?? null]);
+    if (m) out.push({ claim: { agent: m[1] as string, machine: m[2] ?? null } });
   }
   return out;
 }
@@ -188,14 +187,13 @@ export function claimsSinceRelease(n: number | string): ClaimMark[] {
 /** [agent, machine] of the claim comment that came first since the last release, or null. Block and release both
  * post a release, so an old claim never outlives them (unblock an issue with `release`, not by editing labels). */
 export function claimWinner(n: number | string): ClaimMark | null {
-  return claimsSinceRelease(n)[0] ?? null;
+  const won = winner(claimEvents(n));
+  return won ? [won.agent, won.machine] : null;
 }
 
-/** Whether a claim [agent, machine] is this agent on this machine. A claim without a machine (an older kit)
- * matches by name alone, as it always did; so does a machine that has no id. */
+/** Whether a claim [agent, machine] is this agent on this machine (the domain's rule, core/domain/claim.ts). */
 export function isMe(claim: ClaimMark | null, agent: string, machine: string): boolean {
-  if (!claim || claim[0] !== agent) return false;
-  return !(claim[1] && machine && claim[1] !== machine);
+  return isMyClaim(claim ? { agent: claim[0], machine: claim[1] } : null, agent, machine);
 }
 
 /** Whether this agent on this machine may carry on with in-progress issue `n`: the claim that won it is its own.
@@ -212,87 +210,6 @@ export function readyIssues(cfg: Config, openNow: Issue[] = taskIssues()): Issue
     ![...names(i)].some((x) => x.startsWith(L.agentPrefix)));
   const lookedUp = new Map<number, boolean>();
   return sortedByOrder(ready).filter((i) => !openDependencies(i, openNumbers, lookedUp).length);
-}
-
-export function pick(cfg: Config, agent: string): Issue | null {
-  const L = taskLabels(cfg);
-  const mine = L.agentPrefix + agent;
-  const machine = machineId();
-  // Another machine's agent may have the same name: its issue is its, not ours to resume (#45).
-  const own = taskIssues("open", mine).filter((i) => names(i).has(L.inProgress) && ownIssue(i.number, agent, machine));
-  if (own.length) {
-    const i = sortedByOrder(own)[0] as Issue;
-    const full = waitingForSlot(cfg, i);
-    if (full) {
-      // Its branch is pushed but the PR can't open yet: wait instead of a session that the gate stops, and
-      // don't take new work meanwhile. The next pick after a merge frees a slot opens the PR.
-      process.stderr.write(`#${i.number} is ready on its branch and waits for a pull-request slot (${full}).\n`);
-      return null;
-    }
-    return i; // carry on with what this agent already holds
-  }
-  for (const i of readyIssues(cfg)) if (claimIssue(cfg, agent, i)) return i;
-  return null;
-}
-
-/** Labels and a claim comment for issue `i`; true when this agent's claim won. */
-export function claimIssue(cfg: Config, agent: string, i: Issue): boolean {
-  const L = taskLabels(cfg);
-  const mine = L.agentPrefix + agent;
-  const machine = machineId();
-  const n = i.number;
-  addLabels(n, [L.inProgress, mine]);
-  removeLabel(n, L.ready);
-  const where = machine ? ` machine=${machine}` : "";
-  // The budget the issue has now goes into the claim, so a later edit of the issue does not move it (#183).
-  comment(n, `<!-- factory-claim agent=${agent}${where} -->\n**${agent}** is working on this.\n${claimRecord(i.body)}`);
-  sleepSync(claimSettleSeconds()); // let a simultaneous claim land, then let the earliest comment decide
-  const winner = claimWinner(n);
-  if (isMe(winner, agent, machine)) return true;
-  if (!winner || winner[0] !== agent) removeLabel(n, mine); // someone else was first; their labels stay
-  // (a winner with our own name on another machine owns that label too: leave it on)
-  return false;
-}
-
-export interface Refusal {
-  code: string;
-  message: string;
-  fix: string;
-}
-
-/** Claim issue #n for the agent: [issue, null] on success, [null, {code, message, fix}] when it can't be claimed.
- * Nothing is changed on a refusal. An issue this agent already holds is returned as it is. */
-export function pickNamed(cfg: Config, agent: string, n: number): [Issue, null] | [null, Refusal] {
-  const L = taskLabels(cfg);
-  const mine = L.agentPrefix + agent;
-  const i = gh<Issue | null>("GET", `repos/{owner}/{repo}/issues/${n}`, undefined, true);
-  if (!i || i.state !== "open" || "pull_request" in i) {
-    return [null, { code: "issue-not-found", message: `#${n} is not an open task issue.`,
-      fix: "Check the number with `factory issues` and try again." }];
-  }
-  const have = names(i);
-  if (have.has(mine) && have.has(L.inProgress) && ownIssue(n, agent, machineId())) return [i, null];
-  const held = [...have].filter((x) => x.startsWith(L.agentPrefix));
-  if (held.length || have.has(L.inProgress) || have.has(L.inReview)) {
-    const who = held.length ? (held[0] as string).slice(L.agentPrefix.length) : "another agent";
-    return [null, { code: "issue-taken", message: `#${n} is already taken by ${who}.`,
-      fix: "Pick another issue, or ask the dev manager to release it with `factory issues release`." }];
-  }
-  if (have.has(L.blocked)) {
-    return [null, { code: "issue-blocked", message: `#${n} is blocked.`,
-      fix: "Wait for the dev manager to unblock it, or pick another issue." }];
-  }
-  const openDeps = openDependencies(i, new Set(taskIssues().map((x) => x.number)), new Map());
-  if (openDeps.length) {
-    return [null, { code: "issue-blocked", message: `#${n} waits for ${openDeps.map((d) => "#" + d).join(", ")}.`,
-      fix: "Build the issues it depends on first, or pick another issue." }];
-  }
-  if (!have.has(L.ready)) {
-    return [null, { code: "issue-not-ready", message: `#${n} is not labelled ${L.ready}.`,
-      fix: "Ask the dev manager to make it ready, or pick another issue." }];
-  }
-  if (claimIssue(cfg, agent, i)) return [i, null];
-  return [null, { code: "issue-taken", message: `Another agent claimed #${n} first.`, fix: "Pick another issue." }];
 }
 
 /** How long a claim waits for a simultaneous one to land: 2 s, or FACTORY_CLAIM_SETTLE_SECONDS (the tests set 0). */
@@ -372,28 +289,6 @@ export function giveBack(cfg: Config, agent: string): string[] {
   return out;
 }
 
-/** In progress -> in review; returns the one line saying which labels changed. */
-export function reviewIssue(cfg: Config, n: number): string {
-  const L = taskLabels(cfg);
-  const have = names(gh<Issue>("GET", `repos/{owner}/{repo}/issues/${n}`));
-  if (have.has(L.inReview) && !have.has(L.inProgress)) return `#${n} was already in review: nothing changed.`;
-  addLabels(n, [L.inReview]);
-  removeLabel(n, L.inProgress);
-  const gone = have.has(L.inProgress) ? `, removed ${L.inProgress}` : "";
-  return `#${n} is in review: added ${L.inReview}${gone}.`;
-}
-
-export function tick(n: number, index: number): void {
-  const issue = gh<Issue>("GET", `repos/{owner}/{repo}/issues/${n}`);
-  let body = issue.body || "";
-  const boxes = [...body.matchAll(BOX)];
-  if (!(index > 0 && index <= boxes.length)) die(`#${n} has ${boxes.length} checkboxes; there is no number ${index}`);
-  const m = boxes[index - 1] as RegExpMatchArray;
-  const at = (m.index as number) + (m[1] as string).length;
-  body = body.slice(0, at) + "x" + body.slice(at + 1);
-  gh("PATCH", `repos/{owner}/{repo}/issues/${n}`, { body });
-}
-
 /** The latest of: the issue's own update, and a commit on its task branch (seconds since the epoch). */
 export function lastActivity(issue: Issue): number {
   const times = [issue.updated_at as string];
@@ -461,34 +356,39 @@ function main(argv: string[]): number {
   const n = a.n !== undefined ? intArg(a.n, "n", cmd) : 0;
   const cfg = load();
   const L = taskLabels(cfg);
+  try {
+    return command(cmd, a, n, cfg, L);
+  } catch (e) {
+    if (e instanceof CoreError) die(e.message); // a refusal from the tracker, said as this command always said it
+    throw e;
+  }
+}
 
+function command(cmd: string, a: ReturnType<typeof parseArgs>, n: number, cfg: Config, L: TaskLabels): number {
+  // `factory issues` is the GitHub Issues command, so it takes that tracker whatever `tasks.source` says.
+  const tracker = taskTracker(cfg, "issues");
+  const id = String(n);
   if (cmd === "pick") {
-    const i = pick(cfg, a.agent as string);
-    if (!i) {
+    const { task, note } = tracker.pick({ agent: a.agent as string, machine: machineId() });
+    if (note) process.stderr.write(note + "\n");
+    if (!task) {
       console.log("none");
       return 1;
     }
-    console.log(`issue-${i.number} ${i.title}`);
+    console.log(`issue-${task.id} ${task.title}`);
   } else if (cmd === "peek") {
-    const ready = readyIssues(cfg);
-    if (!ready.length) {
+    const task = tracker.next();
+    if (!task) {
       console.log("none");
       return 1;
     }
-    console.log(`issue-${(ready[0] as Issue).number} ${(ready[0] as Issue).title}`);
-  } else if (cmd === "show") {
-    console.log(showText(n, gh<Issue>("GET", `repos/{owner}/{repo}/issues/${n}`)));
-  } else if (cmd === "tick") tick(n, intArg(a.index, "index", cmd));
-  else if (cmd === "review") console.log(reviewIssue(cfg, n));
-  else if (cmd === "block") {
-    const i = gh<Issue>("GET", `repos/{owner}/{repo}/issues/${n}`);
-    for (const x of names(i)) if (x.startsWith(L.agentPrefix) || x === L.inProgress || x === L.ready) removeLabel(n, x);
-    addLabels(n, [L.blocked]);
-    // A block ends the claim too, so whoever takes it after the unblock wins it (factory-release).
-    const held = [...names(i)].filter((x) => x.startsWith(L.agentPrefix)).map((x) => x.slice(L.agentPrefix.length));
-    comment(n, `<!-- factory-release agent=${held[0] ?? "none"} -->\n**Blocked:** ${a.reason}`);
-  } else if (cmd === "give-back") console.log(giveBack(cfg, a.agent as string).join("\n"));
-  else if (cmd === "release") releaseIssue(cfg, n, (a.reason as string | undefined) ?? "");
+    console.log(`issue-${task.id} ${task.title}`);
+  } else if (cmd === "show") console.log(tracker.show(id));
+  else if (cmd === "tick") tracker.tick(id, intArg(a.index, "index", cmd));
+  else if (cmd === "review") console.log(tracker.setState(id, "in-review"));
+  else if (cmd === "block") tracker.block(id, a.reason as string);
+  else if (cmd === "give-back") console.log(giveBack(cfg, a.agent as string).join("\n"));
+  else if (cmd === "release") tracker.release(id, (a.reason as string | undefined) ?? "");
   else if (cmd === "stale") {
     const given = a.hours !== undefined ? toFloat(a.hours) : null;
     const tasks = (cfg.tasks ?? {}) as Record<string, unknown>;
@@ -503,25 +403,17 @@ function main(argv: string[]): number {
       }
     }
   } else if (cmd === "new") {
-    const data: Record<string, unknown> = { title: a.title, body: readFileSync(a["body-file"] as string, "utf8"),
-      labels: [L.ready, ...(a.label as string[])] };
-    const milestone = a.milestone as string | undefined;
-    if (milestone) {
-      const ms = new Map(ghAll<{ title: string; number: number }>("repos/{owner}/{repo}/milestones?state=all").map((m) => [m.title, m.number]));
-      if (!ms.has(milestone)) ms.set(milestone, gh<{ number: number }>("POST", "repos/{owner}/{repo}/milestones", { title: milestone }).number);
-      data.milestone = ms.get(milestone);
-    }
-    const i = gh<Issue>("POST", "repos/{owner}/{repo}/issues", data);
-    console.log(`#${i.number} ${i.html_url}`);
+    const filed = tracker.file({ title: a.title as string, body: readFileSync(a["body-file"] as string, "utf8"),
+      group: (a.milestone as string | undefined) || undefined, tags: a.label as string[] });
+    console.log(`#${filed.id} ${filed.url}`);
   } else if (cmd === "setup") {
     const there: string[] = [];
     for (const name of setupLabels(cfg, there)) console.log(`created ${name}`);
     for (const name of there) console.log(`already there: ${name}`);
   } else if (cmd === "list") {
-    for (const i of sortedByOrder(taskIssues())) {
-      const state = [...names(i)].filter((x) => x.startsWith("factory") || x.startsWith(L.agentPrefix));
-      const ms = (i.milestone ?? {}).title ?? "";
-      console.log(`#${String(i.number).padEnd(5)} ${ms.padEnd(10)} ${state.sort().join(", ").padEnd(45)} ${i.title}`);
+    for (const t of tracker.list()) {
+      const state = t.tags.filter((x) => x.startsWith("factory") || x.startsWith(L.agentPrefix));
+      console.log(`#${t.id.padEnd(5)} ${t.group.padEnd(10)} ${state.sort().join(", ").padEnd(45)} ${t.title}`);
     }
   }
   return 0;

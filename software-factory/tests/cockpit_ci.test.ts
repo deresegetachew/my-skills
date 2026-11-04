@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CI, envWith, gitRepo, HOOKS, SF, sh, tmp, write, WIKI, type Proc } from "./support.ts";
+import { CI, copyHookFolders, envWith, gitRepo, HOOKS, SF, sh, tmp, write, WIKI, type Proc } from "./support.ts";
 
 const T = 60_000;
 type Obj = Record<string, unknown>;
@@ -31,6 +31,7 @@ function setup(extra: Env = {}): Proj {
   gitRepo(d);
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(d, ".claude", "hooks", f));
+  copyHookFolders(join(d, ".claude", "hooks"));
   cpSync(CI, join(d, ".claude", "ci"), { recursive: true });
   write(join(d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "issues" }, ci: { runners: 1 } }));
   const bin = join(root, "bin");
