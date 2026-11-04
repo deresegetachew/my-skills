@@ -21,7 +21,7 @@
 //   factory cockpit --ink          the cockpit's Ink UI (decision 0002, #365) on the cached snapshot: the release's
 //                                  bundle (factory_cockpit_ink.js beside this file), else cockpit/ui.tsx in my-skills
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { toFloat } from "./factory_config.ts";
@@ -372,46 +372,57 @@ async function refresh(): Promise<number> {
 }
 
 /** The Ink UI to run (decision 0002, #365): the bundle a release installs beside this file, else the source in a
- * my-skills checkout (linked), else null. */
-export function inkUi(): string | null {
+ * my-skills checkout (linked), else null. A view (#367) also takes the source beside the `factory` script that started
+ * it (FACTORY_SELF): my-skills' own script run in a project whose hooks are copies. */
+export function inkUi(forView = false): string | null {
   const bundle = join(HOOKS, "factory_cockpit_ink.js");
   if (existsSync(bundle)) return bundle;
   const source = join(HOOKS, "..", "cockpit", "ui.tsx");
-  return existsSync(source) ? source : null;
+  if (existsSync(source)) return source;
+  const self = process.env.FACTORY_SELF;
+  if (!forView || !self || !existsSync(self)) return null;
+  const beside = join(dirname(realpathSync(self)), "cockpit", "ui.tsx");
+  return existsSync(beside) ? beside : null;
 }
 
-/** `factory cockpit --ink`: the Ink UI on the cached snapshot (read now when there is none), passed as a file. */
-async function ink(): Promise<number> {
-  const ui = inkUi();
-  if (!ui) {
-    return fail({ code: "cockpit_ui_missing", message: "The cockpit's Ink UI isn't installed: there is no factory_cockpit_ink.js " +
-      `in ${HOOKS}.`, fix: "Run `factory update` to a release that carries it (`factory releases` lists them)." });
-  }
-  const snap = refreshIfOld()[0] ?? await snapshot();
+/** Runs the Ink UI on the terminal with `args`, then `--data <file>` holding `data`; the file is gone afterwards. `env`
+ *  is added to this environment (FORCE_COLOR for a view coloured off a terminal). */
+export function runUi(ui: string, args: string[], data: unknown, env: Record<string, string> = {}): number {
   const dir = mkdtempSync(join(tmpdir(), "factory-cockpit-"));
   try {
-    const file = join(dir, "snapshot.json");
-    writeFileSync(file, JSON.stringify(snap));
+    const file = join(dir, "data.json");
+    writeFileSync(file, JSON.stringify(data));
     // --no-install: offline, as the rest of the factory; Bun never fetches a package the bundle doesn't hold
-    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, "--data", file],
-      { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+    const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, ...args, "--data", file],
+      { stdin: "inherit", stdout: "inherit", stderr: "inherit", env: { ...process.env, ...env } });
     return p.exitCode ?? 1;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 }
 
+export const UI_MISSING: Problem = { code: "cockpit_ui_missing", message: "The cockpit's Ink UI isn't installed: there is no " +
+  `factory_cockpit_ink.js in ${HOOKS}.`, fix: "Run `factory update` to a release that carries it (`factory releases` lists them)." };
+
+/** `factory cockpit --ink`: the Ink UI on the cached snapshot (read now when there is none), passed as a file. */
+async function ink(): Promise<number> {
+  const ui = inkUi();
+  if (!ui) return fail(UI_MISSING);
+  return runUi(ui, [], refreshIfOld()[0] ?? await snapshot());
+}
+
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
-  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --ci, --usage, " +
-    "--settings [--color], --ink or watch <item>.",
+  message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --tasks, --ci, --agents, " +
+    "--settings [--color], --health, --usage, --ink or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, " +
     "`factory cockpit --ink` for the cockpit on Ink, or " +
     "`factory cockpit watch <item>` to watch a sub-manager.",
 };
 
-const FLAGS = ["--json", "--status", "--refresh", "--sidebar", "--bar", "--needs", "--ci", "--usage", "--settings", "--ink"];
+const VIEW_FLAGS = ["--sidebar", "--needs", "--tasks", "--ci", "--agents", "--health", "--usage"];
+const FLAGS = ["--json", "--status", "--refresh", "--bar", "--settings", "--ink", ...VIEW_FLAGS];
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -464,16 +475,22 @@ export async function main(argv: string[]): Promise<number> {
   }
   if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
   if (flag === "--sidebar-open") return (await import("./factory_cockpit_ui.ts")).sidebarOpen(rest); // the Ink list's keys (#366)
+  if (flag === "--prs-data") return (await import("./factory_cockpit_ui.ts")).prsData(rest); // what the PR view reads (#383)
   if (flag === "--sidebar-data" && !rest.length) return (await import("./factory_cockpit_ui.ts")).sidebarData();
+  if (flag === "--bar-resolve") return (await import("./factory_cockpit_ui.ts")).barResolve(rest); // the Ink bar's Enter (#367)
+  if (flag === "--view-data") return (await import("./factory_cockpit_ui.ts")).viewData(rest); // a view's r (#367)
   if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
   }
-  if (flag === undefined || ["--sidebar", "--bar", "--needs", "--ci", "--usage"].includes(flag)) {
+  if (flag === undefined || VIEW_FLAGS.includes(flag)) {
     const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
     if (flag === "--sidebar") return ui.sidebar();
     if (flag === "--needs") return ui.needs();
+    if (flag === "--tasks") return ui.tasksView();
     if (flag === "--ci") return ui.ciView(); // the CI view (#339)
+    if (flag === "--agents") return ui.agentsView();
+    if (flag === "--health") return ui.healthView();
     if (flag === "--usage") return await ui.usageView(); // the usage view (#341)
     return ui.open();
   }
