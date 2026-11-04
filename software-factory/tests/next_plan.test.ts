@@ -20,7 +20,7 @@ function project(plan: string, blocked = "# Blocked\n"): string {
 }
 
 function next(d: string, ...args: string[]): [number, string] {
-  const env = { ...process.env, CLAUDE_PROJECT_DIR: d };
+  const env: Record<string, string | undefined> = { ...process.env, CLAUDE_PROJECT_DIR: d };
   delete env.FACTORY_AGENT;
   delete env.FACTORY_PID;
   const p = runHook("next_task", ["--no-rework", ...args], { cwd: d, env });
