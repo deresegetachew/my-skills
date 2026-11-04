@@ -1,0 +1,1 @@
+../../../software-factory/hooks/core/compose.ts
