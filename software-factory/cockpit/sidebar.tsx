@@ -19,6 +19,8 @@ export interface Actions {
   openSession(name: string): void;
   openView(key: string): void;
   bar(words: string[]): void;
+  /** The search across the views (#392). */
+  search(): void;
   reload(): void;
   leave(): void;
 }
@@ -123,9 +125,9 @@ function body(data: Data, entries: Entry[], selected: number): [Line[], number] 
 }
 
 function keysFor(onSession: boolean, rows: number): string[] {
-  if (rows < 16) return [onSession ? "↑↓ Enter · : · r · q" : "↑↓ Enter · 1-8 · : · q"];
+  if (rows < 16) return [onSession ? "↑↓ Enter · / search · : · r · q" : "↑↓ Enter · 1-8 · / search · : · q"];
   return ["", onSession ? "Enter shows it · s say · x stop" : "Enter opens the view", "↑↓ move · 1-8 views · n start",
-    ": commands · r reload · q leave"];
+    "/ search · : commands", "r reload · q leave"];
 }
 
 export interface SidebarProps {
@@ -154,6 +156,7 @@ export function Sidebar({ data, cols, rows, color, actions, keys = true }: Sideb
     else if (key.return && current?.kind === "view") actions.openView(current.view.key);
     else if (data.views.some((v) => v.key === input)) actions.openView(input);
     else if (input === ":") actions.bar([]);
+    else if (input === "/") actions.search();
     else if (input === "n") actions.bar(["owner", "start"]);
     else if (input === "s" && current?.kind === "session") actions.bar(["say", current.row.name]);
     else if (input === "x" && current?.kind === "session") actions.bar(["owner", "stop", current.row.name]);

@@ -1,12 +1,14 @@
 // The Tasks & PRD view (#367), towards its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/VTasks.dc.html): how many
 // tasks are in each lane (ready, in progress, in review, blocked, not ready yet, done), the tasks with who holds them,
 // and the selected one's detail. Its data is `factory cockpit --view-data tasks`: the project's task tracker (#377), so
-// the GitHub issues in issues mode and the build plan otherwise. j k (or ↑ ↓) move, r reads the tasks again, q closes.
+// the GitHub issues in issues mode and the build plan otherwise. j k (or ↑ ↓) move, / filters the rows (#392), r reads
+// the tasks again, q closes.
 // It only reads: claiming, blocking and releasing are the agents' and the dev manager's.
 import { useApp, useInput } from "ink";
 import { type ReactElement, useEffect, useState } from "react";
 import { cut, type Line, Lines, list, type Obj, plain, screen, seg, spread, type Style } from "./lines.tsx";
 import { clip, padStr, para } from "./doc.tsx";
+import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
 import type { Got } from "./read.ts";
 
 export const TASKS_KEYS = "j k move · r read again · q close";
@@ -16,16 +18,6 @@ const LANES: Array<[string, string, Style]> = [["in-progress", "in progress", "b
 
 const ORDER = LANES.map(([s]) => s);
 
-/** The tasks of the data, in lane order (in progress first, done last). */
-export function tasksOf(data: Got | undefined): Obj[] {
-  if (!data || data === "late") return [];
-  const rank = (t: Obj) => {
-    const i = ORDER.indexOf(plain(t.state));
-    return i < 0 ? ORDER.length : i;
-  };
-  return list(data.tasks).map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map((x) => x.t);
-}
-
 function stateText(s: string): string {
   return LANES.find(([k]) => k === s)?.[1] ?? s;
 }
@@ -33,6 +25,28 @@ function stateText(s: string): string {
 function who(t: Obj): string {
   const h = Array.isArray(t.holders) ? t.holders.map(plain).filter(Boolean) : [];
   return h.length ? h.join(", ") : "—";
+}
+
+/** What the filter and the search match a task by: its number, title, lane, holders and milestone or phase. */
+export function taskText(t: Obj): string {
+  return [`#${plain(t.id)}`, plain(t.title), stateText(plain(t.state)), who(t), plain(t.group)].join(" ");
+}
+
+/** The tasks of the data, in lane order (in progress first, done last), those that match `typed` (#392). */
+export function tasksOf(data: Got | undefined, typed = ""): Obj[] {
+  if (!data || data === "late") return [];
+  const rank = (t: Obj) => {
+    const i = ORDER.indexOf(plain(t.state));
+    return i < 0 ? ORDER.length : i;
+  };
+  return list(data.tasks).map((t, i) => ({ t, i })).sort((a, b) => rank(a.t) - rank(b.t) || a.i - b.i).map((x) => x.t)
+    .filter((t) => matchesTyped(taskText(t), typed));
+}
+
+/** The index of task `id` (with a leading # or not) among the tasks, else 0: the search's Enter (#392). */
+export function taskAt(data: Got | undefined, id: string): number {
+  const want = id.replace(/^#/, "");
+  return Math.max(tasksOf(data).findIndex((t) => plain(t.id) === want), 0);
 }
 
 function lanes(all: Obj[]): Line {
@@ -69,7 +83,7 @@ function card(t: Obj, source: string, cols: number): Line[] {
 
 /** One screen of the view, `rows` lines at most, each at most `cols` wide. `data` undefined: still reading. */
 export function tasksLines(data: Got | undefined, selected: number, cols: number, rows: number, repo: string,
-  limitSeconds: number): Line[] {
+  limitSeconds: number, filter: Filter = NO_FILTER): Line[] {
   const source = data && data !== "late" ? plain(data.source) : "";
   const right = source === "issues" ? "factory issues list · factory next" : "factory next · the build plan";
   const head = spread([seg("factory", "amber"), seg(`  ${repo} · Tasks and PRD`)], [seg(right, "dim")], cols);
@@ -82,15 +96,17 @@ export function tasksLines(data: Got | undefined, selected: number, cols: number
     body = [...para(`Can't read the tasks (${plain(data.error).slice(0, 200)}).`, cols, "red"),
       ...para("Run `factory issues list` to see the whole error; if it is about GitHub, `gh auth status`.", cols, "dim")];
   } else {
-    const all = tasksOf(data);
+    const every = tasksOf(data);
+    const all = tasksOf(data, filter.typed);
     const prd = plain(data.prd);
-    body = [lanes(all), ...(prd ? para(`PRD: ${prd}`, cols, "dim") : [])];
-    const open = all.filter((t) => plain(t.state) !== "done");
+    body = [lanes(every), ...(prd ? para(`PRD: ${prd}`, cols, "dim") : [])];
+    const open = every.filter((t) => plain(t.state) !== "done");
     if (open.length && !open.some((t) => plain(t.state) === "ready")) {
       body.push(...para("No task is ready, so the coding agents wait for one.", cols, "amber"));
     }
     body.push([]);
-    if (!all.length) body.push([seg("No tasks yet.")]);
+    if (!every.length) body.push([seg("No tasks yet.")]);
+    else if (!all.length) body.push(noMatch(filter.typed));
     else {
       const at = Math.min(Math.max(selected, 0), all.length - 1);
       const detail = card(all[at] as Obj, source, cols);
@@ -99,7 +115,7 @@ export function tasksLines(data: Got | undefined, selected: number, cols: number
       body.push(...all.slice(start, start + room).map((t, i) => row(t, start + i === at, cols)), [], ...detail);
     }
   }
-  return screen([head, [], ...body], TASKS_KEYS, cols, rows);
+  return screen([head, [], ...body], filterKeys(filter, TASKS_KEYS), cols, rows);
 }
 
 export interface TasksProps {
@@ -110,27 +126,36 @@ export interface TasksProps {
   limitSeconds: number;
   /** Reads the tasks (`factory cockpit --view-data tasks`). */
   load: () => Promise<Got>;
+  /** The task to select first, by its number: the search's Enter (#392). */
+  find?: string;
 }
 
 export function TasksView(props: TasksProps): ReactElement {
   const { exit } = useApp();
   const [data, setData] = useState<Got | undefined>(undefined);
   const [selected, setSelected] = useState(0);
-  const read = () => {
+  const [filter, setFilter] = useState<Filter>(NO_FILTER);
+  const read = (first: boolean) => {
     setData(undefined);
     void props.load().then((got) => {
       setData(got);
-      setSelected((s) => Math.min(s, Math.max(tasksOf(got).length - 1, 0)));
+      if (first && props.find) setSelected(taskAt(got, props.find));
+      else setSelected((s) => Math.min(s, Math.max(tasksOf(got, filter.typed).length - 1, 0)));
     });
   };
-  useEffect(read, []);
+  useEffect(() => read(true), []);
   useInput((input, key) => {
-    if (input === "q" || key.escape || (key.ctrl && input === "c")) exit();
+    if (key.ctrl && input === "c") return exit();
+    const next = data === undefined ? null : filterKey(filter, input, key);
+    if (next) {
+      setFilter((f) => filterKey(f, input, key) ?? f); // keys in one chunk each see the one before
+      setSelected(0);
+    } else if (input === "q" || key.escape) exit();
     else if (data === undefined) return; // reading
-    else if (input === "j" || key.downArrow) setSelected((s) => Math.min(s + 1, Math.max(tasksOf(data).length - 1, 0)));
+    else if (input === "j" || key.downArrow) setSelected((s) => Math.min(s + 1, Math.max(tasksOf(data, filter.typed).length - 1, 0)));
     else if (input === "k" || key.upArrow) setSelected((s) => Math.max(s - 1, 0));
-    else if (input === "r") read();
+    else if (input === "r") read(false);
   });
-  const lines = tasksLines(data, selected, props.cols, props.rows, props.repo, props.limitSeconds);
+  const lines = tasksLines(data, selected, props.cols, props.rows, props.repo, props.limitSeconds, filter);
   return <Lines lines={lines.map((l) => cut(l, props.cols))} color={props.color} />;
 }

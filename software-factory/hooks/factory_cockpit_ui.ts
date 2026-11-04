@@ -25,6 +25,13 @@
 //                                next line answers an action's question)
 //   factory cockpit --bar-resolve <typed> [<picked>]
 //                                what the Ink bar's line runs, as JSON, or the refusal
+//   factory cockpit --search [<words>]
+//                                the search across the views (#392; / in the list, C-a /), the words typed in already;
+//                                Enter opens the row's view on that row, through the --find below
+//   factory cockpit --search-data
+//                                what the search looks through, as JSON: the cache, the settings, the usage and lessons
+//   --find <text>                after --needs, --tasks, --ci, --agents, --settings, --health or --usage: the view opens
+//                                on that row (an ask's id, a task's number) or line
 //   factory cockpit --needs      the "Needs you" view, from the cache
 //   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json`
 //   factory cockpit --prs-data [--fresh]
@@ -230,6 +237,8 @@ export function config(root: string, script: string): string {
     "bind q detach-client",
     "# : the command bar over the factory's read-only commands and the owner's actions (each asks first).",
     `bind : ${popup("-w 80% -h 60%", factoryCall(script, ["cockpit", "--bar"]))}`,
+    "# / the search across the views (#392): Enter opens the row's view in the popup, Esc closes.",
+    `bind / ${popup("-w 90% -h 90%", factoryCall(script, ["cockpit", "--search"]))}`,
     "# The views, as popups running the existing commands through less -R (q closes).",
   ];
   for (const v of views()) {
@@ -253,7 +262,7 @@ export function config(root: string, script: string): string {
     "set -g visual-bell off",
     "set -g pane-border-status bottom",
     "set -g pane-border-format '#{?#{==:#{pane_index},0}, the list ,"
-      + " C-a C-a the list · C-a : commands · C-a 1-8 views · C-a d leave }'",
+      + " C-a C-a the list · C-a : commands · C-a / search · C-a 1-8 views · C-a d leave }'",
   );
   return lines.join("\n") + "\n";
 }
@@ -467,6 +476,11 @@ function openView(p: Pane, v: View): void {
   popup(p, ["-w", "90%", "-h", "90%"], viewCommand(p.script, v));
 }
 
+/** The search across the views (#392). */
+function openSearch(p: Pane): void {
+  popup(p, ["-w", "90%", "-h", "90%"], factoryCall(p.script, ["cockpit", "--search"]));
+}
+
 /** The bar, with `words` typed in already (an action such as `say taytu`, or nothing). */
 function openBar(p: Pane, words: string[]): void {
   popup(p, ["-w", "80%", "-h", "60%"], factoryCall(p.script, ["cockpit", "--bar", ...words]));
@@ -519,6 +533,7 @@ async function sidebarLoop(): Promise<number> {
       const v = vs.find((x) => x.key === key);
       if (v) openView(p, v);
     } else if (key === ":") openBar(p, []);
+    else if (key === "/") openSearch(p);
     else if (key === "s" || key === "x" || key === "n") {
       // The bar, with the action typed in already: the owner adds the message or the name, then answers its question.
       const e = entries(snap, vs)[selected];
@@ -573,9 +588,10 @@ export function sidebarOpen(args: string[]): number {
   if (what === "session" && rest.length === 1 && rest[0]) showSession(p, rest[0]);
   else if (what === "view" && rest.length === 1 && v) openView(p, v);
   else if (what === "bar") openBar(p, rest);
+  else if (what === "search" && !rest.length) openSearch(p);
   else if (what === "leave" && !rest.length) tmux(p.sock, ["detach-client"]);
   else {
-    refuse("cockpit_usage", `factory cockpit --sidebar-open takes session <name>, view <key>, bar [<words>] or leave, not "${plain(args.join(" "))}".`,
+    refuse("cockpit_usage", `factory cockpit --sidebar-open takes session <name>, view <key>, bar [<words>], search or leave, not "${plain(args.join(" "))}".`,
       "The cockpit's list runs it for its keys; to open the cockpit, run `factory cockpit`.", 2);
   }
   return 0;
@@ -694,8 +710,8 @@ function termColor(): boolean {
 }
 
 /** `factory cockpit --needs`: the Needs you view, from the cache; r reads the snapshot again. */
-export function needs(): number {
-  return view("needs", { snapshot: readCache(), read: readCommand(null) });
+export function needs(find = ""): number {
+  return view("needs", { snapshot: readCache(), read: readCommand(null), find });
 }
 
 /** `factory cockpit --prs [<n>]`: the Pull requests view (#338), from `factory prs --json`, with <n> selected; m merges
@@ -826,10 +842,10 @@ function ownerOnly(): void {
   }
 }
 
-export function settingsView(args: string[]): number {
+export function settingsView(args: string[], find = ""): number {
   ownerOnly();
   const color = args.includes("--color") && !("NO_COLOR" in process.env);
-  return docView("settings", { data: settingsData(), read: readCommand("settings"), color });
+  return docView("settings", { data: settingsData(), read: readCommand("settings"), color, find });
 }
 
 // --- the CI view (#339, PRD US-13) -----------------------------------------------------------------------------------
@@ -837,7 +853,7 @@ export function settingsView(args: string[]): number {
 // `factory cockpit --ci` (cockpit/views/ci.tsx), from the `ci` part of the cockpit's cache, so it makes no GitHub call;
 // the heavy runner count is this machine's setting (ci_names.ts). Coloured unless NO_COLOR or a dumb terminal.
 
-export function ciView(): number {
+export function ciView(find = ""): number {
   let heavy: Obj | null = null;
   try {
     const { raw, source } = runnerSetting(ciConfig());
@@ -845,7 +861,7 @@ export function ciView(): number {
   } catch {
     // .claude/factory.json can't be read: the card says so
   }
-  return docView("ci", { data: readCache(), read: readCommand(null), color: termColor(), heavy, host: host() });
+  return docView("ci", { data: readCache(), read: readCommand(null), color: termColor(), heavy, host: host(), find });
 }
 
 // --- the usage view (#341, PRD US-13) --------------------------------------------------------------------------------
@@ -938,8 +954,8 @@ async function usageData(root: string, nowMs: number): Promise<Obj> {
   return { repo: plain(basename(root)), tasks: await taskUse(root, nowMs), lessons, cap, path: plain(path) };
 }
 
-export async function usageView(): Promise<number> {
-  return docView("usage", { data: await usageData(process.cwd(), Date.now()), read: readCommand("usage"), color: termColor() });
+export async function usageView(find = ""): Promise<number> {
+  return docView("usage", { data: await usageData(process.cwd(), Date.now()), read: readCommand("usage"), color: termColor(), find });
 }
 
 // --- the Tasks & PRD, Agents & machines and Health & releases views (#367) -------------------------------------------
@@ -961,18 +977,48 @@ async function tasksData(): Promise<Obj> {
 }
 
 /** `factory cockpit --tasks`: the Tasks & PRD view; it reads the tasks itself, within its time limit. */
-export function tasksView(): number {
-  return view("tasks", { read: readCommand("tasks") });
+export function tasksView(find = ""): number {
+  return view("tasks", { read: readCommand("tasks"), find });
 }
 
 /** `factory cockpit --agents`: the Agents & machines view, from the cache's sessions. */
-export function agentsView(): number {
-  return docView("agents", { data: readCache(), read: readCommand(null), host: host() });
+export function agentsView(find = ""): number {
+  return docView("agents", { data: readCache(), read: readCommand(null), host: host(), find });
 }
 
 /** `factory cockpit --health`: the Health & releases view, from the cache's doctor and version. */
-export function healthView(): number {
-  return docView("health", { data: readCache(), read: readCommand(null) });
+export function healthView(find = ""): number {
+  return docView("health", { data: readCache(), read: readCommand(null), find });
+}
+
+// --- the search across the views (#392) ------------------------------------------------------------------------------
+//
+// `factory cockpit --search [<words>]` (cockpit/search.tsx), opened by / in the list or C-a /. Its data is read once, when
+// it opens, and never from GitHub: the cockpit's cache (which holds the tasks too), the settings and this machine's
+// usage and lessons. Enter opens the picked row's view in the same popup (`factory cockpit --<view> --find <row>`, or
+// `--prs <n>`); Esc closes.
+
+/** What the search looks through. The settings are left out in an agent session, as the Settings view refuses there. */
+async function searchData(): Promise<Obj> {
+  const agent = ["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"].some((n) => n in process.env);
+  const usage = await usageData(process.cwd(), Date.now());
+  return { snapshot: readCache(), settings: agent ? null : settingsData(), usage: { tasks: usage.tasks, lessons: usage.lessons } };
+}
+
+/** `factory cockpit --search [<words>]`: the search, with <words> typed in already; off a terminal, one frame of it with
+ *  no colour, sized by COLUMNS and LINES. */
+export async function searchView(words: string[]): Promise<number> {
+  return view("search", { data: await searchData(), prefill: plain(words.join(" ")), open: ["bash", factoryScript(top()), "cockpit"] });
+}
+
+/** `factory cockpit --search-data`: what the search looks through, as JSON. */
+export async function searchDataCommand(args: string[]): Promise<number> {
+  if (args.length) {
+    refuse("cockpit_usage", "factory cockpit --search-data takes no argument.",
+      "The search runs it; to search, run `factory cockpit --search <words>`, or press / in the cockpit's list.", 2);
+  }
+  console.log(JSON.stringify(await searchData()));
+  return 0;
 }
 
 /** `factory cockpit --view-data <settings|usage|tasks>`: what that view reads, as JSON. The views run it for r. */

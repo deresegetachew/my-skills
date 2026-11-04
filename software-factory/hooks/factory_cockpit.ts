@@ -6,8 +6,9 @@
 //
 // The snapshot is made from the commands that already know each part, run side by side, so there is one reader of
 // each: `factory agents ls --json` (sessions on every machine, the role from the heartbeat row, #299), `factory prs
-// --json` (pull requests, owner asks), `factory ci status --json` (#304) and `factory doctor`. Keys: generatedAt,
-// version, sessions, needsYou, pulls, ci, doctor, counts, missing. A part that can't be read is null (or what it had)
+// --json` (pull requests, owner asks), `factory ci status --json` (#304), `factory doctor` and the task tracker (what
+// the Tasks & PRD view reads, for the search, #392). Keys: generatedAt, version, sessions, needsYou, pulls, ci, doctor,
+// tasks, counts, missing. A part that can't be read is null (or what it had)
 // and `missing` says why, each as {code, message, fix}; the command still exits 0.
 //
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
@@ -244,12 +245,20 @@ function version(missing: Problem[]): Obj {
   return { installed: null, source: null };
 }
 
+/** The tasks, as the Tasks & PRD view reads them (`--view-data tasks`), for the search (#392); null when that printed no
+ *  data. A tracker that can't be read gives its error in the part, and the view says it. */
+function tasks(s: Step): Obj | null {
+  const data = parseJson(s.stdout);
+  return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Obj) : null;
+}
+
 export async function snapshot(): Promise<Obj> {
-  const [ls, prs, ciStep, doc] = await Promise.all([
+  const [ls, prs, ciStep, doc, taskStep] = await Promise.all([
     step(hook("factory_agents", "ls", "--json")),
     step(hook("factory_prs", "--json", "--fresh")), // read now: this snapshot is the cockpit's own cache
     step(["bash", join(HOOKS, "..", "ci", "ci.sh"), "status", "--json"]),
     step(hook("factory_doctor")),
+    step(hook("factory_cockpit", "--view-data", "tasks")),
   ]);
   const missing: Problem[] = [];
   const rows = sessions(ls, missing);
@@ -261,7 +270,7 @@ export async function snapshot(): Promise<Obj> {
   const limit = limited(missing);
   return {
     generatedAt: isoUtc(Date.now() / 1000), version: ver, sessions: rows ?? [], needsYou: needs, pulls: p.pulls, ci: ciData,
-    doctor: checks, counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
+    doctor: checks, tasks: tasks(taskStep), counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
       pulls: (p.pulls ?? []).length, needYou: needs.length },
     missing: limit?.missing ?? missing,
     ...(limit ? { limit: limit.limit } : {}),
@@ -441,7 +450,7 @@ async function ink(): Promise<number> {
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
   message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --tasks, --ci, --agents, " +
-    "--settings [--color], --health, --usage, --ink or watch <item>.",
+    "--settings [--color], --health, --usage (each view also with --find <text>), --search [<words>], --ink or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, " +
     "`factory cockpit --ink` for the cockpit on Ink, or " +
@@ -450,6 +459,16 @@ const USAGE_ERROR: Problem = {
 
 const VIEW_FLAGS = ["--sidebar", "--needs", "--tasks", "--ci", "--agents", "--health", "--usage"];
 const FLAGS = ["--json", "--status", "--refresh", "--bar", "--settings", "--ink", ...VIEW_FLAGS];
+/** The views the search opens on a row (#392): `--<view> --find <text>`. */
+const FIND_FLAGS = ["--needs", "--tasks", "--ci", "--agents", "--settings", "--health", "--usage"];
+
+/** `--find <text>` taken out of a view's arguments, or null when it has no text. */
+function takeFind(args: string[]): { find: string; rest: string[] } | null {
+  const at = args.indexOf("--find");
+  if (at < 0) return { find: "", rest: args };
+  const text = args[at + 1];
+  return text ? { find: text, rest: [...args.slice(0, at), ...args.slice(at + 2)] } : null;
+}
 
 function fail(p: Problem, code = 1): number {
   process.stderr.write(JSON.stringify(p) + "\n");
@@ -497,8 +516,16 @@ export async function main(argv: string[]): Promise<number> {
   const [flag, ...rest] = argv;
   if (flag === "watch") return watch(rest);
   if (flag === "--prs") return (await import("./factory_cockpit_ui.ts")).prsView(rest); // the Pull requests view (#338)
-  if (flag === "--settings" && rest.every((a) => a === "--color") && rest.length <= 1) {
-    return (await import("./factory_cockpit_ui.ts")).settingsView(rest);
+  if (flag === "--search") return (await import("./factory_cockpit_ui.ts")).searchView(rest); // the search (#392)
+  if (flag === "--search-data") return (await import("./factory_cockpit_ui.ts")).searchDataCommand(rest);
+  const found = flag !== undefined && FIND_FLAGS.includes(flag) ? takeFind(rest) : { find: "", rest };
+  if (found === null) {
+    process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
+    return 2;
+  }
+  const find = found.find;
+  if (flag === "--settings" && found.rest.every((a) => a === "--color") && found.rest.length <= 1) {
+    return (await import("./factory_cockpit_ui.ts")).settingsView(found.rest, find);
   }
   if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
   if (flag === "--sidebar-open") return (await import("./factory_cockpit_ui.ts")).sidebarOpen(rest); // the Ink list's keys (#366)
@@ -506,19 +533,19 @@ export async function main(argv: string[]): Promise<number> {
   if (flag === "--sidebar-data" && !rest.length) return (await import("./factory_cockpit_ui.ts")).sidebarData();
   if (flag === "--bar-resolve") return (await import("./factory_cockpit_ui.ts")).barResolve(rest); // the Ink bar's Enter (#367)
   if (flag === "--view-data") return (await import("./factory_cockpit_ui.ts")).viewData(rest); // a view's r (#367)
-  if (rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
+  if (found.rest.length || (flag !== undefined && !FLAGS.includes(flag))) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");
     return 2;
   }
   if (flag === undefined || VIEW_FLAGS.includes(flag)) {
     const ui = await import("./factory_cockpit_ui.ts"); // the tmux cockpit (#308); --json and --status don't load it
     if (flag === "--sidebar") return ui.sidebar();
-    if (flag === "--needs") return ui.needs();
-    if (flag === "--tasks") return ui.tasksView();
-    if (flag === "--ci") return ui.ciView(); // the CI view (#339)
-    if (flag === "--agents") return ui.agentsView();
-    if (flag === "--health") return ui.healthView();
-    if (flag === "--usage") return await ui.usageView(); // the usage view (#341)
+    if (flag === "--needs") return ui.needs(find);
+    if (flag === "--tasks") return ui.tasksView(find);
+    if (flag === "--ci") return ui.ciView(find); // the CI view (#339)
+    if (flag === "--agents") return ui.agentsView(find);
+    if (flag === "--health") return ui.healthView(find);
+    if (flag === "--usage") return await ui.usageView(find); // the usage view (#341)
     return ui.open();
   }
   if (flag === "--ink") return ink();
