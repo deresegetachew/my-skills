@@ -30,27 +30,23 @@
 //
 // Reads the plan and blocked list from the main branch when it can (`git show origin/<main>:...`), so a stale
 // working copy can't make the agent skip or repeat a task.
-import { readFileSync } from "node:fs";
+//
+// The tasks come from the TaskTracker port (core/ports/task_tracker.ts, #377), which compose() picks from
+// `tasks.source`: the plan file or GitHub Issues. Rework is a pull request, not a task, so it is read here.
 import { join } from "node:path";
-import { blockedIds, type Config, load, taskSource, tasks, toFloat } from "./factory_config.ts";
+import { type Config, load, taskSource, toFloat } from "./factory_config.ts";
+import { compose } from "./core/compose.ts";
+import { CoreError } from "./core/domain/error.ts";
+import type { Task } from "./core/domain/task.ts";
+import type { TaskTracker } from "./core/ports/task_tracker.ts";
 import { staleClaims } from "./factory_agents.ts";
 import { claimRework, claimTask, describeRework, isMine, release, reworkHolder } from "./factory_claims.ts";
-import { type Comment, type Issue, pick, pickNamed, readyIssues } from "./factory_issues.ts";
+import type { Comment } from "./factory_issues.ts";
 import { machineId } from "./factory_machine.ts";
 import { verdicts } from "./factory_messages.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
 
 type Job = [id: string, title: string, head?: string];
-
-function read(cfg: Config, path: string): string {
-  const p = run(["git", "show", `origin/${cfg.mainBranch}:${path}`]);
-  if (p.code === 0) return p.stdout;
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return "";
-  }
-}
 
 interface Pull {
   number: number;
@@ -181,10 +177,12 @@ function main(argv: string[]): number {
   const cfg = load();
   run(["git", "fetch", "-q", "origin", cfg.mainBranch]);
   if (a.issue && taskSource(cfg) !== "issues") argError('--issue works only in issues mode (tasks.source: "issues")');
-  if (taskSource(cfg) === "issues") return issuesMode(cfg, a);
-  const allTasks = tasks(read(cfg, cfg.plan));
-  const blocked = blockedIds(read(cfg, cfg.blocked));
-  let openTasks: Job[] = allTasks.filter(([i, done]) => !done && !blocked.has(i)).map(([i, , t]): Job => [i, t]);
+  const tracker = compose(cfg).tasks;
+  if (taskSource(cfg) === "issues") return issuesMode(cfg, tracker, a);
+  // Plan mode claims through the local claims file below, together with any rework, so only the list comes from the port.
+  const listed = tracker.list();
+  const blocked = new Set(listed.filter((t) => t.state === "blocked").map((t) => t.id));
+  let openTasks: Job[] = listed.filter((t) => t.state !== "blocked" && !waits(t, listed)).map((t): Job => [t.id, t.title]);
   if (a.after) {
     const ids = openTasks.map(([i]) => i);
     if (ids.includes(a.after)) openTasks = openTasks.slice(ids.indexOf(a.after) + 1);
@@ -219,15 +217,23 @@ function note(a: Args): void {
   }
 }
 
+/** Whether a plan task waits for another one that isn't done (`Depends on 1.2` in its text). */
+function waits(t: Task, open: Task[]): boolean {
+  return t.dependsOn.some((d) => open.some((x) => x.id === d));
+}
+
 /** --claim AGENT --issue N: claim exactly that issue, or refuse with {code, message, fix} and change nothing. */
-function namedIssue(cfg: Config, a: Args): number {
-  const [i, err] = pickNamed(cfg, a.claim as string, a.issue as number);
-  if (err) {
-    process.stderr.write(pyDumps(err) + "\n");
+function namedIssue(tracker: TaskTracker, a: Args): number {
+  let t: Task;
+  try {
+    t = tracker.claim(String(a.issue), { agent: a.claim as string, machine: machineId() });
+  } catch (e) {
+    if (!(e instanceof CoreError)) throw e;
+    process.stderr.write(pyDumps(e.toJSON()) + "\n");
     return 1;
   }
-  ping(a.claim as string, i.number);
-  console.log(a.json ? pyDumps({ id: `issue-${i.number}`, title: i.title }) : `issue-${i.number} ${i.title}`);
+  ping(a.claim as string, Number(t.id));
+  console.log(a.json ? pyDumps({ id: `issue-${t.id}`, title: t.title }) : `issue-${t.id} ${t.title}`);
   return 0;
 }
 
@@ -243,18 +249,21 @@ function sayStaleClaims(cfg: Config): void {
   }
 }
 
-function issuesMode(cfg: Config, a: Args): number {
-  if (a.issue) return namedIssue(cfg, a);
+function issuesMode(cfg: Config, tracker: TaskTracker, a: Args): number {
+  if (a.issue) return namedIssue(tracker, a);
   sayStaleClaims(cfg);
   let jobs = a.noRework ? [] : rework(cfg, me(a));
   if (jobs.length && a.claim) jobs = claimFirst(cfg, jobs, a.claim, a.pid || process.ppid);
   if (!jobs.length) {
-    let i: Issue | null;
-    if (a.claim) i = pick(cfg, a.claim);
-    else i = readyIssues(cfg)[0] ?? null;
-    if (i) {
-      jobs = [[`issue-${i.number}`, i.title]];
-      if (a.claim) ping(a.claim, i.number);
+    let t: Task | null = null;
+    if (a.claim) {
+      const picked = tracker.pick({ agent: a.claim, machine: machineId() });
+      if (picked.note) process.stderr.write(picked.note + "\n");
+      t = picked.task;
+    } else t = tracker.next();
+    if (t) {
+      jobs = [[`issue-${t.id}`, t.title]];
+      if (a.claim) ping(a.claim, Number(t.id));
     }
   }
   if (!jobs.length) {
