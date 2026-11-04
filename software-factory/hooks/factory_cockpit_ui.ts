@@ -625,7 +625,10 @@ export function barResolve(args: string[]): number {
     refuse("cockpit_usage", "factory cockpit --bar-resolve takes the typed line and the command picked.",
       "The command bar runs it; to open the bar, run `factory cockpit --bar`.", 2);
   }
-  const words = resolve(barLine(args[0] ?? "", args[1] ?? ""));
+  const typed = args[0] ?? "";
+  // The typed line must pass on its own first: a word refused when typed (`release`) is not run as the match picked.
+  if (typed.trim()) resolve(typed);
+  const words = resolve(barLine(typed, args[1] ?? ""));
   const action = actionOf(words) ?? null;
   const script = factoryScript(top());
   console.log(JSON.stringify({ words, action, question: action ? question(words) : "",

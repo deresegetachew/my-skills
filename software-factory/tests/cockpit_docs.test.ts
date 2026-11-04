@@ -138,6 +138,10 @@ for (const name of NAMES) {
     await v.press("r");
     await v.settle();
     expect(reads).toBe(1);
+    const fresh = drawDoc(name, { cols: 100, rows: 6, color: false, data: d.again, load, now: NOW });
+    await fresh.settle();
+    expect(v.frame(), "r shows the data read again, from the top").toBe(fresh.frame());
+    fresh.unmount();
     const all = drawDoc(name, { cols: 100, rows: 200, color: false, data: d.again, load, now: NOW });
     await all.settle();
     expect(all.frame()).toContain(d.shows);
@@ -509,8 +513,8 @@ test("the bar's resolver: a prefix runs its command, an action names its questio
   expect(act.action).toBe("say");
   expect(String(act.question)).toContain("Run `factory say haile hello there`? It changes a session");
   expect((act.run as string[]).slice(-3)).toEqual(["say", "haile", "hello there"]);
-  for (const line of ["review-pass", "claims release --agent taytu"]) {
-    const no = cockpit(p, ["--bar-resolve", line, ""]);
+  for (const [line, pick] of [["review-pass", ""], ["claims release --agent taytu", ""], ["release", "owner release"]]) {
+    const no = cockpit(p, ["--bar-resolve", line, pick as string]);
     expect(no.code, line).toBe(2);
     expect(JSON.parse(no.stderr.trim().split("\n").pop() ?? "{}").code, line).toBe("cockpit_not_offered");
   }
