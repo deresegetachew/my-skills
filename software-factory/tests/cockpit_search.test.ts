@@ -250,6 +250,46 @@ test("search: Enter on a CI run or a runner opens CI at text from that row", asy
   }
 });
 
+const TWO_RUNS: Row = { ...DATA, snapshot: { ...SNAPSHOT, ci: { ...SNAPSHOT.ci, runs: [
+  { ref: "main", branch: "main", state: "in_progress", name: "Nightly build", minutesAgo: 4 },
+  { ref: "#13", branch: "task/8-y", state: "success", name: "Nightly build", minutesAgo: 9 },
+] } } };
+
+test("search: Enter on one of two CI runs that share a name opens CI at that run's name and branch", async () => {
+  for (const [moves, want] of [[0, "Nightly build on main"], [1, "Nightly build on task/8-y"]] as const) {
+    const s = search({ prefill: "Nightly", data: TWO_RUNS });
+    await s.v.settle();
+    for (let i = 0; i < moves; i++) await s.v.press(DOWN);
+    await s.v.press(ENTER);
+    await Bun.sleep(80);
+    s.v.unmount();
+    expect(s.done, want).toEqual([["--ci", "--find", want]]);
+  }
+});
+
+function manyRuns(n: number, branch: (i: number) => string): Row {
+  const runs = Array.from({ length: n }, (_, i) => ({ ref: `#${i}`, branch: branch(i), state: "success", name: "CI", minutesAgo: i + 1 }));
+  return { ...SNAPSHOT, ci: { ...SNAPSHOT.ci, runs } };
+}
+
+test("the CI view: find with a run's name and branch opens on that run, not the first with the same name", async () => {
+  const short = (i: number) => `task/${i}-x`;
+  const long = (i: number) => `task/${i}-a-branch-name-long-enough-to-be-clipped-on-a-narrow-screen`;
+  for (const [cols, branch] of [[140, short], [50, long]] as const) {
+    const data = manyRuns(40, branch);
+    const load = () => Promise.resolve(data);
+    const top = drawDoc("ci", { cols, rows: 12, color: false, data, load });
+    await top.settle();
+    expect(top.frame(), `${cols} columns`).not.toContain(`task/33-`);
+    top.unmount();
+    const v = drawDoc("ci", { cols, rows: 12, color: false, data, load, find: `CI on ${branch(33)}` });
+    await v.settle();
+    const f = v.frame();
+    v.unmount();
+    expect(f, `${cols} columns`).toContain(`CI on task/33-`);
+  }
+});
+
 test("search: Enter on a session opens Agents & machines at its name", async () => {
   const { args } = await opens("fasil");
   expect(args?.slice(0, 2)).toEqual(["--agents", "--find"]);
