@@ -15,6 +15,7 @@ import { dirname, join, resolve } from "node:path";
 import * as fa from "./factory_artifacts.ts";
 import * as autostart from "./factory_autostart.ts";
 import { missingOriginMain } from "./factory_claims.ts";
+import { uiPackagesProblem } from "./factory_cockpit.ts";
 import { type Config, load, roleNames, rolesDir, taskSource } from "./factory_config.ts";
 import * as doctorCi from "./factory_doctor_ci.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
@@ -595,7 +596,7 @@ export function release(r: Reporter): void {
 }
 
 /** The cockpit's Ink UI (decision 0002, #365): the release's bundle is present and loads under Bun alone. A my-skills
- * checkout runs the source, which needs Ink and React installed there. A release without the bundle is a note: only
+ * checkout runs the source, which needs Ink and React installed there (a fix when they aren't, #391). A release without the bundle is a note: only
  * `factory cockpit --ink` needs it. */
 export function cockpit(r: Reporter): void {
   const hooks = import.meta.dir;
@@ -605,6 +606,11 @@ export function cockpit(r: Reporter): void {
   if (!ui) {
     r.note("cockpit bundle", "there is no .claude/hooks/factory_cockpit_ink.js, so `factory cockpit --ink` can't open: " +
       "run `factory update` to a release that carries it");
+    return;
+  }
+  const bad = uiPackagesProblem(ui, process.cwd()); // a my-skills checkout without Ink and React installed (#391)
+  if (bad) {
+    r.fix("cockpit UI", `${bad.message} ${bad.fix}`);
     return;
   }
   const [rc, out, err] = run([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, "--check"]);

@@ -45,7 +45,7 @@ import { basename, join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { load, taskSource } from "./factory_config.ts";
 import { ACTION_NAMES, ACTIONS_OFFERED, matches, OFFERED, rank } from "./factory_cockpit_match.ts";
-import { inkUi, LIMITED, limitSentence, readCache, refreshIfOld, runUi, UI_MISSING } from "./factory_cockpit.ts";
+import { inkUi, LIMITED, limitSentence, readCache, refreshIfOld, runUi, UI_MISSING, uiPackagesProblem } from "./factory_cockpit.ts";
 import { run, which } from "./factory_lib.ts";
 import { refuse, repoKey, stateDir } from "./factory_machine.ts";
 import { asText, lookup, MACHINE, MISSING, SECTIONS, SETTINGS, type Setting } from "./factory_settings_schema.ts";
@@ -203,6 +203,9 @@ function idleCommand(text: string): string {
 
 const IDLE_TEXT = "Pick a session on the left and press Enter to see it here. C-a C-a comes back to the list.";
 
+const LIST_FAILED = "The list stopped with the error above. Fix it, then leave with C-a d and run `factory cockpit` again " +
+  "(`factory doctor` checks the cockpit's UI).";
+
 export function socket(): string {
   return `factory-cockpit-${repoKey()}`.replace(/[^A-Za-z0-9_-]+/g, "-");
 }
@@ -288,6 +291,9 @@ export function open(): number {
       "Run `factory cockpit` in a terminal (over ssh: `ssh -t <host>`); for the data, `factory cockpit --json`.", 2);
   }
   const root = top();
+  const ui = inkUi();
+  const bad = ui ? uiPackagesProblem(ui, root) : null; // without the UI the list is drawn here (#391)
+  if (bad) refuse(bad.code, bad.message, bad.fix, 1);
   const script = factoryScript(root);
   const conf = writeConfig(config(root, script));
   const sock = socket();
@@ -297,7 +303,9 @@ export function open(): number {
   } else {
     const cols = process.stdout.columns || 120;
     const rows = process.stdout.rows || 40;
-    const sidebar = `exec env FACTORY_COCKPIT=${dq(session)} ${factoryCall(script, ["cockpit", "--sidebar"])}`;
+    // A list that fails keeps its error on screen (#391), not an empty pane.
+    const sidebar = `env FACTORY_COCKPIT=${dq(session)} ${factoryCall(script, ["cockpit", "--sidebar"])} || ` +
+      `{ echo; echo ${dq(LIST_FAILED)}; exec tail -f /dev/null; }`;
     const made = tmux(sock, ["-f", conf, "new-session", "-d", "-s", session, "-n", "cockpit", "-x", String(cols),
       "-y", String(rows), "-c", root, sidebar]);
     if (made.code !== 0) {
@@ -534,6 +542,11 @@ async function sidebarLoop(): Promise<number> {
 export function sidebar(): Promise<number> | number {
   const ui = inkUi();
   if (ui) {
+    const bad = uiPackagesProblem(ui, top());
+    if (bad) {
+      process.stderr.write(JSON.stringify(bad) + "\n");
+      return 1;
+    }
     // --no-install: offline, as the rest of the factory; Bun never fetches a package the bundle doesn't hold
     const p = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", "--no-install", ui, "--sidebar",
       "--factory", factoryScript(top())], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
@@ -663,6 +676,8 @@ export async function bar(words: string[] = []): Promise<number> {
 function view(name: string, data: Obj): number {
   const ui = inkUi(true);
   if (!ui) refuse(UI_MISSING.code, UI_MISSING.message, UI_MISSING.fix, 1);
+  const bad = uiPackagesProblem(ui, top());
+  if (bad) refuse(bad.code, bad.message, bad.fix, 1);
   // Off a terminal Ink colours nothing unless told: a view coloured there (`color`) sets FORCE_COLOR.
   return runUi(ui, ["--view", name], { repo: basename(top()), ...data }, data.color === true ? { FORCE_COLOR: "1" } : {});
 }
