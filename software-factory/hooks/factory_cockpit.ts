@@ -23,7 +23,7 @@
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { toFloat } from "./factory_config.ts";
 import { isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
 import { stateDir } from "./factory_machine.ts";
@@ -404,10 +404,37 @@ export function runUi(ui: string, args: string[], data: unknown, env: Record<str
 export const UI_MISSING: Problem = { code: "cockpit_ui_missing", message: "The cockpit's Ink UI isn't installed: there is no " +
   `factory_cockpit_ink.js in ${HOOKS}.`, fix: "Run `factory update` to a release that carries it (`factory releases` lists them)." };
 
+/** The packages the source UI imports (#391): a checkout of my-skills runs cockpit/ui.tsx, which needs them installed. */
+const UI_PACKAGES = ["ink", "react"];
+
+/** Whether `name` is installed in a node_modules folder at `dir` or above it, as Bun would find it. */
+function installed(name: string, dir: string): boolean {
+  for (let d = dir; ; d = dirname(d)) {
+    if (existsSync(join(d, "node_modules", name, "package.json"))) return true;
+    if (dirname(d) === d) return false;
+  }
+}
+
+/** Why the Ink UI `ui` can't run, or null (#391): the source UI with Ink or React not installed beside it. The release's
+ *  bundle holds them. `root` is the project's top, to say the folder to install in from there. */
+export function uiPackagesProblem(ui: string, root: string): Problem | null {
+  if (!ui.endsWith(".tsx")) return null;
+  const folder = dirname(dirname(ui));
+  const missing = UI_PACKAGES.filter((name) => !installed(name, folder));
+  if (!missing.length) return null;
+  const rel = relative(root, folder);
+  const where = rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel : folder;
+  return { code: "cockpit_ui_packages_missing", message: `The cockpit's Ink UI runs from the source in ${folder}, and ` +
+    `${missing.join(" and ")} ${missing.length > 1 ? "aren't" : "isn't"} installed there, so its list would stay empty.`,
+    fix: `Run \`cd ${where} && bun install --frozen-lockfile\`, then \`factory cockpit\` again.` };
+}
+
 /** `factory cockpit --ink`: the Ink UI on the cached snapshot (read now when there is none), passed as a file. */
 async function ink(): Promise<number> {
   const ui = inkUi();
   if (!ui) return fail(UI_MISSING);
+  const bad = uiPackagesProblem(ui, process.cwd()); // the factory script runs it from the project's top
+  if (bad) return fail(bad);
   return runUi(ui, [], refreshIfOld()[0] ?? await snapshot());
 }
 
