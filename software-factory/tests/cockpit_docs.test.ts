@@ -513,8 +513,9 @@ test("the bar's resolver: a prefix runs its command, an action names its questio
   expect(act.action).toBe("say");
   expect(String(act.question)).toContain("Run `factory say haile hello there`? It changes a session");
   expect((act.run as string[]).slice(-3)).toEqual(["say", "haile", "hello there"]);
-  for (const [line, pick] of [["review-pass", ""], ["claims release --agent taytu", ""], ["release", "owner release"]]) {
-    const no = cockpit(p, ["--bar-resolve", line, pick as string]);
+  const refused: Array<[string, string]> = [["review-pass", ""], ["claims release --agent taytu", ""], ["release", "owner release"]];
+  for (const [line, pick] of refused) {
+    const no = cockpit(p, ["--bar-resolve", line, pick]);
     expect(no.code, line).toBe(2);
     expect(JSON.parse(no.stderr.trim().split("\n").pop() ?? "{}").code, line).toBe("cockpit_not_offered");
   }
