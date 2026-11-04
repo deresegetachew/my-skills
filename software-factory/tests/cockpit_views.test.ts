@@ -5,7 +5,7 @@ import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { drawNeeds, drawPrs, type NeedsProps, type PrsProps } from "../cockpit/testing.tsx";
-import { CI, envWith, gitRepo, HOOKS, SF, sh, tmp, write } from "./support.ts";
+import { CI, copyHookFolders, envWith, gitRepo, HOOKS, SF, sh, tmp, write } from "./support.ts";
 
 type Row = Record<string, unknown>;
 const A = "a".repeat(40);
@@ -331,6 +331,7 @@ test("factory cockpit --prs off a terminal prints one frame within the time limi
   gitRepo(d);
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(d, ".claude", "hooks", f));
+  copyHookFolders(join(d, ".claude", "hooks"));
   cpSync(CI, join(d, ".claude", "ci"), { recursive: true });
   write(join(d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "issues" } }));
   write(join(root, "bin", "gh"), HANGING_GH, 0o755);
