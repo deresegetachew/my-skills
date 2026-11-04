@@ -94,10 +94,31 @@ export function textOf(l: Line): string {
   return l.map((s) => s.text).join("");
 }
 
-/** The index of the first line with `find` in it, in any case; 0 when none has it. */
+/** How much of the start of `want` the line shows cut with `…` (as `clip` cuts it); 0 when it shows none. */
+function clippedPrefix(text: string, want: string): number {
+  const cs = [...want];
+  for (let n = cs.length - 1; n > 0; n--) if (text.includes(`${cs.slice(0, n).join("")}…`)) return n;
+  return 0;
+}
+
+/** Fewer characters than this before a `…` could be the start of almost anything. */
+const CLIPPED_MIN = 8;
+
+/** The index of the first line with `find` in it, in any case; else the line that shows the longest start of it cut
+ *  short (a narrow screen clips a row), when that is at least CLIPPED_MIN characters; 0 when none has it. */
 export function lineWith(doc: Line[], find: string): number {
   const want = find.toLowerCase();
-  return want ? Math.max(doc.findIndex((l) => textOf(l).toLowerCase().includes(want)), 0) : 0;
+  if (!want) return 0;
+  const texts = doc.map((l) => textOf(l).toLowerCase());
+  const whole = texts.findIndex((t) => t.includes(want));
+  if (whole >= 0) return whole;
+  let best = 0;
+  let at = 0;
+  texts.forEach((t, i) => {
+    const n = clippedPrefix(t, want);
+    if (n > best) [best, at] = [n, i];
+  });
+  return best >= CLIPPED_MIN ? at : 0;
 }
 
 /** The lines of `doc` that match the filter (#392), or the line that says none does. */

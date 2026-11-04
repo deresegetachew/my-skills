@@ -246,7 +246,9 @@ test("search: Enter on a CI run or a runner opens CI at text from that row", asy
     expect(args?.length, typed).toBe(3);
     expect(typeof args?.[2]).toBe("string");
     expect((args?.[2] ?? "").length).toBeGreaterThan(0);
-    expect(lineWith(frame, typed).toLowerCase(), typed).toContain((args?.[2] ?? "").toLowerCase());
+    // the row Enter opened (marked ›), not the box, which holds the typed words too
+    const row = frame.split("\n").find((l) => l.startsWith("›")) ?? "";
+    expect(row.toLowerCase(), typed).toContain((args?.[2] ?? "").toLowerCase());
   }
 });
 

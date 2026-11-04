@@ -66,8 +66,9 @@ function tasks(snap: Obj): Hit[] {
 function ci(snap: Obj): Hit[] {
   const c = obj(snap.ci);
   const runs = list(c.runs).map((r) => {
-    const name = plain(r.name) || "CI";
-    return hit("CI", joined([`${name} on ${plain(r.branch)}`, plain(r.state), plain(r.ref)]), ["--ci", "--find", lead(name)]);
+    // the title the CI view gives the run: runs often share a workflow name, so the branch tells them apart
+    const title = `${plain(r.name) || "CI"} on ${plain(r.branch)}`;
+    return hit("CI", joined([title, plain(r.state), plain(r.ref)]), ["--ci", "--find", title]);
   });
   const runners = [...list(c.runners), ...list(obj(c.light).runners)].filter((r) => plain(r.name)).map((r) =>
     hit("CI", joined([`runner ${plain(r.name)}`, plain(r.status)]), ["--ci", "--find", plain(r.name)]));
