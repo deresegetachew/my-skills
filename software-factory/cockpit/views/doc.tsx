@@ -1,9 +1,10 @@
 // A view that is one document (#367): CI, Settings, Usage & lessons, Agents & machines, Health & releases. It draws
-// every line of its data; on a terminal it shows a screenful, j k (or ↑ ↓, space) scroll, r reads the data again and q
-// closes. Off a terminal the caller prints the whole document once. Also the helpers these views share: plain text cut,
+// every line of its data; on a terminal it shows a screenful, j k (or ↑ ↓, space) scroll, / keeps the lines that match
+// what is typed (#392, views/filter.ts), r reads the data again and q closes. Off a terminal the caller prints the whole document once. Also the helpers these views share: plain text cut,
 // padded and wrapped, and the boxes ("cards") the boards draw.
 import { useApp, useInput } from "ink";
 import { type ReactElement, useEffect, useState } from "react";
+import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
 import { cut, type Line, Lines, screen, seg, type Style } from "./lines.tsx";
 import type { Got } from "./read.ts";
 
@@ -88,6 +89,24 @@ export function docScreen(doc: Line[], top: number, cols: number, rows: number, 
   return screen(doc.slice(at, at + room), keys, cols, rows);
 }
 
+/** A line's text, without its styles. */
+export function textOf(l: Line): string {
+  return l.map((s) => s.text).join("");
+}
+
+/** The index of the first line with `find` in it, in any case; 0 when none has it. */
+export function lineWith(doc: Line[], find: string): number {
+  const want = find.toLowerCase();
+  return want ? Math.max(doc.findIndex((l) => textOf(l).toLowerCase().includes(want)), 0) : 0;
+}
+
+/** The lines of `doc` that match the filter (#392), or the line that says none does. */
+export function filtered(doc: Line[], typed: string): Line[] {
+  if (!typed.trim()) return doc;
+  const kept = doc.filter((l) => textOf(l).trim() && matchesTyped(textOf(l), typed));
+  return kept.length ? kept : [noMatch(typed)];
+}
+
 export interface DocProps {
   cols: number;
   rows: number;
@@ -99,21 +118,34 @@ export interface DocProps {
   /** Reads the data again. */
   load: () => Promise<Got>;
   keys?: string;
+  /** Opens scrolled to the first line with this text (the search's Enter, #392). */
+  find?: string;
 }
 
-/** A document on a terminal: a screenful at a time, j k scroll, r reads again, q closes. */
+/** A document on a terminal: a screenful at a time, j k scroll, / filters, r reads again, q closes. */
 export function DocView(props: DocProps): ReactElement {
   const { exit } = useApp();
   const [data, setData] = useState<Got | undefined>(props.data);
-  const [top, setTop] = useState(0);
+  const [top, setTop] = useState(() => (props.find && props.data !== undefined ? lineWith(props.draw(props.data, props.cols), props.find) : 0));
+  const [filter, setFilter] = useState<Filter>(NO_FILTER);
   useEffect(() => {
-    if (props.data === undefined) void props.load().then(setData);
+    if (props.data === undefined) {
+      void props.load().then((got) => {
+        setData(got);
+        if (props.find) setTop(lineWith(props.draw(got, props.cols), props.find));
+      });
+    }
   }, []);
-  const doc = props.draw(data, props.cols);
+  const doc = filtered(props.draw(data, props.cols), filter.typed);
   const room = Math.max(props.rows - 1, 1);
   const last = Math.max(doc.length - room, 0);
   useInput((input, key) => {
-    if (input === "q" || key.escape || (key.ctrl && input === "c")) exit();
+    if (key.ctrl && input === "c") return exit();
+    const next = data === undefined ? null : filterKey(filter, input, key);
+    if (next) {
+      setFilter((f) => filterKey(f, input, key) ?? f); // keys in one chunk each see the one before
+      setTop(0);
+    } else if (input === "q" || key.escape) exit();
     else if (data === undefined) return; // reading
     else if (input === "j" || key.downArrow) setTop((t) => Math.min(t + 1, last));
     else if (input === "k" || key.upArrow) setTop((t) => Math.max(t - 1, 0));
@@ -124,6 +156,6 @@ export function DocView(props: DocProps): ReactElement {
       void props.load().then(setData);
     }
   });
-  const lines = docScreen(doc, Math.min(top, last), props.cols, props.rows, props.keys ?? DOC_KEYS);
+  const lines = docScreen(doc, Math.min(top, last), props.cols, props.rows, filterKeys(filter, props.keys ?? DOC_KEYS));
   return <Lines lines={lines.map((l) => cut(l, props.cols))} color={props.color} />;
 }

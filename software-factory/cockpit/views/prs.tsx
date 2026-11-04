@@ -2,11 +2,13 @@
 // One row per open PR (number, title and " · protected", by, CI, the dev manager's word, who acts, next), and the
 // selected PR's detail below it: branch, head, the newest marker, any review claim or rework, CI job by job, open
 // questions, protected paths and the next action. The keys that work are at the bottom. Its data is `factory prs
-// --json`, read by the command the hook names. j k (or ↑ ↓) move, r reads again from GitHub, q closes. m merges the
+// --json`, read by the command the hook names. j k (or ↑ ↓) move, / filters the rows (#392; Esc clears it), r reads
+// again from GitHub, q closes. m merges the
 // selected PR after a y/N question, through `factory owner merge <n> --head <the head shown>` (#309), so one that moved
 // since is not merged. No Esc to close: over a slow ssh link an arrow key can come in two pieces, the first a lone Esc.
 import { useApp, useInput } from "ink";
 import { type ReactElement, useEffect, useState } from "react";
+import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
 import { ago, cut, type Line, Lines, list, obj, type Obj, pad, plain, screen, seg, spread, type Style } from "./lines.tsx";
 import type { Got } from "./read.ts";
 
@@ -159,8 +161,14 @@ export function mergeWords(p: Obj): string[] | null {
   return /^[0-9a-f]{7,40}$/i.test(sha) && /^\d+$/.test(n) ? ["owner", "merge", n, "--head", sha] : null;
 }
 
-export function openPulls(data: Got | undefined): Obj[] {
-  return data && data !== "late" ? list(data.pulls) : [];
+/** What the filter and the search match a pull request by: its number, title, branch and author (#392). */
+export function prText(p: Obj): string {
+  return [`#${plain(p.number)}`, plain(p.title), plain(p.branch), plain(p.agent)].join(" ");
+}
+
+/** The open pull requests that match `typed`. */
+export function openPulls(data: Got | undefined, typed = ""): Obj[] {
+  return data && data !== "late" ? list(data.pulls).filter((p) => matchesTyped(prText(p), typed)) : [];
 }
 
 export type Problem = { code: string; message: string; fix: string };
@@ -178,7 +186,7 @@ export function selectedOf(data: Got, n: number | null): number | Problem {
 
 /** One screen of the view, `rows` lines at most, each at most `cols` wide. `data` undefined: still reading. */
 export function prsLines(data: Got | undefined, selected: number, cols: number, rows: number, repo: string, nowMs: number,
-  limitSeconds: number): Line[] {
+  limitSeconds: number, filter: Filter = NO_FILTER): Line[] {
   const when = data && data !== "late" ? ago(data.generatedAt, nowMs) : "";
   const heading = spread([seg("factory", "amber"), seg(`  ${repo} · Pull requests`)],
     [seg(`factory prs · CI judged by the manager's rule${when ? ` · ${when}` : ""}`, "dim")], cols);
@@ -200,8 +208,10 @@ export function prsLines(data: Got | undefined, selected: number, cols: number, 
       [seg("Run `gh auth status` (and `gh auth login` if it says so), then press r.")]];
   } else if (!pulls.length) {
     body = [[seg("No open pull requests.")]];
+  } else if (!openPulls(data, filter.typed).length) {
+    body = [noMatch(filter.typed)];
   } else {
-    const all = pulls.map(obj);
+    const all = openPulls(data, filter.typed);
     const at = Math.min(Math.max(selected, 0), all.length - 1);
     const card = detail(all[at] as Obj, list(data.questions), cols);
     const fixed = 3; // the top line, a blank line before the card, the keys
@@ -214,7 +224,7 @@ export function prsLines(data: Got | undefined, selected: number, cols: number, 
     const fill = Math.max(rows - fixed - cardRoom - body.length, 0);
     body.push(...Array.from({ length: fill }, (): Line => []), [], ...card.slice(0, cardRoom));
   }
-  return screen([heading, ...body], PR_KEYS, cols, rows);
+  return screen([heading, ...body], filterKeys(filter, PR_KEYS), cols, rows);
 }
 
 /** The question asked before `m` runs: the command and what it changes, as the command bar asks it. */
@@ -250,12 +260,13 @@ export function PrsView(props: PrsProps): ReactElement {
   const [data, setData] = useState<Got | undefined>(undefined);
   const [selected, setSelected] = useState(0);
   const [mode, setMode] = useState<Mode>({ kind: "list" });
+  const [filter, setFilter] = useState<Filter>(NO_FILTER);
 
   const reload = (fresh: boolean, text: string) => {
     setMode({ kind: "reading", text });
     void props.load(fresh).then((got) => {
       setData(got);
-      setSelected((s) => Math.min(s, Math.max(openPulls(got).length - 1, 0)));
+      setSelected((s) => Math.min(s, Math.max(openPulls(got, filter.typed).length - 1, 0)));
       setMode({ kind: "list" });
     });
   };
@@ -291,13 +302,20 @@ export function PrsView(props: PrsProps): ReactElement {
       } else setMode({ kind: "shown", text: NOT_RUN });
       return;
     }
-    const count = openPulls(data).length;
-    if (input === "q" || (key.ctrl && input === "c")) exit();
+    if (key.ctrl && input === "c") return exit();
+    const next = data === undefined ? null : filterKey(filter, input, key);
+    if (next) {
+      setFilter((f) => filterKey(f, input, key) ?? f); // keys in one chunk each see the one before
+      setSelected(0);
+      return;
+    }
+    const count = openPulls(data, filter.typed).length;
+    if (input === "q") exit();
     else if (input === "j" || key.downArrow) setSelected((s) => Math.min(s + 1, Math.max(count - 1, 0)));
     else if (input === "k" || key.upArrow) setSelected((s) => Math.max(s - 1, 0));
     else if (input === "r") reload(true, "Reading the pull requests from GitHub…");
     else if (input === "m") {
-      const p = openPulls(data)[selected];
+      const p = openPulls(data, filter.typed)[selected];
       const words = p ? mergeWords(p) : null;
       setMode(words ? { kind: "ask", words }
         : { kind: "note", text: "This view has no head commit for that pull request: press r to read it again." });
@@ -314,6 +332,6 @@ export function PrsView(props: PrsProps): ReactElement {
   } else if (mode.kind === "shown") {
     lines = screen([...mode.text.split("\n").map((t): Line => [seg(plain(t))]), [], [seg("Press a key to go on.")]],
       "any key reads the pull requests again", cols, rows);
-  } else lines = prsLines(data, selected, cols, rows, props.repo, (props.now ?? Date.now)(), props.limitSeconds);
+  } else lines = prsLines(data, selected, cols, rows, props.repo, (props.now ?? Date.now)(), props.limitSeconds, filter);
   return <Lines lines={lines.map((l) => cut(l, cols))} color={color} />;
 }

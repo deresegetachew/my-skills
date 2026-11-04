@@ -6,7 +6,8 @@
 //   ui.tsx --data <file>                 draw the snapshot in <file> (`factory cockpit --json`); on a terminal q or Esc
 //                                        leaves, off one it draws once and exits
 //   ui.tsx --view <name> --data <file>   one of the cockpit's views (#367): needs, prs, tasks, ci, agents, settings,
-//                                        health, usage, or the command bar (bar). <file> is what the hook gives it (the
+//                                        health, usage, the command bar (bar), or the search across them (search,
+//                                        #392: Enter runs the picked view in its place). <file> is what the hook gives it (the
 //                                        data, or the command that reads it, and what an action runs). On a terminal it
 //                                        reads the keys; off one it draws one frame, sized by COLUMNS (and LINES for
 //                                        the lists; a document is printed whole, for a pager), and exits within a time
@@ -18,17 +19,18 @@ import { render, useApp, useInput, useStdout } from "ink";
 import { type ReactElement, useEffect, useState } from "react";
 import { App } from "./app.tsx";
 import { barLines, CommandBar, type Outcome, type Problem as BarProblem, type Resolved } from "./command-bar.tsx";
+import { searchLines, SearchView } from "./search.tsx";
 import { sidebarMain } from "./sidebar-host.tsx";
 import { agentsLines } from "./views/agents.tsx";
 import { ciLines, type Heavy } from "./views/ci.tsx";
 import { DocView } from "./views/doc.tsx";
 import { healthLines } from "./views/health.tsx";
 import { type Line, Lines, obj, plain } from "./views/lines.tsx";
-import { needsLines, NeedsView } from "./views/needs.tsx";
+import { needAt, needsLines, NeedsView } from "./views/needs.tsx";
 import { type Problem, prsLines, PrsView, selectedOf } from "./views/prs.tsx";
 import { type Got, readJson, readOrRefusal, runAction } from "./views/read.ts";
 import { settingsLines } from "./views/settings.tsx";
-import { tasksLines, TasksView } from "./views/tasks.tsx";
+import { taskAt, tasksLines, TasksView } from "./views/tasks.tsx";
 import { usageLines } from "./views/usage.tsx";
 
 /** How long a view waits for its data: off a terminal it must print its frame and exit (bug 3 in #362). */
@@ -90,6 +92,10 @@ interface Spec {
   prefill: string;
   /** The command bar's resolver: the typed line and the picked command go after it. */
   resolve: string[];
+  /** The row a view opens on (the search's Enter, #392): a task's number, an ask's id, a line's text. */
+  find: string;
+  /** The search's Enter runs this with the `factory cockpit` arguments of the row's view (`bash <factory> cockpit`). */
+  open: string[];
 }
 
 function specOf(v: unknown): Spec {
@@ -101,6 +107,7 @@ function specOf(v: unknown): Spec {
     data: "data" in o ? gotOf(o.data) : undefined, color: o.color === true, host: plain(o.host),
     heavy: typeof heavy.raw === "string" ? { raw: plain(heavy.raw), source: plain(heavy.source) } : null,
     prefill: typeof o.prefill === "string" ? o.prefill : "", resolve: strings(o.resolve),
+    find: typeof o.find === "string" ? o.find : "", open: strings(o.open),
   };
 }
 
@@ -113,7 +120,7 @@ const DOCS: Record<string, (s: Spec) => (data: Got | undefined, cols: number) =>
   health: (s) => (d, cols) => healthLines(d, s.repo, cols),
 };
 
-const VIEWS = ["prs", "needs", "tasks", "bar", ...Object.keys(DOCS)];
+const VIEWS = ["prs", "needs", "tasks", "bar", "search", ...Object.keys(DOCS)];
 
 /** Only used when stdin and stdout are terminals. Ink would otherwise treat a set `CI` as "not interactive" and draw
  * nothing until it unmounts: a blank view that still takes keys. */
@@ -141,10 +148,13 @@ async function offTerminal(view: string, spec: Spec): Promise<number> {
     if (typeof at !== "number") return fail(at.code, at.message, at.fix);
     lines = prsLines(got, at, cols, rows, spec.repo, Date.now(), OFF_TERMINAL_SECONDS);
   } else if (view === "tasks") {
-    lines = tasksLines(await readJson(spec.read, limit), 0, cols, rows, spec.repo, OFF_TERMINAL_SECONDS);
+    const got = await readJson(spec.read, limit);
+    lines = tasksLines(got, taskAt(got, spec.find), cols, rows, spec.repo, OFF_TERMINAL_SECONDS);
   } else if (view === "bar") {
     lines = barLines(spec.prefill, 0, cols, rows);
-  } else lines = needsLines(spec.snapshot, 0, cols, rows, spec.repo, Date.now());
+  } else if (view === "search") {
+    lines = searchLines(spec.data ?? null, spec.prefill, 0, cols, rows);
+  } else lines = needsLines(spec.snapshot, needAt(spec.snapshot, spec.find), cols, rows, spec.repo, Date.now());
   await once(<Lines lines={lines} color={spec.color} />);
   return 0;
 }
@@ -171,17 +181,25 @@ function page(run: string[]): number {
   return p.exitCode ?? 1;
 }
 
+/** The view the search's Enter picked, on this terminal, in place of the search (in the same popup). */
+function openPicked(open: string[], args: string[]): number {
+  const p = Bun.spawnSync([...open, ...args], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+  return p.exitCode ?? 1;
+}
+
 async function onTerminal(view: string, spec: Spec): Promise<number> {
   const color = !process.env.NO_COLOR;
   const limit = ON_TERMINAL_SECONDS * 1000;
   const refused: { p: Problem | null } = { p: null };
   const ended: { o: Outcome } = { o: { kind: "closed" } };
+  const picked: { args: string[] | null } = { args: null };
   const doc = DOCS[view];
   let draw: (cols: number, rows: number) => ReactElement;
   if (doc) {
     const lines = doc(spec);
     draw = (cols, rows) => (
-      <DocView cols={cols} rows={rows} color={color} data={spec.data} draw={lines} load={() => readJson(spec.read, limit)} />);
+      <DocView cols={cols} rows={rows} color={color} data={spec.data} draw={lines} load={() => readJson(spec.read, limit)}
+        find={spec.find} />);
   } else if (view === "prs") {
     draw = (cols, rows) => (
       <PrsView repo={spec.repo} select={spec.select} changes={spec.changes} cols={cols} rows={rows} color={color}
@@ -190,17 +208,22 @@ async function onTerminal(view: string, spec: Spec): Promise<number> {
   } else if (view === "tasks") {
     draw = (cols, rows) => (
       <TasksView repo={spec.repo} cols={cols} rows={rows} color={color} limitSeconds={ON_TERMINAL_SECONDS}
-        load={() => readJson(spec.read, limit)} />);
+        load={() => readJson(spec.read, limit)} find={spec.find} />);
   } else if (view === "bar") {
     draw = (cols, rows) => (
       <CommandBar prefill={spec.prefill} cols={cols} rows={rows} color={color} resolve={resolver(spec, limit)}
         act={runAction} finish={(o) => { ended.o = o; }} />);
+  } else if (view === "search") {
+    draw = (cols, rows) => (
+      <SearchView data={spec.data ?? null} prefill={spec.prefill} cols={cols} rows={rows} color={color}
+        done={(args) => { picked.args = args; }} />);
   } else {
     draw = (cols, rows) => (
       <NeedsView repo={spec.repo} snapshot={spec.snapshot} cols={cols} rows={rows} color={color}
-        load={() => readJson(spec.read, limit)} />);
+        load={() => readJson(spec.read, limit)} find={spec.find} />);
   }
   await render(<Sized draw={draw} />, ON_A_TERMINAL).waitUntilExit();
+  if (picked.args && spec.open.length) return openPicked(spec.open, picked.args);
   const r = refused.p;
   if (r) return fail(r.code, r.message, r.fix);
   const o = ended.o;
