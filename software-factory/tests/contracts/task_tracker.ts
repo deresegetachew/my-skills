@@ -47,7 +47,7 @@ const titled = (t: Task | null): string | null => (t ? t.title : null);
 export function taskTrackerContract(name: string, make: (specs: Spec[]) => Fixture): void {
   test(`${name}: the open tasks are listed in order, with their state`, () => {
     const { port, ids } = make([{ title: "One" }, { title: "Two", state: "blocked" }, { title: "Three", state: "done" }]);
-    expect(port.list().map((t) => [t.id, t.title, t.state])).toEqual([[ids[0], "One", "ready"], [ids[1], "Two", "blocked"]]);
+    expect(port.list().map((t) => [t.id, t.title, t.state])).toEqual([[ids[0] as string, "One", "ready"], [ids[1] as string, "Two", "blocked"]]);
   });
 
   test(`${name}: next shows the first ready task and claims nothing`, () => {
@@ -102,7 +102,7 @@ export function taskTrackerContract(name: string, make: (specs: Spec[]) => Fixtu
   test(`${name}: a task with an open dependency waits; a done one does not hold it back`, () => {
     const { port, ids } = make([{ title: "Done", state: "done" }, { title: "Open", state: "blocked" },
       { title: "Waits", dependsOn: [0, 1] }, { title: "Free", dependsOn: [0] }]);
-    expect(port.list().find((t) => t.title === "Waits")?.dependsOn).toEqual([ids[0], ids[1]]);
+    expect(port.list().find((t) => t.title === "Waits")?.dependsOn).toEqual([ids[0] as string, ids[1] as string]);
     expect(titled(port.next())).toBe("Free");
     const r = refusal(() => port.claim(ids[2] as string, haile));
     expect(r.code).toMatch(/-blocked$/);
@@ -115,7 +115,7 @@ export function taskTrackerContract(name: string, make: (specs: Spec[]) => Fixtu
     port.claim(ids[0] as string, haile);
     expect(port.pick(taytu).task).toBeNull();
     port.setState(ids[0] as string, "done");
-    expect(port.list().map((t) => t.id)).toEqual([ids[1]]);
+    expect(port.list().map((t) => t.id)).toEqual([ids[1] as string]);
     expect(port.pick(taytu).task?.id).toBe(ids[1] as string);
   });
 
