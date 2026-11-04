@@ -6,6 +6,7 @@ import { render } from "ink-testing-library";
 import type { ReactElement } from "react";
 import { App } from "./app.tsx";
 import { type BarProps, CommandBar, type Outcome, type Problem, type Resolved } from "./command-bar.tsx";
+import { type SearchItem, type SearchOutcome, type SearchProps, SearchView } from "./search.tsx";
 import { type Actions, type Data, Sidebar } from "./sidebar.tsx";
 import { agentsLines } from "./views/agents.tsx";
 import { ciLines, type Heavy } from "./views/ci.tsx";
@@ -75,6 +76,12 @@ export function drawBar(p: BarProps): Drawn {
   return draw(<CommandBar {...p} />, p.cols, p.color);
 }
 
+export type { SearchItem, SearchOutcome, SearchProps };
+
+export function drawSearch(p: SearchProps): Drawn {
+  return draw(<SearchView {...p} />, p.cols, p.color);
+}
+
 /** The views that are one document, by the name `ui.tsx --view` takes. */
 export type DocName = "ci" | "settings" | "usage" | "agents" | "health";
 
@@ -90,6 +97,10 @@ export interface DocOpts {
   heavy?: Heavy | null;
   /** The clock, for the CI view's "as of". */
   now?: number;
+  /** `/` was pressed: the view closed to open the search. */
+  search?: () => void;
+  /** The text to scroll to on open. */
+  find?: string;
 }
 
 export function drawDoc(name: DocName, o: DocOpts): Drawn {
@@ -102,7 +113,7 @@ export function drawDoc(name: DocName, o: DocOpts): Drawn {
     agents: (d, cols) => agentsLines(d, repo, host, cols),
     health: (d, cols) => healthLines(d, repo, cols),
   };
-  return draw(<DocView cols={o.cols} rows={o.rows} color={o.color} data={o.data} draw={lines[name]} load={o.load} />, o.cols, o.color);
+  return draw(<DocView cols={o.cols} rows={o.rows} color={o.color} data={o.data} draw={lines[name]} load={o.load} search={o.search} find={o.find} />, o.cols, o.color);
 }
 
 export interface SidebarRun {
@@ -124,6 +135,7 @@ export function sidebarOf(data: Data, cols = 40, rows = 30, color = false): Side
     openSession: (name) => calls.push(`session ${name}`),
     openView: (key) => calls.push(`view ${key}`),
     bar: (words) => calls.push(["bar", ...words].join(" ")),
+    search: () => calls.push("search"),
     reload: () => calls.push("reload"),
     leave: () => calls.push("leave"),
   };

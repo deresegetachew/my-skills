@@ -227,6 +227,8 @@ export function config(root: string, script: string): string {
     "bind q detach-client",
     "# : the command bar over the factory's read-only commands and the owner's actions (each asks first).",
     `bind : ${popup("-w 80% -h 60%", factoryCall(script, ["cockpit", "--bar"]))}`,
+    "# / the search over every view's rows (#392); Enter opens the view on the row, Esc closes.",
+    `bind / ${popup("-w 90% -h 90%", factoryCall(script, ["cockpit", "--search"]))}`,
     "# The views, as popups running the existing commands through less -R (q closes).",
   ];
   for (const v of views()) {
@@ -250,7 +252,7 @@ export function config(root: string, script: string): string {
     "set -g visual-bell off",
     "set -g pane-border-status bottom",
     "set -g pane-border-format '#{?#{==:#{pane_index},0}, the list ,"
-      + " C-a C-a the list · C-a : commands · C-a 1-8 views · C-a d leave }'",
+      + " C-a C-a the list · C-a : commands · C-a / search · C-a 1-8 views · C-a d leave }'",
   );
   return lines.join("\n") + "\n";
 }
@@ -511,6 +513,7 @@ async function sidebarLoop(): Promise<number> {
       const v = vs.find((x) => x.key === key);
       if (v) openView(p, v);
     } else if (key === ":") openBar(p, []);
+    else if (key === "/") popup(p, ["-w", "90%", "-h", "90%"], factoryCall(p.script, ["cockpit", "--search"]));
     else if (key === "s" || key === "x" || key === "n") {
       // The bar, with the action typed in already: the owner adds the message or the name, then answers its question.
       const e = entries(snap, vs)[selected];
@@ -560,9 +563,10 @@ export function sidebarOpen(args: string[]): number {
   if (what === "session" && rest.length === 1 && rest[0]) showSession(p, rest[0]);
   else if (what === "view" && rest.length === 1 && v) openView(p, v);
   else if (what === "bar") openBar(p, rest);
+  else if (what === "search" && !rest.length) popup(p, ["-w", "90%", "-h", "90%"], factoryCall(p.script, ["cockpit", "--search"]));
   else if (what === "leave" && !rest.length) tmux(p.sock, ["detach-client"]);
   else {
-    refuse("cockpit_usage", `factory cockpit --sidebar-open takes session <name>, view <key>, bar [<words>] or leave, not "${plain(args.join(" "))}".`,
+    refuse("cockpit_usage", `factory cockpit --sidebar-open takes session <name>, view <key>, bar [<words>], search or leave, not "${plain(args.join(" "))}".`,
       "The cockpit's list runs it for its keys; to open the cockpit, run `factory cockpit`.", 2);
   }
   return 0;
@@ -663,8 +667,10 @@ export async function bar(words: string[] = []): Promise<number> {
 function view(name: string, data: Obj): number {
   const ui = inkUi(true);
   if (!ui) refuse(UI_MISSING.code, UI_MISSING.message, UI_MISSING.fix, 1);
+  // `search` is what `/` in a view runs (#392): the search over this view's rows, then the view again on the one picked.
+  const search = ["bash", factoryScript(top()), "cockpit", "--search"];
   // Off a terminal Ink colours nothing unless told: a view coloured there (`color`) sets FORCE_COLOR.
-  return runUi(ui, ["--view", name], { repo: basename(top()), ...data }, data.color === true ? { FORCE_COLOR: "1" } : {});
+  return runUi(ui, ["--view", name], { repo: basename(top()), search, ...data }, data.color === true ? { FORCE_COLOR: "1" } : {});
 }
 
 /** The command a view runs to read its data again: `factory cockpit --json` (the snapshot) or `--view-data <name>`. */
@@ -679,8 +685,8 @@ function termColor(): boolean {
 }
 
 /** `factory cockpit --needs`: the Needs you view, from the cache; r reads the snapshot again. */
-export function needs(): number {
-  return view("needs", { snapshot: readCache(), read: readCommand(null) });
+export function needs(find = ""): number {
+  return view("needs", { snapshot: readCache(), read: readCommand(null), find });
 }
 
 /** `factory cockpit --prs [<n>]`: the Pull requests view (#338), from `factory prs --json`, with <n> selected; m merges
@@ -740,9 +746,9 @@ function termColumns(): number {
 }
 
 /** A document view: its data, the command that reads it again, and its width off a terminal. */
-function docView(name: string, data: Obj): number {
+function docView(name: string, data: Obj, find = ""): number {
   if (!process.stdout.isTTY) process.env.COLUMNS = String(Math.max(termColumns(), 20));
-  return view(name, data);
+  return view(name, { ...data, find });
 }
 
 function host(): string {
@@ -822,7 +828,7 @@ export function settingsView(args: string[]): number {
 // `factory cockpit --ci` (cockpit/views/ci.tsx), from the `ci` part of the cockpit's cache, so it makes no GitHub call;
 // the heavy runner count is this machine's setting (ci_names.ts). Coloured unless NO_COLOR or a dumb terminal.
 
-export function ciView(): number {
+export function ciView(find = ""): number {
   let heavy: Obj | null = null;
   try {
     const { raw, source } = runnerSetting(ciConfig());
@@ -830,7 +836,7 @@ export function ciView(): number {
   } catch {
     // .claude/factory.json can't be read: the card says so
   }
-  return docView("ci", { data: readCache(), read: readCommand(null), color: termColor(), heavy, host: host() });
+  return docView("ci", { data: readCache(), read: readCommand(null), color: termColor(), heavy, host: host() }, find);
 }
 
 // --- the usage view (#341, PRD US-13) --------------------------------------------------------------------------------
@@ -923,8 +929,8 @@ async function usageData(root: string, nowMs: number): Promise<Obj> {
   return { repo: plain(basename(root)), tasks: await taskUse(root, nowMs), lessons, cap, path: plain(path) };
 }
 
-export async function usageView(): Promise<number> {
-  return docView("usage", { data: await usageData(process.cwd(), Date.now()), read: readCommand("usage"), color: termColor() });
+export async function usageView(find = ""): Promise<number> {
+  return docView("usage", { data: await usageData(process.cwd(), Date.now()), read: readCommand("usage"), color: termColor() }, find);
 }
 
 // --- the Tasks & PRD, Agents & machines and Health & releases views (#367) -------------------------------------------
@@ -939,6 +945,11 @@ async function tasksData(): Promise<Obj> {
     const { taskTracker } = await import("./core/compose.ts");
     const tasks = taskTracker(cfg).list().map((t) => ({ id: plain(t.id), title: plain(t.title), state: t.state,
       holders: t.holders.map(plain), group: plain(t.group), todos: t.todos.map((d) => ({ done: d.done })) }));
+    try {
+      writeFileSync(tasksCachePath(), JSON.stringify({ tasks })); // what the search reads: it makes no GitHub call (#392)
+    } catch {
+      // the state folder is not writable: the search finds no tasks until it is
+    }
     return { ...base, tasks };
   } catch (e) {
     return { ...base, error: plain(e instanceof Error ? e.message : String(e)) || "the tracker gave no tasks" };
@@ -946,18 +957,18 @@ async function tasksData(): Promise<Obj> {
 }
 
 /** `factory cockpit --tasks`: the Tasks & PRD view; it reads the tasks itself, within its time limit. */
-export function tasksView(): number {
-  return view("tasks", { read: readCommand("tasks") });
+export function tasksView(find = ""): number {
+  return view("tasks", { read: readCommand("tasks"), find });
 }
 
 /** `factory cockpit --agents`: the Agents & machines view, from the cache's sessions. */
-export function agentsView(): number {
-  return docView("agents", { data: readCache(), read: readCommand(null), host: host() });
+export function agentsView(find = ""): number {
+  return docView("agents", { data: readCache(), read: readCommand(null), host: host() }, find);
 }
 
 /** `factory cockpit --health`: the Health & releases view, from the cache's doctor and version. */
-export function healthView(): number {
-  return docView("health", { data: readCache(), read: readCommand(null) });
+export function healthView(find = ""): number {
+  return docView("health", { data: readCache(), read: readCommand(null) }, find);
 }
 
 /** `factory cockpit --view-data <settings|usage|tasks>`: what that view reads, as JSON. The views run it for r. */
@@ -971,4 +982,117 @@ export async function viewData(args: string[]): Promise<number> {
   const data = name === "settings" ? settingsData() : name === "usage" ? await usageData(process.cwd(), Date.now()) : await tasksData();
   console.log(JSON.stringify(data));
   return 0;
+}
+
+// --- the search (#392, PRD US-10) ------------------------------------------------------------------------------------
+//
+// `factory cockpit --search [--in <key>] [<text>...]` (cockpit/search.tsx): one box over the rows of every view. It reads
+// what is on this machine, once, when it opens: the cockpit's cache, the settings files, the lessons file, the tasks the
+// Tasks & PRD view last read (`cockpit-tasks.json` in the state folder) and this machine's usage logs. It never calls
+// GitHub, and a key typed in the box reads nothing. Enter opens the view with the row picked: `open` says how, per view,
+// with `{find}` where the row goes.
+
+interface SearchRow {
+  view: string;
+  title: string;
+  text: string;
+  find: string;
+}
+
+function tasksCachePath(): string {
+  mkdirSync(stateDir(), { recursive: true });
+  return join(stateDir(), "cockpit-tasks.json");
+}
+
+/** The first words of `text`, enough for a view to find its line again (a long line is wrapped). */
+function lead(text: string): string {
+  return text.split(/\s+/).slice(0, 3).join(" ").slice(0, 24);
+}
+
+function searchRows(snap: Obj | null, tasks: Obj[], settings: Obj | null, lessons: string[], usage: TaskUse[]): SearchRow[] {
+  const out: SearchRow[] = [];
+  const add = (view: string, title: string, text: string, find: string) => {
+    const t = plain(text).replace(/\s+/g, " ").trim();
+    if (t) out.push({ view, title, text: t, find: plain(find) });
+  };
+  for (const n of list(snap?.needsYou)) {
+    if (n.kind === "owner-ask") add("1", "Needs you", `Owner ask ${plain(n.id)} on #${plain(n.issue)}: ${plain(n.url)}`, `Owner ask ${plain(n.id)} `);
+    else if (n.kind === "owner-merges") add("1", "Needs you", `PR #${plain(n.number)} ${plain(n.title)} is yours to merge`, `PR #${plain(n.number)} `);
+  }
+  for (const p of list(snap?.pulls)) {
+    add("2", "Pull requests", `#${plain(p.number)} ${plain(p.title)} · ${plain(p.branch)}${p.draft === true ? " · draft" : ""}`, plain(p.number));
+  }
+  for (const t of tasks) add("3", "Tasks & PRD", `#${plain(t.id)} ${plain(t.title)} · ${plain(t.state)} · ${plain(t.group)}`, plain(t.id));
+  const ci = obj(snap?.ci);
+  for (const r of list(ci.runs)) add("4", "CI", `${plain(r.name)} ${plain(r.branch) || plain(r.ref)} ${plain(r.state)}`, plain(r.branch) || plain(r.ref));
+  for (const r of list(ci.runners)) add("4", "CI", `runner ${plain(r.name)} ${plain(r.status)}`, plain(r.name));
+  for (const i of list(ci.instances)) add("4", "CI", `${plain(i.name)} ${plain(i.state)}`, plain(i.name));
+  for (const s of list(snap?.sessions)) {
+    add("5", "Agents & machines", `${plain(s.name)} ${plain(s.kind) || plain(s.role)} ${plain(s.state)} ${plain(s.detail)} ${plain(s.machineName)}`, plain(s.name));
+  }
+  for (const sec of list(settings?.sections)) {
+    for (const r of list(sec.rows)) add("6", "Settings", `${plain(r.key)} = ${plain(r.value)} · ${plain(r.help)}`, plain(r.key));
+  }
+  for (const r of list(settings?.machine)) add("6", "Settings", `${plain(r.key)} = ${plain(r.value)} · ${plain(r.help)}`, plain(r.key));
+  const doc = obj(snap?.doctor);
+  for (const f of Array.isArray(doc.fix) ? doc.fix : []) add("7", "Health & releases", `fix: ${plain(f)}`, lead(`fix ${plain(f)}`));
+  if (str(doc.summary)) add("7", "Health & releases", `doctor: ${plain(doc.summary)}`, "Doctor");
+  const v = obj(snap?.version);
+  if (str(v.installed)) add("7", "Health & releases", `factory version ${plain(v.installed)} (${plain(v.source)})`, "Factory version");
+  for (const u of usage) add("8", "Usage & lessons", `#${plain(u.task)} ${plain(u.agent)} · ${u.used} tokens`, plain(u.task));
+  for (const l of lessons) add("8", "Usage & lessons", `lesson: ${l}`, lead(l));
+  return out;
+}
+
+/** The rows of every view, from what is on this machine. A part that can't be read adds no rows. */
+async function searchData(root: string): Promise<SearchRow[]> {
+  let tasks: Obj[] = [];
+  try {
+    tasks = list(obj(JSON.parse(readFileSync(tasksCachePath(), "utf8"))).tasks);
+  } catch {
+    // the Tasks & PRD view has not read the tasks here yet
+  }
+  let settings: Obj | null = null;
+  if (!["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"].some((n) => n in process.env)) {
+    try {
+      settings = settingsData(); // the owner's view: an agent session gets no settings rows
+    } catch {
+      // the settings can't be read: no rows
+    }
+  }
+  let lessons: string[] = [];
+  let usage: TaskUse[] = [];
+  try {
+    const u = await usageData(root, Date.now());
+    lessons = (Array.isArray(u.lessons) ? u.lessons : []).map(String);
+    usage = u.tasks as TaskUse[];
+  } catch {
+    // no logs or lessons file: no rows
+  }
+  return searchRows(readCache(), tasks, settings, lessons, usage);
+}
+
+/** `factory cockpit --search [--in <key>] [<text>...]`. */
+export async function searchView(args: string[]): Promise<number> {
+  let scope: string | null = null;
+  let words = args;
+  if (args[0] === "--in") {
+    scope = args[1] ?? "";
+    words = args.slice(2);
+    if (!views().some((x) => x.key === scope)) {
+      refuse("cockpit_usage", `factory cockpit --search --in takes a view's key (1-8), not "${plain(scope)}".`,
+        "Run `factory cockpit --search` to search every view, or `factory cockpit --search --in 2` for the pull requests.", 2);
+    }
+  }
+  const script = factoryScript(top());
+  const call = (flag: string[]) => ["bash", script, "cockpit", ...flag];
+  const open: Record<string, string[]> = {
+    "1": call(["--needs", "--find", "{find}"]), "2": call(["--prs", "{find}"]), "3": call(["--tasks", "--find", "{find}"]),
+    "4": call(["--ci", "--find", "{find}"]), "5": call(["--agents", "--find", "{find}"]),
+    // Settings is paged by less -R: its own search takes the row
+    "6": ["sh", "-c", 'bash "$1" cockpit --settings --color 2>&1 | less -R "+/$2"', "sh", script, "{find}"],
+    "7": call(["--health", "--find", "{find}"]), "8": call(["--usage", "--find", "{find}"]),
+  };
+  const titles = Object.fromEntries(views().map((x) => [x.key, x.title]));
+  return view("search", { items: await searchData(top()), scope, prefill: words.join(" "), open, titles, color: termColor() });
 }

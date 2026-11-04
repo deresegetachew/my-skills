@@ -414,7 +414,7 @@ async function ink(): Promise<number> {
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
   message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --tasks, --ci, --agents, " +
-    "--settings [--color], --health, --usage, --ink or watch <item>.",
+    "--settings [--color], --health, --usage, --search [--in <key>] [<text>], --ink or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, " +
     "`factory cockpit --ink` for the cockpit on Ink, or " +
@@ -422,6 +422,7 @@ const USAGE_ERROR: Problem = {
 };
 
 const VIEW_FLAGS = ["--sidebar", "--needs", "--tasks", "--ci", "--agents", "--health", "--usage"];
+const FIND_FLAGS = VIEW_FLAGS.slice(1);
 const FLAGS = ["--json", "--status", "--refresh", "--bar", "--settings", "--ink", ...VIEW_FLAGS];
 
 function fail(p: Problem, code = 1): number {
@@ -474,6 +475,18 @@ export async function main(argv: string[]): Promise<number> {
     return (await import("./factory_cockpit_ui.ts")).settingsView(rest);
   }
   if (flag === "--bar") return (await import("./factory_cockpit_ui.ts")).bar(rest); // words typed in already (#309)
+  if (flag === "--search") return (await import("./factory_cockpit_ui.ts")).searchView(rest); // the search over the views (#392)
+  if (rest.length === 2 && rest[0] === "--find" && FIND_FLAGS.includes(flag ?? "")) {
+    // a view opened on the row the search picked (#392)
+    const ui = await import("./factory_cockpit_ui.ts");
+    const find = rest[1] ?? "";
+    if (flag === "--needs") return ui.needs(find);
+    if (flag === "--tasks") return ui.tasksView(find);
+    if (flag === "--ci") return ui.ciView(find);
+    if (flag === "--agents") return ui.agentsView(find);
+    if (flag === "--health") return ui.healthView(find);
+    return await ui.usageView(find);
+  }
   if (flag === "--sidebar-open") return (await import("./factory_cockpit_ui.ts")).sidebarOpen(rest); // the Ink list's keys (#366)
   if (flag === "--prs-data") return (await import("./factory_cockpit_ui.ts")).prsData(rest); // what the PR view reads (#383)
   if (flag === "--sidebar-data" && !rest.length) return (await import("./factory_cockpit_ui.ts")).sidebarData();
