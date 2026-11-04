@@ -17,7 +17,7 @@ import {
   buildRelease, cached, ciLog, commit, type Env, evilRelease, fac, type FakeGitHub, git, PIN, pin, rawTar, sha256, snapshot, spawn,
   stackWorld, UNITTEST_TESTS, world,
 } from "./release_support.ts";
-import { HOOKS, KIT, ROOT, SF, tmp, writeExe } from "./support.ts";
+import { copyHookFolders, HOOKS, KIT, ROOT, SF, tmp, writeExe } from "./support.ts";
 
 const read = (p: string): string => readFileSync(p, "utf8");
 const json = (p: string): Record<string, unknown> => JSON.parse(read(p)) as Record<string, unknown>;
@@ -726,6 +726,7 @@ function projectWithFactory(): string {
   git(d, "init", "-q", "-b", "main");
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(d, ".claude", "hooks", f));
+  copyHookFolders(join(d, ".claude", "hooks"));
   copyFileSync(join(SF, "factory"), join(d, "factory"));
   writeFileSync(join(d, ".claude", "factory.json"), "{}\n");
   commit(d, "project");

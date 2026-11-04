@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import { CI, envWith, gitRepo, HOOKS, runHook, SF, sh, tmp, write, writeExe } from "./support.ts";
+import { CI, copyHookFolders, envWith, gitRepo, HOOKS, runHook, SF, sh, tmp, write, writeExe } from "./support.ts";
 import { type Db, type Env, FAKE_GH, issue, loadDb, nextTask, pull, run, saveDb, setup } from "./issues_support.ts";
 
 const T = 120_000;
@@ -244,6 +244,7 @@ test("the cockpit's Pull requests view says who is reworking a PR, and on which 
   gitRepo(d);
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(d, ".claude", "hooks", f));
+  copyHookFolders(join(d, ".claude", "hooks"));
   cpSync(CI, join(d, ".claude", "ci"), { recursive: true });
   write(join(d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "issues" }, agents: ["menelik", "haile"] }));
   const old = "2020-01-01T00:00:00Z";

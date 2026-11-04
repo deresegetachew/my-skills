@@ -262,16 +262,35 @@ function flakySettings(work: string, word: string, times?: number) {
 
 const blobOf = (work: string, path: string): string => sh(["git", "rev-parse", `HEAD:${path}`], { cwd: work }).stdout.trim();
 
-/** The folder the hook lines name, checked to hold every hook main has, unchanged and read-only. */
+/** Every file and folder under `dir`, as paths relative to it, subfolders included (hooks/core/, decision 0003). */
+function entriesUnder(dir: string, sub = ""): { files: string[]; folders: string[] } {
+  const out = { files: [] as string[], folders: [] as string[] };
+  for (const e of readdirSync(sub ? join(dir, sub) : dir, { withFileTypes: true })) {
+    const rel = sub ? `${sub}/${e.name}` : e.name;
+    if (!e.isDirectory()) out.files.push(rel);
+    else {
+      const inner = entriesUnder(dir, rel);
+      out.folders.push(rel, ...inner.folders);
+      out.files.push(...inner.files);
+    }
+  }
+  return out;
+}
+
+/** The folder the hook lines name, checked to hold every hook main has (its subfolders too), unchanged and read-only. */
 function completeCopy(s: Settings): string {
   const dirs = [...new Set(commands(s).map((c) => scriptOf(c).replace(/\/[^/]+$/, "")))];
   expect(dirs.length).toBe(1);
   const dir = dirs[0] as string;
-  expect(readdirSync(dir).sort()).toEqual(readdirSync(HOOKS).sort());
-  for (const f of readdirSync(HOOKS)) {
+  const want = entriesUnder(HOOKS);
+  const got = entriesUnder(dir);
+  expect(got.files.sort()).toEqual(want.files.sort());
+  expect(got.folders.sort()).toEqual(want.folders.sort());
+  for (const f of want.files) {
     expect(readFileSync(join(dir, f), "utf8"), f).toBe(read(join(HOOKS, f)));
     expect(writable(join(dir, f)), f).toBe(false);
   }
+  for (const f of want.folders) expect(writable(join(dir, f)), f).toBe(false);
   return dir;
 }
 
@@ -330,3 +349,45 @@ test("several sessions starting at once on one clone all start, on one complete 
   const hash = ([...dirs][0] as string).split("/").slice(-2, -1)[0] as string;
   expect(readdirSync(join(work, ".git", "factory-hooks"))).toEqual([hash]);
 }, 120_000);
+
+test("a hooks folder that main has as a link to a folder (hooks/core/, decision 0003) is unpacked whole and read-only", () => {
+  const work = project(true); // .claude/hooks/core is a link to kit/hooks/core (and the folder has its own .keep)
+  const gate = commands(started(work)).map(scriptOf).find((s) => s.endsWith("/pr-gate.ts")) as string;
+  const core = join(gate.replace(/\/pr-gate\.ts$/, ""), "core");
+  const want = entriesUnder(join(HOOKS, "core"));
+  const got = entriesUnder(core);
+  expect(want.files.length).toBeGreaterThan(0);
+  expect(got.files.sort()).toEqual(want.files.sort());
+  expect(got.folders.sort()).toEqual(want.folders.sort());
+  for (const f of want.files) {
+    expect(readFileSync(join(core, f), "utf8"), f).toBe(read(join(HOOKS, "core", f)));
+    expect(writable(join(core, f)), f).toBe(false);
+  }
+  for (const f of ["", ...want.folders]) expect(writable(join(core, f)), f || "core").toBe(false);
+});
+
+test("a changed file in a subfolder of the unpacked copy is put back", () => {
+  const work = project();
+  const dir = completeCopy(started(work));
+  const inner = join(dir, "core", "domain", "message.ts");
+  chmodSync(join(dir, "core", "domain"), 0o755);
+  chmodSync(inner, 0o644);
+  writeFileSync(inner, ALLOW_ALL);
+  expect(completeCopy(started(work))).toBe(dir);
+  expect(readFileSync(inner, "utf8")).toBe(read(join(HOOKS, "core", "domain", "message.ts")));
+});
+
+test("a link in main's hooks that leads back up into them is refused with its own fix, and nothing is put in place", () => {
+  const work = project();
+  symlinkSync("..", join(work, ".claude", "hooks", "core", "loop"));
+  commit(work, "a loop");
+  quiet(["git", "push", "-q", "origin", "HEAD:main"], work);
+  const p = agentSettings(work);
+  expect(p.code, p.out).toBe(1);
+  const err = JSON.parse(p.stderr.trim()) as { code: string; message: string; fix: string };
+  expect(err.code).toBe("hooks_too_deep");
+  expect(err.message).toContain("No session was started");
+  expect(err.fix).toContain("link");
+  const root = join(work, ".git", "factory-hooks");
+  expect(existsSync(root) ? readdirSync(root) : []).toEqual([]);
+});

@@ -96,3 +96,71 @@ test("a Python file in the factory fails, and one in another skill is that skill
   expect(r.stdout).toContain("software-factory/x.py: a Python file");
   expect(r.stdout).not.toContain("demo/helper.py");
 });
+
+/** A repo with the factory's core laid out as decision 0003 says (domain, ports, adapters, compose.ts), all fine. */
+function core(): string {
+  const d = repo(false);
+  const at = (...p: string[]): string => join(d, "software-factory", ...p);
+  for (const dir of [["hooks", "core", "domain"], ["hooks", "core", "ports"], ["hooks", "core", "adapters", "memory"], ["tests"]]) {
+    mkdirSync(at(...dir), { recursive: true });
+  }
+  writeFileSync(at("SKILL.md"), "---\nname: software-factory\ndescription: The factory.\n---\n");
+  writeFileSync(at("hooks", "core", "domain", "message.ts"), "export class Message { id = \"\"; }\n");
+  writeFileSync(at("hooks", "core", "domain", "error.ts"), 'import { Message } from "./message.ts";\nexport type E = Message;\n');
+  writeFileSync(at("hooks", "core", "ports", "messaging.ts"),
+    'import type { Message } from "../domain/message.ts";\nexport interface Messaging { send(m: Message): Message }\n');
+  writeFileSync(at("hooks", "core", "ports", "other.ts"), 'import type { Messaging } from "./messaging.ts";\nexport type O = Messaging;\n');
+  writeFileSync(at("hooks", "core", "adapters", "memory", "messaging.ts"),
+    'import type { Messaging } from "../../ports/messaging.ts";\nimport { Message } from "../../domain/message.ts";\n' +
+    "export class Memory implements Messaging { send(m: Message): Message { return m; } }\n");
+  writeFileSync(at("hooks", "core", "compose.ts"), 'import { Memory } from "./adapters/memory/messaging.ts";\nexport const compose = () => new Memory();\n');
+  writeFileSync(at("hooks", "factory_messages.ts"), 'import { compose } from "./core/compose.ts";\nimport { Message } from "./core/domain/message.ts";\n' +
+    "export const port = compose();\nexport { Message };\n");
+  writeFileSync(at("tests", "memory.test.ts"), 'import { Memory } from "../hooks/core/adapters/memory/messaging.ts";\nexport { Memory };\n');
+  return d;
+}
+
+test("the core's layers pass when each imports only what decision 0003 allows", () => {
+  const r = run(core());
+  expect(r.code, r.out).toBe(0);
+});
+
+test("a domain file that imports an adapter, a port or anything outside the domain fails", () => {
+  const d = core();
+  const domain = join(d, "software-factory", "hooks", "core", "domain");
+  writeFileSync(join(domain, "a.ts"), 'import { Memory } from "../adapters/memory/messaging.ts";\nexport { Memory };\n');
+  writeFileSync(join(domain, "b.ts"), 'import type { Messaging } from "../ports/messaging.ts";\nexport type B = Messaging;\n');
+  writeFileSync(join(domain, "c.ts"), 'import { gh } from "../../factory_issues.ts";\nexport { gh };\n');
+  writeFileSync(join(domain, "d.ts"), 'import { readFileSync } from "node:fs";\nexport { readFileSync };\n');
+  const r = run(d);
+  expect(r.code, r.out).toBe(1);
+  for (const [f, what] of [["a", "../adapters/memory/messaging.ts"], ["b", "../ports/messaging.ts"], ["c", "../../factory_issues.ts"], ["d", "node:fs"]]) {
+    expect(r.stdout).toContain(`software-factory/hooks/core/domain/${f}.ts: imports ${what}; the domain imports only the domain`);
+  }
+  expect(r.stdout).not.toContain("domain/message.ts");
+  expect(r.stdout).not.toContain("domain/error.ts");
+});
+
+test("a port that imports an adapter or anything but the domain and the ports fails", () => {
+  const d = core();
+  const ports = join(d, "software-factory", "hooks", "core", "ports");
+  writeFileSync(join(ports, "x.ts"), 'import { Memory } from "../adapters/memory/messaging.ts";\nexport { Memory };\n');
+  writeFileSync(join(ports, "y.ts"), 'import { load } from "../../factory_config.ts";\nexport { load };\n');
+  const r = run(d);
+  expect(r.code, r.out).toBe(1);
+  expect(r.stdout).toContain("software-factory/hooks/core/ports/x.ts: imports ../adapters/memory/messaging.ts; a port imports only the domain and the ports");
+  expect(r.stdout).toContain("software-factory/hooks/core/ports/y.ts: imports ../../factory_config.ts; a port imports only the domain and the ports");
+});
+
+test("a command that imports an adapter directly fails; compose.ts, other adapters and tests may", () => {
+  const d = core();
+  const hooks = join(d, "software-factory", "hooks");
+  writeFileSync(join(hooks, "factory_x.ts"), 'import { Memory } from "./core/adapters/memory/messaging.ts";\nexport const port = new Memory();\n');
+  writeFileSync(join(hooks, "core", "y.ts"), 'export const load = () => import("./adapters/memory/messaging.ts");\n');
+  const r = run(d);
+  expect(r.code, r.out).toBe(1);
+  expect(r.stdout).toContain("software-factory/hooks/factory_x.ts: imports ./core/adapters/memory/messaging.ts; only core/compose.ts builds the adapters");
+  expect(r.stdout).toContain("software-factory/hooks/core/y.ts: imports ./adapters/memory/messaging.ts; only core/compose.ts builds the adapters");
+  expect(r.stdout).not.toContain("compose.ts: imports");
+  expect(r.stdout).not.toContain("tests/memory.test.ts");
+});

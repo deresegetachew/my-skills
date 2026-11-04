@@ -6,7 +6,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync,
 import { join } from "node:path";
 import { bundleCockpit } from "../../tools/build_cockpit.ts";
 import { sidebarOf } from "../cockpit/testing.tsx";
-import { CI, envWith, gitRepo, HOOKS, SF, sh, tmp, write, type Proc } from "./support.ts";
+import { CI, copyHookFolders, envWith, gitRepo, HOOKS, SF, sh, tmp, write, type Proc } from "./support.ts";
 
 const T = 120_000;
 type Obj = Record<string, unknown>;
@@ -245,6 +245,7 @@ function project(sessions: Obj[], needsYou: Obj[] = []): Proj {
   const hooks = join(d, ".claude", "hooks");
   mkdirSync(hooks, { recursive: true });
   for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(hooks, f));
+  copyHookFolders(hooks);
   cpSync(CI, join(d, ".claude", "ci"), { recursive: true });
   writeFileSync(join(hooks, "factory_cockpit_ink.js"), bundle);
   write(join(d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "issues" } }));

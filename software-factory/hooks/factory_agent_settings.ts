@@ -53,6 +53,8 @@ function gitIn(dir: string, ...args: string[]): { code: number; stdout: Uint8Arr
 /** A git read that failed (an error, a timeout under load), as opposed to one that found nothing: the caller refuses
  * rather than take it for a file main does not have. */
 export class ReadFailed extends Error {}
+/** main's hooks folder goes more than 8 folders deep (most likely a link that leads back up into it). */
+export class TooDeep extends Error {}
 
 const READ_TRIES = 3;
 
@@ -162,32 +164,51 @@ interface Unpacked {
 }
 
 /** main's `.claude/hooks/` files (links and submodules followed), plus `VERSION` beside the folder; null when main
- * has no such folder. Subfolders are left out: the hooks are one flat folder. Every file the listing names is read
- * or it throws ReadFailed: a copy with a file missing would be put in place and its hooks fail on the missing import. */
+ * has no such folder. Subfolders come along (the factory's core is `hooks/core/`, decision 0003). Every file the
+ * listing names is read or it throws ReadFailed: a copy with a file missing would be put in place and its hooks fail
+ * on the missing import. */
 function mainHooks(): Unpacked[] | null {
   const top = entryAt(".", "FETCH_HEAD", HOOKS_DIR);
   if (!top || top.mode !== "040000") return null;
-  const listing = gitRead(top.dir, "ls-tree", "-z", top.sha);
   const files: Unpacked[] = [];
-  for (const line of text(listing).split("\0")) {
-    if (line === "") continue;
-    const m = /^(\d+) \w+ ([0-9a-f]+)\t(.+)$/s.exec(line);
-    if (!m) throw new ReadFailed(`an unexpected line in the listing of ${HOOKS_DIR}`);
-    const [, mode, sha, name] = m as unknown as [string, string, string, string];
-    if (mode === "040000") continue;
-    // a plain file is read by the id the listing gives; a link (or submodule) is followed the way the checkout would
-    const e = mode.startsWith("100")
-      ? { dir: top.dir, mode, sha }
-      : entryAt(top.dir, top.rev, top.path ? `${top.path}/${name}` : name);
-    if (!e || !e.mode.startsWith("100")) continue; // a link that leads nowhere: the checkout would have nothing there
-    files.push({ name: `hooks/${name}`, bytes: gitRead(e.dir, "cat-file", "blob", e.sha), exec: e.mode === "100755" });
-  }
+  listFiles(files, top, "", 0);
   const parent = top.path.split("/").slice(0, -1).join("/");
   if (top.path) {
     const version = bytesAt(top.dir, top.rev, parent ? `${parent}/VERSION` : "VERSION");
     if (version !== null) files.push({ name: "VERSION", bytes: version, exec: false });
   }
   return files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+/** The files of the folder `at` (an Entry whose mode is 040000), as `hooks/<rel>/<name>`, its subfolders included. A
+ * plain file or folder is read by the id the listing gives; a link (or submodule) is followed the way the checkout
+ * would, into a file or a folder. */
+function listFiles(files: Unpacked[], at: Entry, rel: string, depth: number): void {
+  if (depth > 8) throw new TooDeep(`${HOOKS_DIR}/${rel}`);
+  const listing = gitRead(at.dir, "ls-tree", "-z", at.sha);
+  for (const line of text(listing).split("\0")) {
+    if (line === "") continue;
+    const m = /^(\d+) \w+ ([0-9a-f]+)\t(.+)$/s.exec(line);
+    if (!m) throw new ReadFailed(`an unexpected line in the listing of ${HOOKS_DIR}`);
+    const [, mode, sha, name] = m as unknown as [string, string, string, string];
+    const path = at.path ? `${at.path}/${name}` : name;
+    const e: Entry | null = mode.startsWith("100") || mode === "040000" ? { dir: at.dir, rev: at.rev, path, mode, sha }
+      : entryAt(at.dir, at.rev, path);
+    if (!e) continue; // a link that leads nowhere: the checkout would have nothing there
+    const inside = rel ? `${rel}/${name}` : name;
+    if (e.mode === "040000") listFiles(files, e, inside, depth + 1);
+    else if (e.mode.startsWith("100")) files.push({ name: `hooks/${inside}`, bytes: gitRead(e.dir, "cat-file", "blob", e.sha), exec: e.mode === "100755" });
+  }
+}
+
+/** The folders the unpacked files sit in (`hooks` and every subfolder that holds one), deepest first. */
+function foldersOf(files: Unpacked[]): string[] {
+  const out = new Set<string>(["hooks"]);
+  for (const f of files) {
+    const parts = f.name.split("/");
+    for (let i = 1; i < parts.length; i++) out.add(parts.slice(0, i).join("/"));
+  }
+  return [...out].sort((a, b) => b.split("/").length - a.split("/").length || (a < b ? -1 : 1));
 }
 
 /** A name for these files: the same files always get the same folder, so a second start reuses it. */
@@ -202,25 +223,29 @@ function contentKey(files: Unpacked[]): string {
 
 const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 
-/** Whether `dir` holds exactly these files, unchanged and read-only (and its folders too). */
+/** Whether `dir` holds exactly these files, unchanged and read-only, in exactly their folders (read-only too). */
 function intact(dir: string, files: Unpacked[]): boolean {
   try {
     const want = new Map(files.map((f) => [f.name, f]));
-    const seen: string[] = [];
-    for (const sub of ["", "hooks"]) {
-      const at = sub ? join(dir, sub) : dir;
-      const st = lstatSync(at);
+    const folders = new Set(foldersOf(files));
+    let seen = 0;
+    const walk = (sub: string): boolean => {
+      const st = lstatSync(sub ? join(dir, sub) : dir);
       if (!st.isDirectory() || (st.mode & 0o222) !== 0) return false;
-      for (const n of readdirSync(at)) {
+      for (const n of readdirSync(sub ? join(dir, sub) : dir)) {
         const rel = sub ? `${sub}/${n}` : n;
-        if (rel === "hooks") continue;
+        if (folders.has(rel)) {
+          if (!walk(rel)) return false;
+          continue;
+        }
         const f = want.get(rel);
         const fst = lstatSync(join(dir, rel));
         if (!f || !fst.isFile() || (fst.mode & 0o222) !== 0 || !sameBytes(readFileSync(join(dir, rel)), f.bytes)) return false;
-        seen.push(rel);
+        seen++;
       }
-    }
-    return seen.length === files.length;
+      return true;
+    };
+    return walk("") && seen === files.length;
   } catch {
     return false;
   }
@@ -244,10 +269,11 @@ function removeTree(path: string): void {
 function writeTemp(root: string, files: Unpacked[]): string {
   const temp = mkdtempSync(join(root, ".unpacking-"));
   try {
-    mkdirSync(join(temp, "hooks"));
+    const folders = foldersOf(files);
+    for (const d of folders) mkdirSync(join(temp, d), { recursive: true });
     for (const f of files) writeFileSync(join(temp, f.name), f.bytes, { mode: f.exec ? 0o555 : 0o444 });
     for (const f of files) chmodSync(join(temp, f.name), f.exec ? 0o555 : 0o444); // whatever the umask
-    chmodSync(join(temp, "hooks"), 0o555);
+    for (const d of folders) chmodSync(join(temp, d), 0o555); // deepest first, so each is still open while its own are done
     chmodSync(temp, 0o555);
     if (!intact(temp, files)) throw new Error("the unpacked copy does not match main's files");
     return temp;
@@ -392,6 +418,11 @@ export function main(): number {
   try {
     return start();
   } catch (e) {
+    if (e instanceof TooDeep) {
+      return refuse("hooks_too_deep", `main's ${HOOKS_DIR} goes more than 8 folders deep (at ${e.message}), so its hooks ` +
+        "can't be unpacked. No session was started.",
+        `look for a link in ${HOOKS_DIR} on main that points back up into it, remove it on main, then start it again.`);
+    }
     if (!(e instanceof ReadFailed)) throw e;
     return refuse("hooks_not_read", `main's files could not all be read from git (${e.message}), so the agent would start ` +
       "with part of its rules or hooks. No session was started.",
@@ -430,7 +461,7 @@ function start(): number {
   try {
     folder = unpackMainHooks();
   } catch (e) {
-    if (e instanceof ReadFailed) throw e;
+    if (e instanceof ReadFailed || e instanceof TooDeep) throw e;
     return refuse("hooks_not_unpacked", `main's ${HOOKS_DIR} could not be unpacked into the git folder ` +
       `(${e instanceof Error ? e.message : String(e)}), so the agent's hooks would run its own folder's copy. No session was started.`,
       "check that this project's git folder (`git rev-parse --git-common-dir`) is writable and has free space, " +

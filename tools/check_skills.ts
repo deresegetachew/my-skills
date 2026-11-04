@@ -6,9 +6,11 @@
 //   .py file.
 // - Only the cockpit's UI (software-factory/cockpit/) imports Ink or React (decision 0002): they are build-time
 //   dependencies, bundled into one file at release, and a project never installs them.
+// - The factory's core keeps its layers (decision 0003): software-factory/hooks/core/domain/ imports only the domain,
+//   core/ports/ only the domain and the ports, and only core/compose.ts (and tests) import core/adapters/.
 // - No compiled .pyc file is tracked by git.
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const errors: string[] = [];
@@ -53,6 +55,28 @@ const transpilers = { ts: new Bun.Transpiler({ loader: "ts" }), tsx: new Bun.Tra
 // Decision 0002: Ink, React and their helpers (ink-testing-library, react-reconciler, ...) only in the cockpit's UI.
 const UI_PACKAGES = /^(ink|ink-[\w.-]+|react|react-[\w.-]+)(\/|$)/;
 const UI_FOLDER = "software-factory/cockpit/";
+// Decision 0003: the factory's core keeps its layers. The domain imports only the domain (no I/O, no package); a port
+// only the domain and the ports; and only core/compose.ts builds the adapters (other adapters and tests may import them).
+const CORE = "software-factory/hooks/core/";
+
+/** Why importing `spec` from the file at `from` (both relative to the repo) crosses the core's boundary, or null. */
+function crossesCore(from: string, spec: string): string | null {
+  const relative = spec.startsWith("./") || spec.startsWith("../");
+  const target = relative ? join(dirname(from), spec) : null;
+  const inside = (folder: string): boolean => target !== null && target.startsWith(CORE + folder);
+  if (from.startsWith(CORE + "domain/")) return inside("domain/") ? null : "the domain imports only the domain";
+  if (from.startsWith(CORE + "ports/")) return inside("domain/") || inside("ports/") ? null : "a port imports only the domain and the ports";
+  if (!inside("adapters/")) return null;
+  const allowed = from === CORE + "compose.ts" || from.startsWith(CORE + "adapters/") || from.startsWith("software-factory/tests/");
+  return allowed ? null : "only core/compose.ts builds the adapters";
+}
+
+/** What every static `import ... from` and `export ... from` names, types included: the transpiler's scan drops an
+ * import that brings only types (`import type`, `import { type X }`), and those cross a layer too. */
+function staticImports(text: string): string[] {
+  return [...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/gm)].map((m) => m[1] as string);
+}
+
 const pyFiles: string[] = [];
 for (const f of files) {
   if (f.endsWith(".sh")) {
@@ -64,12 +88,17 @@ for (const f of files) {
     const transpiler = f.endsWith(".tsx") ? transpilers.tsx : transpilers.ts;
     try {
       transpiler.transformSync(text);
+      const imports = transpiler.scanImports(text.replace(/^#!.*/, "")); // the scan doesn't take a #! line
       if (!rel(f).startsWith(UI_FOLDER)) {
-        for (const i of transpiler.scanImports(text.replace(/^#!.*/, ""))) { // the scan doesn't take a #! line
+        for (const i of imports) {
           if (UI_PACKAGES.test(i.path)) {
             errors.push(`${rel(f)}: imports ${i.path}; only the cockpit's UI (${UI_FOLDER}) may import Ink or React (decision 0002)`);
           }
         }
+      }
+      for (const spec of new Set([...imports.map((i) => i.path), ...staticImports(text)])) {
+        const why = crossesCore(rel(f), spec);
+        if (why) errors.push(`${rel(f)}: imports ${spec}; ${why} (decision 0003)`);
       }
     } catch (e) {
       errors.push(`${rel(f)}: does not parse: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
