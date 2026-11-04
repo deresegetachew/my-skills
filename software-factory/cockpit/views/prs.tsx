@@ -274,7 +274,8 @@ export function PrsView(props: PrsProps): ReactElement {
   }, []);
 
   useInput((input, key) => {
-    if (mode.kind === "reading" || mode.kind === "running") return;
+    if (mode.kind === "reading" && (input === "q" || (key.ctrl && input === "c"))) return exit(); // a read can be left
+    if (mode.kind === "reading" || mode.kind === "running") return; // an action runs to its end
     if (mode.kind === "shown") {
       reload(true, "Reading the pull requests from GitHub…");
       return;

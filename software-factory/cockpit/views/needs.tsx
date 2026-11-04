@@ -22,7 +22,7 @@ function sentence(n: Obj): string {
     return `Owner ask ${plain(n.id)} on #${plain(n.issue)}${replied}: ${plain(n.url)}`;
   }
   if (n.kind === "owner-merges") return `PR #${plain(n.number)} ${plain(n.title)} is yours to merge: ${plain(n.url)}`;
-  return JSON.stringify(n); // JSON escapes control characters itself
+  return plain(JSON.stringify(n)); // JSON escapes C0 control characters, not C1 (\x80-\x9f)
 }
 
 /** What the owner does about the selected one. */
@@ -78,10 +78,10 @@ export function NeedsView(props: NeedsProps): ReactElement {
   const [snap, setSnap] = useState<Got | undefined>(props.snapshot);
   const [selected, setSelected] = useState(0);
   useInput((input, key) => {
+    if (input === "q" || (key.ctrl && input === "c")) return exit(); // closes while it reads too
     if (snap === undefined) return; // reading
     const count = snap && snap !== "late" ? list(snap.needsYou).length : 0;
-    if (input === "q" || (key.ctrl && input === "c")) exit();
-    else if (input === "j" || key.downArrow) setSelected((s) => Math.min(s + 1, Math.max(count - 1, 0)));
+    if (input === "j" || key.downArrow) setSelected((s) => Math.min(s + 1, Math.max(count - 1, 0)));
     else if (input === "k" || key.upArrow) setSelected((s) => Math.max(s - 1, 0));
     else if (input === "r") {
       setSnap(undefined);

@@ -319,7 +319,42 @@ test("needs: no snapshot yet says how to read one", async () => {
   v.unmount();
 });
 
-// --- off a terminal, within a time limit (bug 3 in #362) ------------------------------------------------------------------
+test("needs and prs: q closes while a read is still going", async () => {
+  let reads = 0;
+  const never = () => {
+    reads++;
+    return new Promise<never>(() => {});
+  };
+  const n = drawNeeds(needsProps({ load: never }));
+  await n.settle();
+  await n.press("r");
+  expect(n.frame()).toContain("Reading the snapshot…");
+  await n.press("q");
+  await n.press("r");
+  expect(reads).toBe(1);
+  n.unmount();
+  reads = 0;
+  const q = drawPrs(prsProps({ load: (fresh) => (fresh ? never() : Promise.resolve(PRS)) }));
+  await q.settle();
+  await q.press("r");
+  expect(q.frame()).toContain("Reading the pull requests from GitHub…");
+  await q.press("q");
+  await q.press("r");
+  expect(reads).toBe(1);
+  q.unmount();
+});
+
+test("needs: an item of a kind it doesn't know shows no control character, C1 ones too", async () => {
+  const v = drawNeeds(needsProps({ snapshot: { generatedAt: SNAP.generatedAt, needsYou: [{ kind: "new-kind", note: "x\x9b2Jy\x1b[31m" }] } }));
+  await v.settle();
+  const f = v.frame();
+  v.unmount();
+  expect(f).toContain("new-kind");
+  expect(f).not.toContain("\x9b");
+  expect(f).not.toContain("\x1b");
+});
+
+// --- off a terminal, within a time limit (bug 3 in #362)------------------------------------------------------------------
 
 /** A gh that never answers, and leaves a child holding its output open, as a slow GitHub read did. */
 const HANGING_GH = "#!/usr/bin/env bash\nsleep 90 &\nwait\n";
