@@ -9,6 +9,7 @@
 // scope (this machine's own file outside the repo, see factory_machine.ts; `factory settings --local`).
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { KINDS as MESSAGE_KINDS } from "./core/domain/message.ts";
 import { DEFAULTS, safeAgent } from "./factory_config.ts";
 import { render } from "./factory_env.ts";
 import { Exit, pyDumps, pyRepr } from "./factory_lib.ts";
@@ -30,6 +31,8 @@ export const SECTIONS: [string, string, string][] = [
   ["ci", "CI", "`factory ci` (ci.sh) and `factory status`"],
   ["design", "Design & eval", "the eval and design-check skills and factory_reviews.ts"],
   ["machine", "Machine (local)", "factory_machine.ts, `factory autostart`, `factory resume` and `factory loop`"],
+  // After the machine section, so its menu number (10) stays the same.
+  ["messaging", "Messaging", "the composition root (core/compose.ts), which picks the messaging adapter (decision 0004)"],
 ];
 export const SECTION_TITLE: Record<string, string> = Object.fromEntries(SECTIONS.map(([slug, title]) => [slug, title]));
 export const SECTION_READERS: Record<string, string> = Object.fromEntries(SECTIONS.map(([slug, , readers]) => [slug, readers]));
@@ -243,6 +246,11 @@ export const SETTINGS: Record<string, Setting> = table([
   S("turbo.port", "int", "ci", "The port the cache server listens on.", { default: 3335 }),
   S("turbo.secretsCommand", "str", "ci", "A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins.", { default: "" }),
   S("ci.lightLabel", "str", "ci", "The light runner's label (default `<repo>-light`).", { default: "" }),
+  S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds).", { options: ["github", "nats"], default: "github" }),
+  S("messaging.url", "str", "messaging", "The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats.", { default: "" }),
+  S("messaging.creds", "str", "messaging", "The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/.", { default: "" }),
+  S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff); every other kind stays on GitHub.", { default: [] }),
+  S("messaging.fallback", "enum", "messaging", "When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command.", { options: ["github", "none"], default: "github" }),
   S("tasks.labels", "dict", "issues", "The GitHub labels that mark a task: ready, inProgress, inReview, blocked and the agentPrefix."),
   S("structure.roots", "list", "commands", "Folders the structure check (the hexagonal skill's check_structure script) looks at, when a style uses it.", { default: [] }),
   S("structure.legacy", "str", "commands", "The list of legacy files the structure check leaves alone (it only shrinks).", { default: "" }),
@@ -439,6 +447,17 @@ const MORE: Record<string, More> = {
   "design.references": { long: "The folder of design reference screens the design-check skill compares a built " +
     "screen with. Empty: no design check.",
   examples: ["factory settings set design.references design/screens"] },
+  "messaging.transport": { long: "github is today's behaviour and needs no setup. nats loads the NATS plugin and sends " +
+    "the kinds in `messaging.kinds` over it; every other kind, and everything the PR gate or the owner reads, stays on " +
+    "GitHub. A kind that moves is sent both ways for its first week (decision 0004).",
+  examples: ["factory settings set messaging.transport nats"] },
+  "messaging.fallback": { long: "With github, a command whose NATS plugin is missing or fails to load goes on over " +
+    "GitHub and prints `plugin-missing` or `plugin-load` once, with the fix; `factory doctor` fails until it is fixed. " +
+    "With none, the command stops with that error instead.",
+  examples: ["factory settings set messaging.fallback none"] },
+  "messaging.kinds": { long: "The kinds of message that have moved to NATS, one at a time. A kind not listed stays on " +
+    "GitHub. Stopping a kind's GitHub copy after its first week is the owner's call.",
+  examples: ["factory settings set messaging.kinds '[\"wake\"]'"] },
   "agents@machine": { long: "The names this machine runs for the project, each one an agent in the project's `agents`. " +
     "`FACTORY_AGENTS` (comma-separated) overrides it. Empty: every name in the project's " +
     "`agents`. In issues mode a name another machine has live is refused.",
@@ -728,8 +747,29 @@ export function validateAll(data: Record<string, unknown>, root = "."): [string[
       if (!existsSync(join(root, here))) errors.push(`${key}: ${here} doesn't exist. Fix the path, or \`factory settings unset ${key}\`.`);
     }
   }
-  errors.push(...portCollisions(data));
+  errors.push(...portCollisions(data), ...messagingErrors(data));
   return [errors, warnings];
+}
+
+// The kinds `messaging.kinds` may move: the envelope's, and the ones decision 0004 (point 6) adds.
+export const MESSAGING_KINDS = [...MESSAGE_KINDS,"claim", "release", "wake", "handoff"];
+
+function messagingErrors(data: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  const url = effective(data, "messaging.url");
+  if (effective(data, "messaging.transport") === "nats" && !url) {
+    errors.push("messaging.url: transport is nats but no server is set. " +
+      "Set it with `factory settings set messaging.url nats://<address>:4222`.");
+  } else if (typeof url === "string" && url && !/^(nats|tls):\/\//.test(url)) {
+    errors.push(`messaging.url: ${url} isn't a NATS address. Use nats://<address>:4222 (or tls://).`);
+  }
+  const kinds = lookup(data, "messaging.kinds");
+  for (const kind of Array.isArray(kinds) ? kinds : []) {
+    if (typeof kind === "string" && !MESSAGING_KINDS.includes(kind)) {
+      errors.push(`messaging.kinds: ${kind} isn't a message kind. Kinds: ${MESSAGING_KINDS.join(", ")}.`);
+    }
+  }
+  return errors;
 }
 
 function portCollisions(data: Record<string, unknown>): string[] {
