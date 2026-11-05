@@ -227,3 +227,74 @@ test("the product owner loop with only waiting asks exits at once with nothing t
   expect(p.out).not.toContain("came up 3 times");
   expect(claudeCalls(env)).toEqual([]);
 });
+
+// --- notes to the product owner, finished asks and the product review (#397) ----------------------------------------------
+
+// The fake gh numbers queue #40's comments 40001, 40002, ... in order.
+function workWith(comments: string[], pulls: Record<string, unknown>[] = []): { out: string; code: number } {
+  const [, work, env] = poProject({ db: { issues: [QUEUE], pulls, comments: { "40": comments } } });
+  const p = factory(work, env, ["product-owner", "loop", "--once", "--dry-run"]);
+  return { out: p.stdout, code: p.code };
+}
+
+test("an unmarked note to the product owner on the owner queue is listed (#397)", () => {
+  const r = workWith(["PO: please review the cockpit against US-12 and file what is missing.",
+    "Note for the product owner: the CI view should say who is running."]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.out).toContain("owner queue #40, note 40001 to the product owner: PO: please review the cockpit against US-12");
+  expect(r.out).toContain("owner queue #40, note 40002 to the product owner: Note for the product owner: the CI view");
+});
+
+test("a note to someone else is not listed, and a note the product owner answered is not listed again (#397)", () => {
+  const r = workWith(["Dev manager: merge #12 first.",
+    "PO: file the follow-up for the CI view.",
+    "PO: and one for the help text.",
+    "<!-- factory-po-reply note=40002 -->\nFiled #77."]);
+  expect(r.out).not.toContain("note 40001");
+  expect(r.out).not.toContain("note 40002");
+  expect(r.out).toContain("note 40003 to the product owner: PO: and one for the help text.");
+});
+
+test("a finished ask marked done is not listed again after the product owner's later notes and reviews (#397)", () => {
+  const r = workWith([ask("hosting", "for=product", "this needs your yes: where do we host?"),
+    "<!-- factory-po-reply ask=hosting done -->\nRecorded in decision 0007.",
+    "<!-- factory-po-review through=9 -->\nReviewed #9 against US-3: filed #80.",
+    "<!-- factory-po-reply note=40001 -->\nAlready recorded."]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.out).not.toContain("ask hosting");
+  expect(r.out).toContain("Nothing to do");
+});
+
+test("a reply without done waits for the owner and the product owner's own markers do not hand it back (#397)", () => {
+  const r = workWith([ask("hosting", "for=product", "this needs your yes: where do we host?"),
+    "<!-- factory-po-reply ask=hosting -->\nI recommend Fly because it is what we run now.",
+    "<!-- factory-po-review through=9 -->\nReviewed #9."]);
+  expect(r.out).not.toContain("ask hosting");
+});
+
+function merged(n: number, title: string): Record<string, unknown> {
+  return { number: n, title, state: "closed", merged_at: "2026-11-04T10:00:00Z", head: { sha: "a".repeat(40), ref: `task/${n}-x` }, labels: [] };
+}
+
+test("pull requests merged since the last product review are listed for review (#397)", () => {
+  const pulls = [merged(9, "cockpit: the CI view"), merged(11, "cockpit: search"),
+    { number: 12, title: "closed unmerged", state: "closed", merged_at: null, labels: [] },
+    { number: 13, title: "still open", state: "open", merged_at: null, labels: [] }];
+  const first = workWith([], pulls);
+  expect(first.out).toContain("review: 2 pull requests merged since the last product review: #11 cockpit: search, #9 cockpit: the CI view");
+  const later = workWith(["<!-- factory-po-review through=9 -->\nReviewed #9 against US-3."], pulls);
+  expect(later.out).toContain("review: 1 pull request merged since the last product review: #11 cockpit: search");
+  const done = workWith(["<!-- factory-po-review through=11 -->\nReviewed #11."], pulls);
+  expect(done.out).not.toContain("review:");
+  expect(done.out).toContain("Nothing to do");
+});
+
+test("the product pass skill has the proactive review, the unmarked note rule and the already asked rule (#397)", () => {
+  const skill = readFileSync(join(KIT, ".claude", "skills", "product-pass", "SKILL.md"), "utf8");
+  expect(skill).toContain("<!-- factory-po-review through=<n> -->");
+  expect(skill).toContain("<!-- factory-po-reply note=<comment id> -->");
+  expect(skill).toContain("<!-- factory-po-reply ask=<slug> done -->");
+  expect(skill).toContain("at most 2 task issues a pass");
+  expect(skill).toMatch(/already asked/i);
+  expect(skill).toMatch(/status:/);
+});
