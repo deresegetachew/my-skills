@@ -2,13 +2,15 @@
 // (tools/build_web.ts). Like Slack: on the far left the projects, then the selected project's channels (one per agent,
 // one per view) with a search across every project's channels, and on the right the channel. Agents and machines are
 // live over a WebSocket; starting and stopping an agent asks first, then runs `factory owner start|stop` on the server.
-// Chat with an agent and the owner queue's approvals (#423) and the tasks, pull requests and CI views (#424) slot in as channels.
+// Chat with an agent and the owner queue's approvals (#423) are in chat.tsx; the tasks, pull requests and CI views (#424)
+// slot in as channels.
 //
 // It reads only the API (factory_ui_server.ts); the few rules it has are in model.ts, tested on their own.
 import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
   type Tone } from "./model.ts";
+import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { CSS } from "./style.ts";
 import { CiChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
 import { searchRows, type ViewsData } from "./views_model.ts";
@@ -153,8 +155,9 @@ interface Ask {
   role: string;
 }
 
-function AgentChannel({ agent, channel, live, project }: { agent: Agent | undefined; channel: ChannelView; live: Live | undefined;
-  project: Project }) {
+function AgentChannel({ agent, channel, live, project, token }: { agent: Agent | undefined; channel: ChannelView; live: Live | undefined;
+  project: Project; token: string }) {
+  const chat = useChat(token, project.id, channel.name);
   const limit = live?.limit ?? null;
   const st = agentState(agent, limit);
   const role = ROLE_TITLE[channel.role ?? ""] ?? channel.role ?? "";
@@ -198,10 +201,9 @@ function AgentChannel({ agent, channel, live, project }: { agent: Agent | undefi
             )}
           </section>
         )}
+        <ChatLog chat={chat} agent={channel.name} />
       </div>
-      <div className="composer" aria-label="Message">
-        <div>Message {channel.name}: chat with agents arrives next (#423). Meanwhile: <code>factory say {channel.name} …</code></div>
-      </div>
+      <Composer chat={chat} agent={channel.name} role={channel.role ?? "coding-agent"} />
     </>
   );
 }
@@ -261,7 +263,6 @@ const COMING: Record<string, [string, string]> = {
   tasks: ["Tasks", "factory cockpit --tasks"],
   "pull-requests": ["Pull requests", "factory cockpit --prs"],
   ci: ["CI", "factory cockpit --ci"],
-  "owner-queue": ["The owner queue", "factory cockpit --needs"],
 };
 
 function ComingChannel({ name }: { name: string }) {
@@ -271,7 +272,7 @@ function ComingChannel({ name }: { name: string }) {
       <div className="placeholder">
         <div className="big" aria-hidden="true">⌁</div>
         <h3>{title} come to this channel next</h3>
-        <p>This view is being built ({name === "owner-queue" ? "#423" : "#424"}). Until then the same data is one command away: <code>{command}</code></p>
+        <p>This view is being built (#424). Until then the same data is one command away: <code>{command}</code></p>
       </div>
     </div>
   );
@@ -361,11 +362,10 @@ function App() {
         if (m.type === "state" && m.project) {
           const { type: _t, project, ...data } = m;
           setLiveBy((before) => ({ ...before, [project as string]: data }));
-        }
-        if (m.type === "views" && m.project) {
+        } else if (m.type === "views" && m.project) {
           const { type: _t, project, ...data } = m as unknown as { type: string; project: string } & ViewsData;
           setViewsBy((before) => ({ ...before, [project]: data }));
-        }
+        } else dispatchLive(m);
       };
       ws.onclose = () => {
         if (stopped) return;
@@ -573,7 +573,8 @@ function App() {
         </header>
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
           : !channel ? <div className="body"><p className="empty">This project has no channels.</p></div>
-          : channel.kind === "agent" ? <AgentChannel agent={agent} channel={channel} live={live} project={project} />
+          : channel.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
+          : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} />
           : VIEW_CHANNELS[channel.name] ? viewChannel(channel.name)
           : <ComingChannel name={channel.name} />}

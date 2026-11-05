@@ -15,3 +15,11 @@ plugin's packages (`bun tools/check_skills.ts`). The release bundles `index.ts` 
 the release. The core loads a plugin by name with `hooks/factory_plugins.ts`: the bundle, else this source (install its
 packages with `bun install --frozen-lockfile` in its folder). See the plugins paragraph on the wiki's
 [updating page](../docs/wiki/updating.md).
+
+The plugins:
+
+- `nats` (#409): the messaging port over NATS JetStream, and claims over its key-value bucket, for
+  `messaging.transport: "nats"`. Its tests start a real `nats-server` (`brew install nats-server`, or a release binary);
+  without one they are skipped and say so, and CI sets `FACTORY_REQUIRE_NATS=1` so a missing server fails instead.
+  Each call runs the plugin's own file as a child Bun that connects, does the one thing and exits, because the port is
+  synchronous and the NATS client is not.

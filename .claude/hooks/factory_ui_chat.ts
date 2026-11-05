@@ -1,0 +1,1 @@
+../../software-factory/hooks/factory_ui_chat.ts

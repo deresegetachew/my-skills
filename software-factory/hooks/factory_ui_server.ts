@@ -8,6 +8,8 @@
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
 //   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
 //   POST /api/projects/:p/agents/:name/stop    {confirm: true}: factory owner stop <name>
+//   GET|POST /api/projects/:p/agents/:name/chat, GET /api/projects/:p/owner-queue, POST .../owner-queue/:id/answer
+//                                              the chat with each agent and the owner queue (factory_ui_chat.ts, #423)
 //   GET  /api/ws?token=...                     a WebSocket: {type: "hello"}, then {type: "state", project, ...live} for
 //                                              each project, and again whenever one changes; likewise {type: "views",
 //                                              project, ...} for the tasks, pull requests and CI channels
@@ -19,6 +21,7 @@
 // port; this loop reads the same data functions the cockpit does.)
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
+import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { ciAction, Refresher, viewsOf } from "./factory_ui_views.ts";
 
@@ -107,6 +110,10 @@ export function serve(o: ServeOptions): Running {
   const servers: Server<undefined>[] = [];
   let clients = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
+  const chat = new ChatHub({ pollSeconds: o.pollSeconds, publish: (m) => {
+    const text = JSON.stringify(m);
+    for (const s of servers) s.publish(TOPIC, text);
+  } });
 
   /** The project's live state, read again when older than `maxAgeMs` (one read at a time per project). */
   function state(p: UiProject, maxAgeMs: number): Promise<Kept> {
@@ -134,6 +141,7 @@ export function serve(o: ServeOptions): Running {
       if (now.text !== before) for (const s of servers) s.publish(TOPIC, message(p, now.data));
       refresher.ifStale(p);
       pushViews(p);
+      await chat.tick(p);
     }
   }
 
@@ -170,6 +178,8 @@ export function serve(o: ServeOptions): Running {
     const p = byId.get(parts[1] ?? "");
     if (!p) return problem(404, "ui_project_unknown", `There is no project ${parts[1]} here.`, "GET /api/projects lists them; add one with ui.projects.");
     const rest = parts.slice(2);
+    const talked = await chat.api(req, p, rest, seen(p));
+    if (talked) return json(talked.status, talked.body);
     const ttl = o.pollSeconds * 1000;
     if (rest.length === 1 && rest[0] === "channels" && req.method === "GET") return json(200, { project: p.id, channels: channels(p, seen(p)) });
     if (rest.length === 1 && rest[0] === "agents" && req.method === "GET") {
