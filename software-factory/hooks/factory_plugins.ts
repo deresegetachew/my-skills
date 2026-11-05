@@ -49,10 +49,12 @@ export function factoryVersion(hooks: string = HOOKS): string | null {
   }
 }
 
-/** Where plugin `name` is: the release's bundle, else the source in a my-skills checkout, else null. */
+/** Where plugin `name` is: the release's bundle, else the source in a my-skills checkout (software-factory/VERSION
+ * beside hooks/), else null. A project never runs a source: only what a release installed. */
 export function pluginPath(name: string, hooks: string = HOOKS): { path: string; bundle: boolean } | null {
   const bundle = join(hooks, "plugins", `${name}.js`);
   if (existsSync(bundle)) return { path: bundle, bundle: true };
+  if (!existsSync(join(hooks, "..", "VERSION"))) return null;
   const source = join(hooks, "..", "plugins", name, "index.ts");
   return existsSync(source) ? { path: source, bundle: false } : null;
 }

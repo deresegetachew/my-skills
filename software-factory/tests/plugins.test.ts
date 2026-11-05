@@ -75,6 +75,13 @@ test("a source plugin loads, with a package from its own node_modules, and needs
   expect(m.hello()).toBe("hi from dep");
 });
 
+test("in a project a source beside the hooks is never loaded: only a release's bundle is (#405)", async () => {
+  const { loadPlugin } = await mod();
+  const p = project("1.2.3");
+  write(join(p.root, ".claude", "plugins", "tiny", "index.ts"), 'export const which = "planted";\n');
+  expect(thrown(() => loadPlugin("tiny", { hooks: p.hooks })).code).toBe("plugin-missing");
+});
+
 test("a plugin that is not there is plugin-missing, with the fix", async () => {
   const { loadPlugin } = await mod();
   const e = thrown(() => loadPlugin("nope", { hooks: project("1.2.3").hooks }));
