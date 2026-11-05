@@ -3,7 +3,7 @@
 // The server here is a small fake that speaks the NATS text protocol and checks the nkey signature on CONNECT.
 import { afterAll, expect, test } from "bun:test";
 import { createPublicKey, verify } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { HOOKS, runBun, sh, tmp, write, writeExe } from "./support.ts";
 
@@ -85,6 +85,42 @@ test("add puts the public key and the role's permissions in the users file, whic
   expect(conf).not.toContain("factory.demo.handoff.alice");
   expect(mode(join(b.server, "users.conf"))).toBe(0o644);
   expect(mode(b.server)).toBe(0o755);
+});
+
+test("an agent gets no JetStream admin: no $JS.API.>, and acks only on its own durable", () => {
+  const b = box();
+  expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
+  const conf = usersOf(b);
+  expect(conf).not.toContain('"$JS.API.>"');
+  expect(conf).not.toContain('"$JS.ACK.>"');
+  expect(conf).not.toMatch(/STREAM\.(UPDATE|DELETE|PURGE|CREATE)/);
+  expect(conf).toContain("$JS.ACK.factory-demo.alice.>");
+});
+
+test("a bad --project is refused, and so is a bad name or a loose seed folder", () => {
+  const b = box();
+  for (const project of ["*", "../x", "A b"]) {
+    const r = nats(b, ["add", "alice", "--role", "coding-agent", "--project", project]);
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("nats-project-name");
+  }
+  expect(existsSync(b.server)).toBe(false);
+  mkdirSync(b.creds, { recursive: true, mode: 0o755 });
+  chmodSync(b.creds, 0o755);
+  const loose = nats(b, ["add", "alice", "--role", "coding-agent"]);
+  expect(loose.code).toBe(1);
+  expect(loose.stderr).toContain("nats-creds-mode");
+  expect(existsSync(join(b.creds, "alice.nk"))).toBe(false);
+});
+
+test("a seed is never written through a link someone planted", () => {
+  const b = box();
+  mkdirSync(b.creds, { recursive: true, mode: 0o700 });
+  const target = join(b.home, "victim");
+  symlinkSync(target, join(b.creds, "alice.nk"));
+  const r = nats(b, ["add", "alice", "--role", "coding-agent"]);
+  expect(r.code).toBe(1);
+  expect(existsSync(target)).toBe(false);
 });
 
 test("only a dev manager may publish hand-offs", () => {
@@ -254,6 +290,22 @@ test("a server that accepts a publish as another agent fails the check", async (
   expect(r.code).toBe(1);
   expect(r.out).toMatch(/as another agent/i);
   expect(r.out).toMatch(/fix/i);
+});
+
+test("a server that lets an agent change the stream fails the check", async () => {
+  const b = box();
+  expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
+  const fake = fakeServer(pubOf(b), (s) => s.endsWith(".alice") || s.startsWith("$JS.API.STREAM.UPDATE."));
+  const r = await natsAsync(b, ["check", "alice", "--url", fake.url]);
+  expect(r.code).toBe(1);
+  expect(r.out).toMatch(/rewrite the stream/);
+});
+
+test("check refuses a name that could leave the seed folder", async () => {
+  const b = box();
+  const r = await natsAsync(b, ["check", "../x", "--url", "nats://127.0.0.1:1"]);
+  expect(r.code).toBe(1);
+  expect(r.stderr).toContain("nats-user-name");
 });
 
 test("a server that refuses the agent's own subject fails the check", async () => {

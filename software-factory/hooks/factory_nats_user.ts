@@ -56,6 +56,7 @@ export function projectName(dir: string = process.cwd()): string {
 
 export function where(opts: { project?: string; creds?: string; serverDir?: string }, cfg: Config | null): Where {
   const project = opts.project ?? projectName();
+  if (!NAME.test(project)) fail("nats-project-name", `"${project}" is not a project name NATS can use in a subject.`, "Use lowercase letters, digits and dashes in --project.");
   const fromSetting = cfg ? messagingSettings(cfg).creds : "";
   return {
     project,
@@ -64,13 +65,24 @@ export function where(opts: { project?: string; creds?: string; serverDir?: stri
   };
 }
 
+/** The project's JetStream stream (one per project, decision 0004 point 6); the NATS transport (#409) creates it. */
+export function streamName(project: string): string {
+  return `factory-${project}`;
+}
+
 /** The subjects a role may publish and subscribe on (the last token of each publish subject is the sender). */
 export function permissions(project: string, name: string, role: string): { publish: string[]; subscribe: string[] } {
   const p = `factory.${project}`;
   const publish = [`${p}.claims.${name}`, `${p}.pr.*.${name}`, `${p}.issue.*.${name}`, `${p}.agent.*.${name}`, `${p}.wake.${name}`];
   if (role === "dev-manager") publish.push(`${p}.handoff.${name}`);
-  // JetStream's own subjects carry no sender (decision 0004 point 4): the stream's API, acks, and the claims bucket.
-  publish.push("$JS.API.>", "$JS.ACK.>", "$KV.claims.>");
+  // JetStream's own subjects carry no sender (decision 0004 point 4), so an agent gets only what reading needs: its own
+  // durable consumer on the project's stream, and the claims bucket. Making, changing or purging the stream is the
+  // operator's (`factory nats up`), never an agent's: `$JS.API.>` would let a builder rewrite subjects and forge senders.
+  const s = streamName(project);
+  const c = `${s}.${name}`;
+  publish.push("$JS.API.INFO", `$JS.API.STREAM.INFO.${s}`, `$JS.API.CONSUMER.CREATE.${c}`, `$JS.API.CONSUMER.CREATE.${c}.>`,
+    `$JS.API.CONSUMER.DURABLE.CREATE.${c}`, `$JS.API.CONSUMER.INFO.${c}`, `$JS.API.CONSUMER.MSG.NEXT.${c}`, `$JS.ACK.${c}.>`,
+    "$JS.API.STREAM.INFO.KV_claims", "$JS.API.STREAM.MSG.GET.KV_claims", "$JS.API.DIRECT.GET.KV_claims.>", "$KV.claims.>");
   return { publish, subscribe: [`${p}.>`, "_INBOX.>"] };
 }
 
@@ -133,15 +145,21 @@ export function add(name: string, role: string, w: Where): string[] {
   }
   const key = newUserKey();
   const madeFolder = !existsSync(w.creds);
+  if (!madeFolder && mode(w.creds) !== 0o700) {
+    fail("nats-creds-mode", `The seed folder ${w.creds} is mode ${mode(w.creds).toString(8)}, so others could plant or read seeds.`,
+      `Run \`chmod 700 ${w.creds}\` and add the user again.`);
+  }
+  let wrote = false;
   try {
     mkdirSync(w.creds, { recursive: true, mode: 0o700 });
     if (madeFolder) chmodSync(w.creds, 0o700);
-    writeFileSync(seedPath, `${key.seed}\n`, { mode: 0o600 });
+    writeFileSync(seedPath, `${key.seed}\n`, { mode: 0o600, flag: "wx" }); // never through a link, never over another's seed
+    wrote = true;
     chmodSync(seedPath, 0o600);
     const end = users.lastIndexOf("]\n");
     writeUsers(w, users.slice(0, end) + userBlock(w, name, role, key.publicKey) + users.slice(end));
   } catch (e) {
-    rmSync(seedPath, { force: true });
+    if (wrote) rmSync(seedPath, { force: true });
     if (madeFolder) rmSync(w.creds, { recursive: true, force: true });
     if (e instanceof FactoryError) throw e;
     return fail("nats-user-write", `Couldn't write the credential: ${(e as Error).message}`, "Nothing was changed. Check the folders' permissions and run the command again.");
@@ -226,6 +244,7 @@ function probe(url: string, seed: string, subjects: { subject: string; payload: 
 
 /** The checks for one agent: the seed and its modes, signing in, an accepted own publish, a refused foreign one. */
 export async function check(name: string, url: string, w: Where): Promise<Line[]> {
+  if (!NAME.test(name)) fail("nats-user-name", `"${name}" is not a name NATS can use in a subject.`, "Use lowercase letters, digits and dashes.");
   const lines: Line[] = [];
   const seedPath = join(w.creds, `${name}.nk`);
   const add = `factory nats user add ${name} --role <role>`;
@@ -244,8 +263,10 @@ export async function check(name: string, url: string, w: Where): Promise<Line[]
   const seed = readFileSync(seedPath, "utf8").trim();
   const base = `factory.${w.project}.wake`;
   const other = name === "doctor-probe" ? "doctor-probe-2" : "doctor-probe";
-  const msg = (from: string) => JSON.stringify({ v: 1, id: `doctor-${Date.now().toString(36)}`, kind: "wake", from, text: "factory nats user check", at: new Date().toISOString() });
-  const result = await probe(url, seed, [{ subject: `${base}.${name}`, payload: msg(name) }, { subject: `${base}.${other}`, payload: msg(other) }]);
+  const msg = (from: string) => JSON.stringify({ v: 1, id: `doctor-${Date.now().toString(36)}`, kind: "probe", from, text: "factory nats user check", at: new Date().toISOString() });
+  const update = `$JS.API.STREAM.UPDATE.${streamName(w.project)}`; // an agent must not be able to reconfigure the stream
+  const result = await probe(url, seed, [{ subject: `${base}.${name}`, payload: msg(name) }, { subject: `${base}.${other}`, payload: msg(other) },
+    { subject: update, payload: "{}" }]);
   if (result.error !== null) {
     return [...lines, { ok: false, what: `the NATS server at ${url} did not answer for ${name}: ${result.error}`,
       how: "Run `factory nats status`; check messaging.url and that this seed belongs to a user in the server's users file." }];
@@ -257,6 +278,9 @@ export async function check(name: string, url: string, w: Where): Promise<Line[]
   lines.push(result.refused[1] ? { ok: true, what: "a publish as another agent is refused" }
     : { ok: false, what: `the server accepted a publish as another agent (${base}.${other}) from ${name}`,
       how: "The server is not checking the sender: give each user only the permissions of its role (`factory nats user add`), and remove any user without a permissions block from the server's config." });
+  lines.push(result.refused[2] ? { ok: true, what: "a change to the project's stream is refused" }
+    : { ok: false, what: `the server accepted ${update} from ${name}, so an agent could rewrite the stream and forge senders`,
+      how: `Give agents no \`$JS.API.>\`: run \`${add}\` again for a new user, and remove the old user's block from the users file.` });
   return lines;
 }
 
