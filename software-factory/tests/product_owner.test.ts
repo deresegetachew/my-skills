@@ -218,6 +218,26 @@ test("a po reply marked done closes the ask, and a later owner comment brings it
   expect(workOf([ask("a", "for=product"), PO_REPLY("a", " done"), "One more thing."]).out).toContain("ask a for product");
 });
 
+// --- a plain note to the product owner is an instruction (#397) --------------------------------------------------------------
+
+test("a plain note on the owner queue, with no marker and no ask above it, is listed (#397)", () => {
+  const r = workOf(["Please file the CI follow-up, I already asked for it."]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.out).toContain("owner queue #40, note");
+  expect(r.out).toContain("Please file the CI follow-up");
+});
+
+test("a note stays listed until a po reply closes it with done, and a reply without done does not (#397)", () => {
+  const note = "Please file the CI follow-up.";
+  expect(workOf([note, PO_REPLY("notes")]).out).toContain("owner queue #40, note");
+  expect(workOf([note, PO_REPLY("notes", " done")]).out).not.toContain("owner queue #40, note");
+  expect(workOf([note, PO_REPLY("notes", " done"), "And the cockpit too."]).out).toContain("And the cockpit too.");
+});
+
+test("a comment with a factory marker is not a note (#397)", () => {
+  expect(workOf(["<!-- factory-digest -->\nfive PRs open"]).out).not.toContain("owner queue #40, note");
+});
+
 test("the product owner loop with only waiting asks exits at once with nothing to do (#352)", () => {
   const [, work, env] = poProject({ db: { issues: [QUEUE], comments: { "40": [
     ask("a", "for=product"), ask("b", "for=product", "this needs your yes: b?"), PO_REPLY("a"), PO_REPLY("b")] } } });

@@ -294,6 +294,31 @@ export function openOwnerAsks(comments: Obj[], trusted: Set<string> = new Set())
   return ownerAskStates(comments, trusted).filter(([, , s]) => s !== "product").map(([slug, c]) => [slug, c]);
 }
 
+/** Plain notes the owner (or the owner's session) wrote on the owner queue that no ask owns (#397): a comment with no
+ * factory marker, from a trusted login, that does not come after an ask or a product owner reply to an ask (those
+ * answer that thread). It is an instruction to the product owner, marked or not. It stays until a product owner reply
+ * `<!-- factory-po-reply ask=notes done -->` comes after it. Returns the comments, oldest first. */
+export function ownerNotes(comments: Obj[], trusted: Set<string> = new Set()): Obj[] {
+  let open: Obj[] = [];
+  let threaded = false; // the last ask or reply was for a real ask: a plain comment answers that thread
+  for (const c of comments) {
+    const body = str(c.body);
+    if (ownerAskIds(body).length) { threaded = true; continue; }
+    const po = PO_REPLY.exec(body);
+    if (po) {
+      if (po[1] === "notes") {
+        threaded = false;
+        if (/\bdone\b/.test(po[2] ?? "")) open = [];
+      } else threaded = true;
+      continue;
+    }
+    if (body.includes("<!--") || threaded || !body.trim()) continue;
+    if (trusted.size && !trusted.has(loginOf(c))) continue;
+    open.push(c);
+  }
+  return open;
+}
+
 /** Whether an ask is tagged `for=product`: the product owner's to answer first. */
 export function forProduct(c: Obj): boolean {
   return /<!--\s*factory-owner-ask\b[^>]*\bfor=product\b/.test(str(c.body));
