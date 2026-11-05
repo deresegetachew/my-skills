@@ -7,15 +7,17 @@
 // node_modules, pinned by its lockfile) into one file that runs under Bun alone, offline, so a project installs nothing.
 // The file starts with pluginHeader(name, version): the core refuses a bundle built for another factory version.
 // tools/build_release.ts calls bundlePlugin() for each plugin and ships the file as hooks/plugins/<name>.js.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { FactoryError } from "../software-factory/hooks/factory_lib.ts";
 import { PLUGIN_NAME, pluginHeader } from "../software-factory/hooks/factory_plugins.ts";
+import { fromOwn } from "./build_cockpit.ts";
 
 /** Where plugins live, relative to software-factory/, and where their bundles go in the release archive. */
 export const PLUGINS = "plugins";
 export const BUNDLES = "hooks/plugins";
+const OWN = resolve(import.meta.dir, "..", "software-factory");
 
 /** The plugins in a list of software-factory/-relative paths: each folder under plugins/ with an index.ts. Throws
  * {code: plugin_name} for a folder whose name isn't lowercase letters, digits and dashes. */
@@ -40,9 +42,13 @@ function failed(dir: string, why: string): FactoryError {
 }
 
 async function buildTo(dir: string, name: string, version: string, out: string): Promise<void> {
+  // A checkout with no node_modules in the plugin's folder (a release built with --root from another checkout) takes the
+  // plugin's packages from the builder's own install of that plugin, as the cockpit's build does.
+  const own = join(OWN, PLUGINS, name);
+  const plugins = !existsSync(join(dir, "node_modules")) && existsSync(join(own, "node_modules")) ? [fromOwn(own)] : [];
   let r: Awaited<ReturnType<typeof Bun.build>>;
   try {
-    r = await Bun.build({ entrypoints: [join(dir, "index.ts")], target: "bun", root: dir,
+    r = await Bun.build({ entrypoints: [join(dir, "index.ts")], target: "bun", root: dir, plugins,
       define: { "process.env.NODE_ENV": '"production"' } });
   } catch (e) {
     const logs = e instanceof AggregateError ? e.errors.map(String) : [e instanceof Error ? e.message : String(e)];

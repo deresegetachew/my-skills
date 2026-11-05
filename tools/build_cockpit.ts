@@ -35,7 +35,7 @@ const noDevtools: BunPlugin = {
 };
 
 /** For a checkout with no node_modules: its packages come from `own` (the folder holding the builder's node_modules). */
-function fromOwn(own: string): BunPlugin {
+export function fromOwn(own: string): BunPlugin {
   return {
     name: "builder-modules",
     setup(b) {
