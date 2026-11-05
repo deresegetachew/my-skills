@@ -282,7 +282,8 @@ async function up(argv: string[]): Promise<number> {
   const saved = readSaved();
   const address = checkedAddress(a.address ?? tailscaleAddress(), "--address");
   const role = a.leaf !== null ? "leaf" : a.hub ? "hub" : saved?.role ?? "hub";
-  const hub = a.leaf !== null ? hubOf(a.leaf) : role === "leaf" ? saved?.hub : undefined;
+  // A saved hub is checked again: nats.json is a file a person can edit.
+  const hub = a.leaf !== null ? hubOf(a.leaf) : role === "leaf" && saved?.hub ? hubOf(saved.hub) : undefined;
   if (role === "leaf" && !hub) refuse("no-hub", "This machine is a leaf, but the hub's address isn't saved.", "Run factory nats up --leaf <hub's Tailscale address>.");
   const s: Saved = { role, address, ...(role === "leaf" ? { hub } : {}), port: portFrom("FACTORY_NATS_PORT", CLIENT_PORT),
     leafPort: portFrom("FACTORY_NATS_LEAF_PORT", LEAF_PORT) };

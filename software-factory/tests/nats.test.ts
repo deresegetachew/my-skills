@@ -311,6 +311,18 @@ test("up refuses an address outside the tailnet, such as a home network's", () =
   refused(nats(r, ["up", "--address", "100.64.1.2", "--leaf", "10.0.0.7"]), "not-tailscale", r);
 });
 
+test("a hub address edited into nats.json by hand is checked again before it reaches nats.conf", () => {
+  const r = rig();
+  nats(r, ["up", "--address", "100.64.1.2", "--leaf", "100.64.9.9"]);
+  const before = files(r);
+  const saved = JSON.parse(before["nats.json"] as string);
+  write(join(r.nats, "nats.json"), JSON.stringify({ ...saved, hub: "100.64.9.9:7422\" }\n  evil: {" }));
+  const p = nats(r, ["up", "--address", "100.64.1.2"]);
+  expect(p.code).toBe(1);
+  expect(errorOf(p).code).toBe("bad-address");
+  expect(conf(r)).toBe(before["nats.conf"] as string);
+});
+
 test("up refuses a FACTORY_NATS_WAIT that is not a number, and changes nothing", () => {
   const r = rig();
   refused(nats(r, ["up", "--address", "100.64.1.2"], { FACTORY_NATS_WAIT: "abc" }), "bad-wait", r);
