@@ -12,6 +12,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { messagingSettings } from "./core/compose.ts";
 import * as fa from "./factory_artifacts.ts";
 import * as autostart from "./factory_autostart.ts";
 import { missingOriginMain } from "./factory_claims.ts";
@@ -19,6 +20,7 @@ import { uiPackagesProblem } from "./factory_cockpit.ts";
 import { type Config, load, roleNames, rolesDir, taskSource } from "./factory_config.ts";
 import * as doctorCi from "./factory_doctor_ci.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
+import * as natsUser from "./factory_nats_user.ts";
 import { Exit, FactoryError, fnmatch, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
 import { machineNames } from "./factory_machine.ts";
 import { ModelsError, resolvedDefault, table, validate } from "./factory_models.ts";
@@ -575,6 +577,29 @@ export async function turbo(r: Reporter, cfg: Config): Promise<void> {
   }
 }
 
+/** With `messaging.transport` "nats" (decision 0004, #408): this agent's seed, its modes, signing in, and that the server
+ * refuses a publish as another agent. Only for an agent (FACTORY_AGENT); a person's machine has no seed to check. */
+export async function natsCreds(r: Reporter, cfg: Config): Promise<void> {
+  if (messagingSettings(cfg).transport !== "nats") return;
+  const name = process.env.FACTORY_AGENT ?? "";
+  if (!name) {
+    r.note("NATS credential", "FACTORY_AGENT isn't set, so no agent's seed was checked. Run `factory nats user check <name>`.");
+    return;
+  }
+  const url = messagingSettings(cfg).url;
+  let lines;
+  try {
+    lines = await natsUser.check(name, url, natsUser.where({}, cfg));
+  } catch (e) {
+    r.fix("NATS credential", `can't check it (${errText(e)})`);
+    return;
+  }
+  for (const l of lines) {
+    if (l.ok) r.ok(l.what);
+    else r.fix(l.what, l.how ?? "");
+  }
+}
+
 /** A project that takes the factory from releases (#113): the installed files are the pinned release's, and this
  * machine is ready (hooks exist, scripts parse, runner files readable). The same checks `factory update` ends with. */
 export function release(r: Reporter): void {
@@ -842,6 +867,7 @@ export async function main(argv: string[]): Promise<number> {
     trustedReviewers(r, cfg);
     await turbo(r, cfg);
     artifacts(r, cfg);
+    await natsCreds(r, cfg);
     release(r);
   }
   cockpit(r);

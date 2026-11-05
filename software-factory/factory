@@ -158,6 +158,10 @@ Look
   messages [ls|new]      questions and answers between agents, the dev manager and the PO: ls [--to X] [--state S]
                          [--ref N] [--fresh] lists what is open across issues and PRs; new --kind question --to po
                          prints the envelope to paste at the top of a comment (docs/messages.md)
+  nats user add <name> --role coding-agent|dev-manager|product-owner
+                         one NATS credential per agent: a seed in ~/.secrets/nats/<project>/<name>.nk (mode 600), the
+                         role's permissions in the server's users file, the server reloaded; nats user check [<name>]
+                         signs in and shows that a publish as another agent is refused (decision 0004)
   alerts check|watch [--every S]
                          a terminal bell and a desktop notice (osascript, notify-send) once per new owner-queue ask;
                          watch looks every S seconds (60) in this terminal. Without a notifier the bell still rings
@@ -363,6 +367,10 @@ case "$cmd" in
   follow|say|remote)  fh "$hooks/factory_follow" "$cmd" "$@" ;;
   agents)    fh "$hooks/factory_agents" "${1:-list}" "${@:2}" ;;
   messages)  fh "$hooks/factory_messages" "${1:-ls}" "${@:2}" ;;
+  nats)      case "${1:-}" in
+               user) fh "$hooks/factory_nats_user" "${@:2}" ;;
+               *) echo '{"code":"nats-command","message":"factory nats: only `user` is built so far.","fix":"Run `factory nats user add <name> --role coding-agent|dev-manager|product-owner`."}' >&2; exit 2 ;;
+             esac ;;
   alerts)    fh "$hooks/factory_alerts" "${1:-check}" "${@:2}" ;;
   heartbeat) fh "$hooks/factory_heartbeat" "${1:-status}" "${@:2}" ;;
   next)      fh "$hooks/next_task" --note "$@" ;;

@@ -45,6 +45,16 @@ function nats(b: Box, args: string[], extraEnv: Record<string, string> = {}) {
   return runBun(join(HOOKS, "factory_nats_user.ts"), args, { cwd: b.project, env });
 }
 
+/** `check` talks to a server in this very process, so it can't be run with a blocking spawn. */
+async function natsAsync(b: Box, args: string[], extraEnv: Record<string, string> = {}, script = "factory_nats_user.ts") {
+  const env: Record<string, string | undefined> = { ...process.env, HOME: b.home, PATH: `${b.bin}:${process.env.PATH ?? ""}`, ...extraEnv };
+  for (const k of ["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"]) if (!(k in extraEnv)) delete env[k];
+  const p = Bun.spawn([process.execPath, "--no-env-file", join(HOOKS, script), ...args], { cwd: b.project,
+    env: env as Record<string, string>, stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  return { code, stdout, stderr, out: stdout + stderr };
+}
+
 const mode = (p: string) => statSync(p).mode & 0o777;
 const seedOf = (b: Box, name: string) => readFileSync(join(b.creds, `${name}.nk`), "utf8").trim();
 const usersOf = (b: Box) => readFileSync(join(b.server, "users.conf"), "utf8");
@@ -224,11 +234,11 @@ const pubOf = (b: Box) => (usersOf(b).match(/U[A-Z2-7]{55}/) as RegExpMatchArray
 /** Allowed: the agent's own subjects, which is what its role's permissions say. */
 const ownOnly = (name: string) => (s: string) => s.endsWith(`.${name}`);
 
-test("check signs in with the seed, publishes as itself, and finds a publish as another agent refused", () => {
+test("check signs in with the seed, publishes as itself, and finds a publish as another agent refused", async () => {
   const b = box();
   expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
   const fake = fakeServer(pubOf(b), ownOnly("alice"));
-  const r = nats(b, ["check", "alice", "--url", fake.url]);
+  const r = await natsAsync(b, ["check", "alice", "--url", fake.url]);
   expect(r.code).toBe(0);
   expect(fake.signatureOk).toContain(true);
   expect(fake.published.length).toBeGreaterThan(0);
@@ -236,55 +246,76 @@ test("check signs in with the seed, publishes as itself, and finds a publish as 
   expect(r.out).toMatch(/refused/i);
 });
 
-test("a server that accepts a publish as another agent fails the check", () => {
+test("a server that accepts a publish as another agent fails the check", async () => {
   const b = box();
   expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
   const fake = fakeServer(pubOf(b), () => true);
-  const r = nats(b, ["check", "alice", "--url", fake.url]);
+  const r = await natsAsync(b, ["check", "alice", "--url", fake.url]);
   expect(r.code).toBe(1);
   expect(r.out).toMatch(/as another agent/i);
   expect(r.out).toMatch(/fix/i);
 });
 
-test("a server that refuses the agent's own subject fails the check", () => {
+test("a server that refuses the agent's own subject fails the check", async () => {
   const b = box();
   expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
   const fake = fakeServer(pubOf(b), () => false);
-  const r = nats(b, ["check", "alice", "--url", fake.url]);
+  const r = await natsAsync(b, ["check", "alice", "--url", fake.url]);
   expect(r.code).toBe(1);
   expect(r.out).toMatch(/own subject/i);
 });
 
-test("check uses FACTORY_AGENT and messaging.url when no name or --url is given", () => {
+test("check uses FACTORY_AGENT and messaging.url when no name or --url is given", async () => {
   const b = box();
   expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
   const fake = fakeServer(pubOf(b), ownOnly("alice"));
   mkdirSync(join(b.project, ".claude"));
   write(join(b.project, ".claude", "factory.json"), JSON.stringify({ messaging: { transport: "nats", url: fake.url, creds: b.creds } }));
-  expect(nats(b, ["check"], { FACTORY_AGENT: "alice" }).code).toBe(0);
+  expect((await natsAsync(b, ["check"], { FACTORY_AGENT: "alice" })).code).toBe(0);
 });
 
-test("check fails with the fix when the seed is missing, too open, or the server is not there", () => {
+test("check fails with the fix when the seed is missing, too open, or the server is not there", async () => {
   const b = box();
   const fake = fakeServer("U" + "A".repeat(55), () => true);
-  const missing = nats(b, ["check", "alice", "--url", fake.url]);
+  const missing = await natsAsync(b, ["check", "alice", "--url", fake.url]);
   expect(missing.code).toBe(1);
   expect(missing.out).toContain(join(b.creds, "alice.nk"));
   expect(missing.out).toContain("factory nats user add");
 
   expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
   chmodSync(join(b.creds, "alice.nk"), 0o644);
-  const open = nats(b, ["check", "alice", "--url", fake.url]);
+  const open = await natsAsync(b, ["check", "alice", "--url", fake.url]);
   expect(open.code).toBe(1);
   expect(open.out).toContain("chmod 600");
   chmodSync(join(b.creds, "alice.nk"), 0o600);
   chmodSync(b.creds, 0o755);
-  const folder = nats(b, ["check", "alice", "--url", fake.url]);
+  const folder = await natsAsync(b, ["check", "alice", "--url", fake.url]);
   expect(folder.code).toBe(1);
   expect(folder.out).toContain("chmod 700");
   chmodSync(b.creds, 0o700);
 
-  const gone = nats(b, ["check", "alice", "--url", "nats://127.0.0.1:1"]);
+  const gone = await natsAsync(b, ["check", "alice", "--url", "nats://127.0.0.1:1"]);
   expect(gone.code).toBe(1);
   expect(gone.out).toMatch(/answer|reach/i);
+});
+
+// --- wiring -------------------------------------------------------------------------------------------------------
+
+test("factory help and the commands page list nats user add", () => {
+  const help = sh([join(HOOKS, "..", "factory"), "help"]);
+  expect(help.out).toContain("nats user add");
+  expect(readFileSync(join(HOOKS, "..", "docs", "wiki", "commands.md"), "utf8")).toContain("factory nats user add");
+});
+
+test("factory doctor runs the credential check when messaging.transport is nats", async () => {
+  const b = box();
+  expect(nats(b, ["add", "alice", "--role", "coding-agent"]).code).toBe(0);
+  const fake = fakeServer(pubOf(b), () => true);
+  mkdirSync(join(b.project, ".claude"));
+  write(join(b.project, ".claude", "factory.json"), JSON.stringify({ messaging: { transport: "nats", url: fake.url, creds: b.creds } }));
+  const r = await natsAsync(b, [], { FACTORY_AGENT: "alice" }, "factory_doctor.ts");
+  expect(r.out).toMatch(/accepted a publish as another agent/);
+  const quiet = box();
+  const off = await natsAsync(quiet, [], { FACTORY_AGENT: "alice" }, "factory_doctor.ts");
+  expect(off.out).not.toMatch(/NATS/);
 });
