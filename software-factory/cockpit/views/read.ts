@@ -80,3 +80,15 @@ export async function runAction(cmd: string[]): Promise<string> {
     return `It could not run: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
+
+/** Runs a view's steps in order (#396), each under its command line, and stops at the first that fails. A step that
+ *  starts with "factory" runs through `factory` (the hook's command for it); any other runs as it is (gh). */
+export async function runSteps(factory: string[], steps: string[][]): Promise<string> {
+  const out: string[] = [];
+  for (const s of steps) {
+    const text = await runAction(s[0] === "factory" ? [...factory, ...s.slice(1)] : s);
+    out.push(`$ ${s.join(" ")}`, text);
+    if (/\(exit \d+\)$/.test(text) || text.startsWith("It could not run")) break;
+  }
+  return out.join("\n");
+}

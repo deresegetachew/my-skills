@@ -22,13 +22,13 @@ import { barLines, CommandBar, type Outcome, type Problem as BarProblem, type Re
 import { searchLines, SearchView } from "./search.tsx";
 import { sidebarMain } from "./sidebar-host.tsx";
 import { agentsLines } from "./views/agents.tsx";
-import { ciLines, type Heavy } from "./views/ci.tsx";
+import { ciLines, CiView, type Heavy } from "./views/ci.tsx";
 import { DocView } from "./views/doc.tsx";
 import { healthLines } from "./views/health.tsx";
 import { type Line, Lines, obj, plain } from "./views/lines.tsx";
 import { needAt, needsLines, NeedsView } from "./views/needs.tsx";
 import { type Problem, prsLines, PrsView, selectedOf } from "./views/prs.tsx";
-import { type Got, readJson, readOrRefusal, runAction } from "./views/read.ts";
+import { type Got, readJson, readOrRefusal, runAction, runSteps } from "./views/read.ts";
 import { settingsLines } from "./views/settings.tsx";
 import { taskAt, tasksLines, TasksView } from "./views/tasks.tsx";
 import { usageLines } from "./views/usage.tsx";
@@ -89,6 +89,8 @@ interface Spec {
   color: boolean;
   host: string;
   heavy: Heavy | null;
+  /** The light lane setting (`ci.light`), for the CI view's L; null when the hook couldn't read it. */
+  light: boolean | null;
   prefill: string;
   /** The command bar's resolver: the typed line and the picked command go after it. */
   resolve: string[];
@@ -106,6 +108,7 @@ function specOf(v: unknown): Spec {
     fresh: strings(o.fresh), act: strings(o.act), changes: plain(o.changes) || "things", snapshot: gotOf(o.snapshot),
     data: "data" in o ? gotOf(o.data) : undefined, color: o.color === true, host: plain(o.host),
     heavy: typeof heavy.raw === "string" ? { raw: plain(heavy.raw), source: plain(heavy.source) } : null,
+    light: typeof o.light === "boolean" ? o.light : null,
     prefill: typeof o.prefill === "string" ? o.prefill : "", resolve: strings(o.resolve),
     find: typeof o.find === "string" ? o.find : "", open: strings(o.open),
   };
@@ -195,7 +198,11 @@ async function onTerminal(view: string, spec: Spec): Promise<number> {
   const picked: { args: string[] | null } = { args: null };
   const doc = DOCS[view];
   let draw: (cols: number, rows: number) => ReactElement;
-  if (doc) {
+  if (view === "ci") {
+    draw = (cols, rows) => (
+      <CiView cols={cols} rows={rows} color={color} data={spec.data} load={() => readJson(spec.read, limit)} find={spec.find}
+        x={{ heavy: spec.heavy, host: spec.host, light: spec.light }} run={(steps) => runSteps(spec.act, steps)} />);
+  } else if (doc) {
     const lines = doc(spec);
     draw = (cols, rows) => (
       <DocView cols={cols} rows={rows} color={color} data={spec.data} draw={lines} load={() => readJson(spec.read, limit)}

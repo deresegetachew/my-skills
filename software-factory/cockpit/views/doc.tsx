@@ -2,10 +2,10 @@
 // every line of its data; on a terminal it shows a screenful, j k (or ↑ ↓, space) scroll, / keeps the lines that match
 // what is typed (#392, views/filter.ts), r reads the data again and q closes. Off a terminal the caller prints the whole document once. Also the helpers these views share: plain text cut,
 // padded and wrapped, and the boxes ("cards") the boards draw.
-import { useApp, useInput } from "ink";
+import { type Key, useApp, useInput } from "ink";
 import { type ReactElement, useEffect, useState } from "react";
 import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
-import { cut, type Line, Lines, screen, seg, type Style } from "./lines.tsx";
+import { cut, type Line, Lines, plain, screen, seg, type Style, wrap } from "./lines.tsx";
 import type { Got } from "./read.ts";
 
 export const DOC_KEYS = "j k scroll · r read again · q close";
@@ -128,6 +128,21 @@ export function filtered(doc: Line[], typed: string): Line[] {
   return kept.length ? kept : [noMatch(typed)];
 }
 
+/** What a view's own key does (#396): ask y/N before running steps, run read-only steps at once ("open"), show a note,
+ *  or nothing more ("done", the view changed its own state). A step is a command's words. */
+export type DocAction = { kind: "ask"; steps: string[][]; does: string } | { kind: "open"; steps: string[][] }
+  | { kind: "note"; text: string } | { kind: "done" };
+
+export const NOT_RUN = "Not run: nothing changed.";
+
+/** The question asked before an action's steps run. */
+export function stepsQuestion(steps: string[][], does: string): string {
+  return `Run \`${steps.map((s) => s.join(" ")).join("` then `")}\`? It ${does}. [y/N] `;
+}
+
+type Mode = { kind: "doc" } | { kind: "ask"; steps: string[][]; does: string } | { kind: "running"; steps: string[][] }
+  | { kind: "shown"; text: string; reload: boolean } | { kind: "note"; text: string };
+
 export interface DocProps {
   cols: number;
   rows: number;
@@ -141,14 +156,31 @@ export interface DocProps {
   keys?: string;
   /** Opens scrolled to the first line with this text (the search's Enter, #392). */
   find?: string;
+  /** The view's own keys, after the document's (#396); null: the key does nothing. */
+  act?: (input: string, key: Key, data: Got) => DocAction | null;
+  /** Runs an action's steps and gives the output to show. */
+  run?: (steps: string[][]) => Promise<string>;
 }
 
-/** A document on a terminal: a screenful at a time, j k scroll, / filters, r reads again, q closes. */
+/** The screen while an action asks, runs or shows its output. */
+function actionLines(mode: Exclude<Mode, { kind: "doc" }>, cols: number, rows: number): Line[] {
+  if (mode.kind === "ask") return [...wrap(stepsQuestion(mode.steps, mode.does), cols, "amber"), [seg("y runs it · any other key does nothing", "dim")]];
+  if (mode.kind === "running") return wrap(`Running \`${mode.steps.map((s) => s.join(" ")).join("` then `")}\`…`, cols);
+  if (mode.kind === "note") return screen([...wrap(mode.text, cols)], "any key goes back", cols, rows);
+  const out = mode.text.split("\n").map((t): Line => [seg(plain(t))]);
+  const room = Math.max(rows - 3, 1); // the end of the output matters most: a log's failing step, an install's result
+  const shown = out.length > room ? [[seg(`… ${out.length - room + 1} lines above`, "dim")], ...out.slice(-(room - 1))] : out;
+  return screen([...shown, [], [seg("Press a key to go on.")]], mode.reload ? "any key reads the view again" : "any key goes back", cols, rows);
+}
+
+/** A document on a terminal: a screenful at a time, j k scroll, / filters, r reads again, q closes; the view's own keys
+ *  (`act`) ask, run and show their output. */
 export function DocView(props: DocProps): ReactElement {
   const { exit } = useApp();
   const [data, setData] = useState<Got | undefined>(props.data);
   const [top, setTop] = useState(() => (props.find && props.data !== undefined ? lineWith(props.draw(props.data, props.cols), props.find) : 0));
   const [filter, setFilter] = useState<Filter>(NO_FILTER);
+  const [mode, setMode] = useState<Mode>({ kind: "doc" });
   useEffect(() => {
     if (props.data === undefined) {
       void props.load().then((got) => {
@@ -160,8 +192,25 @@ export function DocView(props: DocProps): ReactElement {
   const doc = filtered(props.draw(data, props.cols), filter.typed);
   const room = Math.max(props.rows - 1, 1);
   const last = Math.max(doc.length - room, 0);
+  const runSteps = (steps: string[][], reload: boolean) => {
+    setMode({ kind: "running", steps });
+    void (props.run ?? (() => Promise.resolve("")))(steps).then((text) => setMode({ kind: "shown", text, reload }));
+  };
   useInput((input, key) => {
     if (key.ctrl && input === "c") return exit();
+    if (mode.kind === "running") return; // an action runs to its end
+    if (mode.kind === "ask") {
+      if (/^y$/i.test(input)) runSteps(mode.steps, true);
+      else setMode({ kind: "note", text: NOT_RUN });
+      return;
+    }
+    if (mode.kind === "shown" && mode.reload) {
+      setMode({ kind: "doc" });
+      setData(undefined);
+      void props.load().then(setData);
+      return;
+    }
+    if (mode.kind !== "doc") return setMode({ kind: "doc" });
     const next = data === undefined ? null : filterKey(filter, input, key);
     if (next) {
       setFilter((f) => filterKey(f, input, key) ?? f); // keys in one chunk each see the one before
@@ -175,8 +224,14 @@ export function DocView(props: DocProps): ReactElement {
     else if (input === "r") {
       setData(undefined);
       void props.load().then(setData);
+    } else if (props.act) {
+      const a = props.act(input, key, data);
+      if (a?.kind === "ask") setMode({ kind: "ask", steps: a.steps, does: a.does });
+      else if (a?.kind === "open") runSteps(a.steps, false);
+      else if (a?.kind === "note") setMode({ kind: "note", text: a.text });
     }
   });
+  if (mode.kind !== "doc") return <Lines lines={actionLines(mode, props.cols, props.rows).map((l) => cut(l, props.cols))} color={props.color} />;
   const lines = docScreen(doc, Math.min(top, last), props.cols, props.rows, filterKeys(filter, props.keys ?? DOC_KEYS));
   return <Lines lines={lines.map((l) => cut(l, props.cols))} color={props.color} />;
 }
