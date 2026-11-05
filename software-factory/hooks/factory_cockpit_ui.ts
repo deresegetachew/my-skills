@@ -16,7 +16,8 @@
 //                                session s says, x stops it, n starts one (the bar, with the action typed in). On Ink
 //                                (#366, cockpit/sidebar.tsx) when its UI is installed, else drawn here
 //   factory cockpit --sidebar-data
-//                                what the Ink list draws: the cached snapshot, the views, the new asks to ring for
+//                                what the Ink list draws: the cached snapshot, the views, the talks with a role
+//                                (`talks`, #395: 9 and 0), the new asks to ring for
 //   factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | leave
 //                                a key of the Ink list, done in the cockpit's tmux
 //   factory cockpit --bar [<words>]
@@ -111,9 +112,20 @@ export function views(): View[] {
     { key: "6", title: "Settings", commands: [["cockpit", "--settings", "--color"]] },
     { key: "7", title: "Health & releases", commands: [["cockpit", "--health"]], live: true },
     { key: "8", title: "Usage & lessons", commands: [["cockpit", "--usage"]], live: true },
+  ];
+}
+
+/** The talks with a role (#395), listed after the views and opened the same way (9, 0, or Enter on that role). */
+export function talks(): View[] {
+  return [
     { key: "9", title: "Talk to the dev manager", commands: [["cockpit", "--chat", "dev-manager"]], live: true },
     { key: "0", title: "Talk to the product owner", commands: [["cockpit", "--chat", "product-owner"]], live: true },
   ];
+}
+
+/** Every popup the list opens: the views, then the talks. */
+function popups(): View[] {
+  return [...views(), ...talks()];
 }
 
 export { ACTIONS_OFFERED, matches, OFFERED, rank };
@@ -249,7 +261,7 @@ export function config(root: string, script: string): string {
     `bind / ${popup("-w 90% -h 90%", factoryCall(script, ["cockpit", "--search"]))}`,
     "# The views, as popups running the existing commands through less -R (q closes).",
   ];
-  for (const v of views()) {
+  for (const v of popups()) {
     lines.push(`# ${v.key} ${v.title}`, `bind ${v.key} ${popup("-w 90% -h 90%", viewCommand(script, v))}`);
   }
   const status = `cd ${dq(root)} && ${factoryCall(script, ["cockpit", "--status"])}`;
@@ -458,7 +470,7 @@ function sidebarOnce(): number {
   const cols = Number(process.env.COLUMNS) || 32;
   const rows = Number(process.env.LINES) || 30;
   const snap = readCache();
-  console.log(BEL.repeat(newAsks(snap)) + frame(snap, views(), 0, cols, rows, false).join("\n"));
+  console.log(BEL.repeat(newAsks(snap)) + frame(snap, popups(), 0, cols, rows, false).join("\n"));
   return 0;
 }
 
@@ -503,7 +515,7 @@ function showSession(p: Pane, name: string): void {
 
 async function sidebarLoop(): Promise<number> {
   const p = pane();
-  const vs = views();
+  const vs = popups();
   let snap = readCache();
   let selected = 0;
   const draw = () => {
@@ -583,7 +595,8 @@ export function sidebar(): Promise<number> | number {
 export function sidebarData(): number {
   refreshIfOld();
   const snap = readCache();
-  console.log(JSON.stringify({ snapshot: snap, views: views().map((v) => ({ key: v.key, title: v.title })), bell: newAsks(snap) }));
+  const items = (vs: View[]) => vs.map((v) => ({ key: v.key, title: v.title }));
+  console.log(JSON.stringify({ snapshot: snap, views: items(views()), talks: items(talks()), bell: newAsks(snap) }));
   return 0;
 }
 
@@ -592,7 +605,7 @@ export function sidebarData(): number {
 export function sidebarOpen(args: string[]): number {
   const [what, ...rest] = args;
   const p = pane();
-  const v = views().find((x) => x.key === rest[0]);
+  const v = popups().find((x) => x.key === rest[0]);
   if (what === "session" && rest.length === 1 && rest[0]) showSession(p, rest[0]);
   else if (what === "view" && rest.length === 1 && v) openView(p, v);
   else if (what === "bar") openBar(p, rest);

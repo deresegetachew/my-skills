@@ -25,11 +25,15 @@ function views(v: unknown): ViewItem[] {
 function load(factory: string): Loaded | null {
   const r = factoryRun(factory, ["--sidebar-data"], "pipe");
   try {
-    const d = JSON.parse(r.stdout) as Record<string, unknown>;
-    return { snapshot: d.snapshot ?? null, views: views(d.views), bell: Number(d.bell) || 0 };
+    return dataOf(JSON.parse(r.stdout) as Record<string, unknown>);
   } catch {
     return null;
   }
+}
+
+/** The list's data from `--sidebar-data`: the views, then the talks with a role (#395), as one list. */
+function dataOf(d: Record<string, unknown>): Loaded {
+  return { snapshot: d.snapshot ?? null, views: [...views(d.views), ...views(d.talks)], bell: Number(d.bell) || 0 };
 }
 
 /** `load` without blocking: the list keeps reading keys while Bun starts the factory. */
@@ -38,8 +42,7 @@ async function loadLater(factory: string): Promise<Loaded | null> {
   const out = await new Response(p.stdout).text();
   await p.exited;
   try {
-    const d = JSON.parse(out) as Record<string, unknown>;
-    return { snapshot: d.snapshot ?? null, views: views(d.views), bell: Number(d.bell) || 0 };
+    return dataOf(JSON.parse(out) as Record<string, unknown>);
   } catch {
     return null;
   }

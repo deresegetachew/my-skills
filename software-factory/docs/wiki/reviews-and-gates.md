@@ -266,4 +266,4 @@ login. Optional: `CODEOWNERS` on the protected paths, with "require review from 
 
 <br>
 
-Previous: [Roles](roles.md) | Next: [The dev manager](dev-manager.md)
+Previous: [The cockpit](cockpit.md) | Next: [The dev manager](dev-manager.md)
