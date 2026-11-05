@@ -205,13 +205,28 @@ function line(r: Row): string {
 
 // --- the command ----------------------------------------------------------------------------------------------------
 
+const noticed = new Set<string>();
+
+/** A fallback the command goes on with ({code, message, fix}), on stderr once per process. */
+function notice(e: CoreError): void {
+  if (noticed.has(e.code)) return;
+  noticed.add(e.code);
+  process.stderr.write(pyDumps(e.toJSON()) + "\n");
+}
+
 function cmdLs(a: LsArgs): void {
   const every = [...KINDS, "all"];
   if (!every.includes(a.kind)) refuse("bad-kind", `'${a.kind}' isn't a message kind.`, `Use one of: ${every.join(", ")}.`);
   const states = [...STATES, "idle", "down"];
   if (a.state && !states.includes(a.state)) refuse("bad-state", `'${a.state}' isn't a message state.`, `Use one of: ${states.join(", ")}.`);
   const cfg = load();
-  const { messaging } = compose(cfg);
+  let messaging: Messaging;
+  try {
+    messaging = compose(cfg, {}, notice).messaging;
+  } catch (e) {
+    if (e instanceof CoreError) refuse(e.code, e.message, e.fix);
+    throw e;
+  }
   const args = ["ls", ...([["--to", a.to], ["--from", a.frm], ["--state", a.state], ["--ref", a.ref], ["--kind", a.kind]] as const)
     .flatMap(([flag, v]) => (v ? [flag, v] : [])), ...(a.all ? ["--all"] : [])];
   const got = answer(cfg, { name: "messages", hook: import.meta.path, args }, Boolean(a.fresh), () => collect(cfg, a, messaging));

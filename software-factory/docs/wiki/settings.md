@@ -42,6 +42,7 @@ The template has every key with a short `_about`. Missing keys fall back to the 
 factory settings
   1  Paths & docs   2  Commands   3  Tests & protected paths   4  PR gate & reviews   5  Agents & loops
   6  Issues mode    7  Ports & per-agent env   8  CI   9  Design & eval   10  Machine (local)
+  11  Messaging
 Choose a number, /text to search, s to review and save, q to quit >
 ```
 
@@ -281,6 +282,16 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `autostartAgents` | list | `[]` | The agents it starts at boot. Empty: the names this machine runs. |
 | `autostartReport` | bool | `true` | Post the boot report on the first started agent's issue (issues mode). |
 | `ci.runners` | int | `null` | Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's. |
+
+**Messaging**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `messaging.transport` | one of github/nats | `"github"` | How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds). |
+| `messaging.url` | str | `""` | The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats. |
+| `messaging.creds` | str | `""` | The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/. |
+| `messaging.kinds` | list | `[]` | The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff); every other kind stays on GitHub. |
+| `messaging.fallback` | one of github/none | `"github"` | When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command. |
 <!-- settings:end -->
 
 <br>
