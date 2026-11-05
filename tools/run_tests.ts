@@ -1,6 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Run the software factory's tests: each software-factory/tests/*.test.ts file with `bun test`, in its own process,
-// with its own scratch folders. Exits 1 if any test fails, so CI goes red.
+// Run the software factory's tests: each software-factory/tests/*.test.ts file, and each plugin's
+// software-factory/plugins/<name>/tests/*.test.ts, with `bun test`, in its own process, with its own scratch folders.
+// Exits 1 if any test fails, so CI goes red.
 //
 // Files run in parallel (--jobs N, or FACTORY_TEST_JOBS, default min(CPU count, 8)), biggest first. Each file's report
 // is printed whole when it finishes, so output never interleaves. Arguments that are not options pick files by name
@@ -43,8 +44,21 @@ function testFiles(argv: string[]): string[] {
     if (a === "--jobs") i++;
     else if (!a.startsWith("-")) picks.push(a.replace(/^.*\//, "").replace(/(\.test)?\.ts$/, ""));
   }
-  const all = readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort();
-  return (picks.length ? all.filter((f) => picks.includes(f.replace(/\.test\.ts$/, ""))) : all).map((f) => join(TESTS, f));
+  const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)), ...pluginTests()];
+  const name = (f: string): string => f.replace(/^.*\//, "").replace(/\.test\.ts$/, "");
+  return picks.length ? all.filter((f) => picks.includes(name(f))) : all;
+}
+
+/** Each plugin's own tests (decision 0004): software-factory/plugins/<name>/tests/*.test.ts. */
+function pluginTests(): string[] {
+  const plugins = join(ROOT, "software-factory", "plugins");
+  const out: string[] = [];
+  for (const name of statSync(plugins, { throwIfNoEntry: false })?.isDirectory() ? readdirSync(plugins).sort() : []) {
+    const tests = join(plugins, name, "tests");
+    if (!statSync(join(plugins, name)).isDirectory() || !statSync(tests, { throwIfNoEntry: false })?.isDirectory()) continue;
+    for (const f of readdirSync(tests).sort()) if (f.endsWith(".test.ts")) out.push(join(tests, f));
+  }
+  return out;
 }
 
 /** "N passed, M failed" from bun test's own summary lines (" 12 pass", " 1 fail"). */

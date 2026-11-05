@@ -164,3 +164,47 @@ test("a command that imports an adapter directly fails; compose.ts, other adapte
   expect(r.stdout).not.toContain("compose.ts: imports");
   expect(r.stdout).not.toContain("tests/memory.test.ts");
 });
+
+// ---- a plugin's packages are imported only inside its folder (#405, decision 0004) ----
+
+/** A repo with software-factory/plugins/nats (package.json naming several packages), all fine. */
+function withPlugin(): string {
+  const d = repo(false);
+  const at = (...p: string[]): string => join(d, "software-factory", ...p);
+  mkdirSync(at("plugins", "nats", "tests"), { recursive: true });
+  mkdirSync(at("hooks"), { recursive: true });
+  mkdirSync(at("tests"), { recursive: true });
+  writeFileSync(at("SKILL.md"), "---\nname: software-factory\ndescription: The factory.\n---\n");
+  writeFileSync(at("plugins", "nats", "package.json"), JSON.stringify({ name: "nats-plugin", dependencies: { nats: "2.0.0" },
+    devDependencies: { "@nats-io/x": "1.0.0" }, peerDependencies: { peerp: "1.0.0" }, optionalDependencies: { optp: "1.0.0" } }));
+  writeFileSync(at("plugins", "nats", "index.ts"), 'import { connect } from "nats";\nimport { y } from "@nats-io/x/sub";\nexport { connect, y };\n');
+  writeFileSync(at("plugins", "nats", "tests", "a.test.ts"), 'import { connect } from "nats";\nexport { connect };\n');
+  writeFileSync(at("hooks", "ok.ts"), 'import type { Thing } from "../plugins/nats/index.ts";\nimport { z } from "natsy";\nimport { readFileSync } from "node:fs";\n' +
+    "export { readFileSync, z };\nexport type T = Thing;\n");
+  return d;
+}
+
+test("a plugin's own files may import its packages; a relative type import and an unlisted package pass", () => {
+  const r = run(withPlugin());
+  expect(r.code, r.out).toBe(0);
+});
+
+test("a file outside the plugin that imports one of its packages fails, whatever the import form", () => {
+  const d = withPlugin();
+  const outside: [string, string, string][] = [
+    [join("software-factory", "hooks", "a.ts"), 'import { connect } from "nats";\nexport { connect };\n', "nats"],
+    [join("software-factory", "hooks", "b.ts"), 'import type { X } from "@nats-io/x";\nexport type B = X;\n', "@nats-io/x"],
+    [join("software-factory", "tests", "c.test.ts"), 'export const load = () => import("nats/lib/thing");\n', "nats/lib/thing"],
+    [join("tools", "d.ts"), 'const n = require("peerp");\nexport { n };\n', "peerp"],
+    [join("demo", "e.ts"), 'import o from "optp/sub";\nexport { o };\n', "optp/sub"],
+  ];
+  for (const [path, body] of outside) writeFileSync(join(d, path), body);
+  const r = run(d);
+  expect(r.code, r.out).toBe(1);
+  for (const [path, , spec] of outside) {
+    expect(r.stdout).toContain(`${path}: imports ${spec}; only software-factory/plugins/nats/ may import its packages (decision 0004)`);
+  }
+  expect(r.stdout).not.toContain("hooks/ok.ts");
+  expect(r.stdout).not.toContain("plugins/nats/index.ts");
+  expect(r.stdout).not.toContain("plugins/nats/tests");
+});
