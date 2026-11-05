@@ -34,6 +34,7 @@
 import { type Config, load } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
 import { Exit, die, isoUtc, parseArgs, parseIso, pyDumps, pyInt, runMain } from "./factory_lib.ts";
+import { claimKey, leasesOn, shaKey } from "./factory_leases.ts";
 
 export const MAX_LEASE_MINUTES = 120; // a lease never counts for longer than this after its comment, whatever `until` says
 export const OWNER_QUEUE_TITLE = "Dev manager: needs the owner";
@@ -232,6 +233,23 @@ export function claimReview(cfg: Config, pr: Pull, who: string, now: number = no
   const head = pr.head.sha;
   const comments = commentsOf(n);
   if (reviewed(comments, head)) return [DONE, `PR #${n}: ${head.slice(0, 7)} already has a review marker`];
+  const nats = leasesOn(cfg);
+  if (nats) { // claims on NATS (#411): its compare-and-set decides; the marker below is the GitHub copy
+    const key = claimKey("review", n, shaKey(head));
+    const holder = nats.holder(key);
+    if (holder && holder !== who) return [LOST, `PR #${n}: held by ${holder}`];
+    if (holder) {
+      holdOn(n, cfg); // already mine: make sure the hold is on, no second claim
+      return [WON, `PR #${n}: already claimed by ${who}`];
+    }
+    const took = nats.claim(key, who, claimMinutes(cfg) * 60);
+    if (!took.held) return [LOST, `PR #${n}: held by ${took.holder}`];
+    const until = now + claimMinutes(cfg) * 60;
+    post(n, `<!-- factory-review-claim manager=${who} sha=${head} until=${stamp(until)} -->\n` +
+      leaseText(who, `reviewing ${head.slice(0, 7)}`, until));
+    holdOn(n, cfg);
+    return [WON, `PR #${n}: claimed ${head.slice(0, 7)} until ${hhmm(until)} UTC; hold on`];
+  }
   const held = reviewWinner(comments, head, now);
   if (held && held.manager !== who) return [LOST, `PR #${n}: held by ${held.manager} until ${hhmm(held.until)} UTC`];
   if (held && held.manager === who) {
@@ -257,6 +275,19 @@ export function claimAnswer(cfg: Config, qid: string | number, who: string, now:
   const n = issueOf(q);
   const comments = commentsOf(n);
   if (!openQuestions(comments).some((c) => String(c.id) === String(qid))) return [DONE, `question ${qid} on #${n}: already answered`];
+  const nats = leasesOn(cfg);
+  if (nats) { // claims on NATS (#411)
+    const key = claimKey("answer", String(qid));
+    const holder = nats.holder(key);
+    if (holder && holder !== who) return [LOST, `question ${qid} on #${n}: held by ${holder}`];
+    if (holder) return [WON, `question ${qid} on #${n}: already claimed by ${who}`];
+    const took = nats.claim(key, who, claimMinutes(cfg) * 60);
+    if (!took.held) return [LOST, `question ${qid} on #${n}: held by ${took.holder}`];
+    const until = now + claimMinutes(cfg) * 60;
+    post(n, `<!-- factory-answer-claim manager=${who} question=${qid} until=${stamp(until)} -->\n` +
+      leaseText(who, `answering the question above (comment ${qid})`, until));
+    return [WON, `question ${qid} on #${n}: claimed until ${hhmm(until)} UTC`];
+  }
   const held = answerWinner(comments, qid, now);
   if (held && held.manager !== who) return [LOST, `question ${qid} on #${n}: held by ${held.manager} until ${hhmm(held.until)} UTC`];
   if (held) return [WON, `question ${qid} on #${n}: already claimed by ${who}`];
@@ -273,6 +304,20 @@ export function claimAnswer(cfg: Config, qid: string | number, who: string, now:
 /** Give a claim up: a PR number (hold off, release marker when it is still unreviewed) or a question comment id. */
 export function release(cfg: Config, target: string, who: string): Outcome {
   const pr = fi.gh<Pull | null>("GET", `repos/{owner}/{repo}/pulls/${target}`, undefined, true);
+  const nats = leasesOn(cfg);
+  if (pr && nats) { // claims on NATS (#411): give it back there, and post the GitHub copy of the release
+    const n = pr.number;
+    const head = pr.head.sha;
+    const key = claimKey("review", n, shaKey(head));
+    const holder = nats.holder(key);
+    if (holder && holder !== who) return [LOST, `PR #${n}: held by ${holder}, not ${who}; hold left on`];
+    if (holder) {
+      nats.release(key, who);
+      post(n, `<!-- factory-claim-release manager=${who} sha=${head} -->\nDev manager ${who} gave up the review of ${head.slice(0, 7)}.`);
+    }
+    holdOff(n, cfg);
+    return [WON, `PR #${n}: hold off` + (holder ? ", claim released" : "")];
+  }
   if (pr) {
     const n = pr.number;
     const head = pr.head.sha;
@@ -285,6 +330,12 @@ export function release(cfg: Config, target: string, who: string): Outcome {
   const q = fi.gh<Comment | null>("GET", `repos/{owner}/{repo}/issues/comments/${target}`, undefined, true);
   if (!q) die(`factory manager-claims: ${target} is neither an open PR nor a comment. Check the number.`);
   const n = issueOf(q);
+  if (nats) {
+    const key = claimKey("answer", target);
+    if (!nats.release(key, who)) return [LOST, `question ${target} on #${n}: no claim by ${who} to release`];
+    post(n, `<!-- factory-claim-release manager=${who} question=${target} -->\nDev manager ${who} gave up the question (comment ${target}).`);
+    return [WON, `question ${target} on #${n}: claim released`];
+  }
   const held = answerWinner(commentsOf(n), target, nowUtc());
   if (held && held.manager === who) {
     post(n, `<!-- factory-claim-release manager=${who} question=${target} -->\nDev manager ${who} gave up the question (comment ${target}).`);

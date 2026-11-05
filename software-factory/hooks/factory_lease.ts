@@ -17,6 +17,14 @@
 // #99 (factory_manager_claims.ts) keeps these marker formats, so claims made here and there interoperate.
 import * as fi from "./factory_issues.ts";
 import { isoUtc, parseIso } from "./factory_lib.ts";
+import { claimKey, leasesOn, shaKey } from "./factory_leases.ts";
+
+/** The NATS key of a lease (#411): review.<pr>.<sha>, answer.<question>, item.<target>.<key> (factory_leases.ts). */
+function natsKey(target: number | string, kind: string, key: string): string {
+  if (kind === "review") return claimKey("review", target, shaKey(key));
+  if (kind === "answer") return claimKey("answer", key);
+  return claimKey(kind, target, key);
+}
 
 export const KINDS: Record<string, string> = { review: "sha", answer: "question", item: "item" };
 const CLAIM = /<!--\s*factory-(review|answer|item)-claim\s+manager=([\w.-]+)\s+(sha|question|item)=(\S+)\s+until=(\S+?)\s*-->/;
@@ -84,6 +92,8 @@ export function commentsOf(target: number | string): fi.Comment[] {
 
 /** The manager holding the lease on `key` (the earliest unexpired claim), or null. */
 export function holder(target: number | string, kind: string, key: unknown, comments: fi.Comment[] | null = null): string | null {
+  const nats = leasesOn();
+  if (nats) return nats.holder(natsKey(target, kind, String(key))) || null; // claims on NATS (#411)
   const found = claimsOn(comments ?? commentsOf(target), kind, key);
   return found.length ? (found[0] as [fi.Comment, LeaseClaim])[1].holder : null;
 }
@@ -92,6 +102,20 @@ export function holder(target: number | string, kind: string, key: unknown, comm
  * an unexpired one is fine (the lease is returned as it is). */
 export function acquire(target: number | string, kind: string, key: unknown, who: string, minutes: number): Lease | null {
   const k = String(key);
+  const nats = leasesOn();
+  if (nats) { // claims on NATS (#411): the bucket decides; the GitHub marker is its copy (decision 0004 point 8)
+    const nk = natsKey(target, kind, k);
+    const was = nats.holder(nk);
+    if (was && was !== who) return null;
+    if (was) {
+      const mine = claimsOn(commentsOf(target), kind, k).find(([, c]) => c.holder === who);
+      if (mine) return { target, kind, key: k, holder: who, comment: mine[0].id, until: mine[1].until };
+    }
+    if (!nats.claim(nk, who, minutes * 60).held) return null;
+    const until = now() + minutes * 60;
+    const posted = fi.gh<fi.Comment | null>("POST", `repos/{owner}/{repo}/issues/${target}/comments`, { body: render(kind, who, k, until) });
+    return { target, kind, key: k, holder: who, comment: posted?.id, until };
+  }
   const existing = claimsOn(commentsOf(target), kind, k);
   if (existing.length) {
     const [c, claim] = existing[0] as [fi.Comment, LeaseClaim];
@@ -114,5 +138,7 @@ export function end(target: number | string, commentId: unknown, kind: string, w
 
 /** Ends the lease early. Safe to call twice. */
 export function release(lease: Lease | null | undefined): void {
+  const nats = lease ? leasesOn() : null;
+  if (lease && nats) nats.release(natsKey(lease.target, lease.kind, lease.key), lease.holder);
   if (lease && lease.comment) end(lease.target, lease.comment, lease.kind, lease.holder, lease.key);
 }

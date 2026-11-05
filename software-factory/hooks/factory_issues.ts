@@ -40,6 +40,7 @@ import { type ClaimEvent, isMe as isMyClaim, standing, winner } from "./core/dom
 import { CoreError } from "./core/domain/error.ts";
 import { dependencies } from "./core/domain/task.ts";
 import { machineId } from "./factory_machine.ts";
+import { holderIsMe, leasesOn } from "./factory_leases.ts";
 import { die, Exit, GITHUB_BUSY, githubBusy, parseArgs, parseIso, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 
 export const CLAIM = /<!--\s*factory-claim\s+agent=([\w.-]+)(?:\s+machine=([\w-]+))?\s*-->/;
@@ -199,6 +200,8 @@ export function isMe(claim: ClaimMark | null, agent: string, machine: string): b
 /** Whether this agent on this machine may carry on with in-progress issue `n`: the claim that won it is its own.
  * (The winning claim, not the newest comment: a loser's claim comment is newer and must not hide the winner's issue.) */
 export function ownIssue(n: number, agent: string, machine: string): boolean {
+  const holder = leasesOn()?.holder(`task.${n}`); // claims on NATS (#412); a task claimed before the move has none there
+  if (holder) return holderIsMe(holder, agent, machine);
   const winner = claimWinner(n);
   return !winner || isMe(winner, agent, machine);
 }
@@ -262,6 +265,7 @@ export function releaseIssue(cfg: Config, n: number, reason = ""): void {
     if (x.startsWith(L.agentPrefix) || [L.inProgress, L.inReview, L.blocked].includes(x)) removeLabel(n, x);
   }
   addLabels(n, [L.ready]);
+  leasesOn(cfg)?.drop(`task.${n}`); // its claim on NATS too (#412)
   const who = agents[0] ?? "none";
   comment(n, `<!-- factory-release agent=${who} -->\nBack to ready` + (reason ? `: ${reason}` : "."));
 }
