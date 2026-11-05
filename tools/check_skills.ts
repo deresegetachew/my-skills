@@ -4,8 +4,9 @@
 // - SKILL.md exists, with frontmatter: `name:` matching the folder and a non-empty `description:`.
 // - Every .sh parses (bash -n), every .ts and .tsx parses (and uses no `any`), every .json loads, and the factory has no
 //   .py file.
-// - Only the cockpit's UI (software-factory/cockpit/) imports Ink or React (decision 0002): they are build-time
-//   dependencies, bundled into one file at release, and a project never installs them.
+// - Only the cockpit's UI (software-factory/cockpit/) imports Ink or React (decision 0002), and only the web app
+//   (software-factory/web/) React and react-dom (decision 0005): they are build-time dependencies, bundled into one file
+//   at release, and a project never installs them.
 // - The factory's core keeps its layers (decision 0003): software-factory/hooks/core/domain/ imports only the domain,
 //   core/ports/ only the domain and the ports, and only core/compose.ts (and tests) import core/adapters/.
 // - No compiled .pyc file is tracked by git.
@@ -55,6 +56,9 @@ const transpilers = { ts: new Bun.Transpiler({ loader: "ts" }), tsx: new Bun.Tra
 // Decision 0002: Ink, React and their helpers (ink-testing-library, react-reconciler, ...) only in the cockpit's UI.
 const UI_PACKAGES = /^(ink|ink-[\w.-]+|react|react-[\w.-]+)(\/|$)/;
 const UI_FOLDER = "software-factory/cockpit/";
+// Decision 0005: the web app (factory ui) is React and react-dom, bundled for the browser at release; never Ink.
+const WEB_FOLDER = "software-factory/web/";
+const WEB_PACKAGES = /^(react|react-dom)(\/|$)/;
 // Decision 0003: the factory's core keeps its layers. The domain imports only the domain (no I/O, no package); a port
 // only the domain and the ports; and only core/compose.ts builds the adapters (other adapters and tests may import them).
 const CORE = "software-factory/hooks/core/";
@@ -89,7 +93,13 @@ for (const f of files) {
     try {
       transpiler.transformSync(text);
       const imports = transpiler.scanImports(text.replace(/^#!.*/, "")); // the scan doesn't take a #! line
-      if (!rel(f).startsWith(UI_FOLDER)) {
+      if (rel(f).startsWith(WEB_FOLDER)) {
+        for (const i of imports) {
+          if (UI_PACKAGES.test(i.path) && !WEB_PACKAGES.test(i.path)) {
+            errors.push(`${rel(f)}: imports ${i.path}; the web app (${WEB_FOLDER}) may import only React and react-dom (decision 0005)`);
+          }
+        }
+      } else if (!rel(f).startsWith(UI_FOLDER)) {
         for (const i of imports) {
           if (UI_PACKAGES.test(i.path)) {
             errors.push(`${rel(f)}: imports ${i.path}; only the cockpit's UI (${UI_FOLDER}) may import Ink or React (decision 0002)`);
