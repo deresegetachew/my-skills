@@ -39,6 +39,9 @@ reader's:
 Every lesson starts with a section titled **Mental model**:
 
 - A numbered list of the steps. Each step is one line: the idea, then the "because" that leads to the next step.
+- Every step is the same kind of thing, usually an action the reader takes ("model it", "test the old model").
+  A conclusion ("so the model breaks", "so you need X") is never a step of its own. It is the "because" that links
+  two steps, and it belongs at the end of the step that produced it.
 - A one-line short version ("known process → model it → build it → generalize it → the model breaks → model the
   agents → draw it").
 - A diagram of the journey when the steps form a path or a hierarchy.
