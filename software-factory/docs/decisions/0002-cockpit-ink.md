@@ -2,6 +2,8 @@
 
 Date: 31 Oct 2026. Status: accepted (the owner, in the session that runs the factory: "yes, let's go for it").
 Amends decision 0001 (the cockpit on tmux) and PRD D1 and D13.
+**Widened by decision 0004** (5 Nov 2026): the bundling here becomes the general plugin rule, and the cockpit's Ink UI
+becomes a plugin under it (0004 point 5). Rules 3 and 4 below now read as that rule; the rest stands.
 
 ## Context
 
@@ -28,7 +30,9 @@ unit test, with no terminal and no tmux.
    archive. A project that installs the factory gets that file, no `node_modules` and nothing to install, so the
    runtime rule (Bun and Node built-ins only) holds for projects.
 4. **Only the cockpit UI may import them.** `check_skills.ts` refuses an import of `ink` or `react` anywhere else.
-   No other package is added this way without the owner.
+   No other package is added this way without the owner. *Since decision 0004 this is the plugin rule: nothing outside
+   a plugin's folder (`software-factory/plugins/<name>/`) may import that plugin's packages, and the cockpit is one
+   plugin.*
 5. **Views are tested with `ink-testing-library`:** each view renders from a fixed snapshot of factory data, at a
    narrow and a wide size, with and without colour. Keys are sent and the frame is checked.
 
