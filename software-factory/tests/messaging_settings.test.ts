@@ -1,6 +1,7 @@
 // The `messaging` settings (#404, decision 0004): in the schema and the settings page, checked by `factory settings
-// validate`, and read by the composition root to pick the adapter. There is no NATS plugin yet, so "nats" is the
-// plugin-missing case: fall back to GitHub (the default) or stop (fallback "none").
+// validate`, and read by the composition root to pick the adapter. With "nats" and a server that can't be reached
+// (here nothing listens on port 9), the command falls back to GitHub (the default) or stops (fallback "none").
+// plugins/nats/tests/compose.test.ts runs it against a real server.
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -146,19 +147,19 @@ test("transport github reads messages from GitHub and says nothing about a plugi
   expect(p.stderr).not.toContain("plugin-missing");
 });
 
-test("transport nats with the default fallback goes on with GitHub and says plugin-missing once", () => {
+test("transport nats with no server goes on with GitHub and says nats-unreachable once", () => {
   const base = ls({ transport: "github" });
-  const p = ls({ transport: "nats", url: "nats://127.0.0.1:4222" });
+  const p = ls({ transport: "nats", url: "nats://127.0.0.1:9" });
   expect(p.code).toBe(0);
   expect(p.stdout).toBe(base.stdout);
-  expect(count(p.stderr, "plugin-missing")).toBe(1);
+  expect(count(p.stderr, "nats-unreachable")).toBe(1);
   expect(p.stderr).toContain("messaging.transport");
 });
 
-test("transport nats with fallback none stops and says plugin-missing", () => {
-  const p = ls({ transport: "nats", url: "nats://127.0.0.1:4222", fallback: "none" });
+test("transport nats with no server and fallback none stops and says nats-unreachable", () => {
+  const p = ls({ transport: "nats", url: "nats://127.0.0.1:9", fallback: "none" });
   expect(p.code).not.toBe(0);
-  expect(p.out).toContain("plugin-missing");
+  expect(p.out).toContain("nats-unreachable");
   expect(p.stdout).not.toContain("haile");
 });
 

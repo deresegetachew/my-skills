@@ -205,12 +205,12 @@ test("tail refuses an --every that is negative or not a number, without calling 
   }
 });
 
-test("tail with transport nats goes on with GitHub and says plugin-missing once", () => {
+test("tail with transport nats and no server url goes on with GitHub and says nats-unreachable once", () => {
   const w = basic({}, { messaging: { transport: "nats" } });
   const p = tail(w, "--polls", "2", "--every", "0");
   expect(p.code, p.out).toBe(0);
   expect(lines(p.stdout).length).toBe(3);
-  expect(count(p.stderr, "plugin-missing")).toBe(1);
+  expect(count(p.stderr, "nats-unreachable")).toBe(1);
 });
 
 test("factory messages tail runs through the factory script", () => {
