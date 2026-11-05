@@ -105,11 +105,18 @@ export function messagingProject(cwd: string = process.cwd()): string {
   return raw.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "project";
 }
 
-/** This agent's seed file, when it has one: <messaging.creds, else ~/.secrets/nats/<project>>/<FACTORY_AGENT>.nk. */
+/** The folder of the agents' seeds: `creds` (messaging.creds, ~/ for the home folder), else ~/.secrets/nats/<project>.
+ * `factory nats user add` writes there and an agent reads from there, so the two always agree. */
+export function seedFolder(creds: string, project: string): string {
+  if (creds === "~" || creds.startsWith("~/")) return join(homedir(), creds.slice(2));
+  return creds || join(homedir(), ".secrets", "nats", project);
+}
+
+/** This agent's seed file, when it has one: <seedFolder>/<FACTORY_AGENT>.nk. */
 function seedOf(s: MessagingSettings, project: string): { seed?: string } {
   const agent = process.env.FACTORY_AGENT;
   if (!agent) return {};
-  const seed = join(s.creds || join(homedir(), ".secrets", "nats", project), `${agent}.nk`);
+  const seed = join(seedFolder(s.creds, project), `${agent}.nk`);
   return existsSync(seed) ? { seed } : {};
 }
 
