@@ -851,17 +851,22 @@ export function settingsView(args: string[], find = ""): number {
 // --- the CI view (#339, PRD US-13) -----------------------------------------------------------------------------------
 //
 // `factory cockpit --ci` (cockpit/views/ci.tsx), from the `ci` part of the cockpit's cache, so it makes no GitHub call;
-// the heavy runner count is this machine's setting (ci_names.ts). Coloured unless NO_COLOR or a dumb terminal.
+// the heavy runner count is this machine's setting (ci_names.ts). Coloured unless NO_COLOR or a dumb terminal. On a
+// terminal its keys run `factory ci ...` (and `gh run rerun`) after a y/N question (#396).
 
 export function ciView(find = ""): number {
   let heavy: Obj | null = null;
+  let light: boolean | null = null;
   try {
-    const { raw, source } = runnerSetting(ciConfig());
+    const cfg = ciConfig();
+    const { raw, source } = runnerSetting(cfg);
     heavy = { raw: plain(raw), source: sourceText(source) };
+    light = cfg.light !== false;
   } catch {
-    // .claude/factory.json can't be read: the card says so
+    // .claude/factory.json can't be read: the card says so, and L says it can't tell
   }
-  return docView("ci", { data: readCache(), read: readCommand(null), color: termColor(), heavy, host: host(), find });
+  return docView("ci", { data: readCache(), read: readCommand(null), color: termColor(), heavy, light, host: host(), find,
+    act: ["bash", factoryScript(top())] });
 }
 
 // --- the usage view (#341, PRD US-13) --------------------------------------------------------------------------------
