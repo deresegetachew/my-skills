@@ -106,9 +106,13 @@ test("up writes a hub: pinned image, JetStream on a volume, localhost and Tailsc
   expect(p.code, p.out).toBe(0);
   const compose = read(join(w.dir, "compose.yaml"));
   expect(compose).toMatch(/image: nats:\d+\.\d+\.\d+-alpine/);
-  for (const port of ["127.0.0.1:4222:4222", "100.64.0.7:4222:4222", "127.0.0.1:8222:8222", "100.64.0.7:7422:7422"]) {
+  for (const port of ["100.64.0.7:4222:4222", "127.0.0.1:8222:8222", "100.64.0.7:7422:7422"]) {
     expect(compose).toContain(`"${port}"`);
   }
+  // Docker 29 refuses one host port on two addresses ("address already in use"), so with Tailscale the agents' port is
+  // published on the Tailscale address only, which this machine's own agents reach as well.
+  expect(compose).not.toContain('"127.0.0.1:4222:4222"');
+  expect(p.stdout).toContain("Agents connect on nats://100.64.0.7:4222.");
   expect(compose).not.toContain("0.0.0.0"); // never every interface of the host
   expect(compose).toContain("data:/data");
   const conf = read(join(w.dir, "conf", "nats-server.conf"));
