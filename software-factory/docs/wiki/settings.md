@@ -292,6 +292,14 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `messaging.creds` | str | `""` | The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/. |
 | `messaging.kinds` | list | `[]` | The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff); every other kind stays on GitHub. |
 | `messaging.fallback` | one of github/none | `"github"` | When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command. |
+
+**Web UI**
+
+| Key | Type | Default | What it sets |
+|---|---|---|---|
+| `ui.projects` | list | `[]` | Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout. |
+| `ui.port` | int | `4747` | The port `factory ui` listens on (`--port` wins for one run). |
+| `ui.pollSeconds` | int | `5` | How often `factory ui` reads the agents and machines again and pushes what changed to the open pages. |
 <!-- settings:end -->
 
 <br>
