@@ -425,3 +425,24 @@ test("a plugin folder named with anything but lowercase letters, digits and dash
   }
   expect(run(withPlugins({ "good-name2": { "index.ts": 'console.log("x");\n' } }), tmp()).code).toBe(0);
 });
+
+test("a release's plugin bundle loads through the factory's loader in a project with no node_modules (#405)", async () => {
+  const d = withPlugins({
+    tiny: { "index.ts": 'import { dep } from "tiny-dep-405";\nexport const hello = (): string => `hi ${dep()}`;\n',
+      "package.json": JSON.stringify({ name: "tiny", dependencies: { "tiny-dep-405": "1.0.0" } }) },
+  });
+  tinyDep(d, "tiny");
+  const out = tmp();
+  const r = run(d, out);
+  expect(r.code, r.out).toBe(0);
+  const js = member(members(join(out, ARCHIVE)), PREFIX + "hooks/plugins/tiny.js");
+  const project = tmp();
+  const hooks = join(project, ".claude", "hooks");
+  mkdirSync(join(hooks, "plugins"), { recursive: true });
+  mkdirSync(join(project, ".claude", "factory"), { recursive: true });
+  writeFileSync(join(project, ".claude", "factory", "release.json"), JSON.stringify({ version: "1.2.3" }));
+  writeFileSync(join(hooks, "plugins", "tiny.js"), js.data);
+  const { loadPlugin } = (await import(join(ROOT, "software-factory", "hooks", "factory_plugins.ts"))) as typeof import("../hooks/factory_plugins.ts");
+  const mod = loadPlugin("tiny", { hooks }) as { hello: () => string };
+  expect(mod.hello()).toBe("hi from dep");
+});
