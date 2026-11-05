@@ -1,7 +1,7 @@
 # Proposal for #397 (PR #402): text for protected skill files
 
 Agents may not edit `software-factory/kit/.claude/skills/`, so the text is here, on the branch, for the owner to paste.
-Apply it, run `bun tools/run_tests.ts product_owner`, then delete this folder in the same commit.
+Apply it, run `bun tools/run_tests.ts product_owner`, then delete `software-factory/docs/proposals/` in the same commit.
 
 This covers the owner's added scope (comment on #397): items 1 to 4 below. It does **not** repeat the earlier
 proactive-review text (product review step, notes rule, `ask=<slug> done`, the `status:` line); that is still in haile's
@@ -28,7 +28,9 @@ A feature or design is not "done" in the progress report until you have used it.
   that the page's sections are exactly the reference's, plus side-by-side screenshots at phone and desktop sizes.
   Check that task exists in step 4 of the pass.
 - **Daily pass.** Once a day, on main, walk the main user paths (the ones the PRD stories name) and report what is
-  broken, one line each, with a task filed per break.
+  broken, one line each, with a task filed per break. Record it on the owner queue as
+  `<!-- factory-po-daily date=<YYYY-MM-DD> sha=<main's commit> -->` in the same reply; a later pass reads the newest
+  one and skips the daily pass when its date is today.
 ```
 
 ## B. product-pass: add to pass step 4 ("Keep things consistent"), one more sentence
@@ -49,7 +51,7 @@ A feature or design is not "done" in the progress report until you have used it.
 
 ```markdown
    **Acceptance.** For every feature whose last task closed since the last pass, do "Acceptance and user testing" above.
-   Once a day, also do the daily pass.
+   Once a day (no `factory-po-daily` marker dated today), also do the daily pass.
 ```
 
 ## Not in code
