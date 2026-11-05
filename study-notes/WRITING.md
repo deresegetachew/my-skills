@@ -9,6 +9,31 @@ The reader is learning the material for the first time and reads each page once,
 notes to build a **mental model**: a set of ideas where each one rests on the ones before it. Every rule below
 serves that reader, and section 1 is the one that matters most.
 
+## 0. Authoring process
+
+Every new lesson, and every rewrite of a lesson's structure, goes through these stages in order. Don't skip one
+because the material looks simple: the problems these stages catch are invisible from the author's side.
+
+1. **Read the source for its argument, not its outline.** Write down the lesson's driving question: the one
+   question every section must serve. Mark every place where the source moves to a new topic without saying why.
+2. **Draft the mental model** (section 1): numbered steps, each with its "because", plus the running example.
+3. **Run the framing questioner** (`REVIEWERS.md` §1) on the source and the draft mental model. Revise the model
+   until the three weakest points it names are fixed.
+4. **Confirm the mental model with the user in chat** before writing the page: the driving question, the numbered
+   steps with their links, and the running example, in under 15 lines. A 30-second check here saves a rewrite.
+5. **Draft the page** in the order of the confirmed model, following sections 1–8.
+6. **Build, then run the first-time reader** (`REVIEWERS.md` §2) on the built page. Compare its explain-back with
+   the confirmed model. Fix every lost point, restructuring where a link is missing. Re-run it if the fixes were large.
+7. **Run the final check** (section 9), then hand the page to the user, with a short note on what the first-time
+   reader found and how it was fixed.
+
+When the user's questions reveal a gap later, treat it as a structural defect: re-check the whole chain (swap,
+forward-reference and interruption tests), restructure if needed, and only then answer the specific question.
+
+For small additions to an existing lesson (one new capture, a few paragraphs), stages 1, 2 and 6 still apply:
+check where the new material sits in the existing mental model, update the model if it changes, and have the
+first-time reader read the changed sections.
+
 ## 1. Map the mental model first (the core rule)
 
 Before writing anything else, work out the chain of ideas the reader has to climb, step by step. Then put that
