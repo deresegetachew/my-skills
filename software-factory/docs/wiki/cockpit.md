@@ -72,7 +72,8 @@ session that fails posts nothing, and the pane shows the error and what to do (`
 
 Each line is one `factory cockpit --chat-send <role> <text> [<history-json>]`. The session gets the role's settings,
 model and permissions, as the dev manager's sub-managers do, and runs for at most `FACTORY_CHAT_MINUTES` minutes
-(default 15). Only the owner can do this: in an agent session it stops with `cockpit_agent_session`.
+(default 15, from 1 to 19: the pane waits 20 minutes for an answer). Only the last 10 turns of the conversation go
+with each line. Only the owner can do this: in an agent session it stops with `cockpit_agent_session`.
 
 ## Answering an owner ask
 
