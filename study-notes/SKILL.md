@@ -85,6 +85,21 @@ const mindMap = `
 </LessonLayout>
 ```
 
+## Writing the prose — read WRITING.md first
+
+Before drafting or rewriting any lesson text, read `WRITING.md` and follow it. In short:
+
+- **Plan the chain of questions** first. Each section answers the question the previous one raised. Long lessons
+  get a "How this lesson builds up" roadmap callout listing that chain.
+- **Ground every concept before using it**, including labels you invent.
+- **Bridge the gaps** the course leaves, with `mine`-badged sections and worked examples.
+- **Short sentences:** one claim each, about 20 words, at most one colon, active voice.
+- **Avoid the banned patterns** (filler, inflated adjectives, LLM vocabulary, recap and meaning sentences).
+- **Run the final check** in `WRITING.md` before calling a page done.
+
+The mind map follows the same hierarchy: organize it by how the concepts build on each other, not by the order of
+the headings.
+
 ## Required sections — every lesson, no exceptions
 
 Every lesson page ends with all four of these, in this order, even short ones
