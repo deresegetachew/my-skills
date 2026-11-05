@@ -5,20 +5,61 @@ drafting or rewriting any lesson section. The rules come from four places: the r
 Matt Pocock's writing skills (grounding), Vercel's writing guidelines (sentences, second-read test), and
 riekelt's technical-writer skills (banned constructions, rewrite checks).
 
-The reader is learning the material for the first time and reads each page once, top to bottom. Every rule below
-serves that reader.
+The reader is learning the material for the first time and reads each page once, top to bottom. They come to these
+notes to build a **mental model**: a set of ideas where each one rests on the ones before it. Every rule below
+serves that reader, and section 1 is the one that matters most.
 
-## 1. Plan before writing
+## 1. Map the mental model first (the core rule)
 
-Write these down in your working notes before the first sentence:
+Before writing anything else, work out the chain of ideas the reader has to climb, step by step. Then put that
+chain at the top of the page and build the page in exactly that order.
+
+### Work out the chain yourself
+
+Sources often present topics side by side without saying how they connect. A course may list two modeling methods,
+or agent types followed by workflow patterns, as if they were separate. Finding the connection is your job, not the
+reader's:
+
+- **Find the relation between each pair of neighboring ideas.** Does one cause the next, enable it, replace it,
+  or solve a problem the other creates? "Generalizing the workflow is why the modeling method has to change" is a
+  relation. "Next, modeling methods" is not.
+- **Write the link as a "because" sentence.** Step N leads to step N+1 because… If you can't finish the sentence,
+  the chain has a gap. Find the missing idea, and add it as a `mine`-badged section if the source skipped it.
+- **Show every break, shift or "therefore" with an example.** When a step says that something stops working, or
+  that something follows, show it happening on a concrete case. "A flowchart can't capture run-time choices" is a
+  claim. Three questions that take three different paths through the same assistant is the evidence. The reader
+  needs the evidence.
+- **Correct misreadings the source invites.** If the source's wording suggests the wrong model ("replace each step
+  with an agent", "generalize"), say what it actually means and what it doesn't.
+- **Prefer one example that runs through the whole chain.** Use the same system at every step, ideally one the
+  reader has built, so each step visibly changes something the reader already knows.
+
+### Put the map on the page
+
+Every lesson starts with a section titled **Mental model**:
+
+- A numbered list of the steps. Each step is one line: the idea, then the "because" that leads to the next step.
+- A one-line short version ("known process → model it → build it → generalize it → the model breaks → model the
+  agents → draw it").
+- A diagram of the journey when the steps form a path or a hierarchy.
+
+The rest of the page follows the map. Each major section matches one step, in the same order, and opens by naming
+its step. The lesson's mind map has the same shape as the map.
+
+### Test the chain before writing
+
+- **Swap test:** if two sections could swap places without breaking anything, they aren't linked. Find the link,
+  or admit that one of them is an aside and move it into a collapsible.
+- **Forward-reference test:** if a section uses an idea that a later section introduces, reorder.
+- **Interruption test:** an aside placed between two linked steps hides their link. Move it after the link, or into
+  a collapsible.
+
+### Plan the rest in your working notes
 
 - **Prerequisites:** the concepts the reader already has, from earlier lessons (link them) or general knowledge.
-- **New concepts:** every concept this page introduces, in the order the page will introduce them.
-- **The chain of questions:** one question per major section, where each section answers the question the
-  previous one raised. If two sections can swap places without breaking anything, the chain is missing a link.
+- **New concepts:** every concept the page introduces, in the order the map introduces them.
 
-For a lesson with three or more major sections, the chain becomes the roadmap callout at the top of the page
-("How this lesson builds up": a numbered list of the questions, each with a one-line answer).
+The same rule applies to explanations in chat: lead with the map, then fill in the steps.
 
 ## 2. Ground every concept before using it
 
@@ -85,7 +126,7 @@ sentence that leans on an ungrounded concept loses the reader, even if it contai
 
 - A heading names the content as a noun phrase: "Two definitions of agent", "The agent-type spectrum".
 - Question headings only for genuine questions the section answers in its first sentence (FAQ-style collapsibles,
-  "Does agent-centric mean no flowchart?"). The roadmap and quizzes may use questions.
+  "Does agent-centric mean no flowchart?"). The mental model and quizzes may use questions.
 - The first sentence under a heading does not repeat the heading.
 
 ## 7. Format follows the content
@@ -114,7 +155,8 @@ sentence that leans on an ungrounded concept loses the reader, even if it contai
 Run this on every page before calling it done:
 
 1. Every concept is grounded before its first use, including invented labels.
-2. The sections form a chain; the roadmap matches it.
+2. The page opens with a Mental model section; every link has a "because", every claimed break has an example,
+   and the sections follow the map in order (swap, forward-reference and interruption tests pass).
 3. Each sentence passes the second-read test; no sentence chains two colons.
 4. None of the banned patterns from section 5 remain.
 5. Which sentence still sounds like a language model? Rewrite it.
