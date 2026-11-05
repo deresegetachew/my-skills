@@ -290,6 +290,28 @@ test("the cockpit's UI is bundled into one file, installed beside the hooks, the
   expect(ran.stdout.trim(), ran.out).toBe("cockpit bundled");
 });
 
+test("the web app is bundled for the browser into one file, installed beside the hooks, the same bytes each time (#421)", () => {
+  const d = withCockpit('console.log("cockpit");\n', {
+    "software-factory/web/app.tsx": 'import { word } from "./word.ts";\ndocument.title = `web ${word}`;\n',
+    "software-factory/web/word.ts": 'export const word = "bundled";\n' });
+  const a = tmp();
+  const b = tmp();
+  for (const out of [a, b]) {
+    const r = run(d, out);
+    expect(r.code, r.out).toBe(0);
+  }
+  const name = "software-factory-1.2.3.tar.gz";
+  expect(Buffer.compare(readFileSync(join(a, name)), readFileSync(join(b, name)))).toBe(0);
+  const list = members(join(a, name));
+  const js = member(list, "software-factory-1.2.3/hooks/factory_ui_app.js");
+  expect(js.mode & 0o777).toBe(0o644);
+  expect(text(js)).toContain("web ");
+  expect(text(js)).not.toMatch(/\bimport\s*[{*\w]/);
+  const manifest = JSON.parse(text(member(list, "software-factory-1.2.3/MANIFEST.json"))) as
+    { files: { path: string; install: { kind: string; to: string } | null }[] };
+  expect(manifest.files.find((f) => f.path === "hooks/factory_ui_app.js")?.install).toEqual({ kind: "engine", to: ".claude/hooks/factory_ui_app.js" });
+});
+
 test("a release without the cockpit's UI has no bundle", () => {
   const out = tmp();
   expect(run(repo(), out).code).toBe(0);
