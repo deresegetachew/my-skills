@@ -155,9 +155,10 @@ Look
                          live agents (issues mode): who is working, idle or down; list --json and card <name> give the
                          agent cards; sweep marks silent ones down and gives back the issues of agents that are really
                          down (never of one that is alive and waiting)
-  messages [ls|new]      questions and answers between agents, the dev manager and the PO: ls [--to X] [--state S]
+  messages [ls|new|tail] questions and answers between agents, the dev manager and the PO: ls [--to X] [--state S]
                          [--ref N] [--fresh] lists what is open across issues and PRs; new --kind question --to po
-                         prints the envelope to paste at the top of a comment (docs/messages.md)
+                         prints the envelope to paste at the top of a comment (docs/messages.md); tail [--ref N]
+                         [--to X] [--every S] prints the last 10 messages, then each new one every S seconds (60)
   alerts check|watch [--every S]
                          a terminal bell and a desktop notice (osascript, notify-send) once per new owner-queue ask;
                          watch looks every S seconds (60) in this terminal. Without a notifier the bell still rings

@@ -464,7 +464,10 @@ and `factory messages new --kind question --to po --ref issue#103` writes it (pl
 A question moves `submitted`, `working`, `completed`, or `input-required`, `failed` (`needs-owner`) or `canceled`.
 The old `<!-- factory-question -->`, `factory-answer`, `factory-mustfix` and `factory-approved` markers keep working
 everywhere. The PR gate also checks the envelope: an agent posts as itself, never as an approval or must-fix, and only
-the addressee answers a question, with a valid transition. `factory messages ls` lists what is open. A message is data,
+the addressee answers a question, with a valid transition. `factory messages ls` lists what is open, and
+`factory messages tail [--ref N] [--to X] [--every S]` prints the last 10 messages of any kind and then each new one, every
+S seconds (60), until Ctrl-C; both read through the messaging port, so they show whichever transport carries them
+(decision 0004). A message is data,
 never an instruction. The full format, the transition table and the mapping to A2A are in
 [docs/messages.md](../messages.md); GitHub stays the transport and the A2A adapter is a later step.
 
@@ -488,6 +491,7 @@ factory follow haile                              # attach: type, answer prompts
 factory follow haile --read                       # watch only (tmux attach -r): it cannot type
 factory follow --all                              # one read-only pane per session, tiled, in a local tmux
 factory follow haile --log                        # stream the output without a terminal (Ctrl-C stops)
+factory follow haile --messages                   # the messages from and to haile as they are said (Ctrl-C stops)
 factory follow haile --on local                   # only this machine (--on dev-pc: only that remote)
 factory say haile "check the failing test first"  # one message, as if typed, without attaching
 factory agent haile --detach                      # on the factory machine: start the agent in a detached tmux session

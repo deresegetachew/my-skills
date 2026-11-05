@@ -24,6 +24,7 @@ picked. `C-a d` leaves, and everything keeps running. Every key and view is in t
 | Enter | On a coding agent: show its Claude Code session on the right. On the dev manager or the product owner: open the talk with it. On a view: open it. |
 | `1`–`8` | The views: Needs you, Pull requests, Tasks & PRD, CI, Agents & machines, Settings, Health & releases, Usage & lessons. |
 | `9`, `0` | Talk to the dev manager, talk to the product owner. |
+| `m` | Messages: what the agents, the dev manager and the product owner say to each other, as it is said (`factory messages tail`; Ctrl-C closes it). |
 | `/` | Search across the views. |
 | `:` | The command bar. |
 | `s`, `x`, `n` | Say something to a session, stop it, start one (each asks first). |
