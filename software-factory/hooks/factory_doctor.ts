@@ -21,6 +21,8 @@ import * as doctorCi from "./factory_doctor_ci.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
 import { Exit, FactoryError, fnmatch, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
 import { machineNames } from "./factory_machine.ts";
+import { messagingSettings } from "./core/compose.ts";
+import { describe as natsAnswer, probe as natsProbe } from "./factory_nats.ts";
 import { ModelsError, resolvedDefault, table, validate } from "./factory_models.ts";
 import * as fr from "./factory_release.ts";
 import * as roleDefs from "./factory_roles.ts";
@@ -575,6 +577,31 @@ export async function turbo(r: Reporter, cfg: Config): Promise<void> {
   }
 }
 
+/** The NATS server agents connect to (decision 0004, #407): only when `messaging.transport` is nats. It answers when
+ * it sends the `INFO` line a NATS server sends on connect; nothing is published. */
+export async function nats(r: Reporter, cfg: Config): Promise<void> {
+  const s = messagingSettings(cfg);
+  if (s.transport !== "nats") return;
+  let url: URL | null = null;
+  try {
+    url = s.url ? new URL(s.url) : null;
+  } catch {
+    url = null;
+  }
+  if (!url || !url.hostname) {
+    r.fix("NATS server", `messaging.url ${JSON.stringify(s.url)} isn't a server address: run \`factory nats up\` on this ` +
+      "machine, then `factory settings set messaging.url nats://<its address>:4222`");
+    return;
+  }
+  const port = Number(url.port || "4222");
+  const a = await natsProbe(url.hostname, port);
+  if (a.ok) r.ok(`NATS server answers at ${s.url} (${natsAnswer(a)})`);
+  else {
+    r.fix("NATS server", `nothing answers at ${s.url} (${a.why}): run \`factory nats up\` ` +
+      "on this machine, and `factory nats status` to see it");
+  }
+}
+
 /** A project that takes the factory from releases (#113): the installed files are the pinned release's, and this
  * machine is ready (hooks exist, scripts parse, runner files readable). The same checks `factory update` ends with. */
 export function release(r: Reporter): void {
@@ -841,6 +868,7 @@ export async function main(argv: string[]): Promise<number> {
     manager(r, cfg);
     trustedReviewers(r, cfg);
     await turbo(r, cfg);
+    await nats(r, cfg);
     artifacts(r, cfg);
     release(r);
   }
