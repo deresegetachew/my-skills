@@ -17,8 +17,11 @@
 //                                (#366, cockpit/sidebar.tsx) when its UI is installed, else drawn here
 //   factory cockpit --sidebar-data
 //                                what the Ink list draws: the cached snapshot, the views, the new asks to ring for
-//   factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | leave
+//   factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | search | chat <role> | leave
 //                                a key of the Ink list, done in the cockpit's tmux
+//   factory cockpit --chat <role>
+//                                the chat with the dev-manager or the product-owner (#395, TALK TO in the list): each
+//                                message goes through `factory owner chat`, the earlier turns show first
 //   factory cockpit --bar [<words>]
 //                                the `:` command bar: type to pick a factory command, the words typed in already (on
 //                                Ink, cockpit/command-bar.tsx; off a terminal: the words, else one line on stdin, and the
@@ -50,6 +53,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { homedir, hostname } from "node:os";
 import { basename, join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
+import { CHAT_ROLES, history } from "./factory_chat.ts";
 import { load, taskSource } from "./factory_config.ts";
 import { ACTION_NAMES, ACTIONS_OFFERED, matches, OFFERED, rank } from "./factory_cockpit_match.ts";
 import { inkUi, LIMITED, limitSentence, readCache, refreshIfOld, runUi, UI_MISSING, uiPackagesProblem } from "./factory_cockpit.ts";
@@ -579,8 +583,8 @@ export function sidebarData(): number {
   return 0;
 }
 
-/** `factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | leave`: a key of the Ink list, done in
- *  the cockpit's tmux. */
+/** `factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | search | chat <role> | leave`: a key of
+ *  the Ink list, done in the cockpit's tmux. */
 export function sidebarOpen(args: string[]): number {
   const [what, ...rest] = args;
   const p = pane();
@@ -589,9 +593,11 @@ export function sidebarOpen(args: string[]): number {
   else if (what === "view" && rest.length === 1 && v) openView(p, v);
   else if (what === "bar") openBar(p, rest);
   else if (what === "search" && !rest.length) openSearch(p);
-  else if (what === "leave" && !rest.length) tmux(p.sock, ["detach-client"]);
+  else if (what === "chat" && rest.length === 1 && CHAT_ROLES.includes(rest[0] ?? "")) {
+    popup(p, ["-w", "90%", "-h", "90%"], factoryCall(p.script, ["cockpit", "--chat", rest[0] as string]));
+  } else if (what === "leave" && !rest.length) tmux(p.sock, ["detach-client"]);
   else {
-    refuse("cockpit_usage", `factory cockpit --sidebar-open takes session <name>, view <key>, bar [<words>], search or leave, not "${plain(args.join(" "))}".`,
+    refuse("cockpit_usage", `factory cockpit --sidebar-open takes session <name>, view <key>, bar [<words>], search, chat <role> or leave, not "${plain(args.join(" "))}".`,
       "The cockpit's list runs it for its keys; to open the cockpit, run `factory cockpit`.", 2);
   }
   return 0;
@@ -709,9 +715,22 @@ function termColor(): boolean {
   return !process.env.NO_COLOR && !["", "dumb"].includes(process.env.TERM ?? "");
 }
 
-/** `factory cockpit --needs`: the Needs you view, from the cache; r reads the snapshot again. */
+/** `factory cockpit --needs`: the Needs you view, from the cache; r reads the snapshot again, and Enter on an owner ask
+ *  answers it with `factory owner answer` after its question (#395). */
 export function needs(find = ""): number {
-  return view("needs", { snapshot: readCache(), read: readCommand(null), find });
+  return view("needs", { snapshot: readCache(), read: readCommand(null), find, act: ["bash", factoryScript(top())] });
+}
+
+/** `factory cockpit --chat <role>` (#395): the chat with the dev manager or the product owner; each message runs
+ *  `factory owner chat <role> <message>`, and the earlier turns show first. */
+export function chatView(args: string[]): number {
+  const role = args[0] ?? "";
+  if (args.length !== 1 || !CHAT_ROLES.includes(role)) {
+    refuse("cockpit_usage", `factory cockpit --chat takes ${CHAT_ROLES.join(" or ")}, not "${plain(args.join(" "))}".`,
+      "Run `factory cockpit --chat dev-manager`, or pick TALK TO in the cockpit's list.", 2);
+  }
+  return view("chat", { role, send: ["bash", factoryScript(top()), "owner", "chat", role],
+    history: history(role).map((t) => ({ you: t.you, answer: t.answer })) });
 }
 
 /** `factory cockpit --prs [<n>]`: the Pull requests view (#338), from `factory prs --json`, with <n> selected; m merges

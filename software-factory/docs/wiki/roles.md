@@ -228,4 +228,4 @@ or `<notes>/next-task.md` instead. To move: run `factory init-roles`, copy the n
 
 <br>
 
-Previous: [Agent loops](agent-loops.md) | Next: [Reviews and gates](reviews-and-gates.md)
+Previous: [Agent loops](agent-loops.md) | Next: [The cockpit](cockpit.md)

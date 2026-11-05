@@ -1,12 +1,13 @@
 // The Needs you view (#367, PRD US-10), towards its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/VInbox.dc.html): what
 // is waiting on the owner, from the cockpit's snapshot (`needsYou` in `factory cockpit --json`): owner asks (and whether
 // the product owner replied, #352) and pull requests only a person merges, each with its link and age. The selected
-// one's detail is below the list. j k (or ↑ ↓) move, / filters the rows (#392), r reads the snapshot again, q closes. It only reads: answering and
-// merging are `factory owner answer` and `factory owner merge`, in the command bar or the Pull requests view.
+// one's detail is below the list. j k (or ↑ ↓) move, / filters the rows (#392), r reads the snapshot again, q closes.
+// Enter on an owner ask shows it whole with its options (#395); a digit picks one and, after a y/N question, posts it with
+// `factory owner answer <id> <option>`. Merging is `factory owner merge`, in the command bar or the Pull requests view.
 import { useApp, useInput } from "ink";
 import { type ReactElement, useState } from "react";
 import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
-import { ago, cut, type Line, Lines, list, type Obj, plain, screen, seg, spread } from "./lines.tsx";
+import { ago, cut, type Line, Lines, list, type Obj, plain, screen, seg, spread, wrap } from "./lines.tsx";
 import type { Got } from "./read.ts";
 
 export const NEEDS_KEYS = "j k move · r read again · q close";
@@ -28,7 +29,7 @@ export function sentence(n: Obj): string {
 
 /** What the owner does about the selected one. */
 function whatToDo(n: Obj): string {
-  if (n.kind === "owner-ask") return `Answer it on the queue issue, or \`factory owner answer ${plain(n.id)} <answer>\` in the command bar.`;
+  if (n.kind === "owner-ask") return `Enter shows it whole and answers it, or \`factory owner answer ${plain(n.id)} <answer>\` in the command bar.`;
   if (n.kind === "owner-merges") return `Open the Pull requests view (C-a 2) and press m, or \`factory owner merge ${plain(n.number)}\`.`;
   return "Read it on GitHub.";
 }
@@ -79,6 +80,40 @@ export function needsLines(snap: Got | undefined, selected: number, cols: number
   return screen([heading, [], ...body], filterKeys(filter, NEEDS_KEYS), cols, rows);
 }
 
+export const NOT_RUN = "Not run: nothing changed.";
+export const ASK_KEYS = "1-9 answers with that option · Esc back to the list";
+
+/** Where the view is (#395): the list, an ask shown whole, the question before its answer, or what the answer printed. */
+type Mode = { kind: "list" } | { kind: "ask"; ask: Obj } | { kind: "confirm"; ask: Obj; option: string } | { kind: "shown"; text: string };
+
+function strings(v: unknown): string[] {
+  return Array.isArray(v) ? v.map(plain).filter(Boolean) : [];
+}
+
+/** The question asked before an answer is posted. */
+export function answerQuestion(id: string, option: string): string {
+  return `Run \`factory owner answer ${id} ${option}\`? It changes the owner queue. [y/N]`;
+}
+
+/** One screen of an ask shown whole (#395): its text, its options numbered, and the question once one is picked. */
+export function askLines(mode: Exclude<Mode, { kind: "list" }>, cols: number, rows: number, repo: string, canAnswer: boolean): Line[] {
+  const heading = spread([seg("factory", "amber"), seg(`  ${repo} · Needs you`)], [], cols);
+  if (mode.kind === "shown") {
+    return screen([heading, [], ...mode.text.split(/\r?\n/).flatMap((l) => wrap(plain(l), cols))], "Esc back to the list", cols, rows);
+  }
+  const n = mode.ask;
+  const text = String(n.text ?? "").split(/\r?\n/).flatMap((l) => wrap(plain(l), cols));
+  const options = strings(n.options).map((o, i): Line => [seg(`  ${i + 1} ${o}`)]);
+  const body: Line[] = [[seg(`Owner ask ${plain(n.id)} on #${plain(n.issue)}`, "amber"), seg(`  ${plain(n.url)}`, "dim")], [],
+    ...(text.length ? text : [[seg("(no text)", "dim")]]), [], [seg("OPTIONS", "dim")], ...options];
+  if (!canAnswer) body.push([], [seg(`Answer it in the command bar: factory owner answer ${plain(n.id)} <answer>`, "dim")]);
+  if (mode.kind === "confirm") body.push([], [seg(answerQuestion(plain(n.id), mode.option), "bold")]);
+  // the question and the options stay on screen: the text gives way first
+  const room = Math.max(rows - 3, 2); // the heading, a blank, the keys
+  const shown = body.length > room ? [body[0] as Line, ...body.slice(-(room - 1))] : body;
+  return screen([heading, [], ...shown], mode.kind === "confirm" ? "y posts it · any other key doesn't" : ASK_KEYS, cols, rows);
+}
+
 export interface NeedsProps {
   repo: string;
   /** The snapshot the view opens on (the cache), or null when there is none yet. */
@@ -91,6 +126,8 @@ export interface NeedsProps {
   now?: () => number;
   /** The row to select first (`needKey`): the search's Enter (#392). */
   find?: string;
+  /** Runs a factory command (`owner answer <id> <option>`) and gives its output (#395); without it the view only reads. */
+  act?: (words: string[]) => Promise<string>;
 }
 
 export function NeedsView(props: NeedsProps): ReactElement {
@@ -98,8 +135,37 @@ export function NeedsView(props: NeedsProps): ReactElement {
   const [snap, setSnap] = useState<Got | undefined>(props.snapshot);
   const [selected, setSelected] = useState(() => (props.find ? needAt(props.snapshot, props.find) : 0));
   const [filter, setFilter] = useState<Filter>(NO_FILTER);
+  const [mode, setMode] = useState<Mode>({ kind: "list" });
+  const reload = () => {
+    setSnap(undefined);
+    void props.load().then((got) => {
+      setSnap(got);
+      setSelected((s) => Math.min(s, Math.max(needsOf(got, filter.typed).length - 1, 0)));
+    });
+  };
+  /** The keys of an ask shown whole: a digit picks an option, y posts it, Esc (or q) goes back. */
+  const askKey = (input: string, escape: boolean): void => {
+    if (mode.kind === "list") return;
+    if (mode.kind === "confirm") {
+      if (input === "y" && props.act) {
+        const words = ["owner", "answer", plain(mode.ask.id), mode.option];
+        setMode({ kind: "shown", text: "Posting the answer…" });
+        void props.act(words).then((text) => setMode({ kind: "shown", text: text || "Done." }));
+      } else setMode({ kind: "shown", text: NOT_RUN });
+      return;
+    }
+    if (escape || input === "q") {
+      const answered = mode.kind === "shown" && mode.text !== NOT_RUN;
+      setMode({ kind: "list" });
+      if (answered) reload(); // the answered ask leaves the list
+      return;
+    }
+    const option = mode.kind === "ask" && props.act ? strings(mode.ask.options)[Number(input) - 1] : undefined;
+    if (mode.kind === "ask" && /^[1-9]$/.test(input) && option) setMode({ kind: "confirm", ask: mode.ask, option });
+  };
   useInput((input, key) => {
     if (key.ctrl && input === "c") return exit();
+    if (mode.kind !== "list") return askKey(input, key.escape);
     const next = snap === undefined ? null : filterKey(filter, input, key);
     if (next) {
       setFilter((f) => filterKey(f, input, key) ?? f); // keys in one chunk each see the one before
@@ -108,17 +174,17 @@ export function NeedsView(props: NeedsProps): ReactElement {
     }
     if (input === "q") return exit(); // closes while it reads too
     if (snap === undefined) return; // reading
-    const count = needsOf(snap, filter.typed).length;
+    const items = needsOf(snap, filter.typed);
+    const count = items.length;
     if (input === "j" || key.downArrow) setSelected((s) => Math.min(s + 1, Math.max(count - 1, 0)));
     else if (input === "k" || key.upArrow) setSelected((s) => Math.max(s - 1, 0));
-    else if (input === "r") {
-      setSnap(undefined);
-      void props.load().then((got) => {
-        setSnap(got);
-        setSelected((s) => Math.min(s, Math.max(needsOf(got, filter.typed).length - 1, 0)));
-      });
+    else if (input === "r") reload();
+    else if (key.return) {
+      const n = items[Math.min(Math.max(selected, 0), count - 1)];
+      if (n?.kind === "owner-ask") setMode({ kind: "ask", ask: n });
     }
   });
-  const lines = needsLines(snap, selected, props.cols, props.rows, props.repo, (props.now ?? Date.now)(), filter);
+  const lines = mode.kind !== "list" ? askLines(mode, props.cols, props.rows, props.repo, props.act !== undefined)
+    : needsLines(snap, selected, props.cols, props.rows, props.repo, (props.now ?? Date.now)(), filter);
   return <Lines lines={lines.map((l) => cut(l, props.cols))} color={props.color} />;
 }

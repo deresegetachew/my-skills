@@ -280,6 +280,9 @@ Owner                    what the owner does by hand, shared with the cockpit. T
                          add (or remove) a label the repository has, on an issue or a pull request
   owner answer <ask-id> <text>
                          answer an ask in the owner queue (factory cockpit --needs lists them)
+  owner chat <role> <message>
+                         talk to the dev-manager or the product-owner: a fresh session as that role answers, and its
+                         summary goes to the owner queue (TALK TO in the cockpit)
   owner release <X.Y.Z>  tag main vX.Y.Z and push the tag when software-factory/VERSION on main says X.Y.Z; the release
                          workflow publishes it
   owner start <role> [name]

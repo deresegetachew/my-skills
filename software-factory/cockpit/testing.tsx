@@ -9,6 +9,7 @@ import { type BarProps, CommandBar, type Outcome, type Problem, type Resolved } 
 import { type SearchProps, SearchView } from "./search.tsx";
 import { type Actions, type Data, Sidebar } from "./sidebar.tsx";
 import { agentsLines } from "./views/agents.tsx";
+import { type ChatProps, ChatView } from "./views/chat.tsx";
 import { ciLines, type Heavy } from "./views/ci.tsx";
 import { DocView } from "./views/doc.tsx";
 import { healthLines } from "./views/health.tsx";
@@ -58,7 +59,7 @@ function draw(el: ReactElement, cols: number, color: boolean): Drawn {
   };
 }
 
-export type { BarProps, NeedsProps, Outcome, Problem, PrsProps, Resolved, SearchProps, TasksProps };
+export type { BarProps, ChatProps, NeedsProps, Outcome, Problem, PrsProps, Resolved, SearchProps, TasksProps };
 
 export function drawPrs(p: PrsProps): Drawn {
   return draw(<PrsView {...p} />, p.cols, p.color);
@@ -78,6 +79,10 @@ export function drawBar(p: BarProps): Drawn {
 
 export function drawSearch(p: SearchProps): Drawn {
   return draw(<SearchView {...p} />, p.cols, p.color);
+}
+
+export function drawChat(p: ChatProps): Drawn {
+  return draw(<ChatView {...p} />, p.cols, p.color);
 }
 
 /** The views that are one document, by the name `ui.tsx --view` takes. */
@@ -133,6 +138,7 @@ export function sidebarOf(data: Data, cols = 40, rows = 30, color = false): Side
     openView: (key) => calls.push(`view ${key}`),
     bar: (words) => calls.push(["bar", ...words].join(" ")),
     search: () => calls.push("search"),
+    chat: (role) => calls.push(`chat ${role}`),
     reload: () => calls.push("reload"),
     leave: () => calls.push("leave"),
   };

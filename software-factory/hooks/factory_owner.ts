@@ -9,6 +9,8 @@
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
 //   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`
+//   factory owner chat <role> <message>      talks to the dev manager or the product owner (#395, factory_chat.ts): a fresh
+//                                            session as that role answers; the summary goes to the owner queue
 //   factory owner release <X.Y.Z>            tags main's commit vX.Y.Z and pushes the tag, when software-factory/VERSION
 //                                            on main says X.Y.Z (the release workflow then publishes it)
 //   factory owner start <role> [name]        starts `factory loop -i` as that role in its own tmux window on this machine,
@@ -21,6 +23,7 @@
 // releases, starting and stopping stay the owner's. Every other factory session (a coding agent, the product owner) is
 // refused before anything is read or written. Errors are one JSON line `{code, message, fix}` on stderr.
 import { join } from "node:path";
+import { chat } from "./factory_chat.ts";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { type Config, load, loadFromMain } from "./factory_config.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
@@ -38,6 +41,8 @@ const USAGE = `factory owner <command>
   label <n> <label> [--remove]
                               add a label that exists on the repository to an issue or pull request (--remove: take it off)
   answer <ask-id> <text>      answer an ask in the owner queue ("Dev manager: needs the owner")
+  chat <role> <message>       talk to the dev-manager or the product-owner: a fresh session as that role answers, and
+                              its summary goes to the owner queue (the cockpit's TALK TO)
   release <X.Y.Z>             tag main vX.Y.Z and push the tag, when ${VERSION_FILE} on main says X.Y.Z
   start <role> [name]         start a coding-agent, dev-manager or product-owner session (factory loop -i) in its own tmux
                               window on this machine, without attaching
@@ -353,12 +358,15 @@ export function main(argv: string[]): number {
     console.log(USAGE);
     return 0;
   }
-  if (!["merge", "label", "answer", "release", "start", "stop"].includes(cmd)) {
+  if (!["merge", "label", "answer", "chat", "release", "start", "stop"].includes(cmd)) {
     refuse("unknown_command", `factory owner has no command \`${cmd}\`.`,
-      "Use one of: merge, label, answer, release, start, stop (`factory owner help`).", 2);
+      "Use one of: merge, label, answer, chat, release, start, stop (`factory owner help`).", 2);
   }
   const me = who();
-  if (cmd === "merge") {
+  if (cmd === "chat") {
+    if (me === "dev-manager") ownerOnly("Talking to a role as the owner");
+    chat(rest[0], rest.slice(1).join(" "));
+  } else if (cmd === "merge") {
     const [n, seen] = mergeArgs(rest);
     merge(n, me, seen);
   }

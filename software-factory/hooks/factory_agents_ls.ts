@@ -15,8 +15,8 @@
 // --json prints {agents: [...], github: {...}, daemon: {...}, machine}; every row has name, kind, where, state, detail,
 // task, on, since, lastSeen, follow, session, activity, machine (the id), machineName (`machines.<id>.name` in
 // factory.json, else the hostname, which another machine posts only with tasks.showWhere, else the id; #383), source
-// (local or github) and expected: this machine's names file (or FACTORY_AGENTS) names it, so the cockpit lists it even
-// when it is down (#366).
+// (local or github), expected: this machine's names file (or FACTORY_AGENTS) names it, so the cockpit lists it even
+// when it is down (#366), and runs (#395): tmux, nohup (alive here with no tmux session), cloud, or null.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -56,6 +56,15 @@ export interface LsRow {
   machineName: string | null;
   source: string;
   expected: boolean;
+  /** How it runs (#395): tmux (its session is there), nohup (alive with no tmux session), cloud; null when not known. */
+  runs: string | null;
+}
+
+/** How a row of this machine runs (#395): in its tmux session, or outside tmux (nohup or a plain terminal); null when
+ * it is down. */
+export function runsOf(state: string, session: string | null): string | null {
+  if (state === "down") return null;
+  return session ? "tmux" : "nohup";
 }
 
 /** The name to show for machine `id` (#383): `machines.<id>.name` in factory.json, else the hostname it posted (only
@@ -88,7 +97,7 @@ function localRows(cfg: Config): [LsRow[], DaemonInfo] {
     rows.push({ name, kind: kindText(r.kind), where: "this machine", state: r.state, detail: r.detail || r.state,
       task: r.task ?? null, on: r.on ?? null, since: r.since ?? null, lastSeen: r.state !== "down" ? iso(seen) : null,
       follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: mine, machineName: myName,
-      source: "local", expected: names.includes(name) });
+      source: "local", expected: names.includes(name), runs: runsOf(r.state, r.session ?? null) });
   }
   return [rows, { running: fresh, updated: Object.keys(data).length ? iso(data.updated as number | undefined) : null,
     errors: fresh ? ((data.errors as string[] | undefined) || []) : [] }];
@@ -171,7 +180,9 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
     rows.push({ name, kind: kindText(kind), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
       session: f.session ?? null, activity: null, machine,
-      machineName: cloud ? "cloud" : nameOf(cfg, machine, f.where || null), source: "github", expected: false });
+      machineName: cloud ? "cloud" : nameOf(cfg, machine, f.where || null), source: "github", expected: false,
+      // another machine posts its tmux session only with tasks.showWhere: without one, how it runs isn't known
+      runs: cloud ? "cloud" : f.session && state !== "down" ? "tmux" : null });
   }
   return rows;
 }

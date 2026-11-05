@@ -74,6 +74,7 @@ function Live({ factory, first }: { factory: string; first: Data }): ReactElemen
     openView: (key) => open("view", key),
     bar: (words) => open("bar", ...words),
     search: () => open("search"),
+    chat: (role) => open("chat", role),
     reload,
     // Only detach: the pane runs this list with exec, so the list ending would close the pane for the next visit.
     leave: () => open("leave"),
@@ -81,7 +82,7 @@ function Live({ factory, first }: { factory: string; first: Data }): ReactElemen
   return <Sidebar data={data} cols={size.cols} rows={size.rows} color={true} actions={actions} />;
 }
 
-const NONE: Actions = { openSession() {}, openView() {}, bar() {}, search() {}, reload() {}, leave() {} };
+const NONE: Actions = { openSession() {}, openView() {}, bar() {}, search() {}, chat() {}, reload() {}, leave() {} };
 
 /** `--sidebar --factory <script>`; returns the exit code, or null for arguments that aren't these. */
 export async function sidebarMain(argv: string[]): Promise<number | null> {

@@ -6,8 +6,8 @@
 //   ui.tsx --data <file>                 draw the snapshot in <file> (`factory cockpit --json`); on a terminal q or Esc
 //                                        leaves, off one it draws once and exits
 //   ui.tsx --view <name> --data <file>   one of the cockpit's views (#367): needs, prs, tasks, ci, agents, settings,
-//                                        health, usage, the command bar (bar), or the search across them (search,
-//                                        #392: Enter runs the picked view in its place). <file> is what the hook gives it (the
+//                                        health, usage, the command bar (bar), the chat with a role (chat, #395), or
+//                                        the search across them (search, #392: Enter runs the picked view in its place). <file> is what the hook gives it (the
 //                                        data, or the command that reads it, and what an action runs). On a terminal it
 //                                        reads the keys; off one it draws one frame, sized by COLUMNS (and LINES for
 //                                        the lists; a document is printed whole, for a pager), and exits within a time
@@ -22,6 +22,7 @@ import { barLines, CommandBar, type Outcome, type Problem as BarProblem, type Re
 import { searchLines, SearchView } from "./search.tsx";
 import { sidebarMain } from "./sidebar-host.tsx";
 import { agentsLines } from "./views/agents.tsx";
+import { type ChatProblem, chatLines, type ChatTurn, ChatView, type Reply } from "./views/chat.tsx";
 import { ciLines, type Heavy } from "./views/ci.tsx";
 import { DocView } from "./views/doc.tsx";
 import { healthLines } from "./views/health.tsx";
@@ -96,6 +97,15 @@ interface Spec {
   find: string;
   /** The search's Enter runs this with the `factory cockpit` arguments of the row's view (`bash <factory> cockpit`). */
   open: string[];
+  /** The chat (#395): the role, the command a message is added to (`factory owner chat <role>`), the earlier turns. */
+  role: string;
+  send: string[];
+  history: ChatTurn[];
+}
+
+function turnsOf(v: unknown): ChatTurn[] {
+  return (Array.isArray(v) ? v : []).map(obj).filter((t) => typeof t.you === "string" && typeof t.answer === "string")
+    .map((t) => ({ you: String(t.you), answer: String(t.answer) }));
 }
 
 function specOf(v: unknown): Spec {
@@ -108,7 +118,29 @@ function specOf(v: unknown): Spec {
     heavy: typeof heavy.raw === "string" ? { raw: plain(heavy.raw), source: plain(heavy.source) } : null,
     prefill: typeof o.prefill === "string" ? o.prefill : "", resolve: strings(o.resolve),
     find: typeof o.find === "string" ? o.find : "", open: strings(o.open),
+    role: plain(o.role), send: strings(o.send), history: turnsOf(o.history),
   };
+}
+
+/** How long one chat message may take: the role's session has 15 minutes (factory_chat.ts), and a little more. */
+const CHAT_SECONDS = 16 * 60;
+
+/** The chat's send: the command with the message, its JSON answer or its refusal. */
+function sender(spec: Spec): (text: string) => Promise<Reply | ChatProblem> {
+  return async (text) => {
+    const got = await readOrRefusal([...spec.send, text], CHAT_SECONDS * 1000);
+    if ("refused" in got) {
+      const p = problemOf(got.refused);
+      return p.code === "cockpit_unreadable" ? { ...p, fix: `Run \`factory owner chat ${spec.role} "<message>"\` in a shell to see the whole error.` } : p;
+    }
+    const d = got.data;
+    return { answer: typeof d.answer === "string" ? d.answer : "", summary: plain(d.summary),
+      posted: typeof d.posted === "string" ? d.posted : null };
+  };
+}
+
+function chatRole(role: string): "dev-manager" | "product-owner" {
+  return role === "product-owner" ? "product-owner" : "dev-manager";
 }
 
 /** The views that are one document: each draws every line of its data at a width. */
@@ -120,7 +152,7 @@ const DOCS: Record<string, (s: Spec) => (data: Got | undefined, cols: number) =>
   health: (s) => (d, cols) => healthLines(d, s.repo, cols),
 };
 
-const VIEWS = ["prs", "needs", "tasks", "bar", "search", ...Object.keys(DOCS)];
+const VIEWS = ["prs", "needs", "tasks", "bar", "search", "chat", ...Object.keys(DOCS)];
 
 /** Only used when stdin and stdout are terminals. Ink would otherwise treat a set `CI` as "not interactive" and draw
  * nothing until it unmounts: a blank view that still takes keys. */
@@ -154,6 +186,9 @@ async function offTerminal(view: string, spec: Spec): Promise<number> {
     lines = barLines(spec.prefill, 0, cols, rows);
   } else if (view === "search") {
     lines = searchLines(spec.data ?? null, spec.prefill, 0, cols, rows);
+  } else if (view === "chat") {
+    lines = chatLines(spec.role, spec.history.map((t) => ({ you: t.you, reply: { answer: t.answer, summary: "", posted: null }, old: true })),
+      "", cols, rows);
   } else lines = needsLines(spec.snapshot, needAt(spec.snapshot, spec.find), cols, rows, spec.repo, Date.now());
   await once(<Lines lines={lines} color={spec.color} />);
   return 0;
@@ -217,10 +252,14 @@ async function onTerminal(view: string, spec: Spec): Promise<number> {
     draw = (cols, rows) => (
       <SearchView data={spec.data ?? null} prefill={spec.prefill} cols={cols} rows={rows} color={color}
         done={(args) => { picked.args = args; }} />);
+  } else if (view === "chat") {
+    draw = (cols, rows) => (
+      <ChatView role={chatRole(spec.role)} history={spec.history} cols={cols} rows={rows} color={color} send={sender(spec)} />);
   } else {
     draw = (cols, rows) => (
       <NeedsView repo={spec.repo} snapshot={spec.snapshot} cols={cols} rows={rows} color={color}
-        load={() => readJson(spec.read, limit)} find={spec.find} />);
+        load={() => readJson(spec.read, limit)} find={spec.find}
+        act={spec.act.length ? (words) => runAction([...spec.act, ...words]) : undefined} />);
   }
   await render(<Sized draw={draw} />, ON_A_TERMINAL).waitUntilExit();
   if (picked.args && spec.open.length) return openPicked(spec.open, picked.args);

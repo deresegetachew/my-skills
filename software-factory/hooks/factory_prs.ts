@@ -431,7 +431,23 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
 }
 
 export type QuestionOut = { kind: string; number: number; title: string; url: unknown; ageMinutes: number | null };
-export type AskOut = { id: string; issue: number; url: unknown; ageMinutes: number | null; forProduct: boolean; state: AskState };
+/** `text`: the ask without its marker; `options`: what the owner can pick (#395). */
+export type AskOut = { id: string; issue: number; url: unknown; ageMinutes: number | null; forProduct: boolean; state: AskState;
+  text: string; options: string[] };
+
+const ASK_TEXT_CHARS = 4000;
+const LIST_ITEM = /^\s*(?:[-*]|\d+[.)]|[a-z][.)])\s+(.+?)\s*$/;
+
+/** An owner ask's body without its hidden markers, at most ASK_TEXT_CHARS long. */
+export function askText(body: string): string {
+  return body.replace(/<!--[\s\S]*?-->/g, "").trim().slice(0, ASK_TEXT_CHARS);
+}
+
+/** What the owner can answer an ask with (#395): its list items (`- `, `* `, `1. `, `1) `, `a) `), else yes and no. */
+export function askOptions(text: string): string[] {
+  const items = text.split(/\r?\n/).map((l) => LIST_ITEM.exec(l)?.[1] ?? "").filter(Boolean);
+  return items.length ? items : ["yes", "no"];
+}
 
 /** Who an ask waits for, after "waiting <age>" in the plain list: nothing for a plain ask. */
 function askFor(a: AskOut): string {
@@ -471,7 +487,9 @@ function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, no
       for (const [slug, c, state] of ownerAskStates(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`), trusted)) {
         const product = forProduct(c);
         if (state === "product" && !product) continue; // a plain ask the owner answered
-        asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now), forProduct: product, state });
+        const text = askText(str(c.body));
+        asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now), forProduct: product, state,
+          text, options: askOptions(text) });
       }
     }
   }

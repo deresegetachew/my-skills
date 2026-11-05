@@ -5,14 +5,21 @@
 // What is listed (bugs 1 and 2 of #362): every session that runs on this machine, or is expected here (its names file)
 // and is down; and the other machines' sessions that are alive, marked by machine. A name that is only down somewhere
 // else, or only in a roles list, is not listed. The states are the heartbeat's: working, waiting, idle and down; a
-// session waiting on a question is waiting and needs you, and one whose machine stopped reporting is unknown.
+// session waiting on a question is waiting and needs you, and one whose machine stopped reporting is unknown. A loop that
+// runs outside tmux says nohup (#395). Below them, the other projects on this machine with their agents (shown only), and
+// after the views, TALK TO: Enter on the dev manager or the product owner opens a chat with that role.
 import { Box, Text, useInput } from "ink";
 import { type ReactElement, useState } from "react";
 
 export type State = "working" | "waiting" | "idle" | "down" | "unknown";
-export type Row = { name: string; state: State; task: string; machine: string; needsYou: boolean };
+/** `runs`: how it runs (#395), tmux, nohup or cloud; "" when not known. */
+export type Row = { name: string; state: State; task: string; machine: string; needsYou: boolean; runs: string };
 export type ViewItem = { key: string; title: string };
 export type Data = { snapshot: unknown; views: ViewItem[] };
+
+/** The roles the owner talks to (#395): Enter opens a chat with one. */
+export const TALK = [{ role: "dev-manager", title: "dev manager" }, { role: "product-owner", title: "product owner" }];
+type Talk = (typeof TALK)[number];
 
 /** What the keys do; sidebar-host.tsx runs each through `factory cockpit`, the tests record them. */
 export interface Actions {
@@ -21,6 +28,8 @@ export interface Actions {
   bar(words: string[]): void;
   /** The search across the views (#392). */
   search(): void;
+  /** A chat with the dev manager or the product owner (#395). */
+  chat(role: string): void;
   reload(): void;
   leave(): void;
 }
@@ -79,48 +88,78 @@ export function sessionRows(snapshot: unknown): Row[] {
     if (!listed(r)) continue; // not run, nor expected, here
     const task = taskNumber(r.task);
     rows.push({ name, state, task: task === null ? "" : `#${task}`, machine,
-      needsYou: raw === "input-required" || (task !== null && asks.includes(task)) });
+      needsYou: raw === "input-required" || (task !== null && asks.includes(task)), runs: plain(r.runs) });
   }
   return [...rows.filter((r) => !r.machine), ...rows.filter((r) => r.machine)];
 }
 
-type Entry = { kind: "session"; row: Row } | { kind: "view"; view: ViewItem };
+export type Project = { project: string; rows: Row[] };
+
+/** The other projects on this machine and their agents (#395), from their heartbeat files: shown, not selectable. A
+ * project whose daemon stopped writing shows its agents as unknown. */
+export function projectRows(snapshot: unknown): Project[] {
+  return list(obj(snapshot).projects).flatMap((p) => {
+    const project = plain(p.project);
+    if (!project) return [];
+    const rows = list(p.agents).filter((a) => plain(a.name)).map((a): Row => {
+      const task = taskNumber(a.task);
+      return { name: plain(a.name), state: p.fresh === true ? SHOWN[plain(a.state)] ?? "unknown" : "unknown",
+        task: task === null ? "" : `#${task}`, machine: "", needsYou: false, runs: plain(a.runs) };
+    });
+    return [{ project, rows }];
+  });
+}
+
+type Entry = { kind: "session"; row: Row } | { kind: "view"; view: ViewItem } | { kind: "talk"; talk: Talk };
 
 function entriesOf(data: Data): Entry[] {
   return [...sessionRows(data.snapshot).map((row): Entry => ({ kind: "session", row })),
-    ...data.views.map((view): Entry => ({ kind: "view", view }))];
+    ...data.views.map((view): Entry => ({ kind: "view", view })), ...TALK.map((talk): Entry => ({ kind: "talk", talk }))];
 }
 
 function entryId(e: Entry): string {
-  return e.kind === "session" ? `session ${e.row.name}` : `view ${e.view.key}`;
+  return e.kind === "session" ? `session ${e.row.name}` : e.kind === "view" ? `view ${e.view.key}` : `talk ${e.talk.role}`;
 }
 
 const COLOUR: Record<State, string> = { working: "blue", waiting: "yellow", idle: "gray", down: "red", unknown: "gray" };
 
 type Line = { text: string; state?: State; selected?: boolean; dim?: boolean };
 
-function sessionLine(r: Row, selected: boolean): Line {
-  const parts = [r.name, r.state, r.task, r.machine ? `on ${r.machine}` : "", r.needsYou ? "● needs you" : ""];
-  return { text: `${selected ? "›" : " "} ${parts.filter(Boolean).join("  ")}`, state: r.state, selected };
+function sessionLine(r: Row, selected: boolean, indent = ""): Line {
+  // tmux is the usual way and cloud says "on cloud": only a loop outside tmux is marked
+  const parts = [r.name, r.state, r.task, r.machine ? `on ${r.machine}` : "", r.runs === "nohup" ? "nohup" : "",
+    r.needsYou ? "● needs you" : ""];
+  return { text: `${selected ? "›" : " "} ${indent}${parts.filter(Boolean).join("  ")}`, state: r.state, selected };
+}
+
+/** The other projects' agents, below this project's sessions (#395). */
+function projectLines(snapshot: unknown): Line[] {
+  const projects = projectRows(snapshot);
+  if (!projects.length) return [];
+  return [{ text: "" }, { text: "OTHER PROJECTS", dim: true }, ...projects.flatMap((p): Line[] => [{ text: `  ${p.project}`, dim: true },
+    ...(p.rows.length ? p.rows.map((r) => sessionLine(r, false, "  ")) : [{ text: "    No agents.", dim: true }])])];
 }
 
 /** Every line of the list, and which one is selected. */
 function body(data: Data, entries: Entry[], selected: number): [Line[], number] {
   const lines: Line[] = [{ text: "SESSIONS", dim: true }];
   let at = 0;
-  const sessions = entries.filter((e) => e.kind === "session");
-  if (!sessions.length) lines.push({ text: "  No sessions running." }, { text: "  Start one: factory loop -i", dim: true });
+  const sessions = entries.filter((e) => e.kind === "session").length;
+  const views = entries.filter((e) => e.kind === "view").length;
+  if (!sessions) lines.push({ text: "  No sessions running." }, { text: "  Start one: factory loop -i", dim: true });
   const needs = list(obj(data.snapshot).needsYou).length;
   entries.forEach((e, i) => {
-    if (i === sessions.length) lines.push({ text: "" }, { text: "VIEWS", dim: true });
+    if (i === sessions) lines.push(...projectLines(data.snapshot), { text: "" }, { text: "VIEWS", dim: true });
+    if (i === sessions + views) lines.push({ text: "" }, { text: "TALK TO", dim: true });
     if (i === selected) at = lines.length;
+    const mark = i === selected ? "›" : " ";
     if (e.kind === "session") lines.push(sessionLine(e.row, i === selected));
+    else if (e.kind === "talk") lines.push({ text: `${mark} ${e.talk.title}`, selected: i === selected });
     else {
       const count = e.view.key === "1" && needs ? ` (${needs})` : "";
-      lines.push({ text: `${i === selected ? "›" : " "} ${e.view.key} ${e.view.title}${count}`, selected: i === selected });
+      lines.push({ text: `${mark} ${e.view.key} ${e.view.title}${count}`, selected: i === selected });
     }
   });
-  if (!entries.length || sessions.length === entries.length) lines.push({ text: "" }, { text: "VIEWS", dim: true });
   return [lines, at];
 }
 
@@ -154,6 +193,7 @@ export function Sidebar({ data, cols, rows, color, actions, keys = true }: Sideb
     else if (key.downArrow || input === "j") pick(Math.min(selected + 1, Math.max(entries.length - 1, 0)));
     else if (key.return && current?.kind === "session") actions.openSession(current.row.name);
     else if (key.return && current?.kind === "view") actions.openView(current.view.key);
+    else if (key.return && current?.kind === "talk") actions.chat(current.talk.role);
     else if (data.views.some((v) => v.key === input)) actions.openView(input);
     else if (input === ":") actions.bar([]);
     else if (input === "/") actions.search();
