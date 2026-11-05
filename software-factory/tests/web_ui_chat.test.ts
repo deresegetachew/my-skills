@@ -52,6 +52,7 @@ function chatProject(cfg?: Row): Chat {
     msg("q-menelik-1", { summary: "Should the login page use the old session cookie?" }),
     msg("a-fasil-1", { kind: "answer", from: "fasil", to: "menelik", state: "completed", inReplyTo: "q-menelik-1",
       created: "2026-11-05T10:05:00Z", summary: "No: use the new one." }),
+    msg("s-menelik-0", { kind: "status", state: "working", ref: "issue#30", thread: 30, created: "2026-11-05T09:00:00Z", summary: "Status: working" }),
   ]));
   const db = join(p.root, "db.json");
   write(db, JSON.stringify({
@@ -112,9 +113,10 @@ test("an agent's chat has what it said and what it was told, from its messages",
   expect(r.status).toBe(200);
   expect(r.json).toMatchObject({ project: "work", agent: "menelik", pending: false });
   const items = r.json.items as Row[];
-  expect(texts(items)).toEqual(["Should the login page use the old session cookie?", "No: use the new one."]);
-  expect(items[0]).toMatchObject({ from: "menelik", to: "dev-manager", kind: "question", ref: "pr#12", url: "https://github.com/o/r/pull/12#q-menelik-1" });
-  // the dev manager's channel has the question addressed to its role and the answer it gave
+  expect(texts(items)).toEqual(["Status: working", "Should the login page use the old session cookie?", "No: use the new one."]);
+  expect(items[1]).toMatchObject({ from: "menelik", to: "dev-manager", kind: "question", ref: "pr#12", url: "https://github.com/o/r/pull/12#q-menelik-1" });
+  // the dev manager's channel has the question addressed to its role and the answer it gave; an agent's status (addressed
+  // to the dev manager by default) stays in the agent's own channel
   const dm = await api(ui, "/api/projects/work/agents/fasil/chat");
   expect(texts(dm.json.items)).toEqual(["Should the login page use the old session cookie?", "No: use the new one."]);
   // nobody else's
