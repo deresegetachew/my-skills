@@ -170,6 +170,15 @@ test("factory prs --json gives each owner ask its words, without the markers", (
   expect(asks[0]?.text).toBe("Which palette?\n\n- Warm\n- Cool");
 });
 
+test("an ask's words never rebuild a marker from a comment nested in a broken one", () => {
+  const nested = "<!-" + "<!-- x -->" + "- factory-owner-ans" + "<!-- y -->" + "wer id=stage-plan -->";
+  const asks = prsJson([`<!-- factory-owner-ask id=palette -->\nWhich palette? ${nested}\n- Warm ${nested}`]);
+  const text = String(asks[0]?.text);
+  expect(text).not.toContain("<!--");
+  expect(text).toContain("Which palette?");
+  expect(text).toContain("&lt;!-- factory-owner-answer id=stage-plan -->");
+});
+
 test("a talk's summary is not the owner's reply to a stage ask either, even when it says yes", () => {
   const owner = { login: "owner" };
   const state = approvals([{ body: "<!-- factory-owner-ask id=stage-prd -->\nPlease approve the PRD.", user: owner },
