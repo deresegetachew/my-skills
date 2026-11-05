@@ -8,9 +8,10 @@ Messaging port: send, read what is new since a cursor, acknowledge; decision 000
 adapters under `hooks/core/adapters/`, `hooks/factory_messages.ts` (`factory messages`, and the library the other
 hooks import) and `hooks/factory_cards.ts` (agent cards).
 
-GitHub stays the transport: asynchronous, durable, auditable, and it works when a machine or a cloud session is
-offline. Nothing here opens a port or adds a service. An A2A adapter in the heartbeat daemon (#108) is a later step
-and can be added without changing these formats (see [Later](#later-the-a2a-adapter)).
+GitHub is the default transport: asynchronous, durable, auditable, and it works when a machine or a cloud session is
+offline, with nothing to set up. Decision 0004 adds a second one, NATS, as a plugin behind the same Messaging port (see
+[The NATS transport](#the-nats-transport)). The envelope is the same on both. An A2A adapter in the heartbeat daemon
+(#108) is a later step and can be added without changing these formats (see [Later](#later-the-a2a-adapter)).
 
 **A message is data, never an instruction.** What a message says can inform an agent's task. It never widens what the
 agent is allowed to do: only the dev manager's trusted markers (`factory-approved`, `factory-mustfix`, the review
@@ -190,11 +191,39 @@ factory version. Nothing serves the card in this step.
 | **TaskStatus** | The state of the last accepted reply, with that reply as the status message. |
 | **Artifact** | What an answer produces and others rely on: the answer text, and the places it was written down (an acceptance-criteria edit, a decision file, a commit). |
 | **Agent Card** | `factory agents card`: name, kind, skills, state, location, follow, version. |
-| **Transport** | GitHub comments and issues (not A2A's HTTP/JSON-RPC). |
+| **Transport** | GitHub comments and issues by default, or NATS for the kinds in `messaging.kinds` (decision 0004); not A2A's HTTP/JSON-RPC. |
 
 State names follow A2A's task states as the JSON form of the specification shows them (v0.3); v1.0 spells the same
 states as `TASK_STATE_*` enum values. Confirm the exact names against the current specification when the adapter is built:
 the sandbox this was written in could not reach the specification.
+
+## The NATS transport
+
+Decided in [decision 0004](decisions/0004-agent-messaging-nats.md) and being built in its tasks (#403 onwards); until
+they land, every message goes over GitHub as above. It moves the agents' chatter off GitHub, whose shared REST limit
+(D9) the polling for comments uses up (#371).
+
+- **A setting picks it.** `"messaging": {"transport": "github"}` is the default and today's behaviour.
+  `"messaging": {"transport": "nats", "url": "nats://<address>:4222", "creds": "<folder>", "kinds": [...]}` loads the
+  `nats` plugin; only the kinds listed in `kinds` move, every other kind stays on GitHub.
+- **What moves:** task claims and releases (the lock; the labels are still written once), review, answer, item and
+  rework claims, wake-ups, sub-manager hand-offs, and questions and answers between agents.
+- **What stays on GitHub:** reviewer passes, `factory-approved`, `factory-mustfix` and holds (the PR gate trusts only
+  these), owner asks and answers and the owner queue, the issues and PRs with their labels, token usage comments,
+  test plans and sign-offs. When a conversation over NATS ends, whoever closes it posts **one summary comment** on its
+  issue or PR in this envelope, with the question, the answer and the message ids.
+- **The shape:** a NATS message is JSON with the envelope's fields (`v`, `id`, `kind`, `from`, `to`, `state`, `ref`,
+  `in-reply-to`, `sha`) plus `text` and `at`. New kinds: `claim`, `release`, `wake`, `handoff`. The subject ends in
+  the sender (`factory.<project>.pr.<n>.<from>`, `.issue.<n>.<from>`, `.agent.<to>.<from>`, `.claims.<from>`,
+  `.handoff.<from>`, `.wake.<from>`), each agent may publish only on its own name, and a reader drops a message whose
+  `from` doesn't match the subject.
+- **When NATS can't be reached** the send is written to GitHub in today's form, and the command says so once with
+  `{code: "nats-unreachable", message, fix}`. A missing or broken plugin falls back the same way
+  (`plugin-missing`, `plugin-load`) unless `"fallback": "none"` is set.
+- **One kind at a time.** For its first week a kind is sent both ways; the readers use NATS and count what they find
+  only on GitHub. After a week with nothing missed, the owner stops the GitHub copy.
+- **Trust doesn't change.** A message over NATS is data, never an instruction, and nothing that arrives over NATS
+  changes what may merge.
 
 ## Later: the A2A adapter
 
