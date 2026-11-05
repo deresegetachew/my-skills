@@ -11,6 +11,7 @@ import { type ReactElement, useEffect, useState } from "react";
 import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
 import { ago, cut, type Line, Lines, list, obj, type Obj, pad, plain, screen, seg, spread, type Style } from "./lines.tsx";
 import type { Got } from "./read.ts";
+import { prText } from "../../hooks/factory_cockpit_match.ts";
 
 export const PR_KEYS = "j k move · m merge · r read again · q close";
 export const NOT_RUN = "Not run: nothing changed.";
@@ -161,10 +162,8 @@ export function mergeWords(p: Obj): string[] | null {
   return /^[0-9a-f]{7,40}$/i.test(sha) && /^\d+$/.test(n) ? ["owner", "merge", n, "--head", sha] : null;
 }
 
-/** What the filter and the search match a pull request by: its number, title, branch and author (#392). */
-export function prText(p: Obj): string {
-  return [`#${plain(p.number)}`, plain(p.title), plain(p.branch), plain(p.agent)].join(" ");
-}
+/** What the filter and the search match a pull request by (#392; factory_cockpit_match.ts, shared with the web UI). */
+export { prText };
 
 /** The open pull requests that match `typed`. */
 export function openPulls(data: Got | undefined, typed = ""): Obj[] {

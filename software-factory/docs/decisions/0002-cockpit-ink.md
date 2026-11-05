@@ -5,6 +5,8 @@ Amends decision 0001 (the cockpit on tmux) and PRD D1 and D13.
 **Widened by decision 0004** (5 Nov 2026): the bundling here is to become the general plugin rule, and the cockpit's Ink
 UI a plugin under it (0004 point 5, its build tasks 3 and 4). Until those land, rules 3 and 4 stand as written; the
 rest stands either way.
+**Its choice of UI is superseded by decision 0005** (5 Nov 2026): the factory's UI is a web page, `factory ui`. The
+cockpit stays until the web UI covers it (#425 retires it); the bundling rule stands, with react-dom added for the web app.
 
 ## Context
 

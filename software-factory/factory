@@ -117,7 +117,11 @@ Look
                          cache. A release carries it as one file run by Bun, with nothing to install; q leaves
   cockpit watch <item>   watch the item's sub-manager (pr-12, issue-7) in its own tmux window, read-only: it never
                          sends keys; one that ended points at its log
-  prs [--json] [--fresh] what a manager decides from, one list: each open PR with its head, CI judged by one rule,
+  ui [--port N] [--host] the web UI in a browser (decision 0005): each project (this one and ui.projects) with a
+                         channel per agent and per view; agents and machines live, start and stop after a confirm.
+                         localhost only (port ui.port, 4747); --host adds the Tailscale address. It prints the address
+                         with a token (kept in .git/factory/ui-token) that every API call needs; Ctrl-C stops it
+  prs [--json] [--fresh]what a manager decides from, one list: each open PR with its head, CI judged by one rule,
                          the newest marker per commit, any review claim and the next action; then unanswered questions
                          and owner asks, and agents gone quiet. Read-only, REST only. prs, watch and messages ls answer
                          from one cache while it is fresh (views.cacheSeconds, 45) and say how old it is; --fresh asks
@@ -377,6 +381,7 @@ case "$cmd" in
   resume)    fh "$hooks/factory_resume" "$@" ;;
   status)    fh "$hooks/factory_status" "$@" ;;
   cockpit)   FACTORY_SELF="$here" fh "$hooks/factory_cockpit" "$@" ;;
+  ui)        FACTORY_SELF="$here" fh "$hooks/factory_ui" "$@" ;;
   prs)       fh "$hooks/factory_prs" "$@" ;;
   owner)     fh "$hooks/factory_owner" "$@" ;;
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;

@@ -248,6 +248,14 @@ test("a pull request the owner merges needs you and is a pull row", () => {
   expect(j.counts.pulls).toBe((j.pulls as Row[]).length);
 }, T);
 
+test("a pull row carries what the web UI's pull requests channel shows: review, checks, protected, agent (#424)", () => {
+  const p = setup(scenario());
+  const j = snapshot(p);
+  const row = (j.pulls as Row[]).find((r) => r.number === 12);
+  expect(row, JSON.stringify(j.pulls)).toMatchObject({ review: "factory-approved", notGreen: [], protected: true, agent: null,
+    nextText: "owner merges (protected)", claim: null });
+}, T);
+
 test("no sessions at all", () => {
   const p = setup({ issues: [] }, { tasks: { source: "issues" }, reviewMarkers: "tmp/reviews", agents: [] });
   const j = snapshot(p);

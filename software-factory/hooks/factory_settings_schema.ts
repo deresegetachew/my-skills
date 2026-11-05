@@ -33,6 +33,7 @@ export const SECTIONS: [string, string, string][] = [
   ["machine", "Machine (local)", "factory_machine.ts, `factory autostart`, `factory resume` and `factory loop`"],
   // After the machine section, so its menu number (10) stays the same.
   ["messaging", "Messaging", "the composition root (core/compose.ts), which picks the messaging adapter (decision 0004)"],
+  ["ui", "Web UI", "`factory ui` (factory_ui.ts), the web board on this machine (decision 0005)"],
 ];
 export const SECTION_TITLE: Record<string, string> = Object.fromEntries(SECTIONS.map(([slug, title]) => [slug, title]));
 export const SECTION_READERS: Record<string, string> = Object.fromEntries(SECTIONS.map(([slug, , readers]) => [slug, readers]));
@@ -252,6 +253,9 @@ export const SETTINGS: Record<string, Setting> = table([
   S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff); every other kind stays on GitHub.", { default: [] }),
   S("messaging.pollMinutes", "int", "messaging", "With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up over NATS before it looks at GitHub anyway.", { default: 15 }),
   S("messaging.fallback", "enum", "messaging", "When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command.", { options: ["github", "none"], default: "github" }),
+  S("ui.projects", "list", "ui", "Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout.", { default: [] }),
+  S("ui.port", "int", "ui", "The port `factory ui` listens on (`--port` wins for one run).", { default: 4747 }),
+  S("ui.pollSeconds", "int", "ui", "How often `factory ui` reads the agents and machines again and pushes what changed to the open pages.", { default: 5 }),
   S("tasks.labels", "dict", "issues", "The GitHub labels that mark a task: ready, inProgress, inReview, blocked and the agentPrefix."),
   S("structure.roots", "list", "commands", "Folders the structure check (the hexagonal skill's check_structure script) looks at, when a style uses it.", { default: [] }),
   S("structure.legacy", "str", "commands", "The list of legacy files the structure check leaves alone (it only shrinks).", { default: "" }),
@@ -461,6 +465,13 @@ const MORE: Record<string, More> = {
     "owner's words, a wake-up that was missed. Used only while wake is in messaging.kinds; otherwise the loops wait as " +
     "they always did (waitMinutes, idleMinutes).",
   examples: ["factory settings set messaging.pollMinutes 30"] },
+  "ui.projects": { long: "Each path is a checkout of another project that runs the factory on this machine. The web UI " +
+    "lists it under its folder's name, with its own agents and views, read through that project's own commands. A path " +
+    "that is not there is shown with what to do.",
+  examples: ["factory settings set ui.projects '[\"/home/me/shop\"]'"] },
+  "ui.pollSeconds": { long: "Each read runs `factory agents ls --json` for every project shown, which asks GitHub at most " +
+    "once per FACTORY_AGENTS_CACHE_SECONDS (45). The server reads only while a page is open.",
+  examples: ["factory settings set ui.pollSeconds 10"] },
   "messaging.kinds": { long: "The kinds of message that have moved to NATS, one at a time. A kind not listed stays on " +
     "GitHub. Stopping a kind's GitHub copy after its first week is the owner's call.",
   examples: ["factory settings set messaging.kinds '[\"wake\"]'"] },

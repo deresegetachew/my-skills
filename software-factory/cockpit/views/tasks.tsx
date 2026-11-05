@@ -10,6 +10,7 @@ import { cut, type Line, Lines, list, type Obj, plain, screen, seg, spread, type
 import { clip, padStr, para } from "./doc.tsx";
 import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
 import type { Got } from "./read.ts";
+import { taskHolders, taskText } from "../../hooks/factory_cockpit_match.ts";
 
 export const TASKS_KEYS = "j k move · r read again · q close";
 
@@ -22,15 +23,10 @@ function stateText(s: string): string {
   return LANES.find(([k]) => k === s)?.[1] ?? s;
 }
 
-function who(t: Obj): string {
-  const h = Array.isArray(t.holders) ? t.holders.map(plain).filter(Boolean) : [];
-  return h.length ? h.join(", ") : "—";
-}
+const who = taskHolders;
 
-/** What the filter and the search match a task by: its number, title, lane, holders and milestone or phase. */
-export function taskText(t: Obj): string {
-  return [`#${plain(t.id)}`, plain(t.title), stateText(plain(t.state)), who(t), plain(t.group)].join(" ");
-}
+/** What the filter and the search match a task by (factory_cockpit_match.ts, shared with the web UI). */
+export { taskText };
 
 /** The tasks of the data, in lane order (in progress first, done last), those that match `typed` (#392). */
 export function tasksOf(data: Got | undefined, typed = ""): Obj[] {
