@@ -171,3 +171,18 @@ test("an ask with no list has the options yes and no", () => {
   const [ask] = asksFor(["<!-- factory-owner-ask id=plain -->\nthis needs your yes: renumber?"]);
   expect(ask?.options).toEqual(["yes", "no"]);
 });
+
+// --- what the review found (#395) ----------------------------------------------------------------------------------------
+
+test("a chat's summary on the owner queue answers no ask: the ask stays open", () => {
+  const asks = asksFor(["<!-- factory-owner-ask id=ship-it -->\nthis needs your yes: ship 1.4?",
+    "<!-- factory-owner-chat role=dev-manager -->\n\n**The owner, in the cockpit:** how is #12?\n\n**The dev manager:** waiting on CI"]);
+  expect(asks.map((a) => [a.id, a.state])).toEqual([["ship-it", "open"]]);
+});
+
+test("a list above the question is context, not the options", () => {
+  const [ask] = asksFor(["<!-- factory-owner-ask id=files -->\nThe PR touches:\n- factory\n- .claude/settings.json\nMerge it?\n- yes, merge\n- no, split it"]);
+  expect(ask?.options).toEqual(["yes, merge", "no, split it"]);
+  const [plain] = asksFor(["<!-- factory-owner-ask id=ctx -->\nThe PR touches:\n- factory\nMerge it?"]);
+  expect(plain?.options).toEqual(["yes", "no"]);
+});

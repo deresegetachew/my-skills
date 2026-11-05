@@ -21,7 +21,10 @@ function isProblem(r: Reply | ChatProblem): r is ChatProblem {
 
 function turnLines(t: Shown, title: string, cols: number): Line[] {
   const out: Line[] = [...wrap(`You: ${plain(t.you)}`, cols, "bold")];
-  if (t.reply === null) out.push([seg(`${title} is thinking…`, "dim")]);
+  if (t.reply === null) {
+    out.push([seg(`${title} is thinking…`, "dim")],
+      [seg("Esc closes the pane; the answer still comes, is posted and shows here next time.", "dim")]);
+  }
   else if (isProblem(t.reply)) out.push(...wrap(plain(t.reply.message), cols, "red"), ...wrap(plain(t.reply.fix), cols));
   else {
     out.push(...t.reply.answer.split(/\r?\n/).flatMap((l) => wrap(plain(l), cols)));

@@ -81,6 +81,7 @@ export function needsLines(snap: Got | undefined, selected: number, cols: number
 }
 
 export const NOT_RUN = "Not run: nothing changed.";
+const POSTING = "Posting the answer…";
 export const ASK_KEYS = "1-9 answers with that option · Esc back to the list";
 
 /** Where the view is (#395): the list, an ask shown whole, the question before its answer, or what the answer printed. */
@@ -149,11 +150,12 @@ export function NeedsView(props: NeedsProps): ReactElement {
     if (mode.kind === "confirm") {
       if (input === "y" && props.act) {
         const words = ["owner", "answer", plain(mode.ask.id), mode.option];
-        setMode({ kind: "shown", text: "Posting the answer…" });
+        setMode({ kind: "shown", text: POSTING });
         void props.act(words).then((text) => setMode({ kind: "shown", text: text || "Done." }));
       } else setMode({ kind: "shown", text: NOT_RUN });
       return;
     }
+    if (mode.kind === "shown" && mode.text === POSTING) return; // its output comes back here
     if (escape || input === "q") {
       const answered = mode.kind === "shown" && mode.text !== NOT_RUN;
       setMode({ kind: "list" });

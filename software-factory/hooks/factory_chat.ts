@@ -6,7 +6,9 @@
 // The conversation is kept per role in this machine's state folder (`chat-<role>.json`), and the last turns go into
 // the next prompt, so the role knows what was said. Each answer ends with a `Summary:` line; that summary goes to the
 // owner queue issue ("Dev manager: needs the owner") under `<!-- factory-owner-chat role=<role> -->`, so what was agreed
-// is on record next to the asks. With no open owner queue issue, nothing is posted.
+// is on record next to the asks. Such a comment answers no ask (factory_prs.ts skips it), and the summary and the message
+// are posted with any `<!--` and `-->` escaped, so the model's words can't carry a marker. With no open owner queue
+// issue, nothing is posted.
 //
 // Prints one JSON line: {answer, summary, posted} (posted: the comment's link, or null). Errors are one JSON line
 // {code, message, fix} on stderr.
@@ -101,12 +103,18 @@ function ownerQueue(): number | null {
   }
 }
 
+/** Text with no HTML comment in it: the summary is the model's words, posted with the owner's login, so it must not carry
+ * a factory marker (`<!-- factory-owner-answer id=... -->` would answer an ask as the owner). */
+export function unmarked(text: string): string {
+  return text.replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
+}
+
 /** Posts the summary on the owner queue; the comment's link, or null when there is no queue issue. */
 function post(role: string, message: string, summary: string): string | null {
   const n = ownerQueue();
   if (n === null) return null;
-  const said = message.length > 500 ? `${message.slice(0, 500)}…` : message;
-  const body = `<!-- factory-owner-chat role=${role} -->\n\n**The owner, in the cockpit:** ${said}\n\n**The ${TITLE[role]}:** ${summary}`;
+  const said = unmarked(message.length > 500 ? `${message.slice(0, 500)}…` : message);
+  const body = `<!-- factory-owner-chat role=${role} -->\n\n**The owner, in the cockpit:** ${said}\n\n**The ${TITLE[role]}:** ${unmarked(summary)}`;
   const p = gh(["-X", "POST", `repos/{owner}/{repo}/issues/${n}/comments`, "--input", "-"], JSON.stringify({ body }));
   if (p.code !== 0) {
     refuse("github_failed", `The answer came, but its summary could not be posted on #${n}: ${p.err.slice(0, 300)}`,

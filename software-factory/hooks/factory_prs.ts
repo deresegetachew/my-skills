@@ -251,8 +251,11 @@ export type AskState = "open" | "owner" | "product";
  * replied, the product owner closed it (`... done -->`), or the owner answered after a product owner reply. */
 type Reply = "answered" | "po" | "done" | "back";
 
+/** `factory owner chat`'s summary on the owner queue (#395): not an answer to any ask. */
+export const OWNER_CHAT = /^\s*<!--\s*factory-owner-chat\b/;
+
 /** Owner-queue asks still waiting for someone, with their state. The owner answers with `factory-owner-answer id=<slug>`
- * or a plain comment, which belongs to the newest ask or product owner reply before it. An ask the owner answered
+ * or a plain comment (not a chat's summary), which belongs to the newest ask or product owner reply before it. An ask the owner answered
  * before any product owner reply, or one the product owner closed, is left out. With `trusted` logins, an owner reply
  * from anyone else (marked or not) is not the owner's and is skipped (#337). */
 export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()): [string, Obj, AskState][] {
@@ -273,6 +276,7 @@ export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()
       under = [po[1] as string];
       continue;
     }
+    if (OWNER_CHAT.test(body)) continue; // a chat's summary (#395), posted with the owner's login, answers nothing
     if (trusted.size && !trusted.has(loginOf(c))) continue;
     const answered = markerIds(OWNER_ANSWER, body);
     for (const slug of answered.length ? answered : under) {
@@ -443,9 +447,14 @@ export function askText(body: string): string {
   return body.replace(/<!--[\s\S]*?-->/g, "").trim().slice(0, ASK_TEXT_CHARS);
 }
 
-/** What the owner can answer an ask with (#395): its list items (`- `, `* `, `1. `, `1) `, `a) `), else yes and no. */
+/** What the owner can answer an ask with (#395): the list items (`- `, `* `, `1. `, `1) `, `a) `) after its last question
+ * (a list above the question is context, such as the files it names), or every list item when it asks no question;
+ * else yes and no. */
 export function askOptions(text: string): string[] {
-  const items = text.split(/\r?\n/).map((l) => LIST_ITEM.exec(l)?.[1] ?? "").filter(Boolean);
+  const lines = text.split(/\r?\n/);
+  const item = (l: string) => LIST_ITEM.exec(l)?.[1] ?? "";
+  const asked = lines.findLastIndex((l) => !item(l) && l.includes("?"));
+  const items = lines.slice(asked + 1).map(item).filter(Boolean);
   return items.length ? items : ["yes", "no"];
 }
 

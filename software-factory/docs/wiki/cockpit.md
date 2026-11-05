@@ -53,8 +53,8 @@ when the list reads them.
 ## Answering an owner ask
 
 The dev manager writes what only you can decide as an ask on the owner queue issue ("Dev manager: needs the owner").
-In **Needs you** (`1`), Enter on an ask shows all of it, with its options numbered: the ask's list items, or `yes` and
-`no` when it has none. Press the number of your answer. The cockpit asks
+In **Needs you** (`1`), Enter on an ask shows all of it, with its options numbered: the list after its question (a list
+above the question is context), or `yes` and `no` when there is none. Press the number of your answer. The cockpit asks
 ``Run `factory owner answer <id> <option>`? It changes the owner queue. [y/N]``; `y` posts it and shows what the
 command printed, and any other key posts nothing. Esc goes back to the list, which no longer has the ask.
 

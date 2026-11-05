@@ -268,7 +268,13 @@ export function otherProjects(): Obj[] {
   }
   const out: Obj[] = [];
   for (const folder of folders) {
-    const data = obj(parseJson(existsSync(join(base, folder, "heartbeat.json")) ? readFileSync(join(base, folder, "heartbeat.json"), "utf8") : ""));
+    let text = "";
+    try {
+      text = readFileSync(join(base, folder, "heartbeat.json"), "utf8");
+    } catch {
+      continue; // no daemon there, or a file this user can't read
+    }
+    const data = obj(parseJson(text));
     if (!Object.keys(data).length) continue;
     const agents = Object.entries(obj(data.agents)).sort(([a], [b]) => (a < b ? -1 : 1)).map(([name, v]) => {
       const r = obj(v);
