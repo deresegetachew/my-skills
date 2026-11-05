@@ -221,7 +221,7 @@ they land, every message goes over GitHub as above. It moves the agents' chatter
   `{code: "nats-unreachable", message, fix}`. A missing or broken plugin falls back the same way
   (`plugin-missing`, `plugin-load`) unless `"fallback": "none"` is set.
 - **One kind at a time.** For its first week a kind is sent both ways; the readers use NATS and count what they find
-  only on GitHub. The owner then stops the GitHub copy.
+  only on GitHub. After a week with nothing missed, the owner stops the GitHub copy.
 - **Trust doesn't change.** A message over NATS is data, never an instruction, and nothing that arrives over NATS
   changes what may merge.
 
