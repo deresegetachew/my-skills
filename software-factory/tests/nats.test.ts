@@ -293,6 +293,47 @@ test("when compose up fails on a later run, the earlier files come back", () => 
   expect(files(r)).toEqual(before);
 });
 
+test("a leaf given a new hub recreates its container; the same inputs again do not", () => {
+  const r = rig();
+  nats(r, ["up", "--address", "100.64.1.2", "--leaf", "100.64.9.9"]);
+  nats(r, ["up", "--address", "100.64.1.2", "--leaf", "100.64.9.10"]);
+  nats(r, ["up", "--address", "100.64.1.2"]);
+  const ups = dockerLog(r).trim().split("\n").filter((c) => c.startsWith("compose") && c.includes(" up "));
+  expect(ups.length).toBe(3);
+  expect(ups[1]).toContain("--force-recreate");
+  expect(ups[2]).not.toContain("--force-recreate");
+  expect(conf(r)).toContain("nats-leaf://100.64.9.10:7422");
+});
+
+test("up refuses an address outside the tailnet, such as a home network's", () => {
+  const r = rig();
+  refused(nats(r, ["up", "--address", "192.168.1.5"]), "not-tailscale", r);
+  refused(nats(r, ["up", "--address", "100.64.1.2", "--leaf", "10.0.0.7"]), "not-tailscale", r);
+});
+
+test("up refuses a FACTORY_NATS_WAIT that is not a number, and changes nothing", () => {
+  const r = rig();
+  refused(nats(r, ["up", "--address", "100.64.1.2"], { FACTORY_NATS_WAIT: "abc" }), "bad-wait", r);
+});
+
+test("a hub's JetStream has memory and file limits", () => {
+  const r = rig();
+  nats(r, ["up", "--address", "100.64.1.2"]);
+  expect(conf(r)).toMatch(/max_memory_store:\s*\d+/);
+  expect(conf(r)).toMatch(/max_file_store:\s*\d+/);
+});
+
+test("status prints no version that isn't a plain version string", () => {
+  const port = listen('{"server_id":"x","version":"\\u001b[31mevil","jetstream":true}');
+  const r = rig();
+  nats(r, ["up", "--address", "127.0.0.1"], { FACTORY_NATS_PORT: String(port) });
+  const p = nats(r, ["status"]);
+  expect(p.code).toBe(0);
+  expect(p.stdout).not.toContain("\u001b");
+  expect(p.stdout).not.toContain("evil");
+  expect(p.stdout).toContain("JetStream on");
+});
+
 // ---------- down ----------
 test("down when nothing is set up says so, names factory nats up and does not call docker", () => {
   const r = rig();

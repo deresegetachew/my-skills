@@ -67,7 +67,8 @@ function readSaved(): Saved | null {
   }
 }
 
-/** A specific IPv4 address to listen on; 0.0.0.0 and names are refused. */
+/** A Tailscale address (100.64.0.0/10) or a loopback one (127.0.0.0/8, one machine only) to listen on; 0.0.0.0,
+ * names and other networks (a home or café LAN) are refused: the server has no credentials yet (decision 0004 task 6). */
 function checkedAddress(text: string, what: string): string {
   const a = text.trim();
   if (a === "0.0.0.0") {
@@ -75,7 +76,19 @@ function checkedAddress(text: string, what: string): string {
       "Give this machine's Tailscale address (`tailscale ip -4`), for example --address 100.64.1.2.");
   }
   if (isIP(a) !== 4) refuse("bad-address", `${what} ${JSON.stringify(a)} isn't an IPv4 address.`, "Give an address such as 100.64.1.2, not a name.");
+  const [b0, b1] = a.split(".").map(Number) as [number, number];
+  if (!(b0 === 127 || (b0 === 100 && b1 >= 64 && b1 <= 127))) {
+    refuse("not-tailscale", `${what} ${a} isn't a Tailscale address, so NATS would be open on that network.`,
+      "Give this machine's Tailscale address (`tailscale ip -4`, in 100.64.0.0/10), or 127.0.0.1 for one machine only.");
+  }
   return a;
+}
+
+function waitSeconds(): number {
+  const raw = (process.env.FACTORY_NATS_WAIT ?? "").trim();
+  if (!raw) return 10;
+  if (!/^\d+(\.\d+)?$/.test(raw)) refuse("bad-wait", `FACTORY_NATS_WAIT=${raw} isn't a number of seconds.`, "Set it to a number such as 10, or unset it.");
+  return Number(raw);
 }
 
 function tailscaleAddress(): string {
@@ -107,7 +120,8 @@ export function renderConf(s: Saved, name: string): string {
   const out = ["# Written by `factory nats up`. Run it again to change this, not this file.",
     `server_name: "${name}"`, `port: ${CLIENT_PORT}`];
   if (s.role === "hub") {
-    out.push("jetstream {", '  store_dir: "/data"', "}", "leafnodes {", `  port: ${LEAF_PORT}`, "}");
+    // Limits, so a full stream can't fill the always-on machine's disk.
+    out.push("jetstream {", '  store_dir: "/data"', "  max_memory_store: 256MB", "  max_file_store: 10GB", "}", "leafnodes {", `  port: ${LEAF_PORT}`, "}");
   } else {
     out.push("leafnodes {", "  remotes: [", `    { url: "nats-leaf://${s.hub}" }`, "  ]", "}");
   }
@@ -159,12 +173,17 @@ export function probe(host: string, port: number, timeoutSeconds = 2): Promise<A
     sock.on("data", (d: Buffer) => {
       buf += d.toString("utf8");
       const nl = buf.indexOf("\n");
-      if (nl < 0) return;
+      if (nl < 0) {
+        if (buf.length > 64 * 1024) finish(no("it isn't a NATS server"));
+        return;
+      }
       const line = buf.slice(0, nl).trim();
       if (!line.startsWith("INFO ")) return finish(no("it isn't a NATS server"));
       try {
         const info = JSON.parse(line.slice(5)) as { version?: unknown; jetstream?: unknown };
-        finish({ ok: true, version: typeof info.version === "string" ? info.version : "", jetstream: info.jetstream === true, why: "" });
+        // Printed to a terminal: only a plain version, never what else a server might send.
+        const version = typeof info.version === "string" && /^[0-9A-Za-z.+-]{1,40}$/.test(info.version) ? info.version : "";
+        finish({ ok: true, version, jetstream: info.jetstream === true, why: "" });
       } catch {
         finish(no("it isn't a NATS server"));
       }
@@ -229,8 +248,8 @@ function usage(why: string): never {
   return die(2);
 }
 
-/** Write the files; on failure of what follows, `undo` puts back what was there. */
-function writeFiles(texts: Record<string, string>): () => void {
+/** Write the files. `undo` puts back what was there; `confChanged` says the server's config is new or differs. */
+function writeFiles(texts: Record<string, string>): { undo: () => void; confChanged: boolean } {
   const dir = natsDir();
   const existed = existsSync(dir);
   const before: Record<string, string | null> = {};
@@ -241,7 +260,7 @@ function writeFiles(texts: Record<string, string>): () => void {
     writeAtomic(join(dir, f), texts[f] as string, 0o644);
     chmodSync(join(dir, f), 0o644); // writeFileSync's mode is cut by the umask
   }
-  return () => {
+  const undo = (): void => {
     for (const f of FILES) {
       const old = before[f];
       if (old === null || old === undefined) rmSync(join(dir, f), { force: true });
@@ -255,6 +274,7 @@ function writeFiles(texts: Record<string, string>): () => void {
       }
     }
   };
+  return { undo, confChanged: before["nats.conf"] !== texts["nats.conf"] };
 }
 
 async function up(argv: string[]): Promise<number> {
@@ -266,10 +286,14 @@ async function up(argv: string[]): Promise<number> {
   if (role === "leaf" && !hub) refuse("no-hub", "This machine is a leaf, but the hub's address isn't saved.", "Run factory nats up --leaf <hub's Tailscale address>.");
   const s: Saved = { role, address, ...(role === "leaf" ? { hub } : {}), port: portFrom("FACTORY_NATS_PORT", CLIENT_PORT),
     leafPort: portFrom("FACTORY_NATS_LEAF_PORT", LEAF_PORT) };
+  const wait = waitSeconds();
   dockerReady();
   const name = `${token(repoKey())}-${role}-${token(hostname())}`;
-  const undo = writeFiles({ "compose.yaml": renderCompose(s), "nats.conf": renderConf(s, name), "nats.json": pyDumps(s, { indent: 2 }) + "\n" });
-  const p = compose(["up", "-d"]);
+  const { undo, confChanged } = writeFiles({ "compose.yaml": renderCompose(s), "nats.conf": renderConf(s, name),
+    "nats.json": pyDumps(s, { indent: 2 }) + "\n" });
+  // compose recreates the container only when the service changes, not a mounted file: a new nats.conf (a leaf's new
+  // hub) needs --force-recreate, or the running server keeps the old one.
+  const p = compose(["up", "-d", ...(confChanged ? ["--force-recreate"] : [])]);
   if (p.code !== 0) {
     undo();
     refuse("compose-failed", `docker compose couldn't start the NATS server: ${(p.stderr || p.stdout).trim().slice(-400)}`,
@@ -278,7 +302,7 @@ async function up(argv: string[]): Promise<number> {
   const url = `nats://${s.address}:${s.port}`;
   console.log(`Started the NATS ${role} ${projectName()} on ${url}` + (role === "leaf" ? `, connected to the hub at ${s.hub}` : "") +
     " (restarts with Docker).");
-  const answer = await waitFor(s.address, s.port, Number(process.env.FACTORY_NATS_WAIT ?? "10"));
+  const answer = await waitFor(s.address, s.port, wait);
   if (answer.ok) console.log(`The server answers at ${url} (${describe(answer)}).`);
   else console.log(`note: the server doesn't answer at ${url} yet (${answer.why}). \`factory nats status\` checks it again.`);
   console.log(guardLine(s));
