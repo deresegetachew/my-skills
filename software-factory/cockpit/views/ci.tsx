@@ -304,7 +304,8 @@ function lightLane(x: CiExtra): DocAction {
   if (typeof x.light !== "boolean") return note("The light lane setting (ci.light) can't be read: `factory settings get ci.light` shows why.");
   const turn = x.light ? "off" : "on";
   return ask([["factory", "settings", "set", "--stage", "ci.light", String(!x.light)], ["factory", "settings", "pr"]],
-    `turns the light lane ${turn}: .claude/factory.json is protected, so it changes it through a pull request, never on main`);
+    `turns the light lane ${turn}: .claude/factory.json is protected, so it changes it through a pull request, never on ` +
+    "main; that pull request carries any other setting changes you staged too (factory settings diff --staged lists them)");
 }
 
 function runLog(r: Obj | undefined): DocAction {
