@@ -404,7 +404,7 @@ export async function poQuestions(cfg: Config): Promise<string[]> {
 export async function productAsks(cfg: Config): Promise<string[]> {
   const { ghAll } = await import("./factory_issues.ts");
   const { ownerQueue } = await import("./factory_orchestrator.ts");
-  const { ownerAskStates, forProduct, trustedOf } = await import("./factory_prs.ts");
+  const { ownerAskStates, ownerNotes, forProduct, trustedOf } = await import("./factory_prs.ts");
   const queue = ownerQueue(cfg, false);
   if (!queue) return [];
   const out: string[] = [];
@@ -415,6 +415,10 @@ export async function productAsks(cfg: Config): Promise<string[]> {
     const text = splitLines(body.replace(/<!--[\s\S]*?-->/g, "").trim());
     const answered = state === "product" ? ", the owner answered" : "";
     out.push(`owner queue #${queue}, ask ${slug} for product${answered}: ${(text[0] ?? "").slice(0, 100)}`);
+  }
+  for (const c of ownerNotes(comments, trustedOf(cfg))) {
+    const text = splitLines(String(c.body ?? "").trim());
+    out.push(`owner queue #${queue}, note (an instruction, marked or not): ${(text[0] ?? "").slice(0, 100)}`);
   }
   return out;
 }
