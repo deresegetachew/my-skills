@@ -189,8 +189,9 @@ function AgentChannel({ agent, channel, live, project }: { agent: Agent | undefi
             <h3>Recent output</h3>
             {agent.log.length ? <pre className="log">{agent.log.join("\n")}</pre> : (
               <p className="empty" style={{ margin: 0 }}>
-                {agent.here ? "Nothing printed yet." : `Its output stays on ${agent.machineName ?? "its machine"}: `}
-                {!agent.here && <code>factory follow {agent.name}</code>}
+                {agent.state === "down" ? "It isn't running." : agent.here ? "Nothing printed yet."
+                  : `Its output stays on ${agent.machineName ?? "its machine"}: `}
+                {agent.state !== "down" && !agent.here && <code>factory follow {agent.name}</code>}
               </p>
             )}
           </section>
