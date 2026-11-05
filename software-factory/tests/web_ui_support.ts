@@ -110,7 +110,7 @@ export async function startUi(p: Project, args: string[] = ["--port", "0"], cmd:
   for (const [k, v] of Object.entries(full)) if (v !== undefined) clean[k] = v;
   const proc = Bun.spawn([...(cmd ?? [...BUN, join(HOOKS, "factory_ui.ts")]), ...args], { cwd: p.d, env: clean, stdin: "ignore",
     stdout: "pipe", stderr: "pipe" });
-  const out = await readUntil(proc.stdout as ReadableStream<Uint8Array>, (t) => /token: \S+/.test(t), 20_000);
+  const out = await readUntil(proc.stdout as ReadableStream<Uint8Array>, (t) => t.includes("Ctrl-C stops it."), 20_000);
   const url = /(http:\/\/127\.0\.0\.1:\d+)\//.exec(out)?.[1] ?? "";
   const token = /token: (\S+)/.exec(out)?.[1] ?? "";
   const stop = async (): Promise<void> => {

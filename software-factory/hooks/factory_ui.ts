@@ -146,11 +146,10 @@ async function main(argv: string[]): Promise<number> {
       "Pick another port with --port, or run it without --host.");
   }
   const others = list.length - 1;
-  console.log(`factory ui: serving ${list[0]?.name}${others ? ` and ${others} other project${others > 1 ? "s" : ""}` : ""}`);
-  console.log(`  open: ${link("127.0.0.1", server.port, t)}`);
-  if (tail) console.log(`  tailscale: ${link(tail, server.port, t)}`);
-  console.log(`  token: ${t} (kept in .git/factory/ui-token)`);
-  console.log("Ctrl-C stops it.");
+  // one write, so a reader that waits for the token line has the whole message
+  process.stdout.write([`factory ui: serving ${list[0]?.name}${others ? ` and ${others} other project${others > 1 ? "s" : ""}` : ""}`,
+    `  open: ${link("127.0.0.1", server.port, t)}`, ...(tail ? [`  tailscale: ${link(tail, server.port, t)}`] : []),
+    `  token: ${t} (kept in .git/factory/ui-token)`, "Ctrl-C stops it.", ""].join("\n"));
   await new Promise<void>((done) => {
     const stop = (): void => {
       server.stop();
