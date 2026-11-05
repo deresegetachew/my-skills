@@ -8,7 +8,8 @@
 // each: `factory agents ls --json` (sessions on every machine, the role from the heartbeat row, #299), `factory prs
 // --json` (pull requests, owner asks), `factory ci status --json` (#304), `factory doctor` and the task tracker (what
 // the Tasks & PRD view reads, for the search, #392). Keys: generatedAt, version, sessions, needsYou, pulls, ci, doctor,
-// tasks, counts, missing. A part that can't be read is null (or what it had)
+// tasks, counts, missing, and projects: the other projects on this machine with their agents, from their heartbeat
+// files (#395). An owner ask in needsYou carries its text. A part that can't be read is null (or what it had)
 // and `missing` says why, each as {code, message, fix}; the command still exits 0.
 //
 // The cache is `cockpit.json` in this machine's state folder (factory_machine.ts). `--status` reads it; when it is
@@ -22,10 +23,11 @@
 //   factory cockpit --ink          the cockpit's Ink UI (decision 0002, #365) on the cached snapshot: the release's
 //                                  bundle (factory_cockpit_ink.js beside this file), else cockpit/ui.tsx in my-skills
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { toFloat } from "./factory_config.ts";
+import { isFresh, type LocalState } from "./factory_heartbeat.ts";
 import { isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
 import { stateDir } from "./factory_machine.ts";
 import { findSub, subWindow } from "./factory_orchestrator.ts";
@@ -204,7 +206,8 @@ function pullRequests(s: Step, missing: Problem[]): Prs {
  * product owner's, #352), and pull requests only a person merges. */
 function needsYou(prs: Prs): Obj[] {
   const out: Obj[] = prs.asks.filter((a) => !(a.forProduct === true && a.state !== "owner"))
-    .map((a) => ({ kind: "owner-ask", id: a.id, issue: a.issue, url: a.url ?? null, ageMinutes: a.ageMinutes ?? null, state: a.state ?? "open" }));
+    .map((a) => ({ kind: "owner-ask", id: a.id, issue: a.issue, url: a.url ?? null, ageMinutes: a.ageMinutes ?? null, state: a.state ?? "open",
+      text: str(a.text) }));
   for (const p of prs.pulls ?? []) {
     if (p.next === "owner-merges") out.push({ kind: "owner-merges", number: p.number, title: p.title, url: p.url });
   }
@@ -252,6 +255,30 @@ function tasks(s: Step): Obj | null {
   return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Obj) : null;
 }
 
+/** The other projects that run the factory on this machine (#395), from each one's heartbeat file in its state folder
+ *  (`<project>-factory/heartbeat.json`, next to this project's): its name, whether its heartbeat still reports, and its
+ *  agents as that heartbeat saw them. Read from disk only, so it costs nothing. */
+export function otherProjects(): Obj[] {
+  const mine = stateDir();
+  const base = dirname(mine);
+  let folders: string[];
+  try {
+    folders = readdirSync(base).filter((f) => f.endsWith("-factory") && join(base, f) !== mine).sort();
+  } catch {
+    return [];
+  }
+  const out: Obj[] = [];
+  for (const folder of folders) {
+    const data = obj(parseJson(existsSync(join(base, folder, "heartbeat.json")) ? readFileSync(join(base, folder, "heartbeat.json"), "utf8") : ""));
+    if (!Object.keys(data).length) continue;
+    const agents = Object.values(obj(data.agents)).map(obj).map((r) => ({ name: str(r.name), kind: str(r.kind || "coding-agent").replace(/-/g, " "),
+      state: str(r.state) || "unknown", detail: str(r.detail), task: r.task ?? null, runs: str(r.runs), session: r.session ?? null,
+      log: r.log ?? null })).filter((r) => r.name).sort((a, b) => a.name.localeCompare(b.name));
+    out.push({ name: folder.slice(0, -"-factory".length), fresh: isFresh(data as LocalState), updated: data.updated ?? null, agents });
+  }
+  return out;
+}
+
 export async function snapshot(): Promise<Obj> {
   const [ls, prs, ciStep, doc, taskStep] = await Promise.all([
     step(hook("factory_agents", "ls", "--json")),
@@ -269,7 +296,7 @@ export async function snapshot(): Promise<Obj> {
   const ver = version(missing);
   const limit = limited(missing);
   return {
-    generatedAt: isoUtc(Date.now() / 1000), version: ver, sessions: rows ?? [], needsYou: needs, pulls: p.pulls, ci: ciData,
+    generatedAt: isoUtc(Date.now() / 1000), version: ver, sessions: rows ?? [], projects: otherProjects(), needsYou: needs, pulls: p.pulls, ci: ciData,
     doctor: checks, tasks: tasks(taskStep), counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
       pulls: (p.pulls ?? []).length, needYou: needs.length },
     missing: limit?.missing ?? missing,
@@ -450,7 +477,8 @@ async function ink(): Promise<number> {
 const USAGE_ERROR: Problem = {
   code: "cockpit_usage",
   message: "factory cockpit takes no argument, or --json, --status, --needs, --prs [<n>], --tasks, --ci, --agents, " +
-    "--settings [--color], --health, --usage (each view also with --find <text>), --search [<words>], --ink or watch <item>.",
+    "--settings [--color], --health, --usage (each view also with --find <text>), --search [<words>], " +
+    "--chat <dev-manager|product-owner>, --ink or watch <item>.",
   fix: "Run `factory cockpit` to open it, `factory cockpit --json` for the snapshot, `factory cockpit --status` for the " +
     "one line, `factory cockpit --prs` for the pull requests, `factory cockpit --settings` for the Settings view, " +
     "`factory cockpit --ink` for the cockpit on Ink, or " +
@@ -518,6 +546,8 @@ export async function main(argv: string[]): Promise<number> {
   if (flag === "--prs") return (await import("./factory_cockpit_ui.ts")).prsView(rest); // the Pull requests view (#338)
   if (flag === "--search") return (await import("./factory_cockpit_ui.ts")).searchView(rest); // the search (#392)
   if (flag === "--search-data") return (await import("./factory_cockpit_ui.ts")).searchDataCommand(rest);
+  if (flag === "--chat") return (await import("./factory_cockpit_ui.ts")).chatView(rest); // talk to a role (#395)
+  if (flag === "--chat-send") return (await import("./factory_cockpit_ui.ts")).chatSend(rest); // one turn of it
   const found = flag !== undefined && FIND_FLAGS.includes(flag) ? takeFind(rest) : { find: "", rest };
   if (found === null) {
     process.stderr.write(JSON.stringify(USAGE_ERROR) + "\n");

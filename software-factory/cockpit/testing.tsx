@@ -1,11 +1,12 @@
 // The cockpit's screens drawn with ink-testing-library, for the tests (tests/cockpit_ink.test.ts, cockpit_views.test.ts,
-// cockpit_sidebar.test.ts): only this folder may import Ink or React (decision 0002), so the tests come through here.
+// cockpit_sidebar.test.ts, cockpit_chat.test.ts): only this folder may import Ink or React (decision 0002), so the tests come through here.
 // Not part of the bundle.
 import chalk from "chalk";
 import { render } from "ink-testing-library";
 import type { ReactElement } from "react";
 import { App } from "./app.tsx";
 import { type BarProps, CommandBar, type Outcome, type Problem, type Resolved } from "./command-bar.tsx";
+import { type ChatProps, type ChatReply, ChatView, type Turn } from "./views/chat.tsx";
 import { type SearchProps, SearchView } from "./search.tsx";
 import { type Actions, type Data, Sidebar } from "./sidebar.tsx";
 import { agentsLines } from "./views/agents.tsx";
@@ -58,7 +59,12 @@ function draw(el: ReactElement, cols: number, color: boolean): Drawn {
   };
 }
 
-export type { BarProps, NeedsProps, Outcome, Problem, PrsProps, Resolved, SearchProps, TasksProps };
+export type { BarProps, ChatProps, ChatReply, NeedsProps, Outcome, Problem, PrsProps, Resolved, SearchProps, TasksProps, Turn };
+
+/** The talk with a role (#395). */
+export function drawChat(p: ChatProps): Drawn {
+  return draw(<ChatView {...p} />, p.cols, p.color);
+}
 
 export function drawPrs(p: PrsProps): Drawn {
   return draw(<PrsView {...p} />, p.cols, p.color);

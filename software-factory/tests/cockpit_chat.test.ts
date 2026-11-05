@@ -2,11 +2,11 @@
 // drawn with ink-testing-library through cockpit/testing.tsx), and `factory cockpit --chat-send`, which answers one
 // turn in a fresh role session (a fake `claude`) and posts a summary on the owner queue (a fake `gh`).
 import { expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ChatProps, type ChatReply, drawChat, type Turn } from "../cockpit/testing.tsx";
 import { project } from "./roles_support.ts";
-import { type Proc, sh, writeExe } from "./support.ts";
+import { type Proc, SF, sh, writeExe } from "./support.ts";
 
 type Env = Record<string, string | undefined>;
 
@@ -158,6 +158,7 @@ interface Rig { d: string; work: string; env: Env }
 
 function rig(queue = true): Rig {
   const [d, work, base] = project();
+  cpSync(join(SF, "ci"), join(work, ".claude", "ci"), { recursive: true }); // a project has it beside its hooks
   writeExe(join(d, "bin", "gh"), FAKE_GH);
   writeExe(join(d, "bin", "claude"), FAKE_CLAUDE);
   writeFileSync(join(d, "db.json"), JSON.stringify({ issues: queue ? [{ number: 9, title: "Dev manager: needs the owner", state: "open" }] : [] }));
