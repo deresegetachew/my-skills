@@ -233,6 +233,8 @@ The long parts of this guide are wiki pages in [`docs/wiki/`](docs/wiki). Each p
 - [The factory command](docs/wiki/commands.md): every `factory` subcommand and what it prints.
 - [Agent loops](docs/wiki/agent-loops.md): loops, tasks, live agents, messages, `factory follow` and `factory autostart`.
 - [Roles](docs/wiki/roles.md): the coding agent, the dev manager and the product owner.
+- [The cockpit](docs/wiki/cockpit.md): every agent in one window, answering owner asks, and talking to the dev manager
+  and the product owner.
 
 **Review and merge**
 

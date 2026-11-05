@@ -34,6 +34,22 @@ const ANSWER = /<!--\s*factory-answer\b/;
 export const OWNER_ASK = /<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\s*-->/; // for=product may follow
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
+/** The summary of a talk with a role in the cockpit (#395): context for the next pass, never the owner's answer. */
+export const CHAT_SUMMARY = /<!--\s*factory-cockpit-chat\b/;
+const ASK_TEXT_MAX = 4000;
+
+/** `<!--` made harmless (`&lt;!--`, which GitHub still shows as `<!--`): text posted with the owner's login carries
+ *  no marker but its own (#395). */
+export function breakMarkers(text: string): string {
+  return text.replace(/<!--/g, "&lt;!--");
+}
+
+/** An ask's own words: its comment without the factory's markers, cut to a size a screen can show. A comment nested in
+ *  a broken one (`<!-<!-- x -->- factory-owner-answer ... -->`) comes back whole when the inner one is stripped, so
+ *  whatever `<!--` is left is broken too. */
+export function askText(body: string): string {
+  return breakMarkers(body.replace(/<!--[\s\S]*?-->/g, "")).trim().slice(0, ASK_TEXT_MAX);
+}
 
 /** Every id a marker carries in one comment, in order: a comment may answer or ask more than one (#357). */
 function markerIds(marker: RegExp, body: string): string[] {
@@ -273,6 +289,7 @@ export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()
       under = [po[1] as string];
       continue;
     }
+    if (CHAT_SUMMARY.test(body)) continue; // a cockpit talk's summary answers nothing (#395)
     if (trusted.size && !trusted.has(loginOf(c))) continue;
     const answered = markerIds(OWNER_ANSWER, body);
     for (const slug of answered.length ? answered : under) {
@@ -431,7 +448,8 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
 }
 
 export type QuestionOut = { kind: string; number: number; title: string; url: unknown; ageMinutes: number | null };
-export type AskOut = { id: string; issue: number; url: unknown; ageMinutes: number | null; forProduct: boolean; state: AskState };
+export type AskOut = { id: string; issue: number; url: unknown; ageMinutes: number | null; forProduct: boolean; state: AskState;
+  text: string };
 
 /** Who an ask waits for, after "waiting <age>" in the plain list: nothing for a plain ask. */
 function askFor(a: AskOut): string {
@@ -471,7 +489,8 @@ function questionsAndAsks(openPrs: PullRow[], commentsBy: Map<number, Obj[]>, no
       for (const [slug, c, state] of ownerAskStates(fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`), trusted)) {
         const product = forProduct(c);
         if (state === "product" && !product) continue; // a plain ask the owner answered
-        asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now), forProduct: product, state });
+        asks.push({ id: slug, issue: n, url: c.html_url ?? null, ageMinutes: minutesSince(c.created_at, now), forProduct: product, state,
+          text: askText(str(c.body)) });
       }
     }
   }

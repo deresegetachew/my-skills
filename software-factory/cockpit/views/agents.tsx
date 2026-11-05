@@ -1,7 +1,8 @@
 // The Agents & machines view (#367), towards its board (docs/artifacts/9ntScsF5dJGU6XQrQsvQi7/VAgents.dc.html): each
 // machine with its sessions (name, role, state, what it does, where), this machine first, from the cockpit's snapshot
-// (`sessions`, which is `factory agents ls --json`). It only reads: starting, stopping and messaging a session are the
-// owner's actions in the command bar (`owner start`, `owner stop`, `say`).
+// (`sessions`, which is `factory agents ls --json`), and then the other projects on this machine (`projects`, #395). A
+// loop outside tmux says nohup, and the file it writes to when that is known. It only reads: starting, stopping and
+// messaging a session are the owner's actions in the command bar (`owner start`, `owner stop`, `say`).
 import { type Line, list, type Obj, plain, seg, type Style } from "./lines.tsx";
 import { clip, heading, padStr, para } from "./doc.tsx";
 import type { Got } from "./read.ts";
@@ -24,8 +25,16 @@ function doing(r: Obj): string {
   return task && !detail.includes(task) ? `${detail} · ${/^\d+$/.test(task) ? `#${task}` : task}` : detail;
 }
 
+/** Its tmux session, else how it runs (nohup, #395), else the machine's word for it. */
 function where(r: Obj): string {
-  return plain(r.session) || (r.source === "local" ? "" : plain(r.where));
+  if (plain(r.session)) return plain(r.session);
+  if (plain(r.runs) === "nohup") return "nohup";
+  return r.source === "local" ? "" : plain(r.where);
+}
+
+/** The file a loop outside tmux writes to, on a line of its own under the row (#395). */
+function logLine(r: Obj, w: number): Line[] {
+  return plain(r.log) ? [[seg(`    ${clip(`log ${plain(r.log)}`, w - 4)}`, "dim")]] : [];
 }
 
 function rowsOf(rows: Obj[], w: number): Line[] {
@@ -46,12 +55,30 @@ function rowsOf(rows: Obj[], w: number): Line[] {
       out.push([seg(`    ${clip(doing(r), w - 4)}`)]);
       if (where(r)) out.push([seg(`    ${clip(where(r), w - 4)}`, "dim")]);
     }
+    out.push(...logLine(r, w));
   }
   return out;
 }
 
+/** The other projects on this machine (#395), from their heartbeats: each with its agents, or that it stopped reporting. */
+function projectsLines(snap: Obj, w: number): Line[] {
+  const projects = list(snap.projects).filter((p) => plain(p.name));
+  if (!projects.length) return [];
+  const out: Line[] = [[seg("OTHER PROJECTS ON THIS MACHINE", "dim")]];
+  for (const p of projects) {
+    const agents = list(p.agents);
+    const fresh = p.fresh === true;
+    out.push([seg(plain(p.name), "bold"), seg(fresh ? `  ${agents.length} session${agents.length === 1 ? "" : "s"}` :
+      "  not reporting: its heartbeat stopped, so these are its last rows", fresh ? "dim" : "red")]);
+    out.push(...rowsOf(agents.map((a) => (fresh ? a : { ...a, state: "unknown" })), w), []);
+  }
+  out.push(...para("Each runs its own cockpit: cd to the project, then factory cockpit.", w, "dim"), []);
+  return out;
+}
+
 const KEYS = "watch one: factory follow <name> · message: factory say <name> <text> · start: factory owner start · " +
-  "stop: factory owner stop <name> · every agent: factory agents ls · this machine's setup: factory machine show";
+  "stop: factory owner stop <name> (in tmux or not) · restart: stop, then factory owner start <role> <name> · " +
+  "every agent: factory agents ls · this machine's setup: factory machine show";
 
 /** Every line of the Agents & machines view for a snapshot (undefined: still reading), at most `w` wide. */
 export function agentsLines(snap: Got | undefined, repo: string, host: string, w: number): Line[] {
@@ -74,6 +101,7 @@ export function agentsLines(snap: Got | undefined, repo: string, host: string, w
       seg(`  ${rows.length} session${rows.length === 1 ? "" : "s"}${down ? `, ${down} down` : ""}`, down ? "red" : "dim")]);
     out.push(...rowsOf(rows, w), []);
   }
+  out.push(...projectsLines(snap, w));
   for (const p of list(snap.missing).filter((p) => /sessions/.test(plain(p.code)))) {
     out.push(...para(plain(p.message), w, "red"), ...para(`fix: ${plain(p.fix)}`, w, "dim"), []);
   }

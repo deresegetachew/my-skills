@@ -20,7 +20,7 @@ import { comment, type Comment, ghAll, type Issue, names } from "./factory_issue
 import { refuse } from "./factory_machine.ts";
 import { ownerQueue } from "./factory_orchestrator.ts";
 import { parseStories, storyRefs } from "./factory_prd.ts";
-import { trustedOf } from "./factory_prs.ts";
+import { CHAT_SUMMARY, trustedOf } from "./factory_prs.ts";
 import { pyDumps, runMain } from "./factory_lib.ts";
 
 export const GATES = ["vision", "design", "plan"] as const;
@@ -77,6 +77,7 @@ export function approvals(comments: Comment[], trusted: Set<string> = new Set())
       state[last] = "asked";
       continue;
     }
+    if (CHAT_SUMMARY.test(body)) continue; // a cockpit talk's summary answers nothing (#395)
     if (trusted.size && !trusted.has(c.user?.login ?? "")) continue;
     const m = ANSWER.exec(body);
     if (m && (m[1] as string) in state) state[m[1] as string] = "approved";

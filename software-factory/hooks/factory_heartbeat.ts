@@ -8,9 +8,11 @@
 //
 //   the claim          factory_claims.ts: the checkout claim names the agent's loop or Claude process; is that pid
 //                      alive and a loop or Claude process, and does the agent hold a task?
-//   what it waits on   a `factory wait ci|answer <pr>`, `wait slot|ready` or `wait_for_merge.sh <pr>` below that pid
+//   what it waits on   a `factory wait ci|answer <pr>`, `wait slot|ready` or `wait_for_merge.sh <pr>` below that pid, or
+//                      the loop's wait for GitHub's limit (`factory_views_cache.ts limit-wait`, with the time it is back)
 //   the tmux session   `<repo>-<agent>` (factory resume starts it): its Remote Control link, read from the pane, and
-//                      when it last showed output
+//                      when it last showed output. A live agent with no session runs outside tmux (`runs`: tmux or
+//                      nohup, #395), and its log is the file its output goes to, when /proc tells
 //   the transcript     when Claude last wrote to the session's log
 //
 // and works out one state:  working | waiting | idle | down.
@@ -55,7 +57,7 @@
 // second `run` stops with `{code: heartbeat-running}`. A GitHub failure is retried a minute later and never stops it.
 // It runs as the same user as the agents; an agent could stop it or forge its state, which is acceptable for
 // well-meaning agents, as the wiki says of the gate (docs/wiki/reviews-and-gates.md).
-import { ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, writeFileSync,
+import { ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, renameSync, statSync, writeFileSync,
   writeSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -66,6 +68,7 @@ import { agentIssues, current, fields, nameOf, recall, remember, update } from "
 import { installCli, restartCli, serviceText, uninstallCli } from "./factory_heartbeat_service.ts";
 import { machineId, machineNames, refuse, repoKey, stateDir } from "./factory_machine.ts";
 import { sessionName } from "./factory_resume.ts";
+import { limitStatus } from "./factory_views_cache.ts";
 import { Exit, flock, isoUtc, pyDumps, pyRepr, run as runCmd, runMain, splitLines } from "./factory_lib.ts";
 
 const KIND = "coding-agent";
@@ -84,8 +87,10 @@ const WAIT = String.raw`(?:factory_wait\.(?:py|ts)|\bfactory\s+wait)`;
 const ON_PR = new RegExp(WAIT + String.raw`\s+(ci|answer)\s+#?(\d+)\b`);
 const BARE = new RegExp(WAIT + String.raw`\s+(slot|ready)\b`);
 const MERGE = new RegExp(String.raw`(?:wait_for_merge\.sh|` + WAIT + String.raw`)\s+#?(\d+)\b`);
+// The loop's wait for GitHub's hourly limit (#395, factory-loop.sh's github_wait); not limit-idle, its pause between passes.
+const LIMIT = /factory_views_cache\.ts\s+limit-wait\b/;
 const TEXT: Record<string, string> = { ci: "CI on PR #{n}", answer: "an answer on PR #{n}", merge: "the merge of PR #{n}",
-  slot: "a free PR slot", ready: "a ready task" };
+  slot: "a free PR slot", ready: "a ready task", limit: "the GitHub limit" };
 
 export interface Wait {
   kind: string;
@@ -108,6 +113,9 @@ export function parseWait(args: string): Wait | null {
   } else if ((m = MERGE.exec(args))) {
     kind = "merge";
     pr = m[1] as string;
+  } else if (LIMIT.test(args)) {
+    kind = "limit";
+    pr = null;
   } else return null;
   return { kind, pr, on: pr ? `${kind}:${pr}` : kind, text: (TEXT[kind] as string).replace("{n}", String(pr)) };
 }
@@ -138,12 +146,13 @@ export function waitsInTree(procs: Procs, root: number): Wait | null {
   return null;
 }
 
-/** Whether `bun [flags] .../factory_wait.ts ...` runs: the ported wait runs under bun, whose other arguments (Claude
- * Code's) are prompts and never read. Only the script right after bun's own flags counts. */
+/** Whether `bun [flags] .../factory_wait.ts ...` (or the loop's `factory_views_cache.ts limit-wait`) runs: the ported
+ * wait runs under bun, whose other arguments (Claude Code's) are prompts and never read. Only the script right after
+ * bun's own flags counts. */
 function runsWaitScript(words: string[]): boolean {
   let k = 1;
   while (k < words.length && (words[k] as string).startsWith("-")) k++;
-  return k < words.length && /^factory_wait\.(ts|py)$/.test(basename(words[k] as string));
+  return k < words.length && /^(factory_wait\.(ts|py)|factory_views_cache\.ts)$/.test(basename(words[k] as string));
 }
 
 /** {pid: [ppid, command line]} for every process, from `ps`; empty when there is no ps. */
@@ -286,6 +295,10 @@ export interface HeartbeatRow extends Derived {
   session: string | null;
   follow: string | null;
   activity: number | null;
+  /** How a live agent runs (#395): `tmux` in its session, `nohup` outside one (nohup, a plain terminal); "" when down. */
+  runs?: string;
+  /** Where a loop outside tmux writes (its stdout, when that is a file); null when unknown. */
+  log?: string | null;
   since?: string;
 }
 
@@ -428,10 +441,30 @@ function subManagers(ps: Procs, me: string): Record<string, HeartbeatRow> {
       const item = file.slice(0, -4);
       const name = `${folder.slice(0, -2)}-${item}`;
       rows[name] = { ...derive({ alive: true, task: item, wait: waitsInTree(ps, pid) }), name, kind: SUB_MANAGER, machine: me,
-        path: null, pid, session: null, follow: null, activity: null };
+        path: null, pid, session: null, follow: null, activity: null, runs: "", log: null };
     }
   }
   return rows;
+}
+
+/** A wait for GitHub's limit says until when (#395), from the shared limit file (or `gh api rate_limit`, which costs no
+ *  call against the limit); any other wait as it is. */
+function limitUntil(wait: Wait | null): Wait | null {
+  if (wait?.kind !== "limit") return wait;
+  const core = limitStatus();
+  const back = core && core.remaining <= 0 && core.reset > clockNow() ? ` until ${isoUtc(core.reset).slice(11, 16)} UTC` : "";
+  return { ...wait, text: wait.text + back };
+}
+
+/** The file a process writes its output to (a loop started with `nohup ... > loop.log`), read from /proc on Linux; null
+ *  elsewhere, or when its output is a terminal or a pipe. */
+function logOf(pid: number): string | null {
+  try {
+    const target = readlinkSync(`/proc/${pid}/fd/1`);
+    return target.startsWith("/") && statSync(target).isFile() ? target : null;
+  } catch {
+    return null;
+  }
 }
 
 /** {agent: row}: what this machine shows about each agent, derived and not yet reported anywhere. */
@@ -455,7 +488,7 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
     const alive = Object.keys(claim).length > 0 && claimAlive(claim, stale, true);
     const pid = alive ? Math.trunc(Number(claim.pid)) : null;
     const task = alive ? (Object.entries(tasks).find(([, c]) => c.agent === name && claimAlive(c, stale))?.[0] ?? null) : null;
-    const wait = alive ? waitsInTree(ps, pid as number) : null;
+    const wait = alive ? limitUntil(waitsInTree(ps, pid as number)) : null;
     const session = sessionName(name);
     let activity: number | null = null;
     if (alive) {
@@ -464,10 +497,14 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
     }
     const active = activity !== null && now - activity <= ACTIVE_SECONDS;
     const row: HeartbeatRow = { ...derive({ alive, task, wait, active }), name, kind: roleFor(cfg, name, claim), machine: me,
-      path: claim.path ?? null, pid, session: null, follow: null, activity };
+      path: claim.path ?? null, pid, session: null, follow: null, activity, runs: "", log: null };
     if (sessions.has(session)) {
       row.session = session;
       if (alive) row.follow = followUrl(tmux("capture-pane", "-p", "-J", "-S", "-300", "-t", `=${session}`));
+    }
+    if (alive) {
+      row.runs = row.session ? "tmux" : "nohup";
+      row.log = row.session ? null : logOf(pid as number);
     }
     rows[name] = row;
   }
@@ -498,7 +535,8 @@ export function report(cfg: Cfg, name: string, row: HeartbeatRow, now: number, c
     if (pyDumps(got.cand) !== pyDumps(stamp.cand ?? null)) remember(name, { cand: got.cand });
     return null;
   }
-  const extra = { kind: row.kind, task: row.task, on: row.on, since: row.since, hb: "1", ...reach };
+  // how it runs goes along (#395), with no write of its own: a change of it alone is not a change of state
+  const extra = { kind: row.kind, task: row.task, on: row.on, since: row.since, hb: "1", ...(row.runs ? { runs: row.runs } : {}), ...reach };
   try {
     update(cfg, name, state, { detail: state === "working" || state === "waiting" ? row.detail : "", create: state !== "down",
       extra, replaceExtra: true, role: row.kind });
