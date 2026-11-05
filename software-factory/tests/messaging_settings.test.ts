@@ -41,8 +41,8 @@ test("the messaging settings default to GitHub with no url, creds or kinds", () 
   const d = project({});
   const get = (key: string) => settings(d, ["get", key]);
   expect(get("messaging.transport").code).toBe(0);
-  expect(get("messaging.transport").stdout.trim()).toBe("github");
-  expect(get("messaging.fallback").stdout.trim()).toBe("github");
+  expect(get("messaging.transport").stdout.trim()).toBe('"github"');
+  expect(get("messaging.fallback").stdout.trim()).toBe('"github"');
   expect(get("messaging.url").code).toBe(0);
   expect(get("messaging.creds").code).toBe(0);
   expect(get("messaging.kinds").code).toBe(0);
@@ -84,14 +84,14 @@ test("transport nats needs a messaging.url", () => {
   for (const messaging of [{ transport: "nats" }, { transport: "nats", url: "" }]) {
     const p = validate(messaging);
     expect(p.code).toBe(1);
-    expect(p.out).toMatch(/(^|\n)\W*messaging\.url:/);
+    expect(p.out).toMatch(/(^|\n)(error: )?messaging\.url:/);
   }
 });
 
 test("a messaging.url must start with nats:// or tls://", () => {
   const bad = validate({ transport: "nats", url: "http://100.64.0.1:4222" });
   expect(bad.code).toBe(1);
-  expect(bad.out).toMatch(/(^|\n)\W*messaging\.url:/);
+  expect(bad.out).toMatch(/(^|\n)(error: )?messaging\.url:/);
   expect(validate({ transport: "nats", url: "nats://h:4222" }).code).toBe(0);
   expect(validate({ transport: "nats", url: "tls://h:4222" }).code).toBe(0);
 });
@@ -99,7 +99,7 @@ test("a messaging.url must start with nats:// or tls://", () => {
 test("a messaging.kinds item must be a message kind", () => {
   const bad = validate({ kinds: ["claim", "gossip"] });
   expect(bad.code).toBe(1);
-  expect(bad.out).toMatch(/(^|\n)\W*messaging\.kinds:/);
+  expect(bad.out).toMatch(/(^|\n)(error: )?messaging\.kinds:/);
   expect(bad.out).toContain("gossip");
   const all = ["question", "answer", "mustfix", "approval", "status", "claim", "release", "wake", "handoff"];
   expect(validate({ kinds: all }).code).toBe(0);
