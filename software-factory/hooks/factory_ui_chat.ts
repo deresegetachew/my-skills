@@ -201,7 +201,9 @@ async function readMessages(p: UiProject): Promise<Said> {
   const items = rows.map(obj).filter((m) => str(m.id)).map((m) => {
     const it: ChatItem = { id: str(m.id), at: str(m.created), from: str(m.from), to: str(m.to), kind: str(m.kind) || "message",
       text: str(m.summary), state: str(m.state), ref: str(m.ref), url: str(m.url) };
-    return { item: it, channels: [...new Set([channelOf(p.config, it.from), channelOf(p.config, it.to)])].filter(Boolean) };
+    // a status is the agent's own (it is addressed to the dev manager only by default): its channel, not the addressee's
+    const who = it.kind === "status" ? [it.from] : [it.from, it.to];
+    return { item: it, channels: [...new Set(who.map((n) => channelOf(p.config, n)))].filter(Boolean) };
   });
   return { items, ids: new Set(items.map((x) => x.item.id)), problem: null };
 }
