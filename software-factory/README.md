@@ -341,6 +341,7 @@ software-factory/
   hooks/                        every hook and every `factory_*.ts` command, next_task.ts, pr-gate.ts, check.ts ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
   cockpit/                      the cockpit's Ink UI (decision 0002): a release bundles it into hooks/factory_cockpit_ink.js
+  plugins/                      adapters with npm packages (decision 0004): a release bundles each into hooks/plugins/<name>.js
   web/                          the web app `factory ui` serves (decision 0005): a release bundles it into hooks/factory_ui_app.js
   tests/                        the tests (run with tools/run_tests.ts at the repo root)
   docs/                         reference pages (PRD.md, messages.md, manager-handover.md) and the wiki

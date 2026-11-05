@@ -9,7 +9,7 @@
 //
 // `--sandbox` adds the checks of a sandboxed factory machine (factory_sandbox.ts): run it as the dedicated user that
 // `factory bootstrap` made. It runs a few network probes and one container, so it takes longer.
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import * as fa from "./factory_artifacts.ts";
@@ -22,6 +22,8 @@ import * as heartbeat from "./factory_heartbeat_service.ts";
 import { Exit, FactoryError, fnmatch, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
 import { machineNames } from "./factory_machine.ts";
 import { ModelsError, resolvedDefault, table, validate } from "./factory_models.ts";
+import { doctor as nats } from "./factory_nats.ts";
+import { factoryVersion, loadPlugin, neededPlugins, pluginPath } from "./factory_plugins.ts";
 import * as fr from "./factory_release.ts";
 import * as roleDefs from "./factory_roles.ts";
 import { run as sandbox } from "./factory_sandbox.ts";
@@ -624,6 +626,29 @@ export function cockpit(r: Reporter): void {
   }
 }
 
+/** The plugins (decision 0004, #405): each bundle a release installed, and each plugin a setting turns on, loads with
+ * this factory's version. A setting's plugin that is missing or fails is a fix even when its port falls back to GitHub:
+ * the fallback is never silent. */
+export function plugins(r: Reporter, cfg: Config | null): void {
+  const hooks = import.meta.dir;
+  let bundles: string[] = [];
+  try {
+    bundles = readdirSync(join(hooks, "plugins")).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3));
+  } catch {
+    // no plugins folder: a release without plugins
+  }
+  for (const name of [...new Set([...bundles, ...neededPlugins(cfg)])].sort()) {
+    const at = pluginPath(name, hooks);
+    try {
+      loadPlugin(name, { hooks });
+      r.ok(`plugin ${name}: ${at?.bundle ? `the bundle for factory ${factoryVersion(hooks)}` : "the source (a checkout of my-skills)"} loads`);
+    } catch (e) {
+      if (!(e instanceof FactoryError)) throw e;
+      r.fix(`plugin ${name}`, `${e.message} ${e.fix}`);
+    }
+  }
+}
+
 export function models(r: Reporter, cfg: Config): void {
   const value = cfg.models ?? {};
   try {
@@ -841,10 +866,12 @@ export async function main(argv: string[]): Promise<number> {
     manager(r, cfg);
     trustedReviewers(r, cfg);
     await turbo(r, cfg);
+    await nats(r, cfg);
     artifacts(r, cfg);
     release(r);
   }
   cockpit(r);
+  plugins(r, cfg);
   if (argv.includes("--sandbox")) {
     console.log();
     console.log("Sandbox (#105)");
