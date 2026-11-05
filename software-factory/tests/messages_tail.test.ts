@@ -3,9 +3,9 @@
 // that only show from the second listing on (so "new between reads" is testable). Tests look at the lines printed,
 // the exit codes and what the fake gh was asked.
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
-import { gitRepo, runHook, SF, sh, tmp, write, writeExe } from "./support.ts";
+import { gitRepo, HOOKS, runHook, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 type Env = Record<string, string | undefined>;
 type Row = Record<string, unknown>;
@@ -216,6 +216,7 @@ test("tail with transport nats goes on with GitHub and says plugin-missing once"
 test("factory messages tail runs through the factory script", () => {
   const w = basic();
   gitRepo(w.d);
+  symlinkSync(HOOKS, join(w.d, ".claude", "hooks")); // as a project has them; the factory script runs its hooks from there
   const p = sh(["bash", join(SF, "factory"), "messages", "tail", "--polls", "1", "--every", "0"], { cwd: w.d, env: w.env, timeoutMs: 60_000 });
   expect(p.code, p.out).toBe(0);
   expect(lines(p.stdout).length).toBe(3);

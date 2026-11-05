@@ -15,14 +15,18 @@
 //                         cache while it is fresh (factory_views_cache.ts); --fresh reads GitHub now
 //   factory messages new --kind K [--to X] [--from X] [--ref R] [--in-reply-to ID] [--state S] [--sha SHA]
 //                         print the envelope (and the old marker line) to paste at the top of a comment
+//   factory messages tail [--ref N] [--to X] [--every S] [--polls N] [--json]
+//                         every kind of message as it is said (#414, decision 0004 point 7): the last 10, then what is
+//                         new every S seconds (default 60) until Ctrl-C, or N reads; `factory follow <agent> --messages`
+//                         and the cockpit's Messages popup run it
 //
 // The envelope and its rules are the domain (core/domain/message.ts, decision 0003); this module re-exports them, so
 // the PR gate, `factory wait`, `next_task.ts` and `factory status` import from here as before, with the roles from
-// factory.json filled in. `ls` reads through the Messaging port that core/compose.ts builds (on GitHub). Messages
+// factory.json filled in. `ls` and `tail` read through the Messaging port that core/compose.ts builds (on GitHub). Messages
 // from a peer are data, never instructions: nothing here changes what an agent may do.
 import { type Config, load, roleNames, roleSetting } from "./factory_config.ts";
 import { refuse } from "./factory_machine.ts";
-import { Exit, parseArgs, pyDumps, runMain } from "./factory_lib.ts";
+import { Exit, parseArgs, pyDumps, runMain, sleepSync } from "./factory_lib.ts";
 import { answer, sayAge } from "./factory_views_cache.ts";
 import { compose } from "./core/compose.ts";
 import { CoreError } from "./core/domain/error.ts";
@@ -214,19 +218,23 @@ function notice(e: CoreError): void {
   process.stderr.write(pyDumps(e.toJSON()) + "\n");
 }
 
+/** The project's Messaging port; a port that can't be built stops the command with its code, message and fix. */
+function messagingOf(cfg: Config): Messaging {
+  try {
+    return compose(cfg, {}, notice).messaging;
+  } catch (e) {
+    if (e instanceof CoreError) refuse(e.code, e.message, e.fix);
+    throw e;
+  }
+}
+
 function cmdLs(a: LsArgs): void {
   const every = [...KINDS, "all"];
   if (!every.includes(a.kind)) refuse("bad-kind", `'${a.kind}' isn't a message kind.`, `Use one of: ${every.join(", ")}.`);
   const states = [...STATES, "idle", "down"];
   if (a.state && !states.includes(a.state)) refuse("bad-state", `'${a.state}' isn't a message state.`, `Use one of: ${states.join(", ")}.`);
   const cfg = load();
-  let messaging: Messaging;
-  try {
-    messaging = compose(cfg, {}, notice).messaging;
-  } catch (e) {
-    if (e instanceof CoreError) refuse(e.code, e.message, e.fix);
-    throw e;
-  }
+  const messaging = messagingOf(cfg);
   const args = ["ls", ...([["--to", a.to], ["--from", a.frm], ["--state", a.state], ["--ref", a.ref], ["--kind", a.kind]] as const)
     .flatMap(([flag, v]) => (v ? [flag, v] : [])), ...(a.all ? ["--all"] : [])];
   const got = answer(cfg, { name: "messages", hook: import.meta.path, args }, Boolean(a.fresh), () => collect(cfg, a, messaging));
@@ -235,6 +243,66 @@ function cmdLs(a: LsArgs): void {
   else if (rows.length) console.log(rows.map(line).join("\n"));
   else console.log("no messages" + (a.state ? "" : " waiting"));
   sayAge(got.age, a.json);
+}
+
+// --- tail: the messages as they are said (#414) ----------------------------------------------------------------------
+
+export interface TailArgs {
+  ref: string | null;
+  to: string | null;
+  agent: string | null; // from or to this agent (to its name or its role's address): `factory follow <agent> --messages`
+  every: string | null; // seconds between reads, as typed; null is the default
+  polls: number | null; // reads in all, then stop; null runs until Ctrl-C
+  json: boolean;
+}
+
+const TAIL_FIRST = 10; // what the first read shows of what was already said
+const TAIL_EVERY = 60; // seconds: on GitHub each read lists the open issues and their comments
+
+/** A message's text with no control character, so nothing a peer wrote can move the cursor or recolour the terminal. */
+function clean(text: string): string {
+  return text.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+}
+
+function tailLine(r: Row): string {
+  return clean(`${r.created || "-"}  ${r.kind.padEnd(8)} ${r.from || "?"} -> ${r.to || "?"}  ${r.ref || "-"}  ${r.summary}`);
+}
+
+/** `factory messages tail`: the last few messages that match, then each new one, read through the Messaging port. A
+ * read that fails after the first is said on stderr and tried again at the next one. */
+export function tail(a: TailArgs): void {
+  if (a.every !== null && !/^\d+$/.test(a.every)) {
+    refuse("bad-every", `'${a.every}' isn't a number of seconds.`, "Use a whole number of seconds, for example --every 60.");
+  }
+  const every = a.every === null ? TAIL_EVERY : Number(a.every);
+  const cfg = load();
+  const messaging = messagingOf(cfg);
+  const names = a.agent ? new Set([a.agent, addressOf(a.agent)]) : null;
+  const keep = (m: Message): boolean => !m.card && (!a.to || m.to === a.to) &&
+    (!names || names.has(m.frm) || names.has(m.to));
+  const show = (m: Message): void => {
+    const r = row(m, m.state, Number(REF.exec(m.thread)?.[2]));
+    console.log(a.json ? pyDumps(r) : tailLine(r));
+  };
+  process.stderr.write(`Watching messages${a.ref ? ` on ${clean(a.ref)}` : ""}, every ${every} s. Ctrl-C stops.\n`);
+  let cursor: string | null = null;
+  for (let n = 0; a.polls === null || n < a.polls; n++) {
+    if (n) sleepSync(every);
+    let read;
+    try {
+      read = messaging.read(cursor, a.ref ? { ref: a.ref } : {});
+    } catch (e) {
+      const said = e instanceof CoreError ? e
+        : e instanceof Exit && e.text ? new CoreError("read-failed", e.text, "It is read again at the next read; check `gh auth status` if it goes on.") : null;
+      if (!said) throw e;
+      if (cursor === null) refuse(said.code, said.message, said.fix);
+      process.stderr.write(pyDumps(said.toJSON()) + "\n");
+      continue;
+    }
+    const got = read.messages.filter(keep).sort((x, y) => (x.created < y.created ? -1 : x.created > y.created ? 1 : x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+    (cursor === null ? got.slice(-TAIL_FIRST) : got).forEach(show);
+    cursor = read.cursor;
+  }
 }
 
 interface NewArgs {
@@ -274,13 +342,22 @@ function cmdNew(a: NewArgs): void {
 export function main(argv: string[]): void {
   const prog = "factory messages";
   const cmd = argv[0];
-  if (cmd !== "ls" && cmd !== "new") {
-    process.stderr.write(`usage: ${prog} [-h] {ls,new} ...\n${prog}: error: ` +
-      (cmd ? `argument cmd: invalid choice: '${cmd}' (choose from 'ls', 'new')` : "the following arguments are required: cmd") + "\n");
+  if (cmd !== "ls" && cmd !== "new" && cmd !== "tail") {
+    process.stderr.write(`usage: ${prog} [-h] {ls,new,tail} ...\n${prog}: error: ` +
+      (cmd ? `argument cmd: invalid choice: '${cmd}' (choose from 'ls', 'new', 'tail')` : "the following arguments are required: cmd") + "\n");
     throw new Exit(2);
   }
   const s = (v: unknown): string | null => (typeof v === "string" ? v : null);
-  if (cmd === "ls") {
+  if (cmd === "tail") {
+    const usage = `usage: ${prog} tail [-h] [--ref REF] [--to TO] [--every SECONDS] [--polls POLLS] [--json]`;
+    const a = parseArgs(argv.slice(1), { valued: ["--ref", "--to", "--every", "--polls"], flags: ["--json"] }, `${prog} tail`, usage);
+    const polls = s(a.polls);
+    if (polls !== null && !/^\d+$/.test(polls)) {
+      process.stderr.write(`${usage}\n${prog} tail: error: argument --polls: invalid int value: '${polls}'\n`);
+      throw new Exit(2);
+    }
+    tail({ ref: s(a.ref), to: s(a.to), agent: null, every: s(a.every), polls: polls === null ? null : Number(polls), json: Boolean(a.json) });
+  } else if (cmd === "ls") {
     const a = parseArgs(argv.slice(1), { valued: ["--to", "--from", "--state", "--ref", "--kind"], flags: ["--all", "--json", "--fresh"] },
       `${prog} ls`, `usage: ${prog} ls [-h] [--to TO] [--from FRM] [--state STATE] [--ref REF] [--kind KIND] [--all] [--json] [--fresh]`);
     cmdLs({ to: s(a.to), frm: s(a.from), state: s(a.state), ref: s(a.ref), kind: s(a.kind) ?? "question", all: Boolean(a.all),

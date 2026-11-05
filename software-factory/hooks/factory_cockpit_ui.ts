@@ -17,7 +17,7 @@
 //                                (#366, cockpit/sidebar.tsx) when its UI is installed, else drawn here
 //   factory cockpit --sidebar-data
 //                                what the Ink list draws: the cached snapshot, the views, the talks with a role
-//                                (`talks`, #395: 9 and 0), the new asks to ring for
+//                                (`talks`, #395: 9 and 0, then m, the live messages, #414), the new asks to ring for
 //   factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | leave
 //                                a key of the Ink list, done in the cockpit's tmux
 //   factory cockpit --bar [<words>]
@@ -115,11 +115,13 @@ export function views(): View[] {
   ];
 }
 
-/** The talks with a role (#395), listed after the views and opened the same way (9, 0, or Enter on that role). */
+/** The talks with a role (#395), listed after the views and opened the same way (9, 0, or Enter on that role), then
+ *  what the roles say to each other as it is said (m, #414): `factory messages tail`, until Ctrl-C. */
 export function talks(): View[] {
   return [
     { key: "9", title: "Talk to the dev manager", commands: [["cockpit", "--chat", "dev-manager"]], live: true },
     { key: "0", title: "Talk to the product owner", commands: [["cockpit", "--chat", "product-owner"]], live: true },
+    { key: "m", title: "Messages", commands: [["messages", "tail"]], live: true },
   ];
 }
 

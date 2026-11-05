@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { type Config, load } from "./factory_config.ts";
 import * as A from "./factory_agents.ts";
 import { repoKey } from "./factory_machine.ts";
+import { NAME, tail } from "./factory_messages.ts";
 import * as R from "./factory_remotes.ts";
 import { RemoteError } from "./factory_remotes.ts";
 import { Exit, pyDumps, run, runMain, shQuote, sleepSync, splitLines, which } from "./factory_lib.ts";
@@ -23,6 +24,8 @@ agent by its name, wherever it runs: on this machine (its own tmux, no remote ne
   factory follow <agent> [--read] [--on R]  attach to its session: type, answer prompts, Esc to interrupt. --read cannot type.
                                             A cloud agent prints its Remote Control link instead
   factory follow <agent> --log [--polls N]  stream the session's output without a terminal (Ctrl-C stops)
+  factory follow <agent> --messages         the messages from and to that agent as they are said, wherever it runs
+                         [--polls N]        (\`factory messages tail\` kept to it; Ctrl-C stops)
   factory follow --all [--on R]             one read-only pane per session (tiled), in a local tmux
   factory say <agent> "message" [--on R]    send one message, as if typed; the use is logged on that machine (no text)
   --on R                                    only remote R; --on local is this machine (the name local is kept for it)
@@ -147,6 +150,7 @@ interface FollowArgs {
   read: boolean;
   all: boolean;
   log: boolean;
+  messages: boolean;
   json: boolean;
   polls: number | null;
 }
@@ -248,6 +252,17 @@ function stream(target: string, session: string, polls: number | null = null): n
     n += 1;
     if (polls === null || n < polls) sleepSync(2);
   }
+  return 0;
+}
+
+/** `factory follow <agent> --messages`: what that agent says and is told, as `factory messages tail` shows it (#414).
+ * It reads the Messaging port, not the session, so it needs no tmux and works for an agent anywhere. */
+function cmdFollowMessages(args: FollowArgs): number {
+  const agent = args.agent ?? "";
+  if (!NAME.test(agent)) {
+    return refuse(new RemoteError("bad-name", `'${agent}' isn't an agent name.`, "Use the name `factory follow` lists, for example haile."));
+  }
+  tail({ ref: null, to: null, agent, every: null, polls: args.polls, json: args.json });
   return 0;
 }
 
@@ -373,7 +388,7 @@ function cmdRemote(argv: string[]): number {
 }
 
 const SAY_USAGE = "usage: factory say [--on ON] agent message";
-const FOLLOW_USAGE = "usage: factory follow [--on ON] [--read] [--all] [--log] [--json]\n" +
+const FOLLOW_USAGE = "usage: factory follow [--on ON] [--read] [--all] [--log] [--messages] [--json]\n" +
   "                      [--polls POLLS]\n" +
   "                      [agent]";
 
@@ -392,7 +407,7 @@ function parseCommand(cmd: "say" | "follow", rest: string[]): { on: string | nul
   const pos: string[] = [];
   const extra: string[] = [];
   const valued = cmd === "say" ? ["--on"] : ["--on", "--polls"];
-  const boolFlags = cmd === "say" ? [] : ["--read", "--all", "--log", "--json"];
+  const boolFlags = cmd === "say" ? [] : ["--read", "--all", "--log", "--messages", "--json"];
   for (let i = 0; i < rest.length; i++) {
     const x = rest[i] as string;
     const eq = x.startsWith("--") ? x.indexOf("=") : -1;
@@ -434,8 +449,9 @@ export function main(argv: string[]): number {
     if (cmd === "follow") {
       const a = parseCommand("follow", rest);
       const f: FollowArgs = { on: a.on, agent: a.pos[0] ?? null, read: a.flags.has("read"), all: a.flags.has("all"),
-        log: a.flags.has("log"), json: a.flags.has("json"), polls: a.polls };
+        log: a.flags.has("log"), messages: a.flags.has("messages"), json: a.flags.has("json"), polls: a.polls };
       if (f.all) return cmdFollowAll(f);
+      if (f.messages) return cmdFollowMessages(f);
       return f.agent ? cmdFollowOne(f) : cmdList(f);
     }
     process.stderr.write(`factory_follow.ts: unknown command ${cmd}\n`);
