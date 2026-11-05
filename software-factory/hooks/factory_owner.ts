@@ -29,7 +29,7 @@ import { type Config, load, loadFromMain, toFloat } from "./factory_config.ts";
 import { processes } from "./factory_heartbeat.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
 import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
-import { OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
+import { breakMarkers, OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
 import { TAG_RE } from "./factory_release.ts";
 import { running, sessionName, startLoop } from "./factory_window.ts";
 
@@ -232,7 +232,8 @@ function answer(id: string | undefined, text: string): void {
     console.log(`${id} is already answered on #${queue.number}; nothing posted.`);
     return;
   }
-  api("POST", `${REPO}/issues/${queue.number}/comments`, { body: `<!-- factory-owner-answer id=${id} -->\n\n${text.trim()}` });
+  // the owner's words carry no marker but this one: a quoted `<!--` is broken (#395)
+  api("POST", `${REPO}/issues/${queue.number}/comments`, { body: `<!-- factory-owner-answer id=${id} -->\n\n${breakMarkers(text.trim())}` });
   console.log(`Answered ${id} on #${queue.number}.`);
 }
 

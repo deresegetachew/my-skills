@@ -38,9 +38,17 @@ const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done"
 export const CHAT_SUMMARY = /<!--\s*factory-cockpit-chat\b/;
 const ASK_TEXT_MAX = 4000;
 
-/** An ask's own words: its comment without the factory's markers, cut to a size a screen can show. */
+/** `<!--` made harmless (`&lt;!--`, which GitHub still shows as `<!--`): text posted with the owner's login carries
+ *  no marker but its own (#395). */
+export function breakMarkers(text: string): string {
+  return text.replace(/<!--/g, "&lt;!--");
+}
+
+/** An ask's own words: its comment without the factory's markers, cut to a size a screen can show. A comment nested in
+ *  a broken one (`<!-<!-- x -->- factory-owner-answer ... -->`) comes back whole when the inner one is stripped, so
+ *  whatever `<!--` is left is broken too. */
 export function askText(body: string): string {
-  return body.replace(/<!--[\s\S]*?-->/g, "").trim().slice(0, ASK_TEXT_MAX);
+  return breakMarkers(body.replace(/<!--[\s\S]*?-->/g, "")).trim().slice(0, ASK_TEXT_MAX);
 }
 
 /** Every id a marker carries in one comment, in order: a comment may answer or ask more than one (#357). */
