@@ -110,7 +110,7 @@ function strOrNull(v: unknown): string | null {
   return typeof v === "string" && v ? v : v === null || v === undefined ? null : String(v);
 }
 
-function readJson(path: string): unknown {
+export function readJson(path: string): unknown {
   try {
     return JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch {
@@ -369,7 +369,12 @@ export function factoryScript(p: UiProject): string {
 export async function owner(p: UiProject, args: string[]): Promise<ActionResult> {
   const command = `factory owner ${args.join(" ")}`;
   const r = await spawn(["bash", factoryScript(p), "owner", ...args], p.path, envFor(p), ACTION_TIMEOUT_MS);
-  const output = (r.stdout + r.stderr).trim();
+  return resultOf(p, command, r, (r.stdout + r.stderr).trim());
+}
+
+/** How `command` (run in project `p`, giving `r`) went: 200 with `output`, or 500 with its own {code, message, fix} when
+ * its last line on stderr is one, else one that says how to see the whole error. */
+export function resultOf(p: UiProject, command: string, r: Ran, output: string): ActionResult {
   if (r.code === 0) return { status: 200, body: { ok: true, command, output } };
   const last = r.stderr.trim().split("\n").at(-1) ?? "";
   let own: Obj = {};

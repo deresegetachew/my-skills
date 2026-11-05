@@ -11,7 +11,9 @@
 //   GET|POST /api/projects/:p/agents/:name/chat, GET /api/projects/:p/owner-queue, POST .../owner-queue/:id/answer
 //                                              the chat with each agent and the owner queue (factory_ui_chat.ts, #423)
 //   GET  /api/ws?token=...                     a WebSocket: {type: "hello"}, then {type: "state", project, ...live} for
-//                                              each project, and again whenever one changes
+//                                              each project, and again whenever one changes; likewise {type: "views",
+//                                              project, ...} for the tasks, pull requests and CI channels
+//   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
@@ -21,6 +23,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { ciAction, Refresher, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
   hosts: string[];
@@ -38,6 +41,9 @@ export interface Running {
 }
 
 const TOPIC = "live";
+
+/** The views' channels (#424) and the part of factory_ui_views.ts's Views each one is. */
+const VIEW_PARTS: Record<string, "tasks" | "pulls" | "ci"> = { tasks: "tasks", "pull-requests": "pulls", ci: "ci" };
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -133,8 +139,23 @@ export function serve(o: ServeOptions): Running {
       const before = kept.get(p.id)?.text;
       const now = await state(p, 0);
       if (now.text !== before) for (const s of servers) s.publish(TOPIC, message(p, now.data));
+      refresher.ifStale(p);
+      pushViews(p);
       await chat.tick(p);
     }
+  }
+
+  // the tasks, pull requests and CI channels (#424): from the cockpit's cache, sent when they change
+  const viewsSent = new Map<string, string>();
+  const refresher = new Refresher((p) => pushViews(p));
+  function viewsMessage(p: UiProject): string {
+    return JSON.stringify({ type: "views", project: p.id, ...viewsOf(p, refresher.running(p)) });
+  }
+  function pushViews(p: UiProject): void {
+    const text = viewsMessage(p);
+    if (viewsSent.get(p.id) === text) return;
+    viewsSent.set(p.id, text);
+    for (const s of servers) s.publish(TOPIC, text);
   }
 
   function seen(p: UiProject): Agent[] {
@@ -196,6 +217,26 @@ export function serve(o: ServeOptions): Running {
       return json(r.status, r.body);
     }
     if (rest[0] === "agents" && rest.length === 3) return problem(404, "not_found", `There is no ${url.pathname}.`, "An agent has start and stop.");
+    const view = rest.length === 1 ? VIEW_PARTS[rest[0] ?? ""] : undefined;
+    if (view) {
+      if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
+      refresher.ifStale(p);
+      const v = viewsOf(p, refresher.running(p));
+      const meta = { project: p.id, generatedAt: v.generatedAt, age: v.age, refreshing: v.refreshing };
+      return json(200, view === "ci" ? { ...v.ci, ...meta, problems: [...v.problems, ...v.ci.problems] } // the verdict first
+        : { ...meta, ...v[view], problems: [...v.problems, ...v[view].problems] });
+    }
+    if (rest[0] === "ci" && rest[1] === "actions" && rest.length === 3) {
+      if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
+      const r = await ciAction(p, rest[2] as string, await req.json().catch(() => null));
+      if (rest[2] !== "log" && (r.status === 200 || r.status === 500)) refresher.start(p, true); // read again: the next look shows what changed
+      return json(r.status, r.body);
+    }
+    if (rest.length === 1 && rest[0] === "refresh") {
+      if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST.");
+      refresher.start(p, true);
+      return json(202, { ok: true, command: "factory cockpit --json", refreshing: refresher.running(p) });
+    }
     return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
   }
 
@@ -220,6 +261,8 @@ export function serve(o: ServeOptions): Running {
       ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: o.projects.map((p) => p.id) }));
       if (!timer) timer = setInterval(() => void tick(), o.pollSeconds * 1000);
       for (const p of o.projects) {
+        refresher.ifStale(p);
+        if (ws.readyState === 1) ws.send(viewsMessage(p));
         const s = await state(p, o.pollSeconds * 1000);
         if (ws.readyState === 1) ws.send(message(p, s.data));
       }
