@@ -120,12 +120,14 @@ function specOf(v: unknown): Spec {
 }
 
 /** How long one turn of a talk may take: a fresh role session reads its context first (#395). */
-const CHAT_SECONDS = 20 * 60;
+const CHAT_SECONDS = 20 * 60; // `--chat-send` stops a session at 19 minutes, so it never posts after this gave up
+const CHAT_TURNS = 10;
 
 /** Sends one line of a talk: the answer and where its summary went, or the refusal. */
 function sender(spec: Spec): (text: string, history: Turn[]) => Promise<ChatReply> {
   return async (text, history) => {
-    const got = await readOrRefusal([...spec.send, text, JSON.stringify(history)], CHAT_SECONDS * 1000);
+    // the last turns only: the conversation goes as one argument, which the system caps (128 KB on Linux)
+    const got = await readOrRefusal([...spec.send, text, JSON.stringify(history.slice(-CHAT_TURNS))], CHAT_SECONDS * 1000);
     if ("refused" in got) return { problem: problemOf(got.refused) };
     const summary = obj(got.data.summary);
     const where = summary.posted === true ? `A summary is on the owner queue, #${plain(summary.issue)}.`

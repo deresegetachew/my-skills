@@ -5,7 +5,7 @@
 // Enter on an owner ask shows it whole and answers it in place (#395, ask.tsx): `factory owner answer`, after a y/N.
 // Merging is `factory owner merge`, in the command bar or the Pull requests view.
 import { useApp, useInput } from "ink";
-import { type ReactElement, useState } from "react";
+import { type ReactElement, useRef, useState } from "react";
 import { ASK_KEYS, askBody, askKey, type AskState, choicesOf, NEW_ASK } from "./ask.tsx";
 import { type Filter, filterKey, filterKeys, matchesTyped, NO_FILTER, noMatch } from "./filter.ts";
 import { ago, cut, type Line, Lines, list, type Obj, plain, screen, seg, spread } from "./lines.tsx";
@@ -97,6 +97,9 @@ export interface NeedsProps {
   act?: (words: string[]) => Promise<string>;
 }
 
+/** An ask opened with Enter: where the owner is in it, and whether an answer was posted (the list reads again after). */
+type Opened = { ask: Obj; state: AskState; posted: boolean };
+
 /** One screen of an ask opened with Enter (#395): its text, its choices and the question. */
 export function askLines(ask: Obj, s: AskState, cols: number, rows: number, repo: string): Line[] {
   const heading = spread([seg("factory", "amber"), seg(`  ${repo} · Needs you`)], [seg("answer it here", "dim")], cols);
@@ -108,7 +111,12 @@ export function NeedsView(props: NeedsProps): ReactElement {
   const [snap, setSnap] = useState<Got | undefined>(props.snapshot);
   const [selected, setSelected] = useState(() => (props.find ? needAt(props.snapshot, props.find) : 0));
   const [filter, setFilter] = useState<Filter>(NO_FILTER);
-  const [open, setOpen] = useState<{ ask: Obj; state: AskState; posted: boolean } | null>(null);
+  const [open, setOpen] = useState<Opened | null>(null);
+  const openRef = useRef<Opened | null>(null);
+  const show = (o: Opened | null) => {
+    openRef.current = o;
+    setOpen(o);
+  };
   const reload = () => {
     setSnap(undefined);
     void props.load().then((got) => {
@@ -118,19 +126,25 @@ export function NeedsView(props: NeedsProps): ReactElement {
   };
   useInput((input, key) => {
     if (key.ctrl && input === "c") return exit();
-    if (open) {
-      const step = askKey(open.state, choicesOf(open.ask), input, key);
+    // each key works on the state the one before it left (the ref): keys typed fast arrive before the screen is drawn again
+    const o = openRef.current;
+    if (o) {
+      const step = askKey(o.state, choicesOf(o.ask), input, key);
       if (step.back) {
-        setOpen(null);
-        if (open.posted) reload(); // the answered ask leaves the list
+        show(null);
+        if (o.posted) reload(); // the answered ask leaves the list
         return;
       }
       const post = step.post;
-      setOpen({ ...open, state: step.state, posted: open.posted || post !== undefined });
-      if (post !== undefined && props.act) {
-        void props.act(["owner", "answer", plain(open.ask.id), post]).then((said) =>
-          setOpen((o) => (o ? { ...o, state: { ...o.state, said: said.trim() || "Done." } } : o)));
+      if (post === undefined) return show({ ...o, state: step.state });
+      if (!props.act) {
+        return show({ ...o, state: { ...step.state, said: `Not posted from here: run \`factory owner answer ${plain(o.ask.id)} <answer>\`.` } });
       }
+      show({ ...o, state: step.state, posted: true });
+      void props.act(["owner", "answer", plain(o.ask.id), post]).then((said) => {
+        const now = openRef.current;
+        if (now) show({ ...now, state: { ...now.state, said: said.trim() || "Done." } });
+      });
       return;
     }
     const next = snap === undefined ? null : filterKey(filter, input, key);
@@ -147,7 +161,7 @@ export function NeedsView(props: NeedsProps): ReactElement {
     else if (input === "r") reload();
     else if (key.return) {
       const n = needsOf(snap, filter.typed)[Math.min(selected, Math.max(count - 1, 0))];
-      if (n?.kind === "owner-ask") setOpen({ ask: n, state: NEW_ASK, posted: false });
+      if (n?.kind === "owner-ask") show({ ask: n, state: NEW_ASK, posted: false });
     }
   });
   const lines = open ? askLines(open.ask, open.state, props.cols, props.rows, props.repo)

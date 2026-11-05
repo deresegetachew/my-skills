@@ -219,6 +219,19 @@ test("factory owner stop ends a loop that runs outside tmux, by its claim", asyn
   expect(ended).toBe(true);
 });
 
+test("factory owner stop leaves alone a pid claimed under another host name", async () => {
+  const [d, work, env] = project();
+  writeExe(join(d, "bin", "tmux"), FAKE_TMUX);
+  const loop = startLoop();
+  write(join(work, ".git", "factory", "claims.json"), JSON.stringify({ checkouts: { menelik: { agent: "menelik", pid: loop.pid,
+    host: "another-mac", at: Date.now() / 1000, path: work } }, tasks: {} }));
+  const p = ownerStop(work, env, "menelik");
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("is not running on this machine");
+  const ended = await Promise.race([loop.exited.then(() => true), Bun.sleep(1000).then(() => false)]);
+  expect(ended).toBe(false);
+});
+
 test("factory owner stop with no session and no live loop stops nothing", () => {
   const [d, work, env] = project();
   writeExe(join(d, "bin", "tmux"), FAKE_TMUX);

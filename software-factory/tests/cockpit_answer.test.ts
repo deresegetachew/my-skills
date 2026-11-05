@@ -5,6 +5,7 @@ import { expect, test } from "bun:test";
 import { symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { drawNeeds, type NeedsProps } from "../cockpit/testing.tsx";
+import { approvals } from "../hooks/factory_flow.ts";
 import { envWith, gitRepo, HOOKS, type Proc, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 type Obj = Record<string, unknown>;
@@ -167,6 +168,14 @@ function prsJson(comments: string[]): Obj[] {
 test("factory prs --json gives each owner ask its words, without the markers", () => {
   const asks = prsJson(["<!-- factory-owner-ask id=palette -->\nWhich palette?\n\n- Warm\n- Cool\n"]);
   expect(asks[0]?.text).toBe("Which palette?\n\n- Warm\n- Cool");
+});
+
+test("a talk's summary is not the owner's reply to a stage ask either, even when it says yes", () => {
+  const owner = { login: "owner" };
+  const state = approvals([{ body: "<!-- factory-owner-ask id=stage-prd -->\nPlease approve the PRD.", user: owner },
+    { body: "<!-- factory-cockpit-chat role=dev-manager -->\nyes, the owner talked to the dev manager", user: owner }],
+  new Set(["owner"]));
+  expect(state).toEqual({ prd: "asked" });
 });
 
 test("a talk's summary on the owner queue is not the owner's answer to the ask above it", () => {

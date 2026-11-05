@@ -1073,6 +1073,8 @@ const CHAT_ROLES = ["dev-manager", "product-owner"];
 const ANSWER_MAX = 6000; // what the pane shows of one answer
 const SUMMARY_MAX = 1500; // what the owner queue gets of it
 const CHAT_MINUTES = 15;
+const CHAT_MAX_MINUTES = 19;
+const CHAT_TURNS = 10; // the turns of the conversation so far that go in the prompt
 
 type Turn = { who: "owner" | "role"; text: string };
 
@@ -1108,7 +1110,7 @@ function turnsOf(json: string | undefined): Turn[] {
   } catch {
     refuse("cockpit_usage", "The conversation so far isn't JSON.", "The talk pane passes it; to talk, run `factory cockpit --chat <role>`.", 2);
   }
-  return list(data).map((t): Turn => ({ who: t.who === "role" ? "role" : "owner", text: str(t.text) }));
+  return list(data).map((t): Turn => ({ who: t.who === "role" ? "role" : "owner", text: str(t.text) })).slice(-CHAT_TURNS);
 }
 
 /** The turn's prompt: who it is, the rules it acts within, the conversation so far and the owner's line. */
@@ -1131,9 +1133,11 @@ function chatPrompt(role: string, name: string, text: string, history: Turn[]): 
   ].filter(Boolean).join("\n\n");
 }
 
-/** The summary posted on the owner queue: marked, so no reader takes it for the owner's answer to an ask. */
+/** The summary posted on the owner queue: marked, so no reader takes it for the owner's answer to an ask. It goes out
+ *  with the owner's login, so a marker in the owner's line or the role's answer (`<!-- factory-owner-ask ...`) is broken
+ *  (`&lt;!--`, which GitHub still shows as `<!--`): only the summary's own marker is read. */
 function summaryBody(role: string, name: string, text: string, answer: string): string {
-  const cut = (s: string) => (s.length > SUMMARY_MAX ? `${s.slice(0, SUMMARY_MAX)}…` : s);
+  const cut = (s: string) => (s.length > SUMMARY_MAX ? `${s.slice(0, SUMMARY_MAX)}…` : s).replace(/<!--/g, "&lt;!--");
   return `<!-- factory-cockpit-chat role=${role} -->\nThe owner talked to the ${need(role).title} (${name}) in the cockpit. ` +
     `A summary for the next pass; it answers no ask.\n\n**Owner:** ${cut(text)}\n\n**${name}:** ${cut(answer)}`;
 }
@@ -1158,7 +1162,8 @@ export function chatSend(args: string[]): number {
   const history = turnsOf(args[2]);
   const cfg = load();
   const name = chatName(role);
-  const minutes = toFloat(process.env.FACTORY_CHAT_MINUTES) ?? CHAT_MINUTES;
+  // the pane waits 20 minutes for an answer (cockpit/ui.tsx): a session never runs past it, so none posts after it gave up
+  const minutes = Math.min(Math.max(toFloat(process.env.FACTORY_CHAT_MINUTES) ?? CHAT_MINUTES, 1), CHAT_MAX_MINUTES);
   const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: role, FACTORY_LOOP: "1" };
   const p = run(["claude", ...sessionFlags(cfg, role), ...permissionFlags(cfg), "-p", chatPrompt(role, name, text, history)],
     { env, timeoutMs: minutes * 60_000 });

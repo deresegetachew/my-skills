@@ -24,7 +24,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
-import { alive as claimAlive, type Claims, stateDir as claimsDir } from "./factory_claims.ts";
+import { alive as claimAlive, type Claims, HOST, isLoop, stateDir as claimsDir } from "./factory_claims.ts";
 import { type Config, load, loadFromMain, toFloat } from "./factory_config.ts";
 import { processes } from "./factory_heartbeat.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
@@ -329,11 +329,17 @@ function loopPid(name: string): number | null {
     return null;
   }
   const claim = data.checkouts?.[name];
-  return claim && claimAlive(claim, toFloat(load().claimStaleHours ?? 6) ?? 6, true) ? Math.trunc(Number(claim.pid)) : null;
+  // only a claim made here: one from another host (or this one under an old name) holds a pid of another machine
+  if (!claim || claim.host !== HOST) return null;
+  return claimAlive(claim, toFloat(load().claimStaleHours ?? 6) ?? 6, true) ? Math.trunc(Number(claim.pid)) : null;
 }
 
 /** Ends a loop that runs outside tmux (nohup, a plain terminal): what runs below it, then the loop itself. */
 function stopProcess(name: string, pid: number): void {
+  if (!isLoop(pid)) { // it ended, and the number went to another program, since the claim was read
+    console.log(`${name} is not running on this machine any more; nothing to stop.`);
+    return;
+  }
   const procs = processes();
   const below: number[] = [];
   const queue = [pid];
