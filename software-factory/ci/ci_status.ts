@@ -205,6 +205,7 @@ function statusJson(a: Args, now: number): Row {
     latestRuns = [...latestPerBranch(workflowRuns, branches)].map(([b, r]) => ({
       ref: branches.get(b) as string, branch: b, state: String(r.conclusion || r.status), name: String(r.name ?? ""),
       createdAt: String(r.created_at), minutesAgo: minutesSince(when(r.created_at), now),
+      ...(typeof r.id === "number" ? { id: r.id } : {}), // the cockpit's Enter and R name the run by it (#396)
     }));
     const old = queuedLong(workflowRuns, now);
     const online = mine === null ? null : mine.filter((x) => x.status === "online");

@@ -10,7 +10,7 @@ import { type ChatProps, type ChatReply, ChatView, type Turn } from "./views/cha
 import { type SearchProps, SearchView } from "./search.tsx";
 import { type Actions, type Data, Sidebar } from "./sidebar.tsx";
 import { agentsLines } from "./views/agents.tsx";
-import { ciLines, type Heavy } from "./views/ci.tsx";
+import { ciLines, CiView, type Heavy } from "./views/ci.tsx";
 import { DocView } from "./views/doc.tsx";
 import { healthLines } from "./views/health.tsx";
 import type { Line } from "./views/lines.tsx";
@@ -117,6 +117,30 @@ export function drawDoc(name: DocName, o: DocOpts): Drawn {
   };
   return draw(<DocView cols={o.cols} rows={o.rows} color={o.color} data={o.data} draw={lines[name]} load={o.load} find={o.find} />,
     o.cols, o.color);
+}
+
+export interface CiOpts {
+  cols: number;
+  rows: number;
+  color: boolean;
+  /** The snapshot it opens on; undefined: it reads first. */
+  data?: Got;
+  load: () => Promise<Got>;
+  host?: string;
+  heavy?: Heavy | null;
+  /** The light lane setting (`ci.light`); default on. */
+  light?: boolean | null;
+  now?: number;
+  /** Runs an action's steps (a factory step starts with "factory") and gives the output to show. */
+  run: (steps: string[][]) => Promise<string>;
+}
+
+/** The CI view on a terminal, with its keys (#396). */
+export function drawCi(o: CiOpts): Drawn {
+  const x = { heavy: o.heavy === undefined ? { raw: "2", source: "this machine" } : o.heavy, host: o.host ?? "dev-pc",
+    light: o.light === undefined ? true : o.light };
+  return draw(<CiView cols={o.cols} rows={o.rows} color={o.color} data={o.data} load={o.load} x={x} run={o.run}
+    now={() => o.now ?? Date.now()} />, o.cols, o.color);
 }
 
 export interface SidebarRun {
