@@ -176,6 +176,10 @@ Check
   turbo install [--no-github]
                          start the cache server on this machine (Docker) and give CI the same cache (repo variables
                          and secrets); run it again to update. turbo down [--purge] stops it
+  nats up [--leaf HUB_ADDRESS[:PORT] | --hub] [--address ADDRESS]
+                         start this machine's NATS server for agent messages (decision 0004; Docker, restarts with it),
+                         listening on the Tailscale address only: the hub holds JetStream, a leaf connects to the hub.
+                         Safe to run again. nats down stops it (its data is kept); nats status says if it answers
   doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
                          of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user
@@ -405,6 +409,7 @@ case "$cmd" in
   signoff)   fh "$hooks/factory_signoff" "$@" ;;
   manage-tick) fh "$hooks/factory_tick" "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
+  nats)      fh "$hooks/factory_nats" "${1:-status}" "${@:2}" ;;
   version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).

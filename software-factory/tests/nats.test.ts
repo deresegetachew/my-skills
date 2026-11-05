@@ -6,7 +6,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, readdirSync, statSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { doctor, lines, machine, project as doctorProject } from "./doctor_support.ts";
-import { read, runHook, sh, type Proc, tmp, write, writeExe } from "./support.ts";
+import { read, readmeAndWiki, runHook, SF, sh, type Proc, tmp, write, writeExe } from "./support.ts";
 
 const INFO = '{"server_id":"x","version":"2.10.22","jetstream":true,"max_payload":1048576}';
 const SERVER = String.raw`import { writeFileSync } from "node:fs";
@@ -355,6 +355,20 @@ test("an unknown subcommand prints usage on stderr and exits 2", () => {
   const p = nats(r, ["frobnicate"]);
   expect(p.code).toBe(2);
   expect(p.stderr).toMatch(/usage/i);
+});
+
+test("factory nats runs the hook (status by default), and factory help and the commands page list it", () => {
+  const r = rig();
+  symlinkSync(join(SF, "hooks"), join(r.dir, ".claude", "hooks"));
+  const p = sh(["bash", join(SF, "factory"), "nats"], { cwd: r.dir, env: { ...r.env, PATH: `${r.bin}:${process.env.PATH}` } });
+  expect(p.out).toMatch(/no NATS server is set up here/i);
+  const help = sh(["bash", join(SF, "factory"), "help"], { cwd: r.dir }).stdout;
+  expect(help).toContain("nats up [--leaf HUB_ADDRESS[:PORT] | --hub] [--address ADDRESS]");
+  expect(help).toContain("nats down");
+  expect(help).toContain("nats status");
+  const docs = readmeAndWiki();
+  for (const c of ["`factory nats up [--leaf HUB_ADDRESS[:PORT] \\| --hub] [--address ADDRESS]`", "`factory nats down`",
+    "`factory nats status`"]) expect(docs).toContain(c);
 });
 
 // ---------- doctor ----------
