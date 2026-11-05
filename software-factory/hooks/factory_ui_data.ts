@@ -216,7 +216,7 @@ function hooksOf(p: UiProject): string {
 }
 
 /** The environment a project's commands run in: this one, minus what would point them at another project. */
-function envFor(p: UiProject): Record<string, string> {
+export function envFor(p: UiProject): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
   for (const k of ["FACTORY_AGENT", "FACTORY_LOOP", "FACTORY_ROLE"]) delete env[k];
@@ -224,13 +224,13 @@ function envFor(p: UiProject): Record<string, string> {
   return env;
 }
 
-interface Ran {
+export interface Ran {
   code: number;
   stdout: string;
   stderr: string;
 }
 
-async function spawn(cmd: string[], cwd: string, env: Record<string, string>, ms: number): Promise<Ran> {
+export async function spawn(cmd: string[], cwd: string, env: Record<string, string>, ms: number): Promise<Ran> {
   try {
     const proc = Bun.spawn(cmd, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => proc.kill(), ms);
@@ -243,7 +243,7 @@ async function spawn(cmd: string[], cwd: string, env: Record<string, string>, ms
 }
 
 /** This project's state folder: `$XDG_STATE_HOME/<repo>-factory` (factory_machine.ts), worked out for its path. */
-function stateDirOf(p: UiProject): string {
+export function stateDirOf(p: UiProject): string {
   const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
   return join(base, `${repoName(p.path)}-factory`);
 }
@@ -360,7 +360,7 @@ export interface ActionResult {
 }
 
 /** The factory script of project `p`: for this project the one that started `factory ui` (FACTORY_SELF), else its own. */
-function factoryScript(p: UiProject): string {
+export function factoryScript(p: UiProject): string {
   const self = process.env.FACTORY_SELF;
   return p.current && self && existsSync(self) ? self : join(p.path, "factory");
 }
