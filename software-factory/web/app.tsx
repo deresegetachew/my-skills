@@ -10,6 +10,8 @@ import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
   type Tone } from "./model.ts";
 import { CSS } from "./style.ts";
+import { CiChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
+import { searchRows, type ViewsData } from "./views_model.ts";
 
 // --- the API's shapes --------------------------------------------------------------------------------------------------
 
@@ -275,6 +277,9 @@ function ComingChannel({ name }: { name: string }) {
   );
 }
 
+/** The views that are channels of their own (#424, web/views.tsx). */
+const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel, "pull-requests": PullsChannel, ci: CiChannel };
+
 // --- the app -----------------------------------------------------------------------------------------------------------
 
 function Gate({ onToken, wrong }: { onToken: (t: string) => void; wrong: boolean }) {
@@ -298,6 +303,8 @@ function App() {
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [channelsBy, setChannelsBy] = useState<Record<string, ChannelView[]>>({});
   const [liveBy, setLiveBy] = useState<Record<string, Live>>({});
+  const [viewsBy, setViewsBy] = useState<Record<string, ViewsData>>({}); // tasks, pull requests, CI (#424)
+  const [find, setFind] = useState(""); // the filter a view channel opens with (the search's row, #392)
   const [conn, setConn] = useState<Conn>("connecting");
   const [route, setRoute] = useState(() => parseHash(location.hash));
   const [query, setQuery] = useState("");
@@ -355,6 +362,10 @@ function App() {
           const { type: _t, project, ...data } = m;
           setLiveBy((before) => ({ ...before, [project as string]: data }));
         }
+        if (m.type === "views" && m.project) {
+          const { type: _t, project, ...data } = m as unknown as { type: string; project: string } & ViewsData;
+          setViewsBy((before) => ({ ...before, [project]: data }));
+        }
       };
       ws.onclose = () => {
         if (stopped) return;
@@ -370,6 +381,16 @@ function App() {
       ws?.close();
     };
   }, [token]);
+
+  // a view channel (#424) opened before the WebSocket sent its data: read it through the API
+  const viewProject = route && VIEW_CHANNELS[route.channel.replace(/^view:/, "")] ? route.project : null;
+  const haveViews = viewProject !== null && viewProject in viewsBy;
+  useEffect(() => {
+    if (!token || viewProject === null || haveViews) return;
+    loadViews((path) => call<Record<string, unknown>>(token, path), viewProject)
+      .then((v) => setViewsBy((before) => (viewProject in before ? before : { ...before, [viewProject]: v })))
+      .catch(signedOut);
+  }, [token, viewProject, haveViews, signedOut]);
 
   useEffect(() => {
     const onHash = (): void => setRoute(parseHash(location.hash));
@@ -406,6 +427,7 @@ function App() {
   const liveWords = useMemo(() => Object.fromEntries(Object.entries(liveBy).map(([p, l]) =>
     [p, Object.fromEntries(l.agents.map((a) => [a.name, `${a.state} ${a.detail}`]))])), [liveBy]);
   const hits = useMemo(() => searchChannels(views, query, liveWords), [views, query, liveWords]);
+  const rowHits = useMemo(() => searchRows(projects ?? [], viewsBy, query), [projects, viewsBy, query]);
 
   if (!token) return <Gate wrong={wrong} onToken={(t) => { keepToken(t); setWrong(false); setToken(t); }} />;
   if (!projects) return <main className="gate"><p>Loading…</p></main>;
@@ -415,7 +437,8 @@ function App() {
   const channel = view.channels.find((c) => c.id === route?.channel) ?? view.channels[0];
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
-  const go = (p: string, c: string): void => {
+  const go = (p: string, c: string, f = ""): void => {
+    setFind(f);
     location.hash = channelHash(p, c);
     setMenu(false);
     setQuery("");
@@ -436,6 +459,20 @@ function App() {
       setBusy(false);
       setAsk(null);
     }
+  };
+
+  const post = async (path: string, body: unknown): Promise<Record<string, unknown>> => {
+    try {
+      return await call<Record<string, unknown>>(token, path, { method: "POST", body });
+    } catch (e) {
+      signedOut(e);
+      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: "Is `factory ui` still running?" };
+    }
+  };
+  const viewChannel = (name: string) => {
+    const View = VIEW_CHANNELS[name] as (typeof VIEW_CHANNELS)[string];
+    return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast}
+      open={(c, f) => go(project.id, c, f)} />;
   };
 
   const sideAgent = (c: ChannelView) => {
@@ -478,7 +515,9 @@ function App() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               const first = hits[0];
+              const row = rowHits[0];
               if (e.key === "Enter" && first) go(first.project, first.channel.id);
+              else if (e.key === "Enter" && row) go(row.project, row.channel, row.find);
               if (e.key === "Escape") setQuery("");
             }} />
           {!query && <kbd>/</kbd>}
@@ -486,11 +525,18 @@ function App() {
         <div className="channels">
           {query ? (
             <div className="section">
-              <h2>{hits.length ? `${hits.length} match${hits.length > 1 ? "es" : ""}` : `No match for "${query}"`}</h2>
+              <h2>{hits.length + rowHits.length ? `${hits.length + rowHits.length} match${hits.length + rowHits.length > 1 ? "es" : ""}` : `No match for "${query}"`}</h2>
               {hits.map((h) => (
                 <button key={`${h.project}/${h.channel.id}`} className="chan" onClick={() => go(h.project, h.channel.id)}>
                   <span className="hash">#</span>
                   <span className="name">{h.channel.title}<span className="sub">{h.projectName}{h.channel.role ? ` · ${ROLE_TITLE[h.channel.role] ?? h.channel.role}` : ""}</span></span>
+                </button>
+              ))}
+              {rowHits.length > 0 && <h2>In the views</h2>}
+              {rowHits.map((h, i) => (
+                <button key={`${h.project}/${h.channel}/${h.find}/${i}`} className="chan" onClick={() => go(h.project, h.channel, h.find)}>
+                  <span className="hash">›</span>
+                  <span className="name">{h.title}<span className="sub">{h.view} · {h.projectName}{h.detail ? ` · ${h.detail}` : ""}</span></span>
                 </button>
               ))}
             </div>
@@ -529,6 +575,7 @@ function App() {
           : !channel ? <div className="body"><p className="empty">This project has no channels.</p></div>
           : channel.kind === "agent" ? <AgentChannel agent={agent} channel={channel} live={live} project={project} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} />
+          : VIEW_CHANNELS[channel.name] ? viewChannel(channel.name)
           : <ComingChannel name={channel.name} />}
       </main>
       {ask && (
@@ -558,6 +605,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = CSS;
+style.textContent = CSS + VIEWS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);
