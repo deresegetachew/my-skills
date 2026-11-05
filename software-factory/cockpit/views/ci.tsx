@@ -11,6 +11,14 @@ import { type ReactElement, useState } from "react";
 import { type Line, list, obj, type Obj, plain, seg, type Style } from "./lines.tsx";
 import { type Card, cards, clip, type DocAction, DocView, heading, padStr, para } from "./doc.tsx";
 import type { Got } from "./read.ts";
+import { ACTIVE, type CiActionName, ciActionOf, ciVerdict as verdictOf, machineOf, orderedRuns, plural, waitingPulls } from "../../hooks/factory_ci_view.ts";
+
+export { machineOf, orderedRuns, plural };
+
+/** What CI is doing, in one line, and its style (factory_ci_view.ts judges it, for the web UI too). */
+export function ciVerdict(ci: Obj): [string, Style] {
+  return verdictOf(ci);
+}
 
 /** This machine's heavy runner setting (`ci.runners`), as the hook read it; null when factory.json can't be read. */
 export interface Heavy {
@@ -41,10 +49,6 @@ function len(s: string): number {
 export function minutesText(minutes: number): string {
   const m = Math.max(Math.floor(minutes), 0);
   return m < 120 ? `${m} min` : m < 2880 ? `${Math.floor(m / 60)} h` : `${Math.floor(m / 1440)} d`;
-}
-
-export function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 function whereJobsRun(ci: Obj): Card {
@@ -88,13 +92,6 @@ function leftovers(ci: Obj): Card {
 
 const GLYPH: Record<string, [string, Style]> = { working: ["●", "blue"], idle: ["○", "dim"], down: ["✕", "red"] };
 
-/** The machine a runner registered from: its name is `<repo>-ci-<machine>[.<instance>]-<n>` (ci/loop.sh). */
-export function machineOf(name: string, repo: string): string {
-  const prefix = `${repo.split("/")[1] ?? ""}-ci-`.toLowerCase();
-  const rest = prefix !== "-ci-" && name.startsWith(prefix) ? name.slice(prefix.length) : (/-ci-(.+)$/.exec(name)?.[1] ?? "");
-  return rest.replace(/-\d+$/, "").replace(/\.[^.]*$/, "") || "unknown machine";
-}
-
 function runners(ci: Obj, x: CiExtra, w: number): Line[] {
   const heavy = listOrNull(ci.runners);
   if (heavy === null) return [[seg("The runners can't be read: see below.", "dim")]];
@@ -127,59 +124,11 @@ function runners(ci: Obj, x: CiExtra, w: number): Line[] {
   return out;
 }
 
-const ACTIVE = ["queued", "in_progress", "waiting", "pending", "requested"];
-const QUEUED = ["queued", "waiting", "pending", "requested"];
-const FAILED = ["failure", "timed_out", "cancelled", "startup_failure"];
 const RUN_STYLE: Record<string, Style> = { queued: "amber", waiting: "amber", pending: "amber", requested: "amber",
   running: "blue", success: "green", skipped: "dim", neutral: "dim" };
 
-/** The runs as the view lists them: those still going, oldest first, then the finished ones, newest first. */
-export function orderedRuns(ci: Obj): Obj[] {
-  const all = listOrNull(ci.runs) ?? [];
-  const active = all.filter((r) => ACTIVE.includes(plain(r.state))).sort((a, b) => num(b.minutesAgo) - num(a.minutesAgo));
-  const done = all.filter((r) => !ACTIVE.includes(plain(r.state))).sort((a, b) => num(a.minutesAgo) - num(b.minutesAgo));
-  return [...active, ...done];
-}
-
-/** The pull requests whose run is queued or running, one each, oldest first. */
-function waitingPulls(ci: Obj): Obj[] {
-  const seen = new Set<string>();
-  return orderedRuns(ci).filter((r) => {
-    const ref = plain(r.ref);
-    if (!/^#\d+$/.test(ref) || !ACTIVE.includes(plain(r.state)) || seen.has(ref)) return false;
-    seen.add(ref);
-    return true;
-  });
-}
-
 function stateWord(r: Obj): string {
   return plain(r.state) === "in_progress" ? "running" : plain(r.state);
-}
-
-/** What CI is doing, in one line, and its colour: stuck, busy, slow, fine, or what can't be told. */
-export function ciVerdict(ci: Obj): [string, Style] {
-  const queued = (listOrNull(ci.runs) ?? []).filter((r) => QUEUED.includes(plain(r.state))).length;
-  const q = queued ? `${plural(queued, "run")} queued` : "nothing queued";
-  const mode = plain(ci.mode);
-  if (mode === "github") {
-    const long = obj(ci.queuedLong);
-    if (num(long.count)) return [`CI is slow: ${plural(num(long.count), "run")} queued over ${num(long.thresholdMinutes)} min on GitHub's runners`, "amber"];
-    return [`CI is fine: on GitHub's runners, ${q}`, "green"];
-  }
-  if (mode !== "local") return ["CI is unknown: gh can't read CI_RUNS_ON", "amber"];
-  const heavy = listOrNull(ci.runners);
-  if (heavy === null) return ["CI can't be judged: the runners can't be read", "amber"];
-  const online = heavy.filter((r) => plain(r.status) === "online");
-  if (!online.length) {
-    const n = waitingPulls(ci).length;
-    const prs = n === 0 ? "no PR is waiting" : n === 1 ? "1 PR is waiting" : `${n} PRs are waiting`;
-    return [`CI is stuck: no runner online for ${plain(ci.label)}; ${prs}`, "red"];
-  }
-  if (online.every((r) => r.busy === true)) {
-    const all = online.length === 1 ? "the one runner online is running a job" : `all ${online.length} runners online are running jobs`;
-    return [`CI is busy: ${all}; ${q}`, "amber"];
-  }
-  return [`CI is fine: ${plural(online.length, "runner")} online, ${q}`, "green"];
 }
 
 function waiting(ci: Obj, w: number): Line[] {
@@ -278,69 +227,17 @@ export function ciLines(snap: Got | undefined, x: CiExtra, w: number, nowMs: num
 export const CI_KEYS = "j k scroll · Tab run · Enter log · R rerun · i install · l g local/GitHub · + - runners · " +
   "L light lane · c clean · r read again · q close";
 
-const MOST_RUNNERS = 16;
-
-function ask(steps: string[][], does: string): DocAction {
-  return { kind: "ask", steps, does };
-}
-
-function note(text: string): DocAction {
-  return { kind: "note", text };
-}
-
-function scale(x: CiExtra, by: number): DocAction {
-  const raw = plain(x.heavy?.raw);
-  if (!x.heavy || !/^\d+$/.test(raw)) {
-    return note("The heavy runner count can't be read here: `factory ci runners` says what it is and where it comes from.");
-  }
-  const n = Number(raw) + by;
-  if (n > MOST_RUNNERS) return note(`${MOST_RUNNERS} heavy runners is the most: \`factory ci runners\` takes 1 to ${MOST_RUNNERS}.`);
-  if (n < 1) return note(`1 heavy runner is the fewest: \`factory ci runners\` takes 1 to ${MOST_RUNNERS}.`);
-  return ask([["factory", "ci", "runners", String(n)]],
-    `saves ${plural(n, "heavy runner")} for this project on this machine (not committed) and reinstalls them`);
-}
-
-function lightLane(x: CiExtra): DocAction {
-  if (typeof x.light !== "boolean") return note("The light lane setting (ci.light) can't be read: `factory settings get ci.light` shows why.");
-  const turn = x.light ? "off" : "on";
-  return ask([["factory", "settings", "set", "--stage", "ci.light", String(!x.light)], ["factory", "settings", "pr"]],
-    `turns the light lane ${turn}: .claude/factory.json is protected, so it changes it through a pull request, never on ` +
-    "main; that pull request carries any other setting changes you staged too (factory settings diff --staged lists them)");
-}
-
-function runLog(r: Obj | undefined): DocAction {
-  if (!r) return note("There is no run to open: press r to read the snapshot again.");
-  const ref = plain(r.ref);
-  if (/^#\d+$/.test(ref)) return { kind: "open", steps: [["factory", "ci", "log", ref.slice(1)]] };
-  if (typeof r.id === "number") return { kind: "open", steps: [["factory", "ci", "log", String(r.id)]] };
-  return note("This run has no id to open its log by: press r to read the snapshot again.");
-}
-
-function rerun(r: Obj | undefined, repo: string): DocAction {
-  if (!r || !FAILED.includes(plain(r.state))) return note("Only a failed run can be rerun: Tab picks one.");
-  if (typeof r.id !== "number" || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
-    return note("This run has no id to rerun it by: press r to read the snapshot again.");
-  }
-  return ask([["gh", "run", "rerun", String(r.id), "--failed", "--repo", repo]], "reruns that run's failed jobs on GitHub");
-}
+const KEY_ACTIONS: Record<string, CiActionName> = { i: "install", l: "use-local", g: "use-github", "+": "runners-up", "-": "runners-down",
+  L: "light-lane", c: "clean", R: "rerun" };
 
 /** What a key does in the CI view: a question, a log to open, a note, or null when the key is not the view's. */
 export function ciAction(input: string, key: Key, snap: Got, x: CiExtra, selected: number): DocAction | null {
   const ci = ciOf(snap);
   if (ci === null) return null;
   const run = orderedRuns(ci)[selected];
-  if (key.return) return runLog(run);
-  switch (input) {
-    case "i": return ask([["factory", "ci", "install"]], "installs or reinstalls this machine's runners for this project");
-    case "l": return ask([["factory", "ci", "use", "local"]], "sends CI jobs to the self-hosted runners (the repository's CI_RUNS_ON)");
-    case "g": return ask([["factory", "ci", "use", "github"]], "sends CI jobs to GitHub's runners (the repository's CI_RUNS_ON)");
-    case "+": return scale(x, 1);
-    case "-": return scale(x, -1);
-    case "L": return lightLane(x);
-    case "c": return ask([["factory", "ci", "clean", "--apply"]], "removes this project's offline idle runners and exited CI containers");
-    case "R": return rerun(run, plain(ci.repo));
-    default: return null;
-  }
+  if (key.return) return ciActionOf("log", ci, x, run);
+  const name = KEY_ACTIONS[input];
+  return name ? ciActionOf(name, ci, x, run) : null;
 }
 
 export interface CiProps {

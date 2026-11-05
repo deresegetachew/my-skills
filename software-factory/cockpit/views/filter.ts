@@ -5,11 +5,8 @@
 import type { Key } from "ink";
 import { type Line, plain, seg } from "./lines.tsx";
 
-/** True when every word of `typed` is in `text`, in any case; nothing typed matches everything. */
-export function matchesTyped(text: string, typed: string): boolean {
-  const hay = text.toLowerCase();
-  return typed.toLowerCase().split(/\s+/).filter(Boolean).every((w) => hay.includes(w));
-}
+/** True when every word of `typed` is in `text`, in any case (factory_cockpit_match.ts, shared with the web UI). */
+export { matchesTyped } from "../../hooks/factory_cockpit_match.ts";
 
 export interface Filter {
   typed: string;
