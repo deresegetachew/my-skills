@@ -16,7 +16,8 @@
 // task, on, since, lastSeen, follow, session, activity, machine (the id), machineName (`machines.<id>.name` in
 // factory.json, else the hostname, which another machine posts only with tasks.showWhere, else the id; #383), source
 // (local or github) and expected: this machine's names file (or FACTORY_AGENTS) names it, so the cockpit lists it even
-// when it is down (#366).
+// when it is down (#366); runs, how it runs (tmux, nohup, cloud, or "" when not known), and log, the file a loop
+// outside tmux writes to (#395).
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -56,6 +57,10 @@ export interface LsRow {
   machineName: string | null;
   source: string;
   expected: boolean;
+  /** How it runs (#395): tmux, nohup (a live loop outside tmux), cloud, or "" when unknown or down. */
+  runs: string;
+  /** The file a loop outside tmux writes to, on this machine; null when unknown. */
+  log: string | null;
 }
 
 /** The name to show for machine `id` (#383): `machines.<id>.name` in factory.json, else the hostname it posted (only
@@ -88,7 +93,7 @@ function localRows(cfg: Config): [LsRow[], DaemonInfo] {
     rows.push({ name, kind: kindText(r.kind), where: "this machine", state: r.state, detail: r.detail || r.state,
       task: r.task ?? null, on: r.on ?? null, since: r.since ?? null, lastSeen: r.state !== "down" ? iso(seen) : null,
       follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: mine, machineName: myName,
-      source: "local", expected: names.includes(name) });
+      source: "local", expected: names.includes(name), runs: r.runs ?? "", log: r.log ?? null });
   }
   return [rows, { running: fresh, updated: Object.keys(data).length ? iso(data.updated as number | undefined) : null,
     errors: fresh ? ((data.errors as string[] | undefined) || []) : [] }];
@@ -171,7 +176,8 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
     rows.push({ name, kind: kindText(kind), where, state, detail: state !== "silent" ? detail : `${detail} (no keepalive)`,
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
       session: f.session ?? null, activity: null, machine,
-      machineName: cloud ? "cloud" : nameOf(cfg, machine, f.where || null), source: "github", expected: false });
+      machineName: cloud ? "cloud" : nameOf(cfg, machine, f.where || null), source: "github", expected: false,
+      runs: cloud ? "cloud" : f.runs || (f.session ? "tmux" : ""), log: null });
   }
   return rows;
 }

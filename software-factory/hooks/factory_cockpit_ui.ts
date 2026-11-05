@@ -16,7 +16,8 @@
 //                                session s says, x stops it, n starts one (the bar, with the action typed in). On Ink
 //                                (#366, cockpit/sidebar.tsx) when its UI is installed, else drawn here
 //   factory cockpit --sidebar-data
-//                                what the Ink list draws: the cached snapshot, the views, the new asks to ring for
+//                                what the Ink list draws: the cached snapshot, the views, the talks with a role
+//                                (`talks`, #395: 9 and 0), the new asks to ring for
 //   factory cockpit --sidebar-open session <name> | view <key> | bar [<words>] | leave
 //                                a key of the Ink list, done in the cockpit's tmux
 //   factory cockpit --bar [<words>]
@@ -32,7 +33,10 @@
 //                                what the search looks through, as JSON: the cache, the settings, the usage and lessons
 //   --find <text>                after --needs, --tasks, --ci, --agents, --settings, --health or --usage: the view opens
 //                                on that row (an ask's id, a task's number) or line
-//   factory cockpit --needs      the "Needs you" view, from the cache
+//   factory cockpit --chat <dev-manager|product-owner>
+//                                talk to that role (#395; views 9 and 0, or Enter on it in the list); `--chat-send` sends
+//                                one line of it (see the section at the end)
+//   factory cockpit --needs      the "Needs you" view, from the cache; Enter on an owner ask answers it in place (#395)
 //   factory cockpit --prs [<n>]  the Pull requests view (#338), from `factory prs --json`
 //   factory cockpit --prs-data [--fresh]
 //                                what the Pull requests view reads: `factory prs --json`, and when GitHub's limit stopped
@@ -50,7 +54,10 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { homedir, hostname } from "node:os";
 import { basename, join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
-import { load, taskSource } from "./factory_config.ts";
+import { load, roleNames, taskSource, toFloat } from "./factory_config.ts";
+import { gh } from "./factory_issues.ts";
+import { ownerQueue } from "./factory_orchestrator.ts";
+import { contextLine, MARK, need, permissionFlags, sessionFlags } from "./factory_roles.ts";
 import { ACTION_NAMES, ACTIONS_OFFERED, matches, OFFERED, rank } from "./factory_cockpit_match.ts";
 import { inkUi, LIMITED, limitSentence, readCache, refreshIfOld, runUi, UI_MISSING, uiPackagesProblem } from "./factory_cockpit.ts";
 import { run, which } from "./factory_lib.ts";
@@ -106,6 +113,19 @@ export function views(): View[] {
     { key: "7", title: "Health & releases", commands: [["cockpit", "--health"]], live: true },
     { key: "8", title: "Usage & lessons", commands: [["cockpit", "--usage"]], live: true },
   ];
+}
+
+/** The talks with a role (#395), listed after the views and opened the same way (9, 0, or Enter on that role). */
+export function talks(): View[] {
+  return [
+    { key: "9", title: "Talk to the dev manager", commands: [["cockpit", "--chat", "dev-manager"]], live: true },
+    { key: "0", title: "Talk to the product owner", commands: [["cockpit", "--chat", "product-owner"]], live: true },
+  ];
+}
+
+/** Every popup the list opens: the views, then the talks. */
+function popups(): View[] {
+  return [...views(), ...talks()];
 }
 
 export { ACTIONS_OFFERED, matches, OFFERED, rank };
@@ -241,7 +261,7 @@ export function config(root: string, script: string): string {
     `bind / ${popup("-w 90% -h 90%", factoryCall(script, ["cockpit", "--search"]))}`,
     "# The views, as popups running the existing commands through less -R (q closes).",
   ];
-  for (const v of views()) {
+  for (const v of popups()) {
     lines.push(`# ${v.key} ${v.title}`, `bind ${v.key} ${popup("-w 90% -h 90%", viewCommand(script, v))}`);
   }
   const status = `cd ${dq(root)} && ${factoryCall(script, ["cockpit", "--status"])}`;
@@ -262,7 +282,7 @@ export function config(root: string, script: string): string {
     "set -g visual-bell off",
     "set -g pane-border-status bottom",
     "set -g pane-border-format '#{?#{==:#{pane_index},0}, the list ,"
-      + " C-a C-a the list · C-a : commands · C-a / search · C-a 1-8 views · C-a d leave }'",
+      + " C-a C-a the list · C-a : commands · C-a / search · C-a 0-9 views · C-a d leave }'",
   );
   return lines.join("\n") + "\n";
 }
@@ -450,7 +470,7 @@ function sidebarOnce(): number {
   const cols = Number(process.env.COLUMNS) || 32;
   const rows = Number(process.env.LINES) || 30;
   const snap = readCache();
-  console.log(BEL.repeat(newAsks(snap)) + frame(snap, views(), 0, cols, rows, false).join("\n"));
+  console.log(BEL.repeat(newAsks(snap)) + frame(snap, popups(), 0, cols, rows, false).join("\n"));
   return 0;
 }
 
@@ -495,7 +515,7 @@ function showSession(p: Pane, name: string): void {
 
 async function sidebarLoop(): Promise<number> {
   const p = pane();
-  const vs = views();
+  const vs = popups();
   let snap = readCache();
   let selected = 0;
   const draw = () => {
@@ -529,7 +549,7 @@ async function sidebarLoop(): Promise<number> {
     if (key === "\x1b[A" || key === "k") selected = Math.max(selected - 1, 0);
     else if (key === "\x1b[B" || key === "j") selected = Math.min(selected + 1, count - 1);
     else if (key === "\r" || key === "\n") act();
-    else if (/^[1-8]$/.test(key)) {
+    else if (/^[0-9]$/.test(key)) {
       const v = vs.find((x) => x.key === key);
       if (v) openView(p, v);
     } else if (key === ":") openBar(p, []);
@@ -575,7 +595,8 @@ export function sidebar(): Promise<number> | number {
 export function sidebarData(): number {
   refreshIfOld();
   const snap = readCache();
-  console.log(JSON.stringify({ snapshot: snap, views: views().map((v) => ({ key: v.key, title: v.title })), bell: newAsks(snap) }));
+  const items = (vs: View[]) => vs.map((v) => ({ key: v.key, title: v.title }));
+  console.log(JSON.stringify({ snapshot: snap, views: items(views()), talks: items(talks()), bell: newAsks(snap) }));
   return 0;
 }
 
@@ -584,7 +605,7 @@ export function sidebarData(): number {
 export function sidebarOpen(args: string[]): number {
   const [what, ...rest] = args;
   const p = pane();
-  const v = views().find((x) => x.key === rest[0]);
+  const v = popups().find((x) => x.key === rest[0]);
   if (what === "session" && rest.length === 1 && rest[0]) showSession(p, rest[0]);
   else if (what === "view" && rest.length === 1 && v) openView(p, v);
   else if (what === "bar") openBar(p, rest);
@@ -709,10 +730,12 @@ function termColor(): boolean {
   return !process.env.NO_COLOR && !["", "dumb"].includes(process.env.TERM ?? "");
 }
 
-/** `factory cockpit --needs`: the Needs you view, from the cache; r reads the snapshot again. */
+/** `factory cockpit --needs`: the Needs you view, from the cache; r reads the snapshot again, and Enter on an owner ask
+ *  answers it through `factory owner answer` (#395). */
 export function needs(find = ""): number {
-  return view("needs", { snapshot: readCache(), read: readCommand(null), find });
+  return view("needs", { snapshot: readCache(), read: readCommand(null), find, act: ["bash", factoryScript(top())] });
 }
+
 
 /** `factory cockpit --prs [<n>]`: the Pull requests view (#338), from `factory prs --json`, with <n> selected; m merges
  *  through `factory owner merge <n> --head <the head shown>` after its question. */
@@ -1036,5 +1059,136 @@ export async function viewData(args: string[]): Promise<number> {
   if (name === "settings") ownerOnly();
   const data = name === "settings" ? settingsData() : name === "usage" ? await usageData(process.cwd(), Date.now()) : await tasksData();
   console.log(JSON.stringify(data));
+  return 0;
+}
+
+// --- talking to the dev manager and the product owner (#395) ---------------------------------------------------------
+//
+// The dev manager is a program that starts a short Claude session per item, so there is no session to type into; this
+// gives the owner one turn at a time instead. `factory cockpit --chat <role>` is the talk pane (cockpit/views/chat.tsx;
+// views 9 and 0, or Enter on that role in the list). `factory cockpit --chat-send <role> <text> [<history-json>]` is one
+// turn: a fresh session of the role (its skill, profile, model and permissions, as the orchestrator starts a
+// sub-manager) reads its context and answers <text>, with the conversation so far (`[{who: owner|role, text}]`) in its
+// prompt. It prints {answer, summary}; the summary of the turn is posted on the owner queue ("Dev manager: needs the
+// owner") marked `factory-cockpit-chat`, which no reader takes as the owner's answer to an ask (factory_prs.ts), so the
+// next pass sees it as context. `summary.posted` is false when there is no queue or GitHub refused. A session that fails
+// is `chat_failed` and posts nothing. Both are the owner's: they refuse in an agent session.
+
+const CHAT_ROLES = ["dev-manager", "product-owner"];
+const ANSWER_MAX = 6000; // what the pane shows of one answer
+const SUMMARY_MAX = 1500; // what the owner queue gets of it
+const CHAT_MINUTES = 15;
+const CHAT_MAX_MINUTES = 19;
+const CHAT_TURNS = 10; // the turns of the conversation so far that go in the prompt
+
+type Turn = { who: "owner" | "role"; text: string };
+
+/** The role named, or a refusal: only the dev manager and the product owner are talked to here. */
+function chatRole(role: string | undefined): string {
+  if (!role || !CHAT_ROLES.includes(role)) {
+    refuse("cockpit_usage", `The cockpit talks to ${CHAT_ROLES.join(" or ")}, not ${role ? `\`${plain(role)}\`` : "nothing"}.`,
+      "Run `factory cockpit --chat dev-manager` or `factory cockpit --chat product-owner` (views 9 and 0 in the cockpit).", 2);
+  }
+  return role;
+}
+
+/** Refuses in an agent session: a role must not talk to another role as the owner. */
+function chatOwnerOnly(): void {
+  for (const name of ["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"]) {
+    if (name in process.env) {
+      refuse("cockpit_agent_session", `Talking to a role is the owner's, and ${name} is set, so this looks like an agent session.`,
+        "Open the cockpit in your own terminal (`factory cockpit`, then 9 or 0).");
+    }
+  }
+}
+
+/** The name the role's answers carry: its first name in `roles.<role>.names`, else the role. */
+function chatName(role: string): string {
+  return roleNames(load(), role)[0] ?? role;
+}
+
+function turnsOf(json: string | undefined): Turn[] {
+  if (!json) return [];
+  let data: unknown;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    refuse("cockpit_usage", "The conversation so far isn't JSON.", "The talk pane passes it; to talk, run `factory cockpit --chat <role>`.", 2);
+  }
+  return list(data).map((t): Turn => ({ who: t.who === "role" ? "role" : "owner", text: str(t.text) })).slice(-CHAT_TURNS);
+}
+
+/** The turn's prompt: who it is, the rules it acts within, the conversation so far and the owner's line. */
+function chatPrompt(role: string, name: string, text: string, history: Turn[]): string {
+  const d = need(role);
+  const said = history.map((t) => `${t.who === "owner" ? "Owner" : name}: ${t.text}`).join("\n\n");
+  return [
+    `You are ${name}, this project's ${d.title}. The owner is talking to you in the cockpit (\`factory cockpit\`); this is ` +
+      "one turn of that conversation, in a fresh session.",
+    `Your standing rules are the ${d.skill} skill: read .claude/skills/${d.skill}/SKILL.md for what you may do on your own ` +
+      "and what only the owner decides. Do not run a whole pass: answer the owner.",
+    contextLine(load(), role),
+    "Read what the answer needs and no more: the open pull requests (`factory prs`), the owner queue (the issue \"Dev " +
+      "manager: needs the owner\"), your notes. When the owner asks you to do something your rules allow, do it and say " +
+      "what you did; when they don't, say so and what the owner can do instead.",
+    said ? `The conversation so far:\n\n${said}` : "",
+    `The owner says now:\n\n${text}`,
+    "Reply in plain words, in a few short lines: it is shown in the cockpit, and a summary is posted on the owner queue.",
+    `<!-- ${MARK} role=${role} name=${name} -->`,
+  ].filter(Boolean).join("\n\n");
+}
+
+/** The summary posted on the owner queue: marked, so no reader takes it for the owner's answer to an ask. It goes out
+ *  with the owner's login, so a marker in the owner's line or the role's answer (`<!-- factory-owner-ask ...`) is broken
+ *  (`&lt;!--`, which GitHub still shows as `<!--`): only the summary's own marker is read. */
+function summaryBody(role: string, name: string, text: string, answer: string): string {
+  const cut = (s: string) => (s.length > SUMMARY_MAX ? `${s.slice(0, SUMMARY_MAX)}…` : s).replace(/<!--/g, "&lt;!--");
+  return `<!-- factory-cockpit-chat role=${role} -->\nThe owner talked to the ${need(role).title} (${name}) in the cockpit. ` +
+    `A summary for the next pass; it answers no ask.\n\n**Owner:** ${cut(text)}\n\n**${name}:** ${cut(answer)}`;
+}
+
+/** `factory cockpit --chat <role>`: the talk with the dev manager or the product owner. */
+export function chatView(args: string[]): number {
+  chatOwnerOnly();
+  const role = chatRole(args.length === 1 ? args[0] : undefined);
+  return view("chat", { role, name: chatName(role), send: [process.execPath, "--no-env-file", "--config=/dev/null",
+    join(import.meta.dir, "factory_cockpit.ts"), "--chat-send", role] });
+}
+
+/** `factory cockpit --chat-send <role> <text> [<history-json>]`: one turn, as JSON. */
+export function chatSend(args: string[]): number {
+  chatOwnerOnly();
+  const role = chatRole(args[0]);
+  const text = (args[1] ?? "").trim();
+  if (!text || args.length > 3) {
+    refuse("cockpit_usage", "factory cockpit --chat-send takes the role, the owner's line and the conversation so far.",
+      "The talk pane runs it; to talk, run `factory cockpit --chat <role>`.", 2);
+  }
+  const history = turnsOf(args[2]);
+  const cfg = load();
+  const name = chatName(role);
+  // the pane waits 20 minutes for an answer (cockpit/ui.tsx): a session never runs past it, so none posts after it gave up
+  const minutes = Math.min(Math.max(toFloat(process.env.FACTORY_CHAT_MINUTES) ?? CHAT_MINUTES, 1), CHAT_MAX_MINUTES);
+  const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: role, FACTORY_LOOP: "1" };
+  const p = run(["claude", ...sessionFlags(cfg, role), ...permissionFlags(cfg), "-p", chatPrompt(role, name, text, history)],
+    { env, timeoutMs: minutes * 60_000 });
+  const answer = p.stdout.trim().slice(0, ANSWER_MAX);
+  if (p.code !== 0 || !answer) {
+    const why = p.code === 0 ? "it gave no answer" : p.stderr.trim().split("\n").filter(Boolean).pop() || `it exited ${p.code}`;
+    refuse("chat_failed", `The ${need(role).title}'s session failed (${plain(why).slice(0, 200)}); nothing was posted.`,
+      "Run `factory doctor` to check Claude Code and the role's settings, then send the line again.");
+  }
+  let summary: Obj;
+  try {
+    const queue = ownerQueue(cfg, false);
+    if (queue === null) summary = { posted: false, why: "there is no owner queue issue yet" };
+    else {
+      gh("POST", `repos/{owner}/{repo}/issues/${queue}/comments`, { body: summaryBody(role, name, text, answer) });
+      summary = { posted: true, issue: queue };
+    }
+  } catch (e) {
+    summary = { posted: false, why: `GitHub refused it (${(e instanceof Error ? e.message : String(e)).slice(0, 160)})` };
+  }
+  console.log(JSON.stringify({ answer, summary }));
   return 0;
 }

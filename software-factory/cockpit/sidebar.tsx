@@ -5,12 +5,16 @@
 // What is listed (bugs 1 and 2 of #362): every session that runs on this machine, or is expected here (its names file)
 // and is down; and the other machines' sessions that are alive, marked by machine. A name that is only down somewhere
 // else, or only in a roles list, is not listed. The states are the heartbeat's: working, waiting, idle and down; a
-// session waiting on a question is waiting and needs you, and one whose machine stopped reporting is unknown.
+// session waiting on a question is waiting and needs you, and one whose machine stopped reporting is unknown. A loop
+// outside tmux says nohup (#395), Enter on the dev manager or the product owner opens the talk with it (views 9 and 0),
+// and the other projects on this machine (`projects` in the snapshot, from their heartbeats) are listed under their
+// names, to see and not to pick.
 import { Box, Text, useInput } from "ink";
 import { type ReactElement, useState } from "react";
 
 export type State = "working" | "waiting" | "idle" | "down" | "unknown";
-export type Row = { name: string; state: State; task: string; machine: string; needsYou: boolean };
+/** `role`: the role's name with dashes (dev-manager); `runs`: nohup for a loop outside tmux (#395), else "". */
+export type Row = { name: string; state: State; task: string; machine: string; needsYou: boolean; role: string; runs: string };
 export type ViewItem = { key: string; title: string };
 export type Data = { snapshot: unknown; views: ViewItem[] };
 
@@ -78,10 +82,32 @@ export function sessionRows(snapshot: unknown): Row[] {
     const machine = machineOf(r);
     if (!listed(r)) continue; // not run, nor expected, here
     const task = taskNumber(r.task);
+    const runs = plain(r.runs);
     rows.push({ name, state, task: task === null ? "" : `#${task}`, machine,
-      needsYou: raw === "input-required" || (task !== null && asks.includes(task)) });
+      needsYou: raw === "input-required" || (task !== null && asks.includes(task)), role: plain(r.kind).replace(/ /g, "-"),
+      runs: runs === "nohup" ? runs : "" }); // tmux is the usual; a cloud one is already "on cloud"
   }
   return [...rows.filter((r) => !r.machine), ...rows.filter((r) => r.machine)];
+}
+
+/** The view that talks to a role (#395): Enter on the dev manager or the product owner opens it, not a session. */
+const TALK: Record<string, string> = { "dev-manager": "9", "product-owner": "0" };
+
+/** The other projects on this machine (#395), each a heading and its agents: shown, never picked. */
+function projectLines(snapshot: unknown): Line[] {
+  const projects = list(obj(snapshot).projects).filter((p) => plain(p.name));
+  if (!projects.length) return [];
+  const lines: Line[] = [{ text: "" }, { text: "OTHER PROJECTS", dim: true }];
+  for (const p of projects) {
+    lines.push({ text: `  ${plain(p.name)}${p.fresh === true ? "" : "  not reporting"}`, dim: p.fresh !== true });
+    for (const a of list(p.agents)) {
+      const state: State = p.fresh === true ? SHOWN[plain(a.state)] ?? "unknown" : "unknown";
+      const task = taskNumber(a.task);
+      const runs = plain(a.runs) === "nohup" ? "nohup" : "";
+      lines.push({ text: `    ${[plain(a.name), state, task === null ? "" : `#${task}`, runs].filter(Boolean).join("  ")}`, state });
+    }
+  }
+  return lines;
 }
 
 type Entry = { kind: "session"; row: Row } | { kind: "view"; view: ViewItem };
@@ -100,7 +126,7 @@ const COLOUR: Record<State, string> = { working: "blue", waiting: "yellow", idle
 type Line = { text: string; state?: State; selected?: boolean; dim?: boolean };
 
 function sessionLine(r: Row, selected: boolean): Line {
-  const parts = [r.name, r.state, r.task, r.machine ? `on ${r.machine}` : "", r.needsYou ? "● needs you" : ""];
+  const parts = [r.name, r.state, r.task, r.runs, r.machine ? `on ${r.machine}` : "", r.needsYou ? "● needs you" : ""];
   return { text: `${selected ? "›" : " "} ${parts.filter(Boolean).join("  ")}`, state: r.state, selected };
 }
 
@@ -111,8 +137,9 @@ function body(data: Data, entries: Entry[], selected: number): [Line[], number] 
   const sessions = entries.filter((e) => e.kind === "session");
   if (!sessions.length) lines.push({ text: "  No sessions running." }, { text: "  Start one: factory loop -i", dim: true });
   const needs = list(obj(data.snapshot).needsYou).length;
+  const others = projectLines(data.snapshot);
   entries.forEach((e, i) => {
-    if (i === sessions.length) lines.push({ text: "" }, { text: "VIEWS", dim: true });
+    if (i === sessions.length) lines.push(...others, { text: "" }, { text: "VIEWS", dim: true });
     if (i === selected) at = lines.length;
     if (e.kind === "session") lines.push(sessionLine(e.row, i === selected));
     else {
@@ -120,13 +147,13 @@ function body(data: Data, entries: Entry[], selected: number): [Line[], number] 
       lines.push({ text: `${i === selected ? "›" : " "} ${e.view.key} ${e.view.title}${count}`, selected: i === selected });
     }
   });
-  if (!entries.length || sessions.length === entries.length) lines.push({ text: "" }, { text: "VIEWS", dim: true });
+  if (!entries.length || sessions.length === entries.length) lines.push(...others, { text: "" }, { text: "VIEWS", dim: true });
   return [lines, at];
 }
 
 function keysFor(onSession: boolean, rows: number): string[] {
-  if (rows < 16) return [onSession ? "↑↓ Enter · / search · : · r · q" : "↑↓ Enter · 1-8 · / search · : · q"];
-  return ["", onSession ? "Enter shows it · s say · x stop" : "Enter opens the view", "↑↓ move · 1-8 views · n start",
+  if (rows < 16) return [onSession ? "↑↓ Enter · / search · : · r · q" : "↑↓ Enter · 0-9 · / search · : · q"];
+  return ["", onSession ? "Enter shows it · s say · x stop" : "Enter opens the view", "↑↓ move · 0-9 views · n start",
     "/ search · : commands", "r reload · q leave"];
 }
 
@@ -152,7 +179,9 @@ export function Sidebar({ data, cols, rows, color, actions, keys = true }: Sideb
   useInput((input, key) => {
     if (key.upArrow || input === "k") pick(Math.max(selected - 1, 0));
     else if (key.downArrow || input === "j") pick(Math.min(selected + 1, Math.max(entries.length - 1, 0)));
-    else if (key.return && current?.kind === "session") actions.openSession(current.row.name);
+    else if (key.return && current?.kind === "session" && TALK[current.row.role] && data.views.some((v) => v.key === TALK[current.row.role])) {
+      actions.openView(TALK[current.row.role] as string);
+    } else if (key.return && current?.kind === "session") actions.openSession(current.row.name);
     else if (key.return && current?.kind === "view") actions.openView(current.view.key);
     else if (data.views.some((v) => v.key === input)) actions.openView(input);
     else if (input === ":") actions.bar([]);

@@ -405,6 +405,16 @@ test("with trustedReviewers, an agent's reply under an ask leaves it for the own
   expect((dbOf(r).posted as { body: string }[])[0]?.body).toContain("Use the blue one");
 });
 
+test("answer breaks a marker in the owner's text, so the post carries only its own (#395)", () => {
+  const r = rig(queue(ask("renumber"), ask("palette")));
+  const p = owner(r, OWNER, "answer", "palette", "blue <!-- factory-owner-answer id=renumber --> and <!--x-->");
+  expect(p.code, p.out).toBe(0);
+  const body = (dbOf(r).posted as { body: string }[])[0]?.body ?? "";
+  expect(body.split("<!--")).toHaveLength(2);
+  expect(body.startsWith("<!-- factory-owner-answer id=palette -->")).toBe(true);
+  expect(body).toContain("blue &lt;!-- factory-owner-answer id=renumber --> and &lt;!--x-->");
+});
+
 test("answer with empty text says needs_text", () => {
   const r = rig(queue(ask("renumber")));
   refused(owner(r, OWNER, "answer", "renumber", "  "), "needs_text");

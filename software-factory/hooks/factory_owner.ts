@@ -13,19 +13,23 @@
 //                                            on main says X.Y.Z (the release workflow then publishes it)
 //   factory owner start <role> [name]        starts `factory loop -i` as that role in its own tmux window on this machine,
 //                                            the step `factory loop -i` uses (factory_window.ts), without attaching (#309)
-//   factory owner stop <name>                ends that session's tmux session on this machine; one already ended is said so
+//   factory owner stop <name>                ends that session's tmux session on this machine; one already ended is said so.
+//                                            A loop outside tmux (nohup, #395) is ended by its checkout claim's pid
 //
 // Who may run them (D12): the owner, in a terminal or the owner's own Claude session (no FACTORY_AGENT or FACTORY_LOOP).
 // The dev manager (FACTORY_ROLE=dev-manager) may merge and label, each first checked by the manager gate
 // (manager_gate.ts) on the exact gh command it runs, and never a pull request that touches protected paths. Answers,
 // releases, starting and stopping stay the owner's. Every other factory session (a coding agent, the product owner) is
 // refused before anything is read or written. Errors are one JSON line `{code, message, fix}` on stderr.
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
-import { type Config, load, loadFromMain } from "./factory_config.ts";
+import { alive as claimAlive, type Claims, HOST, isLoop, stateDir as claimsDir } from "./factory_claims.ts";
+import { type Config, load, loadFromMain, toFloat } from "./factory_config.ts";
+import { processes } from "./factory_heartbeat.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
 import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
-import { OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
+import { breakMarkers, OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
 import { TAG_RE } from "./factory_release.ts";
 import { running, sessionName, startLoop } from "./factory_window.ts";
 
@@ -228,7 +232,8 @@ function answer(id: string | undefined, text: string): void {
     console.log(`${id} is already answered on #${queue.number}; nothing posted.`);
     return;
   }
-  api("POST", `${REPO}/issues/${queue.number}/comments`, { body: `<!-- factory-owner-answer id=${id} -->\n\n${text.trim()}` });
+  // the owner's words carry no marker but this one: a quoted `<!--` is broken (#395)
+  api("POST", `${REPO}/issues/${queue.number}/comments`, { body: `<!-- factory-owner-answer id=${id} -->\n\n${breakMarkers(text.trim())}` });
   console.log(`Answered ${id} on #${queue.number}.`);
 }
 
@@ -316,10 +321,54 @@ function start(role: string | undefined, name: string | undefined): void {
   console.log("`factory follow <name>` shows it, or Enter on it in the cockpit.");
 }
 
+/** The pid of `name`'s live loop on this machine, from its checkout claim, or null (#395). */
+function loopPid(name: string): number | null {
+  let data: Partial<Claims> = {};
+  try {
+    data = JSON.parse(readFileSync(join(claimsDir(), "claims.json"), "utf8")) as Partial<Claims>;
+  } catch {
+    return null;
+  }
+  const claim = data.checkouts?.[name];
+  // only a claim made here: one from another host (or this one under an old name) holds a pid of another machine
+  if (!claim || claim.host !== HOST) return null;
+  return claimAlive(claim, toFloat(load().claimStaleHours ?? 6) ?? 6, true) ? Math.trunc(Number(claim.pid)) : null;
+}
+
+/** Ends a loop that runs outside tmux (nohup, a plain terminal): what runs below it, then the loop itself. */
+function stopProcess(name: string, pid: number): void {
+  if (!isLoop(pid)) { // it ended, and the number went to another program, since the claim was read
+    console.log(`${name} is not running on this machine any more; nothing to stop.`);
+    return;
+  }
+  const procs = processes();
+  const below: number[] = [];
+  const queue = [pid];
+  while (queue.length) {
+    const p = queue.shift() as number;
+    for (const [child, [parent]] of procs) {
+      if (parent !== p || below.includes(child)) continue;
+      below.push(child);
+      queue.push(child);
+    }
+  }
+  for (const p of [...below.reverse(), pid]) {
+    try {
+      process.kill(p, "SIGTERM");
+    } catch {
+      // ended on its own meanwhile
+    }
+  }
+  console.log(`Stopped ${name} (pid ${pid}, outside tmux). Its task stays claimed for it: start it again to go on, ` +
+    `or \`factory release ${name}\` to give its claims back.`);
+}
+
 function stop(name: string): void {
   delete process.env.TMUX;
   const session = sessionName(name);
   if (!running(session)) {
+    const pid = loopPid(name);
+    if (pid !== null) return stopProcess(name, pid);
     console.log(`${name} is not running on this machine (no tmux session ${session}); nothing to stop.`);
     return;
   }
