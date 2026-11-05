@@ -76,6 +76,9 @@ sentence that leans on an ungrounded concept loses the reader, even if it contai
 - If a block needs a concept nothing has grounded, either add a grounding block before it, or make the concept a
   prerequisite and link the lesson that teaches it.
 - Labels you invent (level ②, stage 3, "the swap test") are concepts too. Ground them before the first reference.
+- Counts and shorthand are labels too: "the seven process-centric steps" means nothing to a reader who hasn't met
+  them. In a summary or a mental model, say what the thing does ("list the tasks, fix their order, write if-then
+  rules"), then give its name. Refer back by count only right after the list that defines it.
 - When several concepts share words (prompt strategy, prompt augmentation, prompt chaining), place them in one
   hierarchy and add a "names that sound alike" table.
 
