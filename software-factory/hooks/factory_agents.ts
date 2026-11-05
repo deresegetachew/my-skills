@@ -58,6 +58,7 @@ import { addLabels, comment, gh, type Issue, releaseIssue, removeLabel, taskIssu
 import { aliveHere, managed } from "./factory_heartbeat.ts";
 import { machineId, refuse } from "./factory_machine.ts";
 import { Message, render as renderMessage } from "./factory_messages.ts";
+import { wakeFromHook } from "./factory_wake.ts";
 import { run as runLs } from "./factory_agents_ls.ts";
 import { card, cards, pyRound0, row } from "./factory_cards.ts";
 import { bunCmd, die, isoUtc, parseArgs, parseIso, pyDumps, pyRepr, runMain } from "./factory_lib.ts";
@@ -428,15 +429,21 @@ export function sweep(cfg: Cfg): string[] {
  * heartbeat daemon runs on this machine it does the pings and the idle (it knows better); SessionEnd still says down. */
 function hook(cfg: Cfg): void {
   let event = "";
+  let command = "";
   try {
-    const data = JSON.parse(readFileSync(0, "utf8")) as unknown;
-    event = String((data as Record<string, unknown>).hook_event_name ?? "");
+    const data = JSON.parse(readFileSync(0, "utf8")) as Record<string, unknown>;
+    event = String(data.hook_event_name ?? "");
+    const input = data.tool_input as Record<string, unknown> | undefined;
+    if (data.tool_name === "Bash" && typeof input?.command === "string") command = input.command;
   } catch (e) {
     if (!(e instanceof SyntaxError)) throw e;
     event = "";
   }
   const agent = process.env.FACTORY_AGENT;
   if (!agent) return;
+  // A pull request opened, a question, an answer, a merge ... wakes whoever waits for it, over NATS (#410).
+  if (event === "PostToolUse" && command) wakeFromHook(cfg as Config, command);
+  if (taskSource(cfg as Config) !== "issues") return; // agent tracking needs issues mode
   if ((event === "PostToolUse" || event === "Stop") && managed(agent)) return;
   const seen = recall(agent);
   if (event === "PostToolUse") {
@@ -498,16 +505,16 @@ async function main(argv: string[]): Promise<number> {
     await runLs(cfg, Boolean(a.json), Boolean(a.local), Boolean(a.fresh));
     return 0;
   }
-  if (taskSource(cfg) !== "issues") {
-    if (["list", "sweep", "card"].includes(cmd)) console.log('Agent tracking needs issues mode: "tasks": {"source": "issues"} in .claude/factory.json.');
-    return 0;
-  }
-  if (cmd === "hook") {
+  if (cmd === "hook") { // the wake-ups go in any mode; the agent's card only in issues mode (hook() checks)
     try {
       hook(cfg);
     } catch {
       // a hook must never break the session
     }
+    return 0;
+  }
+  if (taskSource(cfg) !== "issues") {
+    if (["list", "sweep", "card"].includes(cmd)) console.log('Agent tracking needs issues mode: "tasks": {"source": "issues"} in .claude/factory.json.');
     return 0;
   }
   const agent = a.agent as string | undefined;

@@ -20,7 +20,7 @@ import { GithubTaskTracker } from "./adapters/github/task_tracker.ts";
 import { PlanTaskTracker } from "./adapters/plan/task_tracker.ts";
 import { RoutedMessaging } from "./adapters/routed/messaging.ts";
 import { CoreError } from "./domain/error.ts";
-import type { Messaging } from "./ports/messaging.ts";
+import type { Leases, Messaging, Wakes } from "./ports/messaging.ts";
 import type { TaskTracker } from "./ports/task_tracker.ts";
 
 export interface Ports {
@@ -34,6 +34,7 @@ export interface MessagingSettings {
   creds: string;
   kinds: string[];
   fallback: string;
+  pollMinutes: number; // with wake on NATS: how long an idle wait listens before it looks at GitHub anyway
 }
 
 /** The ports for a project's `config`. `warn` hears of a fallback the command goes on with (nothing in the core prints). */
@@ -55,8 +56,9 @@ export function messagingSettings(config: Config): MessagingSettings {
   const own: Record<string, unknown> = typeof m === "object" && m !== null && !Array.isArray(m) ? (m as Record<string, unknown>) : {};
   const text = (key: string, dflt: string): string => (typeof own[key] === "string" && own[key] ? (own[key] as string) : dflt);
   const kinds = Array.isArray(own.kinds) ? own.kinds.filter((k): k is string => typeof k === "string") : [];
+  const poll = Number(own.pollMinutes);
   return { transport: text("transport", "github"), url: text("url", ""), creds: text("creds", ""), kinds,
-    fallback: text("fallback", "github") };
+    fallback: text("fallback", "github"), pollMinutes: typeof own.pollMinutes === "number" && poll > 0 ? poll : 15 };
 }
 
 function messagingPort(s: MessagingSettings, warn: (e: CoreError) => void): Messaging {
@@ -74,10 +76,39 @@ function messagingPort(s: MessagingSettings, warn: (e: CoreError) => void): Mess
   return new RoutedMessaging(new GithubMessaging(), nats, s.kinds, warn);
 }
 
-type NatsFactory = (o: { url: string; project: string; seed?: string }) => Messaging & { check(): void };
+type NatsPort = Messaging & Leases & Wakes & { check(): void };
+type NatsFactory = (o: { url: string; project: string; seed?: string }) => NatsPort;
+
+let bus: { port: NatsPort | null; error: CoreError | null } | null = null; // one per process: the settings don't change
+
+/** NATS's leases and wake-ups for `kind` ("claim" or "wake", decision 0004 point 8), or null while that kind hasn't
+ * moved: `messaging.transport` isn't nats or `messaging.kinds` doesn't list it. Then the caller goes on over GitHub as it
+ * always did. A plugin or server that can't be had is the same fallback as the messaging port's: null and `warn` is
+ * told (fallback "github", the default), or the CoreError is thrown (fallback "none"). */
+export function natsFor(config: Config, kind: "claim" | "wake", warn: (e: CoreError) => void = () => {}): (Leases & Wakes) | null {
+  const s = messagingSettings(config);
+  if (s.transport !== "nats" || !s.kinds.includes(kind)) return null;
+  if (!bus) {
+    try {
+      bus = { port: rawNatsPort(s), error: null };
+    } catch (e) {
+      bus = { port: null, error: asCoreError(e) };
+    }
+  }
+  if (bus.port) return withCoreErrorsBus(bus.port);
+  const { code, message, fix } = bus.error as CoreError;
+  if (s.fallback === "none") throw new CoreError(code, message, `${fix} Or set \`factory settings set messaging.transport github\`.`);
+  warn(new CoreError(code, `${message} ${kind === "claim" ? "Claims" : "Wake-ups"} go over GitHub for now (messaging.fallback is github).`,
+    `${fix} Or set \`factory settings set messaging.transport github\` to stop this notice.`));
+  return null;
+}
 
 /** The NATS plugin's port for this project, its server checked. Throws {code, message, fix} when it can't be had. */
 function natsPort(s: MessagingSettings): Messaging {
+  return withCoreErrors(rawNatsPort(s));
+}
+
+function rawNatsPort(s: MessagingSettings): NatsPort {
   if (!s.url) {
     throw new CoreError("nats-unreachable", "messaging.transport is nats, but messaging.url names no server.",
       "Set it with `factory settings set messaging.url nats://<address>:4222`.");
@@ -89,7 +120,7 @@ function natsPort(s: MessagingSettings): Messaging {
   const project = messagingProject();
   const port = (create as NatsFactory)({ url: s.url, project, ...seedOf(s, project) });
   port.check();
-  return withCoreErrors(port);
+  return port;
 }
 
 /** The project's name on NATS: its origin repository's name (the same in all its worktrees), else its folder's, in
@@ -141,6 +172,25 @@ function withCoreErrors(port: Messaging): Messaging {
     send: (m, text) => wrap(() => port.send(m, text)),
     read: (cursor, scope) => wrap(() => port.read(cursor, scope)),
     ack: (id) => wrap(() => port.ack(id)),
+  };
+}
+
+/** The plugin's leases and wake-ups, with what they throw as the core's CoreError. */
+function withCoreErrorsBus(port: NatsPort): Leases & Wakes {
+  const wrap = <T>(f: () => T): T => {
+    try {
+      return f();
+    } catch (e) {
+      throw asCoreError(e);
+    }
+  };
+  return {
+    claim: (key, holder, ttl) => wrap(() => port.claim(key, holder, ttl)),
+    release: (key, holder) => wrap(() => port.release(key, holder)),
+    holder: (key) => wrap(() => port.holder(key)),
+    drop: (key) => wrap(() => port.drop(key)),
+    wake: (w) => wrap(() => port.wake(w)),
+    waitWake: (w) => wrap(() => port.waitWake(w)),
   };
 }
 
