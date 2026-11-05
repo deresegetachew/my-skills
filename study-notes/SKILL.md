@@ -87,10 +87,14 @@ const mindMap = `
 
 ## Writing the prose — read WRITING.md first
 
-Before drafting or rewriting any lesson text, read `WRITING.md` and follow it. In short:
+Before drafting or rewriting any lesson text, read `WRITING.md` and follow it. Every lesson goes through its
+**authoring process** (section 0): driving question → draft mental model → **framing questioner** agent → confirm
+the mental model with the user in chat → draft → build → **first-time reader** agent → fix → final check. The two
+reviewer prompts are in `REVIEWERS.md`. In short:
 
-- **Plan the chain of questions** first. Each section answers the question the previous one raised. Long lessons
-  get a "How this lesson builds up" roadmap callout listing that chain.
+- **Map the mental model first (the core rule).** Work out the chain of ideas the reader climbs, even when the
+  source doesn't give it. Each step leads to the next with a "because", and every claimed break or "therefore" is
+  shown with an example. Every lesson opens with a **Mental model** section, and the page follows it in order.
 - **Ground every concept before using it**, including labels you invent.
 - **Bridge the gaps** the course leaves, with `mine`-badged sections and worked examples.
 - **Short sentences:** one claim each, about 20 words, at most one colon, active voice.
