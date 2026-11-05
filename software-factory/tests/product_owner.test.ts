@@ -257,29 +257,27 @@ function workWith(comments: string[], pulls: Record<string, unknown>[] = []): { 
   return { out: p.stdout, code: p.code };
 }
 
-test("an unmarked note to the product owner on the owner queue is listed (#397)", () => {
+test("an unmarked note to the product owner is listed with its comment id (#397)", () => {
   const r = workWith(["PO: please review the cockpit against US-12 and file what is missing.",
     "Note for the product owner: the CI view should say who is running."]);
   expect(r.code, r.out).toBe(0);
-  expect(r.out).toContain("owner queue #40, note 40001 to the product owner: PO: please review the cockpit against US-12");
-  expect(r.out).toContain("owner queue #40, note 40002 to the product owner: Note for the product owner: the CI view");
+  expect(r.out).toContain("owner queue #40, note 40001 (an instruction, marked or not): PO: please review the cockpit against US-12");
+  expect(r.out).toContain("owner queue #40, note 40002 (an instruction, marked or not): Note for the product owner: the CI view");
 });
 
-test("a note to someone else is not listed, and a note the product owner answered is not listed again (#397)", () => {
-  const r = workWith(["Dev manager: merge #12 first.",
-    "PO: file the follow-up for the CI view.",
-    "PO: and one for the help text.",
-    "<!-- factory-po-reply note=40002 -->\nFiled #77."]);
-  expect(r.out).not.toContain("note 40001");
-  expect(r.out).not.toContain("note 40002");
-  expect(r.out).toContain("note 40003 to the product owner: PO: and one for the help text.");
+test("under a dev manager ask, a plain answer is not a note but one that names the product owner is (#397)", () => {
+  const r = workWith([ask("ci-queued", "", "CI is queued"),
+    "Restart the runner.",
+    "PO: file the follow-up for the CI view, I already asked for it."]);
+  expect(r.out).not.toContain("Restart the runner.");
+  expect(r.out).toContain("note 40003 (an instruction, marked or not): PO: file the follow-up for the CI view");
 });
 
 test("a finished ask marked done is not listed again after the product owner's later notes and reviews (#397)", () => {
   const r = workWith([ask("hosting", "for=product", "this needs your yes: where do we host?"),
     "<!-- factory-po-reply ask=hosting done -->\nRecorded in decision 0007.",
     "<!-- factory-po-review through=9 -->\nReviewed #9 against US-3: filed #80.",
-    "<!-- factory-po-reply note=40001 -->\nAlready recorded."]);
+    "<!-- factory-po-reply ask=notes done -->\nNo notes open."]);
   expect(r.code, r.out).toBe(0);
   expect(r.out).not.toContain("ask hosting");
   expect(r.out).toContain("Nothing to do");
@@ -312,7 +310,7 @@ test("pull requests merged since the last product review are listed for review (
 test("the product pass skill has the proactive review, the unmarked note rule and the already asked rule (#397)", () => {
   const skill = readFileSync(join(KIT, ".claude", "skills", "product-pass", "SKILL.md"), "utf8");
   expect(skill).toContain("<!-- factory-po-review through=<n> -->");
-  expect(skill).toContain("<!-- factory-po-reply note=<comment id> -->");
+  expect(skill).toContain("<!-- factory-po-reply ask=notes done -->");
   expect(skill).toContain("<!-- factory-po-reply ask=<slug> done -->");
   expect(skill).toContain("at most 2 task issues a pass");
   expect(skill).toMatch(/already asked/i);
