@@ -22,6 +22,7 @@ import * as heartbeat from "./factory_heartbeat_service.ts";
 import { Exit, FactoryError, fnmatch, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
 import { machineNames } from "./factory_machine.ts";
 import { ModelsError, resolvedDefault, table, validate } from "./factory_models.ts";
+import { doctor as nats } from "./factory_nats.ts";
 import { factoryVersion, loadPlugin, neededPlugins, pluginPath } from "./factory_plugins.ts";
 import * as fr from "./factory_release.ts";
 import * as roleDefs from "./factory_roles.ts";
@@ -865,6 +866,7 @@ export async function main(argv: string[]): Promise<number> {
     manager(r, cfg);
     trustedReviewers(r, cfg);
     await turbo(r, cfg);
+    await nats(r, cfg);
     artifacts(r, cfg);
     release(r);
   }
