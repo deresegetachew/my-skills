@@ -110,7 +110,7 @@ function strOrNull(v: unknown): string | null {
   return typeof v === "string" && v ? v : v === null || v === undefined ? null : String(v);
 }
 
-function readJson(path: string): unknown {
+export function readJson(path: string): unknown {
   try {
     return JSON.parse(readFileSync(path, "utf8")) as unknown;
   } catch {
@@ -216,7 +216,7 @@ function hooksOf(p: UiProject): string {
 }
 
 /** The environment a project's commands run in: this one, minus what would point them at another project. */
-function envFor(p: UiProject): Record<string, string> {
+export function envFor(p: UiProject): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
   for (const k of ["FACTORY_AGENT", "FACTORY_LOOP", "FACTORY_ROLE"]) delete env[k];
@@ -224,13 +224,13 @@ function envFor(p: UiProject): Record<string, string> {
   return env;
 }
 
-interface Ran {
+export interface Ran {
   code: number;
   stdout: string;
   stderr: string;
 }
 
-async function spawn(cmd: string[], cwd: string, env: Record<string, string>, ms: number): Promise<Ran> {
+export async function spawn(cmd: string[], cwd: string, env: Record<string, string>, ms: number): Promise<Ran> {
   try {
     const proc = Bun.spawn(cmd, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => proc.kill(), ms);
@@ -243,7 +243,7 @@ async function spawn(cmd: string[], cwd: string, env: Record<string, string>, ms
 }
 
 /** This project's state folder: `$XDG_STATE_HOME/<repo>-factory` (factory_machine.ts), worked out for its path. */
-function stateDirOf(p: UiProject): string {
+export function stateDirOf(p: UiProject): string {
   const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
   return join(base, `${repoName(p.path)}-factory`);
 }
@@ -360,7 +360,7 @@ export interface ActionResult {
 }
 
 /** The factory script of project `p`: for this project the one that started `factory ui` (FACTORY_SELF), else its own. */
-function factoryScript(p: UiProject): string {
+export function factoryScript(p: UiProject): string {
   const self = process.env.FACTORY_SELF;
   return p.current && self && existsSync(self) ? self : join(p.path, "factory");
 }
@@ -369,7 +369,12 @@ function factoryScript(p: UiProject): string {
 export async function owner(p: UiProject, args: string[]): Promise<ActionResult> {
   const command = `factory owner ${args.join(" ")}`;
   const r = await spawn(["bash", factoryScript(p), "owner", ...args], p.path, envFor(p), ACTION_TIMEOUT_MS);
-  const output = (r.stdout + r.stderr).trim();
+  return resultOf(p, command, r, (r.stdout + r.stderr).trim());
+}
+
+/** How `command` (run in project `p`, giving `r`) went: 200 with `output`, or 500 with its own {code, message, fix} when
+ * its last line on stderr is one, else one that says how to see the whole error. */
+export function resultOf(p: UiProject, command: string, r: Ran, output: string): ActionResult {
   if (r.code === 0) return { status: 200, body: { ok: true, command, output } };
   const last = r.stderr.trim().split("\n").at(-1) ?? "";
   let own: Obj = {};

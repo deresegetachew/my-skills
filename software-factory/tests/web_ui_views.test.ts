@@ -164,7 +164,9 @@ test("each CI action runs the command the cockpit's CI view runs", async () => {
     expect(r.json.command).toBe(calls.map((c) => `factory ${c}`).join(" then "));
     seen.push(...calls);
   }
-  expect(factoryCalls(p)).toEqual(seen);
+  // after an action the server reads the snapshot again (factory cockpit --json), so the channel shows what changed
+  expect(factoryCalls(p).filter((c) => c !== "cockpit --json")).toEqual(seen);
+  expect(factoryCalls(p)).toContain("cockpit --json");
 }, T);
 
 test("rerun runs gh run rerun on a failed run; a run that didn't fail is refused and nothing runs", async () => {
