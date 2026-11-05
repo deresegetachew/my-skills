@@ -316,3 +316,23 @@ test("the product pass skill has the proactive review, the unmarked note rule an
   expect(skill).toMatch(/already asked/i);
   expect(skill).toMatch(/status:/);
 });
+
+test("the product pass skill has the acceptance and user testing, the whole-page task and the daily pass (#397)", () => {
+  const skill = readFileSync(join(KIT, ".claude", "skills", "product-pass", "SKILL.md"), "utf8");
+  expect(skill).toMatch(/acceptance/i);
+  expect(skill).toMatch(/phone and desktop/i);
+  expect(skill).toMatch(/screenshots/i);
+  expect(skill).toMatch(/files? a task per gap/i);
+  expect(skill).toMatch(/not "?done"? in the progress report/i);
+  expect(skill).toMatch(/the page as a whole matches the reference/i);
+  expect(skill).toMatch(/side-by-side/i);
+  expect(skill).toMatch(/daily pass/i);
+});
+
+test("the manage pass skill does not merge a PR that changes what a user sees without phone and desktop screenshots (#397)", () => {
+  const skill = readFileSync(join(KIT, ".claude", "skills", "manage-pass", "SKILL.md"), "utf8");
+  expect(skill).toMatch(/screenshots/i);
+  expect(skill).toMatch(/phone and desktop/i);
+  expect(skill).toMatch(/reference beside/i);
+  expect(skill).toMatch(/never merge[^\n]*screenshots/i);
+});
