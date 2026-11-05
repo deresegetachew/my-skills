@@ -42,6 +42,7 @@ import type { TaskTracker } from "./core/ports/task_tracker.ts";
 import { staleClaims } from "./factory_agents.ts";
 import { claimRework, claimTask, describeRework, isMine, release, reworkHolder } from "./factory_claims.ts";
 import type { Comment } from "./factory_issues.ts";
+import { claimKey, describeHolder, holderIsMe, leasesOn } from "./factory_leases.ts";
 import { machineId } from "./factory_machine.ts";
 import { verdicts } from "./factory_messages.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
@@ -74,6 +75,7 @@ function rework(cfg: Config, me: string | null): Job[] {
   const trusted = new Set(Array.isArray(cfg.trustedReviewers) ? (cfg.trustedReviewers as unknown[]).map(String) : []);
   const hours = toFloat(cfg.claimStaleHours ?? 6) ?? 6;
   const machine = me ? machineId() : "";
+  const nats = leasesOn(cfg);
   const prs = ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open&per_page=100").sort((a, b) => a.number - b.number);
   for (const pr of prs) {
     if ((pr.labels ?? []).some((l) => l.name === hold)) continue; // the dev manager is reviewing it: not rework
@@ -81,10 +83,18 @@ function rework(cfg: Config, me: string | null): Job[] {
     const shas = comments.filter((c) => !trusted.size || trusted.has(String(c.user?.login ?? "")))
       .flatMap((c) => verdicts(c.body || "")).filter(([kind, sha]) => kind === "mustfix" && sha).map(([, sha]) => sha as string); // either form
     if (!shas.length || !pr.head.sha.startsWith(shas[shas.length - 1] as string)) continue;
-    const held = reworkHolder(comments, pr.head.sha, Date.now() / 1000, hours);
-    if (held && !(me && isMine(held, me, machine))) {
-      process.stderr.write(`Skipped #${pr.number}: ${describeRework(held)} is reworking it.\n`);
-      continue;
+    if (nats) { // claims on NATS (#411): the bucket says who holds the rework
+      const holder = nats.holder(claimKey("rework", pr.number));
+      if (holder && !(me && holderIsMe(holder, me, machine))) {
+        process.stderr.write(`Skipped #${pr.number}: ${describeHolder(holder)} is reworking it.\n`);
+        continue;
+      }
+    } else {
+      const held = reworkHolder(comments, pr.head.sha, Date.now() / 1000, hours);
+      if (held && !(me && isMine(held, me, machine))) {
+        process.stderr.write(`Skipped #${pr.number}: ${describeRework(held)} is reworking it.\n`);
+        continue;
+      }
     }
     out.push([`pr-${pr.number}`, `Rework #${pr.number}: ${pr.title} (${pr.head.ref})`, pr.head.sha]);
   }

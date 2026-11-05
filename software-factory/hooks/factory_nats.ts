@@ -21,11 +21,12 @@
 // machine needs a copy of it.
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
-import { homedir, hostname } from "node:os";
-import { basename, join } from "node:path";
+import { hostname } from "node:os";
+import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { type Config, load } from "./factory_config.ts";
-import { Exit, git, pyDumps, run, runMain, sleepSync, which } from "./factory_lib.ts";
+import { Exit, pyDumps, run, runMain, sleepSync, which } from "./factory_lib.ts";
+import { messagingProject, seedFolder } from "./core/compose.ts";
 import { configDir } from "./factory_machine.ts";
 import { NAME, natsTry, newUserKey, permissions, publicKeyOf, type Role, ROLES, roleOf } from "./factory_nats_keys.ts";
 
@@ -422,22 +423,18 @@ async function cmdStatus(argv: string[]): Promise<number> {
 }
 
 // ---------- keys ----------
-/** The project's name as NATS subjects use it: --project, else the repository's name, lowercase. */
+/** The project's name as NATS subjects use it: --project, else the name its agents connect under (the composition
+ * root's rule: the origin repository's name, the same from every worktree). */
 export function projectName(given?: string): string {
-  if (given) return given;
-  const p = git(["config", "--get", "remote.origin.url"]);
-  const m = p.code === 0 ? /[:/]([\w.-]+?)(?:\.git)?\/?$/.exec(p.stdout.trim()) : null;
-  const top = git(["rev-parse", "--show-toplevel"]);
-  const raw = m ? (m[1] as string) : top.code === 0 ? basename(top.stdout.trim()) : "";
-  return raw.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+  return given || messagingProject();
 }
 
-/** The folder of the agents' seeds: messaging.creds, else ~/.secrets/nats/<project>/. */
+/** The folder of the agents' seeds: messaging.creds, else ~/.secrets/nats/<project>/ (the composition root's rule, so
+ * the seed is written where the agent reads it). */
 export function credsDir(cfg: Config | null, project: string): string {
   const m = cfg?.messaging;
   const set = m && typeof m === "object" && !Array.isArray(m) ? String((m as Record<string, unknown>).creds ?? "") : "";
-  if (set) return set.startsWith("~/") ? join(homedir(), set.slice(2)) : set;
-  return join(homedir(), ".secrets", "nats", project);
+  return seedFolder(set, project);
 }
 
 function loadConfig(): Config | null {

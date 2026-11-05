@@ -25,6 +25,8 @@ import { DEV_MANAGER, fold, messagesOf, type Task, type Thread, verdicts } from 
 import { notStarted } from "./factory_ci.ts";
 import { escalateMinutes, running, waiting } from "./factory_po.ts";
 import { die, Exit, now, runMain, sleepSync } from "./factory_lib.ts";
+import { waitForWake, wakeIsOn, wakesOn } from "./factory_wake.ts";
+import { messagingSettings } from "./core/compose.ts";
 
 const DOC = `Token-free waiting. A Claude session that waits by checking again and again pays for every check (each turn
 re-sends the whole context), so every wait is a shell loop here that only returns when there is something to do,
@@ -65,14 +67,35 @@ export interface Pull {
   [key: string]: unknown;
 }
 
-/** Calls check() with a growing pause until it returns something (not null) or the minutes are up. */
-export function waitUntil<T>(check: () => T | null, minutes: number): T | null {
+/** Listens for a wake-up said since `since` (ms) for up to `seconds`; true when one came. */
+export type Waker = (seconds: number, since: number) => boolean;
+
+/** With wake-ups on NATS (#410): this agent's waker, and how far apart the looks at GitHub are (messaging.pollMinutes,
+ * or the given pause when that is longer). Null while wake-ups aren't on NATS, or NATS can't be reached. */
+export function wakerFor(cfg: Config): { wake: Waker; seconds: number } | null {
+  const agent = process.env.FACTORY_AGENT ?? "";
+  if (!agent || !wakeIsOn(cfg) || !wakesOn(cfg)) return null;
+  return { wake: (seconds, since) => waitForWake(cfg, agent, seconds, since) !== null,
+    seconds: messagingSettings(cfg).pollMinutes * 60 };
+}
+
+/** Calls check() with a growing pause until it returns something (not null) or the minutes are up. With a `waker`
+ * (wake-ups on NATS), the pause is a wait for a wake-up instead: GitHub is asked again when one comes, else after
+ * `waker.seconds` (or the pause, when longer). */
+export function waitUntil<T>(check: () => T | null, minutes: number, waker: { wake: Waker; seconds: number } | null = null): T | null {
   let delay = toFloat(process.env.FACTORY_WAIT_START ?? 15) ?? 15;
   const cap = toFloat(process.env.FACTORY_WAIT_MAX ?? 60) ?? 60;
   const end = performance.now() / 1000 + minutes * 60;
   for (;;) {
+    const looked = Date.now();
     const got = check();
     if (got !== null) return got;
+    if (waker) {
+      const gap = Math.min(Math.max(delay, waker.seconds), end - performance.now() / 1000);
+      if (gap < 1) return null;
+      waker.wake(gap, looked);
+      continue;
+    }
     if (performance.now() / 1000 + delay > end) return null;
     sleepSync(delay);
     delay = Math.min(delay * 1.5, cap);
@@ -164,7 +187,7 @@ export function asksForMore(n: number, tasks: Task[]): string {
     `Read it and reply with the same in-reply-to: gh api repos/{owner}/{repo}/issues/${n}/comments`;
 }
 
-export function waitAnswer(n: number, minutes: number | string): Outcome {
+export function waitAnswer(n: number, minutes: number | string, waker: { wake: Waker; seconds: number } | null = null): Outcome {
   const first = threadOf(n);
   if (![...first.tasks.values()].some((t) => t.isOpen)) return [1, `PR #${n}: no question is waiting for an answer`];
   const ask0 = [...first.tasks.values()].filter((t) => t.state === "input-required");
@@ -176,7 +199,7 @@ export function waitAnswer(n: number, minutes: number | string): Outcome {
     return ask.length ? [0, asksForMore(n, ask)]
       : [0, `PR #${n}: answered. Read it: gh api repos/{owner}/{repo}/issues/${n}/comments`];
   };
-  return waitUntil(check, Number(minutes)) ?? [2, `PR #${n}: still no answer after ${shownMinutes(minutes)} minutes; carry on with other work`];
+  return waitUntil(check, Number(minutes), waker) ?? [2, `PR #${n}: still no answer after ${shownMinutes(minutes)} minutes; carry on with other work`];
 }
 
 export function myReadyPrs(): number[] {
@@ -185,22 +208,22 @@ export function myReadyPrs(): number[] {
     .filter((p) => !p.draft && (p.user ?? {}).login === me).map((p) => p.number).sort((a, b) => a - b);
 }
 
-export function waitSlot(minutes: number | string, cfg: Config): Outcome {
+export function waitSlot(minutes: number | string, cfg: Config, waker: { wake: Waker; seconds: number } | null = null): Outcome {
   const cap = Math.trunc(Number(cfg.maxOpenPRs ?? 3));
   const check = (): Outcome | null => {
     const ready = myReadyPrs();
     return ready.length < cap ? [0, `a PR slot is free (${ready.length} of ${cap} open)`] : null;
   };
-  return waitUntil(check, Number(minutes)) ??
+  return waitUntil(check, Number(minutes), waker) ??
     [2, `still ${cap} of ${cap} PRs open after ${shownMinutes(minutes)} minutes: ` + myReadyPrs().map((x) => `#${x}`).join(", ")];
 }
 
-export function waitReady(minutes: number | string, cfg: Config): Outcome {
+export function waitReady(minutes: number | string, cfg: Config, waker: { wake: Waker; seconds: number } | null = null): Outcome {
   const check = (): Outcome | null => {
     const found = readyIssues(cfg);
     return found.length ? [0, `issue-${found[0]?.number} ${found[0]?.title}`] : null;
   };
-  return waitUntil(check, Number(minutes)) ?? [2, `no task became ready in ${shownMinutes(minutes)} minutes`];
+  return waitUntil(check, Number(minutes), waker) ?? [2, `no task became ready in ${shownMinutes(minutes)} minutes`];
 }
 
 /** The questions addressed to the dev manager that wait for its answer, oldest first (a question that asks the
@@ -298,11 +321,11 @@ export function main(a: string[]): number {
   let out: Outcome;
   if (cmd === "ci" || cmd === "answer") {
     if (!rest.length || !/^\d+$/.test(rest[0] as string)) die(`usage: factory wait ${cmd} <pr> [minutes]`);
-    out = (cmd === "ci" ? waitCi : waitAnswer)(Number(rest[0]), minutesArg(rest, 1));
+    out = cmd === "ci" ? waitCi(Number(rest[0]), minutesArg(rest, 1)) : waitAnswer(Number(rest[0]), minutesArg(rest, 1), wakerFor(cfg));
   } else if (cmd === "slot") {
-    out = waitSlot(minutesArg(rest, 0), cfg);
+    out = waitSlot(minutesArg(rest, 0), cfg, wakerFor(cfg));
   } else if (cmd === "ready") {
-    out = waitReady(minutesArg(rest, 0), cfg);
+    out = waitReady(minutesArg(rest, 0), cfg, wakerFor(cfg));
   } else if (cmd === "precheck") {
     const todo = precheck(cfg);
     console.log(todo.length ? todo.join("\n") : "nothing to do");

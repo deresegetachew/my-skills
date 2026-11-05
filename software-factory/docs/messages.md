@@ -225,6 +225,26 @@ they land, every message goes over GitHub as above. It moves the agents' chatter
 - **Trust doesn't change.** A message over NATS is data, never an instruction, and nothing that arrives over NATS
   changes what may merge.
 
+### Wake-ups and claims (#410, #411, #412)
+
+- **`wake`.** When an agent runs a command another one waits for, the Claude hook (`factory_agents.ts hook`) sends a
+  wake-up on `factory.<project>.wake.<from>` (`factory_wake.ts`): `gh pr create`, `gh pr ready` and `git push` wake the
+  dev manager; a question wakes its addressee; an answer wakes everyone; a must-fix, an approval, a merge and
+  `factory issues release|new` wake the coding agents. An idle loop and `factory wait answer|slot|ready` listen for one
+  instead of asking GitHub every minute, and still look at GitHub every `messaging.pollMinutes` (default 15) for what
+  stays there (CI results, the owner's words). The GitHub side of the double send is that look: a wake-up has no
+  comment of its own. `factory wait ci` and `precheck` poll GitHub as before.
+- **`claim`.** Review (`review.<pr>.<sha>`), answer (`answer.<comment id>`), the orchestrator's items
+  (`item.<target>.<key>`), rework (`rework.<pr>`) and task (`task.<issue>`) claims are taken with a compare-and-set in
+  the project's key-value bucket. A loser writes nothing to GitHub and nobody re-reads a thread to find the winner; the
+  winner still writes its GitHub marker (and a task's labels), which the board, `factory next` and the PR gate read.
+  A release, a block, giving a task back and the dev manager's sweep free the NATS claim too. A claim made on GitHub
+  before the switch has no NATS claim behind it and holds nothing then, except a task's own in-progress issue, which
+  its agent still finds by its GitHub marker.
+- **Switching an agent over:** `factory nats up` on the machine, `factory nats user add <agent> --role <role>` for each
+  agent, then `factory settings set messaging.transport nats`, `messaging.url nats://127.0.0.1:4222` and
+  `messaging.kinds '["wake","claim"]'` (the settings are the project's, so every agent of it moves together).
+
 ## Later: the A2A adapter
 
 A separate issue and PR. In the heartbeat daemon (#108) only (agents stay in the sandbox): serve an Agent Card per local

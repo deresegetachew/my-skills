@@ -251,6 +251,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("messaging.url", "str", "messaging", "The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats.", { default: "" }),
   S("messaging.creds", "str", "messaging", "The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/.", { default: "" }),
   S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff); every other kind stays on GitHub.", { default: [] }),
+  S("messaging.pollMinutes", "int", "messaging", "With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up over NATS before it looks at GitHub anyway.", { default: 15 }),
   S("messaging.fallback", "enum", "messaging", "When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command.", { options: ["github", "none"], default: "github" }),
   S("ui.projects", "list", "ui", "Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout.", { default: [] }),
   S("ui.port", "int", "ui", "The port `factory ui` listens on (`--port` wins for one run).", { default: 4747 }),
@@ -459,6 +460,11 @@ const MORE: Record<string, More> = {
     "server can't be reached, goes on over GitHub and prints the error (`plugin-missing`, `plugin-load` or " +
     "`nats-unreachable`) once, with the fix. With none, the command stops with that error instead.",
   examples: ["factory settings set messaging.fallback none"] },
+  "messaging.pollMinutes": { long: "A wake-up over NATS ends an idle wait at once (a pull request opened, a question, " +
+    "an answer, a merge). Meanwhile the loop still looks at GitHub this often, for what stays there: CI results, the " +
+    "owner's words, a wake-up that was missed. Used only while wake is in messaging.kinds; otherwise the loops wait as " +
+    "they always did (waitMinutes, idleMinutes).",
+  examples: ["factory settings set messaging.pollMinutes 30"] },
   "ui.projects": { long: "Each path is a checkout of another project that runs the factory on this machine. The web UI " +
     "lists it under its folder's name, with its own agents and views, read through that project's own commands. A path " +
     "that is not there is shown with what to do.",

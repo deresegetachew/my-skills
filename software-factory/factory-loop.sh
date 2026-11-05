@@ -239,15 +239,37 @@ reload_if_changed() {
 }
 
 # Waits `$1` minutes, still registered as idle: a manager or a product owner that sleeps is not dead (the dev manager's
-# sweep would otherwise mark it down). Ctrl-C stops it.
+# sweep would otherwise mark it down). Ctrl-C stops it. A wake-up over NATS (#410) ends the wait early.
 role_sleep() {
   local left
   left=$(bun --no-env-file --config=/dev/null -e 'console.log(Math.trunc(Number(process.argv[1]) * 60))' "$1")
   while [ "$left" -gt 0 ]; do
     fh "$hooks/factory_agents" ping --agent "$agent" --status idle >/dev/null 2>&1 || true
     local chunk=$((left < 300 ? left : 300))
-    sleep "$chunk"; left=$((left - chunk))
+    wake_wait "$chunk" && return 0
+    left=$((left - chunk))
   done
+}
+
+# Wake-ups (#410, decision 0004): with `wake` in messaging.kinds, factory_wake.ts waits up to $1 seconds for one over
+# NATS that was said since this loop last looked ($looked), and returns 0 (one line says by whom) when it came; with
+# wake-ups off it sleeps the time itself. A release without it, or a wait that failed, sleeps here. 1: nobody woke it.
+looked=$(date +%s)
+wake_wait() {
+  local said rc
+  if [ -f "$hooks/factory_wake.ts" ]; then
+    said="$(fh "$hooks/factory_wake" wait --seconds "$1" --since "$looked")"; rc=$?
+    if [ "$rc" = 0 ]; then echo "[$agent] $(date '+%H:%M') ${said:-woken}"; return 0; fi
+    [ "$rc" = 2 ] && return 1
+  fi
+  sleep "$1"; return 1
+}
+# How long an idle wait of $1 minutes lasts: messaging.pollMinutes when that is longer and wake-ups come over NATS (they
+# end it early, so GitHub is asked less often), else $1.
+wake_minutes() {
+  local m
+  [ -f "$hooks/factory_wake.ts" ] && m="$(fh "$hooks/factory_wake" minutes "$1" 2>/dev/null)" && [ -n "$m" ] && { echo "$m"; return; }
+  echo "$1"
 }
 
 # GitHub's API limit (#347): a pass or a task lookup that exits 4 met the limit or a network error, which is not a
@@ -334,7 +356,7 @@ for ((n = 1; n <= limit; n++)); do
   fi
   reload_if_changed $((limit - n + 1))
   if [ "$role" != coding-agent ]; then
-    role_pass; rc=$?
+    looked=$(date +%s); role_pass; rc=$?
     # A busy GitHub (exit 4) is neither a failure nor a success: it leaves the count of failed passes as it was.
     if [ "$rc" = 4 ]; then busy=$((busy + 1))
     elif [ "$rc" = 1 ]; then
@@ -346,7 +368,7 @@ for ((n = 1; n <= limit; n++)); do
     if [ "$rc" = 4 ]; then github_wait "$busy"
     elif [ "$rc" = 3 ]; then
       [ "$role_idle" != 0 ] || { echo "[$agent] Nothing to do; exiting (idleMinutes is 0)."; exit 0; }
-      role_sleep "$(idle_minutes "$role_idle")"
+      role_sleep "$(wake_minutes "$(idle_minutes "$role_idle")")"  # with wake-ups on NATS, GitHub is asked less often
     else role_sleep "$role_busy"; fi
     continue
   fi
@@ -367,10 +389,14 @@ for ((n = 1; n <= limit; n++)); do
     busy=0
     [ "$wait_minutes" -gt 0 ] 2>/dev/null || {
       echo "[$agent] Nothing left for this loop: every task is done, blocked or taken by another loop."; exit 0; }
-    [ "$waited" = 0 ] && echo "[$agent] $(date '+%H:%M') nothing ready (every task is done, blocked or taken). Checking again every $wait_minutes min; Ctrl-C stops."
+    idle_for="$(wake_minutes "$(idle_minutes "$wait_minutes")")"
+    if [ "$waited" = 0 ]; then
+      if [ "$idle_for" = "$wait_minutes" ]; then echo "[$agent] $(date '+%H:%M') nothing ready (every task is done, blocked or taken). Checking again every $wait_minutes min; Ctrl-C stops."
+      else echo "[$agent] $(date '+%H:%M') nothing ready (every task is done, blocked or taken). Waiting for a wake-up, and checking again every $idle_for min; Ctrl-C stops."; fi
+    fi
     waited=1
-    fh "$hooks/factory_agents" ping --agent "$agent" --status idle >/dev/null 2>&1 || true
-    sleep $(($(idle_minutes "$wait_minutes") * 60))
+    role_sleep "$idle_for"  # pings as idle, and a wake-up ends it early
+    looked=$(date +%s)
     tidy
     reload_if_changed $((limit - n + 1))
   done

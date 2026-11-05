@@ -8,10 +8,15 @@ import { type Config, taskLabels } from "../../../factory_config.ts";
 import { addLabels, claimSettleSeconds, claimWinner, comment, gh, ghAll, humanComments, type Issue, names, openDependencies,
   ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
 import { sleepSync } from "../../../factory_lib.ts";
+import { holderIsMe, holderName, leasesOn } from "../../../factory_leases.ts";
 import { type Claimant, isMe } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
 import { checkClaim, dependencies, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
 import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
+
+/** How long a task claim on NATS lasts when nothing releases it (#412): a week. A release, a block, giving it back and
+ * the dev manager's sweep of a silent agent end it sooner. */
+const TASK_SECONDS = 7 * 24 * 3600;
 
 export class GithubTaskTracker implements TaskTracker {
   constructor(private readonly cfg: Config) {}
@@ -108,6 +113,7 @@ export class GithubTaskTracker implements TaskTracker {
     const i = issue(n);
     for (const x of names(i)) if (x.startsWith(L.agentPrefix) || x === L.inProgress || x === L.ready) removeLabel(n, x);
     addLabels(n, [L.blocked]);
+    leasesOn(this.cfg)?.drop(`task.${n}`); // and its claim on NATS (#412)
     // A block ends the claim too, so whoever takes it after the unblock wins it (factory-release).
     const held = [...names(i)].filter((x) => x.startsWith(L.agentPrefix)).map((x) => x.slice(L.agentPrefix.length));
     comment(n, `<!-- factory-release agent=${held[0] ?? "none"} -->\n**Blocked:** ${reason}`);
@@ -125,11 +131,22 @@ export class GithubTaskTracker implements TaskTracker {
     return { id: String(i.number), url: String(i.html_url) };
   }
 
-  /** Labels and a claim comment for issue `i`; true when this claim won. */
+  /** Labels and a claim comment for issue `i`; true when this claim won. With claims on NATS (#412) the bucket decides
+   * first: a task another agent holds there is left untouched, and the winner writes its labels and comment once. */
   private take(i: Issue, who: Claimant): boolean {
     const L = taskLabels(this.cfg);
     const mine = L.agentPrefix + who.agent;
     const n = i.number;
+    const nats = leasesOn(this.cfg);
+    if (nats) {
+      const took = nats.claim(`task.${n}`, holderName(who.agent, who.machine), TASK_SECONDS);
+      if (!took.held && !holderIsMe(took.holder, who.agent, who.machine)) return false;
+      addLabels(n, [L.inProgress, mine]);
+      removeLabel(n, L.ready);
+      const where = who.machine ? ` machine=${who.machine}` : "";
+      comment(n, `<!-- factory-claim agent=${who.agent}${where} -->\n**${who.agent}** is working on this.\n${claimRecord(i.body)}`);
+      return true;
+    }
     addLabels(n, [L.inProgress, mine]);
     removeLabel(n, L.ready);
     const where = who.machine ? ` machine=${who.machine}` : "";

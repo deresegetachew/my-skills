@@ -36,6 +36,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { agentName, agentSlot, branchTask, type Config, load, roleNames, safeAgent, taskSource, tasks as planTasks,
   toFloat } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
+import { claimKey, holderIsMe, holderName, leasesOn } from "./factory_leases.ts";
 import { machineId, machineNames } from "./factory_machine.ts";
 import { isClaude } from "./factory_session.ts";
 import { type ArgSpec, die, Exit, flock, isoUtc, now, parseArgs, parseIso, pyDumps, run, runMain, sleepSync,
@@ -574,6 +575,21 @@ function postReworkRelease(n: number, agent: string, machine: string): void {
 export function claimRework(cfg: Config, n: number, head: string, agent: string): boolean {
   const hours = staleOf(cfg);
   const machine = machineId();
+  const nats = leasesOn(cfg);
+  if (nats) { // claims on NATS (#411): the bucket decides; the marker is its GitHub copy, and a loser writes nothing
+    const key = claimKey("rework", n);
+    const was = nats.holder(key);
+    if (was) return holderIsMe(was, agent, machine);
+    const took = nats.claim(key, holderName(agent, machine), hours * 3600);
+    if (!took.held) return holderIsMe(took.holder, agent, machine);
+    const until = now() + hours * 3600;
+    const host = hostLabel();
+    const where = machine ? ` machine=${machine}` : "";
+    fi.comment(n, `<!-- factory-rework-claim agent=${agent}${where} host=${host} sha=${head} until=${isoUtc(until)} -->\n` +
+      `**${agent}** on ${host} is reworking ${head.slice(0, 7)} until ${isoUtc(until).slice(11, 16)} UTC. It's released when ` +
+      "the run ends, or when that time passes.");
+    return true;
+  }
   const held = reworkHolder(commentsOf(n), head, now(), hours);
   if (held) return isMine(held, agent, machine);
   const until = now() + hours * 3600;
@@ -592,6 +608,12 @@ export function claimRework(cfg: Config, n: number, head: string, agent: string)
 /** Release this agent's live rework claim on PR `n`, if it has one; true when a release was posted. */
 export function releaseRework(cfg: Config, n: number, agent: string): boolean {
   const machine = machineId();
+  const nats = leasesOn(cfg);
+  if (nats) { // claims on NATS (#411): give it back there, and post the GitHub copy of the release
+    const released = nats.release(claimKey("rework", n), holderName(agent, machine));
+    if (released) postReworkRelease(n, agent, machine);
+    return released;
+  }
   const mine = liveReworkClaims(commentsOf(n), null, now(), staleOf(cfg)).some((c) => isMine(c, agent, machine));
   if (mine) postReworkRelease(n, agent, machine);
   return mine;
