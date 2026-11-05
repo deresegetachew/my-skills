@@ -4,6 +4,7 @@
 import { expect, test } from "bun:test";
 import { MemoryMessaging } from "../hooks/core/adapters/memory/messaging.ts";
 import { RoutedMessaging } from "../hooks/core/adapters/routed/messaging.ts";
+import { CoreError } from "../hooks/core/domain/error.ts";
 import { Message } from "../hooks/core/domain/message.ts";
 import { messagingContract } from "./contracts/messaging.ts";
 
@@ -45,6 +46,18 @@ test("a wake-up in messaging.kinds goes over NATS and is double-sent to GitHub; 
   new RoutedMessaging(github2, nats2, ["question"]).send(msg("w2abc", "wake"), "CI finished.");
   expect(nats2.sent).toEqual([]);
   expect(github2.sent).toEqual(["wake w2abc"]);
+});
+
+test("a send NATS refuses still goes to GitHub, and the fallback is told", () => {
+  const github = new Recorder();
+  const down = new Recorder();
+  down.send = () => {
+    throw new CoreError("nats-unreachable", "The NATS server at nats://x can't be reached.", "Check it.");
+  };
+  const told: string[] = [];
+  new RoutedMessaging(github, down, ["question"], (e) => told.push(e.code)).send(msg("q1abc", "question"), "Still sent?");
+  expect(github.sent).toEqual(["question q1abc"]);
+  expect(told).toEqual(["nats-unreachable"]);
 });
 
 test("a read gives what either transport holds, each message once, and its cursor moves both", () => {
