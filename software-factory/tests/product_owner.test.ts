@@ -280,7 +280,7 @@ test("a finished ask marked done is not listed again after the product owner's l
     "<!-- factory-po-reply ask=notes done -->\nNo notes open."]);
   expect(r.code, r.out).toBe(0);
   expect(r.out).not.toContain("ask hosting");
-  expect(r.out).toContain("Nothing to do");
+  expect(r.out).toContain("] nothing to do");
 });
 
 test("a reply without done waits for the owner and the product owner's own markers do not hand it back (#397)", () => {
@@ -304,7 +304,7 @@ test("pull requests merged since the last product review are listed for review (
   expect(later.out).toContain("review: 1 pull request merged since the last product review: #11 cockpit: search");
   const done = workWith(["<!-- factory-po-review through=11 -->\nReviewed #11."], pulls);
   expect(done.out).not.toContain("review:");
-  expect(done.out).toContain("Nothing to do");
+  expect(done.out).toContain("] nothing to do");
 });
 
 test("the product pass skill has the proactive review, the unmarked note rule and the already asked rule (#397)", () => {

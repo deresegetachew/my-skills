@@ -418,9 +418,26 @@ export async function productAsks(cfg: Config): Promise<string[]> {
   }
   for (const c of ownerNotes(comments, trustedOf(cfg))) {
     const text = splitLines(String(c.body ?? "").trim());
-    out.push(`owner queue #${queue}, note (an instruction, marked or not): ${(text[0] ?? "").slice(0, 100)}`);
+    out.push(`owner queue #${queue}, note ${String(c.id ?? "")} (an instruction, marked or not): ${(text[0] ?? "").slice(0, 100)}`);
   }
-  return out;
+  return [...out, ...await productReview(comments)];
+}
+
+/** The product review line (#397): pull requests merged since the newest `<!-- factory-po-review through=<n> -->` on
+ * the owner queue, newest first, so a pass looks at what was built even when nobody asked. One page of recently
+ * closed pull requests is enough: the product owner reviews the newest work, not the history. */
+async function productReview(comments: Record<string, unknown>[]): Promise<string[]> {
+  const { gh } = await import("./factory_issues.ts");
+  const through = Math.max(0, ...comments.flatMap((c) =>
+    [...String(c.body ?? "").matchAll(/<!--\s*factory-po-review\s+through=(\d+)/g)].map((m) => Number(m[1]))));
+  const pulls = gh<{ number: number; title?: string; merged_at?: string | null }[]>("GET",
+    "repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=50&page=1") ?? [];
+  const fresh = pulls.filter((p) => p.merged_at && p.number > through).sort((a, b) => b.number - a.number);
+  if (!fresh.length) return [];
+  const shown = fresh.slice(0, 5).map((p) => `#${p.number} ${p.title ?? ""}`.trim());
+  const more = fresh.length > 5 ? `, and ${fresh.length - 5} more` : "";
+  const s = fresh.length === 1 ? "" : "s";
+  return [`review: ${fresh.length} pull request${s} merged since the last product review: ${shown.join(", ")}${more}`];
 }
 
 /** What `factory <role> loop --dry-run` prints besides the work: where the role's instructions are, and whether

@@ -34,6 +34,8 @@ const ANSWER = /<!--\s*factory-answer\b/;
 export const OWNER_ASK = /<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\s*-->/; // for=product may follow
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
+const PO_OWN = /<!--\s*factory-po-/;
+const NAMES_PO = /\bPO\b|product[ -]owner/i;
 
 /** Every id a marker carries in one comment, in order: a comment may answer or ask more than one (#357). */
 function markerIds(marker: RegExp, body: string): string[] {
@@ -273,6 +275,7 @@ export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()
       under = [po[1] as string];
       continue;
     }
+    if (PO_OWN.test(body)) continue; // the product owner's own record (a review), never the owner's answer (#397)
     if (trusted.size && !trusted.has(loginOf(c))) continue;
     const answered = markerIds(OWNER_ANSWER, body);
     for (const slug of answered.length ? answered : under) {
@@ -294,10 +297,10 @@ export function openOwnerAsks(comments: Obj[], trusted: Set<string> = new Set())
   return ownerAskStates(comments, trusted).filter(([, , s]) => s !== "product").map(([slug, c]) => [slug, c]);
 }
 
-/** Plain notes the owner (or the owner's session) wrote on the owner queue that no ask owns (#397): a comment with no
- * factory marker, from a trusted login, that does not come after an ask or a product owner reply to an ask (those
- * answer that thread). It is an instruction to the product owner, marked or not. It stays until a product owner reply
- * `<!-- factory-po-reply ask=notes done -->` comes after it. Returns the comments, oldest first. */
+/** Plain notes the owner (or the owner's session) wrote on the owner queue to the product owner (#397): a comment with
+ * no factory marker, from a trusted login, that no ask owns (it does not come after an ask or a product owner reply to
+ * an ask, which it would answer) or that names the product owner ("PO: ..."). It is an instruction, marked or not. It
+ * stays until a product owner reply `<!-- factory-po-reply ask=notes done -->` comes after it. Oldest first. */
 export function ownerNotes(comments: Obj[], trusted: Set<string> = new Set()): Obj[] {
   let open: Obj[] = [];
   let threaded = false; // the last ask or reply was for a real ask: a plain comment answers that thread
@@ -312,7 +315,7 @@ export function ownerNotes(comments: Obj[], trusted: Set<string> = new Set()): O
       } else threaded = true;
       continue;
     }
-    if (body.includes("<!--") || threaded || !body.trim()) continue;
+    if (body.includes("<!--") || !body.trim() || (threaded && !NAMES_PO.test(body))) continue;
     if (trusted.size && !trusted.has(loginOf(c))) continue;
     open.push(c);
   }
