@@ -6,7 +6,7 @@ import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { gitRepo, HOOKS, read, SF, sh, WIKI } from "./support.ts";
 
-const VERBS = ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "ready", "show", "prime"];
+const VERBS = ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "ready", "show", "prime", "import"];
 
 test("factory help lists every board verb", () => {
   const p = sh(["bash", join(SF, "factory"), "help"], { cwd: SF });
@@ -42,4 +42,10 @@ test("a project without the message board (a release install, for now) gets the 
   expect(p.code).toBe(1);
   expect(p.stderr).toContain('"code": "board_missing"');
   expect(p.stderr).toContain("message-board/bin.ts is missing");
+});
+
+test("factory help and the wiki name the import from GitHub with its options (#494)", () => {
+  const p = sh(["bash", join(SF, "factory"), "help"], { cwd: SF });
+  expect(p.stdout).toMatch(/^ {2}board import github \[--closed\] \[--dry-run\]/m);
+  expect(read(join(WIKI, "commands.md"))).toContain("| `factory board import github [--closed] [--dry-run] [--repo owner/name]` |");
 });
