@@ -36,7 +36,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { agentName, agentSlot, branchTask, type Config, load, roleNames, safeAgent, taskSource, tasks as planTasks,
   toFloat } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
-import { claimKey, holderIsMe, holderName, leasesOn } from "./factory_leases.ts";
+import { claimCopy, claimKey, holderIsMe, holderName, leasesOn } from "./factory_leases.ts";
 import { machineId, machineNames } from "./factory_machine.ts";
 import { isClaude } from "./factory_session.ts";
 import { type ArgSpec, die, Exit, flock, isoUtc, now, parseArgs, parseIso, pyDumps, run, runMain, sleepSync,
@@ -582,6 +582,7 @@ export function claimRework(cfg: Config, n: number, head: string, agent: string)
     if (was) return holderIsMe(was, agent, machine);
     const took = nats.claim(key, holderName(agent, machine), hours * 3600);
     if (!took.held) return holderIsMe(took.holder, agent, machine);
+    if (!claimCopy(cfg)) return true; // NATS only (messaging.githubCopy)
     const until = now() + hours * 3600;
     const host = hostLabel();
     const where = machine ? ` machine=${machine}` : "";
@@ -611,7 +612,7 @@ export function releaseRework(cfg: Config, n: number, agent: string): boolean {
   const nats = leasesOn(cfg);
   if (nats) { // claims on NATS (#411): give it back there, and post the GitHub copy of the release
     const released = nats.release(claimKey("rework", n), holderName(agent, machine));
-    if (released) postReworkRelease(n, agent, machine);
+    if (released && claimCopy(cfg)) postReworkRelease(n, agent, machine);
     return released;
   }
   const mine = liveReworkClaims(commentsOf(n), null, now(), staleOf(cfg)).some((c) => isMine(c, agent, machine));

@@ -17,6 +17,10 @@
 // shown there as readable lines and kept in <item>.out; `tmux attach -r` shows the window read-only.
 // Otherwise it runs with no screen, as before.
 //
+// With `pr` in messaging.kinds (NATS), the cycle starts the project's one pull request watcher (factory_pr_feed.ts) when
+// nobody runs it, and reads the open pull requests, their CI and their unchanged comments from its snapshot instead of
+// GitHub. A sub-manager still reads GitHub itself before it acts.
+//
 // Labels and comments on GitHub are the source of truth; the only local state is `.git/factory-manager/<name>.log` and the
 // pid files of the sub-managers it started. A thread's memory is a note comment on the task issue (on the PR when there is
 // no issue); it is a memory for the sub-managers, not a cache.
@@ -29,7 +33,7 @@
 //         --wait      wait for the sub-managers it started
 //   factory_orchestrator.ts sub --name N --item <ref> [--interactive]     one sub-manager (what cycle starts)
 import { createHash } from "node:crypto";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { type Config, load, managerSetting, roleNames, safeAgent, taskLabels, toFloat } from "./factory_config.ts";
 import { comment, type Comment, gh, ghAll, type Issue, taskIssues } from "./factory_issues.ts";
@@ -38,6 +42,9 @@ import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_r
 import { ciState, collect, isoformat, issueOf, isOwn, type Item, minutes, type Pull, reviewState } from "./factory_watch.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./factory_lib.ts";
 import { remember, settled } from "./factory_views_cache.ts";
+import { ensureWatcher, freshPrs, prFeedIsOn } from "./factory_pr_feed.ts";
+import type { PrSnapshot } from "./core/ports/messaging.ts";
+import { wakeUp } from "./factory_wake.ts";
 import { type Job, running as sessionRunning, sessionName, startWindow, type Started, WindowError, windowName } from "./factory_window.ts";
 
 export const OWNER_TITLE = "Dev manager: needs the owner";
@@ -305,6 +312,9 @@ export function leaveVerdict(cfg: Config, name: string, item: Item, before: Set<
   comment(pr, `<!-- factory-manager-skip sha=${head} -->\n` + (failed ? `<!-- factory-review-failed sha=${head} -->\n` : "") +
     `**Dev manager ${name} looked at this pull request and did not review it.** Reason: ${reason}.\n\nNext step: ${step}`);
   out(`pr-${pr}: left a comment saying why it was not reviewed (${reason})`);
+  // A next step the agent takes (draft, conflict, failed CI) is a hand-off: it stays on GitHub, and a wake-up tells the
+  // coding agents at once (#413). Nothing for them while CI runs or when the session itself failed.
+  if (!failed && reason !== "CI has not finished") wakeUp(cfg, name, "coding-agent", `pr#${pr}`, "left the next step");
   if (failed) {
     postAsk(cfg, name, `review-failed-${pr}-${head.slice(0, 7)}`, `PR #${pr} at ${head.slice(0, 7)}: the dev manager's session ended without a ` +
       "verdict, so this commit is skipped until it changes. Read " + join(stateDir(name), `pr-${pr}.out`) + ", then review it " +
@@ -462,6 +472,11 @@ export function runSub(cfg: Config, name: string, ref: string, interactive = fal
   } finally {
     lease.release(held);
     try {
+      writeFileSync(join(stateDir(name), "last-sub"), ref); // a pull request snapshot older than this isn't used (prSnapshot)
+    } catch {
+      // the next cycle then trusts an older snapshot: its sub-manager reads GitHub before it acts
+    }
+    try {
       rmSync(pidfile);
     } catch {
       // gone already
@@ -471,11 +486,30 @@ export function runSub(cfg: Config, name: string, ref: string, interactive = fal
 
 // --- the cycle ---------------------------------------------------------------------------------------------------------
 
+/** When this dev manager's last sub-manager ended (ms), 0 when none has. */
+function lastSubEnded(name: string): number {
+  try {
+    return statSync(join(stateDir(name), "last-sub")).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** With `pr` on NATS: the pull request watcher's snapshot for this cycle, starting the watcher when nobody runs it.
+ * Null (the cycle reads GitHub, as always) while `pr` is off, the snapshot is older than messaging.pollMinutes, or one
+ * of this dev manager's sub-managers ended after it was taken (what it did may not be in it yet). */
+export function prSnapshot(cfg: Config, name: string, dry: boolean, out: Out): PrSnapshot | null {
+  if (!prFeedIsOn(cfg)) return null;
+  if (ensureWatcher(cfg, name, dry)?.started) out("started the pull request watcher (factory_pr_feed.ts watch)");
+  const s = freshPrs(cfg);
+  return s && s.at > lastSubEnded(name) ? s : null;
+}
+
 export async function cycle(cfg: Config, name: string, dry = false, interactive = false, wait = false): Promise<number> {
   const out = makeOut(name, dry);
   const now = lease.now();
   const info: { activity?: number | null } = {};
-  const items = collect(cfg, now, info);
+  const items = collect(cfg, now, info, prSnapshot(cfg, name, dry, out));
   let did = lifecycle(cfg, name, out).length > 0;
   const managers = items.filter((i) => i.to === "manager");
   const owners = items.filter((i) => i.to === "owner");

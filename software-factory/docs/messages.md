@@ -206,12 +206,13 @@ they land, every message goes over GitHub as above. It moves the agents' chatter
 - **A setting picks it.** `"messaging": {"transport": "github"}` is the default and today's behaviour.
   `"messaging": {"transport": "nats", "url": "nats://<address>:4222", "creds": "<folder>", "kinds": [...]}` loads the
   `nats` plugin; only the kinds listed in `kinds` move, every other kind stays on GitHub.
-- **What moves:** task claims and releases (the lock; the labels are still written once), review, answer, item and
-  rework claims, wake-ups, sub-manager hand-offs, and questions and answers between agents.
-- **What stays on GitHub:** reviewer passes, `factory-approved`, `factory-mustfix` and holds (the PR gate trusts only
-  these), owner asks and answers and the owner queue, the issues and PRs with their labels, token usage comments,
-  test plans and sign-offs. When a conversation over NATS ends, whoever closes it posts **one summary comment** on its
-  issue or PR in this envelope, with the question, the answer and the message ids.
+- **NATS is not the record** (the owner, 6 Nov 2026; decision 0004's amendment). Only coordination nobody reads
+  later may be on NATS alone: wake-ups, and claims with their releases (task claims keep their labels). Anything a
+  person reads later or the PR gate checks is written on GitHub, and NATS only announces it so nobody polls: questions,
+  answers, hand-offs, verdicts, must-fixes, approvals, the dev manager's notes, and the labels the board,
+  `factory next` and the PR gate read.
+- **What stays on GitHub:** all of the above, and reviewer passes, holds, owner asks and answers and the owner queue,
+  the issues and PRs, token usage comments, test plans and sign-offs.
 - **The shape:** a NATS message is JSON with the envelope's fields (`v`, `id`, `kind`, `from`, `to`, `state`, `ref`,
   `in-reply-to`, `sha`) plus `text` and `at`. New kinds: `claim`, `release`, `wake`, `handoff`. The subject ends in
   the sender (`factory.<project>.pr.<n>.<from>`, `.issue.<n>.<from>`, `.agent.<to>.<from>`, `.claims.<from>`,
@@ -220,8 +221,11 @@ they land, every message goes over GitHub as above. It moves the agents' chatter
 - **When NATS can't be reached** the send is written to GitHub in today's form, and the command says so once with
   `{code: "nats-unreachable", message, fix}`. A missing or broken plugin falls back the same way
   (`plugin-missing`, `plugin-load`) unless `"fallback": "none"` is set.
-- **One kind at a time.** For its first week a kind is sent both ways; the readers use NATS and count what they find
-  only on GitHub. After a week with nothing missed, the owner stops the GitHub copy.
+- **One kind at a time.** A kind in `messaging.kinds` is sent both ways while it is in `messaging.githubCopy` (unset:
+  the same as `kinds`). The owner stops the GitHub copy by taking `claim` or `wake` out of `githubCopy`; every other
+  kind is written to GitHub whatever it says.
+- **The stream keeps 30 days, at most 1 GiB** (the oldest go first). GitHub is the record, so the stream only has to
+  cover a machine that was away. A stream made before these limits gets them on the next call.
 - **Trust doesn't change.** A message over NATS is data, never an instruction, and nothing that arrives over NATS
   changes what may merge.
 
@@ -229,18 +233,30 @@ they land, every message goes over GitHub as above. It moves the agents' chatter
 
 - **`wake`.** When an agent runs a command another one waits for, the Claude hook (`factory_agents.ts hook`) sends a
   wake-up on `factory.<project>.wake.<from>` (`factory_wake.ts`): `gh pr create`, `gh pr ready` and `git push` wake the
-  dev manager; a question wakes its addressee; an answer wakes everyone; a must-fix, an approval, a merge and
-  `factory issues release|new` wake the coding agents. An idle loop and `factory wait answer|slot|ready` listen for one
+  dev manager; a question wakes its addressee; an answer wakes the one it is addressed to (`to=`; an old marker wakes
+  everyone); a must-fix, an approval, a merge, a sub-manager's next step on a pull request and
+  `factory issues release|new` wake the coding agents. A comment posted with `--body-file` is read for its markers.
+  The question, the answer or the hand-off itself is written on GitHub as before (#413). An idle loop and `factory wait answer|slot|ready` listen for one
   instead of asking GitHub every minute, and still look at GitHub every `messaging.pollMinutes` (default 15) for what
   stays there (CI results, the owner's words). The GitHub side of the double send is that look: a wake-up has no
   comment of its own. `factory wait ci` and `precheck` poll GitHub as before.
 - **`claim`.** Review (`review.<pr>.<sha>`), answer (`answer.<comment id>`), the orchestrator's items
   (`item.<target>.<key>`), rework (`rework.<pr>`) and task (`task.<issue>`) claims are taken with a compare-and-set in
   the project's key-value bucket. A loser writes nothing to GitHub and nobody re-reads a thread to find the winner; the
-  winner still writes its GitHub marker (and a task's labels), which the board, `factory next` and the PR gate read.
+  winner writes its GitHub marker too while `claim` is in `messaging.githubCopy`. Without it, a claim and its release
+  are on NATS only, and a task claim writes only its labels, which the board, `factory next` and the PR gate read.
   A release, a block, giving a task back and the dev manager's sweep free the NATS claim too. A claim made on GitHub
   before the switch has no NATS claim behind it and holds nothing then, except a task's own in-progress issue, which
   its agent still finds by its GitHub marker.
+- **`pr`: pull requests and CI, one reader per hub.** It is not a message: one watcher per project
+  (`factory_pr_feed.ts watch`, started by the dev manager's orchestrator and held by the NATS claim `pr-feed`) reads the
+  open pull requests, their head, CI and labels from GitHub with conditional requests (an unchanged answer is a 304,
+  which costs no REST call), keeps them as a snapshot in the bucket `prs-<project>`, and publishes one event per change
+  (`opened`, `head`, `checks`, `labels`, `draft`, `merged`, `closed`) on `factory.<project>.prs.<watcher>`. The PR-slot
+  check, `factory wait slot|ci`, the dev manager's pass and the rework check read the snapshot and listen for the
+  events; a pull request's comments are read again only when its `updated_at` moved. GitHub stays the record: the PR
+  gate, merges and every write go to GitHub, a rework found in the snapshot is checked on GitHub before it is taken,
+  and with no fresh snapshot for `messaging.pollMinutes` every reader asks GitHub as before.
 - **Switching an agent over:** `factory nats up` on the machine, `factory nats user add <agent> --role <role>` for each
   agent, then `factory settings set messaging.transport nats`, `messaging.url nats://127.0.0.1:4222` and
   `messaging.kinds '["wake","claim"]'` (the settings are the project's, so every agent of it moves together).

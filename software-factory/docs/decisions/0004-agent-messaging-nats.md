@@ -189,6 +189,24 @@ A message is JSON with the fields of the `factory-msg` envelope v1 (`docs/messag
 - One more service on a machine (the NATS container), and a Tailscale port opened to it.
 - An agent that can't reach NATS still works, more slowly and with more calls.
 
+## Amended 6 Nov 2026: NATS is not the record
+
+The owner's decision. GitHub's 5,000 calls an hour still ran out after wake-ups and claims moved, because every moved
+kind was also written to GitHub: overnight the dev manager posted "released" review-claim comments about 50 times on
+each of two PRs that were waiting for the owner. The rule now:
+
+- **Coordination with no history worth keeping may be on NATS only:** wake-ups, and claims with their releases. A task
+  claim keeps its labels (`factory:in-progress`, `agent:<name>`) and writes no comment.
+- **Anything a person reads later or the PR gate checks stays written on GitHub;** NATS only announces it, so nobody
+  polls: questions, answers, hand-offs, verdicts, must-fixes, approvals, the dev manager's notes, and the labels the
+  board, `factory next` and the PR gate read. This replaces point 2's "moves to NATS" for questions, answers and
+  hand-offs, and the summary comment is no longer needed.
+- **The setting:** `messaging.githubCopy` lists the moved kinds still also written to GitHub. Unset, it is the same as
+  `messaging.kinds` (point 8's double send, unchanged); the owner trims it. Only `claim` and `wake` can leave it.
+- **#413 now signals instead of moving:** a question, an answer or a hand-off is posted on GitHub as before, and a
+  wake-up over NATS tells its addressee (the dev manager, the product owner or the agent) at once.
+- **The stream has limits:** 30 days and at most 1 GiB, the oldest dropped first, applied to a running hub's stream too.
+
 ## Build tasks (a draft; filed once this decision is accepted)
 
 The order is set by the numbers `factory usage --github` gives after #371's cuts. The list below assumes wake-ups and

@@ -15,7 +15,7 @@ import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./c
 import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
 import type { DocSection } from "./docs_model.ts";
 import { CSS } from "./style.ts";
-import { CiChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
+import { CiChannel, EpicsChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
 import { searchRows, type ViewsData } from "./views_model.ts";
 
 // --- the API's shapes --------------------------------------------------------------------------------------------------
@@ -265,6 +265,7 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
 
 const COMING: Record<string, [string, string]> = {
   tasks: ["Tasks", "factory next"],
+  epics: ["Epics", "factory snapshot"],
   "pull-requests": ["Pull requests", "factory prs"],
   ci: ["CI", "factory ci status"],
 };
@@ -283,7 +284,7 @@ function ComingChannel({ name }: { name: string }) {
 }
 
 /** The views that are channels of their own (#424, web/views.tsx). */
-const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel, "pull-requests": PullsChannel, ci: CiChannel };
+const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel, epics: EpicsChannel, "pull-requests": PullsChannel, ci: CiChannel };
 
 // --- the app -----------------------------------------------------------------------------------------------------------
 
@@ -506,7 +507,10 @@ function App() {
   };
   const viewChannel = (name: string) => {
     const View = VIEW_CHANNELS[name] as (typeof VIEW_CHANNELS)[string];
+    const talkers = view.channels.filter((c) => c.kind === "agent" && (c.role === "product-owner" || c.role === "dev-manager"))
+      .map((c) => ({ name: c.name, role: c.role as string })).sort((a, b) => Number(b.role === "product-owner") - Number(a.role === "product-owner"));
     return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast} docs={docPages}
+      token={token} talkers={talkers}
       open={(c, f) => go(project.id, c, f)} />;
   };
 

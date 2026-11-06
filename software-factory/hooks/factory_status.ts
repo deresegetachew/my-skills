@@ -8,6 +8,8 @@
 //              (a lease, #99), and "a person merges this one"
 //   CI         runs queued and the oldest one's age, and the self-hosted runners (when GitHub lets us see them)
 //   Tasks      issues mode: ready (by milestone), in progress, in review, blocked; plan mode: the next task
+//   GitHub calls  this machine's factory GitHub calls in the last hour by agent and the top 5 callers (counted by
+//              factory_lib.ts run()), next to what GitHub says is left of the account's hourly limit
 //
 // Everything comes from `gh api` (GitHub's REST API), git and local files. It changes nothing on GitHub or in the
 // working tree; in plan mode `next_task.ts` runs a `git fetch` to see main's plan. A section
@@ -19,7 +21,8 @@ import { join } from "node:path";
 import { agentIssues, current, stateOf } from "./factory_agents.ts";
 import { type Config, load, loadFromMain, taskLabels, taskSource } from "./factory_config.ts";
 import { names, taskIssues } from "./factory_issues.ts";
-import { bunCmd, isoUtc, parseArgs, parseIso, pyDumps, run, runMain } from "./factory_lib.ts";
+import { bunCmd, githubCallsLastHour, isoUtc, parseArgs, parseIso, pyDumps, run, runMain } from "./factory_lib.ts";
+import { limitStatus } from "./factory_views_cache.ts";
 import { passFile } from "./factory_review_pass.ts";
 import { nowUtc } from "./factory_manager_claims.ts";
 import { type Failed, ciState as judgedCi, claimOf, gateWord, isFailed, section, trustedOf } from "./factory_prs.ts";
@@ -173,12 +176,32 @@ function tasks(cfg: Config): Tasks {
   return { ready, ...counts };
 }
 
+const TOP_CALLERS = 5;
+
+interface GithubCallsView {
+  total: number;
+  agents: Record<string, number>;
+  callers: { caller: string; calls: number }[];
+  limit: { remaining: number; limit: number; reset: string } | null;
+}
+
+/** This machine's counted GitHub calls in the last hour, and GitHub's own count when it can be read (`gh api rate_limit`
+ * is free, and kept a minute in the shared limit file). */
+function githubCalls(): GithubCallsView {
+  const h = githubCallsLastHour();
+  const core = limitStatus();
+  return { total: h.total, agents: Object.fromEntries(h.agents),
+    callers: h.callers.slice(0, TOP_CALLERS).map(([caller, calls]) => ({ caller, calls })),
+    limit: core ? { remaining: core.remaining, limit: core.limit, reset: isoUtc(core.reset) } : null };
+}
+
 interface Status {
   agents: Agents | Failed;
   here: { claims: string[] } | Failed;
   pulls: { pulls: StatusPull[] } | Failed;
   ci: Ci | Failed;
   tasks: Tasks | Failed;
+  githubCalls: GithubCallsView | Failed;
 }
 
 function show(s: Status, taskMode = "plan"): void {
@@ -228,6 +251,21 @@ function show(s: Status, taskMode = "plan"): void {
     console.log(`  ready: ${ready}`);
     console.log(`  in progress ${t.inProgress}, in review ${t.inReview}, blocked ${t.blocked}`);
   }
+  console.log("GitHub calls (this machine, last hour)");
+  const g = s.githubCalls;
+  if (isFailed(g)) console.log(err(g));
+  else {
+    const left = g.limit ? `GitHub has ${g.limit.remaining} of ${g.limit.limit} left, resets ${g.limit.reset.slice(11, 16)} UTC`
+      : "GitHub's remaining count can't be read";
+    console.log(`  ${g.total} counted; ${left}`);
+    const agents = Object.entries(g.agents);
+    if (agents.length) console.log("  by agent: " + agents.map(([a, n]) => `${a} ${n}`).join(", "));
+    if (g.callers.length) {
+      console.log("  top callers:");
+      const width = Math.max(...g.callers.map((c) => c.caller.length));
+      for (const c of g.callers) console.log(`    ${c.caller.padEnd(width)}  ${String(c.calls).padStart(5)}`);
+    }
+  }
 }
 
 const PROG = "factory_status.ts";
@@ -238,7 +276,7 @@ export function main(argv: string[]): number {
   const cfg = load();
   const now = Date.now() / 1000;
   const s: Status = { agents: section(() => agents(cfg)), here: section(here), pulls: section(() => pulls(cfg)),
-    ci: section(() => ci(now)), tasks: section(() => tasks(cfg)) };
+    ci: section(() => ci(now)), tasks: section(() => tasks(cfg)), githubCalls: section(githubCalls) };
   if (a.json) console.log(pyDumps(s, { indent: 2 }));
   else show(s, taskSource(cfg));
   return 0;

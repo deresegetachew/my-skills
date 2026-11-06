@@ -3,6 +3,7 @@
 // Linear would be more. `tasks.source` chooses (core/compose.ts). Its contract is tests/contracts/task_tracker.ts, and
 // every adapter passes it. A refusal is a CoreError with {code, message, fix}.
 import type { Claimant } from "../domain/claim.ts";
+import type { Epic } from "../domain/epic.ts";
 import type { Task } from "../domain/task.ts";
 
 /** What a pick gave: the task (null for none), and a line to tell the person when the tracker held back. */
@@ -44,6 +45,8 @@ export interface TaskTracker {
   tick(id: string, index: number): void;
   /** Blocked, saying why; ends the claim, so whoever takes it after a release wins it. */
   block(id: string, reason: string): void;
+  /** The epics (open and closed), in issue-number order; trackers without them give none. */
+  epics(): Epic[];
   /** A new ready task, after the others. */
   file(task: NewTask): Filed;
 }

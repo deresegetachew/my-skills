@@ -227,3 +227,17 @@ test("a Bun only in someone's home folder does not count as installed for the fa
     M.setRoot(savedRoot);
   }
 });
+
+test("replies to connections that came in go out first, and agents still cannot start one to the home network", () => {
+  for (const egress of ["internet", "none"]) {
+    const text = G.renderRules(1001, ["192.168.2.1"], ["192.168.2.10:5432"], [], [], egress);
+    const lines = text.split("\n").map((l) => l.trim());
+    const chain = lines.indexOf("chain output {");
+    expect(lines[chain + 1]).toContain("policy accept;");
+    expect(lines[chain + 2]).toBe("ct state established,related accept");
+    expect(text.indexOf("ct state established,related accept")).toBeLessThan(text.indexOf('log prefix "FACTORY-BLOCK " drop'));
+    expect(text).toContain("meta skuid 1001"); // the drops are still there
+  }
+  expect(G.renderRules(1001)).toContain("100.64.0.0/10");
+  expect(G.renderRules(1001).split("ct state established,related accept").length).toBe(2); // the output chain only
+});
