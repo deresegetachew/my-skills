@@ -188,6 +188,18 @@ test("testing the build cache asks its address", async () => {
   expect(r.json, JSON.stringify(r.json)).toMatchObject({ ok: true, id: "cache" });
 }, T);
 
+test("a build cache nobody answers at fails with a fix", async () => {
+  const gone = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("ok") });
+  const port = gone.port;
+  gone.stop(true);
+  const { ui } = await started({ ...CONFIG, turbo: { api: `http://127.0.0.1:${port}` } });
+  const r = await api(ui, "/api/projects/work/integrations/cache/test", { method: "POST", body: {} });
+  expect(r.status).toBe(200);
+  expect(r.json).toMatchObject({ ok: false, id: "cache", code: "ui_test_cache" });
+  expect(String(r.json.message)).toContain(`127.0.0.1:${port}`);
+  expect(String(r.json.fix).length).toBeGreaterThan(0);
+}, T);
+
 test("testing CI runs the project's CI status", async () => {
   const { ui, p } = await started(CONFIG, (p) => cache(p));
   const r = await api(ui, "/api/projects/work/integrations/ci/test", { method: "POST", body: {} });
