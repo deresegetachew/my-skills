@@ -220,7 +220,73 @@ function agentActions(agent: Agent | undefined, channel: ChannelView, project: P
     : <button className="btn" onClick={() => onAsk({ verb: "stop", project: project.id, agent: channel.name, role })}>Stop</button>;
 }
 
-function MachinesChannel({ live, project, open }: { live: Live | undefined; project: Project; open: (channel: string) => void }) {
+interface JoinCode { code: string; command: string; expiresAt: number; name: string }
+
+/** Add machine (#445): a name and the agents it will run, then the join code and the one command to run there. */
+function AddMachine({ project, post }: { project: Project; post: (path: string, body: unknown) => Promise<Record<string, unknown>> }) {
+  const [openForm, setOpenForm] = useState(false);
+  const [name, setName] = useState("");
+  const [agents, setAgents] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [made, setMade] = useState<JoinCode | null>(null);
+  const [problem, setProblem] = useState<{ message: string; fix: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const submit = async (e: { preventDefault(): void }): Promise<void> => {
+    e.preventDefault();
+    setBusy(true);
+    setProblem(null);
+    const r = await post(`/api/projects/${encodeURIComponent(project.id)}/machines`,
+      { confirm: true, name: name.trim(), agents: agents.split(/[\s,]+/).filter(Boolean) });
+    setBusy(false);
+    const join = r.join as JoinCode | undefined;
+    if (r.ok && join) setMade({ ...join, name: name.trim() });
+    else setProblem({ message: String(r.message ?? "The code wasn't made."), fix: String(r.fix ?? "") });
+  };
+  const copy = async (): Promise<void> => {
+    if (!made) return;
+    try {
+      await navigator.clipboard.writeText(made.command);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  if (!openForm) return <section className="card" aria-label="Add machine"><h3>Add machine</h3>
+    <p className="empty" style={{ margin: "0 0 10px" }}>Join another computer to this hub, so its agents share claims and messages with the team.</p>
+    <button className="btn primary" onClick={() => setOpenForm(true)}>Add machine</button></section>;
+  return (
+    <section className="card" aria-label="Add machine">
+      <h3>Add machine</h3>
+      {made ? (
+        <div className="join-made" aria-live="polite">
+          <p>Join code for <strong>{made.name}</strong>. It works once and expires at {new Date(made.expiresAt * 1000).toLocaleTimeString()}.</p>
+          <output aria-label="Join code" className="join-code">{made.code}</output>
+          <p>On {made.name}, in the project's folder, run:</p>
+          <output aria-label="Join command" className="join-code small">{made.command}</output>
+          <div className="actions">
+            <button className="btn primary" onClick={copy}>{copied ? "Copied" : "Copy the command"}</button>
+            <button className="btn" onClick={() => { setMade(null); setName(""); setAgents(""); setCopied(false); }}>Add another</button>
+          </div>
+          <p className="sub">The code holds the agents' keys: send it over a private channel. Remove the machine to void it.</p>
+        </div>
+      ) : (
+        <form className="join-form" onSubmit={submit}>
+          {problem && <p className="chat-problem"><strong>{problem.message}</strong> {problem.fix}</p>}
+          <label>Machine name<input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="office-pc" required /></label>
+          <label>Agents it will run<input value={agents} onChange={(e) => setAgents(e.target.value)} placeholder="haile, taytu:manager" required /></label>
+          <p className="sub">Lowercase letters, digits and dashes. An agent is a builder unless you add :manager, :po or :owner.</p>
+          <div className="actions">
+            <button className="btn primary" type="submit" disabled={busy || !name.trim() || !agents.trim()}>{busy ? "Making the code…" : "Make the code"}</button>
+            <button className="btn" type="button" onClick={() => setOpenForm(false)} disabled={busy}>Cancel</button>
+          </div>
+        </form>
+      )}
+    </section>
+  );
+}
+
+function MachinesChannel({ live, project, open, post }: { live: Live | undefined; project: Project; open: (channel: string) => void;
+  post: (path: string, body: unknown) => Promise<Record<string, unknown>> }) {
   if (!live) return <div className="body"><p className="empty">Reading {project.name}…</p></div>;
   const runnerTone: Record<string, Tone> = { busy: "good", idle: "quiet", offline: "bad" };
   const runnerText: Record<string, string> = { busy: "running a job", idle: "waiting for a job", offline: "offline" };
@@ -248,6 +314,7 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
             </ul>
           </section>
         ))}
+        <AddMachine project={project} post={post} />
         <section className="card" aria-label="CI runners">
           <h3>CI runners</h3>
           {live.runners.length ? (
@@ -647,7 +714,7 @@ function App() {
           : !channel ? <div className="body"><p className="empty">This project has no channels.</p></div>
           : channel.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
-          : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} />
+          : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} post={post} />
           : VIEW_CHANNELS[channel.name] ? viewChannel(channel.name)
           : <ComingChannel name={channel.name} />}
       </main>

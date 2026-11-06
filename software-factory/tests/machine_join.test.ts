@@ -37,7 +37,7 @@ function world(o: Opts = {}): World {
   if (o.tailscale !== false) writeExe(join(bin, "tailscale"), FAKE_TAILSCALE);
   // With no docker the PATH is just the fakes and the basics, so a real docker on this machine can't leak in.
   let path = `${bin}:${process.env.PATH}`;
-  if (o.docker === false) {
+  if (o.docker === false || o.tailscale === false) { // a tailscale on this machine's PATH must not leak in either
     for (const t of ["git", "bash", "sh", "env", "uname", "dirname", "basename", "cat", "mkdir", "chmod", "rm", "mv", "cp", "ls", "sleep", "head", "tr", "date", "sed", "grep", "awk"]) {
       const found = Bun.which(t);
       if (found && !existsSync(join(bin, t))) symlinkSync(found, join(bin, t));

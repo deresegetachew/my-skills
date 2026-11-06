@@ -534,6 +534,51 @@ function cmdUser(argv: string[]): number {
   }
 }
 
+// ---------- for `factory machine` (#445) ----------
+export interface NatsHub { mode: Mode; hub: string; address: string; ports: State["ports"] }
+
+/** This machine's NATS server as `factory nats up` left it, or null when none is set up. */
+export function natsState(): NatsHub | null {
+  const s = readState();
+  return s ? { mode: s.mode, hub: s.hub, address: s.address, ports: { ...PORTS, ...s.ports } } : null;
+}
+
+/** The hub's leaf password, or "" when it isn't made yet. */
+export function hubLeafPassword(): string {
+  try {
+    return readFileSync(join(natsDir(), "leaf.password"), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** True when Docker is installed and answers (`docker info`). */
+export function dockerUsable(): boolean {
+  return Boolean(which("docker")) && run(["docker", "info"], { timeoutMs: 30_000 }).code === 0;
+}
+
+/** Takes the keys of `names` (in `project`) off the server: users.json, the config, the seeds on this machine, and a
+ * running server reloads. Returns the names that had a key. Safe to run twice. */
+export function removeUsers(project: string, names: string[]): { removed: string[]; reloaded: boolean } {
+  const all = readUsers();
+  const gone = all.filter((u) => u.project === project && names.includes(u.name));
+  if (!gone.length) return { removed: [], reloaded: false };
+  const left = all.filter((u) => !gone.includes(u));
+  const dir = natsDir();
+  const w = new Writes();
+  try {
+    w.put(join(dir, "users.json"), pyDumps(left, { indent: 2 }) + "\n", 0o644);
+    const s = readState();
+    if (s) w.put(join(dir, "conf", "nats-server.conf"), serverConf(s, left, hubLeafPassword()), 0o600);
+  } catch (e) {
+    w.undo();
+    throw e;
+  }
+  for (const u of gone) rmSync(join(credsDir(loadConfig(), project), `${u.name}.nk`), { force: true });
+  const r = readState() && which("docker") ? compose(["kill", "-s", "SIGHUP", "nats"]) : null;
+  return { removed: gone.map((u) => u.name), reloaded: Boolean(r && r.code === 0) };
+}
+
 // ---------- doctor ----------
 export interface DoctorReporter {
   ok(what: string): void;

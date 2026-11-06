@@ -113,6 +113,13 @@ code, pre { font-family: var(--mono); }
 .btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 .btn:disabled { opacity: .5; cursor: default; }
 
+.join-form { display: flex; flex-direction: column; gap: 10px; }
+.join-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.join-form input { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); color: var(--text); font: inherit; }
+.join-form .actions, .join-made .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.join-code { display: block; font: 600 20px var(--mono); letter-spacing: .04em; background: var(--bg-soft); border-radius: 10px; padding: 12px 14px;
+  overflow-wrap: anywhere; user-select: all; }
+.join-code.small { font-size: 12px; font-weight: 400; letter-spacing: 0; }
 .card { background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; }
 .card h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--muted); display: flex; align-items: center; gap: 8px; }
 .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px 20px; margin: 0; }
