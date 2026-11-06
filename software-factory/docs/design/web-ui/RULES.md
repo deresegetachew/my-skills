@@ -97,6 +97,7 @@ buttons with a confirm wording for anything that changes things ("Merge PR #402?
 
 ## Owner feedback (applies to every screen)
 - NO box-shadow anywhere, and no coloured outer edges on cards (no coloured top or left borders): a card is a flat pastel fill, or flat white with a 1px var(--border) hairline.
+  The one exception is the Board (owner, 6 Nov: "all white with no shadows, hard to tell the swim lanes", then "the color on the rows seems a bit too much, maybe the swim lane can be represented based on the cards"): a lane stays plain (a small dot in its colour by its title, a hairline between lanes); each card is white with the hairline, a 4px left edge in its lane's colour (by agent: its epic's colour, grey with none) and `box-shadow: var(--card-shadow)`, the only shadow; each column header is a `--bg-subtle` tile with a 3px top edge in its dot colour.
 - Never show `factory` commands, flags or setting keys in the UI: plain words and buttons only. The one exception is a one-time admin step that must be typed in a terminal with sudo.
 - Agents: 12 ready-made legends (menelik, taytu, haile, tewodros, yohannes, zewditu, lalibela, ezana, alula, abebe, fasil, mentewab); the owner picks how many and which at setup, can rename them and change their picture.
 

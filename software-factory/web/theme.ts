@@ -35,6 +35,8 @@ export const THEME_CSS = String.raw`
   --builder-fill: var(--green-fill);  --builder-dot: var(--green-dot);  --builder-ink: var(--green-ink);
   /* States */
   --working: var(--green-dot); --waiting: var(--yellow-dot); --down: var(--red-dot); --idle: var(--grey-dot);
+  /* The one shadow: a card on a tinted Board lane */
+  --card-shadow: 0 1px 2px rgba(15, 16, 19, 0.06), 0 4px 12px rgba(15, 16, 19, 0.06);
 }
 [data-theme="dark"] {
   color-scheme: dark;
@@ -58,5 +60,6 @@ export const THEME_CSS = String.raw`
   --yellow-fill: #33281A; --yellow-dot: #F5C451; --yellow-ink: #F8D98C;
   --red-fill: #3B1C1F;    --red-dot: #F87171;    --red-ink: #FCAFAF;
   --grey-fill: #23252B;   --grey-dot: #8D9099;   --grey-ink: #C5C7CD;
+  --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.32), 0 4px 12px rgba(0, 0, 0, 0.24);
 }
 `;

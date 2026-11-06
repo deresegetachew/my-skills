@@ -88,6 +88,34 @@ export function epicColour(index: number): string {
   return EPIC_COLOURS[((index % EPIC_COLOURS.length) + EPIC_COLOURS.length) % EPIC_COLOURS.length] as string;
 }
 
+/** The palette category of a role's lane: the product owner's, the dev manager's, else a builder's. */
+function roleColour(role: string | undefined): string {
+  return role === "product-owner" ? "product" : role === "dev-manager" ? "manager" : "builder";
+}
+
+/** Each lane's palette category, for the dot by its title (owner, 6 Nov: the lanes must be told apart). By epic: an epic's
+ *  lane takes its chip's colour (its place in `epics`, every epic), a milestone or phase lane the next colours round
+ *  after the epics, in the order the lanes come. By agent: the agent's role colour from `agents` (an unknown role is a
+ *  builder). The last lane (No epic, Nobody) is grey. */
+export function laneColours(lanes: { key: string }[], by: LaneBy, epics: { id: string }[] = [],
+  agents: Record<string, { role?: string }> = {}): string[] {
+  let groups = 0;
+  return lanes.map((l) => {
+    if (!l.key) return "grey";
+    if (by === "agent") return roleColour(agents[l.key]?.role);
+    const at = epics.findIndex((e) => `#${e.id}` === l.key);
+    return epicColour(at >= 0 ? at : epics.length + groups++);
+  });
+}
+
+/** A card's left edge (owner, 6 Nov: the colour is on the cards, not the lanes). By epic: its lane's colour. By agent:
+ *  its epic's colour (its place in `epics`), so the epic still shows; a task in no epic is grey. */
+export function cardEdge(t: { epic?: string | null }, by: LaneBy, laneColour: string, epics: { id: string }[] = []): string {
+  if (by === "epic") return laneColour;
+  const at = t.epic ? epics.findIndex((e) => e.id === t.epic) : -1;
+  return at >= 0 ? epicColour(at) : "grey";
+}
+
 /** A card's blockers in words (#498): "Blocked by #11, #12", or "" with none. */
 export function blockersText(t: { blockedBy?: string[] }): string {
   const b = t.blockedBy ?? [];

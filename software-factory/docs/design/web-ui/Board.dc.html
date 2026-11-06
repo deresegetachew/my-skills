@@ -43,9 +43,9 @@
 </div>
 
 <div style="overflow-x: auto;">
-<div style="min-width: 1000px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
+<div style="min-width: 1000px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; box-sizing: border-box;">
 <sc-for list="{{columns}}" as="c" hint-placeholder-count="5">
-<div style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;">
+<div style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; background: var(--bg-subtle); border: 1px solid var(--border); border-top: 3px solid {{c.dot}}; border-radius: 8px; padding: 8px 10px;">
 <span style="width: 8px; height: 8px; border-radius: 50%; background: {{c.dot}};"></span>
 <span style="font-weight: 600; color: var(--text);">{{c.name}}</span>
 <span style="color: var(--text-3);">{{c.count}}</span>
@@ -54,16 +54,17 @@
 </div>
 
 <sc-for list="{{lanes}}" as="lane" hint-placeholder-count="4">
-<section style="min-width: 1000px; margin-top: 28px; display: flex; flex-direction: column; gap: 12px;">
+<section style="min-width: 1000px; margin-top: 8px; padding-top: 20px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
 <div style="display: flex; align-items: baseline; gap: 12px;">
+<span style="width: 10px; height: 10px; border-radius: 50%; background: {{lane.dot}}; align-self: center;"></span>
 <h2 style="margin: 0; font-size: 15px; font-weight: 600;">{{lane.name}}</h2>
 <span style="color: var(--text-3); font-size: 13px;">{{lane.sub}}</span>
 </div>
 <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; align-items: start;">
 <sc-for list="{{lane.cols}}" as="col" hint-placeholder-count="5">
-<div style="display: flex; flex-direction: column; gap: 8px; min-height: 40px;">
+<div style="display: flex; flex-direction: column; gap: 8px; min-height: 48px; border-radius: 8px;">
 <sc-for list="{{col.cards}}" as="card" hint-placeholder-count="1">
-<article style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+<article style="background: var(--surface); border: 1px solid var(--border); border-left: 4px solid {{card.edge}}; border-radius: 10px; padding: 12px 12px 12px 11px; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 2px rgba(15, 16, 19, 0.06), 0 4px 12px rgba(15, 16, 19, 0.06);">
 <span style="font-weight: 600; font-size: 13px; line-height: 1.35;">#{{card.n}} {{card.title}}</span>
 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2);">
 <sc-if value="{{card.hasAgent}}" hint-placeholder-val="{{ true }}"><dc-import name="Avatar" agent="{{card.agent}}" size="20" hint-size="20px,20px"></dc-import></sc-if>
@@ -90,9 +91,9 @@ class Component extends DCLogic {
       n, title, agent: agent || '', hasAgent: !!agent, noAgent: !agent, tag: tag || '', needsYou: !!needsYou
     });
     const lane = (name, cat, sub, cols) => ({
-      name, sub,
+      name, sub, fill: 'var(--' + cat + '-fill)', dot: 'var(--' + cat + '-dot)', ink: 'var(--' + cat + '-ink)',
       cols: cols.map((cards) => ({
-        cards: cards.map((c) => ({ ...c, fill: 'var(--' + cat + '-fill)' }))
+        cards: cards.map((c) => ({ ...c, edge: 'var(--' + cat + '-dot)' }))
       }))
     });
     return {
