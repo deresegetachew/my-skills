@@ -1,6 +1,6 @@
 // The web UI's chat with each agent and the owner queue's cards (#423). An agent's channel is a chat: what the agent said
 // (its messages, read through `factory messages ls`) and what the owner sends: to a coding agent through `factory say`,
-// to the dev manager or the product owner through the cockpit's talk (`factory cockpit --chat-send`), whose answer
+// to the dev manager or the product owner through one turn of a talk (`factory talk`), whose answer
 // arrives later over the WebSocket. The owner-queue channel lists each ask with its options; an answer runs
 // `factory owner answer` after a confirm. gh is a fake (the owner queue lives in its db), and `factory` is a fake that
 // logs what it was asked, except `owner answer`, which runs the real command against the fake gh.
@@ -26,7 +26,7 @@ case "$1" in
   say) [ -n "$FAKE_SAY_FAIL" ] && { echo '{"code": "no-session", "message": "No session.", "fix": "Start it."}' >&2; exit 1; }
        echo "Sent to $2 on local (logged there, without the text)." ;;
   messages) cat "$FAKE_MESSAGES" ;;
-  cockpit) sleep "\${FAKE_TALK_SLEEP:-0}"; echo '{"answer": "Noted: I will look at it.", "summary": {"posted": true, "issue": 50}}' ;;
+  talk) sleep "\${FAKE_TALK_SLEEP:-0}"; echo '{"answer": "Noted: I will look at it.", "summary": {"posted": true, "issue": 50}}' ;;
   owner) shift; exec ${BUN.map((x) => `'${x}'`).join(" ")} '${join(HOOKS, "factory_owner.ts")}' "$@" ;;
   *) echo "fake factory: $*" ;;
 esac
@@ -166,7 +166,7 @@ test("a message needs text, at most 2000 characters, to an agent of the project"
   expect(calls(p).some((c) => c[0] === "say")).toBe(false);
 }, T);
 
-test("the dev manager answers through the cockpit's talk, and the answer arrives over the WebSocket", async () => {
+test("the dev manager answers through factory talk, and the answer arrives over the WebSocket", async () => {
   const p = chatProject();
   const ui = await started(p, { FAKE_TALK_SLEEP: "1" });
   const ws = socket(ui);
@@ -174,21 +174,21 @@ test("the dev manager answers through the cockpit's talk, and the answer arrives
   const answer = next(ws, (m) => m.type === "chat" && m.agent === "fasil" && texts(m.items).includes("Noted: I will look at it."), 20_000);
   const r = await api(ui, "/api/projects/work/agents/fasil/chat", { method: "POST", body: { text: "Why is #12 still open?" } });
   expect(r.status).toBe(202);
-  expect(r.json).toMatchObject({ ok: true, pending: true, command: "factory cockpit --chat-send dev-manager …" });
+  expect(r.json).toMatchObject({ ok: true, pending: true, command: "factory talk dev-manager …" });
   const during = await api(ui, "/api/projects/work/agents/fasil/chat");
   expect(during.json.pending).toBe(true);
   const got = await answer;
   expect(got).not.toBeNull();
   expect(((got as Row).items as Row[])[0]).toMatchObject({ from: "fasil", to: "owner", kind: "reply" });
   expect((got as Row).pending).toBe(false);
-  expect(calls(p)).toContainEqual(["cockpit", "--chat-send", "dev-manager", "Why is #12 still open?"]);
+  expect(calls(p)).toContainEqual(["talk", "dev-manager", "Why is #12 still open?"]);
   // the next turn carries the conversation so far
   const again = next(ws, (m) => m.type === "chat" && m.agent === "fasil" && m.pending === false, 20_000);
   await api(ui, "/api/projects/work/agents/fasil/chat", { method: "POST", body: { text: "And #13?" } });
   await again;
   ws.close();
-  const second = calls(p).find((c) => c[0] === "cockpit" && c[3] === "And #13?") as string[];
-  expect(JSON.parse(second[4] as string)).toEqual([{ who: "owner", text: "Why is #12 still open?" }, { who: "role", text: "Noted: I will look at it." }]);
+  const second = calls(p).find((c) => c[0] === "talk" && c[2] === "And #13?") as string[];
+  expect(JSON.parse(second[3] as string)).toEqual([{ who: "owner", text: "Why is #12 still open?" }, { who: "role", text: "Noted: I will look at it." }]);
   const chat = await api(ui, "/api/projects/work/agents/fasil/chat");
   expect(texts(chat.json.items)).toEqual(expect.arrayContaining(["Why is #12 still open?", "Noted: I will look at it.", "And #13?"]));
 }, T);

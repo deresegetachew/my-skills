@@ -837,7 +837,7 @@ console.error(JSON.stringify({ code, message, fix }));' "$1" "$2" "$3"
 }
 
 cmd_status() {
-  # --json (#304): the same facts as data for the cockpit; the text below is unchanged without it.
+  # --json (#304): the same facts as data for `factory snapshot` and the web UI; the text below is unchanged without it.
   local json=""
   while [ $# -gt 0 ]; do
     case "$1" in

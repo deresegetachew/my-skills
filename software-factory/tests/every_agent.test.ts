@@ -1,10 +1,9 @@
-// Every agent in the cockpit (#395): rows from the heartbeat and the claims, not only tmux. How each one runs (tmux,
-// nohup, cloud), a loop waiting for GitHub's limit, the other projects on this machine (from their heartbeat files),
-// and a loop outside tmux that `factory owner stop` can still stop.
+// Every agent (#395): rows from the heartbeat and the claims, not only tmux. How each one runs (tmux, nohup, cloud), a
+// loop waiting for GitHub's limit, the other projects on this machine in the snapshot (from their heartbeat files, for
+// the web UI), and a loop outside tmux that `factory owner stop` can still stop.
 import { afterEach, expect, test } from "bun:test";
 import { hostname } from "node:os";
 import { basename, join } from "node:path";
-import { drawDoc, sidebarOf } from "../cockpit/testing.tsx";
 import { parseWait } from "../hooks/factory_heartbeat.ts";
 import { setup } from "./issues_support.ts";
 import { project } from "./roles_support.ts";
@@ -13,89 +12,13 @@ import { type Proc, runHook, sh, tmp, write, writeExe } from "./support.ts";
 type Obj = Record<string, unknown>;
 type Env = Record<string, string | undefined>;
 
-const VIEWS = [["1", "Needs you"], ["2", "Pull requests"], ["3", "Tasks & PRD"], ["4", "CI"], ["5", "Agents & machines"],
-  ["6", "Settings"], ["7", "Health & releases"], ["8", "Usage & lessons"], ["9", "Talk to the dev manager"],
-  ["0", "Talk to the product owner"]].map(([key, title]) => ({ key: key as string, title: title as string }));
-
-const local = (r: Obj): Obj => ({ where: "this machine", source: "local", machine: "aaaa1111", machineName: "dev-pc", detail: r.state, task: null,
-  expected: false, kind: "coding agent", runs: "", ...r });
-
-const SNAPSHOT: Obj = {
-  generatedAt: new Date().toISOString(),
-  sessions: [
-    local({ name: "menelik", state: "working", task: "12", detail: "working on #12", runs: "nohup", expected: true, log: "/tmp/menelik.log" }),
-    local({ name: "haile", state: "down", expected: true }),
-    local({ name: "fasil", state: "idle", kind: "dev manager", runs: "tmux" }),
-    local({ name: "makeda", state: "idle", kind: "product owner", runs: "tmux" }),
-  ],
-  projects: [
-    { name: "remanual", fresh: true, agents: [{ name: "mentewab", kind: "coding agent", state: "working", task: "4", runs: "tmux", detail: "working on #4" }] },
-    { name: "oldproj", fresh: false, agents: [{ name: "x1", kind: "coding agent", state: "idle", task: null, runs: "nohup", detail: "idle" }] },
-  ],
-  needsYou: [],
-};
-
-function lineWith(frame: string, word: string): string {
-  return frame.split("\n").find((l) => l.includes(word)) ?? "";
-}
-
-// --- the list ---------------------------------------------------------------------------------------------------------
-
-test("the list says how a session runs, keeps a down one expected here, and groups the other projects", () => {
-  const s = sidebarOf({ snapshot: SNAPSHOT, views: VIEWS }, 50, 40);
-  const f = s.frame();
-  expect(lineWith(f, "menelik")).toContain("nohup");
-  expect(lineWith(f, "haile")).toContain("down");
-  expect(f).toContain("OTHER PROJECTS");
-  expect(f).toContain("remanual");
-  expect(lineWith(f, "mentewab")).toContain("#4");
-  expect(lineWith(f, "oldproj")).toContain("not reporting");
-  expect(f).toContain("9 Talk to the dev manager");
-  expect(f).toContain("0 Talk to the product owner");
-  s.unmount();
-});
-
-test("Enter on the dev manager or the product owner opens the talk with it; on a coding agent, its session", async () => {
-  const s = sidebarOf({ snapshot: SNAPSHOT, views: VIEWS }, 50, 40);
-  await s.press("\r"); // menelik, the first
-  await s.press("j");
-  await s.press("j");
-  await s.press("\r"); // fasil
-  await s.press("j");
-  await s.press("\r"); // makeda
-  expect(s.calls).toEqual(["session menelik", "view 9", "view 0"]);
-  s.unmount();
-});
-
-test("the other projects' agents are shown, not picked: j from the last session goes to the first view", async () => {
-  const s = sidebarOf({ snapshot: SNAPSHOT, views: VIEWS }, 50, 40);
-  for (const _ of [1, 2, 3]) await s.press("j"); // makeda, the last session
-  await s.press("j");
-  await s.press("\r");
-  expect(s.calls).toEqual(["view 1"]);
-  s.unmount();
-});
-
-// --- the Agents & machines view ---------------------------------------------------------------------------------------
-
-test("Agents & machines shows how each runs, a loop's log, and the other projects on this machine", () => {
-  const v = drawDoc("agents", { cols: 120, rows: 60, color: false, data: SNAPSHOT, load: async () => SNAPSHOT });
-  const f = v.frame();
-  expect(lineWith(f, "menelik")).toContain("nohup");
-  expect(f).toContain("log /tmp/menelik.log");
-  expect(f).toContain("OTHER PROJECTS ON THIS MACHINE");
-  expect(f).toContain("remanual");
-  expect(f).toContain("mentewab");
-  v.unmount();
-});
-
 // --- the snapshot: other projects ---------------------------------------------------------------------------------------
 
 function heartbeat(agents: Obj, ageSeconds = 0): string {
   return JSON.stringify({ updated: Date.now() / 1000 - ageSeconds, interval: 20, agents });
 }
 
-test("factory cockpit --json lists the other projects on this machine from their heartbeat files, not its own", () => {
+test("factory snapshot lists the other projects on this machine from their heartbeat files, not its own", () => {
   const [d, work, env] = project();
   const state = join(d, "state");
   write(join(state, "remanual-factory", "heartbeat.json"), heartbeat({ mentewab: { name: "mentewab", kind: "coding-agent", state: "working",
@@ -103,7 +26,7 @@ test("factory cockpit --json lists the other projects on this machine from their
     activity: null, runs: "tmux" } }));
   write(join(state, "stale-factory", "heartbeat.json"), heartbeat({}, 3600));
   write(join(state, `${basename(work)}-factory`, "heartbeat.json"), heartbeat({}));
-  const p = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(work, ".claude", "hooks", "factory_cockpit.ts"), "--json"],
+  const p = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(work, ".claude", "hooks", "factory_snapshot.ts")],
     { cwd: work, env: { ...env, XDG_STATE_HOME: state }, timeoutMs: 180_000 });
   expect(p.code, p.out).toBe(0);
   const projects = (JSON.parse(p.stdout) as { projects: Obj[] }).projects;

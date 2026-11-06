@@ -1,7 +1,7 @@
 // The web UI's agents and machines channels, live (#422): each agent with its role, machine, state (working on #n, idle,
 // down), its task and its last lines of output; each machine with its agents and the CI runners; GitHub's limit when it
 // is used up; start and stop through `factory owner start|stop` after a confirm; and a WebSocket that gets the new
-// state after a change, from the server's poll loop. The heartbeat file and the cockpit's cache are written by hand, gh
+// state after a change, from the server's poll loop. The heartbeat file and the snapshot's cache are written by hand, gh
 // is a fake, and `factory` is a fake that logs what it was asked.
 import { afterAll, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
@@ -26,7 +26,7 @@ function live(): Project {
     hbRow("taytu", { state: "down", detail: "down", runs: "", session: null, pid: null }),
     hbRow("fasil", { kind: "dev-manager", state: "idle", detail: "idle" }),
   ]);
-  write(join(p.state, "cockpit.json"), JSON.stringify({
+  write(join(p.state, "snapshot.json"), JSON.stringify({
     generatedAt: new Date().toISOString(),
     tasks: { source: "issues", tasks: [{ id: "7", title: "Add the login page", state: "in-progress", holders: ["menelik"] }] },
     ci: { runners: [{ name: "work-m-here-1", status: "online", busy: true }, { name: "work-m-here-2", status: "offline", busy: false }] },

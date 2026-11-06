@@ -97,8 +97,8 @@ queue: each pass the product owner checks the newest merged work against the PRD
 `<!-- factory-owner-ask id=<slug> for=product -->`. The product owner replies under it with a proposal (the options and a
 recommendation); the owner's yes comes in a reply there. Asks without the tag stay with the owner.
 The reply starts with `<!-- factory-po-reply ask=<slug> -->` (#352): the ask then waits for the owner, is not offered
-to the product owner again (so the loop never stops on it), and `factory prs` and the cockpit's Needs you show it as
-waiting for the owner. An owner comment after it, `factory owner answer <slug>` or a plain reply, gives it back to the
+to the product owner again (so the loop never stops on it), and `factory prs` and `factory snapshot` (its `needsYou`,
+state `owner`) show it as waiting for the owner. An owner comment after it, `factory owner answer <slug>` or a plain reply, gives it back to the
 product owner. `<!-- factory-po-reply ask=<slug> done -->`, once the change is recorded, closes it.
 
 **`factory prd [--open] [--story N] [--json]`** shows progress against the PRD, computed from GitHub. A story's id is `US-<n>`
@@ -237,4 +237,4 @@ or `<notes>/next-task.md` instead. To move: run `factory init-roles`, copy the n
 
 <br>
 
-Previous: [Agent loops](agent-loops.md) | Next: [The cockpit](cockpit.md)
+Previous: [Agent loops](agent-loops.md) | Next: [Reviews and gates](reviews-and-gates.md)

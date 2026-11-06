@@ -1,6 +1,8 @@
 # 0002: The cockpit's sidebar and views use Ink, bundled at release
 
-Date: 31 Oct 2026. Status: accepted (the owner, in the session that runs the factory: "yes, let's go for it").
+Date: 31 Oct 2026. Status: superseded by decision 0005 (the web UI, `factory ui`); the Ink cockpit was retired in #425
+(6 Nov 2026), and its bundling rule stands for the web app. Kept as history: accepted (the owner, in the session that
+runs the factory: "yes, let's go for it").
 Amends decision 0001 (the cockpit on tmux) and PRD D1 and D13.
 **Widened by decision 0004** (5 Nov 2026): the bundling here is to become the general plugin rule, and the cockpit's Ink
 UI a plugin under it (0004 point 5, its build tasks 3 and 4). Until those land, rules 3 and 4 stand as written; the

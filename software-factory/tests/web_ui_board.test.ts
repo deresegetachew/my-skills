@@ -47,7 +47,7 @@ const CI: Row = {
 };
 
 function cache(p: Project, source: string): void {
-  write(join(p.state, "cockpit.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
     tasks: { source, tasks: TASKS }, pulls: PULLS, ci: CI }));
 }
 
@@ -66,7 +66,7 @@ function factoryCalls(p: Project): string[] {
 
 /** What the fake factory was asked, without the snapshot read the server adds after an action. */
 function calls(p: Project): string[] {
-  return factoryCalls(p).filter((c) => c !== "cockpit --json");
+  return factoryCalls(p).filter((c) => c !== "snapshot");
 }
 
 function act(ui: Running, id: string, name: string, body: unknown = { confirm: true }, token?: string | null) {
@@ -206,7 +206,7 @@ test("a reason with spaces reaches factory as one argument, and the agent and th
   running.push(ui);
   expect((await act(ui, "10", "block", { confirm: true, reason: "needs the Stripe keys" })).status).toBe(200);
   expect((await act(ui, "7", "reassign", { confirm: true, agent: "taytu" })).status).toBe(200);
-  expect(factoryCalls(p).filter((c) => !c.startsWith("|cockpit|"))).toEqual(["|issues|block|10|needs the Stripe keys|",
+  expect(factoryCalls(p).filter((c) => !c.startsWith("|snapshot|"))).toEqual(["|issues|block|10|needs the Stripe keys|",
     "|issues|release|7|reassigned to taytu from the web UI|", "|say|taytu|/next-task issue-7|"]);
 }, T);
 
@@ -227,7 +227,7 @@ test("release runs factory issues release with the default reason, or the one gi
   expect(r.json.ok).toBe(true);
   expect(r.json.command).toBe('factory issues release 7 "released from the web UI"');
   expect(calls(p)).toEqual(["issues release 7 released from the web UI"]);
-  expect(factoryCalls(p)).toContain("cockpit --json");
+  expect(factoryCalls(p)).toContain("snapshot");
   const again = await act(ui, "7", "release", { confirm: true, reason: "went quiet" });
   expect(again.status, JSON.stringify(again.json)).toBe(200);
   expect(calls(p)).toEqual(["issues release 7 released from the web UI", "issues release 7 went quiet"]);
@@ -239,7 +239,7 @@ test("block runs factory issues block with the reason", async () => {
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(r.json.ok).toBe(true);
   expect(calls(p)).toEqual(["issues block 10 needs the Stripe keys"]);
-  expect(factoryCalls(p)).toContain("cockpit --json");
+  expect(factoryCalls(p)).toContain("snapshot");
 }, T);
 
 test("reassign releases the task, then tells the agent to take it", async () => {
@@ -249,7 +249,7 @@ test("reassign releases the task, then tells the agent to take it", async () => 
   expect(r.json.ok).toBe(true);
   expect(String(r.json.command)).toContain(" then ");
   expect(calls(p)).toEqual(["issues release 7 reassigned to taytu from the web UI", "say taytu /next-task issue-7"]);
-  expect(factoryCalls(p)).toContain("cockpit --json");
+  expect(factoryCalls(p)).toContain("snapshot");
 }, T);
 
 test("a failing step is 500 with the command's own error, and reassign says nothing after a failed release", async () => {

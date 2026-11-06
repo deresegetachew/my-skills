@@ -1,5 +1,6 @@
-// `factory cockpit --json` and `--status` (#298): one snapshot of the factory for every screen, and one short line for
-// tmux's status line read from a cache. Run against a fake `gh` that answers from a scenario and logs every call.
+// `factory snapshot` (#298, #425): one snapshot of the factory as data, the core the web UI's views read, written to a
+// cache in this machine's state folder. Run against a fake `gh` that answers from a scenario and logs every call. And
+// `factory cockpit`, retired (#425), says it moved to `factory ui`.
 import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -10,9 +11,9 @@ const T = 180_000; // doctor is slow: generous per-test timeouts
 
 const FAKE_GH = String.raw`#!/usr/bin/env bun
 import { appendFileSync, readFileSync } from "node:fs";
-const s = JSON.parse(readFileSync(process.env.COCKPIT_SCENARIO as string, "utf8"));
+const s = JSON.parse(readFileSync(process.env.SNAPSHOT_SCENARIO as string, "utf8"));
 const a = process.argv.slice(2);
-appendFileSync(process.env.COCKPIT_LOG as string, a.join(" ") + "\n");
+appendFileSync(process.env.SNAPSHOT_LOG as string, a.join(" ") + "\n");
 function fail(m: string): never { console.error(m); process.exit(1); }
 const out = (x: unknown): never => { console.log(JSON.stringify(x)); process.exit(0); };
 if (s.fail_all) fail("gh: not logged in");
@@ -59,33 +60,29 @@ function setup(scenario: Row, cfg: Row = ISSUES_MODE): Proj {
   mkdirSync(xdg);
   const log = join(root, "log");
   writeFileSync(log, "");
-  const env = envWith(join(root, "bin"), { COCKPIT_SCENARIO: join(root, "scenario.json"), COCKPIT_LOG: log,
+  const env = envWith(join(root, "bin"), { SNAPSHOT_SCENARIO: join(root, "scenario.json"), SNAPSHOT_LOG: log,
     XDG_STATE_HOME: xdg, HOME: join(root, "home"), FACTORY_AGENT: undefined, FACTORY_LOOP: undefined, CLAUDE_PROJECT_DIR: undefined,
-    FACTORY_COCKPIT_CACHE_SECONDS: undefined, FACTORY_AGENTS: undefined, FACTORY_CONFIG_DIR: undefined,
+    FACTORY_AGENTS: undefined, FACTORY_CONFIG_DIR: undefined,
     XDG_CONFIG_HOME: join(root, "config") }); // this machine's own agent names must not leak in
   mkdirSync(join(root, "home"));
   return { d, env, xdg, log };
 }
 
-function cockpit(p: Proj, ...args: string[]): Proc {
-  return sh(["bash", join(SF, "factory"), "cockpit", ...args], { cwd: p.d, env: p.env, timeoutMs: 120_000 });
+function factory(p: Proj, ...args: string[]): Proc {
+  return sh(["bash", join(SF, "factory"), ...args], { cwd: p.d, env: p.env, timeoutMs: 120_000 });
 }
 
 function snapshot(p: Proj): Row {
-  const r = cockpit(p, "--json");
+  const r = factory(p, "snapshot");
   expect(r.code, r.out).toBe(0);
   return JSON.parse(r.stdout) as Row;
 }
 
-function calls(p: Proj): string[] {
-  return readFileSync(p.log, "utf8").split("\n").filter((l) => l);
-}
-
-/** Every cockpit.json under the state dir. */
+/** Every snapshot.json under the state dir. */
 function caches(xdg: string): string[] {
   const found: string[] = [];
   for (const dir of readdirSync(xdg)) {
-    const f = join(xdg, dir, "cockpit.json");
+    const f = join(xdg, dir, "snapshot.json");
     if (existsSync(f)) found.push(f);
   }
   return found;
@@ -123,9 +120,9 @@ function scenario(): Row {
   };
 }
 
-// --- --json ----------------------------------------------------------------------------------------------------------
+// --- factory snapshot ------------------------------------------------------------------------------------------------
 
-test("json has every key and exits 0", () => {
+test("the snapshot has every key and exits 0", () => {
   const p = setup(scenario());
   const j = snapshot(p);
   for (const k of ["generatedAt", "version", "sessions", "needsYou", "pulls", "ci", "doctor", "counts", "missing"]) {
@@ -140,10 +137,33 @@ test("json has every key and exits 0", () => {
   expect(j.ci, JSON.stringify(j.missing)).not.toBeNull();
 }, T);
 
-test("json writes the cache under the state dir", () => {
+test("the snapshot writes the cache under the state dir", () => {
   const p = setup(scenario());
   snapshot(p);
   expect(caches(p.xdg).length).toBe(1);
+}, T);
+
+test("the snapshot carries the tasks from the task tracker", () => {
+  const p = setup(scenario());
+  const j = snapshot(p);
+  expect(j.tasks, JSON.stringify(j.tasks)).toMatchObject({ source: "issues" });
+}, T);
+
+test("the snapshot's tasks carry the epics, and a task's cites, for the web UI's epics and tasks channels (#440, #438, #425)", () => {
+  const s = scenario();
+  s.issues.push(
+    { number: 7, title: "Add the login page", state: "open", labels: [{ name: "factory:ready" }], body: "Builds on decision 0004.",
+      html_url: "https://github.com/o/r/issues/7" },
+    { number: 40, title: "Accounts", state: "open", labels: [{ name: "epic" }, { name: "epic:building" }],
+      body: "People sign in.\n\nPRD: docs/accounts.md\nDecisions: 0003\n\n- [ ] #7\n- [x] #8\n", html_url: "https://github.com/o/r/issues/40" });
+  const j = snapshot(setup(s));
+  expect(j.tasks.epics, JSON.stringify(j.tasks)).toEqual([expect.objectContaining({ id: "40", title: "Accounts", stage: "building",
+    prd: "docs/accounts.md", decisions: ["0003"], tasks: [{ id: "7", done: false }, { id: "8", done: true }],
+    url: "https://github.com/o/r/issues/40" })]);
+  expect(Object.keys(j.tasks.epics[0]).sort()).toEqual(["cites", "decisions", "id", "prd", "stage", "summary", "tasks", "title", "url"]);
+  const ids = (j.tasks.tasks as Row[]).map((t) => t.id);
+  expect(ids, "an epic is not a task").not.toContain("40");
+  expect((j.tasks.tasks as Row[]).find((t) => t.id === "7")?.cites).toEqual(["decision 0004"]);
 }, T);
 
 test("doctor has the summary shape", () => {
@@ -217,7 +237,7 @@ test("an answered owner ask does not need you", () => {
   expect((j.needsYou as Row[]).filter((x) => x.kind === "owner-ask")).toEqual([]);
 }, T);
 
-test("only asks waiting on the owner need you, and --needs says the product owner replied (#352)", () => {
+test("only asks waiting on the owner need you, and one the product owner replied to says so (#352)", () => {
   const s = scenario();
   const c = (body: string, at: string): Row => ({ body, user: { login: "dm" }, created_at: at, html_url: "https://github.com/o/r/issues/77#cx" });
   s["issues/77/comments"] = [
@@ -226,14 +246,9 @@ test("only asks waiting on the owner need you, and --needs says the product owne
     c("<!-- factory-po-reply ask=waits -->\nmy reply", "2020-01-01T02:00:00Z"),
     c("<!-- factory-owner-ask id=withpo for=product -->\nThis needs your yes: b", "2020-01-01T03:00:00Z"),
   ];
-  const p = setup(s);
-  const asks = (snapshot(p).needsYou as Row[]).filter((x) => x.kind === "owner-ask");
+  const asks = (snapshot(setup(s)).needsYou as Row[]).filter((x) => x.kind === "owner-ask");
   expect(asks.map((x) => x.id).sort()).toEqual(["ship-it", "waits"]);
   expect(asks.find((x) => x.id === "waits")).toMatchObject({ state: "owner" });
-  const needs = cockpit(p, "--needs");
-  expect(needs.code, needs.out).toBe(0);
-  expect(needs.stdout).toContain("Owner ask waits on #77, the product owner replied: https://github.com/o/r/issues/77#cx");
-  expect(needs.stdout).not.toContain("withpo");
 }, T);
 
 test("a pull request the owner merges needs you and is a pull row", () => {
@@ -256,6 +271,17 @@ test("a pull row carries what the web UI's pull requests channel shows: review, 
     nextText: "owner merges (protected)", claim: null });
 }, T);
 
+test("a pull row carries the decisions and PRD stories its body cites, [] when it cites none (#438, #425)", () => {
+  const base = scenario();
+  const pulls = base.pulls as Row[];
+  const first = pulls[0] ?? {};
+  const withCites = { ...base, pulls: [{ ...first, body: `${first.body}\nSee decision 0004 and US-12.` }] };
+  const row = (snapshot(setup(withCites)).pulls as Row[]).find((r) => r.number === 12);
+  expect(row?.cites, JSON.stringify(row)).toEqual(["decision 0004", "US-12"]);
+  const plain = (snapshot(setup(scenario())).pulls as Row[]).find((r) => r.number === 12);
+  expect(plain?.cites).toEqual([]);
+}, T);
+
 test("no sessions at all", () => {
   const p = setup({ issues: [] }, { tasks: { source: "issues" }, reviewMarkers: "tmp/reviews", agents: [] });
   const j = snapshot(p);
@@ -264,9 +290,9 @@ test("no sessions at all", () => {
   expect(j.counts.working).toBe(0);
 }, T);
 
-test("with gh failing, json still answers and says what is missing without a stack trace", () => {
+test("with gh failing, the snapshot still answers and says what is missing without a stack trace", () => {
   const p = setup({ fail_all: true });
-  const r = cockpit(p, "--json");
+  const r = factory(p, "snapshot");
   expect(r.code, r.out).toBe(0);
   noTrace(r.out);
   const j = JSON.parse(r.stdout) as Row;
@@ -286,108 +312,63 @@ test("with everything answering, missing is empty for pulls and the owner queue"
   expect(codes).not.toMatch(/pull/i);
 }, T);
 
-// --- --status --------------------------------------------------------------------------------------------------------
-
-/** Run --json once, then rewrite its cache with known numbers, as of now. */
-function seedCache(p: Proj, counts: Row, missing: Row[] = [], ci?: Row): void {
-  snapshot(p);
-  const [file] = caches(p.xdg) as [string];
-  const j = JSON.parse(read(file)) as Row;
-  writeFileSync(file, JSON.stringify({ ...j, generatedAt: new Date().toISOString(), counts, missing, ...(ci ? { ci } : {}) }));
-  writeFileSync(p.log, "");
-}
-
-test("status from a fresh cache is one line with the counts and makes no github call", () => {
-  const p = setup(scenario());
-  seedCache(p, { sessions: 3, working: 1, pulls: 2, needYou: 4 });
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  expect(r.stdout).toContain("4 need you");
-  expect(r.stdout).toContain("3 sessions");
-  expect(r.stdout).toContain("1 working");
-  expect(calls(p)).toEqual([]);
-}, T);
-
-test("status shows CI on main from the cache", () => {
-  const p = setup(scenario());
-  seedCache(p, { sessions: 0, working: 0, pulls: 0, needYou: 0 }, [],
-    { mode: "github", runs: [{ ref: "#12", branch: "task/7-x", state: "success" }, { ref: "main", branch: "main", state: "failure" }],
-      errors: [] });
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  expect(r.stdout).toContain("CI main failure");
-  expect(r.stdout).not.toContain("success");
-  expect(calls(p)).toEqual([]);
-}, T);
-
-test("status says what it cant read when the cache has missing parts", () => {
-  const p = setup(scenario());
-  seedCache(p, { sessions: 1, working: 0, pulls: 0, needYou: 0 },
-    [{ code: "github-unreadable", message: "GitHub did not answer.", fix: "Run: gh auth login" }]);
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  expect(r.stdout).toContain("can't read");
-  noTrace(r.out);
-}, T);
-
-test("status with no cache says there is no snapshot yet and starts a refresh", async () => {
-  const p = setup(scenario());
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  expect(r.stdout).toContain("no snapshot yet");
-  noTrace(r.out);
-  for (let i = 0; i < 60 && caches(p.xdg).length === 0; i++) await Bun.sleep(500);
-  expect(caches(p.xdg).length, "a background refresh writes cockpit.json").toBe(1);
-}, T);
-
-test("status with gh failing still answers in one line", () => {
-  const p = setup({ fail_all: true });
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  noTrace(r.out);
-}, T);
-
 // --- errors, help and docs -------------------------------------------------------------------------------------------
 
-test("no flag and an unknown flag are errors with code message and fix", () => {
+test("an argument to factory snapshot is an error with code, message and fix", () => {
   const p = setup(scenario());
-  for (const args of [[], ["--bogus"]]) {
-    const r = cockpit(p, ...args);
-    expect(r.code, r.out).toBe(2);
-    const e = JSON.parse(r.stderr.trim()) as Row;
-    for (const k of ["code", "message", "fix"]) expect(typeof e[k], r.stderr).toBe("string");
-    noTrace(r.out);
-  }
+  const r = factory(p, "snapshot", "--bogus");
+  expect(r.code, r.out).toBe(2);
+  const e = JSON.parse(r.stderr.trim()) as Row;
+  expect(e.code).toBe("snapshot_usage");
+  for (const k of ["code", "message", "fix"]) expect(typeof e[k], r.stderr).toBe("string");
+  noTrace(r.out);
 }, T);
 
-test("factory help lists both flags", () => {
+test("factory cockpit, with or without arguments, says it moved to factory ui and changes nothing", () => {
+  const p = setup(scenario());
+  for (const args of [[], ["--json"], ["--status"], ["watch", "pr-12"]]) {
+    const r = factory(p, "cockpit", ...args);
+    expect(r.code, r.out).toBe(1);
+    const e = JSON.parse(r.stderr.trim()) as Row;
+    expect(e.code).toBe("cockpit_moved");
+    expect(e.message).toContain("factory ui");
+    expect(e.fix).toContain("factory ui");
+    noTrace(r.out);
+  }
+  expect(caches(p.xdg)).toEqual([]);
+  expect(readFileSync(p.log, "utf8")).toBe("");
+}, T);
+
+test("factory doctor no longer checks a cockpit bundle or its Ink packages", () => {
+  const p = setup(scenario());
+  const r = factory(p, "doctor");
+  expect(r.out).toMatch(/All the checks pass\.|\d+ to fix\./);
+  expect(r.out.toLowerCase()).not.toContain("cockpit");
+}, T);
+
+test("factory help lists snapshot and no cockpit", () => {
   const p = setup(scenario());
   const r = sh(["bash", join(SF, "factory"), "help"], { cwd: p.d, env: p.env, timeoutMs: 60_000 });
-  expect(r.stdout).toContain("cockpit --json");
-  expect(r.stdout).toContain("cockpit --status");
+  expect(r.stdout).toMatch(/^ {2}snapshot\b/m);
+  expect(r.stdout).not.toContain("cockpit");
 });
 
-test("the commands page has a row for factory cockpit", () => {
+test("the commands page has a row for factory snapshot and none for factory cockpit", () => {
   const page = read(join(SF, "docs", "wiki", "commands.md"));
-  expect(page).toMatch(/^\| `factory cockpit[^`]*`/m);
-  expect(page).toContain("--status");
+  expect(page).toMatch(/^\| `factory snapshot`/m);
+  expect(page).not.toMatch(/^\| `factory cockpit/m);
 });
 
-// --- the GitHub limit, machine names, no snapshot (#383) ----------------------------------------------------------------
+// --- the GitHub limit, machine names (#383) --------------------------------------------------------------------------
 
-/** The reset the fake gh reports: 8 minutes from now, in whole seconds, and the HH:MM UTC the cockpit should print. */
+/** The reset the fake gh reports: 8 minutes from now, in whole seconds, and the HH:MM UTC the snapshot should print. */
 function resetIn8(): { epoch: number; hhmm: string } {
   const epoch = Math.floor(Date.now() / 1000) + 8 * 60;
   return { epoch, hhmm: new Date(epoch * 1000).toISOString().slice(11, 16) };
 }
 
 function setScenario(p: Proj, s: Row): void {
-  writeFileSync(p.env.COCKPIT_SCENARIO as string, JSON.stringify(s));
+  writeFileSync(p.env.SNAPSHOT_SCENARIO as string, JSON.stringify(s));
 }
 
 test("with the hourly limit used up, missing says so with the reset time and no login hint", () => {
@@ -399,7 +380,7 @@ test("with the hourly limit used up, missing says so with the reset time and no 
   expect(lim, JSON.stringify(miss)).toBeDefined();
   expect(lim?.message).toContain(`GitHub's hourly limit is used up; back at ${hhmm} UTC (in `);
   expect(lim?.message).toMatch(/\(in [78] min\)/);
-  expect(lim?.message).toContain("The cockpit shows the last snapshot meanwhile.");
+  expect(lim?.message).toContain("The web UI shows the last snapshot meanwhile.");
   for (const m of miss) expect(m.fix, JSON.stringify(m)).not.toContain("gh auth login");
 }, T);
 
@@ -408,7 +389,7 @@ test("when the limit hits after a good snapshot, the cache keeps the earlier dat
   const first = snapshot(p);
   expect((first.pulls as Row[]).length).toBeGreaterThan(0);
   setScenario(p, { ...scenario(), rate_limited: resetIn8().epoch });
-  const r = cockpit(p, "--json");
+  const r = factory(p, "snapshot");
   expect(r.code, r.out).toBe(0);
   const [file] = caches(p.xdg) as [string];
   const cached = JSON.parse(read(file)) as Row;
@@ -418,22 +399,7 @@ test("when the limit hits after a good snapshot, the cache keeps the earlier dat
   expect((cached.missing as Row[]).map((m) => m.code)).toContain("github_limit");
 }, T);
 
-test("status on a cache with the limit used up says when it is back, not that it can't read", () => {
-  const { epoch, hhmm } = resetIn8();
-  const p = setup(scenario());
-  seedCache(p, { sessions: 1, working: 0, pulls: 0, needYou: 0 },
-    [{ code: "github_limit", message: "GitHub's hourly limit is used up.", fix: "Wait." }]);
-  const [file] = caches(p.xdg) as [string];
-  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), limit: { reset: epoch } }));
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  expect(r.stdout).toContain(`GitHub limit used up, back at ${hhmm} UTC`);
-  expect(r.stdout).not.toContain("can't read");
-  expect(r.stdout).not.toContain("gh auth");
-}, T);
-
-test("a secondary limit while calls remain keeps no reset time, says no 'used up' and does not hold refreshes back (#385)", async () => {
+test("a secondary limit while calls remain keeps no reset time and says no 'used up' (#385)", () => {
   const later = Math.floor(Date.now() / 1000) + 50 * 60;
   const p = setup({ ...scenario(), secondary_limited: later });
   const j = snapshot(p);
@@ -441,49 +407,6 @@ test("a secondary limit while calls remain keeps no reset time, says no 'used up
   expect((j.limit as Row).reset, JSON.stringify(j.limit)).toBeNull();
   const lim = (j.missing as Row[]).find((m) => m.code === "github_limit");
   expect(lim?.message).not.toContain("used up");
-
-  setScenario(p, scenario()); // GitHub answers again
-  writeFileSync(p.log, "");
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  expect(r.stdout).not.toContain("used up, back at");
-  expect(r.stdout).not.toContain("gh auth");
-
-  const [file] = caches(p.xdg) as [string];
-  const old = new Date(Date.now() - 3600_000).toISOString();
-  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), generatedAt: old }));
-  const again = cockpit(p, "--status");
-  expect(again.code, again.out).toBe(0);
-  let fresh: Row = {};
-  for (let i = 0; i < 120; i++) {
-    fresh = JSON.parse(read(file)) as Row;
-    if (fresh.generatedAt !== old) break;
-    await Bun.sleep(500);
-  }
-  expect(fresh.generatedAt, "an old cache is refreshed in the background").not.toBe(old);
-  expect(fresh.limit).toBeUndefined();
-}, T);
-
-test("a cache that kept a reset time while calls remained does not say used up nor hold refreshes back (#385)", async () => {
-  const p = setup(scenario());
-  seedCache(p, { sessions: 1, working: 0, pulls: 0, needYou: 0 },
-    [{ code: "github_limit", message: "GitHub is limiting this account's calls for now.", fix: "Wait." }]);
-  const [file] = caches(p.xdg) as [string];
-  const old = new Date(Date.now() - 3600_000).toISOString();
-  const later = Math.floor(Date.now() / 1000) + 50 * 60;
-  writeFileSync(file, JSON.stringify({ ...(JSON.parse(read(file)) as Row), generatedAt: old,
-    limit: { reset: later, remaining: 5000 } }));
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout).not.toContain("used up, back at");
-  let fresh: Row = {};
-  for (let i = 0; i < 120; i++) {
-    fresh = JSON.parse(read(file)) as Row;
-    if (fresh.generatedAt !== old) break;
-    await Bun.sleep(500);
-  }
-  expect(fresh.generatedAt, "an old cache is refreshed in the background").not.toBe(old);
 }, T);
 
 test("a real 401 keeps the login hint and is not reported as the limit", () => {
@@ -506,14 +429,4 @@ test("a session from another machine carries the name set in machines, else the 
 
   const bare = (snapshot(setup(scenario())).sessions as Row[]).find((r) => r.name === "zemen");
   expect(bare).toMatchObject({ machine: "m-other", machineName: "m-other" });
-}, T);
-
-test("status with no snapshot says there is none and how to get one", async () => {
-  const p = setup(scenario());
-  const r = cockpit(p, "--status");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.trimEnd().split("\n").length).toBe(1);
-  expect(r.stdout).toContain("no snapshot yet");
-  expect(r.stdout).toContain("factory cockpit --json");
-  for (let i = 0; i < 60 && caches(p.xdg).length === 0; i++) await Bun.sleep(500);
 }, T);

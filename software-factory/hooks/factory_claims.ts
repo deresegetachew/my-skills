@@ -493,7 +493,7 @@ export function clean(cfg: Config, staleHours: number): void {
 // that agent's (on that machine) earlier claims. A claim ends when its `until` passes, and never counts for longer than
 // `claimStaleHours` after its comment was posted, so a crashed run doesn't hold a PR forever. A new head (the fix was
 // pushed) makes an old claim mean nothing. next_task.ts claims, `release` and `list` below release and list, and
-// factory_prs.ts shows the holder in the cockpit.
+// factory_prs.ts shows the holder (and the web UI with it).
 
 const REWORK_CLAIM = /<!--\s*factory-rework-claim\s+([^>]*?)-->/;
 const REWORK_RELEASE = /<!--\s*factory-rework-release\s+([^>]*?)-->/;

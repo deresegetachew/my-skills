@@ -349,7 +349,7 @@ a task. A task whose text says `Depends on 1.2, 2.1` waits until those lines are
   unexpired claim for the PR's head wins, and a loop skips a PR another agent holds. The claim is released when the run
   ends (`factory release <agent>`, or the loop's own release posts `factory-rework-release`), counts for no more than
   `claimStaleHours` after it was posted, and means nothing once a new commit is pushed. `factory claims` lists them as
-  `rework` lines with the agent and machine, and the cockpit's Pull requests view shows who is reworking a PR.
+  `rework` lines with the agent and machine.
 
 ### Issues mode
 
