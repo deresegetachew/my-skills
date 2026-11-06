@@ -2,7 +2,7 @@
 // Your team with each agent's role in words and a dot for its state, Run the factory, and Factory settings with its tabs;
 // which one is selected for an address, and the address each opens. Reads web/nav_model.ts as it is (no React).
 import { expect, test } from "bun:test";
-import { channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar, type TeamInput } from "../web/nav_model.ts";
+import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar, type TeamInput } from "../web/nav_model.ts";
 
 const TEAM: TeamInput[] = [
   { name: "fasil", role: "dev-manager", state: "working", detail: "reviewing #402" },
@@ -104,4 +104,16 @@ test("every page has a title and a one-line purpose in plain words, with no comm
   }
   expect(pageHead("settings").title).toBe("Factory settings");
   expect(pageHead("integrations").title).toBe("Factory settings");
+});
+
+test("a page's own name reaches it: page:board opens the board, page:inbox the inbox, and other addresses stay", () => {
+  expect(addressOf("page:board")).toBe("view:tasks");
+  expect(addressOf("page:inbox")).toBe("view:owner-queue");
+  expect(addressOf("page:prs")).toBe("view:pull-requests");
+  expect(addressOf("page:home")).toBe("page:home");
+  expect(addressOf("page:integrations")).toBe("page:integrations");
+  expect(addressOf("page:nothing-like-this")).toBe("page:nothing-like-this");
+  expect(addressOf("view:tasks")).toBe("view:tasks");
+  expect(addressOf("agent:haile")).toBe("agent:haile");
+  expect(pageOf(addressOf("page:board"))).toBe("board");
 });

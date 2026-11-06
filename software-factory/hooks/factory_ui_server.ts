@@ -18,6 +18,7 @@
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
 //   GET|POST /api/projects/:p/signoff, POST .../signoff/:id/confirm|result: the sign-off and testing queue (factory_ui_signoff.ts, #454)
 //   GET  /api/projects/:p/artifacts, POST .../artifacts/pull: designs and artifacts (factory_ui_artifacts.ts, #454)
+//   POST /api/projects/:p/tasks/:id/actions/:name  the board's release, block and reassign (#439): factory_ui_views.ts
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
@@ -30,7 +31,7 @@ import { type Agent, channels, live, type Live, owner, type Problem, roleOf, typ
 import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
-import { ciAction, Refresher, viewsOf } from "./factory_ui_views.ts";
+import { ciAction, Refresher, taskAction, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
   hosts: string[];
@@ -254,6 +255,12 @@ export function serve(o: ServeOptions): Running {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
       const r = await ciAction(p, rest[2] as string, await req.json().catch(() => null));
       if (rest[2] !== "log" && (r.status === 200 || r.status === 500)) refresher.start(p, true); // read again: the next look shows what changed
+      return json(r.status, r.body);
+    }
+    if (rest[0] === "tasks" && rest[2] === "actions" && rest.length === 4) {
+      if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
+      const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null));
+      if (r.status === 200 || r.status === 500) refresher.start(p, true); // read again: the board shows what changed
       return json(r.status, r.body);
     }
     if (rest.length === 1 && rest[0] === "refresh") {

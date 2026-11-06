@@ -117,3 +117,11 @@ export function sidebar(o: { page: string; team: TeamInput[]; counts?: Record<st
   });
   return { main: MAIN.map((p) => item(p, o.page, counts)), team, ops: OPS.map((p) => item(p, o.page, counts)) };
 }
+
+/** The address to show for one typed or linked: `page:<id>` of a page that is a view (`page:board`) opens that view
+ *  (`view:tasks`), so a page's name always reaches it; any other address is kept as it is. */
+export function addressOf(channel: string): string {
+  if (!channel.startsWith("page:")) return channel;
+  const page = channel.slice("page:".length);
+  return PAGES[page] ? channelOf(page) : channel;
+}
