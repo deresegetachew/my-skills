@@ -4,7 +4,7 @@
 // that ask first, then run the same commands the cockpit's CI view runs, on the machine that serves the page.
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
-import { Cited } from "./docs.tsx";
+import { Cited, Cites } from "./docs.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
 import { type ActionRow, checksText, checksTone, filterRows, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
@@ -102,6 +102,7 @@ function TaskLine({ t, open, docs }: { t: TaskRow; open: ViewProps["open"]; docs
           {t.todos.all > 0 && <span>{t.todos.done} of {t.todos.all} todos done</span>}
           {t.dependsOn.length > 0 && <span>after {t.dependsOn.map((d) => `#${d.replace(/^#/, "")}`).join(", ")}</span>}
           {t.pr && <span>PR <button className="link" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>#{t.pr.number}</button></span>}
+          <Cites cites={t.cites} docs={docs} open={open} />
         </span>
       </span>
       <span className="vwho">{t.holders.length ? t.holders.map((h) => <AgentLink key={h} name={h} open={open} />) : <span className="empty">—</span>}</span>
@@ -149,7 +150,7 @@ function PullCard({ pr, open, docs }: { pr: PullRow; open: ViewProps["open"]; do
         <div><dt>Task</dt><dd>{pr.task ? <button className="link" onClick={() => open("view:tasks", `#${pr.task}`)}>#{pr.task}</button> : <span className="empty">—</span>}</dd></div>
         <div><dt>Next</dt><dd>{pr.next.text}</dd></div>
       </dl>
-      <p className="vsub mono">{pr.branch}</p>
+      <p className="vsub"><span className="mono">{pr.branch}</span><Cites cites={pr.cites} docs={docs} open={open} /></p>
     </li>
   );
 }
@@ -348,6 +349,8 @@ export const VIEWS_CSS = String.raw`
 .vtitle { font-weight: 600; min-width: 0; overflow-wrap: anywhere; display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .vsub { color: var(--muted); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; }
 .vsub.mono { font-family: var(--mono); margin-top: 10px; }
+.card .vsub { margin-top: 10px; }
+.vsub .mono { font-family: var(--mono); }
 .vwho { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .vstate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
 button.link { border: 0; background: none; padding: 0; cursor: pointer; font-weight: 600; color: inherit; }

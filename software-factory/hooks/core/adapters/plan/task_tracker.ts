@@ -7,6 +7,7 @@
 // agent skip or repeat a task; writes go to the working copy, which the agent commits on its branch.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { citesIn } from "../../../factory_cites.ts";
 import { alive, type Claims, claimTask, locked } from "../../../factory_claims.ts";
 import { blockedIds, type Config, toFloat } from "../../../factory_config.ts";
 import { run } from "../../../factory_lib.ts";
@@ -127,7 +128,8 @@ export class PlanTaskTracker implements TaskTracker {
       const holder = held[l.id];
       const state = l.done ? "done" : blocked.has(l.id) ? "blocked" : holder ? "in-progress" : "ready";
       return { id: l.id, title: l.title, state, holders: holder && !l.done ? [holder] : [],
-        dependsOn: dependencies(`${lines[l.at]}\n${block}`, "plan"), todos: todos(block), group: l.group, tags: [] };
+        dependsOn: dependencies(`${lines[l.at]}\n${block}`, "plan"), todos: todos(block), group: l.group, tags: [],
+        cites: citesIn(`${lines[l.at]}\n${block}`) };
     });
   }
 

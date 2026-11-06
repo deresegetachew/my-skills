@@ -1,6 +1,7 @@
 // The Docs section's rules (#438), with no React in it so they are tested on their own: Markdown read into blocks, the
 // target of a link between pages, and the citations (`decision 0004`, `US-12`) in a task or a pull request that link
 // straight to a page. Nothing here makes HTML: raw HTML in a page stays text, and only safe links are links.
+import { CITE } from "../hooks/factory_cites.ts";
 
 export interface DocPage {
   id: string;
@@ -194,7 +195,9 @@ export function linkTarget(fromId: string, href: string, pages: DocPage[]): Link
   if (!from) return { kind: "none" };
   const dir = from.path.split("/").slice(0, -1).join("/");
   const path = normalize(file.startsWith("/") ? file : `${dir}/${file}`);
-  const found = path === null ? undefined : pages.find((p) => normalize(p.path) === path);
+  // the wiki is the factory's and the rest the project's: a link never crosses from one to the other
+  const wiki = (id: string): boolean => id.startsWith("wiki/");
+  const found = path === null ? undefined : pages.find((p) => wiki(p.id) === wiki(fromId) && normalize(p.path) === path);
   return found ? { kind: "page", id: found.id, anchor } : { kind: "none" };
 }
 
@@ -202,8 +205,6 @@ export interface Cited {
   text: string;
   link?: { id: string; anchor: string };
 }
-
-const CITE = /\b(?:decision|ADR)\s+#?(\d{1,4})\b|\bUS-(\d+)\b/gi;
 
 /** `text` in pieces: each decision (`decision 0004`, `ADR 5`) or PRD story (`US-12`) it cites that has a page is a piece with a link. */
 export function citations(text: string, pages: DocPage[]): Cited[] {
@@ -230,4 +231,10 @@ export function citations(text: string, pages: DocPage[]): Cited[] {
   }
   add(text.slice(at));
   return out.length ? out : [{ text }];
+}
+
+/** The cites a task or pull request body carries (`factory_cites.ts`), each with a page as a link, in order; one with no
+ *  page is left out. */
+export function citeLinks(cites: string[], pages: DocPage[]): Array<Required<Cited>> {
+  return cites.flatMap((c) => citations(c, pages).filter((x): x is Required<Cited> => x.link !== undefined));
 }

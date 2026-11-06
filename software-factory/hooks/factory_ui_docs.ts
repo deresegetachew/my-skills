@@ -59,14 +59,15 @@ export function titleOf(markdown: string, fallback: string): string {
   return plain || fallback;
 }
 
-/** True when `file` is a regular Markdown file whose real place is inside the real folder `root` (a link out is not). */
-function inside(root: string, file: string): boolean {
+/** The real path of `file` when it is a regular Markdown file whose real place is inside the real folder `root` (a link
+ *  out is not), else null. Pages are read from that real path, so what was checked is what is read. */
+function inside(root: string, file: string): string | null {
   try {
     const real = realpathSync(file);
     const rel = relative(root, real);
-    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && real.endsWith(".md") && statSync(real).isFile();
+    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel) && real.endsWith(".md") && statSync(real).isFile() ? real : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -74,14 +75,27 @@ function problem(code: string, message: string, fix: string): Problem {
   return { code, message, fix };
 }
 
-function pageOf(id: string, file: string, shown: string, fallback: string): { page: DocPage; file: string } | null {
-  let text = "";
+/** The file's text, or null when it can't be read or is over the cap. */
+function textOf(file: string): string | null {
   try {
-    text = readFileSync(file, "utf8");
+    if (statSync(file).size > MAX_BYTES) return null;
+    const raw = readFileSync(file);
+    return raw.length > MAX_BYTES ? null : raw.toString("utf8");
   } catch {
     return null;
   }
-  return { page: { id, title: titleOf(text, fallback), path: shown }, file };
+}
+
+/** A listed page, or null when it can't be read. One over the cap is listed by its file's name, and opening it says it
+ *  is too big. */
+function pageOf(id: string, file: string, shown: string, fallback: string): { page: DocPage; file: string } | null {
+  try {
+    if (statSync(file).size > MAX_BYTES) return { page: { id, title: fallback, path: shown }, file };
+  } catch {
+    return null;
+  }
+  const text = textOf(file);
+  return text === null ? null : { page: { id, title: titleOf(text, fallback), path: shown }, file };
 }
 
 interface Listed {
@@ -101,8 +115,8 @@ function listFolder(id: "decisions" | "wiki", title: string, dir: string, shownB
   for (const name of names) {
     if (!name.endsWith(".md")) continue;
     const stem = name.slice(0, -3);
-    const file = join(dir, name);
-    if (!STEM.test(stem) || !inside(root, file)) continue;
+    const file = STEM.test(stem) ? inside(root, join(dir, name)) : null;
+    if (!file) continue;
     const got = pageOf(`${id}/${stem}`, file, `${shownBase}/${name}`, stem);
     if (!got) continue;
     pages.push(got.page);
@@ -121,14 +135,15 @@ function listAll(p: UiProject): Listed[] {
   const out: Listed[] = [];
   const prdPath = setting(p, "prd");
   const prdFile = resolve(root, prdPath);
+  const prdReal = inside(root, prdFile);
   const prd = new Map<string, string>();
   const prdPages: DocPage[] = [];
   let prdProblem: Problem | null = null;
-  if (inside(root, prdFile)) {
-    const got = pageOf("prd", prdFile, relative(root, prdFile).split(sep).join("/"), basename(prdFile, ".md"));
+  if (prdReal) {
+    const got = pageOf("prd", prdReal, relative(root, prdFile).split(sep).join("/"), basename(prdFile, ".md"));
     if (got) {
       prdPages.push(got.page);
-      prd.set("prd", prdFile);
+      prd.set("prd", prdReal);
     }
   }
   if (!prdPages.length) {
@@ -154,15 +169,6 @@ function listAll(p: UiProject): Listed[] {
 /** The project's docs, section by section. */
 export function docsOf(p: UiProject): DocSection[] {
   return listAll(p).map((l) => l.section);
-}
-
-function textOf(file: string): string | null {
-  try {
-    const raw = readFileSync(file);
-    return raw.length > MAX_BYTES ? null : raw.toString("utf8");
-  } catch {
-    return null;
-  }
 }
 
 /** One page by id, or the 400/404 to answer. */

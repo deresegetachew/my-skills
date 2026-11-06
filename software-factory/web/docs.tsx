@@ -2,7 +2,7 @@
 // links between them), and the citations in a task or a pull request that link straight to a page. The rules are in
 // docs_model.ts; the server (factory_ui_docs.ts) only sends Markdown, which is turned into elements here, never into HTML.
 import { Fragment, type ReactNode, useEffect, useState } from "react";
-import { type Block, citations, type DocPage, type DocSection, type Inline, linkTarget, parseMarkdown } from "./docs_model.ts";
+import { type Block, citations, citeLinks, type DocPage, type DocSection, type Inline, linkTarget, parseMarkdown } from "./docs_model.ts";
 
 export type Get = <T>(path: string) => Promise<T>;
 
@@ -35,6 +35,19 @@ export function Cited({ text, docs, open }: { text: string; docs: DocPage[] | un
         ? <button key={i} className="link doclink" title="Open it in the docs" onClick={() => open(docChannel(c.link?.id ?? "", c.link?.anchor))}>{c.text}</button>
         : <Fragment key={i}>{c.text}</Fragment>)}
     </>
+  );
+}
+
+/** "cites decision 0004 · US-12": what a task or pull request body cites that has a page, each a link; nothing when none. */
+export function Cites({ cites, docs, open }: { cites: string[] | undefined; docs: DocPage[] | undefined; open: Open }) {
+  const links = citeLinks(cites ?? [], docs ?? []);
+  if (!links.length) return null;
+  return (
+    <span className="cites">cites {links.map((c, i) => (
+      <Fragment key={i}>{i > 0 && " · "}
+        <button className="link doclink" title="Open it in the docs" onClick={() => open(docChannel(c.link.id, c.link.anchor))}>{c.text}</button>
+      </Fragment>))}
+    </span>
   );
 }
 
