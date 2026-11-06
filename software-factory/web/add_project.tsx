@@ -179,7 +179,7 @@ function TasksTab({ form, set }: { form: Form; set: (f: Form) => void }) {
         <Field id="ap-main" label="Main branch" hint="Agents never push here.">
           <input id="ap-main" value={form.mainBranch} onChange={(e) => set({ ...form, mainBranch: e.target.value })} />
         </Field>
-        <Field id="ap-test" label="Test command" hint="Empty: the factory suggests one from the project's files.">
+        <Field id="ap-test" label="Test command" hint="Empty keeps the template's; you can change it later in Settings.">
           <input id="ap-test" className="mono" value={form.test} onChange={(e) => set({ ...form, test: e.target.value })} />
         </Field>
         <Field id="ap-lint" label="Lint and type check" hint="Runs before every pull request">
@@ -188,7 +188,7 @@ function TasksTab({ form, set }: { form: Form; set: (f: Form) => void }) {
       </div>
       <div className="ap-field">
         <strong>Protected paths</strong>
-        <span className="ap-hint">A pull request that touches one of these waits for you. The agent that wrote it can never merge it.</span>
+        <span className="ap-hint">A pull request that touches one of these waits for you. The agent that wrote it can never merge it. A folder ends in /; a file is matched whole.</span>
         <div className="ap-chips">
           {form.protected.map((p) => (
             <span key={p} className="ap-chip"><code>{p}</code>

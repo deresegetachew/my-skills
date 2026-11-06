@@ -145,9 +145,10 @@ export function projects(cfg: Config, root: string): UiProject[] {
   const paths = Array.isArray(listed) ? listed.filter((p): p is string => typeof p === "string" && p.trim() !== "") : [];
   const out: UiProject[] = [];
   out.push({ id: idFor(out, repoName(root)), name: repoName(root), path: root, current: true, problem: null, config: cfg });
-  for (const given of [...paths, ...addedPaths(root)]) {
+  const added = addedPaths(root);
+  for (const given of [...paths, ...added]) {
     const path = resolve(root, given.replace(/^~(?=\/|$)/, homedir()));
-    if (!out.some((p) => realpathOr(p.path) === realpathOr(path))) out.push(projectAt(out, path));
+    if (!out.some((p) => realpathOr(p.path) === realpathOr(path))) out.push(projectAt(out, path, !paths.includes(given)));
   }
   return out;
 }
@@ -160,18 +161,20 @@ function idFor(list: UiProject[], name: string): string {
 }
 
 /** The project at `path` beside those in `list` (not added to it): with what to do when it isn't there or doesn't run
- * the factory. */
-export function projectAt(list: UiProject[], path: string): UiProject {
+ * the factory. `fromPage`: it was added from the page (#447), not listed in ui.projects. */
+export function projectAt(list: UiProject[], path: string, fromPage = false): UiProject {
   const name = repoName(path);
   const id = idFor(list, name);
   if (!existsSync(path)) {
     return { id, name, path, current: false, config: null, problem: { code: "ui_project_missing", message: `${path} isn't there.`,
-      fix: `Fix the path in ui.projects (factory settings set ui.projects '[...]'), or clone the project there.` } };
+      fix: fromPage ? "Clone the project there again, or move it back."
+        : `Fix the path in ui.projects (factory settings set ui.projects '[...]'), or clone the project there.` } };
   }
   const config = configAt(path);
   return { id, name, path, current: false, config, problem: config ? null : { code: "ui_project_not_factory",
     message: `${path} has no .claude/factory.json, so it doesn't run the factory.`,
-    fix: `Install the factory there (install.sh), or take it out of ui.projects.` } };
+    fix: fromPage ? "Install the factory there; the project shows here once it has .claude/factory.json."
+      : `Install the factory there (install.sh), or take it out of ui.projects.` } };
 }
 
 /** The file that keeps the projects added from the page (#447): <git common dir>/factory/ui-projects.json, a JSON list

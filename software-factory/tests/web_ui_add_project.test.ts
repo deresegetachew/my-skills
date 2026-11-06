@@ -371,8 +371,10 @@ test("clone: every step runs, the answers are written, the project is listed, an
   expect((cfg.commands as Row).test).toBe("bun test");
   expect((cfg.commands as Row).lint).toBe("bun x tsc --noEmit");
   const prot = cfg.protected as string[];
-  expect(prot).toContain("docs/");
-  expect(prot).toContain("secrets/");
+  // a typed path becomes an anchored regex (protected is a list of regexes): a folder its prefix
+  expect(prot).toContain("^docs/");
+  expect(prot).toContain("^secrets/");
+  expect(prot).not.toContain("docs/");
   expect(new Set(prot).size).toBe(prot.length);
   expect(cfg.agents).toEqual(["menelik", "taytu"]);
   expect(((cfg.roles as Row)["dev-manager"] as Row).names).toEqual(["haile"]);
@@ -536,8 +538,40 @@ test("folder: an existing clean git repo is set up with no gh repo call", async 
   const cfg = readJson<Row>(join(dir, ".claude", "factory.json"));
   expect(cfg.keep).toBe("me");
   expect(cfg.agents).toEqual(["menelik", "taytu"]);
-  expect([...(cfg.protected as string[])].sort()).toEqual(["docs/", "secrets/"]);
+  expect([...(cfg.protected as string[])].sort()).toEqual(["^docs/", "^secrets/", "docs/"]);
   expect(factoryCalls(s.p)).toContain("init");
+}, T);
+
+test("folder on a feature branch: the setup branch starts from the main branch on GitHub, without the feature's commits", async () => {
+  const s = await setup();
+  const dir = folderRepo(s, "mine");
+  git(dir, "checkout", "-q", "-b", "feature");
+  write(join(dir, "feature.txt"), "work in progress\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "feature work");
+  const run = await waitRun(s.ui, await start(s, req(s, { source: "folder", repo: "", path: dir })));
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  expect(git(dir, "log", "--format=%s", "origin/main..origin/factory/setup").trim().split("\n")).toEqual(["Set up the factory"]);
+}, T);
+
+test("protected paths: a file is matched whole, a folder as a prefix, and regex characters are taken as they are", async () => {
+  const s = await setup();
+  const dir = folderRepo(s, "mine");
+  const run = await waitRun(s.ui, await start(s, req(s, { source: "folder", repo: "", path: dir,
+    protected: ["factory", ".claude/", "src/(old)/", "a+b.ts"] })));
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  const prot = readJson<Row>(join(dir, ".claude", "factory.json")).protected as string[];
+  expect(prot).toEqual(["docs/", "^factory$", "^\\.claude/", "^src/\\(old\\)/", "^a\\+b\\.ts$"]);
+  for (const p of prot) expect(() => new RegExp(p)).not.toThrow();
+  expect(prot.some((p) => new RegExp(p).test("src/factory.ts"))).toBe(false);
+}, T);
+
+test("protected paths: one with a leading / is refused with ui_add_protected", async () => {
+  const s = await setup();
+  const r = await api(s.ui, "/api/add-project/check", { method: "POST", body: req(s, { protected: ["/etc/"] }) });
+  expect(r.status).toBe(400);
+  expect(r.json.code).toBe("ui_add_protected");
+  expect(String(r.json.fix)).toMatch(/without a leading \//);
 }, T);
 
 test("folder: a repo with uncommitted changes is refused with ui_add_dirty and nothing is touched", async () => {

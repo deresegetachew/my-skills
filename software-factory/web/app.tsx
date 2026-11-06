@@ -477,7 +477,7 @@ function App() {
   const postStable = useCallback((path: string, body: unknown) => call<Record<string, unknown>>(token, path, { method: "POST", body })
     .catch((e: unknown): Record<string, unknown> => {
       signedOut(e);
-      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: "Is `factory ui` still running?" };
+      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: "Check that the web UI still runs on this machine." };
     }), [token, signedOut]);
 
   if (!token) return <Gate wrong={wrong} onToken={(t) => { keepToken(t); setWrong(false); setToken(t); }} />;

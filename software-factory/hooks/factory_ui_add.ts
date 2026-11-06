@@ -21,7 +21,15 @@ const STEP_TIMEOUT_MS = 10 * 60_000;
 const OUTPUT_CHARS = 4000;
 const SETUP_BRANCH = "factory/setup";
 const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
-const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+const REPO = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9_.][A-Za-z0-9_.-]*$/;
+const INSTALLER = resolve(HOOKS, "..", "install.sh");
+
+/** The `protected` regex for a path the owner typed: anchored at the start, its dots and brackets taken as they are, and
+ * a file (no / at the end) matched whole: "factory" protects ^factory$, not every path with factory in it. */
+export function protectedRegex(path: string): string {
+  const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return `^${escaped}${path.endsWith("/") ? "" : "$"}`;
+}
 
 /** The 12 ready-made agents the owner picks from (the design's RULES.md). */
 export const LEGENDS = ["menelik", "taytu", "haile", "tewodros", "yohannes", "zewditu", "lalibela", "ezana", "alula", "abebe",
@@ -181,6 +189,14 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
       "Pick at least one builder, and give every agent its own name: lowercase letters, digits and dashes.");
   }
   const prot = Array.isArray(b.protected) ? b.protected.map(str).filter(Boolean) : [];
+  const odd = prot.find((p) => /[\u0000-\u001f\u007f]/.test(p) || p.startsWith("/"));
+  if (odd !== undefined) {
+    return problem("ui_add_protected", `"${odd}" isn't a path in the repo.`, "Type each protected path from the repo's top, without a leading /, for example migrations/.");
+  }
+  if (!existsSync(INSTALLER)) {
+    return problem("ui_add_no_installer", "This factory has no installer beside it, so it can't install itself into another project.",
+      "Start the web UI from a my-skills checkout, then add the project again.");
+  }
   return { source, repo: source === "folder" ? "" : repo, path, visibility: b.visibility === "public" ? "public" : "private", tasks,
     mainBranch, test: str(b.test), lint: str(b.lint), protected: [...new Set(prot)], team };
 }
@@ -266,12 +282,7 @@ async function stepRepo(req: AddRequest, step: AddStep): Promise<Done> {
 }
 
 async function stepKit(req: AddRequest, step: AddStep): Promise<Done> {
-  const installer = resolve(HOOKS, "..", "install.sh");
-  if (!existsSync(installer)) {
-    throw new StepFailed(problem("ui_add_no_installer", "This factory has no install.sh beside it, so it can't install itself into another folder.",
-      "Run the web UI from a my-skills checkout, or install a release in that folder with factory update, then press Retry."), "");
-  }
-  return { state: "done", output: await must(step, ["bash", installer, req.path], req.path, gitEnv(), "Read what it printed, fix it, then press Retry.") };
+  return { state: "done", output: await must(step, ["bash", INSTALLER, req.path], req.path, gitEnv(), "Read what it printed, fix it, then press Retry.") };
 }
 
 function writeJson(path: string, data: unknown): void {
@@ -310,7 +321,7 @@ function stepAnswers(req: AddRequest, step: AddStep, host: AddHost): Done {
   if (req.test) commands.test = req.test;
   if (req.lint) commands.lint = req.lint;
   const had = Array.isArray(cfg.protected) ? cfg.protected.filter((p): p is string => typeof p === "string") : [];
-  cfg.protected = [...new Set([...had, ...req.protected])];
+  cfg.protected = [...new Set([...had, ...req.protected.map(protectedRegex)])];
   cfg.agents = req.team.builders;
   const roles = objAt(cfg, "roles");
   objAt(roles, "dev-manager").names = [req.team.devManager];
@@ -345,7 +356,13 @@ async function stepCommit(req: AddRequest, step: AddStep): Promise<Done> {
   const changed = (await git(req.path, ["status", "--porcelain"])).stdout.trim() !== "";
   const branch = (await git(req.path, ["branch", "--show-current"])).stdout.trim();
   if (!changed && branch !== SETUP_BRANCH) return { state: "skipped", output: "Nothing changed in the repo: it already runs the factory." };
-  if (branch !== SETUP_BRANCH) outs.push(await must(step, ["git", "-C", req.path, "checkout", "-B", SETUP_BRANCH], req.path, env, fix));
+  if (branch !== SETUP_BRANCH) {
+    // from the main branch as GitHub has it, so the pull request holds the setup and nothing else; the changes come along
+    await git(req.path, ["fetch", "-q", "origin", req.mainBranch]);
+    const base = (await git(req.path, ["rev-parse", "--verify", "-q", `refs/remotes/origin/${req.mainBranch}`])).code === 0 ? [`origin/${req.mainBranch}`] : [];
+    outs.push(await must(step, ["git", "-C", req.path, "checkout", "-B", SETUP_BRANCH, ...base], req.path, env,
+      `Check that ${req.mainBranch} is the repo's main branch, then press Retry.`));
+  }
   if (changed) {
     outs.push(await must(step, ["git", "-C", req.path, "add", "-A"], req.path, env, fix));
     outs.push(await must(step, ["git", "-C", req.path, "commit", "-m", "Set up the factory"], req.path, env, fix));
