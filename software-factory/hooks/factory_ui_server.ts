@@ -5,7 +5,7 @@
 //   GET  /api/projects                         this project and those in ui.projects
 //   GET  /api/projects/:p/channels             one per agent (with `avatar`, the owner's image, when there is one), one
 //                                              per view
-//   GET  /api/projects/:p/agents[/:name]       the agents live (factory_ui_data.ts live())
+//   GET  /api/projects/:p/agents[/:name]       the agents live (factory_ui_data.ts live()), limit, githubCalls (the last hour)
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
 //   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
 //   POST /api/projects/:p/agents/:name/stop    {confirm: true}: factory owner stop <name>
@@ -196,7 +196,7 @@ export function serve(o: ServeOptions): Running {
     if (rest.length === 1 && rest[0] === "channels" && req.method === "GET") return json(200, { project: p.id, channels: channels(p, seen(p)) });
     if (rest.length === 1 && rest[0] === "agents" && req.method === "GET") {
       const s = await state(p, ttl);
-      return json(200, { project: p.id, agents: s.data.agents, limit: s.data.limit, problems: s.data.problems });
+      return json(200, { project: p.id, agents: s.data.agents, limit: s.data.limit, githubCalls: s.data.githubCalls, problems: s.data.problems });
     }
     if (rest.length === 1 && rest[0] === "machines" && req.method === "GET") {
       const s = await state(p, ttl);

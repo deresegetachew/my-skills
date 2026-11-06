@@ -250,7 +250,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds).", { options: ["github", "nats"], default: "github" }),
   S("messaging.url", "str", "messaging", "The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats.", { default: "" }),
   S("messaging.creds", "str", "messaging", "The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/.", { default: "" }),
-  S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff); every other kind stays on GitHub.", { default: [] }),
+  S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub.", { default: [] }),
   S("messaging.githubCopy", "list", "messaging", "The moved kinds that are still also written to GitHub. Only claim (with its releases) and wake can leave it; every other kind is always written there. Unset: the same as messaging.kinds.", { default: null }),
   S("messaging.pollMinutes", "int", "messaging", "With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up over NATS before it looks at GitHub anyway.", { default: 15 }),
   S("messaging.fallback", "enum", "messaging", "When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command.", { options: ["github", "none"], default: "github" }),
@@ -474,7 +474,10 @@ const MORE: Record<string, More> = {
     "once per FACTORY_AGENTS_CACHE_SECONDS (45). The server reads only while a page is open.",
   examples: ["factory settings set ui.pollSeconds 10"] },
   "messaging.kinds": { long: "The kinds of message that have moved to NATS, one at a time. A kind not listed stays on " +
-    "GitHub. Stopping a kind's GitHub copy after its first week is the owner's call.",
+    "GitHub. Stopping a kind's GitHub copy after its first week is the owner's call. `pr` is not a message: one " +
+    "watcher (started by the dev manager) reads the open pull requests and their CI from GitHub and tells the others " +
+    "over NATS, so the slot check, `factory wait` and the dev manager's pass don't ask GitHub; with no fresh word " +
+    "for `messaging.pollMinutes` they ask GitHub as before.",
   examples: ["factory settings set messaging.kinds '[\"wake\"]'"] },
   "messaging.githubCopy": { long: "NATS is not the record (6 Nov 2026, decision 0004). A moved kind listed here is sent " +
     "over NATS and also written to GitHub, as in its first week. Take a kind out to stop its GitHub copy: only claim " +
@@ -778,7 +781,7 @@ export function validateAll(data: Record<string, unknown>, root = "."): [string[
 }
 
 // The kinds `messaging.kinds` may move: the envelope's, and the ones decision 0004 (point 6) adds.
-export const MESSAGING_KINDS = [...MESSAGE_KINDS,"claim", "release", "wake", "handoff"];
+export const MESSAGING_KINDS = [...MESSAGE_KINDS,"claim", "release", "wake", "handoff", "pr"];
 
 function messagingErrors(data: Record<string, unknown>): string[] {
   const errors: string[] = [];
