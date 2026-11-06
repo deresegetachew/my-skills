@@ -46,7 +46,7 @@ export interface Running {
 const TOPIC = "live";
 
 /** The views' channels (#424) and the part of factory_ui_views.ts's Views each one is. */
-const VIEW_PARTS: Record<string, "tasks" | "pulls" | "ci"> = { tasks: "tasks", "pull-requests": "pulls", ci: "ci" };
+const VIEW_PARTS: Record<string, "tasks" | "epics" | "pulls" | "ci"> = { tasks: "tasks", epics: "epics", "pull-requests": "pulls", ci: "ci" };
 
 const PAGE = `<!doctype html>
 <html lang="en">

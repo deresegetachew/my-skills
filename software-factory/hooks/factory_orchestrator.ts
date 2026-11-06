@@ -38,6 +38,7 @@ import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_r
 import { ciState, collect, isoformat, issueOf, isOwn, type Item, minutes, type Pull, reviewState } from "./factory_watch.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./factory_lib.ts";
 import { remember, settled } from "./factory_views_cache.ts";
+import { wakeUp } from "./factory_wake.ts";
 import { type Job, running as sessionRunning, sessionName, startWindow, type Started, WindowError, windowName } from "./factory_window.ts";
 
 export const OWNER_TITLE = "Dev manager: needs the owner";
@@ -305,6 +306,9 @@ export function leaveVerdict(cfg: Config, name: string, item: Item, before: Set<
   comment(pr, `<!-- factory-manager-skip sha=${head} -->\n` + (failed ? `<!-- factory-review-failed sha=${head} -->\n` : "") +
     `**Dev manager ${name} looked at this pull request and did not review it.** Reason: ${reason}.\n\nNext step: ${step}`);
   out(`pr-${pr}: left a comment saying why it was not reviewed (${reason})`);
+  // A next step the agent takes (draft, conflict, failed CI) is a hand-off: it stays on GitHub, and a wake-up tells the
+  // coding agents at once (#413). Nothing for them while CI runs or when the session itself failed.
+  if (!failed && reason !== "CI has not finished") wakeUp(cfg, name, "coding-agent", `pr#${pr}`, "left the next step");
   if (failed) {
     postAsk(cfg, name, `review-failed-${pr}-${head.slice(0, 7)}`, `PR #${pr} at ${head.slice(0, 7)}: the dev manager's session ended without a ` +
       "verdict, so this commit is skipped until it changes. Read " + join(stateDir(name), `pr-${pr}.out`) + ", then review it " +

@@ -33,6 +33,7 @@ export interface MessagingSettings {
   url: string;
   creds: string;
   kinds: string[];
+  githubCopy: string[]; // the moved kinds still also written to GitHub (unset: kinds)
   fallback: string;
   pollMinutes: number; // with wake on NATS: how long an idle wait listens before it looks at GitHub anyway
 }
@@ -55,10 +56,22 @@ export function messagingSettings(config: Config): MessagingSettings {
   const m = config.messaging;
   const own: Record<string, unknown> = typeof m === "object" && m !== null && !Array.isArray(m) ? (m as Record<string, unknown>) : {};
   const text = (key: string, dflt: string): string => (typeof own[key] === "string" && own[key] ? (own[key] as string) : dflt);
-  const kinds = Array.isArray(own.kinds) ? own.kinds.filter((k): k is string => typeof k === "string") : [];
+  const list = (v: unknown): string[] | null => (Array.isArray(v) ? v.filter((k): k is string => typeof k === "string") : null);
+  const kinds = list(own.kinds) ?? [];
   const poll = Number(own.pollMinutes);
   return { transport: text("transport", "github"), url: text("url", ""), creds: text("creds", ""), kinds,
-    fallback: text("fallback", "github"), pollMinutes: typeof own.pollMinutes === "number" && poll > 0 ? poll : 15 };
+    githubCopy: list(own.githubCopy) ?? kinds, fallback: text("fallback", "github"),
+    pollMinutes: typeof own.pollMinutes === "number" && poll > 0 ? poll : 15 };
+}
+
+/** The kinds that may be on NATS only (6 Nov 2026, "NATS is not the record"): coordination nobody reads later. */
+export const NATS_ONLY_KINDS = ["claim", "release", "wake"];
+
+/** Whether `kind` is written to GitHub, on top of NATS, by a caller that already has NATS for it. False only for a
+ * moved kind that may be NATS-only and that `messaging.githubCopy` leaves out; every record kind is always written. */
+export function githubCopies(config: Config, kind: string): boolean {
+  const s = messagingSettings(config);
+  return !(s.transport === "nats" && s.kinds.includes(kind) && NATS_ONLY_KINDS.includes(kind) && !s.githubCopy.includes(kind));
 }
 
 function messagingPort(s: MessagingSettings, warn: (e: CoreError) => void): Messaging {
