@@ -2,6 +2,7 @@
 // thread, and the thread itself. No React here, so tests/epic_detail.test.ts runs it as it is.
 import type { ChatItemView } from "./chat_model.ts";
 import { citeLinks, type DocPage } from "./docs_model.ts";
+import { itemThread, talkText as itemTalkText } from "./parts_model.ts";
 
 /** The stages in the order an epic walks them (a parked epic is none of them), with the words the page shows. */
 export const STAGE_FLOW: Array<[string, string]> = [["investigating", "Investigating"], ["prd", "PRD written"], ["decision", "Decision"],
@@ -56,23 +57,12 @@ export function writtenDown(e: { title: string; prd: string; decisions: string[]
   return out;
 }
 
-function tag(epic: { id: string }): string {
-  return `About epic #${epic.id} (`;
-}
-
-/** What the "Talk about this" box sends: the owner's line, led by the epic it is about, so the answerer knows. */
+/** What the "Talk about this" box sends: the owner's line, led by the epic it is about (the shared box's rule, #450). */
 export function talkText(epic: { id: string; title: string }, text: string): string {
-  return `${tag(epic)}${epic.title.replace(/\s+/g, " ").trim()}): ${text.trim()}`;
+  return itemTalkText({ kind: "epic", ...epic }, text);
 }
 
-/** The epic's thread out of a chat: the owner's messages about it, and the answers that follow each, up to the next
- * message from the owner about something else. */
+/** The epic's thread out of a chat: the owner's messages about it, and the answers that follow each. */
 export function epicThread(items: ChatItemView[], epicId: string): ChatItemView[] {
-  const out: ChatItemView[] = [];
-  let inside = false;
-  for (const x of items) {
-    if (x.kind === "owner") inside = x.text.startsWith(tag({ id: epicId }));
-    if (inside) out.push(x);
-  }
-  return out;
+  return itemThread(items, { kind: "epic", id: epicId });
 }

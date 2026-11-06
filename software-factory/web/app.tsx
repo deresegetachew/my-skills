@@ -1,11 +1,12 @@
 // The factory's web app (#421, #422, decision 0005), served by `factory ui` and bundled for the browser at release
-// (tools/build_web.ts). Like Slack: on the far left the projects, then the selected project's channels (one per agent,
-// one per view) with a search across every project's channels, and on the right the channel. Agents and machines are
-// live over a WebSocket; starting and stopping an agent asks first, then runs `factory owner start|stop` on the server.
-// Chat with an agent and the owner queue's approvals (#423) are in chat.tsx; the tasks, pull requests and CI views (#424)
-// slot in as channels.
+// (tools/build_web.ts). The owner's design (#450, docs/design/web-ui/): on the far left the projects, then the selected
+// project's sidebar (the pages, Your team, Run the factory) with a search across every project, and on the right the
+// page under its header. Agents and machines are live over a WebSocket; starting and stopping an agent shows its
+// preconditions and what will and won't happen first. Chat with an agent and the owner queue's approvals (#423) are in
+// chat.tsx; the tasks, pull requests and CI views (#424) are pages; the shared parts are in parts.tsx.
 //
-// It reads only the API (factory_ui_server.ts); the few rules it has are in model.ts, tested on their own.
+// It reads only the API (factory_ui_server.ts); its rules are in model.ts, nav_model.ts, parts_model.ts and theme_model.ts,
+// tested on their own. Nothing on screen names a command.
 import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
@@ -14,7 +15,12 @@ import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
 import type { DocSection } from "./docs_model.ts";
+import { channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
+import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx";
+import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
 import { CSS } from "./style.ts";
+import { THEME_CSS } from "./theme.ts";
+import { nextTheme, THEME_KEY, themeLabel, themeOf } from "./theme_model.ts";
 import { CiChannel, EpicsChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
 import { searchRows, type ViewsData } from "./views_model.ts";
 
@@ -70,6 +76,8 @@ type Conn = "connecting" | "live" | "reconnecting";
 
 class Unauthorized extends Error {}
 
+const UNREACHABLE_FIX = "Check that the web UI still runs on the machine that serves this page, start it again there, then reload.";
+
 const TOKEN_KEY = "factory-ui-token";
 
 function storedToken(): string {
@@ -117,11 +125,65 @@ function Dot({ tone, label }: { tone: Tone; label?: string }) {
 
 function SearchIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
       <circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" />
     </svg>
   );
 }
+
+function GearIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" />
+    </svg>
+  );
+}
+
+/** The theme switch's icon: half a circle (follows the system), a sun (light) or a moon (dark). */
+function ThemeIcon({ choice }: { choice: string }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      {choice === "light" ? <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5" /></>
+        : choice === "dark" ? <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+        : <><circle cx="12" cy="12" r="9" /><path d="M12 3v18" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" /></>}
+    </svg>
+  );
+}
+
+/** The light or dark the page shows: the owner's pick kept in the browser, else the system's, followed as it changes. */
+function useTheme(): { choice: string | null; flip: () => void } {
+  const kept = (): string | null => {
+    try {
+      return localStorage.getItem(THEME_KEY);
+    } catch {
+      return null;
+    }
+  };
+  const [choice, setChoice] = useState<string | null>(kept);
+  const [dark, setDark] = useState(() => matchMedia("(prefers-color-scheme: dark)").matches);
+  useEffect(() => {
+    const m = matchMedia("(prefers-color-scheme: dark)");
+    const on = (e: MediaQueryListEvent): void => setDark(e.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
+  useEffect(() => {
+    document.documentElement.dataset.theme = themeOf(choice, dark);
+  }, [choice, dark]);
+  const flip = (): void => {
+    const next = nextTheme(choice);
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      // a private window: the pick lasts as long as the page
+    }
+    setChoice(next);
+  };
+  return { choice, flip };
+}
+
+/** A project's square on the rail, in a category colour of its own. */
+const PROJECT_COLOURS = ["violet", "green", "blue", "pink", "yellow"];
 
 function MenuIcon() {
   return (
@@ -131,7 +193,7 @@ function MenuIcon() {
   );
 }
 
-function Notice({ tone, title, children }: { tone: "warn" | "bad"; title: string; children?: ReactNode }) {
+function Notice({ tone, title, children }: { tone: "good" | "warn" | "bad"; title: string; children?: ReactNode }) {
   return (
     <div className={`notice ${tone}`} role={tone === "bad" ? "alert" : "status"}>
       <Dot tone={tone} />
@@ -156,6 +218,7 @@ interface Ask {
   project: string;
   agent: string;
   role: string;
+  spec: ConfirmSpec;
 }
 
 function AgentChannel({ agent, channel, live, project, token }: { agent: Agent | undefined; channel: ChannelView; live: Live | undefined;
@@ -173,10 +236,7 @@ function AgentChannel({ agent, channel, live, project, token }: { agent: Agent |
         {!live && <p className="empty">Reading {project.name}…</p>}
         {live && !agent && (
           <div className="card">
-            <p className="empty" style={{ margin: 0 }}>
-              {channel.name} hasn't reported yet: it isn't running on any machine. Start it here, or with
-              {" "}<code>factory owner start {channel.role} {channel.name}</code>.
-            </p>
+            <p className="empty" style={{ margin: 0 }}>{channel.name} hasn't reported yet: it isn't running on any machine. Start it with the button above.</p>
           </div>
         )}
         {agent && (
@@ -198,8 +258,7 @@ function AgentChannel({ agent, channel, live, project, token }: { agent: Agent |
             {agent.log.length ? <pre className="log">{agent.log.join("\n")}</pre> : (
               <p className="empty" style={{ margin: 0 }}>
                 {agent.state === "down" ? "It isn't running." : agent.here ? "Nothing printed yet."
-                  : `Its output stays on ${agent.machineName ?? "its machine"}: `}
-                {agent.state !== "down" && !agent.here && <code>factory follow {agent.name}</code>}
+                  : `Its output stays on ${agent.machineName ?? "its machine"}: open this page there to see it.`}
               </p>
             )}
           </section>
@@ -211,13 +270,16 @@ function AgentChannel({ agent, channel, live, project, token }: { agent: Agent |
   );
 }
 
+/** Start or Stop: each opens the confirm with its preconditions; one running on another machine says where instead. */
 function agentActions(agent: Agent | undefined, channel: ChannelView, project: Project, onAsk: (a: Ask) => void) {
   const role = channel.role ?? "coding-agent";
   const down = !agent || agent.state === "down";
+  const facts: AgentFacts = { name: channel.name, here: agent?.here ?? false, state: agent?.state ?? "down", machineName: agent?.machineName ?? agent?.machine ?? null,
+    task: agent?.task ?? null };
   if (!down && agent && !agent.here) return <span className="tag quiet">on {agent.machineName ?? "another machine"}</span>;
   return down
-    ? <button className="btn primary" onClick={() => onAsk({ verb: "start", project: project.id, agent: channel.name, role })}>Start</button>
-    : <button className="btn" onClick={() => onAsk({ verb: "stop", project: project.id, agent: channel.name, role })}>Stop</button>;
+    ? <button className="btn primary" onClick={() => onAsk({ verb: "start", project: project.id, agent: channel.name, role, spec: startAgentAsk(facts) })}>Start</button>
+    : <button className="btn danger" onClick={() => onAsk({ verb: "stop", project: project.id, agent: channel.name, role, spec: stopAgentAsk(facts) })}>Stop</button>;
 }
 
 function MachinesChannel({ live, project, open }: { live: Live | undefined; project: Project; open: (channel: string) => void }) {
@@ -228,7 +290,7 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
     <div className="body">
       {live.limit && <Notice tone="warn" title={live.limit.message} />}
       {live.problems.map((p) => <ProblemNotice key={p.code} p={p} />)}
-      {!live.machines.length && <p className="empty">No machine reports an agent yet. <code>factory loop -i</code> starts one.</p>}
+      {!live.machines.length && <p className="empty">No machine reports an agent yet. Start one from Your team.</p>}
       <div className="machines">
         {live.machines.map((m) => (
           <section className="card" key={m.id} aria-label={m.name}>
@@ -256,29 +318,62 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
                 <li key={r.name}><Dot tone={runnerTone[r.state] ?? "quiet"} label={r.state} /><span>{r.name}</span><span className="detail">{runnerText[r.state]}</span></li>
               ))}
             </ul>
-          ) : <p className="empty" style={{ margin: 0 }}>None known on this machine. <code>factory ci status</code> says where CI runs.</p>}
+          ) : <p className="empty" style={{ margin: 0 }}>None known on this machine. CI and runners says where CI runs.</p>}
         </section>
       </div>
     </div>
   );
 }
 
-const COMING: Record<string, [string, string]> = {
-  tasks: ["Tasks", "factory cockpit --tasks"],
-  epics: ["Epics", "factory cockpit --tasks"],
-  "pull-requests": ["Pull requests", "factory cockpit --prs"],
-  ci: ["CI", "factory cockpit --ci"],
+/** A page of the design not built yet: what it will hold, and the pages that already have some of it. */
+const COMING: Record<string, { what: string; see: string[] }> = {
+  home: { what: "Home will show what the team is doing now and what needs you, on one page.", see: ["inbox", "board", "prs"] },
+  signoff: { what: "Sign-off and testing will list what was built and waits for you to try it.", see: ["prs", "board"] },
+  activity: { what: "Activity will show everything that happened, newest first.", see: ["prs", "ci"] },
+  health: { what: "Health will check every part of the factory and give a fix for what doesn't work.", see: ["machines", "ci"] },
+  usage: { what: "Usage and cost will show what each agent and task used, against its budget.", see: ["board"] },
+  settings: { what: "The settings of this project and this machine will be set here.", see: [] },
+  integrations: { what: "The services the agents use will be listed here, with whether each one works.", see: [] },
+  releases: { what: "The version this project runs, and the newer ones, will be shown here.", see: [] },
+  maintenance: { what: "Clean-ups and repairs will be here, each saying what it will and won't touch.", see: [] },
 };
 
-function ComingChannel({ name }: { name: string }) {
-  const [title, command] = COMING[name] ?? [name, "factory help"];
+function ComingPage({ page, open }: { page: string; open: (channel: string) => void }) {
+  const c = COMING[page] ?? { what: "This page is being built.", see: [] };
+  const tabs = SETTINGS_TABS.some((t) => t.page === page);
   return (
     <div className="body">
+      {tabs && <Tabs label="Factory settings" value={page} onChange={(p) => open(channelOf(p))} tabs={SETTINGS_TABS.map((t) => ({ id: t.page, label: t.label }))} />}
       <div className="placeholder">
-        <div className="big" aria-hidden="true">⌁</div>
-        <h3>{title} come to this channel next</h3>
-        <p>This view is being built (#424). Until then the same data is one command away: <code>{command}</code></p>
+        <h2>Coming next</h2>
+        <p>{c.what}</p>
+        {c.see.length > 0 && (
+          <div className="links">
+            {c.see.map((p) => <button key={p} className="btn" onClick={() => open(channelOf(p))}>Open {pageHead(p).title}</button>)}
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** PRD and decisions: a tab per section (the PRD, the decisions, the wiki), and a row per page that opens it. */
+function DocsIndex({ sections, open }: { sections: DocSection[] | undefined; open: (channel: string) => void }) {
+  const [tab, setTab] = useState("");
+  const s = sections?.find((x) => x.id === tab) ?? sections?.[0];
+  if (!sections) return <div className="body"><p className="empty">Reading the docs…</p></div>;
+  if (!s) return <div className="body"><p className="empty">No PRD, decisions or wiki could be read for this project. Reload the page to try again.</p></div>;
+  return (
+    <div className="body">
+      <Tabs label="PRD and decisions" value={s.id} onChange={setTab} tabs={sections.map((x) => ({ id: x.id, label: x.title, count: x.pages.length }))} />
+      {s.problem && <ProblemNotice p={s.problem} />}
+      {!s.problem && !s.pages.length && <p className="empty">Nothing here yet.</p>}
+      <ul className="lrows" aria-label={s.title}>
+        {s.pages.map((d) => (
+          <ListRow key={d.id} title={d.title} sub={d.path}
+            action={<button className="btn small" onClick={() => open(docChannel(d.id))}>Open</button>} />
+        ))}
+      </ul>
     </div>
   );
 }
@@ -293,8 +388,8 @@ function Gate({ onToken, wrong }: { onToken: (t: string) => void; wrong: boolean
   return (
     <main className="gate">
       <h1>Factory</h1>
-      <p>{wrong ? "That token isn't this server's." : "This page needs the token `factory ui` printed."} Open the address it printed (it ends in
-        {" "}<code>?token=…</code>), or paste the token from <code>.git/factory/ui-token</code>.</p>
+      <p>{wrong ? "That token isn't this server's." : "This page needs the token the server printed when it started."} Open the address it
+        printed (it ends in <code>?token=…</code>), or paste the token kept in <code>.git/factory/ui-token</code>.</p>
       <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) onToken(text.trim()); }}>
         <input aria-label="Token" value={text} onChange={(e) => setText(e.target.value)} placeholder="token" autoFocus />
         <button className="btn primary" type="submit">Open</button>
@@ -304,6 +399,7 @@ function Gate({ onToken, wrong }: { onToken: (t: string) => void; wrong: boolean
 }
 
 function App() {
+  const theme = useTheme();
   const [token, setToken] = useState(initialToken);
   const [wrong, setWrong] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
@@ -470,7 +566,8 @@ function App() {
   const docRoute = route ? parseDocChannel(route.channel) : null;
   const docPages = pagesOf(docsBy[project.id]);
   const docPage = docRoute ? docPages.find((d) => d.id === docRoute.id) : undefined;
-  const channel = view.channels.find((c) => c.id === route?.channel) ?? view.channels[0];
+  const channel = view.channels.find((c) => c.id === route?.channel);
+  const page = channel || docRoute ? pageOf(route?.channel ?? "") : pageOf(route?.channel?.startsWith("page:") ? route.channel : "page:home");
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
   const go = (p: string, c: string, f = ""): void => {
@@ -486,11 +583,11 @@ function App() {
     try {
       const r = await call<{ ok?: boolean; command?: string; output?: string; message?: string; fix?: string }>(token,
         `/api/projects/${encodeURIComponent(ask.project)}/agents/${encodeURIComponent(ask.agent)}/${ask.verb}`, { method: "POST", body: { confirm: true } });
-      setToast(r.ok ? { title: `Ran ${r.command}`, text: r.output ?? "", tone: "good" }
+      setToast(r.ok ? { title: `${ask.verb === "start" ? "Started" : "Stopped"} ${ask.agent}.`, text: r.output ?? "", tone: "good" }
         : { title: r.message ?? "It didn't run.", text: [r.fix, r.output].filter(Boolean).join("\n\n"), tone: "bad" });
     } catch (e) {
       signedOut(e);
-      if (!(e instanceof Unauthorized)) setToast({ title: "The server can't be reached.", text: "Is `factory ui` still running?", tone: "bad" });
+      if (!(e instanceof Unauthorized)) setToast({ title: "The server can't be reached.", text: UNREACHABLE_FIX, tone: "bad" });
     } finally {
       setBusy(false);
       setAsk(null);
@@ -502,34 +599,33 @@ function App() {
       return await call<Record<string, unknown>>(token, path, { method: "POST", body });
     } catch (e) {
       signedOut(e);
-      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: "Is `factory ui` still running?" };
+      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: UNREACHABLE_FIX };
     }
   };
   const viewChannel = (name: string) => {
     const View = VIEW_CHANNELS[name] as (typeof VIEW_CHANNELS)[string];
-    const talkers = view.channels.filter((c) => c.kind === "agent" && (c.role === "product-owner" || c.role === "dev-manager"))
-      .map((c) => ({ name: c.name, role: c.role as string })).sort((a, b) => Number(b.role === "product-owner") - Number(a.role === "product-owner"));
+    const talkers = talkTargets(view.channels.filter((c) => c.kind === "agent"));
     return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast} docs={docPages}
       token={token} talkers={talkers}
       open={(c, f) => go(project.id, c, f)} />;
   };
 
-  const sideAgent = (c: ChannelView) => {
-    const a = live?.agents.find((x) => x.name === c.name);
-    const st = agentState(a, live?.limit ?? null);
-    return (
-      <button key={c.id} className="chan" aria-current={c.id === channel?.id} onClick={() => go(project.id, c.id)} title={`${c.name}: ${st.text}`}>
-        <Avatar name={c.name} role={c.role} size={28} tone={live ? st.tone : "quiet"} />
-        <span className="name">{c.name}<span className="sub">{ROLE_TITLE[c.role ?? ""] ?? c.role}</span></span>
-        {a?.task && <span className="meta">#{a.task}</span>}
-      </button>
-    );
-  };
+  const agentChannels = view.channels.filter((c) => c.kind === "agent");
+  const nav = sidebar({
+    page,
+    team: agentChannels.map((c) => {
+      const a = agentOf(c.name);
+      return { name: c.name, role: c.role, ...(a ? { state: a.state, detail: a.detail } : {}) };
+    }),
+    counts: { prs: viewsBy[project.id]?.pulls.pulls.length ?? 0 },
+    limit: live?.limit ?? null,
+  });
 
   const role = ROLE_TITLE[channel?.role ?? ""] ?? "";
   const agent = channel?.kind === "agent" ? agentOf(channel.name) : undefined;
-  const subtitle = channel?.kind === "agent" ? [role, agentState(agent, live?.limit ?? null).text].filter(Boolean).join(" · ")
-    : `${project.name} · ${project.current ? "this project" : project.path}`;
+  const head = docRoute ? { title: docPage?.title ?? docRoute.id, purpose: `PRD and decisions · ${docPage?.path ?? ""}` }
+    : channel?.kind === "agent" ? { title: channel.name, purpose: [role, agentState(agent, live?.limit ?? null).text].filter(Boolean).join(" · ") }
+    : pageHead(page);
 
   const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => [c.name, { role: c.role, avatar: c.avatar }]));
 
@@ -538,22 +634,32 @@ function App() {
     <div className={`app${menu ? " open" : ""}`}>
       {menu && <button className="backdrop" aria-label="Close the menu" onClick={() => setMenu(false)} />}
       <nav className="rail" aria-label="Projects">
-        {projects.map((p) => (
-          <button key={p.id} aria-current={p.id === project.id} title={p.name} aria-label={p.name}
-            onClick={() => go(p.id, (views.find((v) => v.id === p.id)?.channels[0]?.id) ?? "view:machines")}>
-            {initials(p.name)}
-            {(p.problem || liveBy[p.id]?.limit) && <span className="flag" />}
-          </button>
-        ))}
+        {projects.map((p, i) => {
+          const c = PROJECT_COLOURS[i % PROJECT_COLOURS.length] as string;
+          return (
+            <button key={p.id} className="proj" aria-current={p.id === project.id} title={p.name} aria-label={p.problem ? `${p.name}: ${p.problem.message}` : p.name}
+              style={{ background: `var(--${c}-fill)`, color: `var(--${c}-ink)` }} onClick={() => go(p.id, "page:home")}>
+              {initials(p.name)}
+              {(p.problem || liveBy[p.id]?.limit) && <span className="flag" />}
+            </button>
+          );
+        })}
+        <span className="grow" />
+        <button className="icon" onClick={theme.flip} aria-label={`${themeLabel(theme.choice)}. Change it`} title={themeLabel(theme.choice)}>
+          <ThemeIcon choice={theme.choice ?? "system"} />
+        </button>
+        <button className="icon" aria-label="Factory settings" aria-current={nav.ops.some((n) => n.page === "settings" && n.on)}
+          onClick={() => go(project.id, channelOf("settings"))}><GearIcon /></button>
       </nav>
-      <nav className="side" aria-label="Channels">
+      <nav className="side" aria-label={`${project.name}: pages and team`}>
         <div className="side-head">
-          <h1>{project.name}</h1>
-          <p title={project.path}>{project.current ? "this project" : project.path}</p>
+          <h1 title={project.path}>{project.name}</h1>
+          <p role="status"><StatusDot state={conn === "live" ? "working" : "waiting"} />
+            {conn === "live" ? (project.current ? "Live · this project" : "Live") : conn === "connecting" ? "Connecting…" : "Reconnecting…"}</p>
         </div>
         <div className="search">
           <SearchIcon />
-          <input ref={search} type="search" placeholder="Search channels" aria-label="Search channels across projects" value={query}
+          <input ref={search} type="search" placeholder="Search" aria-label="Search every project: agents, pages, tasks, pull requests and docs" value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
               const first = hits[0];
@@ -565,107 +671,85 @@ function App() {
             }} />
           {!query && <kbd>/</kbd>}
         </div>
-        <div className="channels">
-          {query ? (
-            <div className="section">
-              <h2>{hits.length + rowHits.length + docHits.length ? `${hits.length + rowHits.length + docHits.length} match${hits.length + rowHits.length + docHits.length > 1 ? "es" : ""}` : `No match for "${query}"`}</h2>
-              {hits.map((h) => (
-                <button key={`${h.project}/${h.channel.id}`} className="chan" onClick={() => go(h.project, h.channel.id)}>
-                  {h.channel.kind === "agent" ? <Avatar name={h.channel.name} role={h.channel.role} image={h.channel.avatar} size={20} /> : <span className="hash">#</span>}
-                  <span className="name">{h.channel.title}<span className="sub">{h.projectName}{h.channel.role ? ` · ${ROLE_TITLE[h.channel.role] ?? h.channel.role}` : ""}</span></span>
-                </button>
-              ))}
-              {rowHits.length > 0 && <h2>In the views</h2>}
-              {rowHits.map((h, i) => (
-                <button key={`${h.project}/${h.channel}/${h.find}/${i}`} className="chan" onClick={() => go(h.project, h.channel, h.find)}>
-                  <span className="hash">›</span>
-                  <span className="name">{h.title}<span className="sub">{h.view} · {h.projectName}{h.detail ? ` · ${h.detail}` : ""}</span></span>
-                </button>
-              ))}
-              {docHits.length > 0 && <h2>In the docs</h2>}
-              {docHits.map((h, i) => (
-                <button key={`${h.project}/${h.hit.id}/${h.hit.line}/${i}`} className="chan" onClick={() => go(h.project, docChannel(h.hit.id))}>
-                  <span className="hash">§</span>
-                  <span className="name">{h.hit.text}<span className="sub">{h.hit.title} · line {h.hit.line} · {h.projectName}</span></span>
+        {query ? (
+          <div className="nav" aria-label="Search results">
+            <h2>{hits.length + rowHits.length + docHits.length ? `${hits.length + rowHits.length + docHits.length} match${hits.length + rowHits.length + docHits.length > 1 ? "es" : ""}` : `No match for "${query}"`}</h2>
+            {hits.map((h) => (
+              <button key={`${h.project}/${h.channel.id}`} className="nav-item" onClick={() => go(h.project, h.channel.id)}>
+                {h.channel.kind === "agent" ? <Avatar name={h.channel.name} role={h.channel.role} image={h.channel.avatar} size={20} /> : <span className="hash">#</span>}
+                <span className="name">{h.channel.kind === "view" ? pageHead(pageOf(h.channel.id)).title : h.channel.title}
+                  <span className="sub">{h.projectName}{h.channel.role ? ` · ${ROLE_TITLE[h.channel.role] ?? h.channel.role}` : ""}</span></span>
+              </button>
+            ))}
+            {rowHits.length > 0 && <h2>In the pages</h2>}
+            {rowHits.map((h, i) => (
+              <button key={`${h.project}/${h.channel}/${h.find}/${i}`} className="nav-item" onClick={() => go(h.project, h.channel, h.find)}>
+                <span className="hash">›</span>
+                <span className="name">{h.title}<span className="sub">{pageHead(pageOf(h.channel)).title} · {h.projectName}{h.detail ? ` · ${h.detail}` : ""}</span></span>
+              </button>
+            ))}
+            {docHits.length > 0 && <h2>In the docs</h2>}
+            {docHits.map((h, i) => (
+              <button key={`${h.project}/${h.hit.id}/${h.hit.line}/${i}`} className="nav-item" onClick={() => go(h.project, docChannel(h.hit.id))}>
+                <span className="hash">§</span>
+                <span className="name">{h.hit.text}<span className="sub">{h.hit.title} · line {h.hit.line} · {h.projectName}</span></span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="nav">
+              {nav.main.map((n) => (
+                <button key={n.page} className="nav-item" aria-current={n.on ? "page" : undefined} onClick={() => go(project.id, n.channel)}>
+                  <span className="name">{n.label}</span>
+                  {n.badge && <span className={`badge ${n.badge.tone}`} aria-label={`${n.badge.count} ${n.page === "inbox" ? "need you" : "open"}`}>{n.badge.count}</span>}
                 </button>
               ))}
             </div>
-          ) : (
-            <>
-              <div className="section">
-                <h2>Agents</h2>
-                {view.channels.filter((c) => c.kind === "agent").map(sideAgent)}
-              </div>
-              <div className="section">
-                <h2>Views</h2>
-                {view.channels.filter((c) => c.kind === "view").map((c) => (
-                  <button key={c.id} className="chan" aria-current={c.id === channel?.id} onClick={() => go(project.id, c.id)}>
-                    <span className="hash">#</span><span className="name">{c.title}</span>
-                  </button>
-                ))}
-              </div>
-              <div className="section">
-                <h2>Docs</h2>
-                {(docsBy[project.id] ?? []).map((s) => s.id === "prd" ? s.pages.map((d) => (
-                  <button key={d.id} className="chan" aria-current={docRoute?.id === d.id} onClick={() => go(project.id, docChannel(d.id))}>
-                    <span className="hash">§</span><span className="name">PRD</span>
-                  </button>
-                )) : (
-                  <details key={s.id} className="docs-sec" open={docRoute !== null && s.pages.some((d) => d.id === docRoute.id)}>
-                    <summary>{s.title} <span className="meta">{s.pages.length}</span></summary>
-                    {s.pages.map((d) => (
-                      <button key={d.id} className="chan" aria-current={docRoute?.id === d.id} title={d.title} onClick={() => go(project.id, docChannel(d.id))}>
-                        <span className="hash">§</span><span className="name">{d.title}</span>
-                      </button>
-                    ))}
-                  </details>
-                ))}
-                {(docsBy[project.id] ?? []).filter((s) => s.problem).map((s) => <p key={s.id} className="sub docs-problem" title={s.problem?.fix}>{s.title}: {s.problem?.message}</p>)}
-              </div>
-            </>
-          )}
-        </div>
-        <div className="side-foot" role="status">
-          <Dot tone={conn === "live" ? "good" : "warn"} />
-          {conn === "live" ? "Live" : conn === "connecting" ? "Connecting…" : "Reconnecting…"}
-        </div>
+            <div className="nav">
+              <h2>Your team</h2>
+              {!nav.team.length && <p className="empty" style={{ margin: "0 10px", fontSize: 13 }}>No agents named yet.</p>}
+              {nav.team.map((t) => (
+                <button key={t.name} className="nav-item mate" aria-current={t.on ? "page" : undefined} title={t.title} onClick={() => go(project.id, t.channel)}>
+                  <Avatar name={t.name} role={t.roleId} size={28} />
+                  <span className="name">{t.name}<span className="sub">{t.role}</span></span>
+                  <span role="img" aria-label={t.title} style={{ display: "inline-flex" }}><StatusDot state={t.dot} /></span>
+                </button>
+              ))}
+            </div>
+            <div className="nav">
+              <h2>Run the factory</h2>
+              {nav.ops.map((n) => (
+                <button key={n.page} className="nav-item" aria-current={n.on ? "page" : undefined} onClick={() => go(project.id, n.channel)}>
+                  <span className="name">{n.label}</span>
+                  {n.badge && <span className={`badge ${n.badge.tone}`}>{n.badge.count}</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </nav>
       <main className="main">
-        <header className="main-head">
-          <button className="menu" aria-label="Projects and channels" onClick={() => setMenu(true)}><MenuIcon /></button>
+        <header className="page-head">
+          <button className="menu" aria-label="Projects and pages" onClick={() => setMenu(true)}><MenuIcon /></button>
           <div className="grow">
-            <h2>{docRoute ? <span className="hash">§</span>
-              : channel?.kind === "agent" ? <Avatar name={channel.name} role={channel.role} size={26} /> : <span className="hash">#</span>}
-              {docRoute ? docPage?.title ?? docRoute.id : channel?.title ?? "—"}</h2>
-            <div className="subtitle">{docRoute ? `Docs · ${project.name}` : subtitle}</div>
+            <h1>{channel?.kind === "agent" && <Avatar name={channel.name} role={channel.role} size={40} />}{head.title}</h1>
+            {head.purpose && <p>{head.purpose}</p>}
           </div>
-          {!docRoute && channel?.kind === "agent" && live && !project.problem && agentActions(agent, channel, project, setAsk)}
+          {!docRoute && channel?.kind === "agent" && live && !project.problem && <div className="page-actions">{agentActions(agent, channel, project, setAsk)}</div>}
         </header>
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
           : docRoute ? <DocPageView key={`${project.id}/${docRoute.id}`} project={project.id} id={docRoute.id} anchor={docRoute.anchor} get={get} pages={docPages}
             open={(c) => go(project.id, c)} />
-          : !channel ? <div className="body"><p className="empty">This project has no channels.</p></div>
-          : channel.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
+          : channel?.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
+          : page === "docs" ? <DocsIndex key={project.id} sections={docsBy[project.id]} open={(c) => go(project.id, c)} />
+          : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} />
           : VIEW_CHANNELS[channel.name] ? viewChannel(channel.name)
-          : <ComingChannel name={channel.name} />}
+          : <ComingPage page={page} open={(c) => go(project.id, c)} />}
       </main>
-      {ask && (
-        <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) setAsk(null); }}>
-          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="ask-title">
-            <h3 id="ask-title">{ask.verb === "start" ? "Start" : "Stop"} {ask.agent}?</h3>
-            <p>This runs <code>factory owner {ask.verb === "start" ? `start ${ask.role} ${ask.agent}` : `stop ${ask.agent}`}</code> in {ask.project} on
-              the machine that serves this page.</p>
-            <div className="actions">
-              <button className="btn" onClick={() => setAsk(null)} disabled={busy} autoFocus>Cancel</button>
-              <button className={`btn ${ask.verb === "stop" ? "danger" : "primary"}`} onClick={() => void runAsk()} disabled={busy}>
-                {busy ? "Running…" : ask.verb === "start" ? "Start" : "Stop"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {ask && <ConfirmDialog key={`${ask.verb}/${ask.agent}`} spec={ask.spec} busy={busy} onConfirm={() => void runAsk()} onCancel={() => setAsk(null)} />}
       {toast && (
         <div className="toast" role="status">
           <Dot tone={toast.tone} />
@@ -679,6 +763,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = CSS + VIEWS_CSS + DOCS_CSS + AVATAR_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + AVATAR_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);
