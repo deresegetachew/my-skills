@@ -117,6 +117,14 @@ Look
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
+  machine add <name> --agent <agent>[:role] ... [--ttl minutes]
+                         on the hub: make the keys of the agents another machine will run and print one join code
+                         (short-lived, works once; it holds the hub's Tailscale address, the leaf password, the keys)
+  machine join <code> [--no-tailscale] [--no-doctor]
+                         on the new machine: check Tailscale and Docker, start the leaf (or, without Docker, connect
+                         the agents straight to the hub), write the keys, run factory doctor
+  machine ls [--json]    the machines added and whether their code is still waiting
+  machine remove <name>  forget a machine and take its agents' keys off the hub
   follow [<agent>] [--read|--log] [--on R] [--all]
                          watch and talk to an agent by name, on another machine or in the cloud: without a name,
                          every agent and one-item sub-manager we can find, where it runs and its Remote Control link
