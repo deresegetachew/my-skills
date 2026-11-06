@@ -35,11 +35,11 @@ test("factory board runs the message board's command from the factory's folder",
   expect(bad.stderr).toContain('"code": "unknown-verb"');
 });
 
-test("a project without the message board gets the fix, not a stack trace", () => {
+test("a project without the message board (a release install, for now) gets the fix, not a stack trace", () => {
   const d = gitRepo();
   mkdirSync(join(d, ".claude", "hooks"), { recursive: true });
   const p = sh(["bash", join(SF, "factory"), "board", "status"], { cwd: d });
   expect(p.code).toBe(1);
   expect(p.stderr).toContain('"code": "board_missing"');
-  expect(p.stderr).toContain("factory update");
+  expect(p.stderr).toContain("message-board/bin.ts is missing");
 });
