@@ -677,3 +677,23 @@ test("the docs agree the owner merges a change under claude", () => {
   expect(docs).not.toMatch(/dev manager (or the owner|or owner|or the owner) merges/);
   expect(read(join(WIKI, "updating.md"))).toContain("factory settings pr");
 });
+
+test("tasks.source takes board (#500): the message board's tasks, with messages following them", () => {
+  const d = project({ tasks: { source: "issues" } });
+  expect(settings(d, ["set", "tasks.source", "board"]).code).toBe(0);
+  expect((saved(d).tasks as Record<string, unknown>).source).toBe("board");
+  expect(settings(d, ["validate"]).code).toBe(0);
+  const show = settings(d, ["show", "tasks.source"]);
+  expect(show.stdout).toContain("plan, issues, board");
+  const help = settings(d, ["help", "tasks.source"]);
+  expect(help.stdout).toContain("`board`");
+  expect(help.stdout).toContain("factory board up");
+});
+
+test("messaging.transport takes board (#500): the moved kinds go to the message board, as they went to NATS", () => {
+  const d = project({});
+  expect(settings(d, ["set", "messaging.transport", "board"]).code).toBe(0);
+  expect(settings(d, ["validate"]).code).toBe(0); // no messaging.url needed: the board is found as `factory board` finds it
+  expect(settings(d, ["show", "messaging.transport"]).stdout).toContain("github, nats, board");
+  expect(settings(d, ["help", "messaging.transport"]).stdout).toContain("board");
+});

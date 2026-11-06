@@ -1,0 +1,1 @@
+../../software-factory/message-board/bin.ts

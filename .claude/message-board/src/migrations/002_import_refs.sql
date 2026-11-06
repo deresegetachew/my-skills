@@ -1,0 +1,1 @@
+../../../../software-factory/message-board/src/migrations/002_import_refs.sql

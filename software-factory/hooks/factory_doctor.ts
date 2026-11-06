@@ -14,6 +14,8 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import * as fa from "./factory_artifacts.ts";
 import * as autostart from "./factory_autostart.ts";
+import { boardInfo } from "./core/compose.ts";
+import { CoreError } from "./core/domain/error.ts";
 import { missingOriginMain } from "./factory_claims.ts";
 import { type Config, load, roleNames, rolesDir, taskSource } from "./factory_config.ts";
 import * as doctorCi from "./factory_doctor_ci.ts";
@@ -685,6 +687,23 @@ export function trustedReviewers(r: Reporter, cfg: Config): void {
     "`factory settings set trustedReviewers '[\"<your-login>\"]'`");
 }
 
+/** The message board (#500), when the tasks or the moved message kinds are on it (`tasks.source` or
+ * `messaging.transport` "board"): it answers, and has its tables. */
+export function board(r: Reporter, cfg: Config): void {
+  const transport = isObject(cfg.messaging) ? cfg.messaging.transport : undefined;
+  if (taskSource(cfg) !== "board" && transport !== "board") return;
+  let info: ReturnType<typeof boardInfo>;
+  try {
+    info = boardInfo();
+  } catch (e) {
+    if (!(e instanceof CoreError)) throw e;
+    r.fix("message board answers", `${e.message} ${e.fix}`);
+    return;
+  }
+  if (!info.counts) r.fix("message board tables", "the board answers but has none yet: run `factory board migrate`");
+  else r.ok(`message board answers (${info.server}, ${info.migrations.length} migrations)`);
+}
+
 /** The artifact copies in the repo (#104): each one exists, is not edited by hand, and is not older than its artifact
  * when the project can say (`artifacts.info`). */
 export function artifacts(r: Reporter, cfg: Config): void {
@@ -837,6 +856,7 @@ export async function main(argv: string[]): Promise<number> {
     trustedReviewers(r, cfg);
     await turbo(r, cfg);
     await nats(r, cfg);
+    board(r, cfg);
     artifacts(r, cfg);
     release(r);
   }

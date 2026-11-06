@@ -8,7 +8,13 @@
 // fails to load, or a server that can't be reached, is a fallback: with `messaging.fallback` "github" (the default) the
 // port is GitHub's and `warn` is told once; with "none" reading `messaging` throws.
 // The port is built when it is first read, so a command that only uses the task tracker never trips on it. The task
-// tracker follows `tasks.source` (#377): "issues" is GitHub Issues, anything else the build plan, as it always was.
+// tracker follows `tasks.source` (#377): "issues" is GitHub Issues, "board" the message board (#500), anything else the
+// build plan, as it always was.
+//
+// The message board (decision 0007, #500): with `tasks.source` "board" the messages follow the tasks there (every kind).
+// With `messaging.transport` "board", the kinds in `messaging.kinds` go to the board as they went to NATS: messages
+// through adapters/routed, and claims, wake-ups and the pull request feed from natsFor. The board is reached through
+// its child (adapters/board/child.ts), which finds it as `factory board` does (MB_URL, else this machine's url file).
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -17,6 +23,11 @@ import { type Config, taskSource } from "../factory_config.ts";
 import { loadPlugin } from "../factory_plugins.ts";
 import { GithubMessaging } from "./adapters/github/messaging.ts";
 import { GithubTaskTracker } from "./adapters/github/task_tracker.ts";
+import { BoardBus } from "./adapters/board/bus.ts";
+import { BoardChild } from "./adapters/board/child.ts";
+import { BoardMessaging } from "./adapters/board/messaging.ts";
+import { BoardTaskTracker } from "./adapters/board/task_tracker.ts";
+import { ClaimTokens } from "./adapters/board/tokens.ts";
 import { PlanTaskTracker } from "./adapters/plan/task_tracker.ts";
 import { RoutedMessaging } from "./adapters/routed/messaging.ts";
 import { CoreError } from "./domain/error.ts";
@@ -44,7 +55,7 @@ export function compose(config: Config, overrides: Partial<Ports> = {}, warn: (e
   const tasks = overrides.tasks ?? taskTracker(config);
   return {
     get messaging(): Messaging {
-      messaging ??= messagingPort(messagingSettings(config), warn);
+      messaging ??= taskSource(config) === "board" ? boardMessaging() : messagingPort(messagingSettings(config), warn);
       return messaging;
     },
     tasks,
@@ -71,10 +82,16 @@ export const NATS_ONLY_KINDS = ["claim", "release", "wake"];
  * moved kind that may be NATS-only and that `messaging.githubCopy` leaves out; every record kind is always written. */
 export function githubCopies(config: Config, kind: string): boolean {
   const s = messagingSettings(config);
-  return !(s.transport === "nats" && s.kinds.includes(kind) && NATS_ONLY_KINDS.includes(kind) && !s.githubCopy.includes(kind));
+  return !(busTransport(s) && s.kinds.includes(kind) && NATS_ONLY_KINDS.includes(kind) && !s.githubCopy.includes(kind));
+}
+
+/** Whether the settings send the moved kinds over a coordination transport: NATS or the message board. */
+export function busTransport(s: MessagingSettings): boolean {
+  return s.transport === "nats" || s.transport === "board";
 }
 
 function messagingPort(s: MessagingSettings, warn: (e: CoreError) => void): Messaging {
+  if (s.transport === "board") return new RoutedMessaging(new GithubMessaging(), boardMessaging(), s.kinds, warn);
   if (s.transport !== "nats") return new GithubMessaging();
   let nats: Messaging;
   try {
@@ -100,16 +117,24 @@ let bus: { port: NatsPort | null; error: CoreError | null } | null = null; // on
  * port's: null and `warn` is told (fallback "github", the default), or the CoreError is thrown (fallback "none"). */
 export function natsFor(config: Config, kind: "claim" | "wake" | "pr", warn: (e: CoreError) => void = () => {}): (Leases & Wakes & PrFeed) | null {
   const s = messagingSettings(config);
-  if (s.transport !== "nats" || !s.kinds.includes(kind)) return null;
-  if (!bus) {
-    try {
-      bus = { port: rawNatsPort(s), error: null };
-    } catch (e) {
-      bus = { port: null, error: asCoreError(e) };
+  if (!busTransport(s) || !s.kinds.includes(kind)) return null;
+  let error: CoreError;
+  if (s.transport === "board") {
+    boardBusState ??= checkedBoardBus();
+    if (boardBusState.port) return boardBusState.port;
+    error = boardBusState.error as CoreError;
+  } else {
+    if (!bus) {
+      try {
+        bus = { port: rawNatsPort(s), error: null };
+      } catch (e) {
+        bus = { port: null, error: asCoreError(e) };
+      }
     }
+    if (bus.port) return withCoreErrorsBus(bus.port);
+    error = bus.error as CoreError;
   }
-  if (bus.port) return withCoreErrorsBus(bus.port);
-  const { code, message, fix } = bus.error as CoreError;
+  const { code, message, fix } = error;
   if (s.fallback === "none") throw new CoreError(code, message, `${fix} Or set \`factory settings set messaging.transport github\`.`);
   const what = kind === "claim" ? "Claims go" : kind === "wake" ? "Wake-ups go" : "Pull requests and CI are read";
   warn(new CoreError(code, `${message} ${what} over GitHub for now (messaging.fallback is github).`,
@@ -214,5 +239,55 @@ function withCoreErrorsBus(port: NatsPort): Leases & Wakes & PrFeed {
 /** The task tracker `source` names, by default the project's `tasks.source`. A command that is about one tracker
  * (`factory issues`) names it. */
 export function taskTracker(config: Config, source: string = taskSource(config)): TaskTracker {
+  if (source === "board") return boardTracker();
   return source === "issues" ? new GithubTaskTracker(config) : new PlanTaskTracker(config);
+}
+
+/** The message board's child. Nothing is asked of the board until a call is made. */
+function boardChild(): BoardChild {
+  return new BoardChild({ url: process.env.MB_URL ?? "" });
+}
+
+/** This project's GitHub repo as the board's refs name it (owner/name, lowercase): GH_REPO, else the origin remote, as
+ * `factory board import github` reads it; "" when it has neither. */
+export function boardRepo(cwd: string = process.cwd()): string {
+  const given = (process.env.GH_REPO ?? "").trim();
+  if (given) return given.toLowerCase();
+  const p = spawnSync("git", ["-C", cwd, "remote", "get-url", "origin"], { encoding: "utf8" });
+  const m = p.status === 0 ? /github\.com[:/]([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(p.stdout.trim()) : null;
+  return m ? `${m[1]}/${m[2]}`.toLowerCase() : "";
+}
+
+/** Where this project keeps its board claim tokens on this machine: <git common dir>/factory/board-claims.json. */
+export function boardTokensFile(cwd: string = process.cwd()): string {
+  const p = spawnSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" });
+  const common = p.status === 0 && p.stdout.trim() ? p.stdout.trim() : resolve(cwd, ".git");
+  return join(common, "factory", "board-claims.json");
+}
+
+function boardTracker(): TaskTracker {
+  return new BoardTaskTracker({ child: boardChild(), repo: boardRepo(), tokens: new ClaimTokens(boardTokensFile()) });
+}
+
+function boardMessaging(): Messaging {
+  return new BoardMessaging({ child: boardChild(), repo: boardRepo() });
+}
+
+let boardBusState: { port: (Leases & Wakes & PrFeed) | null; error: CoreError | null } | null = null; // one per process
+
+/** The board's leases, wake-ups and pull request feed, the board checked once (it answers, and has its tables). */
+function checkedBoardBus(): { port: (Leases & Wakes & PrFeed) | null; error: CoreError | null } {
+  const child = boardChild();
+  try {
+    child.call("factory", [{ op: "lastSeq" }, { op: "leaseHolder", args: ["factory:check"] }]);
+  } catch (e) {
+    return { port: null, error: asCoreError(e) };
+  }
+  return { port: new BoardBus({ child, project: messagingProject() }), error: null };
+}
+
+/** What `factory doctor` asks of this machine's message board: its server, the migrations applied and its task counts
+ * (null before the first migrate). Throws the CoreError that says why it can't be reached. */
+export function boardInfo(): { server: string; migrations: string[]; counts: Record<string, number> | null } {
+  return boardChild().one("factory", "info") as { server: string; migrations: string[]; counts: Record<string, number> | null };
 }

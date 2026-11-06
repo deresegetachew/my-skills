@@ -51,7 +51,7 @@ fi
 # Shared: used unchanged by every project. Everything else in kit/ is a template the project fills in.
 is_engine() {
   case "$1" in
-    ./factory|./factory-loop.sh|./.claude/hooks/*.ts|./.claude/hooks/*.sh|./.claude/ci/*) return 0;;
+    ./factory|./factory-loop.sh|./.claude/hooks/*.ts|./.claude/hooks/*.sh|./.claude/ci/*|./.claude/message-board/*) return 0;;
     ./.claude/agents/*.md|./.claude/skills/*/*.md|./.claude/factory/settings.json|./.claude/manager/settings.json|./.claude/product-owner/settings.json) return 0;;
     *) return 1;;
   esac
@@ -62,6 +62,7 @@ moved_to() {
   case "$1" in
     ./.claude/hooks/*) [ -f "$here/hooks/${1#./.claude/hooks/}" ] && echo "$here/hooks/${1#./.claude/hooks/}" ;;
     ./.claude/ci/*) [ -f "$here/ci/${1#./.claude/ci/}" ] && echo "$here/ci/${1#./.claude/ci/}" ;;
+    ./.claude/message-board/*) [ -f "$here/message-board/${1#./.claude/message-board/}" ] && echo "$here/message-board/${1#./.claude/message-board/}" ;;
     ./factory|./factory-loop.sh) [ -f "$here/${1#./}" ] && echo "$here/${1#./}" ;;
   esac
   return 0
@@ -76,10 +77,11 @@ rel() {
 }
 
 # The files to install, as paths a project has them (./.claude/hooks/x.ts, ./factory ...), one per line: what kit/
-# holds, plus the factory's code from hooks/, ci/ and the two entry points.
+# holds, plus the factory's code from hooks/, ci/, the message board (not its tests, #500) and the two entry points.
 list_files() {
   { ( cd "$src" && find . -type f -not -path '*/__pycache__/*' )
     ( cd "$here" && find hooks ci -type f -not -path '*/__pycache__/*' | sed 's#^hooks/#./.claude/hooks/#; s#^ci/#./.claude/ci/#'
+      if [ -d message-board ]; then find message-board -type f -not -path 'message-board/tests/*' | sed 's#^#./.claude/#'; fi
       echo ./factory; echo ./factory-loop.sh ); } | sort -u
 }
 

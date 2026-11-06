@@ -1,0 +1,1 @@
+../../../software-factory/message-board/src/graph.ts

@@ -12,9 +12,9 @@
 // fill the Board page the same way: status to column, blocked and ready as the board works them out, lanes by epic from
 // parents and by agent from holders, and each card's blockers.
 //
-// The board's code sits beside the hooks folder in my-skills and in a project linked to it; a release doesn't ship it yet
-// (it comes with the adapters, 0007 build step 3). So it is loaded when the server starts, and without it there is no
-// board: the GitHub path, as before.
+// The board's code sits beside the hooks folder (.claude/message-board: linked in my-skills and a linked project,
+// shipped by a release since #500). It is loaded when the server starts, and without it there is no board: the GitHub
+// path, as before.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";

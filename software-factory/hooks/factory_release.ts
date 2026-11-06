@@ -576,7 +576,7 @@ export function readManifest(files: Files, version: string): Manifest {
  * plan() follows the manifest's rules first (#278). */
 export function classify(rel: string): ["engine" | "template", string] | null {
   if (rel === "factory" || rel === "factory-loop.sh") return ["engine", rel];
-  for (const [src, dst] of [["hooks/", ".claude/hooks/"], ["ci/", ".claude/ci/"]] as const) {
+  for (const [src, dst] of [["hooks/", ".claude/hooks/"], ["ci/", ".claude/ci/"], ["message-board/", ".claude/message-board/"]] as const) {
     if (rel.startsWith(src)) return ["engine", dst + rel.slice(src.length)];
   }
   if (rel.startsWith("kit/.claude/")) {

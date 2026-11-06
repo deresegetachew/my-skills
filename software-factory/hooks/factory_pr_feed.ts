@@ -22,7 +22,7 @@ import { join, resolve } from "node:path";
 import { type Config, load, roleNames, safeAgent, toFloat } from "./factory_config.ts";
 import { judge, type Row } from "./factory_ci_judge.ts";
 import { bunCmd, Exit, GITHUB_BUSY, githubBusy, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
-import { messagingSettings, natsFor } from "./core/compose.ts";
+import { busTransport, messagingSettings, natsFor } from "./core/compose.ts";
 import type { CoreError } from "./core/domain/error.ts";
 import type { Leases, PrEvent, PrFeed, PrSnapshot, PrState } from "./core/ports/messaging.ts";
 import { notice, waitForWake } from "./factory_wake.ts";
@@ -30,10 +30,10 @@ import { notice, waitForWake } from "./factory_wake.ts";
 export const FEED_CLAIM = "pr-feed";
 const BODY_MAX = 4000;
 
-/** Whether the settings move pull request reads to NATS (no connection is made to answer). */
+/** Whether the settings move pull request reads to NATS or the message board (no connection is made to answer). */
 export function prFeedIsOn(cfg: Config): boolean {
   const s = messagingSettings(cfg);
-  return s.transport === "nats" && s.kinds.includes("pr");
+  return busTransport(s) && s.kinds.includes("pr");
 }
 
 /** NATS's pull request feed (and its claims), or null: `pr` isn't on, or NATS can't be had (`notice` says so, once). */

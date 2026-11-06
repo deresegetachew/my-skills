@@ -215,7 +215,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("github.reserve", "int", "agents", "GitHub's API limit is shared by every agent on the account (5,000 calls an hour). When fewer than this many are left, idle loops wait twice as long, so the limit is not used up. 0: never slow down.", { default: 500, minimum: 0, read_by: "factory_views_cache.ts limit-idle (the loops)" }),
   S("models", "dict", "agents", 'The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today\'s model: the agent file\'s, or Claude Code\'s default.', { default: {} }),
   S("budget.builder", "int", "agents", "The token budget of a task whose issue has no `Budget:` line, counting fresh input (input + cache writes) + output as `factory usage` reports them. Advisory: shown and compared, a warning at 80%, never a stop. Empty: no budget.", { default: null }),
-  S("tasks.source", "enum", "issues", "Where tasks come from.", { options: ["plan", "issues"] }),
+  S("tasks.source", "enum", "issues", "Where tasks come from. `board`: the message board; messages follow the tasks there.", { options: ["plan", "issues", "board"] }),
   S("tasks.staleHours", "int", "issues", "An in-progress issue with no activity this long counts as stale."),
   S("tasks.pingMinutes", "int", "issues", "How often a working agent pings its agent issue, at most."),
   S("tasks.downMinutes", "int", "issues", "No ping for this long: the agent counts as down."),
@@ -247,7 +247,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("turbo.port", "int", "ci", "The port the cache server listens on.", { default: 3335 }),
   S("turbo.secretsCommand", "str", "ci", "A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins.", { default: "" }),
   S("ci.lightLabel", "str", "ci", "The light runner's label (default `<repo>-light`).", { default: "" }),
-  S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds).", { options: ["github", "nats"], default: "github" }),
+  S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds), or board (the message board, for the same kinds).", { options: ["github", "nats", "board"], default: "github" }),
   S("messaging.url", "str", "messaging", "The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats.", { default: "" }),
   S("messaging.creds", "str", "messaging", "The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/.", { default: "" }),
   S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub.", { default: [] }),
@@ -424,7 +424,10 @@ const MORE: Record<string, More> = {
   read_by: "`factory usage` (factory_budget.ts) and factory-loop.sh (the task's prompt)",
   examples: ["factory settings set budget.builder 300000"] },
   "tasks.source": { long: "`plan`: the unticked lines of the build plan are the tasks. `issues`: open GitHub issues " +
-    "labelled ready are the tasks, claimed with labels and a claim comment.",
+    "labelled ready are the tasks, claimed with labels and a claim comment. `board`: the message board's tasks for this " +
+    "repo (decision 0007; `factory board up` starts one, `factory board import github` brings the issues in), claimed " +
+    "on the board with a token kept on this machine; the factory's messages go there too. The pull request gate " +
+    "still reads GitHub. `factory doctor` says when the board can't be reached.",
   examples: ["factory settings set tasks.source issues"] },
   "tasks.labels": { long: "Rename the labels the factory puts on issues. Keys: ready, inProgress, inReview, blocked, " +
     "agentPrefix. Keys you leave out keep their defaults.",
@@ -455,8 +458,11 @@ const MORE: Record<string, More> = {
   examples: ["factory settings set design.references design/screens"] },
   "messaging.transport": { long: "github is today's behaviour and needs no setup. nats loads the NATS plugin and sends " +
     "the kinds in `messaging.kinds` over it; every other kind, and everything the PR gate or the owner reads, stays on " +
-    "GitHub. A kind that moves is sent both ways for its first week (decision 0004).",
-  examples: ["factory settings set messaging.transport nats"] },
+    "GitHub. A kind that moves is sent both ways for its first week (decision 0004). board does the same on the message " +
+    "board (decision 0007, #500): claims, wake-ups and the pull request feed (`claim`, `wake`, `pr`) and the message kinds " +
+    "listed; it needs no messaging.url (the board is found as `factory board` finds it: MB_URL, else this machine's url " +
+    "file), and `factory board up` starts one.",
+  examples: ["factory settings set messaging.transport nats", "factory settings set messaging.transport board"] },
   "messaging.fallback": { long: "With github, a command whose NATS plugin is missing or fails to load, or whose NATS " +
     "server can't be reached, goes on over GitHub and prints the error (`plugin-missing`, `plugin-load` or " +
     "`nats-unreachable`) once, with the fix. With none, the command stops with that error instead.",

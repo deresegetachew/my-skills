@@ -28,6 +28,9 @@
 // Issues mode (`tasks.source: "issues"`): tasks are GitHub issues (factory_issues.ts). Rework still comes first; then
 // the agent's own in-progress issue, else the next `factory:ready` one, claimed on GitHub: "issue-42 <title>".
 //
+// Board mode (`tasks.source: "board"`, #500): the same, on the message board; a task is printed by its id (the issue
+// number for a task that came from GitHub, b<n> for one filed on the board), and `--issue N` works there too.
+//
 // Reads the plan and blocked list from the main branch when it can (`git show origin/<main>:...`), so a stale
 // working copy can't make the agent skip or repeat a task.
 //
@@ -205,9 +208,10 @@ function main(argv: string[]): number {
   if (a.issue && !a.claim) argError("--issue needs --claim AGENT");
   const cfg = load();
   run(["git", "fetch", "-q", "origin", cfg.mainBranch]);
-  if (a.issue && taskSource(cfg) !== "issues") argError('--issue works only in issues mode (tasks.source: "issues")');
+  if (a.issue && !["issues", "board"].includes(taskSource(cfg))) argError('--issue works only with tasks.source "issues" or "board"');
   const tracker = compose(cfg).tasks;
   if (taskSource(cfg) === "issues") return issuesMode(cfg, tracker, a);
+  if (taskSource(cfg) === "board") return boardMode(cfg, tracker, a);
   // Plan mode claims through the local claims file below, together with any rework, so only the list comes from the port.
   const listed = tracker.list();
   const blocked = new Set(listed.filter((t) => t.state === "blocked").map((t) => t.id));
@@ -302,6 +306,42 @@ function issuesMode(cfg: Config, tracker: TaskTracker, a: Args): number {
   const [tid, title] = jobs[0] as Job;
   console.log(a.json ? pyDumps({ id: tid, title }) : `${tid} ${title}`);
   if (!a.json) note(a);
+  return 0;
+}
+
+/** Board mode (`tasks.source: "board"`, #500): the tasks and their claims are the message board's (the TaskTracker
+ * port claims there and keeps the token on this machine). Rework, a pull request, still comes first, read from GitHub.
+ * A task is printed by its id: the issue number for one that came from GitHub, b<n> for one filed on the board. */
+function boardMode(cfg: Config, tracker: TaskTracker, a: Args): number {
+  let t: Task | null = null;
+  try {
+    if (a.issue) t = tracker.claim(String(a.issue), { agent: a.claim as string, machine: machineId() });
+    else {
+      let jobs = a.noRework ? [] : rework(cfg, me(a));
+      if (jobs.length && a.claim) jobs = claimFirst(cfg, jobs, a.claim, a.pid || process.ppid);
+      if (jobs.length) {
+        const [tid, title] = jobs[0] as Job;
+        console.log(a.json ? pyDumps({ id: tid, title }) : `${tid} ${title}`);
+        if (!a.json) note(a);
+        return 0;
+      }
+      if (a.claim) {
+        const picked = tracker.pick({ agent: a.claim, machine: machineId() });
+        if (picked.note) process.stderr.write(picked.note + "\n");
+        t = picked.task;
+      } else t = tracker.next();
+    }
+  } catch (e) {
+    if (!(e instanceof CoreError)) throw e;
+    process.stderr.write(pyDumps(e.toJSON()) + "\n");
+    return 1;
+  }
+  if (!t) {
+    console.log(a.json ? pyDumps({ id: null, remaining: 0 }) : "none");
+    return 1;
+  }
+  console.log(a.json ? pyDumps({ id: t.id, title: t.title }) : `${t.id} ${t.title}`);
+  if (!a.json && !a.issue) note(a);
   return 0;
 }
 

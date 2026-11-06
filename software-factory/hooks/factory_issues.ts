@@ -34,7 +34,7 @@
 // (core/ports/task_tracker.ts, #377), on its GitHub Issues adapter. The helpers here are still shared with other
 // commands until their own step of decision 0003.
 import { readFileSync } from "node:fs";
-import { type Config, load, type TaskLabels, taskLabels, toFloat } from "./factory_config.ts";
+import { type Config, load, type TaskLabels, taskLabels, taskSource, toFloat } from "./factory_config.ts";
 import { taskTracker } from "./core/compose.ts";
 import { type ClaimEvent, isMe as isMyClaim, standing, winner } from "./core/domain/claim.ts";
 import { CoreError } from "./core/domain/error.ts";
@@ -382,8 +382,11 @@ function main(argv: string[]): number {
 }
 
 function command(cmd: string, a: ReturnType<typeof parseArgs>, n: number, cfg: Config, L: TaskLabels): number {
-  // `factory issues` is the GitHub Issues command, so it takes that tracker whatever `tasks.source` says.
-  const tracker = taskTracker(cfg, "issues");
+  // `factory issues` is the GitHub Issues command, so it takes that tracker whatever `tasks.source` says, but on the
+  // message board (`tasks.source: "board"`, #500), where the issues' tasks and claims are: there pick, peek, show,
+  // tick, review, block, release and new act on the board (the rest still read GitHub).
+  const tracker = taskTracker(cfg, taskSource(cfg) === "board" ? "board" : "issues");
+  const named = (t: { id: string }): string => (taskSource(cfg) === "board" ? t.id : `issue-${t.id}`);
   const id = String(n);
   if (cmd === "pick") {
     const { task, note } = tracker.pick({ agent: a.agent as string, machine: machineId() });
@@ -392,14 +395,14 @@ function command(cmd: string, a: ReturnType<typeof parseArgs>, n: number, cfg: C
       console.log("none");
       return 1;
     }
-    console.log(`issue-${task.id} ${task.title}`);
+    console.log(`${named(task)} ${task.title}`);
   } else if (cmd === "peek") {
     const task = tracker.next();
     if (!task) {
       console.log("none");
       return 1;
     }
-    console.log(`issue-${task.id} ${task.title}`);
+    console.log(`${named(task)} ${task.title}`);
   } else if (cmd === "show") console.log(tracker.show(id));
   else if (cmd === "tick") tracker.tick(id, intArg(a.index, "index", cmd));
   else if (cmd === "review") console.log(tracker.setState(id, "in-review"));

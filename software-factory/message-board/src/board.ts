@@ -71,6 +71,18 @@ function wholeNumber(what: string, value: unknown): number {
   return value;
 }
 
+function named(what: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim() || value.length > 200) refuse("bad-input", `${what} must be a name of 1 to 200 characters.`, `Pass ${what.toLowerCase()} as text.`);
+  return value;
+}
+
+function signalName(name: unknown): string {
+  if (typeof name !== "string" || !/^[a-z][a-z0-9_-]{0,39}$/.test(name)) {
+    refuse("bad-input", `A signal's name is lowercase letters, digits, - and _, not ${JSON.stringify(name)}.`, "Name it like wake.");
+  }
+  return name;
+}
+
 function seconds(value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) refuse("bad-input", `A time in seconds must be 0 or more, not ${value}.`, "Pass a number of seconds.");
@@ -262,10 +274,12 @@ export class Board {
     });
   }
 
-  /** The edges from or to a task. */
-  async edges(id: number): Promise<{ from: number; to: number; kind: EdgeKind }[]> {
+  /** The edges from or to a task; with no id, every edge on the board. */
+  async edges(id?: number): Promise<{ from: number; to: number; kind: EdgeKind }[]> {
+    const which = id === undefined ? null : wholeNumber("A task id", id);
     return this.run(async () => rows(await this.sql`SELECT from_id::int AS f, to_id::int AS t, kind FROM edges
-      WHERE from_id = ${id} OR to_id = ${id} ORDER BY created_at, from_id, to_id`).map((r) => ({ from: Number(r.f), to: Number(r.t), kind: r.kind as EdgeKind })));
+      WHERE ${which}::bigint IS NULL OR from_id = ${which} OR to_id = ${which} ORDER BY created_at, from_id, to_id`)
+      .map((r) => ({ from: Number(r.f), to: Number(r.t), kind: r.kind as EdgeKind })));
   }
 
   /** The ready queue, in claim order: tasks and bugs that are open, not blocked and held by nobody. A task handed to an
@@ -364,13 +378,14 @@ export class Board {
     });
   }
 
-  /** Give a held task back, saying what happens next: ready (anyone may claim it), deferred, or handed to one actor. */
+  /** Give a held task back, saying what happens next: ready (anyone may claim it), deferred, review (its work waits for a
+   * review: in review, held by nobody, so anyone may close it or send it back), or handed to one actor. */
   async release(id: number, token: string, next: Next): Promise<Task> {
-    const n = oneOf("next", next.next, ["ready", "deferred", "handoff"] as const);
+    const n = oneOf("next", next.next, ["ready", "deferred", "review", "handoff"] as const);
     if (typeof next.reason !== "string" || !next.reason.trim()) refuse("bad-input", "A release says why.", "Pass { next, reason: \"...\" }.");
     const to = next.next === "handoff" ? next.to : undefined;
     if (n === "handoff" && (typeof to !== "string" || !to.trim())) refuse("bad-input", "A hand-off names who takes it.", "Pass { next: \"handoff\", to: \"<actor>\", reason }.");
-    const status = n === "deferred" ? "deferred" : "open";
+    const status = n === "deferred" ? "deferred" : n === "review" ? "in_review" : "open";
     return this.write(async (tx) => {
       const task = await this.fenced(tx, id, token,
         "holder = NULL, claim_token = NULL, claimed_at = NULL, claim_until = NULL, status = $3, assignee = $4", [status, to ?? null]);
@@ -460,6 +475,99 @@ export class Board {
     });
   }
 
+  /** The messages posted after `after` (an event seq, from an earlier call's cursor), in the order they were posted, and
+   * the cursor to pass next. With no `after`, every message on the board (imported ones too), oldest first. A reader
+   * that keeps its own place reads each posted message once this way: the events' order is the order they committed. */
+  async messages(options: { after?: number; limit?: number } = {}): Promise<{ messages: Message[]; cursor: number }> {
+    const limit = Math.floor(options.limit ?? 1000);
+    return this.run(async () => {
+      if (options.after === undefined) {
+        const top = Number(rows(await this.sql`SELECT COALESCE(max(seq), 0)::bigint::text AS seq FROM events`)[0]?.seq ?? 0);
+        const r = rows(await this.sql.unsafe(`SELECT ${MESSAGE_COLS} FROM messages m WHERE NOT EXISTS (SELECT 1 FROM events e
+          WHERE e.kind = 'message.posted' AND e.subject = 'message:' || m.id AND e.seq > $1) ORDER BY m.id`, [top]));
+        return { messages: r.map(toMessage), cursor: top };
+      }
+      const after = wholeNumber("A cursor", options.after);
+      const r = rows(await this.sql.unsafe(`SELECT ${MESSAGE_COLS.split(", ").map((c) => `m.${c}`).join(", ")}, e.seq::text AS seq
+        FROM events e JOIN messages m ON e.subject = 'message:' || m.id
+        WHERE e.kind = 'message.posted' AND e.seq > $1 ORDER BY e.seq LIMIT $2`, [after, limit]));
+      return { messages: r.map(toMessage), cursor: r.length ? Number(r.at(-1)?.seq) : after };
+    });
+  }
+
+  // ---------- leases ----------
+  /** Hold `key` for `holder` for `ttlSeconds` when nobody holds it or its time ran out; the holder taking it again moves
+   * its time on. Says whether `holder` holds it now, and who does. */
+  async lease(key: string, holder: string, ttlSeconds: number): Promise<{ held: boolean; holder: string }> {
+    const ttl = seconds(ttlSeconds, 0);
+    named("A lease key", key);
+    named("A lease holder", holder);
+    return this.write<{ held: boolean; holder: string }>(async (tx) => {
+      const r = rows(await tx`INSERT INTO leases (key, holder, until) VALUES (${key}, ${holder}, now() + make_interval(secs => ${ttl}))
+        ON CONFLICT (key) DO UPDATE SET holder = EXCLUDED.holder, until = EXCLUDED.until, updated_at = now()
+        WHERE leases.holder = EXCLUDED.holder OR leases.until <= now() RETURNING holder`);
+      if (r.length) return { result: { held: true, holder }, event: { kind: "lease.taken", subject: `lease:${key}`, payload: { holder, ttl } } };
+      const now = rows(await tx`SELECT holder FROM leases WHERE key = ${key}`);
+      return { result: { held: false, holder: String(now[0]?.holder ?? "") }, event: null };
+    });
+  }
+
+  /** Give a lease back; false (nothing changes) when `holder` doesn't hold it. */
+  async unlease(key: string, holder: string): Promise<boolean> {
+    return this.write(async (tx) => {
+      const r = rows(await tx`DELETE FROM leases WHERE key = ${key} AND holder = ${holder} AND until > now() RETURNING key`);
+      return { result: r.length > 0, event: r.length ? { kind: "lease.released", subject: `lease:${key}`, payload: { holder } } : null };
+    });
+  }
+
+  /** Who holds a lease now: "" for nobody. */
+  async leaseHolder(key: string): Promise<string> {
+    return this.run(async () => String(rows(await this.sql`SELECT holder FROM leases WHERE key = ${key} AND until > now()`)[0]?.holder ?? ""));
+  }
+
+  /** Free a lease whoever holds it; false when nobody did. */
+  async dropLease(key: string): Promise<boolean> {
+    return this.write(async (tx) => {
+      const r = rows(await tx`DELETE FROM leases WHERE key = ${key} RETURNING holder, until > now() AS live`);
+      const live = Boolean(r[0]?.live);
+      return { result: live, event: live ? { kind: "lease.dropped", subject: `lease:${key}`, payload: { holder: r[0]?.holder } } : null };
+    });
+  }
+
+  // ---------- values ----------
+  /** Keep `value` under `key`, replacing what was there, and record `signals` (each `signal.<name>`) in the same
+   * transaction: a watcher's snapshot and the changes it saw land together or not at all. */
+  async setValue(key: string, value: unknown, signals: { name: string; payload: Record<string, unknown> }[] = []): Promise<void> {
+    named("A value's key", key);
+    if (value === undefined) refuse("bad-input", "A value can't be undefined.", "Pass any JSON value (null included).");
+    for (const s of signals) signalName(s.name);
+    return this.run(() =>
+      this.sql.begin(async (tx) => {
+        await tx`INSERT INTO "values" (key, value, updated_by) VALUES (${key}, ${value as object}, ${this.as})
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`;
+        await recordEvents(tx, this.as, this.session, [{ kind: "value.set", subject: `value:${key}`, payload: {} },
+          ...signals.map((s) => ({ kind: `signal.${s.name}`, subject: `signal:${s.name}`, payload: s.payload }))]);
+      }) as Promise<void>,
+    );
+  }
+
+  /** The value kept under `key`, or null when there is none. */
+  async value(key: string): Promise<unknown> {
+    return this.run(async () => {
+      const r = rows(await this.sql`SELECT value FROM "values" WHERE key = ${key}`);
+      if (!r[0]) return null;
+      const v = r[0].value;
+      return typeof v === "string" ? (JSON.parse(v) as unknown) : v;
+    });
+  }
+
+  // ---------- signals ----------
+  /** Record a signal: an event and nothing else (kind `signal.<name>`), for listeners such as a waiting agent. */
+  async signal(name: string, payload: Record<string, unknown> = {}): Promise<void> {
+    signalName(name);
+    return this.write(async () => ({ result: undefined, event: { kind: `signal.${name}`, subject: `signal:${name}`, payload } }));
+  }
+
   // ---------- context ----------
   /** Record a discovery, decision, blocker or result on a task: the next agent on a linked task starts with it. */
   async note(taskId: number, entry: { kind: ContextKind; body: string }): Promise<ContextEntry> {
@@ -546,10 +654,26 @@ export class Board {
   }
 
   // ---------- events ----------
-  /** The events after `after` (a seq), oldest first. */
-  async events(after = 0, limit = 500): Promise<BoardEvent[]> {
-    return this.run(async () => rows(await this.sql.unsafe(`SELECT ${EVENT_COLS} FROM events WHERE seq > $1 ORDER BY seq LIMIT $2`,
-      [after, Math.floor(limit)])).map(toEvent));
+  /** The events after `after` (a seq), oldest first; with `since`, only those recorded at or after that time, and with
+   * `kind`, only that kind. */
+  async events(after = 0, limit = 500, options: { since?: Date; kind?: string } = {}): Promise<BoardEvent[]> {
+    const since = options.since === undefined ? null : options.since.toISOString();
+    return this.run(async () => rows(await this.sql.unsafe(`SELECT ${EVENT_COLS} FROM events WHERE seq > $1
+      AND ($3::timestamptz IS NULL OR at >= $3::timestamptz) AND ($4::text IS NULL OR kind = $4::text) ORDER BY seq LIMIT $2`,
+      [after, Math.floor(limit), since, options.kind ?? null])).map(toEvent));
+  }
+
+  /** The board's clock now: what a caller compares its own clock with (events carry the board's times). */
+  async now(): Promise<Date> {
+    return this.run(async () => {
+      const v = rows(await this.sql`SELECT clock_timestamp() AS now`)[0]?.now;
+      return v instanceof Date ? v : new Date(String(v));
+    });
+  }
+
+  /** The last event's seq: 0 when there is none. */
+  async lastSeq(): Promise<number> {
+    return this.run(async () => Number(rows(await this.sql`SELECT COALESCE(max(seq), 0)::bigint::text AS seq FROM events`)[0]?.seq ?? 0));
   }
 
   private async recentEvents(n: number): Promise<BoardEvent[]> {
