@@ -19,13 +19,15 @@ because the material looks simple: the problems these stages catch are invisible
 2. **Draft the mental model** (section 1): numbered steps, each with its "because", plus the running example.
 3. **Run the framing questioner** (`REVIEWERS.md` §1) on the source and the draft mental model. Revise the model
    until the three weakest points it names are fixed.
-4. **Confirm the mental model with the user in chat** before writing the page: the driving question, the numbered
-   steps with their links, and the running example, in under 15 lines. A 30-second check here saves a rewrite.
+4. **Don't wait for the user's approval of the mental model in chat.** The user reviews the rendered page, not a
+   summary of it, and the two reviewer agents cover the checks before that. Ask the user first only when there is a
+   real choice to make (which course concept a page belongs to, a new page versus an existing one), as one short
+   question.
 5. **Draft the page** in the order of the confirmed model, following sections 1–8.
 6. **Build, then run the first-time reader** (`REVIEWERS.md` §2) on the built page. Compare its explain-back with
    the confirmed model. Fix every lost point, restructuring where a link is missing. Re-run it if the fixes were large.
-7. **Run the final check** (section 9), then hand the page to the user, with a short note on what the first-time
-   reader found and how it was fixed.
+7. **Run the final check** (section 9), then hand the page to the user with its URL and a short note on what the
+   reviewers found and how it was fixed.
 
 When the user's questions reveal a gap later, treat it as a structural defect: re-check the whole chain (swap,
 forward-reference and interruption tests), restructure if needed, and only then answer the specific question.
@@ -186,6 +188,15 @@ sentence that leans on an ungrounded concept loses the reader, even if it contai
 - Keep course content and own notes apart with `SourceBadge`. When rewriting course material, don't add or drop a
   fact.
 
+## 8b. Quiz questions
+
+- Each question tests a link in the mental model ("why does X lead to Y?"), or applies an idea to the running
+  example ("v2's diagram has a node called 'Process'; why does that make a wrong answer hard to trace?").
+- Never ask the reader to recall an example the page gave, or a question whose answer is the only option that
+  sounds reasonable.
+- Wrong options are real misconceptions a learner could hold, not filler.
+- The course's own quiz questions stay, word for word. Write new questions around them.
+
 ## 9. Final check
 
 Run this on every page before calling it done:
@@ -197,3 +208,4 @@ Run this on every page before calling it done:
 4. None of the banned patterns from section 5 remain.
 5. Which sentence still sounds like a language model? Rewrite it.
 6. When rewriting course material, compare against the source: no fact added or lost.
+7. Every quiz question passes section 8b.
