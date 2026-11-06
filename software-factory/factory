@@ -181,6 +181,9 @@ Check
                          one task: its fields, edges, context and thread
   board prime <actor> [--json]
                          an actor's start: what it holds, what is ready, what is blocked, recent events
+  board mcp --as <actor> [--session <id>]
+                         the board as an MCP server over stdio for one agent: board_prime, board_claim,
+                         board_post and the other board_* tools; every write is recorded as <actor>
   board import github [--closed] [--dry-run] [--repo owner/name]
                          the repo's open issues into the board as tasks (--closed: the closed ones too, as done):
                          labels as status, "Depends on #n" as edges, epics as parents, comments as threads with the

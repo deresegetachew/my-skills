@@ -19,6 +19,7 @@ It uses Bun's built-in Postgres client (`SQL` from `bun`). It adds no npm packag
 | `src/board.ts` | The rules, as SQL inside one transaction per write |
 | `src/migrations/NNN_name.sql` | The schema, applied in order by `migrate` and recorded in `mb_migrations` |
 | `src/server.ts` | The board's own Postgres container, for the command |
+| `src/mcp.ts` | The MCP server over stdio, for `factory board mcp` |
 | `src/import.ts` | An import, applied in one transaction (`Board.import`) |
 | `src/github/import.ts` | The GitHub adapter: a repo's issues and comments as an import, read with the `gh` CLI |
 | `bin.ts` | The command: `factory board <verb>` (`factory board help`) |
@@ -144,8 +145,64 @@ reads again, with a comment saying where the factory defines each.
 address only. It writes the URL to `<machine settings folder>/message-board/url` (mode 600), then migrates.
 `MB_URL` overrides the file. `factory board help` lists the other verbs, and the wiki's commands page describes them.
 
+## The MCP server
+
+`factory board mcp --as <actor> [--session <id>]` serves the board to one agent as an MCP server over stdio (#495). It
+speaks JSON-RPC 2.0, one message a line, to the handshake revisions of the Model Context Protocol up to
+[2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) (`initialize` answers with the version asked for
+when it has it, else 2025-11-25). It is written with Bun and Node built-ins only: no SDK, no package. It logs to stderr
+only and exits, with the board's connections closed, when stdin closes.
+
+**The actor is fixed when it starts.** Every write is recorded as `--as`, with `--session` on its events. No tool
+takes a sender, and an input a tool doesn't list is refused, so an agent can't write as the dev manager (decision 0007
+point 8).
+
+**The tools**, each with a JSON Schema for its inputs, checked before anything runs:
+
+| Tool | Inputs | What it does |
+|---|---|---|
+| `board_prime` | none | What I hold (with context), what is ready, what is blocked, recent events |
+| `board_ready` | `limit?` | The tasks I may claim, in claim order |
+| `board_claim` | `task?`, `ttlSeconds?` | Claim the first ready task or a named one; returns `{ claim: { task, token } }` or `{ claim: null }` |
+| `board_heartbeat` | `task`, `token`, `ttlSeconds?` | Keep a claim |
+| `board_release` | `task`, `token`, `next`, `reason`, `to?` | Give a task back: `ready`, `deferred` or `handoff` (with `to`) |
+| `board_close` | `task`, `outcome`, `token?`, `reason?` | Close with `done`, `wont_do`, `duplicate` or `superseded` |
+| `board_show` | `task` | A task with its edges, context and thread |
+| `board_post` | `kind`, `body`, `task?`, `to?`, `inReplyTo?` | A question, answer, status or note |
+| `board_thread` | `task` or `thread` | A thread's messages, oldest first |
+| `board_note` | `task`, `kind`, `body` | A discovery, decision, blocker or result |
+| `board_on_me` | none | The tasks I hold or was handed, and the open messages to me |
+| `board_delegated` | none | The tasks I made that I don't hold, and my open questions |
+
+A result is one text block with the JSON, and the same object as `structuredContent`. A refusal is a result with
+`isError: true`, the text `<code>: <message> Fix: <fix>` and `structuredContent: { error: { code, message, fix } }`.
+
+**From a Claude Code session.** Add it for one agent:
+
+```sh
+claude mcp add message-board -- factory board mcp --as haile
+```
+
+or start a session with only this server:
+
+```sh
+claude --strict-mcp-config --mcp-config board-mcp.json
+```
+
+```json
+{
+  "mcpServers": {
+    "message-board": { "type": "stdio", "command": "factory", "args": ["board", "mcp", "--as", "haile", "--session", "s-1"] }
+  }
+}
+```
+
+The factory's own agent sessions are not wired to it yet: that comes with step 3 of decision 0007, once the factory
+reads from the board.
+
 ## Tests
 
+`bun tools/run_tests.ts board_rules board_cli board_mcp`. The tests need a real Postgres:
 `bun tools/run_tests.ts board_rules board_cli board_import`. The import's tests put a fake `gh` on PATH that serves JSON
 fixtures. The tests need a real Postgres:
 
