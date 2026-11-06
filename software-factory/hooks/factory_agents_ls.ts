@@ -15,7 +15,7 @@
 // --json prints {agents: [...], github: {...}, daemon: {...}, machine}; every row has name, kind, where, state, detail,
 // task, on, since, lastSeen, follow, session, activity, machine (the id), machineName (`machines.<id>.name` in
 // factory.json, else the hostname, which another machine posts only with tasks.showWhere, else the id; #383), source
-// (local or github) and expected: this machine's names file (or FACTORY_AGENTS) names it, so the cockpit lists it even
+// (local or github) and expected: this machine's names file (or FACTORY_AGENTS) names it, so the web UI lists it even
 // when it is down (#366); runs, how it runs (tmux, nohup, cloud, or "" when not known), and log, the file a loop
 // outside tmux writes to (#395).
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";

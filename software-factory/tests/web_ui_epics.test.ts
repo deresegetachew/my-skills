@@ -1,4 +1,4 @@
-// The web UI's epics channel (#440): GET /api/projects/:p/epics from the cockpit's cache, the epic each task belongs to,
+// The web UI's epics channel (#440): GET /api/projects/:p/epics from the snapshot's cache, the epic each task belongs to,
 // and the channel in the sidebar after tasks. Same harness as web_ui_views.test.ts.
 import { afterAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
@@ -29,7 +29,7 @@ const EPICS: Row[] = [
 function cache(p: Project, epics: Row[] | null): void {
   const tasks: Row = { source: "issues", tasks: TASKS };
   if (epics) tasks.epics = epics;
-  write(join(p.state, "cockpit.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [], tasks,
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [], tasks,
     pulls: [], ci: { mode: "local", repo: "o/work", label: "", runners: [], runs: [], errors: [] } }));
 }
 

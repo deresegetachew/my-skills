@@ -4,16 +4,19 @@
 // - SKILL.md exists, with frontmatter: `name:` matching the folder and a non-empty `description:`.
 // - Every .sh parses (bash -n), every .ts and .tsx parses (and uses no `any`), every .json loads, and the factory has no
 //   .py file.
-// - Only the cockpit's UI (software-factory/cockpit/) imports Ink or React (decision 0002), and only the web app
-//   (software-factory/web/) React and react-dom (decision 0005): they are build-time dependencies, bundled into one file
-//   at release, and a project never installs them.
+// - Only the web app (software-factory/web/) imports React and react-dom (decision 0005), and nothing imports Ink (the
+//   cockpit that used it is retired, #425): they are build-time dependencies, bundled into one file at release, and a
+//   project never installs them.
 // - The factory's core keeps its layers (decision 0003): software-factory/hooks/core/domain/ imports only the domain,
 //   core/ports/ only the domain and the ports, and only core/compose.ts (and tests) import core/adapters/.
 // - A plugin's packages (the names in software-factory/plugins/<name>/package.json) are imported only inside that
 //   plugin's folder (decision 0004): the core imports only types from a plugin, by a relative path.
+// - The message board (software-factory/message-board/, decision 0007) imports only built-ins and its own files, and
+//   the rest of the repo imports from it only its public entry, message-board/src/index.ts.
 // - No compiled .pyc file is tracked by git.
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { builtinModules } from "node:module";
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const errors: string[] = [];
@@ -55,9 +58,8 @@ for (const d of skills) {
 const files = walk(root);
 const rel = (f: string): string => relative(root, f);
 const transpilers = { ts: new Bun.Transpiler({ loader: "ts" }), tsx: new Bun.Transpiler({ loader: "tsx" }) };
-// Decision 0002: Ink, React and their helpers (ink-testing-library, react-reconciler, ...) only in the cockpit's UI.
+// Decisions 0002 and 0005: Ink, React and their helpers (ink-testing-library, react-reconciler, ...) are UI packages.
 const UI_PACKAGES = /^(ink|ink-[\w.-]+|react|react-[\w.-]+)(\/|$)/;
-const UI_FOLDER = "software-factory/cockpit/";
 // Decision 0005: the web app (factory ui) is React and react-dom, bundled for the browser at release; never Ink.
 const WEB_FOLDER = "software-factory/web/";
 const WEB_PACKAGES = /^(react|react-dom)(\/|$)/;
@@ -67,6 +69,24 @@ const CORE = "software-factory/hooks/core/";
 // Decision 0004: a plugin's packages (the names in its package.json) are imported only inside that plugin's folder.
 const PLUGINS = "software-factory/plugins/";
 const DEP_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+// Decision 0007: the message board is a framework of its own. It imports only built-ins and its own files; the factory
+// imports only its public entry.
+const BOARD = "software-factory/message-board/";
+const BOARD_ENTRY = BOARD + "src/index.ts";
+const BUILTINS = new Set(builtinModules);
+
+/** Why the file at `from` may not import `spec` across the message board's boundary, or null. */
+function crossesBoard(from: string, spec: string): string | null {
+  const local = spec.startsWith("./") || spec.startsWith("../") || isAbsolute(spec);
+  const target = local ? normalize(isAbsolute(spec) ? relative(root, spec) : join(dirname(from), spec)) : null;
+  if (from.startsWith(BOARD)) {
+    if (target !== null) return target.startsWith(BOARD) ? null : "the message board imports only built-ins and its own files";
+    const builtin = spec === "bun" || spec.startsWith("bun:") || spec.startsWith("node:") || BUILTINS.has(spec);
+    return builtin ? null : "the message board imports only built-ins and its own files";
+  }
+  if (target !== null && target.startsWith(BOARD) && target !== BOARD_ENTRY) return "the factory imports only message-board/src/index.ts";
+  return null;
+}
 
 /** [plugin folder, package name] for every package a plugin's package.json lists. */
 function pluginPackages(all: string[]): [string, string][] {
@@ -133,10 +153,10 @@ for (const f of files) {
             errors.push(`${rel(f)}: imports ${i.path}; the web app (${WEB_FOLDER}) may import only React and react-dom (decision 0005)`);
           }
         }
-      } else if (!rel(f).startsWith(UI_FOLDER)) {
+      } else {
         for (const i of imports) {
           if (UI_PACKAGES.test(i.path)) {
-            errors.push(`${rel(f)}: imports ${i.path}; only the cockpit's UI (${UI_FOLDER}) may import Ink or React (decision 0002)`);
+            errors.push(`${rel(f)}: imports ${i.path}; only the web app (${WEB_FOLDER}) may import React, and nothing imports Ink (decision 0005)`);
           }
         }
       }
@@ -145,6 +165,8 @@ for (const f of files) {
         if (why) errors.push(`${rel(f)}: imports ${spec}; ${why} (decision 0003)`);
         const plugin = crossesPlugin(rel(f), spec, packages);
         if (plugin) errors.push(`${rel(f)}: imports ${spec}; ${plugin} (decision 0004)`);
+        const board = crossesBoard(rel(f), spec);
+        if (board) errors.push(`${rel(f)}: imports ${spec}; ${board} (decision 0007)`);
       }
     } catch (e) {
       errors.push(`${rel(f)}: does not parse: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
