@@ -81,7 +81,7 @@ rel() {
 list_files() {
   { ( cd "$src" && find . -type f -not -path '*/__pycache__/*' )
     ( cd "$here" && find hooks ci -type f -not -path '*/__pycache__/*' | sed 's#^hooks/#./.claude/hooks/#; s#^ci/#./.claude/ci/#'
-      find message-board -type f -not -path 'message-board/tests/*' | sed 's#^#./.claude/#'
+      if [ -d message-board ]; then find message-board -type f -not -path 'message-board/tests/*' | sed 's#^#./.claude/#'; fi
       echo ./factory; echo ./factory-loop.sh ); } | sort -u
 }
 
