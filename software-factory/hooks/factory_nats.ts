@@ -32,7 +32,7 @@ import { NAME, natsTry, newUserKey, permissions, publicKeyOf, type Role, ROLES, 
 
 export const IMAGE = "nats:2.15.2-alpine";
 export const COMPOSE_PROJECT = "factory-nats";
-const PORTS = { client: 4222, monitor: 8222, leaf: 7422 };
+const PORTS = { client: 4222, tailnet: 4223, monitor: 8222, leaf: 7422 };
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 type Mode = "hub" | "leaf";
@@ -40,7 +40,7 @@ interface State {
   mode: Mode;
   hub: string; // a leaf's hub, nats-leaf://<host>:<port>, without the password
   address: string; // this machine's Tailscale address, or "" for localhost only
-  ports: { client: number; monitor: number; leaf: number };
+  ports: { client: number; tailnet: number; monitor: number; leaf: number };
   image: string;
 }
 interface User { project: string; name: string; role: Role; nkey: string }
@@ -122,9 +122,10 @@ function q(text: string): string {
 /** The compose file: the pinned image, the config folder read-only, the data volume, and the host ports on
  * localhost and the Tailscale address only. */
 export function composeYaml(s: State): string {
-  // One address for the agents' port: Docker 29 refuses the same host port on two addresses ("address already in
-  // use"). The Tailscale address when there is one (this machine's own agents reach it too), else localhost.
-  const ports = [`${s.address || "127.0.0.1"}:${s.ports.client}:4222`];
+  // This machine's agents on localhost (their network guard keeps them off the tailnet); other machines on the Tailscale
+  // address, on a port of its own: Docker 29 refuses the same host port on two addresses ("address already in use").
+  const ports = [`127.0.0.1:${s.ports.client}:4222`];
+  if (s.address) ports.push(`${s.address}:${s.ports.tailnet ?? PORTS.tailnet}:4222`);
   ports.push(`127.0.0.1:${s.ports.monitor}:8222`);
   // The hub's leaf port is for the other machines: on the Tailscale address only.
   if (s.mode === "hub" && s.address) ports.push(`${s.address}:${s.ports.leaf}:7422`);
@@ -349,8 +350,8 @@ async function cmdUp(argv: string[]): Promise<number> {
       "Fix what Docker says, then run `factory nats up` again. Nothing was changed.");
   }
   console.log(w.changed ? `Started the NATS ${mode} (${IMAGE}) from ${dir}.` : `The NATS ${mode} is up to date (${dir}).`);
-  console.log(`Agents connect on nats://${address || "127.0.0.1"}:${ports.client}.` +
-    (address ? ` Set it once: factory settings set messaging.url nats://${address}:${ports.client}` : ""));
+  console.log(`This machine's agents connect on nats://127.0.0.1:${ports.client}` +
+    (address ? `; other machines on nats://${address}:${ports.tailnet}.` : "."));
   if (!address) {
     console.log("note: Tailscale isn't installed or isn't up here, so the server listens on localhost only: other " +
       "machines can't reach it. Start Tailscale (`tailscale up`) and run `factory nats up` again.");
@@ -364,7 +365,7 @@ async function cmdUp(argv: string[]): Promise<number> {
   } else console.log(`It connects to the hub at ${hubUrl}; the hub keeps JetStream.`);
   if (address) {
     console.log(`On a sandboxed machine, let agents through the network guard: sudo factory bootstrap machine --apply ` +
-      `--allow-host ${address}:${ports.client}`);
+      `--allow-host ${address}:${ports.tailnet}`);
   }
   const a = await waitForHealth(s);
   console.log(a.ok ? `The server answers (http://127.0.0.1:${ports.monitor}/healthz).`
@@ -403,7 +404,7 @@ async function cmdStatus(argv: string[]): Promise<number> {
     return 1;
   }
   console.log(`mode        ${s.mode}` + (s.mode === "leaf" ? ` (hub ${s.hub})` : ""));
-  console.log(`listens     ${s.address || "127.0.0.1"}:${s.ports.client}` + (s.address ? " (Tailscale)" : " (localhost only: no Tailscale)"));
+  console.log(`listens     127.0.0.1:${s.ports.client}` + (s.address ? `, ${s.address}:${s.ports.tailnet ?? PORTS.tailnet} (Tailscale)` : " (localhost only: no Tailscale)"));
   console.log(`files       ${natsDir()}`);
   console.log(`keys        ${readUsers().length}`);
   const health = await httpGet(`http://127.0.0.1:${s.ports.monitor}/healthz`);
