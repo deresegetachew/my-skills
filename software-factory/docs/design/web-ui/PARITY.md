@@ -102,6 +102,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `board ready` | planned | Tasks read from the message board: the ready queue | #472 |
 | `board show` | planned | Task (Task.dc.html), read from the message board | #472 |
 | `board prime` | agents only | An agent's start of task; the web UI's first read has the same shape | #472 |
+| `board mcp --as` | agents only | An agent's session reaches the message board through it; the owner sees what they wrote on Task (Task.dc.html) and the board | #495 |
 
 ## Product
 

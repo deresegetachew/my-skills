@@ -123,6 +123,7 @@ version it pins. `factory help` lists everything.
 | `factory board ready [--for <actor>] [--json]` | The ready queue in claim order: tasks and bugs that are open, not blocked and held by nobody. A task handed to an actor shows only with `--for` that actor |
 | `factory board show <id> [--json]` | One task: status, holder and claim time, kind, priority, version, parent, what blocks it, its edges, body, context entries (its own and its linked tasks') and thread |
 | `factory board prime <actor> [--json]` | An actor's start in one call: the tasks it holds with their context, what is ready for it, what is blocked, and the recent events |
+| `factory board mcp --as <actor> [--session <id>]` | Serves the message board to one agent as an MCP server over stdio (#495): JSON-RPC 2.0, one message a line, the handshake revisions of MCP up to 2025-11-25; logs go to stderr, and it exits when stdin closes. The tools: `board_prime`, `board_ready`, `board_claim` (returns the token), `board_heartbeat`, `board_release`, `board_close`, `board_show`, `board_post` (a question, answer, status or note), `board_thread`, `board_note`, `board_on_me` and `board_delegated`, each with a JSON Schema for its inputs, checked before anything runs. The actor is fixed by `--as`: no tool takes a sender, and an input a tool doesn't list is refused (decision 0007 point 8). A refusal comes back as a tool error `<code>: <message> Fix: <fix>`. Needs `--as`, and the board's URL as the other verbs do. The factory's own sessions are wired to it in a later step (#472) |
 
 <br>
 
