@@ -1,5 +1,5 @@
 // Every factory session runs in its own tmux window, started by one step (#300, PRD US-3): `factory loop -i` on a
-// terminal, `factory resume` (what `factory autostart`'s boot service runs) and the cockpit all use it.
+// terminal, `factory resume` (what `factory autostart`'s boot service runs) and `factory owner start` all use it.
 // tmux is a fake on PATH (it logs every call and keeps sessions as files); a real tmux never runs.
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, symlinkSync } from "node:fs";
@@ -143,7 +143,7 @@ test("inside a window (FACTORY_WINDOW) or without a terminal the loop runs in pl
 }, 150_000);
 
 test("without tmux loop dash i on a terminal runs in place, with a note that tmux would give it a window", async () => {
-  // tmux is needed for the cockpit, not for the factory (#295): the owner's machine may have none.
+  // tmux gives a session its window, but the factory runs without it (#295): the owner's machine may have none.
   const [work, env] = withTmux(false);
   const [rc, shown] = await onATerminal(work, env, ["dev-manager", "lead", "loop", "-i", "--once"]);
   expect(rc, shown).toBe(0);
@@ -153,15 +153,13 @@ test("without tmux loop dash i on a terminal runs in place, with a note that tmu
   expect(shown).not.toContain('"no-tmux"');
 }, 90_000);
 
-test("a tmux older than 3.2 still starts the session with a note about 3.2", async () => {
+test("a tmux older than 3.2 starts the session with no note: only the retired cockpit needed 3.2 (#425)", async () => {
   const [work, env] = withTmux(true, { FAKE_TMUX_VERSION: "tmux 3.0a" });
   const [rc, shown] = await onATerminal(work, env, ["dev-manager", "lead", "loop", "-i"]);
   expect(rc, shown).toBe(0);
   expect(starts(env).length).toBe(1);
-  expect(shown).toContain("3.2");
-  const [work2, env2] = withTmux(); // a new enough tmux says nothing about versions
-  const [, shown2] = await onATerminal(work2, env2, ["dev-manager", "lead", "loop", "-i"]);
-  expect(shown2).not.toContain("3.2");
+  expect(shown).not.toContain("3.2");
+  expect(shown).not.toContain("cockpit");
 }, 150_000);
 
 test("resume starts each agent in its window through the same step as loop dash i and autostart", async () => {

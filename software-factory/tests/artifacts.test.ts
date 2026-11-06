@@ -245,3 +245,97 @@ test("a role reads md names an artifact through its repo copy", () => {
   expect(after).not.toContain("fix   .claude/factory/roles/product-owner/reads.md: docs/prd/index.html");
   expect(after).toContain("ok    product-owner reads.md: every path exists");
 });
+
+// --- the web UI's needs (#454): status rows with their manifest facts, and a pull that opens a pull request -------------
+
+test("status --json carries the title, link and who pulled it and when", () => {
+  const [, work, env] = artProject();
+  expect(art(work, env, ["pull", URL, "docs/prd"]).code).toBe(0);
+  const rows = JSON.parse(art(work, env, ["status", "--json"]).stdout) as Record<string, string>[];
+  const row = rows[0] as Record<string, string>;
+  const entry = manifest(work).artifacts[0] as Entry;
+  expect(row.id).toBe("SMWHUKAEcqo6VtbTzYrTZj");
+  expect(row.title).toBe("MVP PRD");
+  expect(row.url).toBe(URL);
+  expect(row.pulledAt).toBe(entry.pulledAt);
+  expect(row.pulledBy).toBe(entry.pulledBy);
+  expect(row.pulledBy).toBeTruthy();
+});
+
+const FAKE_GH_PR = '#!/bin/sh\necho "$@" >> "$GH_PR_LOG"\necho "https://github.com/o/work/pull/77"\n';
+const ID = "SMWHUKAEcqo6VtbTzYrTZj";
+
+/** A project whose origin has main, an export folder beside it, a fake gh that logs, and a checkout on its own branch. */
+function prProject(): { work: string; env: Env; ghLog: string } {
+  const [d, work, env] = project();
+  must(["git", "push", "-q", "origin", "main"], work);
+  must(["git", "checkout", "-q", "-b", "my-work"], work);
+  write(join(d, "export", "page.html"), "<p>exported</p>");
+  const bin = join(d, "ghbin");
+  writeExe(join(bin, "gh"), FAKE_GH_PR);
+  const ghLog = join(d, "gh-pr.log");
+  write(ghLog, "");
+  return { work, ghLog, env: { ...env, PATH: `${bin}:${process.env.PATH ?? ""}`, GH_PR_LOG: ghLog } };
+}
+
+function g(work: string, ...args: string[]): string {
+  return sh(["git", "-C", work, ...args], { env: { ...process.env, ...GIT_ENV } }).stdout.trim();
+}
+
+function worktrees(work: string): number {
+  return g(work, "worktree", "list").split("\n").filter(Boolean).length;
+}
+
+test("pull --pr puts the copy on a new branch of origin and opens a pull request, leaving the checkout alone", () => {
+  const { work, env, ghLog } = prProject();
+  const p = art(work, env, ["pull", URL, "docs/prd", "--from", "../export", "--title", "MVP PRD", "--pr"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("https://github.com/o/work/pull/77");
+  const heads = g(work, "ls-remote", "--heads", "origin", `artifacts/${ID}/*`).split("\n").filter(Boolean);
+  expect(heads.length).toBe(1);
+  const branch = ((heads[0] as string).split("\t")[1] as string).replace("refs/heads/", "");
+  expect(branch.startsWith(`artifacts/${ID}/`)).toBe(true);
+  g(work, "fetch", "-q", "origin", branch);
+  expect(g(work, "show", "FETCH_HEAD:docs/prd/page.html")).toBe("<p>exported</p>");
+  expect(g(work, "show", "FETCH_HEAD:docs/artifacts.json")).toContain(ID);
+  const log = read(ghLog);
+  expect(log).toContain("pr create");
+  expect(log).toMatch(/--base main/);
+  expect(log).toContain(`--head ${branch}`);
+  // the person's own checkout is as it was
+  expect(g(work, "status", "--porcelain")).toBe("");
+  expect(g(work, "rev-parse", "--abbrev-ref", "HEAD")).toBe("my-work");
+  expect(existsSync(join(work, "docs", "prd"))).toBe(false);
+  expect(existsSync(join(work, "docs", "artifacts.json"))).toBe(false);
+  expect(worktrees(work)).toBe(1);
+});
+
+test("pull --pr whose push fails says why and leaves no branch, no worktree and no change", () => {
+  const { work, env, ghLog } = prProject();
+  must(["git", "config", "remote.origin.pushurl", join(work, "..", "nowhere.git")], work);
+  const p = art(work, env, ["pull", URL, "docs/prd", "--from", "../export", "--pr"]);
+  expect(p.code).not.toBe(0);
+  const e = error(p);
+  expect(e.code).toBeTruthy();
+  expect(e.message).toBeTruthy();
+  expect(e.fix).toBeTruthy();
+  expect(g(work, "branch", "--list", "artifacts/*")).toBe("");
+  expect(worktrees(work)).toBe(1);
+  expect(g(work, "status", "--porcelain")).toBe("");
+  expect(g(work, "rev-parse", "--abbrev-ref", "HEAD")).toBe("my-work");
+  expect(existsSync(join(work, "docs", "artifacts.json"))).toBe(false);
+  expect(read(ghLog)).not.toContain("pr create");
+});
+
+test("pull --pr --dry-run says what it would do and changes nothing", () => {
+  const { work, env, ghLog } = prProject();
+  const p = art(work, env, ["pull", URL, "docs/prd", "--from", "../export", "--pr", "--dry-run"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.toLowerCase()).toContain("would");
+  expect(p.stdout.toLowerCase()).toContain("pull request");
+  expect(g(work, "ls-remote", "--heads", "origin", "artifacts/*")).toBe("");
+  expect(g(work, "branch", "--list", "artifacts/*")).toBe("");
+  expect(worktrees(work)).toBe(1);
+  expect(g(work, "status", "--porcelain")).toBe("");
+  expect(read(ghLog)).toBe("");
+});

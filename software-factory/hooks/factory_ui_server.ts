@@ -9,6 +9,9 @@
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
 //   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
 //   POST /api/projects/:p/agents/:name/stop    {confirm: true}: factory owner stop <name>
+//   POST /api/projects/:p/machines             {confirm: true, name, agents: ["haile", "taytu:manager"]}: factory machine add
+//                                              <name> --json --agent ...; the answer carries `join` (code, command, expiresAt) (#445)
+//   POST /api/projects/:p/machines/:name/remove {confirm: true}: factory machine remove <name>
 //   GET|POST /api/projects/:p/agents/:name/chat, GET /api/projects/:p/owner-queue, POST .../owner-queue/:id/answer
 //                                              the chat with each agent and the owner queue (factory_ui_chat.ts, #423)
 //   GET  /api/ws?token=...                     a WebSocket: {type: "hello"}, then {type: "state", project, ...live} for
@@ -16,17 +19,25 @@
 //                                              project, ...} for the tasks, pull requests and CI channels
 //   GET  /api/projects/:p/docs, .../docs/page?id=, .../docs/search?q=: the PRD, the decisions and the wiki (factory_ui_docs.ts, #438)
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
+//   GET|POST /api/projects/:p/signoff, POST .../signoff/:id/confirm|result: the sign-off and testing queue (factory_ui_signoff.ts, #454)
+//   GET  /api/projects/:p/artifacts, POST .../artifacts/pull: designs and artifacts (factory_ui_artifacts.ts, #454)
+//   POST /api/projects/:p/tasks/:id/actions/:name  the board's release, block and reassign (#439): factory_ui_views.ts
+//   GET|POST /api/add-project[/check|/runs/:id[/retry]]: add a project from the page (factory_ui_add.ts, #447); the
+//                                              WebSocket gets {type: "add-project", run} and {type: "projects"}
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
 // `ui.pollSeconds` and pushes what changed; with no page open it reads nothing. (NATS comes later through the messaging
-// port; this loop reads the same data functions the cockpit does.)
+// port.)
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
+import { AddRuns } from "./factory_ui_add.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
-import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
-import { ciAction, Refresher, viewsOf } from "./factory_ui_views.ts";
+import { signoffApi } from "./factory_ui_signoff.ts";
+import { ciAction, Refresher, taskAction, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
   hosts: string[];
@@ -107,7 +118,8 @@ interface Kept {
 
 /** Starts the server on every host in `o.hosts`, on one port. */
 export function serve(o: ServeOptions): Running {
-  const byId = new Map(o.projects.map((p) => [p.id, p]));
+  const list = [...o.projects]; // grows when a project is added from the page (#447)
+  const byId = new Map(list.map((p) => [p.id, p]));
   const kept = new Map<string, Kept>();
   const reading = new Map<string, Promise<Kept>>();
   const servers: Server<undefined>[] = [];
@@ -138,7 +150,7 @@ export function serve(o: ServeOptions): Running {
   }
 
   async function tick(): Promise<void> {
-    for (const p of o.projects) {
+    for (const p of list) {
       const before = kept.get(p.id)?.text;
       const now = await state(p, 0);
       if (now.text !== before) for (const s of servers) s.publish(TOPIC, message(p, now.data));
@@ -148,7 +160,7 @@ export function serve(o: ServeOptions): Running {
     }
   }
 
-  // the tasks, pull requests and CI channels (#424): from the cockpit's cache, sent when they change
+  // the tasks, pull requests and CI channels (#424): from the snapshot's cache, sent when they change
   const viewsSent = new Map<string, string>();
   const refresher = new Refresher((p) => pushViews(p));
   function viewsMessage(p: UiProject): string {
@@ -160,6 +172,22 @@ export function serve(o: ServeOptions): Running {
     viewsSent.set(p.id, text);
     for (const s of servers) s.publish(TOPIC, text);
   }
+
+  // adding a project (#447)
+  const adds = new AddRuns({
+    serving: list.find((p) => p.current) ?? list[0] as UiProject,
+    projects: () => list,
+    list: (p) => {
+      list.push(p);
+      byId.set(p.id, p);
+      for (const s of servers) s.publish(TOPIC, JSON.stringify({ type: "projects" }));
+      if (clients) void tick();
+    },
+    publish: (m) => {
+      const text = JSON.stringify(m);
+      for (const s of servers) s.publish(TOPIC, text);
+    },
+  });
 
   function seen(p: UiProject): Agent[] {
     return kept.get(p.id)?.data.agents ?? [];
@@ -173,10 +201,15 @@ export function serve(o: ServeOptions): Running {
       if (server.upgrade(req, { data: undefined })) return undefined;
       return problem(400, "ui_ws_upgrade", "This address is a WebSocket.", "Connect to it with a WebSocket client.");
     }
+    if (parts[0] === "add-project") {
+      const r = await adds.api(req, parts.slice(1));
+      return r ? json(r.status, r.body) : problem(404, "not_found", `There is no ${req.method} ${url.pathname}.`,
+        "Adding a project is GET or POST /api/add-project, POST /api/add-project/check, GET /api/add-project/runs/:id and POST .../retry.");
+    }
     if (parts[0] !== "projects") return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
     if (parts.length === 1) {
       if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
-      return json(200, { projects: o.projects.map((p) => ({ id: p.id, name: p.name, path: p.path, current: p.current, problem: p.problem })) });
+      return json(200, { projects: list.map((p) => ({ id: p.id, name: p.name, path: p.path, current: p.current, problem: p.problem })) });
     }
     const p = byId.get(parts[1] ?? "");
     if (!p) return problem(404, "ui_project_unknown", `There is no project ${parts[1]} here.`, "GET /api/projects lists them; add one with ui.projects.");
@@ -193,6 +226,14 @@ export function serve(o: ServeOptions): Running {
       }
       if (rest[1] === "search") return json(200, { project: p.id, q: url.searchParams.get("q") ?? "", hits: searchDocs(p, url.searchParams.get("q") ?? "") });
     }
+    if (rest[0] === "signoff") { // the sign-off and testing page (#454)
+      const r = await signoffApi(req, p, rest);
+      return json(r.status, r.body);
+    }
+    if (rest[0] === "artifacts") { // designs and artifacts (#454)
+      const r = await artifactsApi(req, p, rest);
+      return json(r.status, r.body);
+    }
     if (rest.length === 1 && rest[0] === "channels" && req.method === "GET") return json(200, { project: p.id, channels: channels(p, seen(p)) });
     if (rest.length === 1 && rest[0] === "agents" && req.method === "GET") {
       const s = await state(p, ttl);
@@ -201,6 +242,36 @@ export function serve(o: ServeOptions): Running {
     if (rest.length === 1 && rest[0] === "machines" && req.method === "GET") {
       const s = await state(p, ttl);
       return json(200, { project: p.id, machines: s.data.machines, runners: s.data.runners, problems: s.data.problems });
+    }
+    if (rest[0] === "machines" && (rest.length === 1 || rest.length === 3) && req.method === "POST") { // #445
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await req.json()) as Record<string, unknown>;
+      } catch {
+        // no body: no confirm
+      }
+      if (body === null || typeof body !== "object" || body.confirm !== true) {
+        return problem(400, "confirm_needed", "Adding or removing a machine changes the hub's keys, so it needs a confirm.", 'Send {"confirm": true} (the page asks you first).');
+      }
+      const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()) : []);
+      const flag = (s: string): boolean => s.startsWith("-"); // a value never becomes an option of the command
+      let args: string[];
+      if (rest.length === 1) {
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const agents = strs(body.agents);
+        if (flag(name) || agents.some(flag)) return problem(400, "ui_bad_machine", "A machine's name and agents can't start with a dash.", "Use lowercase letters, digits and dashes.");
+        args = ["add", name, "--json", ...agents.flatMap((a) => ["--agent", a])];
+      } else if (rest[2] === "remove" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(rest[1] ?? "")) args = ["remove", rest[1] as string]; // already decoded once
+      else return problem(404, "not_found", `There is no ${url.pathname}.`, "A machine has remove.");
+      const r = await machineCommand(p, args);
+      if (r.status === 200 && args[0] === "add") {
+        try {
+          return json(200, { ...r.body, join: JSON.parse(String(r.body.output)) as unknown });
+        } catch {
+          return json(200, r.body);
+        }
+      }
+      return json(r.status, r.body);
     }
     if (rest[0] === "agents" && rest.length === 2 && req.method === "GET") {
       const s = await state(p, ttl);
@@ -244,10 +315,16 @@ export function serve(o: ServeOptions): Running {
       if (rest[2] !== "log" && (r.status === 200 || r.status === 500)) refresher.start(p, true); // read again: the next look shows what changed
       return json(r.status, r.body);
     }
+    if (rest[0] === "tasks" && rest[2] === "actions" && rest.length === 4) {
+      if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
+      const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null));
+      if (r.status === 200 || r.status === 500) refresher.start(p, true); // read again: the board shows what changed
+      return json(r.status, r.body);
+    }
     if (rest.length === 1 && rest[0] === "refresh") {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST.");
       refresher.start(p, true);
-      return json(202, { ok: true, command: "factory cockpit --json", refreshing: refresher.running(p) });
+      return json(202, { ok: true, command: "factory snapshot", refreshing: refresher.running(p) });
     }
     return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
   }
@@ -270,9 +347,9 @@ export function serve(o: ServeOptions): Running {
     async open(ws: ServerWebSocket<undefined>): Promise<void> {
       clients++;
       ws.subscribe(TOPIC);
-      ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: o.projects.map((p) => p.id) }));
+      ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: list.map((p) => p.id) }));
       if (!timer) timer = setInterval(() => void tick(), o.pollSeconds * 1000);
-      for (const p of o.projects) {
+      for (const p of list) {
         refresher.ifStale(p);
         if (ws.readyState === 1) ws.send(viewsMessage(p));
         const s = await state(p, o.pollSeconds * 1000);

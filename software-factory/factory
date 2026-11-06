@@ -14,7 +14,7 @@ if [ "${1:-}" = bootstrap ]; then
   self="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
   fh "$(dirname "$self")/hooks/factory_bootstrap" "${@:2}"; exit $?
 fi
-# This script's own path, before the cd: the cockpit's panes and popups run the factory through it (#308).
+# This script's own path, before the cd: the web UI runs the factory through it.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 root="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "factory: run this inside the project's git repo" >&2; exit 1; }
 cd "$root"
@@ -29,7 +29,7 @@ console.log(v === undefined ? d : typeof v === "string" ? v : JSON.stringify(v))
 main() { setting mainBranch main; }
 # `loop -i` on a terminal starts in its own tmux window (#300), through the one step `factory resume` uses too, and
 # shows it here. Inside that window (FACTORY_WINDOW), without a terminal (scripts, tests) or with --dry-run it runs
-# in place. Without tmux it runs in place too, with a note: only the cockpit needs tmux (#295).
+# in place. Without tmux it runs in place too, with a note (#295).
 # Usage: to_window <role> <name or ""> <loop arguments>; it returns only when the loop runs here.
 to_window() {
   local r="$1" n="$2" a i=0; shift 2
@@ -83,44 +83,16 @@ Build
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
                          the CI queue and runners, and the tasks; read-only
-  cockpit                one terminal window over tmux 3.2+ (its own prefix, C-a): sessions and views on the left, the
-                         selected agent's real Claude Code session on the right (type into it; C-a C-a comes back),
-                         the counts on top. `:` is a command bar over the read-only commands and the owner's actions
-                         (owner merge, label, answer, release, start, stop, and say), each asking y/N first; 1-8 open
-                         the views as popups; in the list s says, x stops, n starts. C-a d leaves it, everything keeps running
-  cockpit --json         the factory as data, one snapshot: sessions on every machine, what needs you, PRs, CI, the
-                         version and the doctor's summary; a part that can't be read is listed under "missing"
-  cockpit --status       one line for tmux's status line (counts and "N need you"), from a cache: no GitHub call;
-                         an old or empty cache is refreshed in the background
-  cockpit --needs        what needs you (owner asks, PRs only a person merges), with links, from the same cache
-  cockpit --prs [<n>]    the cockpit's Pull requests view (C-a 2): one row per open PR, #n's detail below (head, CI
-                         by one rule, the newest marker, questions, protected paths, next action); j k move, m merges
-                         (asks first; owner merge --head, so a PR that moved is not merged), r reads again, q closes.
-                         Off a terminal, one frame sized by COLUMNS and LINES
-  cockpit --tasks        the Tasks & PRD view (C-a 3), from the task tracker (the issues, or the build plan): how many
-                         tasks are in each lane, each task with who holds it, the selected one's detail; j k move
-  cockpit --ci           the CI view, from the same cache: where jobs run, the heavy runners, leftovers, the runners and
-                         the queue, with the commands that act on them; fits COLUMNS, no colour with NO_COLOR
-  cockpit --agents       the Agents & machines view (C-a 5), from the same cache: each machine with its sessions (role,
-                         state, what it does, where)
-  cockpit --health       the Health & releases view (C-a 7), from the same cache: what the doctor found, each check to
-                         fix, and the factory version installed here; r runs the doctor again
-  cockpit --usage        the usage view, from this machine's logs (no GitHub call): each task of the last 7 days
-                         against its budget as a bar, with its agent and top subagent, and the lessons.
-                         The views read j k (scroll or move), r (read again) and q (close); off a terminal, one frame
-                         sized by COLUMNS, within 20 s
-  cockpit --settings [--color]
-                         the Settings view (view 6): every setting with its value, where it comes from (main, your
-                         staged change, this machine, default) and what it does, and the staged changes that go out as
-                         one pull request. Read-only; agents can't open it
-  cockpit --ink          the cockpit on Ink (decision 0002) on its own: the title and the sessions, from the same
-                         cache. A release carries it as one file run by Bun, with nothing to install; q leaves
-  cockpit watch <item>   watch the item's sub-manager (pr-12, issue-7) in its own tmux window, read-only: it never
-                         sends keys; one that ended points at its log
   ui [--port N] [--host] the web UI in a browser (decision 0005): each project (this one and ui.projects) with a
                          channel per agent and per view; agents and machines live, start and stop after a confirm.
                          localhost only (port ui.port, 4747); --host adds the Tailscale address. It prints the address
                          with a token (kept in .git/factory/ui-token) that every API call needs; Ctrl-C stops it
+  snapshot               the factory as data, one snapshot read now (what the web UI's views read): sessions on every
+                         machine, what needs you, PRs, CI, the tasks, the version and the doctor's summary; a part that
+                         can't be read is listed under "missing". Also written to snapshot.json in this machine's state folder
+  talk <dev-manager|product-owner> <text> [<history-json>]
+                         one turn of a talk with that role (what the web UI's chat runs): a fresh session of the role
+                         answers, as JSON, and a summary goes on the owner queue. The owner's: agents can't run it
   prs [--json] [--fresh]what a manager decides from, one list: each open PR with its head, CI judged by one rule,
                          the newest marker per commit, any review claim and the next action; then unanswered questions
                          and owner asks, and agents gone quiet. Read-only, REST only. prs, watch and messages ls answer
@@ -145,6 +117,14 @@ Look
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
+  machine add <name> --agent <agent>[:role] ... [--ttl minutes]
+                         on the hub: make the keys of the agents another machine will run and print one join code
+                         (short-lived, works once; it holds the hub's Tailscale address, the leaf password, the keys)
+  machine join <code> [--no-tailscale] [--no-doctor]
+                         on the new machine: check Tailscale and Docker, start the leaf (or, without Docker, connect
+                         the agents straight to the hub), write the keys, run factory doctor
+  machine ls [--json]    the machines added and whether their code is still waiting
+  machine remove <name>  forget a machine and take its agents' keys off the hub
   follow [<agent>] [--read|--log] [--on R] [--all]
                          watch and talk to an agent by name, on another machine or in the cloud: without a name,
                          every agent and one-item sub-manager we can find, where it runs and its Remote Control link
@@ -187,6 +167,29 @@ Check
                          Tailscale address. status: whether it answers. Run up again to change it
   nats user add <agent> --role builder|manager|po|owner
                          the agent's key: its seed in messaging.creds (mode 600) and its role's permissions on the server
+  board up [--port N]    the message board (factory-message-board, decision 0007): tasks, claims, threads and events
+                         on Postgres, in Docker on this machine (127.0.0.1 and the Tailscale address), then migrated
+  board down [--purge]   stop it; --purge also removes its data
+  board status           whether it answers, its schema and its task counts
+  board migrate|backup|sweep
+                         apply the schema (safe to run twice) | a pg_dump, mode 600 | release the claims whose time
+                         is up and whose holder has been quiet for 30 minutes (--quiet-minutes N)
+  board tasks|ready [--json]
+                         the tasks not done (--all: every one) | the ready queue, in claim order (--for <actor>:
+                         with the tasks handed to that actor)
+  board show <id> [--json]
+                         one task: its fields, edges, context and thread
+  board prime <actor> [--json]
+                         an actor's start: what it holds, what is ready, what is blocked, recent events
+  board mcp --as <actor> [--session <id>]
+                         the board as an MCP server over stdio for one agent: board_prime, board_claim,
+                         board_post and the other board_* tools; every write is recorded as <actor>
+  board import github [--closed] [--dry-run] [--repo owner/name]
+                         the repo's open issues into the board as tasks (--closed: the closed ones too, as done):
+                         labels as status, "Depends on #n" as edges, epics as parents, comments as threads with the
+                         factory's markers as their own kinds; safe to run twice; --dry-run writes nothing
+                         GitHub wins on status unless the task is held on the board (done here but open there:
+                         reopened); comments deleted on GitHub stay on the board
   doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
                          of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user
@@ -282,7 +285,7 @@ Maintain
                          then commit it in a PR (links made through kit/ are moved to the factory's own folders)
   install-shim           put a `factory` command on your PATH (~/.local/bin) that works in every factory project
 
-Owner                    what the owner does by hand, shared with the cockpit. The dev manager may run merge and label,
+Owner                    what the owner does by hand, shared with the web UI. The dev manager may run merge and label,
                          under its gate; coding agents can't run any of them
   owner merge <pr> [--head <sha>]
                          name the protected paths the PR touches, then merge it (a merge commit) when it is open, not a draft,
@@ -290,7 +293,7 @@ Owner                    what the owner does by hand, shared with the cockpit. T
   owner label <n> <label> [--remove]
                          add (or remove) a label the repository has, on an issue or a pull request
   owner answer <ask-id> <text>
-                         answer an ask in the owner queue (factory cockpit --needs lists them)
+                         answer an ask in the owner queue (factory prs lists them)
   owner release <X.Y.Z>  tag main vX.Y.Z and push the tag when software-factory/VERSION on main says X.Y.Z; the release
                          workflow publishes it
   owner start <role> [name]
@@ -380,7 +383,11 @@ case "$cmd" in
   autostart) fh "$hooks/factory_autostart" "$@" ;;
   resume)    fh "$hooks/factory_resume" "$@" ;;
   status)    fh "$hooks/factory_status" "$@" ;;
-  cockpit)   FACTORY_SELF="$here" fh "$hooks/factory_cockpit" "$@" ;;
+  cockpit)   # retired (#425): the web UI does what it did
+             echo '{"code": "cockpit_moved", "message": "The tmux cockpit is retired: its views, the chat with the dev manager and the product owner, and the owner'"'"'s actions moved to the web UI, factory ui.", "fix": "Run `factory ui` and open the address it prints. `factory snapshot` prints the same data as JSON."}' >&2
+             exit 1 ;;
+  snapshot)  fh "$hooks/factory_snapshot" "$@" ;;
+  talk)      fh "$hooks/factory_talk" "$@" ;;
   ui)        FACTORY_SELF="$here" fh "$hooks/factory_ui" "$@" ;;
   prs)       fh "$hooks/factory_prs" "$@" ;;
   owner)     fh "$hooks/factory_owner" "$@" ;;
@@ -418,6 +425,11 @@ case "$cmd" in
   manage-tick) fh "$hooks/factory_tick" "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
   nats)      fh "$hooks/factory_nats" "${1:-status}" "${@:2}" ;;
+  board)     # The message board (decision 0007) sits beside the hooks folder in my-skills; a project linked to it reaches
+             # it through .claude/hooks.
+             mb="$hooks/../message-board/bin"
+             [ -f "$mb.ts" ] || { printf '{"code": "board_missing", "message": "This project has no message board: %s.ts is missing.", "fix": "Run it in my-skills or a project linked to it (install.sh --link). Releases ship it with the adapters (decision 0007, build step 3)."}\n' "$mb" >&2; exit 1; }
+             fh "$mb" "${1:-help}" "${@:2}" ;;
   version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).

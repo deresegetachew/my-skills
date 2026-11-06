@@ -1,6 +1,6 @@
-// The web UI's tasks, pull requests and CI channels (#424): what each shows, read from the project's cockpit cache
-// (`cockpit.json`, the snapshot `factory cockpit --json` writes), so a read here never calls GitHub; the CI view's
-// actions (#396), running the commands the cockpit's CI view runs; and a read again that runs `factory cockpit --json`.
+// The web UI's tasks, pull requests and CI channels (#424): what each shows, read from the project's snapshot cache
+// (`snapshot.json`, what `factory snapshot` writes), so a read here never calls GitHub; the CI view's actions (#396),
+// each running its factory commands; and a read again that runs `factory snapshot`.
 // factory_ui_server.ts routes to it and sends what changed over the WebSocket.
 //
 //   GET  /api/projects/:p/tasks                 the tasks in build order (the order `factory next` walks), and the next one
@@ -8,18 +8,20 @@
 //   GET  /api/projects/:p/pull-requests        each open pull request: checks, review, protected files, agent, task
 //   GET  /api/projects/:p/ci                    the verdict first, then the runs, the runners and the actions
 //   POST /api/projects/:p/ci/actions/:name      {confirm: true[, run: <id>]}: that action's commands (log needs no confirm)
-//   POST /api/projects/:p/refresh               runs `factory cockpit --json` in the background (202)
+//   POST /api/projects/:p/refresh               runs `factory snapshot` in the background (202)
+//   POST /api/projects/:p/tasks/:id/actions/:name  {confirm: true[, reason][, agent]}: the board's release, block or
+//                                               reassign (#439), through `factory issues` and `factory say`
 //
-// Each row carries `find`: the text the search within a view and across views matches (#392, factory_cockpit_match.ts).
-// While a page looks at a project, its cache is read again when older than FACTORY_COCKPIT_CACHE_SECONDS (300 s, as the
-// tmux cockpit's status line has it), never while GitHub's hourly limit is still used up.
+// Each row carries `find`: the text the search within a view and across views matches (#392, factory_match.ts).
+// While a page looks at a project, its cache is read again when older than FACTORY_SNAPSHOT_CACHE_SECONDS (300 s),
+// never while GitHub's hourly limit is still used up.
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { branchTask, toFloat } from "./factory_config.ts";
 import { CI_ACTIONS, type CiActionName, ciActionOf, type CiSettingsSeen, ciVerdict, FAILED, machineOf, orderedRuns,
   waitingPulls } from "./factory_ci_view.ts";
-import { prText, taskStateText, taskText } from "./factory_cockpit_match.ts";
+import { prText, taskStateText, taskText } from "./factory_match.ts";
 import { run } from "./factory_lib.ts";
 import { type ActionResult, envFor, factoryScript, type Obj, type Problem, readJson, resultOf, spawn, stateDirOf,
   type UiProject } from "./factory_ui_data.ts";
@@ -60,12 +62,28 @@ export interface TaskRow {
   todos: { done: number; all: number };
   dependsOn: string[];
   url: string | null;
-  pr: { number: number; url: string | null } | null;
+  pr: { number: number; url: string | null; checks: PullView["checks"] } | null;
   next: boolean;
+  /** What the board offers on it (#439): issues mode only, by its state. */
+  actions: TaskActionName[];
   /** The id of the first epic that names this task (#440), or null. */
   epic: string | null;
   cites: string[];
   find: string;
+}
+
+/** The board's actions on a task (#439), in the order it shows them. */
+export const TASK_ACTIONS = ["release", "block", "reassign"] as const;
+export type TaskActionName = (typeof TASK_ACTIONS)[number];
+
+/** The states each action is offered in: release puts a held or blocked task back to ready (the documented way to
+ *  unblock one); block parks one that isn't in review yet; reassign hands one nobody has finished to another agent. A
+ *  task in review has an open PR, so it is left to the PR's own flow. */
+const OFFERED: Record<TaskActionName, string[]> = { release: ["in-progress", "blocked"], block: ["new", "ready", "in-progress"],
+  reassign: ["ready", "in-progress"] };
+
+function actionsFor(state: string, source: string): TaskActionName[] {
+  return source === "issues" ? TASK_ACTIONS.filter((a) => OFFERED[a].includes(state)) : [];
 }
 
 export interface EpicView {
@@ -180,7 +198,7 @@ export interface Views {
 // --- reading the cache -------------------------------------------------------------------------------------------------
 
 function cacheOf(p: UiProject): Obj | null {
-  const c = readJson(join(stateDirOf(p), "cockpit.json"));
+  const c = readJson(join(stateDirOf(p), "snapshot.json"));
   return typeof c === "object" && c !== null && !Array.isArray(c) ? (c as Obj) : null;
 }
 
@@ -249,7 +267,8 @@ function tasksView(p: UiProject, cache: Obj, repo: string, pulls: PullView[]): T
     return { id, title: str(t.title), state: str(t.state), stateText: taskStateText(str(t.state)), holders, group: str(t.group),
       todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
-      pr: pr ? { number: pr.number, url: pr.url } : null, next: isNext, epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
+      pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, next: isNext, actions: actionsFor(str(t.state), source),
+      epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
   });
   return { source, tasks, next, problems };
 }
@@ -302,8 +321,9 @@ const LABELS: Record<CiActionName, string> = { install: "Install runners", "use-
   "use-github": "Use GitHub's runners", "runners-up": "One more heavy runner", "runners-down": "One fewer heavy runner",
   "light-lane": "Light lane", clean: "Clean up", rerun: "Rerun failed jobs", log: "Open the log" };
 
+/** The steps as one line to show: a word with a space in it is quoted, as you would type it. */
 function commandText(steps: string[][]): string {
-  return steps.map((s) => s.join(" ")).join(" then ");
+  return steps.map((s) => s.map((w) => (/\s/.test(w) ? `"${w}"` : w)).join(" ")).join(" then ");
 }
 
 function actionsOf(ci: Obj, x: CiSettingsSeen): ActionView[] {
@@ -341,10 +361,10 @@ function ciView(p: UiProject, cache: Obj, repo: string): CiView {
     waiting: waitingPulls(ci).map((r) => str(r.ref)), host: here, settings, actions: has ? actionsOf(ci, settings) : [], problems };
 }
 
-const NO_SNAPSHOT = (p: UiProject): Problem => ({ code: "ui_no_snapshot", message: `${p.name} has no cockpit snapshot yet; one is being read.`,
-  fix: `Wait a minute, or run \`factory cockpit --json\` in ${p.path}.` });
+const NO_SNAPSHOT = (p: UiProject): Problem => ({ code: "ui_no_snapshot", message: `${p.name} has no snapshot yet; one is being read.`,
+  fix: `Wait a minute, or run \`factory snapshot\` in ${p.path}.` });
 
-/** What the three channels show for project `p`, from its cockpit cache. */
+/** What the three channels show for project `p`, from its snapshot cache. */
 export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Views {
   if (p.problem) {
     const ci: CiView = { verdict: null, mode: "", repo: "", label: "", runs: [], runners: [], waiting: [], host: host(),
@@ -363,9 +383,9 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Vie
     problems: cache ? limit : [NO_SNAPSHOT(p)], tasks: tasksView(p, c, repo, pulls.pulls), epics: epicsView(obj(c.tasks), repo), pulls, ci: ciView(p, c, repo) };
 }
 
-/** The cache's age limit, in seconds (as `factory cockpit --status` has it). */
+/** The cache's age limit, in seconds: a read costs a few GitHub calls per open pull request, on the agents' token. */
 function ttl(): number {
-  return toFloat(process.env.FACTORY_COCKPIT_CACHE_SECONDS || 300) ?? 300;
+  return toFloat(process.env.FACTORY_SNAPSHOT_CACHE_SECONDS || 300) ?? 300;
 }
 
 /** True when project `p`'s cache is missing or older than the limit, and GitHub's hourly limit isn't still used up. */
@@ -382,7 +402,7 @@ export function stale(p: UiProject, now = Date.now()): boolean {
 // --- acting ------------------------------------------------------------------------------------------------------------
 
 /** Runs `steps` in project `p` in order, each under its command line, stopping at the first that fails: a step that
- *  starts with "factory" runs through the project's `factory`, any other (gh) as it is, as the cockpit's runSteps does. */
+ *  starts with "factory" runs through the project's `factory`, any other (gh) as it is. */
 async function runSteps(p: UiProject, steps: string[][], ms: number): Promise<ActionResult> {
   const out: string[] = [];
   const command = commandText(steps);
@@ -419,7 +439,60 @@ export async function ciAction(p: UiProject, name: string, body: unknown): Promi
   return runSteps(p, a.steps, CI_ACTION_TIMEOUT_MS);
 }
 
-/** Runs `factory cockpit --json` in project `p` (its snapshot, written to its cache), at most one at a time per project. */
+const TASK_ACTION_TIMEOUT_MS = 120_000;
+const REASON_MAX = 500;
+
+/** A reason as `factory issues` takes it: trimmed, at most REASON_MAX characters, and never read as an option (leading
+ *  dashes go). */
+function reasonOf(v: unknown): string {
+  return (typeof v === "string" ? v : "").replace(/^[-\s]+/, "").slice(0, REASON_MAX).trim();
+}
+
+/** A coding agent's name, as factory_config.ts's safeAgent takes it. */
+const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+
+/** POST /api/projects/:p/tasks/:id/actions/:name with `body` (#439): release, block or reassign a task issue through the
+ *  commands the dev manager runs. Reassign releases it, then tells that agent to take it (`factory say <agent>
+ *  "/next-task issue-<n>"`), and says nothing when the release failed. */
+export async function taskAction(p: UiProject, id: string, name: string, body: unknown): Promise<Answer> {
+  if (!(TASK_ACTIONS as readonly string[]).includes(name)) {
+    return refusal(404, "ui_action_unknown", `A task has no action ${name}.`, `Its actions: ${TASK_ACTIONS.join(", ")}.`);
+  }
+  const action = name as TaskActionName;
+  const b = obj(body);
+  if (b.confirm !== true) {
+    return refusal(400, "confirm_needed", `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
+  }
+  const part = obj(cacheOf(p)?.tasks);
+  const task = /^\d+$/.test(id) ? list(part.tasks).find((t) => str(t.id) === id) : undefined; // an issue number, never an option
+  if (!task) {
+    return refusal(404, "ui_task_unknown", `#${id} isn't one of ${p.name}'s tasks in the last snapshot.`, "Read the board again, then pick a task it shows.");
+  }
+  if (!actionsFor(str(task.state), str(part.source)).includes(action)) {
+    const why = str(part.source) !== "issues" ? "only a task kept as a GitHub issue can be changed from here" : `#${id} is ${taskStateText(str(task.state))}`;
+    return refusal(400, "ui_action_unavailable", `#${id} can't be ${action === "block" ? "blocked" : `${action}d`}: ${why}.`,
+      "Read the board again; a card shows only the actions it can take.");
+  }
+  const reason = reasonOf(b.reason);
+  if (action === "block" && !reason) {
+    return refusal(400, "ui_reason_needed", "Blocking a task needs a reason: what a person must provide.", 'Send {"confirm": true, "reason": "<what is needed>"}.');
+  }
+  if (action === "reassign") {
+    // the names as factory.json has them, keeping only valid ones: roleNames would stop the server on a bad one
+    const agents = (Array.isArray(p.config?.agents) ? p.config.agents : []).filter((n): n is string => typeof n === "string" && AGENT_NAME.test(n));
+    const to = str(b.agent);
+    if (!agents.includes(to)) {
+      return refusal(400, "ui_agent_unknown", `${to || "No agent"} isn't one of ${p.name}'s coding agents.`,
+        `Pick one of: ${agents.join(", ") || "none (set agents in .claude/factory.json)"}.`);
+    }
+    return runSteps(p, [["factory", "issues", "release", id, `reassigned to ${to} from the web UI`], ["factory", "say", to, `/next-task issue-${id}`]],
+      TASK_ACTION_TIMEOUT_MS);
+  }
+  const step = action === "block" ? ["factory", "issues", "block", id, reason] : ["factory", "issues", "release", id, reason || "released from the web UI"];
+  return runSteps(p, [step], TASK_ACTION_TIMEOUT_MS);
+}
+
+/** Runs `factory snapshot` in project `p` (its snapshot, written to its cache), at most one at a time per project. */
 export class Refresher {
   private readonly busy = new Map<string, Promise<void>>();
   private readonly started = new Map<string, number>();
@@ -436,7 +509,7 @@ export class Refresher {
     const last = this.started.get(p.id) ?? 0;
     if (!force && Date.now() - last < ttl() * 1000) return false; // one that failed is not tried again at each tick
     this.started.set(p.id, Date.now());
-    const job = spawn(["bash", factoryScript(p), "cockpit", "--json"], p.path, envFor(p), REFRESH_TIMEOUT_MS)
+    const job = spawn(["bash", factoryScript(p), "snapshot"], p.path, envFor(p), REFRESH_TIMEOUT_MS)
       .then(() => undefined).finally(() => {
         this.busy.delete(p.id);
         this.changed(p);

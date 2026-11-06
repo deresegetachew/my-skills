@@ -35,7 +35,10 @@ const ANSWER = /<!--\s*factory-answer\b/;
 export const OWNER_ASK = /<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\s*-->/; // for=product may follow
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
-/** The summary of a talk with a role in the cockpit (#395): context for the next pass, never the owner's answer. */
+const PO_OWN = /<!--\s*factory-po-/;
+const NAMES_PO = /\bPO\b|product[ -]owner/i;
+/** The summary of a talk with a role (`factory talk`, #395; the marker keeps the cockpit's name, so earlier summaries
+ *  still read the same): context for the next pass, never the owner's answer. */
 export const CHAT_SUMMARY = /<!--\s*factory-cockpit-chat\b/;
 const ASK_TEXT_MAX = 4000;
 
@@ -290,7 +293,8 @@ export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()
       under = [po[1] as string];
       continue;
     }
-    if (CHAT_SUMMARY.test(body)) continue; // a cockpit talk's summary answers nothing (#395)
+    if (CHAT_SUMMARY.test(body)) continue; // a talk's summary (`factory talk`) answers nothing (#395)
+    if (PO_OWN.test(body)) continue; // the product owner's own record (a review), never the owner's answer (#397)
     if (trusted.size && !trusted.has(loginOf(c))) continue;
     const answered = markerIds(OWNER_ANSWER, body);
     for (const slug of answered.length ? answered : under) {
@@ -310,6 +314,31 @@ export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()
  * again, or closed). */
 export function openOwnerAsks(comments: Obj[], trusted: Set<string> = new Set()): [string, Obj][] {
   return ownerAskStates(comments, trusted).filter(([, , s]) => s !== "product").map(([slug, c]) => [slug, c]);
+}
+
+/** Plain notes the owner (or the owner's session) wrote on the owner queue to the product owner (#397): a comment with
+ * no factory marker, from a trusted login, that no ask owns (it does not come after an ask or a product owner reply to
+ * an ask, which it would answer) or that names the product owner ("PO: ..."). It is an instruction, marked or not. It
+ * stays until a product owner reply `<!-- factory-po-reply ask=notes done -->` comes after it. Oldest first. */
+export function ownerNotes(comments: Obj[], trusted: Set<string> = new Set()): Obj[] {
+  let open: Obj[] = [];
+  let threaded = false; // the last ask or reply was for a real ask: a plain comment answers that thread
+  for (const c of comments) {
+    const body = str(c.body);
+    if (ownerAskIds(body).length) { threaded = true; continue; }
+    const po = PO_REPLY.exec(body);
+    if (po) {
+      if (po[1] === "notes") {
+        threaded = false;
+        if (/\bdone\b/.test(po[2] ?? "")) open = [];
+      } else threaded = true;
+      continue;
+    }
+    if (body.includes("<!--") || !body.trim() || (threaded && !NAMES_PO.test(body))) continue;
+    if (trusted.size && !trusted.has(loginOf(c))) continue;
+    open.push(c);
+  }
+  return open;
 }
 
 /** Whether an ask is tagged `for=product`: the product owner's to answer first. */

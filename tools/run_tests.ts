@@ -1,6 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Run the software factory's tests: each software-factory/tests/*.test.ts file, and each plugin's
-// software-factory/plugins/<name>/tests/*.test.ts, with `bun test`, in its own process, with its own scratch folders.
+// Run the software factory's tests: each software-factory/tests/*.test.ts file, each plugin's
+// software-factory/plugins/<name>/tests/*.test.ts, and the message board's software-factory/message-board/tests/*.test.ts,
+// with `bun test`, in its own process, with its own scratch folders.
 // Exits 1 if any test fails, so CI goes red.
 //
 // Files run in parallel (--jobs N, or FACTORY_TEST_JOBS, default min(CPU count, 8)), biggest first. Each file's report
@@ -11,8 +12,10 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
-const TESTS = join(ROOT, "software-factory", "tests");
-const TIMEOUT_MS = 600_000;
+// FACTORY_TEST_DIR and FACTORY_TEST_TIMEOUT_MS exist for the runner's own test (tests/test_cleanup.test.ts): another folder of
+// test files (and no plugin tests), and a shorter limit per file.
+const TESTS = process.env.FACTORY_TEST_DIR || join(ROOT, "software-factory", "tests");
+const TIMEOUT_MS = Number(process.env.FACTORY_TEST_TIMEOUT_MS) || 600_000;
 
 interface Result {
   rel: string;
@@ -44,7 +47,8 @@ function testFiles(argv: string[]): string[] {
     if (a === "--jobs") i++;
     else if (!a.startsWith("-")) picks.push(a.replace(/^.*\//, "").replace(/(\.test)?\.ts$/, ""));
   }
-  const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)), ...pluginTests()];
+  const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)),
+    ...(process.env.FACTORY_TEST_DIR ? [] : [...pluginTests(), ...boardTests()])];
   const name = (f: string): string => f.replace(/^.*\//, "").replace(/\.test\.ts$/, "");
   return picks.length ? all.filter((f) => picks.includes(name(f))) : all;
 }
@@ -59,6 +63,13 @@ function pluginTests(): string[] {
     for (const f of readdirSync(tests).sort()) if (f.endsWith(".test.ts")) out.push(join(tests, f));
   }
   return out;
+}
+
+/** The message board's own tests (decision 0007): software-factory/message-board/tests/*.test.ts. */
+function boardTests(): string[] {
+  const tests = join(ROOT, "software-factory", "message-board", "tests");
+  if (!statSync(tests, { throwIfNoEntry: false })?.isDirectory()) return [];
+  return readdirSync(tests).sort().filter((f) => f.endsWith(".test.ts")).map((f) => join(tests, f));
 }
 
 /** "N passed, M failed" from bun test's own summary lines (" 12 pass", " 1 fail"). */
@@ -132,10 +143,15 @@ async function runFile(path: string): Promise<Result> {
       stdin: "ignore",
       stdout: Bun.file(outFile),
       stderr: Bun.file(outFile),
+      // Its own process group, so whatever it starts can be stopped with it (#476).
+      detached: true,
     });
-    const timer = setTimeout(() => proc.kill(9), TIMEOUT_MS);
+    LIVE.add(proc.pid);
+    const timer = setTimeout(() => killGroup(proc.pid), TIMEOUT_MS);
     code = await proc.exited;
     clearTimeout(timer);
+    killGroup(proc.pid);
+    LIVE.delete(proc.pid); // anything the file left running (a server a failed test never stopped) goes too
     out = await Bun.file(outFile).text();
     if (proc.signalCode === "SIGKILL") out += `\ntimed out after ${TIMEOUT_MS / 1000} s\n`;
   } catch (e) {
@@ -144,6 +160,30 @@ async function runFile(path: string): Promise<Result> {
     removeScratch(scratch);
   }
   return { rel, code, out, seconds: (Date.now() - start) / 1000 };
+}
+
+// The test files running now. Each is its own process group, so Ctrl-C on the runner reaches only the runner: it stops
+// them all on the way out (#476).
+const LIVE = new Set<number>();
+function stopLive(): void {
+  for (const pid of LIVE) killGroup(pid);
+  LIVE.clear();
+}
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    stopLive();
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  });
+}
+process.on("exit", stopLive);
+
+/** Stop a test file's whole process group: the file and every process it started. */
+function killGroup(pid: number): void {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // the group is already gone
+  }
 }
 
 function annotate(rel: string, out: string): void {

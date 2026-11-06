@@ -4,14 +4,14 @@
 //
 // Agents come from the project's own `factory agents ls --json` (this machine's heartbeat file, the other machines' agent
 // issues, cached), run in that project's folder, so a project in `ui.projects` is read by its own release. A task's
-// title, the CI runners and GitHub's limit come from that project's state folder (the cockpit's cache and the limit file),
-// so a read here never calls GitHub itself. Start and stop run that project's `factory owner start|stop`, the commands
-// the cockpit and the command line run.
+// title, the CI runners and GitHub's limit come from that project's state folder (the snapshot's cache, `factory
+// snapshot`, and the limit file), so a read here never calls GitHub itself. Start and stop run that project's `factory
+// owner start|stop`, the commands the command line runs.
 import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type Config, DEFAULTS, roleNames } from "./factory_config.ts";
-import { limitSentence } from "./factory_cockpit.ts";
+import { limitSentence } from "./factory_snapshot.ts";
 import { countGithubCall, type GithubCallsSummary, githubCallsSummary, run } from "./factory_lib.ts";
 
 const HOOKS = import.meta.dir;
@@ -138,33 +138,56 @@ export function uiSetting(cfg: Config, key: "projects" | "port" | "pollSeconds")
   return obj(cfg.ui)[key];
 }
 
-/** This project (at `root`, its settings `cfg`) and each project in `ui.projects`, each with an id unique among them. */
+/** This project (at `root`, its settings `cfg`), each project in `ui.projects` and each one added from the page (#447,
+ * addedPaths()), each with an id unique among them. */
 export function projects(cfg: Config, root: string): UiProject[] {
   const listed = uiSetting(cfg, "projects");
   const paths = Array.isArray(listed) ? listed.filter((p): p is string => typeof p === "string" && p.trim() !== "") : [];
   const out: UiProject[] = [];
-  const taken = new Set<string>();
-  const add = (path: string, current: boolean, config: Config | null, problem: Problem | null): void => {
-    const name = repoName(path);
-    let id = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "project";
-    for (let n = 2; taken.has(id); n++) id = `${id.replace(/-\d+$/, "")}-${n}`;
-    taken.add(id);
-    out.push({ id, name, path, current, problem, config });
-  };
-  add(root, true, cfg, null);
-  for (const given of paths) {
+  out.push({ id: idFor(out, repoName(root)), name: repoName(root), path: root, current: true, problem: null, config: cfg });
+  const added = addedPaths(root);
+  for (const given of [...paths, ...added]) {
     const path = resolve(root, given.replace(/^~(?=\/|$)/, homedir()));
-    if (realpathOr(path) === realpathOr(root)) continue;
-    if (!existsSync(path)) {
-      add(path, false, null, { code: "ui_project_missing", message: `${path} isn't there.`,
-        fix: `Fix the path in ui.projects (factory settings set ui.projects '[...]'), or clone the project there.` });
-      continue;
-    }
-    const config = configAt(path);
-    add(path, false, config, config ? null : { code: "ui_project_not_factory", message: `${path} has no .claude/factory.json, so it doesn't run the factory.`,
-      fix: `Install the factory there (install.sh), or take it out of ui.projects.` });
+    if (!out.some((p) => realpathOr(p.path) === realpathOr(path))) out.push(projectAt(out, path, !paths.includes(given)));
   }
   return out;
+}
+
+/** An id for `name` that no project in `list` has. */
+function idFor(list: UiProject[], name: string): string {
+  let id = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "project";
+  for (let n = 2; list.some((p) => p.id === id); n++) id = `${id.replace(/-\d+$/, "")}-${n}`;
+  return id;
+}
+
+/** The project at `path` beside those in `list` (not added to it): with what to do when it isn't there or doesn't run
+ * the factory. `fromPage`: it was added from the page (#447), not listed in ui.projects. */
+export function projectAt(list: UiProject[], path: string, fromPage = false): UiProject {
+  const name = repoName(path);
+  const id = idFor(list, name);
+  if (!existsSync(path)) {
+    return { id, name, path, current: false, config: null, problem: { code: "ui_project_missing", message: `${path} isn't there.`,
+      fix: fromPage ? "Clone the project there again, or move it back."
+        : `Fix the path in ui.projects (factory settings set ui.projects '[...]'), or clone the project there.` } };
+  }
+  const config = configAt(path);
+  return { id, name, path, current: false, config, problem: config ? null : { code: "ui_project_not_factory",
+    message: `${path} has no .claude/factory.json, so it doesn't run the factory.`,
+    fix: fromPage ? "Install the factory there; the project shows here once it has .claude/factory.json."
+      : `Install the factory there (install.sh), or take it out of ui.projects.` } };
+}
+
+/** The file that keeps the projects added from the page (#447): <git common dir>/factory/ui-projects.json, a JSON list
+ * of paths, beside the token. Kept on this machine, not in .claude/factory.json: adding a project changes no setting. */
+export function addedFile(root: string): string {
+  const g = run(["git", "-C", root, "rev-parse", "--git-common-dir"]);
+  return join(resolve(root, g.code === 0 && g.stdout.trim() ? g.stdout.trim() : ".git"), "factory", "ui-projects.json");
+}
+
+/** The paths added from the page, in the order they were added. */
+export function addedPaths(root: string): string[] {
+  const raw = readJson(addedFile(root));
+  return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string" && p.trim() !== "") : [];
 }
 
 /** The repository's name, as factory_machine.ts's repoKey() has it: the folder holding its git common dir, so a worktree
@@ -328,7 +351,7 @@ function runnersOf(cache: Obj): Runner[] {
     state: str(r.status) !== "online" ? "offline" : r.busy ? "busy" : "idle" }));
 }
 
-/** GitHub's hourly limit while it is used up (from the limit file or the cockpit's cache), else null. */
+/** GitHub's hourly limit while it is used up (from the limit file or the snapshot's cache), else null. */
 function limitOf(state: string, cache: Obj, now: number): Limit | null {
   const kept = obj(obj(readJson(join(state, "github-rate.json"))).core);
   const cached = obj(cache.limit);
@@ -379,7 +402,7 @@ export async function live(p: UiProject): Promise<Live> {
       fix: "Run `gh auth status` (and `gh auth login` if it says so)." });
   }
   const state = stateDirOf(p);
-  const cache = obj(readJson(join(state, "cockpit.json")));
+  const cache = obj(readJson(join(state, "snapshot.json")));
   const titles = taskTitles(cache);
   const rows = (Array.isArray(data.agents) ? data.agents : []).map(obj).filter((a) => str(a.name));
   const agents: Agent[] = await Promise.all(rows.map(async (a): Promise<Agent> => {
@@ -412,6 +435,13 @@ export function factoryScript(p: UiProject): string {
 export async function owner(p: UiProject, args: string[]): Promise<ActionResult> {
   const command = `factory owner ${args.join(" ")}`;
   const r = await spawn(["bash", factoryScript(p), "owner", ...args], p.path, envFor(p), ACTION_TIMEOUT_MS);
+  return resultOf(p, command, r, (r.stdout + r.stderr).trim());
+}
+
+/** Runs `factory machine <args>` in project `p` (#445: add a machine, remove one) and says how it went. */
+export async function machineCommand(p: UiProject, args: string[]): Promise<ActionResult> {
+  const command = `factory machine ${args.join(" ")}`;
+  const r = await spawn(["bash", factoryScript(p), "machine", ...args], p.path, envFor(p), ACTION_TIMEOUT_MS);
   return resultOf(p, command, r, (r.stdout + r.stderr).trim());
 }
 

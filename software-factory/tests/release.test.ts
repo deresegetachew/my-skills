@@ -251,47 +251,20 @@ test("real checkout has a valid version", async () => {
   expect(/^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.]*)?$/.test(mod.readVersion(ROOT))).toBe(true);
 });
 
-/** The repo above with the cockpit's UI entry point (and any other files) committed. */
-function withCockpit(ui: string, more: Record<string, string> = {}): string {
+/** The repo above with these files committed. */
+function withFiles(files: Record<string, string>): string {
   const d = repo();
-  for (const [rel, body] of Object.entries({ "software-factory/cockpit/ui.tsx": ui, ...more })) {
+  for (const [rel, body] of Object.entries(files)) {
     mkdirSync(dirname(join(d, rel)), { recursive: true });
     writeFileSync(join(d, rel), body);
   }
   git(d, "add", "-f", "-A");
-  git(d, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "cockpit");
+  git(d, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "files");
   return d;
 }
 
-test("the cockpit's UI is bundled into one file, installed beside the hooks, the same bytes each time (#365)", () => {
-  const d = withCockpit('import { word } from "./word.ts";\nconsole.log(`cockpit ${word}`);\n',
-    { "software-factory/cockpit/word.ts": 'export const word = "bundled";\n' });
-  const a = tmp();
-  const b = tmp();
-  for (const out of [a, b]) {
-    const r = run(d, out);
-    expect(r.code, r.out).toBe(0);
-  }
-  const name = "software-factory-1.2.3.tar.gz";
-  expect(Buffer.compare(readFileSync(join(a, name)), readFileSync(join(b, name)))).toBe(0);
-  const list = members(join(a, name));
-  const js = member(list, "software-factory-1.2.3/hooks/factory_cockpit_ink.js");
-  expect(js.mode & 0o777).toBe(0o644);
-  const manifest = JSON.parse(text(member(list, "software-factory-1.2.3/MANIFEST.json"))) as
-    { files: { path: string; sha256: string; install: { kind: string; to: string } | null }[] };
-  const entry = manifest.files.find((f) => f.path === "hooks/factory_cockpit_ink.js");
-  expect(entry?.install).toEqual({ kind: "engine", to: ".claude/hooks/factory_cockpit_ink.js" });
-  expect(entry?.sha256).toBe(sha(js.data));
-  const paths = manifest.files.map((f) => f.path);
-  expect(paths).toEqual([...paths].sort());
-  const dir = tmp();
-  writeFileSync(join(dir, "ui.js"), js.data);
-  const ran = sh([...BUN, "--no-install", join(dir, "ui.js")], { cwd: dir });
-  expect(ran.stdout.trim(), ran.out).toBe("cockpit bundled");
-});
-
 test("the web app is bundled for the browser into one file, installed beside the hooks, the same bytes each time (#421)", () => {
-  const d = withCockpit('console.log("cockpit");\n', {
+  const d = withFiles({
     "software-factory/web/app.tsx": 'import { word } from "./word.ts";\ndocument.title = `web ${word}`;\n',
     "software-factory/web/word.ts": 'export const word = "bundled";\n' });
   const a = tmp();
@@ -312,38 +285,41 @@ test("the web app is bundled for the browser into one file, installed beside the
   expect(manifest.files.find((f) => f.path === "hooks/factory_ui_app.js")?.install).toEqual({ kind: "engine", to: ".claude/hooks/factory_ui_app.js" });
 });
 
-test("a release without the cockpit's UI has no bundle", () => {
+test("a release has no cockpit bundle, even from a checkout that still has the cockpit's old entry point (#425)", () => {
   const out = tmp();
-  expect(run(repo(), out).code).toBe(0);
+  const d = withFiles({ "software-factory/cockpit/ui.tsx": 'console.log("cockpit");\n' });
+  expect(run(d, out).code).toBe(0);
   const names = members(join(out, "software-factory-1.2.3.tar.gz")).map((m) => m.name);
   expect(names.some((n) => n.endsWith("factory_cockpit_ink.js"))).toBe(false);
 });
 
-test("a checkout without node_modules takes Ink from the builder's own, pinned install", () => {
-  const d = withCockpit('import { Text } from "ink";\nconsole.log(typeof Text);\n');
-  const out = tmp();
-  const r = run(d, out);
-  expect(r.code, r.out).toBe(0);
-  const js = member(members(join(out, "software-factory-1.2.3.tar.gz")), "software-factory-1.2.3/hooks/factory_cockpit_ink.js");
-  const dir = tmp();
-  writeFileSync(join(dir, "ui.js"), js.data);
-  const ran = sh([...BUN, "--no-install", join(dir, "ui.js")], { cwd: dir });
-  expect(ran.stdout.trim(), ran.out).toBe("function");
-});
-
-test("a cockpit that can't be bundled (a package not installed) stops the build with the fix", () => {
-  const d = withCockpit('import { thing } from "no-such-package-365";\nconsole.log(thing);\n');
+test("a web app that can't be bundled (a package not installed) stops the build, and writes no archive", () => {
+  const d = withFiles({ "software-factory/web/app.tsx": 'import { thing } from "no-such-package-425";\nconsole.log(thing);\n' });
   const out = tmp();
   const r = run(d, out);
   expect(r.code, r.out).toBe(1);
   const err = JSON.parse(r.stderr.trim()) as Record<string, string>;
-  expect(err.code).toBe("cockpit_build_failed");
+  expect(err.code).toBe("ui_app_build_failed");
   expect(err.fix).toContain("bun install --frozen-lockfile");
   expect(existsSync(join(out, "software-factory-1.2.3.tar.gz"))).toBe(false);
 });
 
+test("a checkout without node_modules takes React from the builder's own, pinned install", () => {
+  const d = withFiles({ "software-factory/web/app.tsx": 'import { version } from "react";\nconsole.log(`react ${typeof version}`);\n' });
+  expect(existsSync(join(d, "software-factory", "node_modules"))).toBe(false);
+  const out = tmp();
+  const r = run(d, out);
+  expect(r.code, r.out).toBe(0);
+  const js = member(members(join(out, "software-factory-1.2.3.tar.gz")), "software-factory-1.2.3/hooks/factory_ui_app.js");
+  expect(text(js)).not.toMatch(/\bimport\s*[{*\w]/);
+  const dir = tmp();
+  writeFileSync(join(dir, "app.js"), js.data);
+  const ran = sh([...BUN, "--no-install", join(dir, "app.js")], { cwd: dir });
+  expect(ran.stdout.trim(), ran.out).toBe("react string");
+});
+
 test("a tracked bundle is refused: the release builds it", () => {
-  const d = withCockpit('console.log("x");\n', { "software-factory/hooks/factory_cockpit_ink.js": "old\n" });
+  const d = withFiles({ "software-factory/web/app.tsx": 'console.log("x");\n', "software-factory/hooks/factory_ui_app.js": "old\n" });
   const r = run(d, tmp());
   expect(r.code, r.out).toBe(1);
   expect((JSON.parse(r.stderr.trim()) as Record<string, string>).code).toBe("bundle_tracked");
@@ -411,6 +387,19 @@ test("each plugin is bundled to hooks/plugins/<name>.js with the version header,
   writeFileSync(join(dir, "tiny.js"), js.data);
   const ran = sh([...BUN, "--no-install", join(dir, "tiny.js")], { cwd: dir });
   expect(ran.stdout.trim(), ran.out).toBe("plugin bundled from dep");
+});
+
+test("a plugin with no node_modules in the checkout takes its packages from the builder's own install of that plugin", () => {
+  const d = withPlugins({ nats: { "index.ts": 'import { nuid } from "@nats-io/nuid";\nconsole.log(`nuid ${typeof nuid.next()}`);\n' } });
+  expect(existsSync(join(d, "software-factory", "plugins", "nats", "node_modules"))).toBe(false);
+  const out = tmp();
+  const r = run(d, out);
+  expect(r.code, r.out).toBe(0);
+  const js = member(members(join(out, ARCHIVE)), PREFIX + "hooks/plugins/nats.js");
+  const dir = tmp();
+  writeFileSync(join(dir, "nats.js"), js.data);
+  const ran = sh([...BUN, "--no-install", join(dir, "nats.js")], { cwd: dir });
+  expect(ran.stdout.trim(), ran.out).toBe("nuid string");
 });
 
 test("a release with no plugins has no hooks/plugins entries", () => {
