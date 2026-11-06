@@ -11,8 +11,10 @@ import { availableParallelism, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
-const TESTS = join(ROOT, "software-factory", "tests");
-const TIMEOUT_MS = 600_000;
+// FACTORY_TEST_DIR and FACTORY_TEST_TIMEOUT_MS exist for the runner's own test (tests/test_cleanup.test.ts): another folder of
+// test files (and no plugin tests), and a shorter limit per file.
+const TESTS = process.env.FACTORY_TEST_DIR || join(ROOT, "software-factory", "tests");
+const TIMEOUT_MS = Number(process.env.FACTORY_TEST_TIMEOUT_MS) || 600_000;
 
 interface Result {
   rel: string;
@@ -44,7 +46,7 @@ function testFiles(argv: string[]): string[] {
     if (a === "--jobs") i++;
     else if (!a.startsWith("-")) picks.push(a.replace(/^.*\//, "").replace(/(\.test)?\.ts$/, ""));
   }
-  const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)), ...pluginTests()];
+  const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)), ...(process.env.FACTORY_TEST_DIR ? [] : pluginTests())];
   const name = (f: string): string => f.replace(/^.*\//, "").replace(/\.test\.ts$/, "");
   return picks.length ? all.filter((f) => picks.includes(name(f))) : all;
 }
@@ -132,10 +134,13 @@ async function runFile(path: string): Promise<Result> {
       stdin: "ignore",
       stdout: Bun.file(outFile),
       stderr: Bun.file(outFile),
+      // Its own process group, so whatever it starts can be stopped with it (#476).
+      detached: true,
     });
-    const timer = setTimeout(() => proc.kill(9), TIMEOUT_MS);
+    const timer = setTimeout(() => killGroup(proc.pid), TIMEOUT_MS);
     code = await proc.exited;
     clearTimeout(timer);
+    killGroup(proc.pid); // anything the file left running (a server a failed test never stopped) goes too
     out = await Bun.file(outFile).text();
     if (proc.signalCode === "SIGKILL") out += `\ntimed out after ${TIMEOUT_MS / 1000} s\n`;
   } catch (e) {
@@ -144,6 +149,15 @@ async function runFile(path: string): Promise<Result> {
     removeScratch(scratch);
   }
   return { rel, code, out, seconds: (Date.now() - start) / 1000 };
+}
+
+/** Stop a test file's whole process group: the file and every process it started. */
+function killGroup(pid: number): void {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    // the group is already gone
+  }
 }
 
 function annotate(rel: string, out: string): void {
