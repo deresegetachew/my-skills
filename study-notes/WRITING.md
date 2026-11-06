@@ -63,15 +63,18 @@ reader's:
 
 ### Put the map on the page
 
-Every lesson starts with a section titled **Mental model**:
+Every lesson starts with a section titled **Mental model**. It must be readable in about 15 seconds:
 
-- A numbered list of the steps. Each step is one line: the idea, then the "because" that leads to the next step.
+- The driving question, in one line.
+- A numbered list of the steps, 3–6 of them. Each step is a bold name of two to four words, then at most two short
+  sentences (about 25 words in total): the idea, and the "so" or "because" that leads to the next step.
+- Nothing else. Definitions, recaps, the running example's details, notes on terms and the diagram legend go in a
+  short section after it (e.g. "Before you start"), or into the stage where they're needed. If a step needs more words
+  to make sense, the explanation belongs in its stage.
 - Every step is the same kind of thing, usually an action the reader takes ("model it", "test the old model").
   A conclusion ("so the model breaks", "so you need X") is never a step of its own. It is the "because" that links
   two steps, and it belongs at the end of the step that produced it.
-- A one-line short version ("known process → model it → build it → generalize it → the model breaks → model the
-  agents → draw it").
-- A diagram of the journey when the steps form a path or a hierarchy.
+- Optional: a one-line short version, or a small diagram of the journey, when it adds something the list doesn't.
 
 The rest of the page follows the map. Each major section matches one step, in the same order, and opens by naming
 its step. The lesson's mind map has the same shape as the map.
