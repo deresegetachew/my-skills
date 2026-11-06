@@ -300,7 +300,22 @@ test("a web app that can't be bundled (a package not installed) stops the build,
   expect(r.code, r.out).toBe(1);
   const err = JSON.parse(r.stderr.trim()) as Record<string, string>;
   expect(err.code).toBe("ui_app_build_failed");
+  expect(err.fix).toContain("bun install --frozen-lockfile");
   expect(existsSync(join(out, "software-factory-1.2.3.tar.gz"))).toBe(false);
+});
+
+test("a checkout without node_modules takes React from the builder's own, pinned install", () => {
+  const d = withFiles({ "software-factory/web/app.tsx": 'import { version } from "react";\nconsole.log(`react ${typeof version}`);\n' });
+  expect(existsSync(join(d, "software-factory", "node_modules"))).toBe(false);
+  const out = tmp();
+  const r = run(d, out);
+  expect(r.code, r.out).toBe(0);
+  const js = member(members(join(out, "software-factory-1.2.3.tar.gz")), "software-factory-1.2.3/hooks/factory_ui_app.js");
+  expect(text(js)).not.toMatch(/\bimport\s*[{*\w]/);
+  const dir = tmp();
+  writeFileSync(join(dir, "app.js"), js.data);
+  const ran = sh([...BUN, "--no-install", join(dir, "app.js")], { cwd: dir });
+  expect(ran.stdout.trim(), ran.out).toBe("react string");
 });
 
 test("a tracked bundle is refused: the release builds it", () => {
@@ -372,6 +387,19 @@ test("each plugin is bundled to hooks/plugins/<name>.js with the version header,
   writeFileSync(join(dir, "tiny.js"), js.data);
   const ran = sh([...BUN, "--no-install", join(dir, "tiny.js")], { cwd: dir });
   expect(ran.stdout.trim(), ran.out).toBe("plugin bundled from dep");
+});
+
+test("a plugin with no node_modules in the checkout takes its packages from the builder's own install of that plugin", () => {
+  const d = withPlugins({ nats: { "index.ts": 'import { nuid } from "@nats-io/nuid";\nconsole.log(`nuid ${typeof nuid.next()}`);\n' } });
+  expect(existsSync(join(d, "software-factory", "plugins", "nats", "node_modules"))).toBe(false);
+  const out = tmp();
+  const r = run(d, out);
+  expect(r.code, r.out).toBe(0);
+  const js = member(members(join(out, ARCHIVE)), PREFIX + "hooks/plugins/nats.js");
+  const dir = tmp();
+  writeFileSync(join(dir, "nats.js"), js.data);
+  const ran = sh([...BUN, "--no-install", join(dir, "nats.js")], { cwd: dir });
+  expect(ran.stdout.trim(), ran.out).toBe("nuid string");
 });
 
 test("a release with no plugins has no hooks/plugins entries", () => {
