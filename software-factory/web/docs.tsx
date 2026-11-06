@@ -28,13 +28,14 @@ interface Open {
 
 /** `text` with each decision or PRD story it cites turned into a link to that page. */
 export function Cited({ text, docs, open }: { text: string; docs: DocPage[] | undefined; open: Open }) {
-  if (!docs?.length) return <>{text}</>;
+  if (!docs?.length) return <span>{text}</span>;
+  // one span, so a title row that lays its parts out with a gap keeps the text and its links together
   return (
-    <>
+    <span>
       {citations(text, docs).map((c, i) => c.link
         ? <button key={i} className="link doclink" title="Open it in the docs" onClick={() => open(docChannel(c.link?.id ?? "", c.link?.anchor))}>{c.text}</button>
         : <Fragment key={i}>{c.text}</Fragment>)}
-    </>
+    </span>
   );
 }
 
