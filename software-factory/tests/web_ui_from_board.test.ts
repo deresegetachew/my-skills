@@ -49,8 +49,8 @@ function cache(p: Project, ageSeconds = 0): void {
     ci: { mode: "github", repo: REPO, runners: [], runs: [], errors: [] } }));
 }
 
-function workProject(ageSeconds = 0): Project {
-  const p = project(CONFIG);
+function workProject(ageSeconds = 0, cfg: Row = CONFIG): Project {
+  const p = project(cfg);
   roots.push(p.root);
   writeExe(join(p.d, "factory"), FAKE_FACTORY);
   cache(p, ageSeconds);
@@ -237,6 +237,68 @@ test("Release on a board task still runs through the GitHub path", async () => {
   const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(readFileSync(p.factoryLog, "utf8")).toContain("issues release 7 try again");
+}, T);
+
+// --- the board is the record (#502): with tasks.source board the card's actions write to the board ----------------------
+
+const BOARD_CONFIG = { ...CONFIG, tasks: { source: "board" } };
+
+/** The project's factory commands the server ran, without the snapshots. */
+function factoryRan(p: Project): string[] {
+  return readFileSync(p.factoryLog, "utf8").split("\n").filter((l) => l && !l.startsWith("snapshot"));
+}
+
+test("with tasks.source board, Release takes the task back on the board, with its reason, and runs no factory issues", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(await board.get(id[7] as number)).toMatchObject({ status: "open", holder: null });
+  const back = (await board.events(0, 500, { kind: "task.taken_back" })).find((e) => e.subject === `task:${id[7]}`);
+  expect(back?.payload.reason).toBe("try again");
+  expect(factoryRan(p)).toEqual([]);
+  const json = await tasksUntil(ui, (j) => byId(j)["7"]?.state === "ready", 15_000);
+  expect(byId(json)["7"]?.holders).toEqual([]);
+}, T);
+
+test("with tasks.source board, Block moves the task to blocked with a blocker note; the board and the tracker both call it blocked", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/12/actions/block", { method: "POST", body: { confirm: true, reason: "needs the card keys" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect((await board.get(id[12] as number)).status).toBe("deferred");
+  expect((await board.contextFor(id[12] as number)).map((c) => [c.kind, c.body])).toContainEqual(["blocker", "needs the card keys"]);
+  expect(factoryRan(p)).toEqual([]);
+  const json = await tasksUntil(ui, (j) => byId(j)["12"]?.state === "blocked", 15_000);
+  expect(byId(json)["12"]?.state).toBe("blocked"); // deferred is blocked, as the task tracker says (not "not ready")
+  expect(byId(json)["12"]?.actions).toEqual(["release"]);
+}, T);
+
+test("with tasks.source board, Reassign hands the task to the agent on the board, then tells that agent; no factory issues", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/7/actions/reassign", { method: "POST", body: { confirm: true, agent: "taytu" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(await board.get(id[7] as number)).toMatchObject({ assignee: "taytu", holder: null, status: "open" });
+  expect(factoryRan(p)).toEqual(["say taytu /next-task issue-7"]);
+}, T);
+
+test("with tasks.source board and the board down, an action is refused with the fix and nothing runs on GitHub", async () => {
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, "postgres://nobody:pw@127.0.0.1:1/none");
+  const r = await api(ui, "/api/projects/work/tasks/99/actions/release", { method: "POST", body: { confirm: true } });
+  expect(r.status, JSON.stringify(r.json)).toBe(503);
+  expect(r.json.code).toBe("ui_board_unreachable");
+  expect(factoryRan(p)).toEqual([]);
 }, T);
 
 // --- falling back ------------------------------------------------------------------------------------------------------

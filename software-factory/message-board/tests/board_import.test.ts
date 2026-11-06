@@ -521,3 +521,57 @@ test("an issue listed twice while paging is taken once", async () => {
   expect(r.code, r.stderr).toBe(0);
   expect(r.stdout).toMatch(/tasks\s+7 new/);
 });
+
+// --- the board as the record (#502, decision 0007 point 5) ----------------------------------------------------------------
+
+test("with --board-is-record, a status the board changed since the last import is kept; one it didn't change follows GitHub", async () => {
+  const url = await migrated();
+  const fx = fixture();
+  const w = world(url, fx);
+  expect(importGithub(w).code).toBe(0);
+  const t6 = (await byRef(url)).get(ref(6)) as Task;
+  await look(url, (b) => b.move(t6.id, { to: "blocked", reason: "waits for the owner" }));
+
+  const now = new Date().toISOString();
+  const i6 = fx.issues.find((i) => i.number === 6) as Record<string, unknown>;
+  Object.assign(i6, { title: "Fix the crash on start", labels: [{ name: "factory:in-review" }], updated_at: now });
+  const i2 = fx.issues.find((i) => i.number === 2) as Record<string, unknown>;
+  Object.assign(i2, { labels: [{ name: "factory:in-review" }], updated_at: now });
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+
+  const r = importGithub(w, ["--board-is-record"]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(r.stdout).toContain("the board is the record");
+  const t = await byRef(url);
+  expect(t.get(ref(6))).toMatchObject({ status: "deferred", title: "Fix the crash on start" });
+  expect(t.get(ref(2))?.status).toBe("in_review");
+
+  // without the flag GitHub wins on status, as before
+  const again = importGithub(w);
+  expect(again.code, again.stderr).toBe(0);
+  expect((await byRef(url)).get(ref(6))?.status).toBe("in_review");
+});
+
+test("a comment the board's mirror wrote is not imported again, and a reply to it joins the board's own message", async () => {
+  const url = await migrated();
+  const fx = fixture();
+  const w = world(url, fx);
+  expect(importGithub(w).code).toBe(0);
+  const queue = (await byRef(url)).get(ref(9)) as Task;
+  const mirrored = comment(9, "<!-- factory-owner-ask id=colour -->\nWhich colour?\n\n<!-- factory-mirror v=1 message=1 -->", "boss", new Date().toISOString());
+  const ask = await look(url, async (b) => {
+    const m = await b.post({ task: queue.id, kind: "ask", tag: "owner-ask", to: "owner", body: "<!-- factory-owner-ask id=colour -->\nWhich colour?" });
+    return b.linkMessage(m.id, `github:${REPO}/comments/${mirrored.id}`);
+  });
+  fx.comments.push(mirrored, comment(9, "<!-- factory-owner-answer id=colour -->\nBlue.", "boss", new Date(Date.now() + 1000).toISOString()));
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+
+  const r = importGithub(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect(r.stdout).toMatch(/messages\s+1 new/);
+  expect(r.stdout).toContain("1 comment the board mirrored");
+  const thread = await look(url, (b) => b.thread({ thread: ask.threadId }));
+  expect(thread.map((m) => [m.kind, m.from, m.inReplyTo])).toEqual([["ask", "system", null], ["answer", "boss", ask.id]]);
+  expect(thread[0]?.state).toBe("answered");
+  expect(thread[0]?.body).not.toContain("factory-mirror");
+});
