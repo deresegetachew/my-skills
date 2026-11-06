@@ -1,7 +1,7 @@
 // The task board's rules that aren't drawing (#439): its columns, and its lanes by agent or by epic, from
 // web/board_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { boardOf, cardTag, COLUMNS, columnsOf, epicColour, taskAsk } from "../web/board_model.ts";
+import { blockersText, boardOf, cardTag, COLUMNS, columnsOf, epicColour, taskAsk } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
@@ -98,4 +98,10 @@ test("an action's confirm says what happens and what doesn't, and that a working
   expect(taskAsk("reassign", held, "taytu")).toEqual({ happens: "#7 goes back to Ready, then taytu is told to take it. haile's claim comes off.",
     doesNot: "A session already working on it isn't stopped. haile's branch stays." });
   expect(taskAsk("reassign", free).happens).toBe("#8 goes back to Ready, then the agent you pick is told to take it.");
+});
+
+test("a card's blockers are listed in words, and a card with none says nothing (#498)", () => {
+  expect(blockersText({ blockedBy: ["11", "12"] })).toBe("Blocked by #11, #12");
+  expect(blockersText({ blockedBy: [] })).toBe("");
+  expect(blockersText({})).toBe("");
 });

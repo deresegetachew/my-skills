@@ -1,7 +1,7 @@
 // The web app's search within the tasks, pull requests and CI channels and across them (#424, matching #392: every
 // word typed is in the row's text, in any case), from web/views_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { checksText, filterRows, searchRows, type ViewsData } from "../web/views_model.ts";
+import { checksText, filterRows, originText, searchRows, type ViewsData } from "../web/views_model.ts";
 
 const task = (id: string, title: string, find: string) => ({ id, title, state: "ready", stateText: "ready", holders: [], group: "",
   todos: { done: 0, all: 0 }, dependsOn: [], url: null, pr: null, next: false, epic: null, find });
@@ -46,4 +46,12 @@ test("checks say which jobs fail", () => {
   expect(checksText({ state: "red", failing: ["test", "lint"] })).toBe("failing: test, lint");
   expect(checksText({ state: "none", failing: [] })).toBe("no runs yet");
   expect(checksText({ state: "green", failing: [] })).toBe("green");
+});
+
+test("the tasks say where they come from (#498): the message board, live, or GitHub, read every so often, in plain words", () => {
+  expect(originText({ from: "board", every: null })).toBe("From the message board, live");
+  expect(originText({ from: "github", every: 300 })).toBe("From GitHub, read every 5 min");
+  expect(originText({ from: "github", every: 45 })).toBe("From GitHub, read every 45 s");
+  expect(originText({ from: "github", every: 7200 })).toBe("From GitHub, read every 2 h");
+  expect(originText({})).toBe(""); // an older server says nothing
 });

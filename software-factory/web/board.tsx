@@ -4,11 +4,11 @@
 // columns and words are board_model.ts's. A card's actions (release, block, reassign; the API says which each card has)
 // ask first, saying what happens and what doesn't, then run on the machine that serves the page (factory_ui_views.ts
 // taskAction); the board is live through the views message. Colours are the palette's (theme.ts) only.
-import { useContext, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { Avatar, AgentsContext } from "./avatar_view.tsx";
-import { boardOf, cardTag, columnsOf, epicColour, type LaneBy, type TaskAction, taskAsk } from "./board_model.ts";
+import { blockersText, boardOf, cardTag, columnsOf, epicColour, type LaneBy, type TaskAction, taskAsk } from "./board_model.ts";
 import { Chips } from "./parts.tsx";
-import type { Tone } from "./model.ts";
+import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
 import type { Post, Say, ViewProps } from "./views.tsx";
 
@@ -79,9 +79,57 @@ function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: View
   );
 }
 
-function Card({ t, pull, open, act }: { t: TaskRow; pull?: PullRow; open: ViewProps["open"]; act: (a: Ask) => void }) {
+type Json = Record<string, unknown>;
+
+/** A task's page from the message board (#498): its thread and its context entries, read when it opens. */
+function TaskThread({ t, project, token, close }: { t: TaskRow; project: ViewProps["project"]; token: string; close: () => void }) {
+  const [got, setGot] = useState<Json | null>(null);
+  useEffect(() => {
+    let gone = false;
+    fetch(`/api/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(t.id)}`, { headers: { authorization: `Bearer ${token}` } })
+      .then((r) => r.json() as Promise<Json>)
+      .then((j) => { if (!gone) setGot(j); })
+      .catch(() => { if (!gone) setGot({ message: "The server can't be reached.", fix: "Check that the web UI still runs, then open this again." }); });
+    return () => {
+      gone = true;
+    };
+  }, [project.id, t.id, token]);
+  const thread = Array.isArray(got?.thread) ? (got.thread as Json[]) : [];
+  const context = Array.isArray(got?.context) ? (got.context as Json[]) : [];
+  const failed = got !== null && !Array.isArray(got.thread);
+  return (
+    <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+      <div className="dialog bthread" role="dialog" aria-modal="true" aria-labelledby="task-thread">
+        <h2 id="task-thread">#{t.id} {t.title}</h2>
+        <p className="muted">{[t.stateText, t.holders[0] ? `held by ${t.holders[0]}` : "", blockersText(t)].filter(Boolean).join(" · ")}</p>
+        {got === null && <p className="empty">Reading the thread…</p>}
+        {failed && <div className="notice bad" role="alert"><div><strong>{String(got?.message ?? "")}</strong><p>{String(got?.fix ?? "")}</p></div></div>}
+        {context.length > 0 && <section aria-label="Context">
+          <h3 className="vgroup">Context</h3>
+          <ul className="bentries">{context.map((c) => (
+            <li key={String(c.id)}><span className="bkind">{String(c.kind)}</span> {String(c.body)} <span className="muted">· {String(c.author)}, {ago(String(c.at))}</span></li>
+          ))}</ul>
+        </section>}
+        {got !== null && !failed && <section aria-label="Thread">
+          <h3 className="vgroup">Thread</h3>
+          {thread.length ? <ul className="bentries">{thread.map((m) => (
+            <li key={String(m.id)}>
+              <p className="bwhofrom"><Avatar name={String(m.from)} size={18} /><strong>{String(m.from)}</strong>{m.to ? <span className="muted">to {String(m.to)}</span> : null}
+                <span className="bkind">{String(m.kind)}</span><span className="muted">{ago(String(m.at))}</span></p>
+              <p className="bbody">{String(m.body)}</p>
+            </li>
+          ))}</ul> : <p className="empty">Nothing said on this task yet.</p>}
+        </section>}
+        <div className="actions"><button className="btn" onClick={close} autoFocus>Close</button></div>
+      </div>
+    </div>
+  );
+}
+
+function Card({ t, pull, open, act, thread }: { t: TaskRow; pull?: PullRow; open: ViewProps["open"]; act: (a: Ask) => void; thread?: (t: TaskRow) => void }) {
   const actions = (t.actions ?? []).filter((a): a is TaskAction => a in LABELS);
   const tag = cardTag(t, pull);
+  const blockers = blockersText(t);
   return (
     <li className="bcard">
       <p className="btitle">{t.url ? <a className="ext" href={t.url} target="_blank" rel="noreferrer noopener">#{t.id}</a> : `#${t.id}`} {t.title}</p>
@@ -91,14 +139,16 @@ function Card({ t, pull, open, act }: { t: TaskRow; pull?: PullRow; open: ViewPr
         )) : <span className="bnone">Unassigned</span>}</span>
         <span className="btag">{tag.needsYou && <span className="sdot down" aria-hidden="true" />}{tag.text}</span>
       </div>
+      {blockers && <p className="bblock"><Dot tone="bad" />{blockers}</p>}
       {t.pr && (
         <p className="bpr">
           <button className="blink" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>PR #{t.pr.number}</button>
           {t.pr.checks && <span title={checksText(t.pr.checks)}><Dot tone={checksTone(t.pr.checks.state)} />{checksText(t.pr.checks)}</span>}
         </p>
       )}
-      {actions.length > 0 && (
+      {(actions.length > 0 || thread) && (
         <div className="bactions">
+          {thread && <button className="btn small" onClick={() => thread(t)}>Thread</button>}
           {actions.map((a) => <button key={a} className="btn small" onClick={() => act({ task: t, action: a })}>{LABELS[a]}</button>)}
         </div>
       )}
@@ -113,10 +163,12 @@ function laneSub(key: string, count: number, by: LaneBy, epics: EpicRow[]): stri
   return `${count} ${count === 1 ? "task" : "tasks"}`;
 }
 
-/** The board for `tasks` (already filtered), with its lanes by `by`. */
-export function Board({ tasks, all, epics, pulls, by, project, open, post, say }: { tasks: TaskRow[]; all: TaskRow[]; epics: EpicRow[];
-  pulls: PullRow[]; by: LaneBy; project: ViewProps["project"]; open: ViewProps["open"]; post: Post; say: Say }) {
+/** The board for `tasks` (already filtered), with its lanes by `by`. With `token` (its tasks come from the message board,
+ *  #498) a card opens its thread. */
+export function Board({ tasks, all, epics, pulls, by, project, open, post, say, token }: { tasks: TaskRow[]; all: TaskRow[]; epics: EpicRow[];
+  pulls: PullRow[]; by: LaneBy; project: ViewProps["project"]; open: ViewProps["open"]; post: Post; say: Say; token?: string }) {
   const [ask, setAsk] = useState<Ask | null>(null);
+  const [reading, setReading] = useState<TaskRow | null>(null);
   const columns = columnsOf(all);
   const lanes = boardOf(tasks, by, epics);
   const pullOf = new Map(pulls.map((p) => [p.number, p]));
@@ -140,13 +192,15 @@ export function Board({ tasks, all, epics, pulls, by, project, open, post, say }
           <div className="bgrid" style={grid}>
             {columns.map((c) => (
               <ul key={c.state} className="bcell" data-col={c.title} aria-label={`${l.title}: ${c.title}`}>
-                {(l.cells[c.state] ?? []).map((t) => <Card key={t.id} t={t} pull={t.pr ? pullOf.get(t.pr.number) : undefined} open={open} act={setAsk} />)}
+                {(l.cells[c.state] ?? []).map((t) => <Card key={t.id} t={t} pull={t.pr ? pullOf.get(t.pr.number) : undefined} open={open} act={setAsk}
+                  thread={token ? setReading : undefined} />)}
               </ul>
             ))}
           </div>
         </section>
       ))}
       {ask && <AskDialog ask={ask} project={project} post={post} say={say} close={() => setAsk(null)} />}
+      {reading && token && <TaskThread t={reading} project={project} token={token} close={() => setReading(null)} />}
     </div>
   );
 }
@@ -189,6 +243,14 @@ export const BOARD_CSS = String.raw`
 .bpr .blink { font-weight: 600; color: var(--text); }
 .bpr span { display: inline-flex; align-items: center; gap: 4px; }
 .bactions { display: flex; flex-wrap: wrap; gap: 6px; }
+.bblock { margin: 0; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); }
+.bthread { width: min(680px, 100%); max-height: calc(100vh - 32px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.bthread h2 { margin: 0; font-size: 17px; }
+.bentries { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.bentries li { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 13px; overflow-wrap: anywhere; }
+.bwhofrom { margin: 0 0 6px; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.bbody { margin: 0; white-space: pre-wrap; }
+.bkind { font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text-3); }
 .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-2); }
 .field input, .field select { height: 44px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 10px;
   padding: 0 12px; font: inherit; }

@@ -17,6 +17,9 @@
 //
 //   factory_snapshot.ts --tasks    the tasks part alone, as JSON: what the snapshot runs, in its own process, so a
 //                                  tracker that hangs costs only its time limit
+//
+// FACTORY_SNAPSHOT_TASKS=board (#498): `factory ui` sets it when the project's tasks come from the message board, so
+// the tracker isn't read (no GitHub calls for tasks) and the tasks part is the last snapshot's.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { load, taskSource } from "./factory_config.ts";
@@ -297,13 +300,15 @@ function otherProjects(): Obj[] {
   return out;
 }
 
-export async function snapshot(): Promise<Obj> {
+/** The snapshot. `keptTasks`: the tasks part to give without reading the tracker (FACTORY_SNAPSHOT_TASKS=board). */
+export async function snapshot(keptTasks?: Obj | null): Promise<Obj> {
+  const skip = keptTasks !== undefined;
   const [ls, prs, ciStep, doc, taskStep] = await Promise.all([
     step(hook("factory_agents", "ls", "--json")),
     step(hook("factory_prs", "--json", "--fresh")), // read now: this snapshot is the web UI's own cache
     step(["bash", join(HOOKS, "..", "ci", "ci.sh"), "status", "--json"]),
     step(hook("factory_doctor")),
-    step(hook("factory_snapshot", "--tasks")),
+    skip ? Promise.resolve(null) : step(hook("factory_snapshot", "--tasks")),
   ]);
   const missing: Problem[] = [];
   const rows = sessions(ls, missing);
@@ -315,7 +320,7 @@ export async function snapshot(): Promise<Obj> {
   const limit = limited(missing);
   return {
     generatedAt: isoUtc(Date.now() / 1000), version: ver, sessions: rows ?? [], projects: otherProjects(), needsYou: needs, pulls: p.pulls, ci: ciData,
-    doctor: checks, tasks: tasks(taskStep), counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
+    doctor: checks, tasks: taskStep ? tasks(taskStep) : keptTasks ?? null, counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
       pulls: (p.pulls ?? []).length, needYou: needs.length },
     missing: limit?.missing ?? missing,
     ...(limit ? { limit: limit.limit } : {}),
@@ -350,7 +355,9 @@ export async function main(argv: string[]): Promise<number> {
     refuse("snapshot_usage", "factory snapshot takes no argument.",
       "Run `factory snapshot` for the snapshot as JSON, or `factory ui` to see it in a browser.", 2);
   }
-  const snap = keepLast(await snapshot(), readCache());
+  const last = readCache();
+  const fromBoard = process.env.FACTORY_SNAPSHOT_TASKS === "board";
+  const snap = keepLast(await snapshot(fromBoard ? (last?.tasks as Obj | null | undefined) ?? null : undefined), last);
   try {
     writeCache(snap);
   } catch (e) {

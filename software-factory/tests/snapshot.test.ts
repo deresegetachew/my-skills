@@ -166,6 +166,23 @@ test("the snapshot's tasks carry the epics, and a task's cites, for the web UI's
   expect((j.tasks.tasks as Row[]).find((t) => t.id === "7")?.cites).toEqual(["decision 0004"]);
 }, T);
 
+test("with FACTORY_SNAPSHOT_TASKS=board (the web UI reads them from the message board, #498) the tasks are not read: the last ones are kept", () => {
+  const s = scenario();
+  s.issues.push({ number: 7, title: "Add the login page", state: "open", labels: [{ name: "factory:ready" }], body: "", html_url: "https://github.com/o/r/issues/7" });
+  const p = setup(s);
+  const first = snapshot(p);
+  expect((first.tasks.tasks as Row[]).map((t) => t.id)).toContain("7");
+  expect((first.tasks.tasks as Row[]).map((t) => t.id)).not.toContain("8");
+  s.issues.push({ number: 8, title: "Sign out", state: "open", labels: [{ name: "factory:ready" }], body: "", html_url: "https://github.com/o/r/issues/8" });
+  writeFileSync(join(p.env.SNAPSHOT_SCENARIO as string), JSON.stringify(s));
+  const r = sh(["bash", join(SF, "factory"), "snapshot"], { cwd: p.d, env: { ...p.env, FACTORY_SNAPSHOT_TASKS: "board" }, timeoutMs: 120_000 });
+  expect(r.code, r.out).toBe(0);
+  const j = JSON.parse(r.stdout) as Row;
+  expect(j.tasks).toEqual(first.tasks);
+  const again = snapshot(p); // without it, the tracker is read again
+  expect((again.tasks.tasks as Row[]).map((t) => t.id)).toContain("8");
+}, T);
+
 test("doctor has the summary shape", () => {
   const p = setup(scenario());
   const dr = snapshot(p).doctor;

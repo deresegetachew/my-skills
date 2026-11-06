@@ -22,6 +22,8 @@ export interface TaskRow {
   group: string;
   todos: { done: number; all: number };
   dependsOn: string[];
+  /** The open tasks that block it, from the message board (#498); missing or [] on the GitHub path. */
+  blockedBy?: string[];
   url: string | null;
   pr: { number: number; url: string | null; checks?: { state: string; failing: string[] } } | null;
   next: boolean;
@@ -121,8 +123,8 @@ export interface ViewsData {
   age: number | null;
   refreshing: boolean;
   problems: ProblemView[];
-  tasks: { source: string; tasks: TaskRow[]; next: string | null; problems: ProblemView[] };
-  epics: { source: string; epics: EpicRow[]; problems: ProblemView[] };
+  tasks: { source: string; tasks: TaskRow[]; next: string | null; problems: ProblemView[] } & Origin;
+  epics: { source: string; epics: EpicRow[]; problems: ProblemView[] } & Origin;
   pulls: { pulls: PullRow[]; problems: ProblemView[] };
   ci: {
     verdict: { text: string; tone: string } | null;
@@ -137,6 +139,26 @@ export interface ViewsData {
     actions: ActionRow[];
     problems: ProblemView[];
   };
+}
+
+/** Where the tasks come from (#498): the message board, live, or GitHub, read every `every` seconds. Left out by an
+ *  older server. */
+export interface Origin {
+  from?: "board" | "github";
+  every?: number | null;
+}
+
+function everyText(seconds: number): string {
+  if (seconds < 120) return `${Math.round(seconds)} s`;
+  if (seconds < 7200 && seconds % 3600 !== 0) return `${Math.round(seconds / 60)} min`;
+  return `${Math.round(seconds / 3600)} h`;
+}
+
+/** "From the message board, live", or "From GitHub, read every 5 min"; "" when the server doesn't say. */
+export function originText(o: Origin): string {
+  if (o.from === "board") return "From the message board, live";
+  if (o.from === "github") return typeof o.every === "number" && o.every > 0 ? `From GitHub, read every ${everyText(o.every)}` : "From GitHub";
+  return "";
 }
 
 /** The rows whose `find` text holds every word of `typed`; nothing typed keeps them all. */
