@@ -106,13 +106,13 @@ test("up writes a hub: pinned image, JetStream on a volume, localhost and Tailsc
   expect(p.code, p.out).toBe(0);
   const compose = read(join(w.dir, "compose.yaml"));
   expect(compose).toMatch(/image: nats:\d+\.\d+\.\d+-alpine/);
-  for (const port of ["100.64.0.7:4222:4222", "127.0.0.1:8222:8222", "100.64.0.7:7422:7422"]) {
+  // This machine's agents on localhost (the agents' network guard keeps them off the tailnet); other machines on the
+  // Tailscale address, on its own port: Docker 29 refuses one host port on two addresses ("address already in use").
+  for (const port of ["127.0.0.1:4222:4222", "100.64.0.7:4223:4222", "127.0.0.1:8222:8222", "100.64.0.7:7422:7422"]) {
     expect(compose).toContain(`"${port}"`);
   }
-  // Docker 29 refuses one host port on two addresses ("address already in use"), so with Tailscale the agents' port is
-  // published on the Tailscale address only, which this machine's own agents reach as well.
-  expect(compose).not.toContain('"127.0.0.1:4222:4222"');
-  expect(p.stdout).toContain("Agents connect on nats://100.64.0.7:4222.");
+  expect(compose).not.toContain('"100.64.0.7:4222:4222"');
+  expect(p.stdout).toContain("This machine's agents connect on nats://127.0.0.1:4222; other machines on nats://100.64.0.7:4223.");
   expect(compose).not.toContain("0.0.0.0"); // never every interface of the host
   expect(compose).toContain("data:/data");
   const conf = read(join(w.dir, "conf", "nats-server.conf"));
@@ -121,8 +121,8 @@ test("up writes a hub: pinned image, JetStream on a volume, localhost and Tailsc
   expect(conf).not.toContain("authorization {\n"); // no keys yet: clients connect without one
   expect(dockerLog(w)).toContain("info");
   expect(dockerLog(w)).toContain(`compose --file ${join(w.dir, "compose.yaml")} --project-name factory-nats up -d`);
-  expect(p.stdout).toContain("nats://100.64.0.7:4222");
-  expect(p.stdout).toContain("--allow-host 100.64.0.7:4222"); // the network guard's allow rule
+  expect(p.stdout).toContain("nats://100.64.0.7:4223");
+  expect(p.stdout).toContain("--allow-host 100.64.0.7:4223"); // the network guard's allow rule
   expect(p.stdout).toContain("factory nats user add");
 });
 
