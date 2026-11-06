@@ -76,6 +76,8 @@ type Conn = "connecting" | "live" | "reconnecting";
 
 class Unauthorized extends Error {}
 
+const UNREACHABLE_FIX = "Check that the web UI still runs on the machine that serves this page, start it again there, then reload.";
+
 const TOKEN_KEY = "factory-ui-token";
 
 function storedToken(): string {
@@ -356,13 +358,14 @@ function ComingPage({ page, open }: { page: string; open: (channel: string) => v
 }
 
 /** PRD and decisions: a tab per section (the PRD, the decisions, the wiki), and a row per page that opens it. */
-function DocsIndex({ sections, open }: { sections: DocSection[]; open: (channel: string) => void }) {
-  const [tab, setTab] = useState(sections[0]?.id ?? "");
-  const s = sections.find((x) => x.id === tab) ?? sections[0];
-  if (!s) return <div className="body"><p className="empty">Reading the docs…</p></div>;
+function DocsIndex({ sections, open }: { sections: DocSection[] | undefined; open: (channel: string) => void }) {
+  const [tab, setTab] = useState("");
+  const s = sections?.find((x) => x.id === tab) ?? sections?.[0];
+  if (!sections) return <div className="body"><p className="empty">Reading the docs…</p></div>;
+  if (!s) return <div className="body"><p className="empty">No PRD, decisions or wiki could be read for this project. Reload the page to try again.</p></div>;
   return (
     <div className="body">
-      <Tabs label="Docs" value={s.id} onChange={setTab} tabs={sections.map((x) => ({ id: x.id, label: x.title, count: x.pages.length }))} />
+      <Tabs label="PRD and decisions" value={s.id} onChange={setTab} tabs={sections.map((x) => ({ id: x.id, label: x.title, count: x.pages.length }))} />
       {s.problem && <ProblemNotice p={s.problem} />}
       {!s.problem && !s.pages.length && <p className="empty">Nothing here yet.</p>}
       <ul className="lrows" aria-label={s.title}>
@@ -584,7 +587,7 @@ function App() {
         : { title: r.message ?? "It didn't run.", text: [r.fix, r.output].filter(Boolean).join("\n\n"), tone: "bad" });
     } catch (e) {
       signedOut(e);
-      if (!(e instanceof Unauthorized)) setToast({ title: "The server can't be reached.", text: "Is `factory ui` still running?", tone: "bad" });
+      if (!(e instanceof Unauthorized)) setToast({ title: "The server can't be reached.", text: UNREACHABLE_FIX, tone: "bad" });
     } finally {
       setBusy(false);
       setAsk(null);
@@ -596,7 +599,7 @@ function App() {
       return await call<Record<string, unknown>>(token, path, { method: "POST", body });
     } catch (e) {
       signedOut(e);
-      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: "Is `factory ui` still running?" };
+      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: UNREACHABLE_FIX };
     }
   };
   const viewChannel = (name: string) => {
@@ -738,9 +741,9 @@ function App() {
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
           : docRoute ? <DocPageView key={`${project.id}/${docRoute.id}`} project={project.id} id={docRoute.id} anchor={docRoute.anchor} get={get} pages={docPages}
             open={(c) => go(project.id, c)} />
-          : page === "docs" ? <DocsIndex key={project.id} sections={docsBy[project.id] ?? []} open={(c) => go(project.id, c)} />
+          : channel?.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
+          : page === "docs" ? <DocsIndex key={project.id} sections={docsBy[project.id]} open={(c) => go(project.id, c)} />
           : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
-          : channel.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} />
           : VIEW_CHANNELS[channel.name] ? viewChannel(channel.name)
