@@ -14,7 +14,7 @@
 // A sub-manager gets a screen (#307, PRD US-4): when the dev manager itself runs in a factory window (FACTORY_WINDOW, as
 // `factory resume` and `loop -i` start it) and tmux is installed, each sub-manager runs in its own tmux window, through
 // the shared step of factory_window.ts: session <repo>-<name>-<item>, window dev-manager-<name>-<item>. Its output is
-// shown there as readable lines and kept in <item>.out; `factory cockpit watch <item>` shows the window read-only.
+// shown there as readable lines and kept in <item>.out; `tmux attach -r` shows the window read-only.
 // Otherwise it runs with no screen, as before.
 //
 // With `pr` in messaging.kinds (NATS), the cycle starts the project's one pull request watcher (factory_pr_feed.ts) when
@@ -374,7 +374,7 @@ function inWindow(name: string, ref: string, job: Job, limit: number, out: Out):
     out(`${ref}: its window ${s.window} is still open from an earlier run; leaving it (tmux kill-session -t ${s.session} ends it)`);
     return "busy";
   }
-  out(`${ref}: running in tmux window ${s.window} (watch it read-only: factory cockpit watch ${ref})`);
+  out(`${ref}: running in tmux window ${s.window} (watch it read-only: tmux attach -r -t =${s.session})`);
   const deadline = limit > 0 ? Date.now() + limit * 1000 : Infinity;
   while (sessionRunning(s.session)) {
     if (existsSync(job.rc)) { // done; a tmux with remain-on-exit keeps the session, so close it here

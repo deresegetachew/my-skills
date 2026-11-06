@@ -1,11 +1,10 @@
-// What the CI view judges and what its actions run (#396), with no I/O and no UI: the cockpit's CI view
-// (cockpit/views/ci.tsx) draws it on a terminal and the web UI's CI channel (#424, factory_ui_views.ts) serves it, so
-// both say the same verdict and run the same commands. Its input is the `ci` part of the cockpit's snapshot (`factory ci
+// What the CI view judges and what its actions run (#396), with no I/O and no UI: the web UI's CI channel (#424,
+// factory_ui_views.ts) serves it. Its input is the `ci` part of the snapshot (`factory snapshot`, from `factory ci
 // status --json`, #304).
 
 type Obj = { [key: string]: unknown };
 
-/** The verdict's colour: the cockpit's styles of the same names. */
+/** The verdict's colour. */
 export type Tone = "green" | "amber" | "red";
 
 function obj(v: unknown): Obj {

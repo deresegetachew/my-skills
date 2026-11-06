@@ -1,6 +1,6 @@
 // Rework claims every machine sees (#355): starting a PR's rework posts a `factory-rework-claim` comment on the PR, a
 // loop skips a PR another agent holds, the claim is released when the run ends and expires after `claimStaleHours`, and
-// `factory claims list` and the cockpit's Pull requests view show who holds it. Two machines are two project folders
+// `factory claims list` and the snapshot's pull request rows (the web UI's channel) show who holds it. Two machines are two project folders
 // (two state folders) with their own FACTORY_MACHINE_ID and one fake GitHub.
 import { expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
@@ -220,10 +220,10 @@ test("factory claims list shows another machine's rework claim", () => {
   expect(line).toContain("dev-pc");
 }, T);
 
-// The cockpit's Pull requests view, with a fake gh that answers from a scenario (as cockpit_prs.test.ts does).
-const COCKPIT_GH = String.raw`#!/usr/bin/env bun
+// The snapshot the web UI's pull requests channel reads, with a fake gh that answers from a scenario.
+const SCENARIO_GH = String.raw`#!/usr/bin/env bun
 import { readFileSync } from "node:fs";
-const s = JSON.parse(readFileSync(process.env.COCKPIT_SCENARIO as string, "utf8"));
+const s = JSON.parse(readFileSync(process.env.GH_SCENARIO as string, "utf8"));
 const a = process.argv.slice(2);
 const out = (x: unknown): never => { console.log(JSON.stringify(x)); process.exit(0); };
 if (a[0] === "repo" && a[1] === "view") { console.log(a.includes("nameWithOwner") ? "o/r" : "main"); process.exit(0); }
@@ -237,7 +237,7 @@ if (path.endsWith("/files")) out([]);
 console.error("gh: Not Found (HTTP 404)"); process.exit(1);
 `;
 
-test("the cockpit's Pull requests view says who is reworking a PR, and on which machine", () => {
+test("the snapshot's pull request row says who is reworking it", () => {
   const root = tmp();
   const d = join(root, "work");
   mkdirSync(d);
@@ -260,14 +260,14 @@ test("the cockpit's Pull requests view says who is reworking a PR, and on which 
     ],
     repo: { default_branch: "main" },
   };
-  write(join(root, "bin", "gh"), COCKPIT_GH, 0o755);
+  write(join(root, "bin", "gh"), SCENARIO_GH, 0o755);
   writeFileSync(join(root, "scenario.json"), JSON.stringify(scenario));
   for (const sub of ["state", "home"]) mkdirSync(join(root, sub));
-  const env = envWith(join(root, "bin"), { COCKPIT_SCENARIO: join(root, "scenario.json"), XDG_STATE_HOME: join(root, "state"),
+  const env = envWith(join(root, "bin"), { GH_SCENARIO: join(root, "scenario.json"), XDG_STATE_HOME: join(root, "state"),
     HOME: join(root, "home"), XDG_CONFIG_HOME: join(root, "config"), FACTORY_AGENT: undefined, FACTORY_LOOP: undefined,
-    CLAUDE_PROJECT_DIR: undefined, FACTORY_AGENTS: undefined, FACTORY_CONFIG_DIR: undefined,
-    FACTORY_COCKPIT_CACHE_SECONDS: undefined, TMUX: undefined, NO_COLOR: undefined, COLUMNS: "160", LINES: "40" });
-  const r = sh(["bash", join(SF, "factory"), "cockpit", "--prs", "13"], { cwd: d, env, timeoutMs: 100_000 });
+    CLAUDE_PROJECT_DIR: undefined, FACTORY_AGENTS: undefined, FACTORY_CONFIG_DIR: undefined, TMUX: undefined });
+  const r = sh(["bash", join(SF, "factory"), "snapshot"], { cwd: d, env, timeoutMs: 170_000 });
   expect(r.code, r.out).toBe(0);
-  expect(r.stdout).toMatch(/haile on dev-pc .*reworking/);
-}, T);
+  const row = (JSON.parse(r.stdout) as { pulls: Record<string, unknown>[] }).pulls.find((x) => x.number === 13);
+  expect(row, r.stdout).toMatchObject({ rework: "haile" });
+}, 180_000);

@@ -37,7 +37,8 @@ A change that breaks one of these is wrong even if the tests pass.
 
 - **No new dependencies.** Bun is the only runtime (plus bash): Bun and Node built-ins only, no npm package at
   runtime. The dev-only `typescript` and `@types/bun` (for `tsc --noEmit` in CI) are never installed in a project.
-  **One exception (decision 0002):** the cockpit's sidebar and views use Ink and React, as build-time dependencies.
+  **One exception (decisions 0002, 0005):** the web app (`factory ui`, `software-factory/web/`) uses React and
+  react-dom, as build-time dependencies (the tmux cockpit and its Ink views were retired, #425).
   The release bundles them into one JavaScript file with `bun build`, so a project still installs no npm package and
   gets no `node_modules`. Nothing else may import them, and no other package is added this way without the owner.
 - **Tests are never weakened, skipped or deleted** to make a change pass. Failing tests come first; a bug fix adds

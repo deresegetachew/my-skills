@@ -17,7 +17,7 @@ export interface Project {
   root: string;
   d: string;
   env: Env;
-  /** This project's state folder ($XDG_STATE_HOME/<repo>-factory): heartbeat.json, cockpit.json. */
+  /** This project's state folder ($XDG_STATE_HOME/<repo>-factory): heartbeat.json, snapshot.json. */
   state: string;
   /** What the fake `factory` script was asked, one line per call. */
   factoryLog: string;
@@ -111,7 +111,12 @@ function stopAll(): void {
   for (const p of RUNNING) p.kill(9);
   RUNNING.clear();
 }
-afterAll(stopAll);
+// After the tests, wait until each server has really exited, so nothing is left even for a moment.
+afterAll(async () => {
+  const left = [...RUNNING];
+  stopAll();
+  await Promise.all(left.map((p) => p.exited));
+});
 process.on("exit", stopAll);
 
 /** Runs `factory ui` (the hook itself, or through `cmd`) in the project and waits for its address and token. */

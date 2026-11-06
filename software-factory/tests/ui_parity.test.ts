@@ -52,7 +52,7 @@ function rows(): Row[] {
 
 test("the help lists commands this test can read", () => {
   const cmds = helpCommands();
-  for (const c of ["loop", "settings pr", "ci use local","owner merge", "rereview plan", "cockpit --prs", "doctor", "update"]) {
+  for (const c of ["loop", "settings pr", "ci use local","owner merge", "rereview plan", "usage --task", "doctor", "update"]) {
     expect(cmds).toContain(c);
   }
   expect(cmds.length).toBeGreaterThan(60);

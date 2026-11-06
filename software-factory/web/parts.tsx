@@ -6,7 +6,9 @@ import { Avatar } from "./avatar_view.tsx";
 import type { Chat } from "./chat.tsx";
 import { type Check, type ConfirmSpec, confirmState, type TalkItem, talkText } from "./parts_model.ts";
 
-export type DotState = "working" | "waiting" | "idle" | "down";
+/** A state's dot; "red" is the one accent for the single thing that needs the owner, and "ink" a finished thing that
+ * failed (dark, so a list of results stays calm). */
+export type DotState = "working" | "waiting" | "idle" | "down" | "red" | "ink";
 
 /** An 8px dot in a state's colour, beside words that say the same. */
 export function StatusDot({ state }: { state: DotState }) {
@@ -43,11 +45,12 @@ export function Chips<T extends string>({ chips, value, onChange, label }: { chi
 }
 
 /** One row of a list: avatar, title, one grey line, one status, one action. Everything else is on the item's page. */
-export function ListRow({ avatar, title, sub, status, action }: { avatar?: { name: string; role?: string } | null; title: ReactNode;
-  sub?: ReactNode; status?: { state: DotState; text: string } | null; action?: ReactNode }) {
+export function ListRow({ avatar, lead, title, sub, status, action }: { avatar?: { name: string; role?: string } | null;
+  /** In the avatar's place, for a row about a thing (an artifact's icon). */
+  lead?: ReactNode; title: ReactNode; sub?: ReactNode; status?: { state: DotState; text: string } | null; action?: ReactNode }) {
   return (
     <li className="lrow">
-      <span className="lrow-who">{avatar ? <Avatar name={avatar.name} role={avatar.role} size={32} /> : null}</span>
+      <span className="lrow-who">{lead ?? (avatar ? <Avatar name={avatar.name} role={avatar.role} size={32} /> : null)}</span>
       <span className="lrow-main"><span className="lrow-title">{title}</span>{sub && <span className="lrow-sub">{sub}</span>}</span>
       {status && <span className="lrow-status"><StatusDot state={status.state} />{status.text}</span>}
       {action && <span className="lrow-action">{action}</span>}
@@ -157,6 +160,8 @@ export const PARTS_CSS = String.raw`
 .sdot.working { background: var(--working); }
 .sdot.waiting { background: var(--waiting); }
 .sdot.down { background: var(--down); }
+.sdot.red { background: var(--red-dot); }
+.sdot.ink { background: var(--text); }
 
 .tabs { display: flex; gap: 28px; border-bottom: 1px solid var(--border); overflow-x: auto; }
 .tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;
