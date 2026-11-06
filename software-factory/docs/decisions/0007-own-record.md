@@ -1,9 +1,9 @@
 # 0007: The factory's own record: a task and messaging framework on Postgres, with GitHub for code
 
-Date: 6 Nov 2026. Status: **proposed** (draft PR; the owner approved the direction on #472, 6 Nov: "Yes, this is
-important, go for it, and scalable. It should be part of the initial setup: when we start a new factory and connect
-GitHub we should be able to import issues or tasks."). The decision itself needs the owner's yes before any building
-starts. Epic #472. Product half: mentewab (product owner). Technical half: fasil (dev manager), who reviews this draft.
+Date: 6 Nov 2026. Status: **accepted** (the owner, 6 Nov: "yesss pls", in the owner's session, after reading a summary of this record).
+The direction was approved on #472 the same day: "Yes, this is important, go for it, and scalable. It should be part of
+the initial setup: when we start a new factory and connect GitHub we should be able to import issues or tasks." Epic
+#472. Product half: mentewab (product owner). Technical half: the owner's session (point 10), from fasil's answers.
 Decision number 0006 is kept for the web UI amendment proposed on #293 (ask `web-ui-design-449-scope`).
 
 **Builds on 0003** (ports and adapters) and **amends 0004** (NATS becomes an optional adapter for live delivery, not
