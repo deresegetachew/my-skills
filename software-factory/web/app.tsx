@@ -14,6 +14,7 @@ import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
 import type { DocSection } from "./docs_model.ts";
+import { INTEGRATIONS_CHANNEL, INTEGRATIONS_CSS, IntegrationsPage } from "./integrations.tsx";
 import { CSS } from "./style.ts";
 import { CiChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
 import { searchRows, type ViewsData } from "./views_model.ts";
@@ -469,6 +470,7 @@ function App() {
   const docRoute = route ? parseDocChannel(route.channel) : null;
   const docPages = pagesOf(docsBy[project.id]);
   const docPage = docRoute ? docPages.find((d) => d.id === docRoute.id) : undefined;
+  const settingsRoute = route?.channel === INTEGRATIONS_CHANNEL; // Factory settings: Integrations (#441)
   const channel = view.channels.find((c) => c.id === route?.channel) ?? view.channels[0];
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
@@ -618,6 +620,12 @@ function App() {
                 ))}
                 {(docsBy[project.id] ?? []).filter((s) => s.problem).map((s) => <p key={s.id} className="sub docs-problem" title={s.problem?.fix}>{s.title}: {s.problem?.message}</p>)}
               </div>
+              <div className="section">
+                <h2>Factory settings</h2>
+                <button className="chan" aria-current={settingsRoute} onClick={() => go(project.id, INTEGRATIONS_CHANNEL)}>
+                  <span className="hash">#</span><span className="name">Integrations</span>
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -632,12 +640,13 @@ function App() {
           <div className="grow">
             <h2>{docRoute ? <span className="hash">§</span>
               : channel?.kind === "agent" ? <Avatar name={channel.name} role={channel.role} size={26} /> : <span className="hash">#</span>}
-              {docRoute ? docPage?.title ?? docRoute.id : channel?.title ?? "—"}</h2>
-            <div className="subtitle">{docRoute ? `Docs · ${project.name}` : subtitle}</div>
+              {settingsRoute ? "Integrations" : docRoute ? docPage?.title ?? docRoute.id : channel?.title ?? "—"}</h2>
+            <div className="subtitle">{settingsRoute ? `Factory settings · ${project.name}` : docRoute ? `Docs · ${project.name}` : subtitle}</div>
           </div>
-          {!docRoute && channel?.kind === "agent" && live && !project.problem && agentActions(agent, channel, project, setAsk)}
+          {!docRoute && !settingsRoute && channel?.kind === "agent" && live && !project.problem && agentActions(agent, channel, project, setAsk)}
         </header>
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
+          : settingsRoute ? <IntegrationsPage key={project.id} project={project} get={get} post={post} open={(c) => go(project.id, c)} />
           : docRoute ? <DocPageView key={`${project.id}/${docRoute.id}`} project={project.id} id={docRoute.id} anchor={docRoute.anchor} get={get} pages={docPages}
             open={(c) => go(project.id, c)} />
           : !channel ? <div className="body"><p className="empty">This project has no channels.</p></div>
@@ -675,6 +684,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = CSS + VIEWS_CSS + DOCS_CSS + AVATAR_CSS;
+style.textContent = CSS + VIEWS_CSS + DOCS_CSS + AVATAR_CSS + INTEGRATIONS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

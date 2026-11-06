@@ -248,7 +248,8 @@ export function roleOf(p: UiProject, name: string, seen: Agent[] = []): string |
 
 // --- live state --------------------------------------------------------------------------------------------------------
 
-function hooksOf(p: UiProject): string {
+/** The hooks folder that reads project `p`: its own for a project in `ui.projects` that has one, else this one. */
+export function hooksOf(p: UiProject): string {
   const own = join(p.path, ".claude", "hooks");
   return !p.current && existsSync(join(own, "factory_agents.ts")) ? own : HOOKS;
 }
