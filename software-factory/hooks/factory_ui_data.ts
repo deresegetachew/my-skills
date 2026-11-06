@@ -138,33 +138,53 @@ export function uiSetting(cfg: Config, key: "projects" | "port" | "pollSeconds")
   return obj(cfg.ui)[key];
 }
 
-/** This project (at `root`, its settings `cfg`) and each project in `ui.projects`, each with an id unique among them. */
+/** This project (at `root`, its settings `cfg`), each project in `ui.projects` and each one added from the page (#447,
+ * addedPaths()), each with an id unique among them. */
 export function projects(cfg: Config, root: string): UiProject[] {
   const listed = uiSetting(cfg, "projects");
   const paths = Array.isArray(listed) ? listed.filter((p): p is string => typeof p === "string" && p.trim() !== "") : [];
   const out: UiProject[] = [];
-  const taken = new Set<string>();
-  const add = (path: string, current: boolean, config: Config | null, problem: Problem | null): void => {
-    const name = repoName(path);
-    let id = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "project";
-    for (let n = 2; taken.has(id); n++) id = `${id.replace(/-\d+$/, "")}-${n}`;
-    taken.add(id);
-    out.push({ id, name, path, current, problem, config });
-  };
-  add(root, true, cfg, null);
-  for (const given of paths) {
+  out.push({ id: idFor(out, repoName(root)), name: repoName(root), path: root, current: true, problem: null, config: cfg });
+  for (const given of [...paths, ...addedPaths(root)]) {
     const path = resolve(root, given.replace(/^~(?=\/|$)/, homedir()));
-    if (realpathOr(path) === realpathOr(root)) continue;
-    if (!existsSync(path)) {
-      add(path, false, null, { code: "ui_project_missing", message: `${path} isn't there.`,
-        fix: `Fix the path in ui.projects (factory settings set ui.projects '[...]'), or clone the project there.` });
-      continue;
-    }
-    const config = configAt(path);
-    add(path, false, config, config ? null : { code: "ui_project_not_factory", message: `${path} has no .claude/factory.json, so it doesn't run the factory.`,
-      fix: `Install the factory there (install.sh), or take it out of ui.projects.` });
+    if (!out.some((p) => realpathOr(p.path) === realpathOr(path))) out.push(projectAt(out, path));
   }
   return out;
+}
+
+/** An id for `name` that no project in `list` has. */
+function idFor(list: UiProject[], name: string): string {
+  let id = name.toLowerCase().replace(/[^a-z0-9._-]+/g, "-") || "project";
+  for (let n = 2; list.some((p) => p.id === id); n++) id = `${id.replace(/-\d+$/, "")}-${n}`;
+  return id;
+}
+
+/** The project at `path` beside those in `list` (not added to it): with what to do when it isn't there or doesn't run
+ * the factory. */
+export function projectAt(list: UiProject[], path: string): UiProject {
+  const name = repoName(path);
+  const id = idFor(list, name);
+  if (!existsSync(path)) {
+    return { id, name, path, current: false, config: null, problem: { code: "ui_project_missing", message: `${path} isn't there.`,
+      fix: `Fix the path in ui.projects (factory settings set ui.projects '[...]'), or clone the project there.` } };
+  }
+  const config = configAt(path);
+  return { id, name, path, current: false, config, problem: config ? null : { code: "ui_project_not_factory",
+    message: `${path} has no .claude/factory.json, so it doesn't run the factory.`,
+    fix: `Install the factory there (install.sh), or take it out of ui.projects.` } };
+}
+
+/** The file that keeps the projects added from the page (#447): <git common dir>/factory/ui-projects.json, a JSON list
+ * of paths, beside the token. Kept on this machine, not in .claude/factory.json: adding a project changes no setting. */
+export function addedFile(root: string): string {
+  const g = run(["git", "-C", root, "rev-parse", "--git-common-dir"]);
+  return join(resolve(root, g.code === 0 && g.stdout.trim() ? g.stdout.trim() : ".git"), "factory", "ui-projects.json");
+}
+
+/** The paths added from the page, in the order they were added. */
+export function addedPaths(root: string): string[] {
+  const raw = readJson(addedFile(root));
+  return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === "string" && p.trim() !== "") : [];
 }
 
 /** The repository's name, as factory_machine.ts's repoKey() has it: the folder holding its git common dir, so a worktree

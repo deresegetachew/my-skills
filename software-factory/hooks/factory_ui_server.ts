@@ -16,6 +16,8 @@
 //                                              project, ...} for the tasks, pull requests and CI channels
 //   GET  /api/projects/:p/docs, .../docs/page?id=, .../docs/search?q=: the PRD, the decisions and the wiki (factory_ui_docs.ts, #438)
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
+//   GET|POST /api/add-project[/check|/runs/:id[/retry]]: add a project from the page (factory_ui_add.ts, #447); the
+//                                              WebSocket gets {type: "add-project", run} and {type: "projects"}
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
@@ -23,6 +25,7 @@
 // port; this loop reads the same data functions the cockpit does.)
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
+import { AddRuns } from "./factory_ui_add.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
@@ -107,7 +110,8 @@ interface Kept {
 
 /** Starts the server on every host in `o.hosts`, on one port. */
 export function serve(o: ServeOptions): Running {
-  const byId = new Map(o.projects.map((p) => [p.id, p]));
+  const list = [...o.projects]; // grows when a project is added from the page (#447)
+  const byId = new Map(list.map((p) => [p.id, p]));
   const kept = new Map<string, Kept>();
   const reading = new Map<string, Promise<Kept>>();
   const servers: Server<undefined>[] = [];
@@ -138,7 +142,7 @@ export function serve(o: ServeOptions): Running {
   }
 
   async function tick(): Promise<void> {
-    for (const p of o.projects) {
+    for (const p of list) {
       const before = kept.get(p.id)?.text;
       const now = await state(p, 0);
       if (now.text !== before) for (const s of servers) s.publish(TOPIC, message(p, now.data));
@@ -161,6 +165,22 @@ export function serve(o: ServeOptions): Running {
     for (const s of servers) s.publish(TOPIC, text);
   }
 
+  // adding a project (#447)
+  const adds = new AddRuns({
+    serving: list.find((p) => p.current) ?? list[0] as UiProject,
+    projects: () => list,
+    list: (p) => {
+      list.push(p);
+      byId.set(p.id, p);
+      for (const s of servers) s.publish(TOPIC, JSON.stringify({ type: "projects" }));
+      if (clients) void tick();
+    },
+    publish: (m) => {
+      const text = JSON.stringify(m);
+      for (const s of servers) s.publish(TOPIC, text);
+    },
+  });
+
   function seen(p: UiProject): Agent[] {
     return kept.get(p.id)?.data.agents ?? [];
   }
@@ -173,10 +193,15 @@ export function serve(o: ServeOptions): Running {
       if (server.upgrade(req, { data: undefined })) return undefined;
       return problem(400, "ui_ws_upgrade", "This address is a WebSocket.", "Connect to it with a WebSocket client.");
     }
+    if (parts[0] === "add-project") {
+      const r = await adds.api(req, parts.slice(1));
+      return r ? json(r.status, r.body) : problem(404, "not_found", `There is no ${req.method} ${url.pathname}.`,
+        "Adding a project is GET or POST /api/add-project, POST /api/add-project/check, GET /api/add-project/runs/:id and POST .../retry.");
+    }
     if (parts[0] !== "projects") return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
     if (parts.length === 1) {
       if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
-      return json(200, { projects: o.projects.map((p) => ({ id: p.id, name: p.name, path: p.path, current: p.current, problem: p.problem })) });
+      return json(200, { projects: list.map((p) => ({ id: p.id, name: p.name, path: p.path, current: p.current, problem: p.problem })) });
     }
     const p = byId.get(parts[1] ?? "");
     if (!p) return problem(404, "ui_project_unknown", `There is no project ${parts[1]} here.`, "GET /api/projects lists them; add one with ui.projects.");
@@ -270,9 +295,9 @@ export function serve(o: ServeOptions): Running {
     async open(ws: ServerWebSocket<undefined>): Promise<void> {
       clients++;
       ws.subscribe(TOPIC);
-      ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: o.projects.map((p) => p.id) }));
+      ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: list.map((p) => p.id) }));
       if (!timer) timer = setInterval(() => void tick(), o.pollSeconds * 1000);
-      for (const p of o.projects) {
+      for (const p of list) {
         refresher.ifStale(p);
         if (ws.readyState === 1) ws.send(viewsMessage(p));
         const s = await state(p, o.pollSeconds * 1000);
