@@ -6,7 +6,7 @@ import { afterAll, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { api, CONFIG, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
-import { write } from "./support.ts";
+import { write, writeExe } from "./support.ts";
 
 const T = 60_000;
 const running: Running[] = [];
@@ -188,6 +188,26 @@ test("a bad agent name in factory.json is left out of reassign and doesn't stop 
   const r = await act(ui, "7", "reassign", { confirm: true, agent: "taytu" });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(calls(p)).toEqual(["issues release 7 reassigned to taytu from the web UI", "say taytu /next-task issue-7"]);
+}, T);
+
+test("a task id that isn't an issue number is 404 ui_task_unknown and nothing runs", async () => {
+  const { ui, p } = await started();
+  for (const id of ["-7", "7 ", "--help", "1.3"]) expectRefusal(await act(ui, encodeURIComponent(id), "release"), 404, "ui_task_unknown");
+  expect(factoryCalls(p)).toEqual([]);
+}, T);
+
+test("a reason with spaces reaches factory as one argument, and the agent and the message as one each", async () => {
+  const p = project();
+  roots.push(p.root);
+  cache(p, "issues");
+  // this fake logs each argument between bars, so a reason split into words shows
+  writeExe(join(p.d, "factory"), `#!/usr/bin/env bash\nline=""\nfor a in "$@"; do line="$line|$a"; done\necho "$line|" >> "$FAKE_FACTORY_LOG"\n`);
+  const ui = await startUi(p, ["--port", "0"]);
+  running.push(ui);
+  expect((await act(ui, "10", "block", { confirm: true, reason: "needs the Stripe keys" })).status).toBe(200);
+  expect((await act(ui, "7", "reassign", { confirm: true, agent: "taytu" })).status).toBe(200);
+  expect(factoryCalls(p).filter((c) => !c.startsWith("|cockpit|"))).toEqual(["|issues|block|10|needs the Stripe keys|",
+    "|issues|release|7|reassigned to taytu from the web UI|", "|say|taytu|/next-task issue-7|"]);
 }, T);
 
 test("an action needs the token, and nothing runs without it", async () => {

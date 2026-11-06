@@ -24,15 +24,15 @@ function Dot({ tone }: { tone: Tone }) {
   return <span className={`dot ${tone}`} aria-hidden="true" />;
 }
 
-/** What the action does and doesn't do, in plain words, for the confirm. */
+/** What the action does and doesn't do, in plain words, for the confirm. The commands change the issue's labels and
+ *  claim; they don't stop a session that is working on it, so the confirm says so. */
 function whatHappens(a: Ask, agent: string): string {
   const id = `#${a.task.id}`;
   const who = a.task.holders[0];
-  if (a.action === "release") {
-    return `${id} goes back to Ready${who ? ` and ${who} lets go of it` : ""}; the next free agent takes it. Its branch and pull request stay.`;
-  }
-  if (a.action === "block") return `${id} moves to Blocked with your reason${who ? `, and ${who} stops on it` : ""}. Nothing is deleted: Release puts it back to Ready.`;
-  return `${id} goes back to Ready, then ${agent || "the agent you pick"} is told to take it.${who ? ` ${who}'s branch stays.` : ""}`;
+  const running = who ? ` ${who}'s claim comes off, but a session already working on it isn't stopped.` : "";
+  if (a.action === "release") return `${id} goes back to Ready and the next free agent takes it.${running} Its branch and pull request stay.`;
+  if (a.action === "block") return `${id} moves to Blocked with your reason.${running} Nothing is deleted: Release puts it back to Ready.`;
+  return `${id} goes back to Ready, then ${agent || "the agent you pick"} is told to take it.${running}${who ? ` ${who}'s branch stays.` : ""}`;
 }
 
 /** The confirm for one card's action: a reason for block (needed) and release (optional), an agent for reassign. */

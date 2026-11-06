@@ -464,7 +464,7 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
     return refusal(400, "confirm_needed", `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
   }
   const part = obj(cacheOf(p)?.tasks);
-  const task = list(part.tasks).find((t) => str(t.id) === id);
+  const task = /^\d+$/.test(id) ? list(part.tasks).find((t) => str(t.id) === id) : undefined; // an issue number, never an option
   if (!task) {
     return refusal(404, "ui_task_unknown", `#${id} isn't one of ${p.name}'s tasks in the last snapshot.`, "Read the board again, then pick a task it shows.");
   }
