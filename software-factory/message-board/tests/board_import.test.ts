@@ -57,9 +57,12 @@ if (!u.pathname.startsWith(base)) { console.error("gh: Not Found (HTTP 404)"); p
 const p = u.pathname.slice(base.length);
 if (p === "issues") {
   const st = q.get("state") || "open";
-  out((db.issues as Row[]).filter((i) => st === "all" || (i.state || "open") === st).filter((i) => !since || i.updated_at >= since));
+  const list = (db.issues as Row[]).filter((i) => st === "all" || (i.state || "open") === st).filter((i) => !since || i.updated_at >= since);
+  if (process.env.FAKE_GH_DUP === "1" && list[0]) list.push(list[0]); // a page that shifted under a live repo
+  out(list);
 }
 const one = /^issues\/(\d+)$/.exec(p);
+if (one && process.env.FAKE_GH_FAIL_ISSUE === one[1]) { console.error("gh: Bad Gateway (HTTP 502)"); process.exit(1); }
 if (one) { const i = (db.issues as Row[]).find((x) => x.number === Number(one[1])); if (!i) { console.error("gh: Not Found (HTTP 404)"); process.exit(1); } out(i); }
 if (p === "issues/comments") out((db.comments as Row[]).filter((c) => !since || (c.updated_at || c.created_at) >= since));
 console.error("gh: Not Found (HTTP 404)"); process.exit(1);
@@ -176,6 +179,8 @@ async function migrated(): Promise<string> {
 test("help lists the import verb", () => {
   const r = run(world(null), ["help"]);
   expect(r.stdout).toContain("factory board import github [--closed] [--dry-run]");
+  expect(r.stdout).toContain("GitHub wins on status unless the task is held on the board");
+  expect(r.stdout).toContain("comments deleted on GitHub stay on the board");
 });
 
 test("a first import brings the open issues as tasks, with states, edges, parents, threads and markers", async () => {
@@ -451,4 +456,68 @@ test("Board.import keeps the board's rules: a loop is left out, a bad batch is r
   } finally {
     await b.end();
   }
+});
+
+test("an edited reply whose question is on an issue with no new comments keeps its link", async () => {
+  const url = await migrated();
+  const fx = fixture();
+  fx.comments.push(comment(2, "<!-- factory-msg v=1 id=q-2 kind=question from=haile to=po state=submitted ref=issue#2 -->\nWhich page size?"));
+  const answer = comment(3, "<!-- factory-msg v=1 id=a-2 kind=answer from=po to=haile state=completed in-reply-to=q-2 -->\n100.");
+  fx.comments.push(answer);
+  const w = world(url, fx);
+  expect(importGithub(w).code).toBe(0);
+  const id = async (n: number): Promise<number> => ((await byRef(url)).get(ref(n)) as Task).id;
+  const q = (await look(url, async (b) => b.thread({ task: await id(2) }))).find((m) => m.body.includes("Which page size?")) as Message;
+  Object.assign(answer, { body: String(answer.body) + " Edited.", updated_at: new Date().toISOString() });
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  const r = importGithub(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect(r.stdout).toMatch(/messages\s+0 new, 1 updated/);
+  const a = (await look(url, async (b) => b.thread({ task: await id(3) }))).find((m) => m.body.includes("Edited.")) as Message;
+  expect(a.inReplyTo).toBe(q.id);
+});
+
+test("an issue GitHub answers 404 for is gone; any other failure stops the run and writes nothing", async () => {
+  const url = await migrated();
+  const fx = fixture();
+  const w = world(url, fx);
+  importGithub(w);
+  const i6 = fx.issues.find((i) => i.number === 6) as Record<string, unknown>;
+  i6.state = "closed";
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  const before = await counts(url);
+  const bad = importGithub(w, [], { FAKE_GH_FAIL_ISSUE: "6" });
+  expect(bad.code).toBe(1);
+  expect(err(bad).code).toBe("gh-failed");
+  expect(err(bad).fix).toContain("Nothing was written");
+  expect(await counts(url)).toEqual(before);
+  fx.issues = fx.issues.filter((i) => i.number !== 6);
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  const gone = importGithub(w);
+  expect(gone.code, gone.stderr).toBe(0);
+  expect(gone.stdout).toContain("1 task whose issue GitHub no longer has");
+});
+
+test("repo names: parts of only dots are refused; case doesn't make a second set of tasks", async () => {
+  const url = await migrated();
+  const w = world(url);
+  for (const bad of ["../widgets", "acme/..", "./x"]) {
+    const r = run(w, ["import", "github", "--repo", bad]);
+    expect(r.code).toBe(1);
+    expect(err(r).code).toBe("bad-input");
+  }
+  expect(calls(w)).toEqual([]);
+  expect(importGithub(w).stdout).toMatch(/tasks\s+7 new/);
+  const r = run(w, ["import", "github", "--repo", "Acme/Widgets"]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(r.stdout).toMatch(/tasks\s+0 new, 0 updated, 7 unchanged/);
+  expect((await counts(url)).tasks).toBe(7);
+});
+
+test("an issue listed twice while paging is taken once", async () => {
+  const url = await migrated();
+  const w = world(url);
+  const r = importGithub(w, [], { FAKE_GH_DUP: "1" });
+  expect(r.code, r.stderr).toBe(0);
+  expect(r.stdout).toMatch(/tasks\s+7 new/);
 });
