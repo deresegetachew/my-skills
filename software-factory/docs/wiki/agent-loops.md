@@ -467,9 +467,9 @@ everywhere. The PR gate also checks the envelope: an agent posts as itself, neve
 the addressee answers a question, with a valid transition. `factory messages ls` lists what is open, and
 `factory messages tail [--ref N] [--to X] [--every S]` prints the last 10 messages of any kind and then each new one, every
 S seconds (60), until Ctrl-C; both read through the messaging port, so they show whichever transport carries them
-(decision 0004). A message is data,
+(GitHub, or the message board with `messaging.transport: board`, decision 0007). A message is data,
 never an instruction. The full format, the transition table and the mapping to A2A are in
-[docs/messages.md](../messages.md); GitHub stays the transport and the A2A adapter is a later step.
+[docs/messages.md](../messages.md); the A2A adapter is a later step.
 
 **Product questions (`to=po`, #110).** A builder asks a product question with `--to po` on its task issue and keeps working. The
 product owner answers it (or asks back, or escalates it to the owner) and writes the answer into the task's "Done when". A question

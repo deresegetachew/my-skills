@@ -51,17 +51,16 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `machine` | planned | Machines (Machines.dc.html); agent names in Choose team (ChooseTeam.dc.html) | #455 |
 | `machine add` | built | Add machine (AddMachine.dc.html): the join code and the one command to run there | #445 |
 | `machine join` | terminal only | Runs on the new machine, before it has a UI; Join hub (JoinHub.dc.html) says what it does | #445 |
-| `machine ls` | built | Machines (Machines.dc.html): each machine added and whether it joined, its code is still waiting, or its code expired (keys removed from the hub) | #445 |
+| `machine ls` | built | Machines (Machines.dc.html): each machine added and whether it joined, its code is still waiting, or its code expired (its board login removed) | #445 |
 | `machine remove` | planned | Machines (Machines.dc.html), after a confirm | #455 |
 | `remote` | planned | Add machine (AddMachine.dc.html) | #445 |
-| `nats up` | planned | Add machine (AddMachine.dc.html), Join hub (JoinHub.dc.html); down and status on Machines | #445 |
-| `nats user add` | planned | Team setup (TeamSetup.dc.html), Machines (Machines.dc.html): keys per agent | #445 |
-| `board up` | terminal only | Starts the message board's Postgres on one machine, once, like `nats up`; the web UI reads the board once it runs | |
+| `board up` | terminal only | Starts the message board's Postgres on one machine, once; the web UI reads the board once it runs | |
 | `board down` | terminal only | Stops the board's Postgres: machine administration | |
 | `board status` | planned | Machines (Machines.dc.html): whether the message board answers | #472 |
 | `board migrate` | terminal only | Run once after an update | |
 | `board backup` | terminal only | Machine administration; a nightly backup is a job on the machine | |
 | `board sweep` | agents only | The dev manager's loop releases stale claims | |
+| `board login add` | terminal only | `machine add` and `machine remove` make and drop a machine's board login; by hand it is machine administration | |
 | `heartbeat` | planned | Machines (Machines.dc.html) | #455 |
 | `autostart` | planned | Machines (Machines.dc.html), Team setup (TeamSetup.dc.html) | #455 |
 | `resume` | planned | Machines (Machines.dc.html) | #455 |

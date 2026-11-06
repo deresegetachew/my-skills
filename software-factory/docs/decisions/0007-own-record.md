@@ -6,8 +6,8 @@ the initial setup: when we start a new factory and connect GitHub we should be a
 #472. Product half: mentewab (product owner). Technical half: the owner's session (point 10), from fasil's answers.
 Decision number 0006 is kept for the web UI amendment proposed on #293 (ask `web-ui-design-449-scope`).
 
-**Builds on 0003** (ports and adapters) and **amends 0004** (NATS becomes an optional adapter for live delivery, not
-required) and PRD D10 ("GitHub is the record").
+**Builds on 0003** (ports and adapters) and **supersedes 0004** (NATS first became an optional adapter for live
+delivery; it was removed on 6 Nov 2026, #504) and amends PRD D10 ("GitHub is the record").
 
 ## Context
 
@@ -67,12 +67,12 @@ factory-message-board.
 | Tasks, epics, subtasks, state (ready, in progress, in review, blocked, done), who holds what, dependencies, the order `factory next` gives | **Postgres** |
 | Every conversation about a task: questions, answers, hand-offs, the PO's proposals, the owner queue, the dev manager's notes | **Postgres** |
 | A pull request's back-and-forth: builder questions, must-fix lists, rework notes, next steps | **Postgres** |
-| Wake-ups, claims and live change events | **Postgres** (point 3); NATS optional |
+| Wake-ups, claims and live change events | **Postgres** (point 3); NATS removed (#504) |
 | Code, branches, the pull request itself, CI, the dev manager's final verdict and the review labels the Factory guard and the PR gate read | **GitHub** |
 
 The PR gate still trusts only GitHub. Nothing written in the database changes what may merge, as with NATS (0004 point 2).
 
-### 3. Postgres for the record and for live delivery; NATS stays optional
+### 3. Postgres for the record and for live delivery; NATS removed
 
 fasil compared the two on #472 (comment 6683448149). In both options every agent already holds a Postgres connection,
 because the record is there, so using it for live delivery adds no connection or service.
@@ -82,7 +82,10 @@ because the record is there, so using it for live delivery adds no connection or
 - **Claims** are one transaction: insert, or take over only when the old claim has expired, with the claims history
   written in the same transaction (a real compare-and-set, which closes 0004's gap where any agent could overwrite a
   claim).
-- **NATS stays as an optional adapter** behind the same ports for now. Nothing merged is deleted. The owner asked
+- **NATS was removed (the owner, 6 Nov 2026; #504),** before the board went live, so the factory never runs half on one
+  and half on the other. The board carries wake-ups, claims and the pull request feed (#500); `messaging.transport`
+  takes `github` or `board`, and machines join the hub with board logins (`factory machine add|join`). What follows was
+  the first answer, kept as history: NATS stayed as an optional adapter behind the same ports for a while. The owner asked
   (6 Nov) whether NATS is needed once Postgres is in. The answer: not at our size. NATS can store messages and do
   compare-and-set claims, but it can't answer the questions the record is for (the ready list, what blocks what, "on me"
   and "delegated") without our own code keeping copies in shape for each. Skein, the closest product, keeps Postgres as

@@ -101,9 +101,8 @@ class Component extends DCLogic {
       code: 'K7QM-4D2P',
       joinSteps: [
         step('Code made on dev-pc', 'done'),
-        step('office-pc reaches the hub (looking every few seconds)', 'now'),
-        step('office-pc makes its key; the hub signs it', 'later'),
-        step('A NATS leaf starts on office-pc and connects', 'later')
+        step('office-pc reaches the message board (looking every few seconds)', 'now'),
+        step('office-pc connects with its own board login', 'later')
       ],
       others: [
         { title: 'A cloud agent', body: 'An agent running on claude.ai: paste its session link and the team can follow it and talk to it.', action: 'Add cloud agent' },

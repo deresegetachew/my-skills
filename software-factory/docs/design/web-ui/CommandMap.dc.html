@@ -51,9 +51,9 @@ class Component extends DCLogic {
           r('update --tasks, --release (first install)', 'Project wizard', 'ProjectWizard') ] },
         { name: 'Team and machines', color: 'green', rows: [
           r('coding-agent / dev-manager / product-owner loop', 'Agent, Team setup', 'Agent'), r('owner start / owner stop', 'Agent', 'Agent'),
-          r('loop [-i], agent <name>', 'Agent: open its session', 'Agent'), r('nats user add', 'Team setup, Machines', 'TeamSetup'),
+          r('loop [-i], agent <name>', 'Agent: open its session', 'Agent'), r('board login add|ls|remove', 'Machines', 'Machines'),
           r('machine show|setup', 'Machines, Team setup', 'Machines'), r('machine add (new, #445)', 'Add machine', 'AddMachine'),
-          r('nats up|down|status', 'Machines', 'Machines'), r('heartbeat …', 'Machines', 'Machines'),
+          r('board up|down|status', 'Machines', 'Machines'), r('heartbeat …', 'Machines', 'Machines'),
           r('autostart …, resume', 'Machines, Team setup', 'Machines'), r('remote add|cloud|list|remove', 'Add machine', 'AddMachine'),
           r('worktree, env', 'Agent', 'Agent'), r('agents ls|list|card|sweep', 'Home, Machines', 'Main') ] },
         { name: 'Every day', color: 'violet', rows: [

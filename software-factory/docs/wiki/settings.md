@@ -80,6 +80,8 @@ again first: if one is no longer valid (or no longer a setting) it stops, opens 
 Machine settings (`--local`) are saved at once, never staged.
 
 `validate` fails on: a regex that does not compile, a `tasks.source` that is not `plan`, `issues` or `board`, a
+`messaging.transport` that is not `github` or `board` (`nats` was removed, #504: the fix is
+`factory settings set messaging.transport board`), a
 duplicate or invalid agent name, an integer below its minimum (`maxOpenPRs`, `portStep` ... at least 1), a `prd`,
 `plan` or `decisions` path that does not exist, a bad `models`, `styles` or `agentEnv` value, and `agentEnv` ports that collide
 across the agents' slots. A key that is not a setting is only a warning (probably a typo); it is kept and ignored.
