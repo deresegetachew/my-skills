@@ -34,7 +34,7 @@
 import { type Config, load } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
 import { Exit, die, isoUtc, parseArgs, parseIso, pyDumps, pyInt, runMain } from "./factory_lib.ts";
-import { claimKey, leasesOn, shaKey } from "./factory_leases.ts";
+import { claimCopy, claimKey, leasesOn, shaKey } from "./factory_leases.ts";
 
 export const MAX_LEASE_MINUTES = 120; // a lease never counts for longer than this after its comment, whatever `until` says
 export const OWNER_QUEUE_TITLE = "Dev manager: needs the owner";
@@ -238,16 +238,18 @@ export function claimReview(cfg: Config, pr: Pull, who: string, now: number = no
     const key = claimKey("review", n, shaKey(head));
     const holder = nats.holder(key);
     if (holder && holder !== who) return [LOST, `PR #${n}: held by ${holder}`];
-    if (holder) {
-      holdOn(n, cfg); // already mine: make sure the hold is on, no second claim
+    if (holder) { // already mine: make sure the hold is on (no write when it is), no second claim
+      if (!(pr.labels ?? []).some((x) => x.name === (cfg.holdLabel ?? "factory-hold"))) holdOn(n, cfg);
       return [WON, `PR #${n}: already claimed by ${who}`];
     }
     const took = nats.claim(key, who, claimMinutes(cfg) * 60);
     if (!took.held) return [LOST, `PR #${n}: held by ${took.holder}`];
     const until = now + claimMinutes(cfg) * 60;
-    post(n, `<!-- factory-review-claim manager=${who} sha=${head} until=${stamp(until)} -->\n` +
-      leaseText(who, `reviewing ${head.slice(0, 7)}`, until));
-    holdOn(n, cfg);
+    if (claimCopy(cfg)) {
+      post(n, `<!-- factory-review-claim manager=${who} sha=${head} until=${stamp(until)} -->\n` +
+        leaseText(who, `reviewing ${head.slice(0, 7)}`, until));
+    }
+    holdOn(n, cfg); // the PR gate reads the hold: it stays on GitHub
     return [WON, `PR #${n}: claimed ${head.slice(0, 7)} until ${hhmm(until)} UTC; hold on`];
   }
   const held = reviewWinner(comments, head, now);
@@ -284,8 +286,10 @@ export function claimAnswer(cfg: Config, qid: string | number, who: string, now:
     const took = nats.claim(key, who, claimMinutes(cfg) * 60);
     if (!took.held) return [LOST, `question ${qid} on #${n}: held by ${took.holder}`];
     const until = now + claimMinutes(cfg) * 60;
-    post(n, `<!-- factory-answer-claim manager=${who} question=${qid} until=${stamp(until)} -->\n` +
-      leaseText(who, `answering the question above (comment ${qid})`, until));
+    if (claimCopy(cfg)) {
+      post(n, `<!-- factory-answer-claim manager=${who} question=${qid} until=${stamp(until)} -->\n` +
+        leaseText(who, `answering the question above (comment ${qid})`, until));
+    }
     return [WON, `question ${qid} on #${n}: claimed until ${hhmm(until)} UTC`];
   }
   const held = answerWinner(comments, qid, now);
@@ -313,7 +317,9 @@ export function release(cfg: Config, target: string, who: string): Outcome {
     if (holder && holder !== who) return [LOST, `PR #${n}: held by ${holder}, not ${who}; hold left on`];
     if (holder) {
       nats.release(key, who);
-      post(n, `<!-- factory-claim-release manager=${who} sha=${head} -->\nDev manager ${who} gave up the review of ${head.slice(0, 7)}.`);
+      if (claimCopy(cfg)) {
+        post(n, `<!-- factory-claim-release manager=${who} sha=${head} -->\nDev manager ${who} gave up the review of ${head.slice(0, 7)}.`);
+      }
     }
     holdOff(n, cfg);
     return [WON, `PR #${n}: hold off` + (holder ? ", claim released" : "")];
@@ -333,7 +339,9 @@ export function release(cfg: Config, target: string, who: string): Outcome {
   if (nats) {
     const key = claimKey("answer", target);
     if (!nats.release(key, who)) return [LOST, `question ${target} on #${n}: no claim by ${who} to release`];
-    post(n, `<!-- factory-claim-release manager=${who} question=${target} -->\nDev manager ${who} gave up the question (comment ${target}).`);
+    if (claimCopy(cfg)) {
+      post(n, `<!-- factory-claim-release manager=${who} question=${target} -->\nDev manager ${who} gave up the question (comment ${target}).`);
+    }
     return [WON, `question ${target} on #${n}: claim released`];
   }
   const held = answerWinner(commentsOf(n), target, nowUtc());

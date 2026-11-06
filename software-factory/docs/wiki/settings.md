@@ -291,6 +291,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `messaging.url` | str | `""` | The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats. |
 | `messaging.creds` | str | `""` | The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/. |
 | `messaging.kinds` | list | `[]` | The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff); every other kind stays on GitHub. |
+| `messaging.githubCopy` | list | `null` | The moved kinds that are still also written to GitHub. Only claim (with its releases) and wake can leave it; every other kind is always written there. Unset: the same as messaging.kinds. |
 | `messaging.pollMinutes` | int | `15` | With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up over NATS before it looks at GitHub anyway. |
 | `messaging.fallback` | one of github/none | `"github"` | When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command. |
 
