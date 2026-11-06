@@ -19,6 +19,7 @@ It uses Bun's built-in Postgres client (`SQL` from `bun`). It adds no npm packag
 | `src/board.ts` | The rules, as SQL inside one transaction per write |
 | `src/migrations/NNN_name.sql` | The schema, applied in order by `migrate` and recorded in `mb_migrations` |
 | `src/server.ts` | The board's own Postgres container, for the command |
+| `src/child.ts` | One request per process, for synchronous callers (the factory's ports) |
 | `src/mcp.ts` | The MCP server over stdio, for `factory board mcp` |
 | `src/import.ts` | An import, applied in one transaction (`Board.import`) |
 | `src/github/import.ts` | The GitHub adapter: a repo's issues and comments as an import, read with the `gh` CLI |
@@ -44,7 +45,7 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
 **Tasks**
 - `create({ title, body?, kind?, priority?, parentId?, ref? })`: kind is `task`, `epic`, `bug`, `decision` or `note`.
   A lower priority is claimed first. `ref` is an outside id such as `github:owner/repo#123` (unique).
-- `get(id)`, `tasks({ all? })`, `ready({ for? })`, `edges(id)`. `ready()` leaves out tasks handed to someone;
+- `get(id)`, `tasks({ all? })`, `ready({ for? })`, `edges(id?)` (no id: every edge). `ready()` leaves out tasks handed to someone;
   `ready({ for })` adds the ones handed to that actor.
 - `update(id, { version, title?, body?, kind?, priority?, parentId?, ref?, status? })`: `version` is the one you read.
   `status` may be `open`, `in_review` or `deferred`; open and deferred clear the outcome (a reopened task).
@@ -56,7 +57,7 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
 - `close(id, { outcome, token?, reason? })`: outcome is `done`, `wont_do`, `duplicate` or `superseded`.
 - `sweep({ quietSeconds? })`.
 
-**Threads:** `post({ task?, kind, tag?, to?, body, inReplyTo? })` and `thread({ thread } | { task })`. Kind is `question`,
+**Threads:** `post({ task?, kind, tag?, to?, body, inReplyTo? })` and `thread({ thread } | { task })`, and `messages({ after? })`: every message, or those posted after a cursor it gave, with the next cursor. Kind is `question`,
 `answer`, `status`, `note`, `verdict` or `ask`. A reply joins its parent's thread. An answer marks its question
 answered. A question or an ask stays open until then.
 
@@ -69,8 +70,12 @@ answered. A question or an ask stays open until then.
 - `onMe(actor)`: the tasks it holds or was handed, and the open messages addressed to it.
 - `delegated(actor)`: the tasks it created and does not hold, with where each is now, and its open questions and asks.
 
-**Live:** `events(after)` reads the log. `listen(onEvent, { after? })` calls `onEvent` for each new event, in order, once
+**Live:** `events(after, limit?, { since?, kind? })` reads the log; `lastSeq()` is its last seq. `signal(name, payload)` records an event and nothing else (`signal.<name>`), for a listener such as a waiting agent. `listen(onEvent, { after? })` calls `onEvent` for each new event, in order, once
 each.
+
+**Leases:** `lease(key, holder, ttlSeconds)` holds a named claim on anything that isn't a task (one holder until its time runs out; the holder taking it again moves the time on) and says `{ held, holder }`. `unlease(key, holder)`, `leaseHolder(key)` (`""` for nobody) and `dropLease(key)`.
+
+**From synchronous code:** `src/child.ts` reads one JSON request on stdin (`{ url, as, session?, calls: [{ op, args }] }`), makes the calls as that actor, prints `{ ok, results }` or `{ ok: false, code, message, fix }` on one line and exits. Run it with `Bun.spawnSync`. Besides the methods above it has `wait`: the first event of a kind since a time whose payload matches, waiting up to a number of seconds.
 
 **Import:** `import(batch, { dryRun? })` brings in tasks, parents, `blocks` edges, context entries and messages, each
 keyed by an outside id (`ref`), in one transaction: a second run updates what changed and adds what is new, never a
