@@ -1,6 +1,7 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Run the software factory's tests: each software-factory/tests/*.test.ts file, and each plugin's
-// software-factory/plugins/<name>/tests/*.test.ts, with `bun test`, in its own process, with its own scratch folders.
+// Run the software factory's tests: each software-factory/tests/*.test.ts file, each plugin's
+// software-factory/plugins/<name>/tests/*.test.ts, and the message board's software-factory/message-board/tests/*.test.ts,
+// with `bun test`, in its own process, with its own scratch folders.
 // Exits 1 if any test fails, so CI goes red.
 //
 // Files run in parallel (--jobs N, or FACTORY_TEST_JOBS, default min(CPU count, 8)), biggest first. Each file's report
@@ -44,7 +45,7 @@ function testFiles(argv: string[]): string[] {
     if (a === "--jobs") i++;
     else if (!a.startsWith("-")) picks.push(a.replace(/^.*\//, "").replace(/(\.test)?\.ts$/, ""));
   }
-  const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)), ...pluginTests()];
+  const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)), ...pluginTests(), ...boardTests()];
   const name = (f: string): string => f.replace(/^.*\//, "").replace(/\.test\.ts$/, "");
   return picks.length ? all.filter((f) => picks.includes(name(f))) : all;
 }
@@ -59,6 +60,13 @@ function pluginTests(): string[] {
     for (const f of readdirSync(tests).sort()) if (f.endsWith(".test.ts")) out.push(join(tests, f));
   }
   return out;
+}
+
+/** The message board's own tests (decision 0007): software-factory/message-board/tests/*.test.ts. */
+function boardTests(): string[] {
+  const tests = join(ROOT, "software-factory", "message-board", "tests");
+  if (!statSync(tests, { throwIfNoEntry: false })?.isDirectory()) return [];
+  return readdirSync(tests).sort().filter((f) => f.endsWith(".test.ts")).map((f) => join(tests, f));
 }
 
 /** "N passed, M failed" from bun test's own summary lines (" 12 pass", " 1 fail"). */
