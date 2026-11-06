@@ -597,7 +597,7 @@ export function setLeafUser(user: string, password: string | null): boolean {
   return Boolean(r && r.code === 0);
 }
 
-/** The names that already have a key on this server (any project's), for `factory machine add` to refuse. */
+/** The names that already have a key on this server in `project`, for `factory machine add` to refuse. */
 export function keyedNames(project: string): string[] {
   return readUsers().filter((u) => u.project === project).map((u) => u.name);
 }
