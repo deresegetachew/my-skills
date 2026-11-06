@@ -154,6 +154,37 @@ if (!NATS_SERVER) {
     expect(aboutPrs(calls(p.env))).toEqual(["gh GET repos/{owner}/{repo}/pulls/6"]);
   });
 
+  test("the dev manager's precheck over two unchanged pull requests asks GitHub nothing about them", () => {
+    const p = hub(IDLE);
+    run(p.work, p.env, "factory_pr_feed", ["look", "--name", "lead"]);
+    run(p.work, p.env, "factory_wait", ["precheck"]);
+    calls(p.env);
+    const r = run(p.work, p.env, "factory_wait", ["precheck"]);
+    expect(r.code, r.out).toBe(0);
+    expect(r.stdout.trim()).toBe("nothing to do");
+    expect(aboutPrs(calls(p.env))).toEqual([]);
+  });
+
+  test("an idle builder waits messaging.pollMinutes, and a merged or closed pull request wakes it; a CI result doesn't", async () => {
+    const p = hub(IDLE);
+    expect(run(p.work, p.env, "factory_wake", ["minutes", "1"], "menelik").stdout.trim()).toBe("15");
+    run(p.work, p.env, "factory_pr_feed", ["look", "--name", "lead"]);
+    const since = String(Math.floor(Date.now() / 1000));
+    const wait = (): Bun.Subprocess<"ignore", "pipe", "pipe"> => Bun.spawn([process.execPath, "--no-env-file",
+      `${import.meta.dir}/../../../hooks/factory_wake.ts`, "wait", "--seconds", "40", "--since", since],
+    { cwd: p.work, env: { ...p.env, FACTORY_AGENT: "menelik", FACTORY_ROLE: "coding-agent" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    put(p.d, { checks: { [H]: [green], [H2]: [pending] } });
+    expect(run(p.work, p.env, "factory_pr_feed", ["look", "--name", "lead"]).stdout).toContain("pr#5 checks");
+    const quiet = run(p.work, p.env, "factory_wake", ["wait", "--seconds", "2", "--since", since], "menelik");
+    expect(quiet.code, quiet.out).toBe(2);
+    const waiting = wait();
+    await Bun.sleep(2000);
+    put(p.d, { pulls: [{ ...pr(5), updated_at: iso(30) }, { ...pr(6, { sha: H2, state: "closed" }), updated_at: iso(1) }] });
+    run(p.work, p.env, "factory_pr_feed", ["look", "--name", "lead"]);
+    expect(await waiting.exited).toBe(0);
+    expect(await new Response(waiting.stdout).text()).toContain("woken by lead: pull request closed (pr#6)");
+  });
+
   test("a snapshot older than messaging.pollMinutes isn't trusted: the slot check asks GitHub", () => {
     const p = hub(IDLE, { pollMinutes: 0.0001 });
     run(p.work, p.env, "factory_pr_feed", ["look", "--name", "lead"]);

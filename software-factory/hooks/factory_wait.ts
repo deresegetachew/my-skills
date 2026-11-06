@@ -29,7 +29,8 @@ import { escalateMinutes, running, waiting } from "./factory_po.ts";
 import { die, Exit, now, runMain, sleepSync } from "./factory_lib.ts";
 import { waitForWake, wakeIsOn, wakesOn } from "./factory_wake.ts";
 import { messagingSettings } from "./core/compose.ts";
-import { freshPrs, prWaker, readyOf } from "./factory_pr_feed.ts";
+import { asPull, freshPrs, prWaker, readyOf } from "./factory_pr_feed.ts";
+import { remember, settled } from "./factory_views_cache.ts";
 
 const DOC = `Token-free waiting. A Claude session that waits by checking again and again pays for every check (each turn
 re-sends the whole context), so every wait is a shell loop here that only returns when there is something to do,
@@ -318,7 +319,15 @@ export function precheckItems(cfg: Config, prs: Pull[] | null = null, commentsOf
 
 /** What the dev manager has to do right now, one line each; empty when nothing. Reads GitHub only. */
 export function precheck(cfg: Config): string[] {
-  return precheckItems(cfg).map(([, , text]) => text);
+  // With `pr` on NATS: the open pull requests from the watcher's snapshot, and a pull request's comments read again only
+  // when its updated_at moved (factory_pr_feed.ts).
+  const fed = freshPrs(cfg);
+  if (!fed) return precheckItems(cfg).map(([, , text]) => text);
+  const prs: Pull[] = fed.prs.map(asPull);
+  const updated = new Map(fed.prs.map((p) => [p.number, p.updated]));
+  const commentsOf = (n: number): Comment[] => remember(cfg, `comments-${n}`, settled(updated.get(n)),
+    () => ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`));
+  return precheckItems(cfg, prs, commentsOf).map(([, , text]) => text);
 }
 
 /** One ["question", number, line] per question addressed to the dev manager that waits for its answer (a

@@ -49,7 +49,7 @@ type Op =
   | { op: "holder"; key: string }
   | { op: "drop"; key: string }
   | { op: "wake"; subject: string; payload: string }
-  | { op: "wait"; filter: string; names: string[]; since: number; seconds: number }
+  | { op: "wait"; filter: string; names: string[]; since: number; seconds: number; prs?: string; prChanges?: string[] }
   | { op: "prs-put"; snapshot: string; events: { subject: string; payload: string }[] }
   | { op: "prs-get" }
   | { op: "prs-events"; filter: string; since: number; seconds: number; pr: number; first: boolean };
@@ -152,8 +152,8 @@ export class NatsMessaging implements Messaging, Leases, Wakes, PrFeed {
   /** Wait for a wake-up (see WakeWait); null when none came in time. */
   waitWake(w: WakeWait): Wake | null {
     const seconds = Math.max(1, Math.floor(w.seconds));
-    return this.call({ op: "wait", filter: `${this.base()}.wake.*`, names: w.names, since: w.since, seconds },
-      seconds * 1000) as Wake | null;
+    return this.call({ op: "wait", filter: `${this.base()}.wake.*`, names: w.names, since: w.since, seconds,
+      ...(w.prChanges ? { prs: `${this.base()}.prs.*`, prChanges: w.prChanges } : {}) }, seconds * 1000) as Wake | null;
   }
 
   /** Keep the watcher's snapshot (the key-value bucket prs-<project>, key `open`) and publish each change on
@@ -400,8 +400,9 @@ async function waitWake(nc: NatsConnection, jsm: JetStreamManager, req: Request)
   await ensureStream(jsm, req.project);
   const names = req.names as string[];
   const deadline = Date.now() + (req.seconds as number) * 1000;
+  const prChanges = Array.isArray(req.prChanges) ? (req.prChanges as string[]) : null;
   const consumer = await jetstream(nc, { timeout: req.timeout }).consumers.get(streamName(req.project), {
-    filter_subjects: [req.filter as string], deliver_policy: DeliverPolicy.StartTime,
+    filter_subjects: [req.filter as string, ...(prChanges ? [req.prs as string] : [])], deliver_policy: DeliverPolicy.StartTime,
     opt_start_time: new Date(req.since as number).toISOString() });
   try {
     while (Date.now() < deadline) {
@@ -415,6 +416,10 @@ async function waitWake(nc: NatsConnection, jsm: JetStreamManager, req: Request)
       }
       const str = (k: string): string => (typeof b[k] === "string" ? (b[k] as string) : "");
       const from = str("from");
+      if (b.kind === "pr" && prChanges) { // the pull request watcher saw a change (the `pr` kind)
+        if (from !== m.subject.split(".").at(-1) || (prChanges.length && !prChanges.includes(str("change")))) continue;
+        return { from, to: names[0] ?? "", ref: str("ref"), why: `pull request ${str("change")}`, at: str("at") };
+      }
       if (b.kind !== "wake" || from !== m.subject.split(".").at(-1) || from === names[0] || !names.includes(str("to"))) continue;
       return { from, to: str("to"), ref: str("ref"), why: str("text"), at: str("at") };
     }

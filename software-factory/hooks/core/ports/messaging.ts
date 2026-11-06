@@ -62,6 +62,8 @@ export interface WakeWait {
   names: string[];
   since: number;
   seconds: number;
+  /** With `pr` on NATS: a pull request event with one of these changes wakes the waiter too (empty: every change). */
+  prChanges?: string[];
 }
 
 export interface Wakes {
