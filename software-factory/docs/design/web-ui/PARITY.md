@@ -52,6 +52,12 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `remote` | planned | Add machine (AddMachine.dc.html) | #445 |
 | `nats up` | planned | Add machine (AddMachine.dc.html), Join hub (JoinHub.dc.html); down and status on Machines | #445 |
 | `nats user add` | planned | Team setup (TeamSetup.dc.html), Machines (Machines.dc.html): keys per agent | #445 |
+| `board up` | terminal only | Starts the message board's Postgres on one machine, once, like `nats up`; the web UI reads the board once it runs | |
+| `board down` | terminal only | Stops the board's Postgres: machine administration | |
+| `board status` | planned | Machines (Machines.dc.html): whether the message board answers | #472 |
+| `board migrate` | terminal only | Run once after an update | |
+| `board backup` | terminal only | Machine administration; a nightly backup is a job on the machine | |
+| `board sweep` | agents only | The dev manager's loop releases stale claims | |
 | `heartbeat` | planned | Machines (Machines.dc.html) | #455 |
 | `autostart` | planned | Machines (Machines.dc.html), Team setup (TeamSetup.dc.html) | #455 |
 | `resume` | planned | Machines (Machines.dc.html) | #455 |
@@ -86,6 +92,10 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `review-pass arch` | agents only | PR (PR.dc.html): reviews | |
 | `claims` | planned | Maintenance (Maintenance.dc.html); Agent: its task | #456 |
 | `release` | planned | Maintenance (Maintenance.dc.html): drop an agent's claims, after a confirm | #456 |
+| `board tasks` | planned | Tasks read from the message board (decision 0007, build step 6) | #472 |
+| `board ready` | planned | Tasks read from the message board: the ready queue | #472 |
+| `board show` | planned | Task (Task.dc.html), read from the message board | #472 |
+| `board prime` | agents only | An agent's start of task; the web UI's first read has the same shape | #472 |
 
 ## Product
 

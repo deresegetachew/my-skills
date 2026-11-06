@@ -11,9 +11,12 @@
 //   core/ports/ only the domain and the ports, and only core/compose.ts (and tests) import core/adapters/.
 // - A plugin's packages (the names in software-factory/plugins/<name>/package.json) are imported only inside that
 //   plugin's folder (decision 0004): the core imports only types from a plugin, by a relative path.
+// - The message board (software-factory/message-board/, decision 0007) imports only built-ins and its own files, and
+//   the rest of the repo imports from it only its public entry, message-board/src/index.ts.
 // - No compiled .pyc file is tracked by git.
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { builtinModules } from "node:module";
+import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const errors: string[] = [];
@@ -66,6 +69,24 @@ const CORE = "software-factory/hooks/core/";
 // Decision 0004: a plugin's packages (the names in its package.json) are imported only inside that plugin's folder.
 const PLUGINS = "software-factory/plugins/";
 const DEP_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
+// Decision 0007: the message board is a framework of its own. It imports only built-ins and its own files; the factory
+// imports only its public entry.
+const BOARD = "software-factory/message-board/";
+const BOARD_ENTRY = BOARD + "src/index.ts";
+const BUILTINS = new Set(builtinModules);
+
+/** Why the file at `from` may not import `spec` across the message board's boundary, or null. */
+function crossesBoard(from: string, spec: string): string | null {
+  const local = spec.startsWith("./") || spec.startsWith("../") || isAbsolute(spec);
+  const target = local ? normalize(isAbsolute(spec) ? relative(root, spec) : join(dirname(from), spec)) : null;
+  if (from.startsWith(BOARD)) {
+    if (target !== null) return target.startsWith(BOARD) ? null : "the message board imports only built-ins and its own files";
+    const builtin = spec === "bun" || spec.startsWith("bun:") || spec.startsWith("node:") || BUILTINS.has(spec);
+    return builtin ? null : "the message board imports only built-ins and its own files";
+  }
+  if (target !== null && target.startsWith(BOARD) && target !== BOARD_ENTRY) return "the factory imports only message-board/src/index.ts";
+  return null;
+}
 
 /** [plugin folder, package name] for every package a plugin's package.json lists. */
 function pluginPackages(all: string[]): [string, string][] {
@@ -144,6 +165,8 @@ for (const f of files) {
         if (why) errors.push(`${rel(f)}: imports ${spec}; ${why} (decision 0003)`);
         const plugin = crossesPlugin(rel(f), spec, packages);
         if (plugin) errors.push(`${rel(f)}: imports ${spec}; ${plugin} (decision 0004)`);
+        const board = crossesBoard(rel(f), spec);
+        if (board) errors.push(`${rel(f)}: imports ${spec}; ${board} (decision 0007)`);
       }
     } catch (e) {
       errors.push(`${rel(f)}: does not parse: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);

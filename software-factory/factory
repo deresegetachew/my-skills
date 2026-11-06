@@ -159,6 +159,20 @@ Check
                          Tailscale address. status: whether it answers. Run up again to change it
   nats user add <agent> --role builder|manager|po|owner
                          the agent's key: its seed in messaging.creds (mode 600) and its role's permissions on the server
+  board up [--port N]    the message board (factory-message-board, decision 0007): tasks, claims, threads and events
+                         on Postgres, in Docker on this machine (127.0.0.1 and the Tailscale address), then migrated
+  board down [--purge]   stop it; --purge also removes its data
+  board status           whether it answers, its schema and its task counts
+  board migrate|backup|sweep
+                         apply the schema (safe to run twice) | a pg_dump, mode 600 | release the claims whose time
+                         is up and whose holder has been quiet for 30 minutes (--quiet-minutes N)
+  board tasks|ready [--json]
+                         the tasks not done (--all: every one) | the ready queue, in claim order (--for <actor>:
+                         with the tasks handed to that actor)
+  board show <id> [--json]
+                         one task: its fields, edges, context and thread
+  board prime <actor> [--json]
+                         an actor's start: what it holds, what is ready, what is blocked, recent events
   doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
                          of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user
@@ -394,6 +408,11 @@ case "$cmd" in
   manage-tick) fh "$hooks/factory_tick" "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
   nats)      fh "$hooks/factory_nats" "${1:-status}" "${@:2}" ;;
+  board)     # The message board (decision 0007) sits beside the hooks folder in my-skills; a project linked to it reaches
+             # it through .claude/hooks.
+             mb="$hooks/../message-board/bin"
+             [ -f "$mb.ts" ] || { printf '{"code": "board_missing", "message": "This project has no message board: %s.ts is missing.", "fix": "Run it in my-skills or a project linked to it (install.sh --link). Releases ship it with the adapters (decision 0007, build step 3)."}\n' "$mb" >&2; exit 1; }
+             fh "$mb" "${1:-help}" "${@:2}" ;;
   version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).
