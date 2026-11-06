@@ -227,3 +227,67 @@ test("a file outside the plugin that imports one of its packages fails, whatever
   expect(r.stdout).not.toContain("plugins/nats/index.ts");
   expect(r.stdout).not.toContain("plugins/nats/tests");
 });
+
+// ---- the message board imports nothing from the factory, and the factory only its public entry (#489, decision 0007) ----
+
+/** A repo with software-factory/message-board/ whose files import only built-ins and each other, and a factory file
+ * that imports only message-board/src/index.ts. */
+function withBoard(): string {
+  const d = repo(false);
+  const at = (...p: string[]): string => join(d, "software-factory", ...p);
+  for (const dir of [["message-board", "src"], ["message-board", "tests"], ["hooks"], ["tests"]]) mkdirSync(at(...dir), { recursive: true });
+  writeFileSync(at("SKILL.md"), "---\nname: software-factory\ndescription: The factory.\n---\n");
+  writeFileSync(at("message-board", "src", "rows.ts"), "export const x = 1;\n");
+  writeFileSync(at("message-board", "src", "index.ts"),
+    'import { SQL } from "bun";\nimport { readFileSync } from "node:fs";\nimport { join } from "path";\nimport { x } from "./rows.ts";\n' +
+    "export { SQL, readFileSync, join, x };\n");
+  writeFileSync(at("message-board", "bin.ts"), 'import { x } from "./src/index.ts";\nexport { x };\n');
+  writeFileSync(at("message-board", "tests", "a.test.ts"), 'import { expect } from "bun:test";\nimport { x } from "../src/rows.ts";\nexport { expect, x };\n');
+  writeFileSync(at("hooks", "ok.ts"), 'import { x } from "../message-board/src/index.ts";\nimport type { X } from "../message-board/src/index.ts";\n' +
+    "export { x };\nexport type Y = X;\n");
+  writeFileSync(at("tests", "ok.test.ts"), 'import { x } from "../message-board/src/index.ts";\nexport { x };\n');
+  return d;
+}
+
+test("the message board importing built-ins and its own files, and the factory its public entry, pass", () => {
+  const r = run(withBoard());
+  expect(r.code, r.out).toBe(0);
+});
+
+test("a message board file that imports from outside its folder, or a package, fails", () => {
+  const d = withBoard();
+  const at = (...p: string[]): string => join("software-factory", "message-board", ...p);
+  const bad: [string, string, string][] = [
+    [at("src", "a.ts"), 'import { load } from "../../hooks/factory_config.ts";\nexport { load };\n', "../../hooks/factory_config.ts"],
+    [at("src", "b.ts"), 'import type { T } from "../../hooks/core/domain/task.ts";\nexport type B = T;\n', "../../hooks/core/domain/task.ts"],
+    [at("tests", "c.test.ts"), 'export const load = () => import("../../tests/support.ts");\n', "../../tests/support.ts"],
+    [at("bin.ts"), 'import pg from "pg";\nexport { pg };\n', "pg"],
+    [at("src", "d.ts"), 'const r = require("/etc/thing.js");\nexport { r };\n', "/etc/thing.js"],
+  ];
+  for (const [path, body] of bad) writeFileSync(join(d, path), body);
+  const r = run(d);
+  expect(r.code, r.out).toBe(1);
+  for (const [path, , spec] of bad) {
+    expect(r.stdout).toContain(`${path}: imports ${spec}; the message board imports only built-ins and its own files (decision 0007)`);
+  }
+  expect(r.stdout).not.toContain("message-board/src/index.ts:");
+  expect(r.stdout).not.toContain("message-board/tests/a.test.ts");
+});
+
+test("a factory file that imports anything in the message board but src/index.ts fails", () => {
+  const d = withBoard();
+  const bad: [string, string, string][] = [
+    [join("software-factory", "hooks", "a.ts"), 'import { x } from "../message-board/src/rows.ts";\nexport { x };\n', "../message-board/src/rows.ts"],
+    [join("software-factory", "hooks", "b.ts"), 'import type { X } from "../message-board/bin.ts";\nexport type B = X;\n', "../message-board/bin.ts"],
+    [join("software-factory", "tests", "c.test.ts"), 'export const load = () => import("../message-board/tests/pg.ts");\n', "../message-board/tests/pg.ts"],
+    [join("tools", "d.ts"), 'export { x } from "../software-factory/message-board/src/rows.ts";\n', "../software-factory/message-board/src/rows.ts"],
+  ];
+  for (const [path, body] of bad) writeFileSync(join(d, path), body);
+  const r = run(d);
+  expect(r.code, r.out).toBe(1);
+  for (const [path, , spec] of bad) {
+    expect(r.stdout).toContain(`${path}: imports ${spec}; the factory imports only message-board/src/index.ts (decision 0007)`);
+  }
+  expect(r.stdout).not.toContain("hooks/ok.ts");
+  expect(r.stdout).not.toContain("tests/ok.test.ts");
+});

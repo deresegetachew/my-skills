@@ -48,6 +48,21 @@ jobs:
     if: ${{ !contains(fromJSON('["labeled","unlabeled"]'), github.event.action) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      # The message board's tests run against a real Postgres (decision 0007 point 10); MB_TEST_URL below points at it.
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: factory
+          POSTGRES_PASSWORD: mb-ci-3c9f7a1e
+          POSTGRES_DB: postgres
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U factory"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -80,6 +95,7 @@ jobs:
       - name: Factory tests
         env:
           FACTORY_REQUIRE_NATS: "1"
+          MB_TEST_URL: postgres://factory:mb-ci-3c9f7a1e@127.0.0.1:5432/postgres
         run: |
           git config --global user.email ci@example.com
           git config --global user.name ci

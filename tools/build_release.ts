@@ -35,8 +35,8 @@ const SCHEMA = "factory-release/1";
 const SRC = "software-factory";
 // Excluded from the archive: the factory's own tests (they test my-skills, a project does not run them), caches and
 // the dev-only files for type-checking the factory (#252: a project never installs them), and the plugins' sources (the
-// archive holds their bundles).
-const EXCLUDE_PREFIXES = [`${SRC}/tests/`, `${SRC}/${PLUGINS}/`];
+// archive holds their bundles). The message board (decision 0007) ships with its adapters (#489, build step 3), not before.
+const EXCLUDE_PREFIXES = [`${SRC}/tests/`, `${SRC}/${PLUGINS}/`, `${SRC}/message-board/`];
 const EXCLUDE_PARTS = ["__pycache__", "node_modules"];
 const EXCLUDE_FILES = [`${SRC}/package.json`, `${SRC}/tsconfig.json`, `${SRC}/bun.lock`, `${SRC}/bun.lockb`];
 const VERSION_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.]*)?$/;
