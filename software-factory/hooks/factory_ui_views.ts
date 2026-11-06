@@ -17,7 +17,7 @@
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
-import { branchTask, roleNames, toFloat } from "./factory_config.ts";
+import { branchTask, toFloat } from "./factory_config.ts";
 import { CI_ACTIONS, type CiActionName, ciActionOf, type CiSettingsSeen, ciVerdict, FAILED, machineOf, orderedRuns,
   waitingPulls } from "./factory_ci_view.ts";
 import { prText, taskStateText, taskText } from "./factory_cockpit_match.ts";
@@ -390,8 +390,11 @@ const REASON_MAX = 500;
 /** A reason as `factory issues` takes it: trimmed, at most REASON_MAX characters, and never read as an option (leading
  *  dashes go). */
 function reasonOf(v: unknown): string {
-  return (typeof v === "string" ? v : "").trim().replace(/^-+\s*/, "").slice(0, REASON_MAX).trim();
+  return (typeof v === "string" ? v : "").replace(/^[-\s]+/, "").slice(0, REASON_MAX).trim();
 }
+
+/** A coding agent's name, as factory_config.ts's safeAgent takes it. */
+const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 
 /** POST /api/projects/:p/tasks/:id/actions/:name with `body` (#439): release, block or reassign a task issue through the
  *  commands the dev manager runs. Reassign releases it, then tells that agent to take it (`factory say <agent>
@@ -420,7 +423,8 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
     return refusal(400, "ui_reason_needed", "Blocking a task needs a reason: what a person must provide.", 'Send {"confirm": true, "reason": "<what is needed>"}.');
   }
   if (action === "reassign") {
-    const agents = p.config ? roleNames(p.config, "coding-agent") : [];
+    // the names as factory.json has them, keeping only valid ones: roleNames would stop the server on a bad one
+    const agents = (Array.isArray(p.config?.agents) ? p.config.agents : []).filter((n): n is string => typeof n === "string" && AGENT_NAME.test(n));
     const to = str(b.agent);
     if (!agents.includes(to)) {
       return refusal(400, "ui_agent_unknown", `${to || "No agent"} isn't one of ${p.name}'s coding agents.`,
