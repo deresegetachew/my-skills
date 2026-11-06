@@ -3,8 +3,11 @@
 // Configure opens the row's settings in plain words and, when it needs a fix, what is wrong and the step that fixes it.
 // Test asks it now on the machine that serves the page; "Test all" asks every one that has a test.
 import { useCallback, useEffect, useState } from "react";
+import { Avatar } from "./avatar_view.tsx";
 import type { Tone } from "./model.ts";
-import { type IntegrationRow, type IntegrationsData, type IntegrationTab, integrationTabs, integrationTone, showRows } from "./integrations_model.ts";
+import { type IntegrationRow, type IntegrationsData, type IntegrationTab, integrationTabs, integrationTone, showRows, type UsesData,
+  usesGrid } from "./integrations_model.ts";
+import type { Say } from "./views.tsx";
 
 /** The settings channels: the page's address after the project in the hash. */
 export const INTEGRATIONS_CHANNEL = "settings:integrations";
@@ -22,9 +25,13 @@ function Dot({ tone }: { tone: Tone }) {
   return <span className={`dot ${tone}`} aria-hidden="true" />;
 }
 
-function Row({ it, open, toggle, testing, tested, test }: { it: IntegrationRow; open: boolean; toggle: () => void; testing: boolean;
-  tested: Tested | undefined; test: () => void }) {
+type Action = IntegrationRow["actions"][number];
+
+function Row({ it, open, toggle, testing, tested, test, ask }: { it: IntegrationRow; open: boolean; toggle: () => void; testing: boolean;
+  tested: Tested | undefined; test: () => void; ask: (a: Action) => void }) {
   const detail = `int-${it.id}`;
+  const start = it.actions.find((a) => a.name === "start"); // a row that is off and can be turned on here: its one action
+  const more = it.actions.filter((a) => a !== start);
   return (
     <li className="int-row">
       <div className="int-line">
@@ -35,9 +42,11 @@ function Row({ it, open, toggle, testing, tested, test }: { it: IntegrationRow; 
         <span className="int-state"><Dot tone={integrationTone(it.state)} />{testing ? "Testing…" : it.stateText}</span>
         <div className="int-actions">
           {it.testable && <button className="btn" onClick={test} disabled={testing}>Test</button>}
-          <button className={it.state === "bad" ? "btn primary" : "btn"} aria-expanded={open} aria-controls={detail} onClick={toggle}>
-            {it.state === "bad" ? "Fix" : it.state === "off" ? "Set up" : "Configure"}
-          </button>
+          {start ? <button className="btn" onClick={() => ask(start)}>{start.label}</button> : (
+            <button className={it.state === "bad" ? "btn primary" : "btn"} aria-expanded={open} aria-controls={detail} onClick={toggle}>
+              {it.state === "bad" ? "Fix" : it.state === "off" ? "Set up" : "Configure"}
+            </button>
+          )}
         </div>
       </div>
       {tested && (
@@ -53,15 +62,45 @@ function Row({ it, open, toggle, testing, tested, test }: { it: IntegrationRow; 
           <dl className="facts">
             {it.settings.map((s) => <div key={s.label}><dt>{s.label}</dt><dd>{s.value}</dd></div>)}
           </dl>
-          <p className="empty int-how">A change here goes through a settings pull request that only you merge.</p>
+          {more.length > 0 && <div className="int-more">{more.map((a) => <button key={a.name} className="btn" onClick={() => ask(a)}>{a.label}</button>)}</div>}
+          <p className="empty int-how">A change to these settings goes through a settings pull request that only you merge.</p>
         </div>
       )}
     </li>
   );
 }
 
-export function IntegrationsPage({ project, get, post }: { project: { id: string; name: string }; get: Get; post: Post }) {
+function Grid({ uses }: { uses: UsesData }) {
+  const rows = usesGrid(uses);
+  return (
+    <section className="int-uses" aria-labelledby="int-uses-h">
+      <h3 id="int-uses-h">What each agent may use</h3>
+      <p className="int-sub">{uses.note}</p>
+      {!uses.connectors.length || !rows.length ? <p className="empty">Nothing is set up for the agents to use yet.</p> : (
+        <div className="int-scroll">
+          <table className="int-grid">
+            <thead><tr><th scope="col">Agent</th>{uses.connectors.map((c) => <th scope="col" key={c.id}>{c.label}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.name}>
+                  <th scope="row"><span className="int-agent"><Avatar name={r.name} size={28} /><span><b>{r.name}</b><small>{r.role}</small></span></span></th>
+                  {r.cells.map((c) => (
+                    <td key={c.id}><input type="checkbox" checked={c.on} disabled={!uses.perAgent} aria-label={c.label} readOnly /></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function IntegrationsPage({ project, get, post, say }: { project: { id: string; name: string }; get: Get; post: Post; say: Say }) {
   const [data, setData] = useState<IntegrationsData | null>(null);
+  const [asking, setAsking] = useState<{ id: string; a: Action } | null>(null);
+  const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
   const [tab, setTab] = useState<IntegrationTab>("all");
   const [open, setOpen] = useState<string | null>(null);
@@ -85,6 +124,19 @@ export function IntegrationsPage({ project, get, post }: { project: { id: string
     });
   };
 
+  const act = async (id: string, a: Action): Promise<void> => {
+    setBusy(true);
+    try {
+      const r = await post(`${base}/${encodeURIComponent(id)}/actions/${encodeURIComponent(a.name)}`, { confirm: true });
+      say(r.ok === true ? { title: `${a.label}: done`, text: String(r.output ?? ""), tone: "good" }
+        : { title: String(r.message ?? "It didn't run."), text: [r.fix, r.output].filter(Boolean).map(String).join("\n\n"), tone: "bad" });
+    } finally {
+      setBusy(false);
+      setAsking(null);
+      load();
+    }
+  };
+
   if (failed) return <div className="body"><p className="empty">The integrations of {project.name} can't be read. Is the page's server still running?</p></div>;
   if (!data) return <div className="body"><p className="empty">Reading {project.name}…</p></div>;
   const rows = showRows(data.integrations, tab);
@@ -104,10 +156,23 @@ export function IntegrationsPage({ project, get, post }: { project: { id: string
         <ul className="int-list">
           {rows.map((it) => (
             <Row key={it.id} it={it} open={open === it.id} toggle={() => setOpen(open === it.id ? null : it.id)} testing={testing.has(it.id)}
-              tested={tested[it.id]} test={() => void test(it.id)} />
+              tested={tested[it.id]} test={() => void test(it.id)} ask={(a) => setAsking({ id: it.id, a })} />
           ))}
         </ul>
       ) : <p className="empty">{tab === "bad" ? "Nothing needs a fix." : "Everything is set up."}</p>}
+      <Grid uses={data.uses} />
+      {asking && (
+        <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) setAsking(null); }}>
+          <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="int-ask">
+            <h3 id="int-ask">{asking.a.label}?</h3>
+            <p>This {asking.a.does}.</p>
+            <div className="actions">
+              <button className="btn" onClick={() => setAsking(null)} disabled={busy} autoFocus>Cancel</button>
+              <button className="btn primary" onClick={() => void act(asking.id, asking.a)} disabled={busy}>{busy ? "Working…" : asking.a.label}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -135,6 +200,20 @@ export const INTEGRATIONS_CSS = String.raw`
 .int-detail { margin-top: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); }
 .int-detail > * + * { margin-top: 12px; }
 .int-how { font-size: 13px; margin-bottom: 0; }
+.int-more { display: flex; gap: 8px; flex-wrap: wrap; }
+.int-uses { display: flex; flex-direction: column; gap: 6px; margin-top: 16px; }
+.int-uses h3 { margin: 0; font-size: 15px; }
+.int-scroll { overflow-x: auto; }
+.int-grid { width: 100%; border-collapse: collapse; min-width: 480px; }
+.int-grid th, .int-grid td { padding: 8px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.int-grid thead th { color: var(--faint); font-weight: 500; text-align: center; }
+.int-grid thead th:first-child, .int-grid tbody th { text-align: left; padding-left: 2px; }
+.int-grid tbody th { font-weight: 400; }
+.int-grid td { text-align: center; }
+.int-grid input { width: 18px; height: 18px; accent-color: var(--text); }
+.int-agent { display: inline-flex; align-items: center; gap: 10px; }
+.int-agent > span { display: flex; flex-direction: column; }
+.int-agent small { color: var(--faint); font-size: 12px; }
 @media (max-width: 760px) {
   .int-state { width: auto; }
   .int-actions { width: 100%; justify-content: flex-start; }

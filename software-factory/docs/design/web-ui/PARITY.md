@@ -122,8 +122,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `ci uninstall` | planned | CI (CI.dc.html): remove a runner, with its preconditions | #455 |
 | `ci start` | planned | CI (CI.dc.html): start and stop a runner by hand | #455 |
 | `ci logs` | planned | CI (CI.dc.html): a runner's log | #455 |
-| `turbo status` | planned | Integrations (Integrations.dc.html): the build cache | #441 |
-| `turbo install` | planned | Integrations (Integrations.dc.html): turn the build cache on; down too | #441 |
+| `turbo status` | built | Integrations: the build cache's row and its test | |
+| `turbo install` | built | Integrations: turn the build cache on, after a confirm; turn it off too | |
 
 ## Health and measure
 

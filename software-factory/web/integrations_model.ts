@@ -14,6 +14,14 @@ export interface IntegrationRow {
   settings: { label: string; value: string }[];
   problem: { code: string; message: string; fix: string } | null;
   testable: boolean;
+  actions: { name: string; label: string; does: string }[];
+}
+
+export interface UsesData {
+  perAgent: boolean;
+  note: string;
+  connectors: { id: string; label: string }[];
+  agents: { name: string; role: string; uses: string[] }[];
 }
 
 export interface IntegrationsData {
@@ -21,6 +29,21 @@ export interface IntegrationsData {
   summary: string;
   counts: { all: number; bad: number; off: number };
   integrations: IntegrationRow[];
+  uses: UsesData;
+}
+
+export interface GridRow {
+  name: string;
+  role: string;
+  cells: { id: string; on: boolean; label: string }[];
+}
+
+/** The grid of what each agent may use: a row per agent, a cell per connector, each labelled for a screen reader. */
+export function usesGrid(u: UsesData): GridRow[] {
+  return u.agents.map((a) => ({ name: a.name, role: a.role, cells: u.connectors.map((c) => {
+    const on = a.uses.includes(c.id);
+    return { id: c.id, on, label: `${a.name} ${on ? "may" : "may not"} use ${c.label}` };
+  }) }));
 }
 
 const TAB_LABEL: Record<IntegrationTab, string> = { all: "All", bad: "Needs a fix", off: "Not set up" };

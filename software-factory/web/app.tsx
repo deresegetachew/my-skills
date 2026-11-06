@@ -650,7 +650,7 @@ function App() {
           {!docRoute && !settingsRoute && channel?.kind === "agent" && live && !project.problem && agentActions(agent, channel, project, setAsk)}
         </header>
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
-          : settingsRoute ? <IntegrationsPage key={project.id} project={project} get={get} post={post} />
+          : settingsRoute ? <IntegrationsPage key={project.id} project={project} get={get} post={post} say={setToast} />
           : docRoute ? <DocPageView key={`${project.id}/${docRoute.id}`} project={project.id} id={docRoute.id} anchor={docRoute.anchor} get={get} pages={docPages}
             open={(c) => go(project.id, c)} />
           : !channel ? <div className="body"><p className="empty">This project has no channels.</p></div>

@@ -2,15 +2,19 @@
 // the plugins, the MCP connectors, the build cache), each one set up or not, its settings in plain words, and a test
 // that asks it now. A read only looks at files (the settings, the git remote, .mcp.json, the cockpit's cache, the
 // plugins' folder), so it calls no one; only a test does: `gh api user`, a connection to the hub, the project's
-// `factory ci status --json`, a request to the build cache. factory_ui_server.ts serves it.
+// `factory ci status --json`, a request to the build cache. The build cache is turned on and off here, after a confirm
+// (`factory turbo install` and `turbo down`). It also says what each agent may use. factory_ui_server.ts serves it.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { connect } from "node:net";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { neededPlugins, pluginPath } from "./factory_plugins.ts";
-import { type ActionResult, envFor, factoryScript, type Obj, type Problem, readJson, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
+import { type ActionResult, channels, envFor, factoryScript, type Obj, type Problem, readJson, resultOf, spawn, stateDirOf,
+  type UiProject } from "./factory_ui_data.ts";
 
 const TEST_TIMEOUT_MS = 5_000;
 const CI_TIMEOUT_MS = 60_000;
+const ACTION_TIMEOUT_MS = 600_000; // turbo install pulls an image and sets the repository's variables
 
 export type IntegrationState = "ok" | "bad" | "off" | "unknown";
 
@@ -25,6 +29,17 @@ export interface Integration {
   problem: Problem | null;
   /** Whether POST .../integrations/:id/test asks it now. */
   testable: boolean;
+  /** What POST .../integrations/:id/actions/:name does now, after a confirm (the build cache's on and off). */
+  actions: { name: string; label: string; does: string }[];
+}
+
+/** What each agent may use: the connectors that are set up, and each agent's. Today every agent gets the same ones (the
+ * MCP config and the settings are the project's), so `perAgent` is false and the page shows it without boxes to change. */
+export interface Uses {
+  perAgent: boolean;
+  note: string;
+  connectors: { id: string; label: string }[];
+  agents: { name: string; role: string; uses: string[] }[];
 }
 
 export interface Integrations {
@@ -32,6 +47,7 @@ export interface Integrations {
   summary: string;
   counts: { all: number; bad: number; off: number };
   integrations: Integration[];
+  uses: Uses;
 }
 
 const STATE_TEXT: Record<IntegrationState, string> = { ok: "Set up", bad: "Needs a fix", off: "Not set up", unknown: "Not read yet" };
@@ -49,7 +65,7 @@ function list(v: unknown): unknown[] {
 }
 
 function item(id: string, name: string, state: IntegrationState, sub: string, more: Partial<Integration> = {}): Integration {
-  return { id, name, sub, state, stateText: STATE_TEXT[state], settings: [], problem: null, testable: false, ...more };
+  return { id, name, sub, state, stateText: STATE_TEXT[state], settings: [], problem: null, testable: false, actions: [], ...more };
 }
 
 // --- reading -----------------------------------------------------------------------------------------------------------
@@ -211,8 +227,37 @@ function buildCache(p: UiProject): Integration {
     { label: "Address", value: api || "none" },
     { label: "Team", value: str(t.team) || "the repository's name" },
   ];
-  if (!api) return item("cache", "Build cache", "off", "Agents and CI build without a shared cache", { settings });
-  return item("cache", "Build cache", "ok", api, { settings, testable: true });
+  if (!api) {
+    return item("cache", "Build cache", "off", "Agents and CI build without a shared cache", { settings, actions: [{ name: "start",
+      label: "Turn on here", does: `starts the build cache on ${hostname()} in Docker and gives CI the same cache` }] });
+  }
+  return item("cache", "Build cache", "ok", api, { settings, testable: true, actions: [{ name: "stop", label: "Turn off",
+    does: `stops the build cache on ${hostname()}; agents and CI then build without it, and what it kept stays for the next start` }] });
+}
+
+const CACHE_STEPS: Record<string, string[]> = { start: ["turbo", "install"], stop: ["turbo", "down"] };
+
+function mcpNames(p: UiProject): string[] {
+  return Object.keys(obj(obj(readJson(join(p.path, ".mcp.json"))).mcpServers)).sort();
+}
+
+const ROLE_TEXT: Record<string, string> = { "product-owner": "Product owner", "dev-manager": "Dev manager", "coding-agent": "Builder" };
+const ROLE_RANK = ["product-owner", "dev-manager", "coding-agent"];
+
+function usesOf(p: UiProject, all: Integration[]): Uses {
+  const on = (id: string) => all.some((i) => i.id === id && i.state === "ok");
+  const connectors = [
+    ...(on("github") ? [{ id: "github", label: "GitHub" }] : []),
+    ...(on("messaging") ? [{ id: "messaging", label: "Hub" }] : []),
+    ...(on("cache") ? [{ id: "cache", label: "Build cache" }] : []),
+    ...(on("mcp") ? mcpNames(p).map((n) => ({ id: `mcp:${n}`, label: n })) : []),
+  ];
+  const ids = connectors.map((c) => c.id);
+  const agents = channels(p).filter((c) => c.kind === "agent")
+    .sort((a, b) => ROLE_RANK.indexOf(a.role ?? "") - ROLE_RANK.indexOf(b.role ?? "") || a.name.localeCompare(b.name))
+    .map((c) => ({ name: c.name, role: ROLE_TEXT[c.role ?? ""] ?? "Builder", uses: ids }));
+  return { perAgent: false, connectors, agents,
+    note: "Every agent uses the same connectors today: they come with the project. Choosing them for each agent is not built yet." };
 }
 
 function summaryOf(all: Integration[]): string {
@@ -226,8 +271,30 @@ function summaryOf(all: Integration[]): string {
 /** Every integration of project `p`, read from its files: no call to GitHub, the hub or the cache. */
 export function integrationsOf(p: UiProject): Integrations {
   const all = [github(p), messaging(p), ci(p), plugins(p), mcp(p), buildCache(p)];
-  return { project: p.id, summary: summaryOf(all), integrations: all,
+  return { project: p.id, summary: summaryOf(all), integrations: all, uses: usesOf(p, all),
     counts: { all: all.length, bad: all.filter((i) => i.state === "bad").length, off: all.filter((i) => i.state === "off").length } };
+}
+
+/** Runs action `name` of integration `id` (the build cache's start or stop) after {confirm: true}: 200 with its output, or
+ * 500 with its error; 404 for an unknown integration, 409 for an action it doesn't offer now. */
+export async function integrationAction(p: UiProject, id: string, name: string, body: unknown): Promise<ActionResult> {
+  const it = integrationsOf(p).integrations.find((i) => i.id === id);
+  if (!it) {
+    return { status: 404, body: { code: "ui_integration_unknown", message: `There is no integration ${id}.`,
+      fix: "GET /api/projects/:p/integrations lists them." } };
+  }
+  const a = it.actions.find((x) => x.name === name);
+  const steps = CACHE_STEPS[name];
+  if (!a || !steps) {
+    return { status: 409, body: { code: "ui_action_unavailable", message: `${it.name} has no ${name} now.`,
+      fix: "Read the page again, then pick what its row offers." } };
+  }
+  if (obj(body).confirm !== true) {
+    return { status: 400, body: { code: "confirm_needed", message: `${a.label} changes what runs on ${hostname()}, so it needs a confirm.`,
+      fix: 'Send {"confirm": true} (the page asks you first).' } };
+  }
+  const r = await spawn(["bash", factoryScript(p), ...steps], p.path, envFor(p), ACTION_TIMEOUT_MS);
+  return resultOf(p, `factory ${steps.join(" ")}`, r, (r.stdout + r.stderr).trim());
 }
 
 // --- testing -----------------------------------------------------------------------------------------------------------

@@ -15,7 +15,8 @@
 //                                              each project, and again whenever one changes; likewise {type: "views",
 //                                              project, ...} for the tasks, pull requests and CI channels
 //   GET  /api/projects/:p/docs, .../docs/page?id=, .../docs/search?q=: the PRD, the decisions and the wiki (factory_ui_docs.ts, #438)
-//   GET  /api/projects/:p/integrations, POST .../integrations/:id/test: what the factory connects to (factory_ui_integrations.ts, #441)
+//   GET  /api/projects/:p/integrations, POST .../integrations/:id/test, POST .../integrations/:id/actions/:name
+//                                              {confirm: true}: what the factory connects to (factory_ui_integrations.ts, #441)
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
@@ -27,7 +28,7 @@ import type { Server, ServerWebSocket } from "bun";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
-import { integrationsOf, testIntegration } from "./factory_ui_integrations.ts";
+import { integrationAction, integrationsOf, testIntegration } from "./factory_ui_integrations.ts";
 import { ciAction, Refresher, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
@@ -202,6 +203,11 @@ export function serve(o: ServeOptions): Running {
     if (rest[0] === "integrations" && rest.length === 3 && rest[2] === "test") {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST.");
       const r = await testIntegration(p, rest[1] as string);
+      return json(r.status, r.body);
+    }
+    if (rest[0] === "integrations" && rest.length === 4 && rest[2] === "actions") {
+      if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
+      const r = await integrationAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null));
       return json(r.status, r.body);
     }
     if (rest.length === 1 && rest[0] === "channels" && req.method === "GET") return json(200, { project: p.id, channels: channels(p, seen(p)) });
