@@ -357,7 +357,7 @@ case "$cmd" in
              exit 1 ;;
   snapshot)  fh "$hooks/factory_snapshot" "$@" ;;
   talk)      fh "$hooks/factory_talk" "$@" ;;
-  ui)      FACTORY_SELF="$here" fh "$hooks/factory_ui" "$@" ;;
+  ui)        FACTORY_SELF="$here" fh "$hooks/factory_ui" "$@" ;;
   prs)       fh "$hooks/factory_prs" "$@" ;;
   owner)     fh "$hooks/factory_owner" "$@" ;;
   claims)    fh "$hooks/factory_claims" "${1:-list}" "${@:2}" ;;

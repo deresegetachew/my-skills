@@ -175,7 +175,7 @@ test("the machine steps plan as shell text with the uid variable, the user and t
   }
 });
 
-test("the machine's packages no longer include tmux: the cockpit that needed it is retired (#425)", () => {
+test("the machine's packages still include tmux: autostart starts the agents in tmux sessions, though the cockpit is retired (#425)", () => {
   const base = tmp();
   const bin = `${base}/bin`;
   const root = `${base}/root`;
@@ -197,7 +197,7 @@ test("the machine's packages no longer include tmux: the cockpit that needed it 
     const install = (steps.find((s) => s.id === "packages")?.actions ?? []).map((a) => shellOf(a, ctx)).join("\n");
     expect(install).toContain("apt-get install -y -q uidmap slirp4netns");
     expect(install).toContain(" git ");
-    expect(install).not.toMatch(/\btmux\b/);
+    expect(install).toMatch(/\btmux\b/);
   } finally {
     for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
     Object.assign(process.env, saved);

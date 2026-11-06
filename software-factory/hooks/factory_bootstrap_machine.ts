@@ -17,7 +17,7 @@ export let ROOT = process.env.FACTORY_BOOTSTRAP_ROOT ?? "";
 export function setRoot(root: string): void {
   ROOT = root;
 }
-export const PACKAGES = ["uidmap", "slirp4netns", "dbus-user-session", "git", "gh", "age", "curl",
+export const PACKAGES = ["uidmap", "slirp4netns", "dbus-user-session", "git", "gh", "age", "tmux", "curl",
   "ca-certificates", "nftables", "unzip"];
 export const PRIVILEGE_GROUPS = ["sudo", "docker", "wheel", "admin", "lxd"];
 export const SUBID_COUNT = 65536;
