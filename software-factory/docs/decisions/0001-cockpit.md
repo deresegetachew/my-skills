@@ -1,6 +1,7 @@
 # 0001: the cockpit, one terminal window built on tmux
 
-Status: decided by the owner on 28 Oct 2026 (#295). Replaces PRD D1, "No custom UI".
+Status: superseded by decision 0005 (the web UI, `factory ui`); the cockpit was retired in #425 (6 Nov 2026). Kept as
+history: decided by the owner on 28 Oct 2026 (#295). Replaces PRD D1, "No custom UI".
 
 ## Context
 

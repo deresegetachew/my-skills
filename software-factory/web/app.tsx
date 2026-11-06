@@ -260,9 +260,9 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
 }
 
 const COMING: Record<string, [string, string]> = {
-  tasks: ["Tasks", "factory cockpit --tasks"],
-  "pull-requests": ["Pull requests", "factory cockpit --prs"],
-  ci: ["CI", "factory cockpit --ci"],
+  tasks: ["Tasks", "factory next"],
+  "pull-requests": ["Pull requests", "factory prs"],
+  ci: ["CI", "factory ci status"],
 };
 
 function ComingChannel({ name }: { name: string }) {

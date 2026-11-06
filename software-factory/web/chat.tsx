@@ -2,7 +2,7 @@
 // passes every WebSocket message here (dispatchLive); a chat or the queue takes what is about it.
 //
 // A chat shows what the agent said and was told (its messages) and what the owner sent; the box under it sends one
-// message: to a coding agent as `factory say`, to the dev manager or the product owner as one turn of the cockpit's talk,
+// message: to a coding agent as `factory say`, to the dev manager or the product owner as one turn of a talk (`factory talk`),
 // whose answer arrives later. The owner queue shows each ask as a card with its options as buttons; a tap asks first,
 // then runs `factory owner answer`.
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -190,7 +190,7 @@ export function Composer({ chat, agent, role }: { chat: Chat; agent: string; rol
         <button className="btn primary" type="submit" disabled={busy || waiting || !text.trim()}>{busy ? "Sending…" : "Send"}</button>
       </span>
       <span className="send-hint">
-        {talk ? <>One turn of a talk with {agent}, {talk}, in a fresh session (as in the cockpit); a summary goes on the owner queue.</>
+        {talk ? <>One turn of a talk with {agent}, {talk}, in a fresh session; a summary goes on the owner queue.</>
           : <>Typed into {agent}'s session as one line, like <code>factory say {agent} …</code></>}
       </span>
     </form>

@@ -1,11 +1,11 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// `factory owner`: what the owner does by hand, as factory commands, so the cockpit and the command line share them
+// `factory owner`: what the owner does by hand, as factory commands, so the web UI and the command line share them
 // (US-6, #302). Each one is a thin wrapper over what exists.
 //
 //   factory owner merge <pr> [--head <sha>]  names the protected paths the PR touches, checks it is open, not a draft,
 //                                            mergeable and green (factory_ci_judge.ts), then merges it (a merge commit) pinned to
 //                                            its head (`gh pr merge --match-head-commit`). --head: only when the head is still
-//                                            that commit (the one the cockpit showed, #309), else `pr_changed`
+//                                            that commit (the one a screen showed, #309), else `pr_changed`
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
 //   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`
@@ -148,7 +148,7 @@ function merge(n: string, me: Who, seen: string | null): void {
   console.log(`PR #${n} ${str(pr.title)}`);
   if (seen !== null && !head.toLowerCase().startsWith(seen.toLowerCase())) {
     refuse("pr_changed", `#${n} changed since you looked: its head is now ${head.slice(0, 12)}, not ${seen.slice(0, 12)}.`,
-      `Look at it again (r in the cockpit's Pull requests view, or \`factory prs\`), then merge: factory owner merge ${n}`);
+      `Look at it again (the web UI's pull requests channel, or \`factory prs\`), then merge: factory owner merge ${n}`);
   }
   if (pr.state !== "open" || pr.merged === true) {
     refuse("pr_not_open", `Pull request #${n} is ${pr.merged === true ? "merged" : str(pr.state) || "not open"}.`, "Nothing to merge; `factory prs` lists the open ones.");
@@ -213,20 +213,20 @@ function label(n: string, name: string | undefined, remove: boolean, me: Who): v
 // --- answer ---------------------------------------------------------------------------------------------------------
 
 function answer(id: string | undefined, text: string): void {
-  if (!id) refuse("needs_id", "Say which ask you answer.", "`factory cockpit --needs` lists the open asks with their ids.");
+  if (!id) refuse("needs_id", "Say which ask you answer.", "`factory prs` lists the open asks with their ids.");
   if (!text.trim()) refuse("needs_text", `Write the answer to ${id}.`, `factory owner answer ${id} "yes, go ahead"`);
   const queue = apiAll<Issue & Row>(`${REPO}/issues?state=open`)
     .find((i) => str(i.title).startsWith(OWNER_QUEUE_TITLE) && !("pull_request" in i && i.pull_request));
   if (!queue) {
     refuse("no_owner_queue", `There is no open "${OWNER_QUEUE_TITLE}" issue, so there is nothing to answer.`,
-      "The dev manager opens it with its first ask; `factory cockpit --needs` shows what needs you.");
+      "The dev manager opens it with its first ask; `factory prs` shows what needs you.");
   }
   const comments = apiAll<Comment>(`${REPO}/issues/${queue.number}/comments`) as Row[];
   const asked = comments.flatMap((c) => ownerAskIds(str(c.body)));
   const open = openOwnerAsks(comments, trustedOf(load())).map(([slug]) => slug);
   if (!asked.includes(id)) {
     refuse("no_such_ask", `There is no ask \`${id}\` in #${queue.number}. Open: ${open.length ? open.join(", ") : "none"}.`,
-      "`factory cockpit --needs` lists the open asks with their ids.");
+      "`factory prs` lists the open asks with their ids.");
   }
   if (!open.includes(id)) {
     console.log(`${id} is already answered on #${queue.number}; nothing posted.`);
@@ -299,7 +299,7 @@ function release(given: string | undefined): void {
 
 // --- start and stop (#309) ------------------------------------------------------------------------------------------
 //
-// This machine's tmux, never the cockpit's own server: TMUX is dropped, so the session is where `factory follow`, `say`
+// This machine's default tmux server, never the one the caller may be inside: TMUX is dropped, so the session is where `factory follow`, `say`
 // and the heartbeat look for it.
 
 const ROLES = ["coding-agent", "dev-manager", "product-owner"];
@@ -318,7 +318,7 @@ function start(role: string | undefined, name: string | undefined): void {
   }
   delete process.env.TMUX;
   startLoop(role, name === undefined ? "" : agentName(name, `factory owner start ${role} taytu`), ["-i"]);
-  console.log("`factory follow <name>` shows it, or Enter on it in the cockpit.");
+  console.log("`factory follow <name>` shows it, or its channel in `factory ui`.");
 }
 
 /** The pid of `name`'s live loop on this machine, from its checkout claim, or null (#395). */

@@ -18,7 +18,7 @@
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
 // `ui.pollSeconds` and pushes what changed; with no page open it reads nothing. (NATS comes later through the messaging
-// port; this loop reads the same data functions the cockpit does.)
+// port.)
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { ChatHub } from "./factory_ui_chat.ts";
@@ -145,7 +145,7 @@ export function serve(o: ServeOptions): Running {
     }
   }
 
-  // the tasks, pull requests and CI channels (#424): from the cockpit's cache, sent when they change
+  // the tasks, pull requests and CI channels (#424): from the snapshot's cache, sent when they change
   const viewsSent = new Map<string, string>();
   const refresher = new Refresher((p) => pushViews(p));
   function viewsMessage(p: UiProject): string {
@@ -235,7 +235,7 @@ export function serve(o: ServeOptions): Running {
     if (rest.length === 1 && rest[0] === "refresh") {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST.");
       refresher.start(p, true);
-      return json(202, { ok: true, command: "factory cockpit --json", refreshing: refresher.running(p) });
+      return json(202, { ok: true, command: "factory snapshot", refreshing: refresher.running(p) });
     }
     return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
   }

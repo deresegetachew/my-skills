@@ -73,7 +73,7 @@ factory settings unstage [maxOpenPRs]                 # drop one staged change, 
 factory settings --local set remoteControl off        # the machine scope (below)
 ```
 
-Staging (#306) is how the cockpit collects changes: each `set --stage` is kept in the git directory, not in the
+Staging (#306) is how changes are collected: each `set --stage` is kept in the git directory, not in the
 file, and `factory settings pr` puts them all in one pull request. It builds that on the main branch as `origin` has it
 now, in a temporary worktree, so it works from any checkout and after main has moved on. It checks each staged value
 again first: if one is no longer valid (or no longer a setting) it stops, opens nothing and says which to `unstage`.
@@ -229,7 +229,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `tasks.heartbeatMissMinutes` | int | `12` | An agent the daemon writes for counts as silent after this many minutes without a keepalive (instead of downMinutes). |
 | `tasks.releaseDownMinutes` | int | `10` | An agent that is plainly down (its loop or the daemon said so) gets its in-progress issues back to ready by the sweep after this long. |
 | `tasks.showWhere` | bool | `false` | Post the machine, folder, tmux session and Remote Control link on agent issues (anyone who can read the repo sees them). |
-| `machines` | dict | `{}` | Names for the machines, by machine id (`factory machine id` prints it): {"469ae1ea6a9e": {"name": "dev-pc"}}. The cockpit and `factory agents ls --json` show the name; with none, the hostname (another machine's only with tasks.showWhere), else the id. |
+| `machines` | dict | `{}` | Names for the machines, by machine id (`factory machine id` prints it): {"469ae1ea6a9e": {"name": "dev-pc"}}. The web UI and `factory agents ls --json` show the name; with none, the hostname (another machine's only with tasks.showWhere), else the id. |
 | `tasks.labels` | dict | `see `factory settings help tasks.labels`` | The GitHub labels that mark a task: ready, inProgress, inReview, blocked and the agentPrefix. |
 
 **Ports & per-agent env**

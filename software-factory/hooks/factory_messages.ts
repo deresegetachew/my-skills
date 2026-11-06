@@ -18,7 +18,7 @@
 //   factory messages tail [--ref N] [--to X] [--every S] [--polls N] [--json]
 //                         every kind of message as it is said (#414, decision 0004 point 7): the last 10, then what is
 //                         new every S seconds (default 60) until Ctrl-C, or N reads; `factory follow <agent> --messages`
-//                         and the cockpit's Messages popup run it
+//                         runs it
 //
 // The envelope and its rules are the domain (core/domain/message.ts, decision 0003); this module re-exports them, so
 // the PR gate, `factory wait`, `next_task.ts` and `factory status` import from here as before, with the roles from

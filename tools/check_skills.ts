@@ -4,9 +4,9 @@
 // - SKILL.md exists, with frontmatter: `name:` matching the folder and a non-empty `description:`.
 // - Every .sh parses (bash -n), every .ts and .tsx parses (and uses no `any`), every .json loads, and the factory has no
 //   .py file.
-// - Only the cockpit's UI (software-factory/cockpit/) imports Ink or React (decision 0002), and only the web app
-//   (software-factory/web/) React and react-dom (decision 0005): they are build-time dependencies, bundled into one file
-//   at release, and a project never installs them.
+// - Only the web app (software-factory/web/) imports React and react-dom (decision 0005), and nothing imports Ink (the
+//   cockpit that used it is retired, #425): they are build-time dependencies, bundled into one file at release, and a
+//   project never installs them.
 // - The factory's core keeps its layers (decision 0003): software-factory/hooks/core/domain/ imports only the domain,
 //   core/ports/ only the domain and the ports, and only core/compose.ts (and tests) import core/adapters/.
 // - A plugin's packages (the names in software-factory/plugins/<name>/package.json) are imported only inside that
@@ -55,9 +55,8 @@ for (const d of skills) {
 const files = walk(root);
 const rel = (f: string): string => relative(root, f);
 const transpilers = { ts: new Bun.Transpiler({ loader: "ts" }), tsx: new Bun.Transpiler({ loader: "tsx" }) };
-// Decision 0002: Ink, React and their helpers (ink-testing-library, react-reconciler, ...) only in the cockpit's UI.
+// Decisions 0002 and 0005: Ink, React and their helpers (ink-testing-library, react-reconciler, ...) are UI packages.
 const UI_PACKAGES = /^(ink|ink-[\w.-]+|react|react-[\w.-]+)(\/|$)/;
-const UI_FOLDER = "software-factory/cockpit/";
 // Decision 0005: the web app (factory ui) is React and react-dom, bundled for the browser at release; never Ink.
 const WEB_FOLDER = "software-factory/web/";
 const WEB_PACKAGES = /^(react|react-dom)(\/|$)/;
@@ -133,10 +132,10 @@ for (const f of files) {
             errors.push(`${rel(f)}: imports ${i.path}; the web app (${WEB_FOLDER}) may import only React and react-dom (decision 0005)`);
           }
         }
-      } else if (!rel(f).startsWith(UI_FOLDER)) {
+      } else {
         for (const i of imports) {
           if (UI_PACKAGES.test(i.path)) {
-            errors.push(`${rel(f)}: imports ${i.path}; only the cockpit's UI (${UI_FOLDER}) may import Ink or React (decision 0002)`);
+            errors.push(`${rel(f)}: imports ${i.path}; only the web app (${WEB_FOLDER}) may import React, and nothing imports Ink (decision 0005)`);
           }
         }
       }

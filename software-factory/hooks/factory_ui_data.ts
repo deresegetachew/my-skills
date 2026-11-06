@@ -4,14 +4,14 @@
 //
 // Agents come from the project's own `factory agents ls --json` (this machine's heartbeat file, the other machines' agent
 // issues, cached), run in that project's folder, so a project in `ui.projects` is read by its own release. A task's
-// title, the CI runners and GitHub's limit come from that project's state folder (the cockpit's cache and the limit file),
-// so a read here never calls GitHub itself. Start and stop run that project's `factory owner start|stop`, the commands
-// the cockpit and the command line run.
+// title, the CI runners and GitHub's limit come from that project's state folder (the snapshot's cache, `factory
+// snapshot`, and the limit file), so a read here never calls GitHub itself. Start and stop run that project's `factory
+// owner start|stop`, the commands the command line runs.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type Config, DEFAULTS, roleNames } from "./factory_config.ts";
-import { limitSentence } from "./factory_cockpit.ts";
+import { limitSentence } from "./factory_snapshot.ts";
 import { run } from "./factory_lib.ts";
 
 const HOOKS = import.meta.dir;
@@ -286,7 +286,7 @@ function runnersOf(cache: Obj): Runner[] {
     state: str(r.status) !== "online" ? "offline" : r.busy ? "busy" : "idle" }));
 }
 
-/** GitHub's hourly limit while it is used up (from the limit file or the cockpit's cache), else null. */
+/** GitHub's hourly limit while it is used up (from the limit file or the snapshot's cache), else null. */
 function limitOf(state: string, cache: Obj, now: number): Limit | null {
   const kept = obj(obj(readJson(join(state, "github-rate.json"))).core);
   const cached = obj(cache.limit);
@@ -337,7 +337,7 @@ export async function live(p: UiProject): Promise<Live> {
       fix: "Run `gh auth status` (and `gh auth login` if it says so)." });
   }
   const state = stateDirOf(p);
-  const cache = obj(readJson(join(state, "cockpit.json")));
+  const cache = obj(readJson(join(state, "snapshot.json")));
   const titles = taskTitles(cache);
   const rows = (Array.isArray(data.agents) ? data.agents : []).map(obj).filter((a) => str(a.name));
   const agents: Agent[] = await Promise.all(rows.map(async (a): Promise<Agent> => {

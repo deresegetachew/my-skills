@@ -34,7 +34,8 @@ const ANSWER = /<!--\s*factory-answer\b/;
 export const OWNER_ASK = /<!--\s*factory-owner-ask\s+id=([\w.-]+)(?:\s+[^>]*?)?\s*-->/; // for=product may follow
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
-/** The summary of a talk with a role in the cockpit (#395): context for the next pass, never the owner's answer. */
+/** The summary of a talk with a role (`factory talk`, #395; the marker keeps the cockpit's name, so earlier summaries
+ *  still read the same): context for the next pass, never the owner's answer. */
 export const CHAT_SUMMARY = /<!--\s*factory-cockpit-chat\b/;
 const ASK_TEXT_MAX = 4000;
 

@@ -5,11 +5,11 @@
 //                                                    ls --kind all --all --json`, through the Messaging port, cached by
 //                                                    the views' cache) and what the owner sent from this page
 //   POST /api/projects/:p/agents/:name/chat {text}   to a coding agent: `factory say <name> <text>` (200). To the dev
-//                                                    manager or the product owner: one turn of the cockpit's talk,
-//                                                    `factory cockpit --chat-send <role> <text> [<history>]` (202); its
+//                                                    manager or the product owner: one turn of a talk,
+//                                                    `factory talk <role> <text> [<history>]` (202); its
 //                                                    answer arrives over the WebSocket
 //   GET  /api/projects/:p/owner-queue                each ask on the owner queue ("Dev manager: needs the owner"): its
-//                                                    text, its options (its list lines, as the cockpit has them), open or
+//                                                    text, its options (its list lines), open or
 //                                                    answered, and the answer
 //   POST /api/projects/:p/owner-queue/:id/answer     {answer, confirm: true}: `factory owner answer <id> <answer>`
 //
@@ -25,13 +25,13 @@ import { type Agent, envFor, factoryScript, type Obj, type Problem, type Ran, ro
 const TEXT_MAX = 2000; // what `factory say` takes in one message
 const ITEMS_MAX = 200; // what a chat shows
 const LOG_MAX = 2000; // the lines of ui-chat.jsonl read back
-const TURNS = 10; // the talk's turns that go with the next one (the cockpit's own cut)
+const TURNS = 10; // the talk's turns that go with the next one (`factory talk` keeps as many)
 const SAY_MS = 60_000;
-const TALK_MS = 20 * 60_000; // the cockpit's pane waits 20 minutes; the session itself stops before
+const TALK_MS = 20 * 60_000; // a talk's answer is waited for 20 minutes; the session itself stops before
 const READ_MS = 30_000;
 const QUEUE_SECONDS = 45; // views.cacheSeconds' default: how long a read of the owner queue is used again
 const TALKS = ["dev-manager", "product-owner"];
-// an ask's options are its list lines: `- `, `* `, `1. `, `1) `, `A) `, `a. ` (as cockpit/views/ask.tsx reads them)
+// an ask's options are its list lines: `- `, `* `, `1. `, `1) `, `A) `, `a. `
 const OPTION = /^\s*(?:[-*]|\d{1,2}[.)]|[A-Za-z][.)])\s+(.+?)\s*$/;
 const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/g;
 
@@ -227,7 +227,7 @@ async function ghAll(p: UiProject, path: string): Promise<Obj[] | Problem> {
     if (r.code !== 0 || !Array.isArray(chunk)) {
       const why = (r.stderr.trim().split("\n").at(-1) || `exit ${r.code}`).slice(0, 200);
       return { code: "ui_owner_queue_unreadable", message: `The owner queue of ${p.name} can't be read from GitHub (${why}).`,
-        fix: "Run `gh auth status` (and `gh auth login` if it says so); `factory cockpit --needs` reads the same queue." };
+        fix: "Run `gh auth status` (and `gh auth login` if it says so); `factory prs` reads the same queue." };
     }
     out.push(...chunk.map(obj));
     if (chunk.length < 100) break;
@@ -375,7 +375,7 @@ export class ChatHub {
     return { status: 200, body: { ...r.body, item: said } };
   }
 
-  /** One turn of the cockpit's talk with the dev manager or the product owner: the owner's line now, the answer when the
+  /** One turn of a talk (`factory talk`) with the dev manager or the product owner: the owner's line now, the answer when the
    * session ends (over the WebSocket). One turn at a time per role. */
   private talk(p: UiProject, agent: string, role: string, text: string): Reply {
     const key = `${p.id}/${agent}`;
@@ -388,7 +388,7 @@ export class ChatHub {
     keep(p, agent, asked);
     this.pending.add(key);
     this.push(p, agent, [asked]);
-    const args = ["cockpit", "--chat-send", role, text, ...(history.length ? [JSON.stringify(history)] : [])];
+    const args = ["talk", role, text, ...(history.length ? [JSON.stringify(history)] : [])];
     void factory(p, args, TALK_MS).then((r) => {
       let answer = "";
       try {
@@ -400,12 +400,12 @@ export class ChatHub {
       const got = r.code === 0 && answer ? item(agent, "owner", "reply", answer)
         : item(agent, "owner", "error", own?.message ?? `The talk with ${agent} failed (exit ${r.code}); nothing was posted.`, {
           error: own ?? { code: "chat_failed", message: `The talk with ${agent} failed (exit ${r.code}).`,
-            fix: `Run \`factory cockpit --chat ${role}\` in ${p.path} to see the whole error.` } });
+            fix: `Run \`factory talk ${role} <text>\` in ${p.path} to see the whole error.` } });
       keep(p, agent, got);
       this.pending.delete(key);
       this.push(p, agent, [got]);
     });
-    return { status: 202, body: { ok: true, pending: true, command: `factory cockpit --chat-send ${role} …`, item: asked } };
+    return { status: 202, body: { ok: true, pending: true, command: `factory talk ${role} …`, item: asked } };
   }
 
   private async answer(p: UiProject, id: string, given: Obj): Promise<Reply> {

@@ -1,24 +1,24 @@
-// The web UI's tasks, pull requests and CI channels (#424): what each shows, read from the project's cockpit cache
-// (`cockpit.json`, the snapshot `factory cockpit --json` writes), so a read here never calls GitHub; the CI view's
-// actions (#396), running the commands the cockpit's CI view runs; and a read again that runs `factory cockpit --json`.
+// The web UI's tasks, pull requests and CI channels (#424): what each shows, read from the project's snapshot cache
+// (`snapshot.json`, what `factory snapshot` writes), so a read here never calls GitHub; the CI view's actions (#396),
+// each running its factory commands; and a read again that runs `factory snapshot`.
 // factory_ui_server.ts routes to it and sends what changed over the WebSocket.
 //
 //   GET  /api/projects/:p/tasks                 the tasks in build order (the order `factory next` walks), and the next one
 //   GET  /api/projects/:p/pull-requests         each open pull request: checks, review, protected files, agent, task
 //   GET  /api/projects/:p/ci                    the verdict first, then the runs, the runners and the actions
 //   POST /api/projects/:p/ci/actions/:name      {confirm: true[, run: <id>]}: that action's commands (log needs no confirm)
-//   POST /api/projects/:p/refresh               runs `factory cockpit --json` in the background (202)
+//   POST /api/projects/:p/refresh               runs `factory snapshot` in the background (202)
 //
-// Each row carries `find`: the text the search within a view and across views matches (#392, factory_cockpit_match.ts).
-// While a page looks at a project, its cache is read again when older than FACTORY_COCKPIT_CACHE_SECONDS (300 s, as the
-// tmux cockpit's status line has it), never while GitHub's hourly limit is still used up.
+// Each row carries `find`: the text the search within a view and across views matches (#392, factory_match.ts).
+// While a page looks at a project, its cache is read again when older than FACTORY_SNAPSHOT_CACHE_SECONDS (300 s),
+// never while GitHub's hourly limit is still used up.
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
 import { branchTask, toFloat } from "./factory_config.ts";
 import { CI_ACTIONS, type CiActionName, ciActionOf, type CiSettingsSeen, ciVerdict, FAILED, machineOf, orderedRuns,
   waitingPulls } from "./factory_ci_view.ts";
-import { prText, taskStateText, taskText } from "./factory_cockpit_match.ts";
+import { prText, taskStateText, taskText } from "./factory_match.ts";
 import { run } from "./factory_lib.ts";
 import { type ActionResult, envFor, factoryScript, type Obj, type Problem, readJson, resultOf, spawn, stateDirOf,
   type UiProject } from "./factory_ui_data.ts";
@@ -147,7 +147,7 @@ export interface Views {
 // --- reading the cache -------------------------------------------------------------------------------------------------
 
 function cacheOf(p: UiProject): Obj | null {
-  const c = readJson(join(stateDirOf(p), "cockpit.json"));
+  const c = readJson(join(stateDirOf(p), "snapshot.json"));
   return typeof c === "object" && c !== null && !Array.isArray(c) ? (c as Obj) : null;
 }
 
@@ -287,10 +287,10 @@ function ciView(p: UiProject, cache: Obj, repo: string): CiView {
     waiting: waitingPulls(ci).map((r) => str(r.ref)), host: here, settings, actions: has ? actionsOf(ci, settings) : [], problems };
 }
 
-const NO_SNAPSHOT = (p: UiProject): Problem => ({ code: "ui_no_snapshot", message: `${p.name} has no cockpit snapshot yet; one is being read.`,
-  fix: `Wait a minute, or run \`factory cockpit --json\` in ${p.path}.` });
+const NO_SNAPSHOT = (p: UiProject): Problem => ({ code: "ui_no_snapshot", message: `${p.name} has no snapshot yet; one is being read.`,
+  fix: `Wait a minute, or run \`factory snapshot\` in ${p.path}.` });
 
-/** What the three channels show for project `p`, from its cockpit cache. */
+/** What the three channels show for project `p`, from its snapshot cache. */
 export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Views {
   if (p.problem) {
     const ci: CiView = { verdict: null, mode: "", repo: "", label: "", runs: [], runners: [], waiting: [], host: host(),
@@ -308,9 +308,9 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Vie
     problems: cache ? limit : [NO_SNAPSHOT(p)], tasks: tasksView(p, c, repo, pulls.pulls), pulls, ci: ciView(p, c, repo) };
 }
 
-/** The cache's age limit, in seconds (as `factory cockpit --status` has it). */
+/** The cache's age limit, in seconds: a read costs a few GitHub calls per open pull request, on the agents' token. */
 function ttl(): number {
-  return toFloat(process.env.FACTORY_COCKPIT_CACHE_SECONDS || 300) ?? 300;
+  return toFloat(process.env.FACTORY_SNAPSHOT_CACHE_SECONDS || 300) ?? 300;
 }
 
 /** True when project `p`'s cache is missing or older than the limit, and GitHub's hourly limit isn't still used up. */
@@ -327,7 +327,7 @@ export function stale(p: UiProject, now = Date.now()): boolean {
 // --- acting ------------------------------------------------------------------------------------------------------------
 
 /** Runs `steps` in project `p` in order, each under its command line, stopping at the first that fails: a step that
- *  starts with "factory" runs through the project's `factory`, any other (gh) as it is, as the cockpit's runSteps does. */
+ *  starts with "factory" runs through the project's `factory`, any other (gh) as it is. */
 async function runSteps(p: UiProject, steps: string[][], ms: number): Promise<ActionResult> {
   const out: string[] = [];
   const command = commandText(steps);
@@ -364,7 +364,7 @@ export async function ciAction(p: UiProject, name: string, body: unknown): Promi
   return runSteps(p, a.steps, CI_ACTION_TIMEOUT_MS);
 }
 
-/** Runs `factory cockpit --json` in project `p` (its snapshot, written to its cache), at most one at a time per project. */
+/** Runs `factory snapshot` in project `p` (its snapshot, written to its cache), at most one at a time per project. */
 export class Refresher {
   private readonly busy = new Map<string, Promise<void>>();
   private readonly started = new Map<string, number>();
@@ -381,7 +381,7 @@ export class Refresher {
     const last = this.started.get(p.id) ?? 0;
     if (!force && Date.now() - last < ttl() * 1000) return false; // one that failed is not tried again at each tick
     this.started.set(p.id, Date.now());
-    const job = spawn(["bash", factoryScript(p), "cockpit", "--json"], p.path, envFor(p), REFRESH_TIMEOUT_MS)
+    const job = spawn(["bash", factoryScript(p), "snapshot"], p.path, envFor(p), REFRESH_TIMEOUT_MS)
       .then(() => undefined).finally(() => {
         this.busy.delete(p.id);
         this.changed(p);
