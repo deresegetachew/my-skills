@@ -23,8 +23,10 @@ export interface TaskRow {
   todos: { done: number; all: number };
   dependsOn: string[];
   url: string | null;
-  pr: { number: number; url: string | null } | null;
+  pr: { number: number; url: string | null; checks?: { state: string; failing: string[] } } | null;
   next: boolean;
+  /** What the board offers on it (#439): release, block, reassign. */
+  actions?: string[];
   find: string;
 }
 
