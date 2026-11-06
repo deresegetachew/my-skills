@@ -361,7 +361,8 @@ async function stepCommit(req: AddRequest, step: AddStep): Promise<Done> {
     await git(req.path, ["fetch", "-q", "origin", req.mainBranch]);
     const base = (await git(req.path, ["rev-parse", "--verify", "-q", `refs/remotes/origin/${req.mainBranch}`])).code === 0 ? [`origin/${req.mainBranch}`] : [];
     outs.push(await must(step, ["git", "-C", req.path, "checkout", "-B", SETUP_BRANCH, ...base], req.path, env,
-      `Check that ${req.mainBranch} is the repo's main branch, then press Retry.`));
+      `A file the setup changed differs between the branch checked out in ${req.path} and ${req.mainBranch} (what it printed names it). ` +
+      `In that folder, put the setup's changes aside, check out ${req.mainBranch}, then add the project again.`));
   }
   if (changed) {
     outs.push(await must(step, ["git", "-C", req.path, "add", "-A"], req.path, env, fix));
