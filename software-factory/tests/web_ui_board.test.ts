@@ -233,6 +233,16 @@ test("release runs factory issues release with the default reason, or the one gi
   expect(calls(p)).toEqual(["issues release 7 released from the web UI", "issues release 7 went quiet"]);
 }, T);
 
+test("with no message board set up, the read after a release starts at once, every time (#498: nothing waits for a board)", async () => {
+  for (let i = 0; i < 20; i++) {
+    const { ui, p } = await started();
+    const r = await act(ui, "7", "release");
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(factoryCalls(p), `run ${i + 1}`).toContain("snapshot");
+    await ui.stop();
+  }
+}, 240_000);
+
 test("block runs factory issues block with the reason", async () => {
   const { ui, p } = await started();
   const r = await act(ui, "10", "block", { confirm: true, reason: "needs the Stripe keys" });

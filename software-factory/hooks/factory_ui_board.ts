@@ -16,6 +16,7 @@
 // (it comes with the adapters, 0007 build step 3). So it is loaded when the server starts, and without it there is no
 // board: the GitHub path, as before.
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Board, BoardEvent, ContextEntry, Listener, Message, Task } from "../message-board/src/index.ts";
 import { citesIn } from "./core/domain/cites.ts";
@@ -31,9 +32,20 @@ const MOST = 5_000;
 
 type BoardApi = typeof import("../message-board/src/index.ts");
 
+const ENTRY = join(import.meta.dir, "..", "message-board", "src", "index.ts");
+
+/** True when this machine may have a board, told at once, without loading its code: the code is here, and MB_URL or the
+ *  url file (where the board's own boardUrl() looks) names one. False: no board, the GitHub path from the start. */
+function maybeBoard(): boolean {
+  if (!existsSync(ENTRY)) return false;
+  if (process.env.MB_URL) return true;
+  const base = process.env.FACTORY_CONFIG_DIR || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "software-factory");
+  return existsSync(join(base, "message-board", "url"));
+}
+
 /** The board's public entry, or null when this install has none (a release, for now). */
 async function loadBoard(): Promise<BoardApi | null> {
-  const entry = join(import.meta.dir, "..", "message-board", "src", "index.ts");
+  const entry = ENTRY;
   if (!existsSync(entry)) return null;
   try {
     return (await import(entry)) as BoardApi;
@@ -141,8 +153,10 @@ export class BoardFeed {
 
   /** `url`: the board's; left out, this machine's (MB_URL, else the settings folder's url file, as `factory board`). */
   constructor(private readonly projects: UiProject[], private readonly o: { url?: string | null; repoOf: (p: UiProject) => string;
-    changed: (p: UiProject) => void; fellBack?: (p: UiProject) => void }) {
-    this.url = o.url;
+    changed: (p: UiProject) => void; fellBack?: (p: UiProject, wasLive: boolean) => void }) {
+    // fellBack(p, wasLive): p's tasks come from GitHub again (wasLive), or turned out not to come from the board
+    // known at once when there is no board, so a project without one waits for nothing
+    this.url = o.url !== undefined ? o.url : maybeBoard() ? undefined : null;
   }
 
   /** Opens the board and starts listening; with no board set up it does nothing. Never throws: a failure is the notice. */
@@ -154,7 +168,8 @@ export class BoardFeed {
       if (!this.api) this.url = null;
     }
     if (!this.url || !this.api) {
-      this.tried = true;
+      this.url = null;
+      this.settle();
       return;
     }
     if (!this.check) {
@@ -172,12 +187,20 @@ export class BoardFeed {
       this.all = await board.tasks({ all: true, limit: MOST });
       this.listener = await board.listen((_e: BoardEvent) => this.schedule(), { onError: (e) => void this.fail(e) });
       this.down = null;
-      this.tried = true;
       this.publish(true);
+      this.settle();
     } catch (e) {
       await this.fail(e);
-      this.tried = true;
+      this.settle();
     }
+  }
+
+  /** The first open is over: each project whose tasks don't come from the board is told (fellBack), so a snapshot that
+   *  left its tasks out while that wasn't known reads them. */
+  private settle(): void {
+    if (this.tried) return;
+    this.tried = true;
+    for (const p of this.projects) if (!this.live(p)) this.o.fellBack?.(p, false);
   }
 
   /** The board's part for project `p` and its notice. */
@@ -274,7 +297,7 @@ export class BoardFeed {
     this.parts.clear();
     if (first) {
       for (const p of this.projects) this.o.changed(p);
-      for (const p of wasLive) this.o.fellBack?.(p); // its tasks were not read from GitHub: read them now
+      for (const p of wasLive) this.o.fellBack?.(p, true); // its tasks were not read from GitHub: read them now (or right after)
     }
     if (!this.retry) {
       this.retry = setTimeout(() => {

@@ -534,12 +534,23 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
 export class Refresher {
   private readonly busy = new Map<string, Promise<void>>();
   private readonly started = new Map<string, number>();
+  /** The projects whose last (or running) read left the tasks out, and those with a full read to run after this one. */
+  private readonly skipped = new Set<string>();
+  private readonly queued = new Set<string>();
 
   /** `fromBoard(p)`: project `p`'s tasks come from the message board (#498), so its snapshot leaves them out
    *  (FACTORY_SNAPSHOT_TASKS=board) and reads only what the board doesn't have: pull requests, CI, agents. null: not
-   *  known yet (the board is being opened), so a read waits for `known`. */
-  constructor(private readonly changed: (p: UiProject) => void, private readonly fromBoard: (p: UiProject) => boolean | null = () => false,
-    private readonly known: Promise<void> = Promise.resolve()) {}
+   *  known yet (the board is being opened): the read runs now and leaves them out too, and tasksNeeded() reads them if
+   *  they turn out not to come from the board. */
+  constructor(private readonly changed: (p: UiProject) => void, private readonly fromBoard: (p: UiProject) => boolean | null = () => false) {}
+
+  /** `p`'s tasks come from GitHub (again): when the last or running read left them out (or `always`: they were read
+   *  from the board until now, so the cache's may be old), a full read runs now, or as soon as the running one ends. */
+  tasksNeeded(p: UiProject, always = false): void {
+    if (!always && !this.skipped.has(p.id)) return;
+    if (this.busy.has(p.id)) this.queued.add(p.id);
+    else this.start(p, true);
+  }
 
   running(p: UiProject): boolean {
     return this.busy.has(p.id);
@@ -550,16 +561,16 @@ export class Refresher {
     if (p.problem || this.busy.has(p.id)) return false;
     const last = this.started.get(p.id) ?? 0;
     if (!force && Date.now() - last < ttl() * 1000) return false; // one that failed is not tried again at each tick
-    if (this.fromBoard(p) === null) { // the message board is still being opened: read once it is known
-      void this.known.then(() => this.start(p, force));
-      return true;
-    }
     this.started.set(p.id, Date.now());
-    const env = { ...envFor(p), FACTORY_SNAPSHOT_TASKS: this.fromBoard(p) === true ? "board" : "" };
+    const skip = this.fromBoard(p) !== false;
+    if (skip) this.skipped.add(p.id);
+    else this.skipped.delete(p.id);
+    const env = { ...envFor(p), FACTORY_SNAPSHOT_TASKS: skip ? "board" : "" };
     const job = spawn(["bash", factoryScript(p), "snapshot"], p.path, env, REFRESH_TIMEOUT_MS)
       .then(() => undefined).finally(() => {
         this.busy.delete(p.id);
         this.changed(p);
+        if (this.queued.delete(p.id)) this.tasksNeeded(p, true);
       });
     this.busy.set(p.id, job);
     this.changed(p);

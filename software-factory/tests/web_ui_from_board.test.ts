@@ -318,3 +318,52 @@ test("an install without the board's code (a release, for now) keeps the GitHub 
   expect(Object.keys(byId(json))).toEqual(["99"]);
   expect(problemsOf(json)).toEqual([]);
 }, T);
+
+test("with a board, the read after a release starts at once (leaving tasks out), every time", async () => {
+  const url = await boardUrl();
+  await seeded(url);
+  for (let i = 0; i < 5; i++) {
+    const p = workProject();
+    const ui = await started(p, url);
+    await tasksUntil(ui, (j) => j.from === "board", 15_000); // the card is the board's
+    const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true } });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(readFileSync(p.factoryLog, "utf8").split("\n"), `run ${i + 1}`).toContain("snapshot tasks=board");
+    await ui.stop();
+  }
+}, T);
+
+/** A fake `factory` whose snapshot takes `seconds`, logging when each starts (with its tasks setting) and ends. */
+const SLOW_FACTORY = (seconds: number) => `#!/usr/bin/env bash
+if [ "$1" = snapshot ]; then
+  echo "snapshot start tasks=\${FACTORY_SNAPSHOT_TASKS:-}" >> "$FAKE_FACTORY_LOG"; sleep ${seconds}; echo "snapshot end" >> "$FAKE_FACTORY_LOG"; exit 0
+fi
+echo "$*" >> "$FAKE_FACTORY_LOG"
+`;
+
+test("a board that drops while a snapshot without tasks runs: a full snapshot runs as soon as that one ends", async () => {
+  const db = await freshDb(pg);
+  await seeded(db.url);
+  const p = workProject(3_600); // old: a snapshot starts at once
+  writeExe(join(p.d, "factory"), SLOW_FACTORY(8));
+  const ui = await started(p, db.url);
+  const { ws, next } = socket(ui);
+  const lines = () => readFileSync(p.factoryLog, "utf8").split("\n").filter(Boolean);
+  try {
+    expect(await next(fromBoardViews, 15_000)).not.toBeNull();
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline && !lines().includes("snapshot start tasks=board")) await Bun.sleep(100);
+    expect(lines()).toContain("snapshot start tasks=board");
+    for (const b of boards.splice(0)) await b.end().catch(() => {});
+    await db.drop(); // while that snapshot runs
+    expect(await next((x) => x.type === "views" && x.project === "work" && (x.tasks as Row).from === "github", 15_000)).not.toBeNull();
+    const until = Date.now() + 20_000;
+    while (Date.now() < until && !lines().includes("snapshot start tasks=")) await Bun.sleep(200);
+  } finally {
+    ws.close();
+  }
+  const l = lines();
+  const full = l.indexOf("snapshot start tasks=");
+  expect(full, l.join("\n")).toBeGreaterThan(l.indexOf("snapshot end")); // queued behind the busy one, not dropped
+  expect(l.indexOf("snapshot end")).toBeGreaterThan(l.indexOf("snapshot start tasks=board"));
+}, T);
