@@ -420,7 +420,7 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
     return refusal(400, "ui_reason_needed", "Blocking a task needs a reason: what a person must provide.", 'Send {"confirm": true, "reason": "<what is needed>"}.');
   }
   if (action === "reassign") {
-    const agents = roleNames(p.config ?? {}, "coding-agent");
+    const agents = p.config ? roleNames(p.config, "coding-agent") : [];
     const to = str(b.agent);
     if (!agents.includes(to)) {
       return refusal(400, "ui_agent_unknown", `${to || "No agent"} isn't one of ${p.name}'s coding agents.`,

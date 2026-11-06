@@ -11,6 +11,7 @@ import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
   type Tone } from "./model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
+import { BOARD_CSS } from "./board.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { CSS } from "./style.ts";
 import { CiChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
@@ -612,6 +613,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = CSS + VIEWS_CSS + AVATAR_CSS;
+style.textContent = CSS + VIEWS_CSS + BOARD_CSS + AVATAR_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

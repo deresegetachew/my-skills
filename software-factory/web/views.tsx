@@ -1,9 +1,12 @@
 // The web app's tasks, pull requests and CI channels (#424): the cockpit's views as channels, from the API's views data
-// (factory_ui_views.ts, live over the WebSocket). Each has a filter (#392: every word, any case) and says how old its
+// (factory_ui_views.ts, live over the WebSocket). The tasks channel shows a board (#439, board.tsx) or a list. Each has
+// a filter (#392: every word, any case) and says how old its
 // data is, with a button that reads it again. The CI channel puts the verdict first and its actions (#396) are buttons
 // that ask first, then run the same commands the cockpit's CI view runs, on the machine that serves the page.
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
+import { Board } from "./board.tsx";
+import type { LaneBy } from "./board_model.ts";
 import type { Tone } from "./model.ts";
 import { type ActionRow, checksText, checksTone, filterRows, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
   type RunRow, runnerText, runnerTone, runStateText, runTone, type TaskRow, taskTone, verdictTone, type ViewsData } from "./views_model.ts";
@@ -106,8 +109,18 @@ function TaskLine({ t, open }: { t: TaskRow; open: ViewProps["open"] }) {
   );
 }
 
+function Toggle<T extends string>({ label, value, set, options }: { label: string; value: T; set: (v: T) => void; options: Array<[T, string]> }) {
+  return (
+    <span className="vmode" role="group" aria-label={label}>
+      {options.map(([v, text]) => <button key={v} aria-pressed={value === v} onClick={() => set(v)}>{text}</button>)}
+    </span>
+  );
+}
+
 export function TasksChannel(p: ViewProps) {
   const [typed, setTyped] = useFilter(p.find);
+  const [mode, setMode] = useState<"board" | "list">("board");
+  const [by, setBy] = useState<LaneBy>("agent");
   if (!p.views) return <Loading name={p.project.name} />;
   const v = p.views;
   const all = v.tasks.tasks;
@@ -116,13 +129,18 @@ export function TasksChannel(p: ViewProps) {
     <div className="body">
       <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="tasks" />
       <Problems list={[...v.problems, ...v.tasks.problems]} />
+      <div className="vbar">
+        <Toggle label="Show the tasks as" value={mode} set={setMode} options={[["board", "Board"], ["list", "List"]]} />
+        {mode === "board" && <Toggle label="Swim lanes by" value={by} set={setBy} options={[["agent", "By agent"], ["epic", "By epic"]]} />}
+      </div>
       <div className="lanes" aria-label="Tasks by state">
         {LANES.map(([s, name]) => <span key={s}><Dot tone={taskTone(s)} />{name} {all.filter((t) => t.state === s).length}</span>)}
       </div>
       <p className="vnote">In the order <code>factory next</code> walks them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>
       {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} />)}</ul>}
+      {rows.length > 0 && mode === "board" && <Board tasks={rows} all={all} by={by} project={p.project} open={p.open} post={p.post} say={p.say} />}
+      {rows.length > 0 && mode === "list" && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} />)}</ul>}
     </div>
   );
 }
