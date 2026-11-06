@@ -15,6 +15,7 @@
 // runs yet; `unknown` when they could not be read. The next action is one of: review, merge, wait CI, rerun flake,
 // waiting for agent, owner merges (protected), owner merges (own PR), held by <manager>, none.
 import { agentIssues, current, stateOf } from "./factory_agents.ts";
+import { citesIn } from "./factory_cites.ts";
 import { type Config, branchTask, load, loadFromMain, taskLabels, taskSource, toFloat } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
 import { Exit, isoUtc, parseArgs, parseIso, pyDumps, pyInt, runMain } from "./factory_lib.ts";
@@ -331,6 +332,7 @@ export interface PullRow {
   url: unknown;
   branch: string;
   draft: boolean;
+  cites: string[]; // the decisions and PRD stories its body cites (#438)
   head?: { sha: string; ageMinutes: number | null };
   labels?: string[];
   agent?: string | null;
@@ -409,7 +411,8 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
     const n = Number(p.number);
     const sha = str(obj(p.head).sha);
     const branch = str(obj(p.head).ref);
-    const out: PullRow = { number: n, title: str(p.title), url: p.html_url ?? null, branch, draft: Boolean(p.draft) };
+    const out: PullRow = { number: n, title: str(p.title), url: p.html_url ?? null, branch, draft: Boolean(p.draft),
+      cites: citesIn(str(p.body)) };
     try {
       const labels = (Array.isArray(p.labels) ? p.labels : []).map((x) => str(obj(x).name));
       const comments = fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`);
