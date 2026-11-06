@@ -27,7 +27,7 @@ import { dirname, join } from "node:path";
 import { Board, boardDir, LOGIN_NAME } from "../message-board/src/index.ts";
 import { now } from "./factory_clock.ts";
 import { Exit, pyDumps, run, which } from "./factory_lib.ts";
-import { configDir, machineSettings, refuse, saveMachineSettings } from "./factory_machine.ts";
+import { configDir, machineSettings, refuse, saveMachineSettings, writeMachineSettings } from "./factory_machine.ts";
 
 const PREFIX = "FM1-";
 const VERSION = 2; // 1 carried NATS keys (#445); 2 carries a board login (#504)
@@ -324,10 +324,22 @@ async function cmdJoin(argv: string[]): Promise<number> {
       "Check that Tailscale is up on both machines and that the board runs (`factory board status` on its machine). " +
       "Nothing was kept. If the code expired or the machine was removed there, make a new one: factory machine add " + p.name + " --agent ...");
   }
-  writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
-  const mine = machineSettings().agents;
-  const names = [...new Set([...(Array.isArray(mine) ? mine.map(String) : []), ...p.agents.map((a) => a.name)])];
-  saveMachineSettings({ agents: names });
+  const settingsBefore = machineSettings();
+  try {
+    const mine = settingsBefore.agents;
+    const names = [...new Set([...(Array.isArray(mine) ? mine.map(String) : []), ...p.agents.map((a) => a.name)])];
+    writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
+    saveMachineSettings({ agents: names });
+  } catch (e) {
+    undo(); // nothing half done: without its record the code could be used here again
+    try {
+      writeMachineSettings(settingsBefore);
+    } catch {
+      // it was never written
+    }
+    refuse("join-not-saved", `Couldn't record the join in ${configDir()}: ${e instanceof Error ? e.message : String(e)}. Nothing was kept.`,
+      `Make ${configDir()} writable for this user (machine-joins.json must be a file), then run this again; the code still works.`);
+  }
 
   console.log(`Joined the message board at ${address} as ${p.name}, with ${p.agents.map((a) => `${a.name} (${a.role})`).join(", ")}.`);
   console.log(`The board's URL, with ${p.name}'s own login: ${file} (folder 700, file 600). With it, messaging.transport is board by default.`);

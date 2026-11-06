@@ -172,7 +172,18 @@ touching the others:
   that was never used (`login-used` otherwise).
 
 Making logins needs the board's own user (a superuser: the one `factory board up` made), because of the roles and the
-login trigger; a login can't make logins (`no-rights`). `factory machine add|join|ls|remove` use these verbs.
+login trigger; a login can't make logins (`no-rights`).
+
+What else `login add` changes on the server, each time (safe to run twice):
+
+- PUBLIC loses CONNECT and TEMPORARY on the board's database, so only the board's user and the logins reach it, and a
+  login can't make temporary tables. PUBLIC also loses CONNECT on `postgres` and `template1`, so a login reaches no
+  other database (`template0` takes no connections anyway). The board's server holds only these databases, and its one
+  user is a superuser, whom none of this limits. On a server shared with other databases, those are left as they are;
+  a non-superuser that needs `postgres` must then be granted CONNECT there by name.
+- The password is in the `CREATE ROLE` statement, so that transaction sets `log_statement = 'none'` and
+  `log_min_error_statement = 'panic'` first (for itself only): neither a logged statement nor a failed one writes it to
+  the server's log. `factory machine add|join|ls|remove` use these verbs.
 
 ## The MCP server
 

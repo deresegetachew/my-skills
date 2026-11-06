@@ -62,7 +62,15 @@ async function ensure(tx: SQL, db: string): Promise<void> {
     first_seen timestamptz, last_seen timestamptz)`);
   const exists = ((await tx`SELECT 1 FROM pg_roles WHERE rolname = ${group}`) as Row[]).length > 0;
   if (!exists) await tx.unsafe(`CREATE ROLE ${ident(group)} NOLOGIN`);
-  await tx.unsafe(`REVOKE CONNECT ON DATABASE ${ident(db)} FROM PUBLIC`);
+  // Only the board's own user (a superuser, unaffected by these) and the logins reach the board's database, and no login
+  // reaches the server's maintenance databases. The board's server holds only those (factory board up), so nobody else
+  // needs PUBLIC's CONNECT there; on a server shared with other databases, those are left as they are.
+  await tx.unsafe(`REVOKE CONNECT, TEMPORARY ON DATABASE ${ident(db)} FROM PUBLIC`);
+  for (const other of ["postgres", "template1"]) {
+    if (other !== db && ((await tx`SELECT 1 FROM pg_database WHERE datname = ${other}`) as Row[]).length) {
+      await tx.unsafe(`REVOKE CONNECT ON DATABASE ${ident(other)} FROM PUBLIC`);
+    }
+  }
   await tx.unsafe(`GRANT CONNECT ON DATABASE ${ident(db)} TO ${ident(group)}`);
   await tx.unsafe(`GRANT USAGE ON SCHEMA public TO ${ident(group)}`);
   await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${ident(group)}`);
@@ -96,6 +104,9 @@ export async function addLogin(sql: SQL, name: string, password: string): Promis
     const taken = ((await tx`SELECT 1 FROM mb_logins WHERE name = ${name}`) as Row[]).length > 0 ||
       ((await tx`SELECT 1 FROM pg_roles WHERE rolname = ${role}`) as Row[]).length > 0;
     if (taken) refuse("login-exists", `There is already a login called ${name}.`, `Remove it first with \`factory board login remove ${name}\`, or choose another name.`);
+    // The statement holds the password: keep it out of the server's log, even if it fails.
+    await tx.unsafe("SET LOCAL log_statement = 'none'");
+    await tx.unsafe("SET LOCAL log_min_error_statement = 'panic'");
     await tx.unsafe(`CREATE ROLE ${ident(role)} LOGIN INHERIT PASSWORD ${literal(password)} IN ROLE ${ident(groupOf(db))}`);
     await tx`INSERT INTO mb_logins (name, role) VALUES (${name}, ${role})`;
   });

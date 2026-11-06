@@ -188,7 +188,6 @@ function boardMessaging(): Messaging {
   return new BoardMessaging({ child: boardChild(), repo: boardRepo() });
 }
 
-
 /** The board's leases, wake-ups and pull request feed, the board checked once (it answers, and has its tables). */
 function checkedBoardBus(): { port: (Leases & Wakes & PrFeed) | null; error: CoreError | null } {
   const child = boardChild();

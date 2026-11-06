@@ -124,7 +124,6 @@ export class Board {
     return this.run(() => migrate(this.sql));
   }
 
-  /** The server's version, the migrations applied, and how many tasks there are in each status. */
   /** Makes a login of its own for another machine (logins.ts); the caller shows `password` once and keeps nothing. */
   async addLogin(name: string, password: string): Promise<{ name: string; role: string }> {
     return this.run(() => addLogin(this.sql, name, password));
@@ -140,6 +139,7 @@ export class Board {
     return this.run(() => removeLogin(this.sql, name, options));
   }
 
+  /** The server's version, the migrations applied, and how many tasks there are in each status. */
   async info(): Promise<{ server: string; migrations: string[]; counts: Record<string, number> | null }> {
     return this.run(async () => {
       const server = `PostgreSQL ${String(rows(await this.sql`SHOW server_version`)[0]?.server_version ?? "?")}`;
