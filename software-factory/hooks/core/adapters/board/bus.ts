@@ -1,9 +1,15 @@
-// Leases and wake-ups on the message board (#500, decision 0007 point 10), the board's side of what NATS gives
-// (decision 0004): a lease is the board's `lease` row (one holder per key until its time runs out), a wake-up a
-// `signal.wake` event. A wait is a child that listens until a matching wake-up or its time limit. The keys and wakes are
-// the project's own (`<project>:<key>`, and the project in each wake), so projects sharing a board don't meet.
-import type { BoardEvent, WaitFor } from "../../../../message-board/src/index.ts";
-import type { ClaimResult, Leases, Wake, WakeWait, Wakes } from "../../ports/messaging.ts";
+// Leases, wake-ups and the pull request feed on the message board (#500, decision 0007 point 10): everything the factory
+// sent over NATS (decision 0004: the claim, wake and pr kinds), with `messaging.transport` "board".
+//
+// - A lease is the board's `leases` row: one holder per key until its time runs out.
+// - A wake-up is a `signal.wake` event; a wait is a child that listens until a matching one or its time limit.
+// - The watcher's snapshot of the open pull requests is the board's value `<project>:prs`, and each change it saw a
+//   `signal.pr` event, written in the same transaction. A wait with `prChanges` also ends on such an event.
+// Keys, values and signals carry the project (compose.ts's messagingProject), so projects sharing a board don't meet.
+import type { BoardEvent, EventRule, WaitFor } from "../../../../message-board/src/index.ts";
+import { CoreError } from "../../domain/error.ts";
+import { NAME, REF } from "../../domain/message.ts";
+import type { ClaimResult, Leases, PrEvent, PrFeed, PrSnapshot, PrWait, Wake, WakeWait, Wakes } from "../../ports/messaging.ts";
 import type { BoardChild } from "./child.ts";
 
 export interface BoardBusOptions {
@@ -12,7 +18,7 @@ export interface BoardBusOptions {
   project: string;
 }
 
-export class BoardBus implements Leases, Wakes {
+export class BoardBus implements Leases, Wakes, PrFeed {
   constructor(private readonly o: BoardBusOptions) {}
 
   claim(key: string, holder: string, ttl: number): ClaimResult {
@@ -28,21 +34,64 @@ export class BoardBus implements Leases, Wakes {
   }
 
   drop(key: string): boolean {
-    return this.o.child.one(process.env.FACTORY_AGENT || "factory", "dropLease", this.key(key)) as boolean;
+    return this.o.child.one(this.actor(), "dropLease", this.key(key)) as boolean;
   }
 
   wake(w: Wake): void {
+    if (!NAME.test(w.from) || !NAME.test(w.to) || (w.ref && !REF.test(w.ref))) {
+      throw new CoreError("bad-wake", `A wake needs a sender and an addressee (lowercase names) and an issue#<n> or pr#<n> ref, ` +
+        `not from=${w.from} to=${w.to} ref=${w.ref}.`, "Report it as a bug with the command you ran.");
+    }
     this.o.child.one(w.from, "signal", "wake", { project: this.o.project, from: w.from, to: w.to, ref: w.ref, why: w.why,
       at: w.at ?? new Date().toISOString() });
   }
 
   waitWake(w: WakeWait): Wake | null {
-    const wait: WaitFor = { kind: "signal.wake", since: w.since, seconds: w.seconds, match: { project: [this.o.project], to: w.names },
-      not: { from: w.names.slice(0, 1) } };
-    const e = this.o.child.call(w.names[0] || "factory", [{ op: "wait", args: [wait] }], Math.max(0, w.seconds) * 1000)[0] as BoardEvent | null;
+    const seconds = Math.max(1, Math.floor(w.seconds));
+    const or: EventRule[] = w.prChanges
+      ? [{ kind: "signal.pr", match: { project: [this.o.project], ...(w.prChanges.length ? { change: w.prChanges } : {}) } }]
+      : [];
+    const wait: WaitFor = { kind: "signal.wake", since: w.since, seconds, match: { project: [this.o.project], to: w.names },
+      not: { from: w.names.slice(0, 1) }, or };
+    const e = this.o.child.call(w.names[0] || "factory", [{ op: "wait", args: [wait] }], seconds * 1000)[0] as BoardEvent | null;
     if (!e) return null;
     const p = e.payload;
-    return { from: String(p.from ?? ""), to: String(p.to ?? ""), ref: String(p.ref ?? ""), why: String(p.why ?? ""), at: String(p.at ?? "") };
+    const text = (k: string): string => (typeof p[k] === "string" ? (p[k] as string) : "");
+    if (e.kind === "signal.pr") return { from: text("from"), to: w.names[0] ?? "", ref: `pr#${Number(p.pr)}`, why: `pull request ${text("change")}`, at: text("at") };
+    return { from: text("from"), to: text("to"), ref: text("ref"), why: text("why"), at: text("at") };
+  }
+
+  putPrs(snapshot: PrSnapshot, events: PrEvent[]): void {
+    if (!NAME.test(snapshot.by) || events.some((e) => e.from !== snapshot.by)) {
+      throw new CoreError("bad-pr-event", `Pull request events need their watcher's name as the sender, not '${snapshot.by}'.`,
+        "Report it as a bug with the command you ran.");
+    }
+    const signals = events.map((e) => ({ name: "pr", payload: { project: this.o.project, pr: e.pr, change: e.change, from: e.from,
+      head: e.head, checks: e.checks, labels: e.labels, at: e.at } }));
+    this.o.child.one(snapshot.by, "setValue", this.key("prs"), snapshot, signals);
+  }
+
+  prs(): PrSnapshot | null {
+    const s = this.o.child.one("factory", "value", this.key("prs")) as PrSnapshot | null;
+    return s && s.v === 1 && typeof s.at === "number" && Array.isArray(s.prs) && Array.isArray(s.closed) ? s : null;
+  }
+
+  prEvents(w: PrWait): PrEvent[] {
+    const seconds = Math.max(1, Math.floor(w.seconds));
+    const rule = { kind: "signal.pr", since: w.since, match: { project: [this.o.project], ...(w.pr ? { pr: [String(w.pr)] } : {}) } };
+    const got = w.first
+      ? [this.o.child.call("factory", [{ op: "wait", args: [{ ...rule, seconds }] }], seconds * 1000)[0] as BoardEvent | null]
+      : this.o.child.one("factory", "find", rule) as BoardEvent[];
+    return got.filter((e): e is BoardEvent => e !== null).map((e) => {
+      const p = e.payload;
+      const text = (k: string): string => (typeof p[k] === "string" ? (p[k] as string) : "");
+      return { pr: Number(p.pr), change: text("change"), from: text("from"), head: text("head"), checks: text("checks"),
+        labels: Array.isArray(p.labels) ? p.labels.filter((x): x is string => typeof x === "string") : [], at: text("at") };
+    });
+  }
+
+  private actor(): string {
+    return process.env.FACTORY_AGENT || "factory";
   }
 
   private key(key: string): string {
