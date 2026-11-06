@@ -79,9 +79,9 @@ now, in a temporary worktree, so it works from any checkout and after main has m
 again first: if one is no longer valid (or no longer a setting) it stops, opens nothing and says which to `unstage`.
 Machine settings (`--local`) are saved at once, never staged.
 
-`validate` fails on: a regex that does not compile, a `tasks.source` that is not `plan` or `issues`, a duplicate or
-invalid agent name, an integer below its minimum (`maxOpenPRs`, `portStep` ... at least 1), a `prd`, `plan` or
-`decisions` path that does not exist, a bad `models`, `styles` or `agentEnv` value, and `agentEnv` ports that collide
+`validate` fails on: a regex that does not compile, a `tasks.source` that is not `plan`, `issues` or `board`, a
+duplicate or invalid agent name, an integer below its minimum (`maxOpenPRs`, `portStep` ... at least 1), a `prd`,
+`plan` or `decisions` path that does not exist, a bad `models`, `styles` or `agentEnv` value, and `agentEnv` ports that collide
 across the agents' slots. A key that is not a setting is only a warning (probably a typo); it is kept and ignored.
 Saving keeps the file readable: key order and `_about` entries stay, the file's own indent is kept, and the write is
 atomic.
@@ -221,7 +221,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 
 | Key | Type | Default | What it sets |
 |---|---|---|---|
-| `tasks.source` | one of plan/issues | `"plan"` | Where tasks come from. |
+| `tasks.source` | one of plan/issues/board | `"plan"` | Where tasks come from. `board`: the message board; messages follow the tasks there. |
 | `tasks.staleHours` | int | `3` | An in-progress issue with no activity this long counts as stale. |
 | `tasks.pingMinutes` | int | `5` | How often a working agent pings its agent issue, at most. |
 | `tasks.downMinutes` | int | `30` | No ping for this long: the agent counts as down. |
