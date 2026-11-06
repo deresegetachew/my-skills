@@ -1,10 +1,12 @@
 // Claims over NATS (decision 0004 points 2 and 8, #411, #412). With `claim` in `messaging.kinds` (and
 // `messaging.transport` nats), who holds a review, an answer, an orchestrator's item, a rework or a task is decided by a
 // compare-and-set in the project's NATS key-value bucket, not by reading the comments back and letting the earliest one
-// win: a claim that lost costs no GitHub write, and nobody re-reads a thread to find out who won. The winner still
-// writes the GitHub marker (and, for a task, the labels the board, `factory next` and the PR gate read): that is the
-// double send of a kind's first week. Without `claim` in the kinds, or when NATS can't be had (`nats-unreachable`, said
-// once), every claim is the GitHub one, exactly as before.
+// win: a claim that lost costs no GitHub write, and nobody re-reads a thread to find out who won. The winner writes the
+// GitHub marker too (the double send of a kind's first week) while `claim` is in `messaging.githubCopy` (unset: the
+// same as messaging.kinds). NATS is not the record (6 Nov 2026): with `claim` left out of githubCopy a claim and its
+// release are on NATS only, and a task claim writes only the labels the board, `factory next` and the PR gate read.
+// Without `claim` in the kinds, or when NATS can't be had (`nats-unreachable`, said once), every claim is the GitHub
+// one, exactly as before.
 //
 // The keys, one per thing that can be held:
 //   review.<pr>.<head sha, 7>   answer.<question comment id>   item.<target>.<key>   rework.<pr>   task.<issue>
@@ -12,7 +14,7 @@
 // `machine=`.
 import { type Config, load } from "./factory_config.ts";
 import { Exit, pyDumps } from "./factory_lib.ts";
-import { natsFor } from "./core/compose.ts";
+import { githubCopies, natsFor } from "./core/compose.ts";
 import type { CoreError } from "./core/domain/error.ts";
 import type { Leases } from "./core/ports/messaging.ts";
 import { notice } from "./factory_wake.ts";
@@ -32,6 +34,16 @@ export function leasesOn(cfg: Config | null = null): Leases | null {
     const x = e as CoreError;
     process.stderr.write(pyDumps({ code: x.code, message: x.message, fix: x.fix }) + "\n");
     throw new Exit(1);
+  }
+}
+
+/** Whether a claim taken on NATS (and its release) is also written to GitHub as a marker or comment:
+ * `claim` in messaging.githubCopy. Only asked once leasesOn gave NATS's claims. */
+export function claimCopy(cfg: Config | null = null): boolean {
+  try {
+    return githubCopies(cfg ?? load(), "claim");
+  } catch {
+    return true;
   }
 }
 

@@ -1,0 +1,78 @@
+// The rules of an epic's page (#440) that aren't drawing: the stage bar, the words that put a message on the epic's
+// thread, and the thread itself. No React here, so tests/epic_detail.test.ts runs it as it is.
+import type { ChatItemView } from "./chat_model.ts";
+import { citeLinks, type DocPage } from "./docs_model.ts";
+
+/** The stages in the order an epic walks them (a parked epic is none of them), with the words the page shows. */
+export const STAGE_FLOW: Array<[string, string]> = [["investigating", "Investigating"], ["prd", "PRD written"], ["decision", "Decision"],
+  ["planned", "Planned"], ["building", "Building"], ["done", "Done"]];
+
+export interface StageStep {
+  stage: string;
+  name: string;
+  /** Before the epic's stage (done), its stage (now), or after it (later). */
+  state: "done" | "now" | "later";
+}
+
+export function stageSteps(stage: string): StageStep[] {
+  const at = STAGE_FLOW.findIndex(([s]) => s === stage);
+  return STAGE_FLOW.map(([s, name], i) => ({ stage: s, name, state: at < 0 || i > at ? "later" : i === at ? "now" : "done" }));
+}
+
+export interface Written {
+  name: string;
+  tag: string;
+  /** The channel that opens it (`doc:<id>`), or null when the Docs have no page for it. */
+  channel: string | null;
+}
+
+/** Where an epic is written down: its PRD file, its decisions, and what its title and body cite (`citeLinks`, the rule the
+ * tasks use), each once and linked to its Docs page when there is one. */
+export function writtenDown(e: { title: string; prd: string; decisions: string[]; cites?: string[] }, pages: DocPage[]): Written[] {
+  const out: Written[] = [];
+  const seen = new Set<string>();
+  const add = (w: Written): void => {
+    const key = w.channel ?? `${w.tag}:${w.name}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(w);
+  };
+  const norm = (p: string): string => p.replace(/^\.?\//, "");
+  if (e.prd) {
+    const page = pages.find((p) => norm(p.path) === norm(e.prd) || p.path.endsWith(`/${norm(e.prd)}`));
+    add({ name: page?.title ?? e.prd, tag: "PRD", channel: page ? `doc:${page.id}` : null });
+  }
+  const cites = [...e.decisions.map((d) => `decision ${d.replace(/^#/, "")}`), ...(e.cites ?? [])];
+  for (const c of cites) {
+    const link = citeLinks([c], pages)[0]?.link;
+    const page = link ? pages.find((p) => p.id === link.id) : undefined;
+    if (!link) {
+      if (e.decisions.some((d) => c === `decision ${d.replace(/^#/, "")}`)) add({ name: c.replace(/^decision /, "Decision "), tag: "Decision", channel: null });
+      continue;
+    }
+    add({ name: link.id === "prd" ? `${page?.title ?? "PRD"}: ${c}` : page?.title ?? c, tag: link.id === "prd" ? "Story" : "Decision",
+      channel: `doc:${link.id}${link.anchor ? `#${link.anchor}` : ""}` });
+  }
+  return out;
+}
+
+function tag(epic: { id: string }): string {
+  return `About epic #${epic.id} (`;
+}
+
+/** What the "Talk about this" box sends: the owner's line, led by the epic it is about, so the answerer knows. */
+export function talkText(epic: { id: string; title: string }, text: string): string {
+  return `${tag(epic)}${epic.title.replace(/\s+/g, " ").trim()}): ${text.trim()}`;
+}
+
+/** The epic's thread out of a chat: the owner's messages about it, and the answers that follow each, up to the next
+ * message from the owner about something else. */
+export function epicThread(items: ChatItemView[], epicId: string): ChatItemView[] {
+  const out: ChatItemView[] = [];
+  let inside = false;
+  for (const x of items) {
+    if (x.kind === "owner") inside = x.text.startsWith(tag({ id: epicId }));
+    if (inside) out.push(x);
+  }
+  return out;
+}

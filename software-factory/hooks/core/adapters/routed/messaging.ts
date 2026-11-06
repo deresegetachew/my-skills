@@ -3,8 +3,9 @@
 // missed); every other kind stays on GitHub. A read gives what either holds, each message once per thread (the NATS
 // copy when both have it), so a reader sees a kind that has moved and one that hasn't alike.
 //
-// The cursor holds both transports' cursors. The GitHub copy of a moved kind stops when the owner says so (#247): until
-// a setting for that exists, every moved kind is double-sent.
+// The cursor holds both transports' cursors. The kinds that go through this port (question, answer, mustfix, approval,
+// status) are always written to GitHub too: NATS is not the record (decision 0004, amended 6 Nov 2026). Only claims and
+// wake-ups, which don't go through here, may drop their GitHub copy (messaging.githubCopy).
 import { CoreError } from "../../domain/error.ts";
 import { badCursor, type Message, unknownMessage } from "../../domain/message.ts";
 import type { Cursor, Messaging, Read, Scope } from "../../ports/messaging.ts";

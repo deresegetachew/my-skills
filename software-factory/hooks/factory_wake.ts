@@ -17,8 +17,14 @@
 //
 // Who wakes whom: the Claude hook (factory_agents.ts hook, PostToolUse) reads each shell command an agent ran, and
 // wakesFor() below names the wake-ups it calls for: a pull request opened, marked ready or pushed to wakes the dev
-// manager; a question wakes its addressee; an answer, a must-fix, an approval or a merge wakes the coding agents.
+// manager; a question wakes its addressee (`to=`, else the dev manager); an answer wakes the one it is addressed to
+// (else every loop); a must-fix, an approval or a merge wakes the coding agents. A comment posted from a file
+// (`--body-file`) is read for its markers too. A sub-manager's hand-off (the next step it leaves on a pull request,
+// factory_orchestrator.ts) wakes the coding agents. Each of these is still written on GitHub, which stays the record
+// (6 Nov 2026, #413): the wake-up only ends the reader's idle wait at once, instead of it polling.
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { type Config, load, roleNames, toFloat } from "./factory_config.ts";
 import { Exit, pyDumps, runMain, sleepSync } from "./factory_lib.ts";
 import { messagingSettings, natsFor } from "./core/compose.ts";
@@ -109,22 +115,21 @@ export function wakeUp(cfg: Config, from: string, to: string, ref = "", why = ""
   }
 }
 
-/** The wake-ups a shell command an agent ran calls for: [{to, ref, why}], one per addressee. */
-export function wakesFor(command: string): Wake[] {
+/** The wake-ups a shell command an agent ran calls for: [{to, ref, why}], one per addressee. `body` is the text of a
+ * comment the command posts from a file (`--body-file`), which the command line itself doesn't show. */
+export function wakesFor(command: string, body = ""): Wake[] {
   const out: Wake[] = [];
   const add = (to: string, why: string): void => {
     if (!out.some((w) => w.to === to)) out.push({ from: "", to, ref: refOf(command), why });
   };
+  const said = `${command}\n${body}`;
   if (/\bgh\s+pr\s+create\b/.test(command)) add("dev-manager", "opened a pull request");
   if (/\bgh\s+pr\s+ready\b/.test(command)) add("dev-manager", "marked a pull request ready");
   if (/\bgit\s+push\b/.test(command)) add("dev-manager", "pushed");
-  if (/factory-question\b|kind=question\b/.test(command)) {
-    const to = /kind=question\b[^>]*?\bto=([a-z0-9-]+)/.exec(command)?.[1] ?? "dev-manager";
-    add(to, "asked a question");
-  }
-  if (/factory-answer(?!-)\b|kind=answer\b/.test(command)) add("all", "answered a question");
-  if (/factory-mustfix\b|kind=mustfix\b/.test(command)) add("coding-agent", "asked for a fix");
-  if (/factory-approved\b|kind=approval\b/.test(command)) add("coding-agent", "approved a pull request");
+  if (/factory-question\b|kind=question\b/.test(said)) add(addressee(said, "question") ?? "dev-manager", "asked a question");
+  if (/factory-answer(?!-)\b|kind=answer\b/.test(said)) add(addressee(said, "answer") ?? "all", "answered a question");
+  if (/factory-mustfix\b|kind=mustfix\b/.test(said)) add("coding-agent", "asked for a fix");
+  if (/factory-approved\b|kind=approval\b/.test(said)) add("coding-agent", "approved a pull request");
   if (/\bgh\s+pr\s+merge\b|manager_claims(?:\.ts)?\s+merge\b|\bmanager-claims\s+merge\b/.test(command)) {
     add("coding-agent", "merged a pull request");
   }
@@ -132,10 +137,27 @@ export function wakesFor(command: string): Wake[] {
   return out;
 }
 
+/** The `to=` of a factory-msg envelope of `kind` in `text`, or null (an old marker names nobody). */
+function addressee(text: string, kind: string): string | null {
+  return new RegExp(`kind=${kind}\\b[^>]*?\\bto=([a-z0-9-]+)`).exec(text)?.[1] ?? null;
+}
+
+/** The text of the file a `gh ... --body-file F` (or `-F F`) command posts, or "" (none, `-` for stdin, unreadable). */
+export function bodyFileOf(command: string, cwd: string = process.cwd()): string {
+  const m = /(?:--body-file|\s-F)[=\s]+(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(command);
+  const file = m ? (m[1] ?? m[2] ?? m[3] ?? "") : "";
+  if (!file || file === "-") return "";
+  try {
+    return readFileSync(resolve(cwd, file), "utf8").slice(0, 64 * 1024);
+  } catch {
+    return "";
+  }
+}
+
 /** pr#N for `gh pr <verb> N`, else "". */
 function refOf(command: string): string {
-  const pr = /\bgh\s+pr\s+[a-z]+\s+#?(\d+)\b/.exec(command);
-  return pr ? `pr#${pr[1]}` : "";
+  const m = /\bgh\s+(pr|issue)\s+[a-z]+\s+#?(\d+)\b/.exec(command);
+  return m ? `${m[1]}#${m[2]}` : "";
 }
 
 /** For the Claude hook: send, in the background, the wake-ups `command` calls for, as FACTORY_AGENT. Does nothing (and
@@ -143,7 +165,7 @@ function refOf(command: string): string {
 export function wakeFromHook(cfg: Config, command: string): void {
   const agent = process.env.FACTORY_AGENT ?? "";
   if (!agent || !wakeIsOn(cfg)) return;
-  for (const w of wakesFor(command)) {
+  for (const w of wakesFor(command, bodyFileOf(command))) {
     const args = [import.meta.path, "send", "--to", w.to, "--why", w.why, ...(w.ref ? ["--ref", w.ref] : [])];
     spawn(process.execPath, ["--no-env-file", "--config=/dev/null", ...args], { detached: true, stdio: "ignore" }).unref();
   }

@@ -4,13 +4,14 @@ import { expect, test } from "bun:test";
 import { checksText, filterRows, searchRows, type ViewsData } from "../web/views_model.ts";
 
 const task = (id: string, title: string, find: string) => ({ id, title, state: "ready", stateText: "ready", holders: [], group: "",
-  todos: { done: 0, all: 0 }, dependsOn: [], url: null, pr: null, next: false, find });
+  todos: { done: 0, all: 0 }, dependsOn: [], url: null, pr: null, next: false, epic: null, find });
 
 function views(): ViewsData {
   return {
     generatedAt: null, age: null, refreshing: false, problems: [],
     tasks: { source: "issues", next: null, problems: [], tasks: [task("7", "Add the login page", "#7 Add the login page in progress menelik Phase 1"),
       task("10", "Export to CSV", "#10 Export to CSV ready — Phase 1")] },
+    epics: { source: "issues", epics: [], problems: [] },
     pulls: { problems: [], pulls: [{ number: 21, title: "Add the login page", url: null, branch: "task/7-login", draft: false, agent: "menelik",
       task: "7", checks: { state: "red", failing: ["test"] }, review: { state: "changes-asked", text: "changes asked", claim: null }, protected: null,
       next: { action: "waiting-for-agent", text: "waiting for agent" }, rework: null, find: "#21 Add the login page task/7-login menelik" }] },

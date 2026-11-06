@@ -302,17 +302,29 @@ async function helper(): Promise<Answer> {
 
 const streamName = (project: string): string => `factory-${project}`;
 
+// NATS is not the record (6 Nov 2026): GitHub keeps what anyone reads later, so the stream only has to cover a reader
+// that was away. 30 days is far longer than any machine is off; 1 GiB is thousands of times a busy month's wake-ups and
+// claims events (each well under 1 KiB) and still small on the hub's disk. The oldest messages go first.
+export const STREAM_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+export const STREAM_MAX_BYTES = 1024 * 1024 * 1024;
+
 async function ensureStream(jsm: JetStreamManager, project: string): Promise<void> {
+  const limits = { max_age: nanos(STREAM_MAX_AGE_MS), max_bytes: STREAM_MAX_BYTES, discard: DiscardPolicy.Old };
+  let have: Awaited<ReturnType<JetStreamManager["streams"]["info"]>> | null = null;
   try {
-    await jsm.streams.info(streamName(project));
+    have = await jsm.streams.info(streamName(project));
   } catch {
     await jsm.streams.add({ name: streamName(project), subjects: [`factory.${project}.>`], storage: StorageType.File,
-      retention: RetentionPolicy.Limits, discard: DiscardPolicy.Old, allow_direct: true,
-      duplicate_window: nanos(60 * 60 * 1000) }).catch(async (e: unknown) => {
-      await jsm.streams.info(streamName(project)).catch(() => {
-        throw e; // made by someone else meanwhile is fine; anything else is not
+      retention: RetentionPolicy.Limits, allow_direct: true, duplicate_window: nanos(60 * 60 * 1000), ...limits })
+      .catch(async (e: unknown) => {
+        have = await jsm.streams.info(streamName(project)).catch(() => {
+          throw e; // made by someone else meanwhile is fine; anything else is not
+        });
       });
-    });
+  }
+  const c = have?.config;
+  if (c && (c.max_age !== limits.max_age || c.max_bytes !== limits.max_bytes || c.discard !== limits.discard)) {
+    await jsm.streams.update(streamName(project), limits); // a stream made before the limits: the running hub gets them
   }
 }
 
