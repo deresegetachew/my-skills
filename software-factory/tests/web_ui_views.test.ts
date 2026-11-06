@@ -4,6 +4,7 @@
 // and the views sent over the WebSocket again when the cache changes.
 import { afterAll, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { api, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { write } from "./support.ts";
@@ -135,6 +136,16 @@ test("CI: the verdict first, then the runs (going first), the runners by machine
   expect(actions["light-lane"]).toMatchObject({ command: "factory settings set --stage ci.light false then factory settings pr" });
   expect(actions.clean).toMatchObject({ command: "factory ci clean --apply" });
   expect(r.json.settings).toMatchObject({ heavy: { raw: "2", source: "FACTORY_CI_RUNNERS" }, light: true });
+}, T);
+
+test("CI: only the runners of this machine's host name are marked as this machine", async () => {
+  const { ui } = await started();
+  const r = await api(ui, "/api/projects/work/ci");
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const host = hostname().split(".")[0];
+  expect(r.json.host).toBe(host);
+  for (const runner of r.json.runners as Row[]) expect(runner.here, String(runner.name)).toBe(runner.machine === host);
+  expect((r.json.runners as Row[]).find((x) => x.machine === "old-box")?.here).toBe(false);
 }, T);
 
 test("a CI action needs a confirm: without it 400 confirm_needed and nothing runs", async () => {
