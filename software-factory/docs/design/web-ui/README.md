@@ -12,6 +12,9 @@ Read in this order:
    `renderVals()` at its bottom (sample data). `Sidebar.dc.html`, `Avatar.dc.html` and `HowItRuns.dc.html` are
    components the screens import with `<dc-import name="…">`.
 5. `CommandMap.dc.html`: every `factory` command and the screen that covers it (for builders; not shown in the app).
+   `PARITY.md` is the checked list (#446): one row per command in `factory help`, built, planned (with its task), or
+   why it stays with the agents or the terminal. A new command gets its row, and a screen that ships turns its rows
+   `built`; a test fails otherwise.
 
 `canvas.json` places the screens on the canvas in rows: first launch, project setup, every day, talking and planning,
 tasks and pull requests, product, running the factory, maintain and configure, phone.

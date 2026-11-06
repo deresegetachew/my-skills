@@ -1,0 +1,195 @@
+# Every command and the web UI (#446)
+
+The UI comes first (owner, 6 Nov): everything the factory does from a terminal can be done in the web UI. This is the
+checklist. Each command `factory help` lists has one row; `tests/ui_parity.test.ts` fails when a command has no row, when
+a row names a command that is gone, or when a row does not say how the UI covers it. `CommandMap.dc.html` is the same
+map as a design page.
+
+**In the UI** is one of:
+
+- `built`: the web UI does it today (`factory ui`). A **Task** on a built row is the screen task that redoes it to the
+  reference design.
+- `planned`: its screen is designed; **Task** is the issue that builds it.
+- `agents only`: a tool the agents run. The owner sees its result on the screen named.
+- `terminal only`: it stays in a terminal, and **Where** says why.
+
+A new command gets its row in the same pull request. When a screen ships, its rows turn `built`.
+
+## First launch and setup
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `ui` | terminal only | Starts the web UI itself | |
+| `install-shim` | terminal only | Puts `factory` on the PATH, before there is a UI to open; Welcome (Welcome.dc.html) says how | #457 |
+| `doctor` | planned | Health (Health.dc.html): each check with its fix, run again; Machine check (MachineCheck.dc.html) | #455 |
+| `bootstrap machine` | terminal only | Needs sudo; Machine check (MachineCheck.dc.html) shows the one admin step to type | #457 |
+| `bootstrap all` | terminal only | Needs sudo, as bootstrap machine | #457 |
+| `bootstrap uninstall` | terminal only | Needs sudo; removes the sandbox user and its guard | |
+| `bootstrap project` | planned | Machine check (MachineCheck.dc.html) | #457 |
+| `bootstrap status` | planned | Machine check (MachineCheck.dc.html) | #457 |
+| `init` | planned | Project wizard (ProjectWizard.dc.html), Add project (AddProject.dc.html) | #447 |
+| `init-roles` | planned | Project wizard (ProjectWizard.dc.html) | #447 |
+| `prd` | planned | Kickoff (Kickoff.dc.html) for the stage; the PRD itself is in Docs (Docs.dc.html, built) | #457 |
+
+## Team and machines
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `loop` | built | An agent's channel: start, after a confirm (runs the loop in its own window) | #453 |
+| `coding-agent` | built | An agent's channel: start | #453 |
+| `dev-manager` | built | The dev manager's channel: start | #453 |
+| `product-owner` | built | The product owner's channel: start | #453 |
+| `owner start` | built | An agent's channel: start, after a confirm | |
+| `owner stop` | built | An agent's channel: stop, after a confirm | |
+| `agent` | planned | Agent (Agent.dc.html): open its session | #453 |
+| `follow` | planned | Agent (Agent.dc.html): recent output and its Remote Control link | #453 |
+| `say` | built | An agent's channel: chat | |
+| `env` | planned | Agent (Agent.dc.html): details | #453 |
+| `worktree` | planned | Agent (Agent.dc.html): details | #453 |
+| `agents ls` | built | The agents in the sidebar and their channels | |
+| `agents` | built | The agents in the sidebar; sweep stays with the dev manager | |
+| `machine` | planned | Machines (Machines.dc.html); agent names in Choose team (ChooseTeam.dc.html) | #455 |
+| `remote` | planned | Add machine (AddMachine.dc.html) | #445 |
+| `nats up` | planned | Add machine (AddMachine.dc.html), Join hub (JoinHub.dc.html); down and status on Machines | #445 |
+| `nats user add` | planned | Team setup (TeamSetup.dc.html), Machines (Machines.dc.html): keys per agent | #445 |
+| `heartbeat` | planned | Machines (Machines.dc.html) | #455 |
+| `autostart` | planned | Machines (Machines.dc.html), Team setup (TeamSetup.dc.html) | #455 |
+| `resume` | planned | Machines (Machines.dc.html) | #455 |
+
+## Every day
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `status` | planned | Home (Main.dc.html) | #451 |
+| `cockpit --json` | built | What the UI reads; refresh asks for it again | |
+| `cockpit --needs` | built | The owner queue channel: answer in place | #451 |
+| `owner answer` | built | The owner queue channel: answer, after a confirm | |
+| `alerts check` | planned | Inbox (Inbox.dc.html): notify me | #451 |
+| `alerts watch` | planned | Inbox (Inbox.dc.html): notify me | #451 |
+| `messages` | planned | Activity (Activity.dc.html): the feed and open questions | #451 |
+| `cockpit watch` | planned | Activity (Activity.dc.html) | #451 |
+| `issues` | built | The tasks channel; issues setup is in the Project wizard (ProjectWizard.dc.html) | #452 |
+| `cockpit --tasks` | built | The tasks channel; Board (Board.dc.html) | #439 |
+| `next` | planned | Task (Task.dc.html): next in line | #452 |
+| `cockpit` | terminal only | The tmux cockpit, which the web UI replaces (decision 0005) | |
+| `cockpit --ink` | terminal only | The Ink cockpit (decision 0002), which the web UI replaces | |
+| `cockpit --status` | terminal only | One line for tmux's status bar | |
+
+## Tasks and pull requests
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `prs` | built | The pull requests channel | #452 |
+| `cockpit --prs` | built | The pull requests channel; PRs (PRs.dc.html) | #452 |
+| `owner merge` | planned | PR (PR.dc.html): merge pinned to the head, after a confirm; Inbox | #452 |
+| `owner label` | planned | Task (Task.dc.html), PR (PR.dc.html) | #452 |
+| `reviews` | agents only | PR (PR.dc.html): checks and reviews | |
+| `rereview plan` | agents only | PR (PR.dc.html): reviews | |
+| `rereview prompt` | agents only | PR (PR.dc.html): reviews | |
+| `rereview record` | agents only | PR (PR.dc.html): reviews | |
+| `rereview reply` | agents only | PR (PR.dc.html): reviews | |
+| `review-pass reviewer` | agents only | PR (PR.dc.html): reviews | |
+| `review-pass arch` | agents only | PR (PR.dc.html): reviews | |
+| `claims` | planned | Maintenance (Maintenance.dc.html); Agent: its task | #456 |
+| `release` | planned | Maintenance (Maintenance.dc.html): drop an agent's claims, after a confirm | #456 |
+
+## Product
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `signoff ls` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
+| `signoff add` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
+| `signoff plan` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
+| `signoff confirm` | planned | Sign-off item (SignoffItem.dc.html) | #454 |
+| `signoff result` | planned | Sign-off item (SignoffItem.dc.html) | #454 |
+| `artifacts pull` | planned | Artifacts (Artifacts.dc.html) | #454 |
+| `artifacts status` | planned | Artifacts (Artifacts.dc.html) | #454 |
+| `artifacts list` | planned | Artifacts (Artifacts.dc.html) | #454 |
+
+## CI
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `ci status` | built | The CI channel: the verdict first, runs, runners | #455 |
+| `cockpit --ci` | built | The CI channel | #455 |
+| `ci use local` | built | The CI channel: run CI here, after a confirm | |
+| `ci use github` | built | The CI channel: run CI on GitHub, after a confirm | |
+| `ci install` | built | The CI channel: install the runners, after a confirm | |
+| `ci runners` | built | The CI channel: more or fewer runners, after a confirm | |
+| `ci clean` | built | The CI channel: clean up, after a confirm | |
+| `ci log` | built | The CI channel: why a run failed | |
+| `ci stale` | planned | CI (CI.dc.html): runners older than the checkout; check too | #455 |
+| `ci uninstall` | planned | CI (CI.dc.html): remove a runner, with its preconditions | #455 |
+| `ci start` | planned | CI (CI.dc.html): start and stop a runner by hand | #455 |
+| `ci logs` | planned | CI (CI.dc.html): a runner's log | #455 |
+| `turbo status` | planned | Integrations (Integrations.dc.html): the build cache | #441 |
+| `turbo install` | planned | Integrations (Integrations.dc.html): turn the build cache on; down too | #441 |
+
+## Health and measure
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `cockpit --agents` | built | The machines channel | #455 |
+| `cockpit --health` | planned | Health (Health.dc.html) | #455 |
+| `reset-run` | planned | Health (Health.dc.html), Maintenance (Maintenance.dc.html): list, then clean after a confirm | #455 |
+| `cockpit --usage` | planned | Usage and cost (Usage.dc.html) | #455 |
+| `usage` | planned | Usage and cost (Usage.dc.html) | #455 |
+| `usage --task` | planned | Usage and cost (Usage.dc.html); Task (Task.dc.html): its budget | #455 |
+| `report` | planned | Usage and cost (Usage.dc.html) | #455 |
+| `lessons` | planned | Maintenance (Maintenance.dc.html); Usage (Usage.dc.html) | #456 |
+
+## Maintain and release
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `version` | planned | Releases (Releases.dc.html); Home: the new-version line | #456 |
+| `releases` | planned | Releases (Releases.dc.html) | #456 |
+| `update` | planned | Releases (Releases.dc.html): update, after a confirm | #456 |
+| `rollback` | planned | Releases (Releases.dc.html): roll back, after a confirm | #456 |
+| `migrate-to-release` | planned | Releases (Releases.dc.html): a project still on the submodule | #456 |
+| `owner release` | terminal only | Publishing a release is the owner's own step; Releases has no publish (RULES.md) | |
+| `clean` | planned | Maintenance (Maintenance.dc.html) | #456 |
+| `handover snapshot` | planned | Maintenance (Maintenance.dc.html) | #456 |
+| `manager-claims list` | planned | Maintenance (Maintenance.dc.html): who holds what | #456 |
+| `manager-claims next` | agents only | PR (PR.dc.html): review claim | |
+| `manager-claims review` | agents only | PR (PR.dc.html): review claim | |
+| `manager-claims answer` | agents only | Activity (Activity.dc.html): who answers a question | |
+| `manager-claims release` | agents only | Maintenance (Maintenance.dc.html) | |
+| `manager-claims sweep` | agents only | Maintenance (Maintenance.dc.html) | |
+| `manager-claims merge` | agents only | PR (PR.dc.html): review claim | |
+| `manager-claims ask` | agents only | Inbox (Inbox.dc.html) | |
+| `wait` | agents only | PR (PR.dc.html): the agent waits for the merge | |
+| `wait ci` | agents only | PR (PR.dc.html): checks | |
+| `wait answer` | agents only | Activity (Activity.dc.html): open questions | |
+| `precheck` | agents only | Home (Main.dc.html): what the manager sees | |
+| `watch` | agents only | Home (Main.dc.html): what the manager sees | |
+| `manage-tick` | agents only | Home (Main.dc.html): what the manager sees | |
+
+## Check
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `verify` | agents only | PR (PR.dc.html): checks | |
+| `fix` | agents only | PR (PR.dc.html): checks | |
+| `run-check` | agents only | PR (PR.dc.html): checks | |
+| `check` | agents only | PR (PR.dc.html): checks | |
+| `guard` | agents only | PR (PR.dc.html): checks | |
+
+## Settings and integrations
+
+| Command | In the UI | Where | Task |
+|---|---|---|---|
+| `settings` | planned | Settings (Settings.dc.html): browse by section, search, help, change | #456 |
+| `cockpit --settings` | planned | Settings (Settings.dc.html) | #456 |
+| `settings list` | planned | Settings (Settings.dc.html) | #456 |
+| `settings help` | planned | Settings (Settings.dc.html): each setting's help | #456 |
+| `settings show` | planned | Settings (Settings.dc.html) | #456 |
+| `settings get` | planned | Settings (Settings.dc.html) | #456 |
+| `settings set` | planned | Settings (Settings.dc.html): checked against its type and limits | #456 |
+| `settings set --stage` | planned | Settings (Settings.dc.html): a project change is staged | #456 |
+| `settings diff` | planned | Settings (Settings.dc.html): where a value comes from | #456 |
+| `settings diff --staged` | planned | Settings (Settings.dc.html): the staged changes | #456 |
+| `settings validate` | planned | Settings (Settings.dc.html): a bad value is refused with its fix | #456 |
+| `settings pr` | planned | Settings (Settings.dc.html): propose the staged changes as a pull request | #456 |
+| `settings --local` | planned | Settings (Settings.dc.html): this machine, saved at once | #456 |
+| `settings docs` | agents only | Writes the settings page of the wiki from the schema; nothing to show | |
