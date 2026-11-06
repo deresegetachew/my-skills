@@ -195,7 +195,8 @@ Check
                          apply the schema (safe to run twice) | a pg_dump, mode 600 | release the claims whose time
                          is up and whose holder has been quiet for 30 minutes (--quiet-minutes N)
   board tasks|ready [--json]
-                         the tasks not done (--all: every one) | the ready queue, in claim order
+                         the tasks not done (--all: every one) | the ready queue, in claim order (--for <actor>:
+                         with the tasks handed to that actor)
   board show <id> [--json]
                          one task: its fields, edges, context and thread
   board prime <actor> [--json]

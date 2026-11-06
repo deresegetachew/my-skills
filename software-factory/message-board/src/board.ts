@@ -16,6 +16,9 @@ export const CLAIM_SECONDS = 30 * 60;
 export const QUIET_SECONDS = 30 * 60;
 const GRAPH_LOCK = 4_891_008; // serialises edge and parent writes, so two of them can't close a loop together
 const EVENT_LOCK = 4_891_009; // serialises event inserts to commit order, so a reader's cursor never skips one
+/** The kinds a claim takes: epics, notes and decisions are not work items. */
+const CLAIMABLE_KINDS = ["task", "bug"] as const;
+const CLAIMABLE = CLAIMABLE_KINDS.map((k) => `'${k}'`).join(", ");
 const MIGRATE_FIX = "Run `factory board migrate` (or board.migrate()), then try again.";
 
 export interface OpenOptions {
@@ -223,6 +226,7 @@ export class Board {
     if (changes.ref !== undefined) add("external_ref", changes.ref);
     if (changes.parentId !== undefined) add("parent_id", changes.parentId === null ? null : wholeNumber("A parent id", changes.parentId));
     if (changes.status !== undefined) add("status", oneOf("A status set by update", changes.status, ["open", "in_review", "deferred"] as const));
+    if (changes.status === "open" || changes.status === "deferred") set.push("outcome = NULL"); // reopened: no outcome yet
     return this.write(async (tx) => {
       const before = await this.mustTask(tx, id);
       if (changes.parentId !== undefined && changes.parentId !== null) {
@@ -284,10 +288,11 @@ export class Board {
       WHERE from_id = ${id} OR to_id = ${id} ORDER BY created_at, from_id, to_id`).map((r) => ({ from: Number(r.f), to: Number(r.t), kind: r.kind as EdgeKind })));
   }
 
-  /** The ready queue, in claim order: open, not blocked, held by nobody (and handed to nobody else than `for`). */
+  /** The ready queue, in claim order: tasks and bugs that are open, not blocked and held by nobody. A task handed to an
+   * actor is in that actor's queue (`for`) only. */
   async ready(options: { for?: string; limit?: number } = {}): Promise<Task[]> {
     const who = options.for ?? null;
-    return this.tasksWhere("t.id IN (SELECT id FROM ready) AND (t.assignee IS NULL OR t.assignee = $1::text OR $1::text IS NULL)", [who],
+    return this.tasksWhere("t.id IN (SELECT id FROM ready) AND (t.assignee IS NULL OR t.assignee = $1::text)", [who],
       undefined, options.limit ?? 500);
   }
 
@@ -304,18 +309,7 @@ export class Board {
     return this.write(async (tx) => {
       let r: Row[];
       if (id === undefined) {
-        r = rows(await tx.unsafe(`
-          WITH pick AS (
-            SELECT id FROM tasks
-            WHERE status = 'open' AND holder IS NULL AND (assignee IS NULL OR assignee = $1)
-              AND NOT EXISTS (SELECT 1 FROM task_blockers k WHERE k.task_id = tasks.id)
-            ORDER BY priority, created_at, id
-            LIMIT 1 FOR UPDATE SKIP LOCKED
-          )
-          UPDATE tasks t SET holder = $1, claim_token = $2, claimed_at = now(), claim_until = now() + make_interval(secs => $3),
-            status = 'in_progress', version = t.version + 1, updated_at = now()
-          FROM pick WHERE t.id = pick.id AND t.status = 'open' AND t.holder IS NULL
-          RETURNING t.id`, [this.as, token, ttl]));
+        r = await this.claimFirst(tx, token, ttl);
         if (!r.length) return { result: null, event: null };
       } else {
         wholeNumber("A task id", id);
@@ -323,6 +317,7 @@ export class Board {
           UPDATE tasks t SET holder = $1, claim_token = $2, claimed_at = now(), claim_until = now() + make_interval(secs => $3),
             status = CASE WHEN t.holder = $1 THEN t.status ELSE 'in_progress' END, version = t.version + 1, updated_at = now()
           WHERE t.id = $4 AND (t.holder = $1 OR (t.status = 'open' AND t.holder IS NULL AND (t.assignee IS NULL OR t.assignee = $1)
+            AND t.kind IN (${CLAIMABLE})
             AND NOT EXISTS (SELECT 1 FROM task_blockers k WHERE k.task_id = t.id)))
           RETURNING t.id`, [this.as, token, ttl, id]));
         if (!r.length) await this.whyNotReady(tx, id);
@@ -333,9 +328,33 @@ export class Board {
     });
   }
 
+  /** The first ready task, claimed. A candidate a concurrent claim changed after this statement's snapshot drops out of
+   * the UPDATE; then it tries again, a few times, while something is still ready. */
+  private async claimFirst(tx: Tx, token: string, ttl: number): Promise<Row[]> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const r = rows(await tx.unsafe(`
+        WITH pick AS (
+          SELECT id FROM tasks
+          WHERE status = 'open' AND holder IS NULL AND (assignee IS NULL OR assignee = $1) AND kind IN (${CLAIMABLE})
+            AND NOT EXISTS (SELECT 1 FROM task_blockers k WHERE k.task_id = tasks.id)
+          ORDER BY priority, created_at, id
+          LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        UPDATE tasks t SET holder = $1, claim_token = $2, claimed_at = now(), claim_until = now() + make_interval(secs => $3),
+          status = 'in_progress', version = t.version + 1, updated_at = now()
+        FROM pick WHERE t.id = pick.id AND t.status = 'open' AND t.holder IS NULL
+        RETURNING t.id`, [this.as, token, ttl]));
+      if (r.length) return r;
+      const left = rows(await tx.unsafe("SELECT EXISTS (SELECT 1 FROM ready WHERE assignee IS NULL OR assignee = $1) AS any", [this.as]));
+      if (!left[0]?.any) return [];
+    }
+    return [];
+  }
+
   private async whyNotReady(tx: Tx, id: number): Promise<never> {
     const t = await this.mustTask(tx, id);
-    const why = t.holder ? `${t.holder} holds it`
+    const why = !(CLAIMABLE_KINDS as readonly string[]).includes(t.kind) ? `it is ${/^[aeiou]/.test(t.kind) ? "an" : "a"} ${t.kind}; only tasks and bugs are claimed`
+      : t.holder ? `${t.holder} holds it`
       : t.blocked ? `it is blocked by ${t.blockedBy.map((b) => `#${b}`).join(", ")}`
       : t.status !== "open" ? `it is ${t.status}`
       : t.assignee && t.assignee !== this.as ? `it was handed to ${t.assignee}`
@@ -388,9 +407,13 @@ export class Board {
       if (options.token !== undefined) task = await this.fenced(tx, id, options.token, clear, [outcome]);
       else {
         const r = rows(await tx.unsafe(`UPDATE tasks SET ${clear.replace("$3", "$2")}, version = version + 1, updated_at = now()
-          WHERE id = $1 AND holder IS NULL RETURNING id`, [id, outcome]));
+          WHERE id = $1 AND holder IS NULL AND status <> 'done' RETURNING id`, [id, outcome]));
         if (!r.length) {
           const t = await this.mustTask(tx, id);
+          if (!t.holder) {
+            refuse("bad-input", `#${id} is already done (${t.outcome ?? "no outcome"}).`,
+              "Reopen it first (board.update with status open), then close it with the new outcome.");
+          }
           refuse("claim-lost", `#${id} is held by ${t.holder}; only its holder closes it, with its token.`,
             "Ask the holder to close it, or wait until it is released.");
         }
@@ -410,8 +433,8 @@ export class Board {
       const r = rows(await this.sql.begin(async (tx) => {
         const swept = rows(await tx.unsafe(`
           WITH stale AS (SELECT t.id, t.holder FROM tasks t WHERE ${stale} FOR UPDATE SKIP LOCKED)
-          UPDATE tasks t SET holder = NULL, claim_token = NULL, claimed_at = NULL, claim_until = NULL, status = 'open',
-            version = t.version + 1, updated_at = now()
+          UPDATE tasks t SET holder = NULL, claim_token = NULL, claimed_at = NULL, claim_until = NULL,
+            status = CASE WHEN t.status = 'in_review' THEN 'in_review' ELSE 'open' END, version = t.version + 1, updated_at = now()
           FROM stale WHERE t.id = stale.id AND t.holder = stale.holder AND ${stale}
           RETURNING t.id::int AS id, stale.holder AS holder`, [quiet]));
         if (swept.length) {

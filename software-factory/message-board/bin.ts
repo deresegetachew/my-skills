@@ -7,8 +7,8 @@ import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, stat
 import { join } from "node:path";
 import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
 import {
-  boardDir, boardUrl, CommandError, compose, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
-  masked, readState, type State, tailscaleAddress, urlFor, Writes,
+  boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
+  masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
 } from "./src/server.ts";
 
 const USAGE = `factory board <verb>: the message board (factory-message-board, decision 0007): tasks, claims, threads and
@@ -24,7 +24,8 @@ events on Postgres.
                                      release the claims whose time is up and whose holder has been quiet N minutes (30)
   factory board tasks [--all] [--json]
                                      the tasks not done (--all: every task)
-  factory board ready [--json]       the ready queue, in claim order
+  factory board ready [--for <actor>] [--json]
+                                     the ready queue, in claim order; tasks handed to an actor show only with --for
   factory board show <id> [--json]   one task: its fields, edges, context and thread
   factory board prime <actor> [--json]
                                      an actor's start: what it holds, what is ready, what is blocked, recent events
@@ -112,6 +113,7 @@ async function up(argv: string[]): Promise<number> {
   const address = tailscaleAddress();
   const s: State = { port, tailnetPort: port + 1, address, image: IMAGE };
   const dir = boardDir();
+  refuseLostPassword(dir);
   const fresh = !existsSync(dir);
   ensureDir(dir, 0o700);
   const w = new Writes();
@@ -164,6 +166,16 @@ async function up(argv: string[]): Promise<number> {
   }
   print(applied.length ? `Applied ${applied.join(", ")}.` : "The schema is up to date.");
   return 0;
+}
+
+/** The data volume keeps the password Postgres was first started with: a new one would never authenticate. */
+function refuseLostPassword(dir: string): void {
+  const file = join(dir, "password");
+  if (existsSync(file) && readFileSync(file, "utf8").trim()) return;
+  const volume = `${COMPOSE_PROJECT}_data`;
+  if (sh(["docker", "volume", "inspect", volume], { timeoutMs: 30_000 }).code !== 0) return;
+  fail("password-missing", `${file} is gone, but the board's data (the Docker volume ${volume}) is still there; a new password wouldn't open it.`,
+    `Put the old password back in ${file} (mode 600), or start over with \`factory board down --purge\` (it deletes the board's data) and then \`factory board up\`.`);
 }
 
 function down(argv: string[]): number {
@@ -279,8 +291,9 @@ async function tasks(argv: string[]): Promise<number> {
 async function ready(argv: string[]): Promise<number> {
   const args = [...argv];
   const asJson = flag(args, "--json");
-  leftovers(args, "factory board ready [--json]");
-  const list = await withBoard((b) => b.ready());
+  const who = option(args, "--for");
+  leftovers(args, "factory board ready [--for <actor>] [--json]");
+  const list = await withBoard((b) => b.ready({ for: who }));
   if (asJson) json(list);
   else if (!list.length) print("Nothing is ready.");
   else for (const t of list) print(taskLine(t));

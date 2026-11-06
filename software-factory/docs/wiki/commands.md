@@ -120,7 +120,7 @@ version it pins. `factory help` lists everything.
 | `factory board backup [--out FILE]` | A `pg_dump` run inside the container, written mode 600 to FILE or to `<machine settings folder>/message-board/backups/board-<time>.sql` |
 | `factory board sweep [--quiet-minutes N]` | Releases the claims whose time has passed and whose holder sent no heartbeat for N minutes (default 30), and lists them. Both are checked again in the same update, so a heartbeat that lands meanwhile wins |
 | `factory board tasks [--all] [--json]` | The tasks not done (`--all`: every task), in claim order: id, state (`blocked` when a blocking edge points to it or a parent), holder, title |
-| `factory board ready [--json]` | The ready queue: open, not blocked, held by nobody, in claim order |
+| `factory board ready [--for <actor>] [--json]` | The ready queue in claim order: tasks and bugs that are open, not blocked and held by nobody. A task handed to an actor shows only with `--for` that actor |
 | `factory board show <id> [--json]` | One task: status, holder and claim time, kind, priority, version, parent, what blocks it, its edges, body, context entries (its own and its linked tasks') and thread |
 | `factory board prime <actor> [--json]` | An actor's start in one call: the tasks it holds with their context, what is ready for it, what is blocked, and the recent events |
 

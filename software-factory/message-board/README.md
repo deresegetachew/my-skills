@@ -41,9 +41,10 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
 **Tasks**
 - `create({ title, body?, kind?, priority?, parentId?, ref? })`: kind is `task`, `epic`, `bug`, `decision` or `note`.
   A lower priority is claimed first. `ref` is an outside id such as `github:owner/repo#123` (unique).
-- `get(id)`, `tasks({ all? })`, `ready({ for? })`, `edges(id)`.
+- `get(id)`, `tasks({ all? })`, `ready({ for? })`, `edges(id)`. `ready()` leaves out tasks handed to someone;
+  `ready({ for })` adds the ones handed to that actor.
 - `update(id, { version, title?, body?, kind?, priority?, parentId?, ref?, status? })`: `version` is the one you read.
-  `status` may be `open`, `in_review` or `deferred`.
+  `status` may be `open`, `in_review` or `deferred`; open and deferred clear the outcome (a reopened task).
 - `link(from, to, kind)` and `unlink(from, to, kind)`: kind is `blocks`, `waits_for`, `discovered_from`, `supersedes`,
   `duplicates` or `related`. "from blocks to".
 - `claim(id?, { ttlSeconds? })`: returns `{ task, token }`.
@@ -75,17 +76,21 @@ and the counts, `end()` closes the connections.
 
 - **Ready and blocked are computed when read** (the `task_blockers` and `ready` views). A task is blocked while a
   `blocks` or `waits_for` edge points to it, or to one of its parents at any depth, from a task that isn't done. Ready
-  means open, not blocked, and held by nobody. Nothing is stored that a write could forget to refresh.
+  means a task or a bug that is open, not blocked, and held by nobody. Epics, notes and decisions are never ready
+  and never claimed: they aren't work items. Nothing is stored that a write could forget to refresh.
 - **A claim is atomic.** One `UPDATE` takes the first ready task with `FOR UPDATE SKIP LOCKED`, so two claimers never
-  get the same task. A named claim succeeds only when the task is ready, or the caller already holds it. Each claim
-  gets a new token.
+  get the same task; when its pick was taken by a claim that committed meanwhile, it tries again (up to 5 times) while
+  something is still ready. A named claim succeeds only when the task is ready, or the caller already holds it. Each
+  claim gets a new token.
 - **The holder's later writes name the token.** A heartbeat, release or close with a token that no longer holds the
-  task is refused with `claim-lost`. A held task can't be closed without its token.
+  task is refused with `claim-lost`. A held task can't be closed without its token, and a done task can't be closed
+  again: reopen it first.
 - **A release says what happens next:** `ready` (anyone may claim it), `deferred`, or `handoff` to a named actor (only
   that actor may claim it), with a reason.
 - **The sweep releases a claim only when both have gone quiet:** its time (`claim_until`) has passed, and its holder
   sent no claim or heartbeat for the quiet time (default 30 minutes). Both are checked again inside the same `UPDATE`.
-  The sweep records a `task.swept` event as `system`.
+  A swept task goes back to open, except one in review, which stays in review without a holder. The sweep records a
+  `task.swept` event as `system`.
 - **Edits carry the version they read.** Every write raises a task's version. A mismatch is a `conflict`, and nothing
   changes.
 - **No loops.** A `blocks` or `waits_for` edge that would make a task wait on itself is refused (`cycle`). That

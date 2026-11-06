@@ -96,8 +96,8 @@ FROM lineage l
 JOIN edges e ON e.to_id = l.ancestor_id AND e.kind IN ('blocks', 'waits_for')
 JOIN tasks b ON b.id = e.from_id AND b.status <> 'done';
 
--- Ready: open, not blocked, and nobody holds it.
+-- Ready: a task or a bug (epics, notes and decisions aren't claimed), open, not blocked, and nobody holds it.
 CREATE VIEW ready AS
 SELECT t.* FROM tasks t
-WHERE t.status = 'open' AND t.holder IS NULL
+WHERE t.status = 'open' AND t.holder IS NULL AND t.kind IN ('task', 'bug')
   AND NOT EXISTS (SELECT 1 FROM task_blockers k WHERE k.task_id = t.id);
