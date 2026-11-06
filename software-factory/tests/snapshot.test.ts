@@ -149,6 +149,23 @@ test("the snapshot carries the tasks from the task tracker", () => {
   expect(j.tasks, JSON.stringify(j.tasks)).toMatchObject({ source: "issues" });
 }, T);
 
+test("the snapshot's tasks carry the epics, and a task's cites, for the web UI's epics and tasks channels (#440, #438, #425)", () => {
+  const s = scenario();
+  s.issues.push(
+    { number: 7, title: "Add the login page", state: "open", labels: [{ name: "factory:ready" }], body: "Builds on decision 0004.",
+      html_url: "https://github.com/o/r/issues/7" },
+    { number: 40, title: "Accounts", state: "open", labels: [{ name: "epic" }, { name: "epic:building" }],
+      body: "People sign in.\n\nPRD: docs/accounts.md\nDecisions: 0003\n\n- [ ] #7\n- [x] #8\n", html_url: "https://github.com/o/r/issues/40" });
+  const j = snapshot(setup(s));
+  expect(j.tasks.epics, JSON.stringify(j.tasks)).toEqual([expect.objectContaining({ id: "40", title: "Accounts", stage: "building",
+    prd: "docs/accounts.md", decisions: ["0003"], tasks: [{ id: "7", done: false }, { id: "8", done: true }],
+    url: "https://github.com/o/r/issues/40" })]);
+  expect(Object.keys(j.tasks.epics[0]).sort()).toEqual(["cites", "decisions", "id", "prd", "stage", "summary", "tasks", "title", "url"]);
+  const ids = (j.tasks.tasks as Row[]).map((t) => t.id);
+  expect(ids, "an epic is not a task").not.toContain("40");
+  expect((j.tasks.tasks as Row[]).find((t) => t.id === "7")?.cites).toEqual(["decision 0004"]);
+}, T);
+
 test("doctor has the summary shape", () => {
   const p = setup(scenario());
   const dr = snapshot(p).doctor;
