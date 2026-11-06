@@ -1,7 +1,7 @@
 // The integrations page's rules that aren't drawing (#441): its tabs with their counts, which rows each tab shows, and the
 // tone of each state's dot.
 import { expect, test } from "bun:test";
-import { integrationTabs, integrationTone, showRows } from "../web/integrations_model.ts";
+import { integrationTabs, integrationTone, showRows, usesGrid } from "../web/integrations_model.ts";
 
 const ROWS = [
   { id: "github", state: "ok" },
@@ -30,4 +30,17 @@ test("a dot's tone: set up is good, a fix is bad, the rest quiet", () => {
   expect(integrationTone("bad")).toBe("bad");
   expect(integrationTone("off")).toBe("quiet");
   expect(integrationTone("unknown")).toBe("quiet");
+});
+
+test("the grid of what each agent may use: one cell per connector, ticked when the agent uses it, labelled for a reader", () => {
+  const uses = {
+    perAgent: false, note: "",
+    connectors: [{ id: "github", label: "GitHub" }, { id: "cache", label: "Build cache" }],
+    agents: [{ name: "taytu", role: "Builder", uses: ["github"] }],
+  };
+  expect(usesGrid(uses)).toEqual([{ name: "taytu", role: "Builder", cells: [
+    { id: "github", on: true, label: "taytu may use GitHub" },
+    { id: "cache", on: false, label: "taytu may not use Build cache" },
+  ] }]);
+  expect(usesGrid({ ...uses, agents: [] })).toEqual([]);
 });

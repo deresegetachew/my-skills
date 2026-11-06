@@ -230,3 +230,71 @@ test("the integrations need the token", async () => {
   const t = await api(ui, "/api/projects/work/integrations/github/test", { method: "POST", body: {}, token: "wrong" });
   expect(t.status).toBe(401);
 }, T);
+
+// --- what each agent may use -------------------------------------------------------------------------------------------
+
+test("what each agent may use: every agent with its role, and each connector that is set up", async () => {
+  const cfg = { ...NATS, turbo: { api: "http://127.0.0.1:3335" } };
+  const { ui } = await started(cfg, (p) => {
+    git(p.d, "remote", "add", "origin", "https://github.com/o/work.git");
+    write(join(p.d, ".mcp.json"), JSON.stringify({ mcpServers: { playwright: { command: "npx" } } }));
+  });
+  const r = await api(ui, "/api/projects/work/integrations");
+  const uses = r.json.uses as Row;
+  expect(uses.perAgent).toBe(false); // no setting chooses them per agent yet: every agent gets the same
+  expect(String(uses.note).length).toBeGreaterThan(0);
+  const cols = (uses.connectors as Row[]).map((c) => c.id);
+  expect(cols).toEqual(["github", "messaging", "cache", "mcp:playwright"]);
+  expect((uses.connectors as Row[]).map((c) => c.label)).toEqual(["GitHub", "Hub", "Build cache", "playwright"]);
+  const agents = uses.agents as Row[];
+  expect(agents.map((a) => [a.name, a.role])).toEqual([["mentewab", "Product owner"], ["fasil", "Dev manager"],
+    ["menelik", "Builder"], ["taytu", "Builder"]]);
+  for (const a of agents) expect(a.uses).toEqual(cols);
+}, T);
+
+test("a connector that isn't set up is no column", async () => {
+  const { ui } = await started(CONFIG, (p) => git(p.d, "remote", "add", "origin", "https://github.com/o/work.git"));
+  const uses = (await api(ui, "/api/projects/work/integrations")).json.uses as Row;
+  expect((uses.connectors as Row[]).map((c) => c.id)).toEqual(["github"]);
+}, T);
+
+// --- the build cache: turn it on and off -------------------------------------------------------------------------------
+
+test("the build cache offers to turn it on when it is off, and to turn it off when it is on", async () => {
+  const off = byId(await api((await started()).ui, "/api/projects/work/integrations"));
+  expect((off.cache?.actions as Row[]).map((a) => a.name)).toEqual(["start"]);
+  expect(String((off.cache?.actions as Row[])[0]?.does).length).toBeGreaterThan(0);
+  const on = byId(await api((await started({ ...CONFIG, turbo: { api: "http://127.0.0.1:3335" } })).ui, "/api/projects/work/integrations"));
+  expect((on.cache?.actions as Row[]).map((a) => a.name)).toEqual(["stop"]);
+  for (const id of ["github", "messaging", "ci", "plugins", "mcp"]) expect(on[id]?.actions, id).toEqual([]);
+}, T);
+
+test("turning the build cache on asks first, then runs it on this machine", async () => {
+  const { ui, p } = await started();
+  const path = "/api/projects/work/integrations/cache/actions/start";
+  const no = await api(ui, path, { method: "POST", body: {} });
+  expect(no.status).toBe(400);
+  expect(no.json).toMatchObject({ code: "confirm_needed" });
+  expect(readFileSync(p.factoryLog, "utf8")).toBe(""); // nothing ran
+  const yes = await api(ui, path, { method: "POST", body: { confirm: true } });
+  expect(yes.status, JSON.stringify(yes.json)).toBe(200);
+  expect(yes.json).toMatchObject({ ok: true });
+  expect(readFileSync(p.factoryLog, "utf8")).toContain("turbo install");
+}, T);
+
+test("turning it off runs turbo down; an action it doesn't offer now, or one it has none of, is refused", async () => {
+  const { ui, p } = await started({ ...CONFIG, turbo: { api: "http://127.0.0.1:3335" } });
+  const base = "/api/projects/work/integrations";
+  const stop = await api(ui, `${base}/cache/actions/stop`, { method: "POST", body: { confirm: true } });
+  expect(stop.json, JSON.stringify(stop.json)).toMatchObject({ ok: true });
+  expect(readFileSync(p.factoryLog, "utf8")).toContain("turbo down");
+  const start = await api(ui, `${base}/cache/actions/start`, { method: "POST", body: { confirm: true } });
+  expect(start.status).toBe(409);
+  expect(start.json).toMatchObject({ code: "ui_action_unavailable" });
+  const none = await api(ui, `${base}/github/actions/start`, { method: "POST", body: { confirm: true } });
+  expect(none.status).toBe(409);
+  const unknown = await api(ui, `${base}/slack/actions/start`, { method: "POST", body: { confirm: true } });
+  expect(unknown.status).toBe(404);
+  const get = await api(ui, `${base}/cache/actions/stop`);
+  expect(get.status).toBe(405);
+}, T);
