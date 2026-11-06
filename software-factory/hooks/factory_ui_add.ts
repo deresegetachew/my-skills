@@ -174,7 +174,8 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
   if (existsSync(path) && (await git(path, ["status", "--porcelain"])).stdout.trim()) {
     return problem("ui_add_dirty", `${path} has changes that aren't committed.`, "Commit or put them aside in that folder, then press Continue again.");
   }
-  const known = host.projects().find((p) => resolve(p.path) === path);
+  // the same folder by another name (a symlink, or macOS's /var and /private/var) is the same project
+  const known = host.projects().find((p) => samePath(p.path, path));
   if (known) return problem("ui_add_known", `${path} is already in this factory, as ${known.name}.`, `Open ${known.name} on the left instead.`);
   const tasks = b.tasks;
   if (tasks !== "issues" && tasks !== "plan") return problem("ui_add_tasks", "Say where tasks come from.", "Pick GitHub issues or A build plan file.");
@@ -556,4 +557,16 @@ export class AddRuns {
     }
     return null;
   }
+}
+
+/** Whether two paths name the same folder once symlinks are followed (a path that doesn't exist is taken as it is). */
+function samePath(a: string, b: string): boolean {
+  const real = (x: string): string => {
+    try {
+      return realpathSync(resolve(x));
+    } catch {
+      return resolve(x);
+    }
+  };
+  return real(a) === real(b);
 }

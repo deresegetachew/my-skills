@@ -1,10 +1,13 @@
 // Add a project (#447), after the owner's AddProject.dc.html and ProjectWizard.dc.html: where the project comes from
 // (clone a repo, a folder on this machine, or a new repo), then Set it up in five tabs (about, tasks, team, CI, review),
 // then the run, each step as it goes, with Retry where it stopped. The server does the work (hooks/factory_ui_add.ts);
-// the rules are in add_project_model.ts.
+// the rules are in add_project_model.ts. It is drawn with the theme's variables and the shared parts (parts.tsx): underline
+// tabs, list rows with a status, the buttons and the confirm dialog before Create. No command is shown on screen.
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { addProtected, createsOf, emptyForm, filterRepos, type Form, LEGENDS, type Problem, type Repo, requestOf, type Run,
   runProgress, SETUP_STEPS, setupProblem, SOURCES, sourceProblem, TEAM_SIZES, teamOf, WIZARD, withRepo } from "./add_project_model.ts";
+import { ConfirmDialog, type DotState, ListRow, StatusDot, Tabs } from "./parts.tsx";
+import type { ConfirmSpec } from "./parts_model.ts";
 
 interface Info {
   repos: Repo[];
@@ -33,16 +36,6 @@ function Stepper({ current }: { current: number }) {
         </li>
       ))}
     </ol>
-  );
-}
-
-function Tabs<T extends string>({ label, items, current, pick }: { label: string; items: { id: T; title: string }[]; current: T; pick: (id: T) => void }) {
-  return (
-    <div role="tablist" aria-label={label} className="ap-tabs">
-      {items.map((t) => (
-        <button key={t.id} role="tab" aria-selected={t.id === current} onClick={() => pick(t.id)}>{t.title}</button>
-      ))}
-    </div>
   );
 }
 
@@ -78,8 +71,8 @@ function SourceStep({ form, set, info }: { form: Form; set: (f: Form) => void; i
         <h1>Add a project</h1>
         <p>Each project is one GitHub repo. Bring one you have, or start a new one; you set it up on the next step.</p>
       </div>
-      <Tabs label="Where the project comes from" items={SOURCES} current={form.source}
-        pick={(source) => set({ ...form, source, repo: "", path: "", pathEdited: false })} />
+      <Tabs label="Where the project comes from" tabs={SOURCES.map((x) => ({ id: x.id, label: x.title }))} value={form.source}
+        onChange={(source) => set({ ...form, source, repo: "", path: "", pathEdited: false })} />
       {form.source === "clone" && (
         <section aria-label="Clone from GitHub" className="ap-section">
           <label className="ap-search">
@@ -198,7 +191,7 @@ function TasksTab({ form, set }: { form: Form; set: (f: Form) => void }) {
         </div>
         <form className="ap-row" onSubmit={(e) => { e.preventDefault(); set({ ...form, protected: addProtected(form.protected, adding) }); setAdding(""); }}>
           <input aria-label="Add a protected path" placeholder="Add a path, e.g. migrations/" value={adding} onChange={(e) => setAdding(e.target.value)} />
-          <button type="submit" className="ap-btn">Add</button>
+          <button type="submit" className="btn">Add</button>
         </form>
       </div>
     </div>
@@ -264,13 +257,13 @@ function ReviewTab({ steps, problem, checking }: { steps: { id: string; title: s
   return (
     <div className="ap-section">
       {checking && <p className="ap-hint">Checking…</p>}
-      {problem && <div className="ap-problem" role="alert"><strong>{problem.message}</strong><span>{problem.fix}</span></div>}
+      {problem && <div className="ap-problem" role="alert"><StatusDot state="down" /><span><strong>{problem.message}</strong> <span className="ap-hint">{problem.fix}</span></span></div>}
       {steps.length > 0 && (
         <>
           <h2 className="ap-h2">What Create will do</h2>
-          <ol className="ap-list">
-            {steps.map((s) => <li key={s.id}><strong>{s.title}</strong><span className="ap-hint">{s.detail}</span></li>)}
-          </ol>
+          <ul className="lrows ap-rows">
+            {steps.map((s) => <ListRow key={s.id} title={s.title} sub={s.detail} />)}
+          </ul>
           <p className="ap-hint">It won't push to the main branch or start any agent: you merge the setup pull request and start the team when you are ready.
             Each step can be retried, and running it again adds nothing twice.</p>
         </>
@@ -283,24 +276,24 @@ function ReviewTab({ steps, problem, checking }: { steps: { id: string; title: s
 
 const STATE_WORDS: Record<string, string> = { waiting: "Waiting", running: "Running", done: "Done", skipped: "Nothing to do", failed: "Stopped" };
 
+/** A step's state as the shared status dot and its words. */
+const STATE_DOT: Record<string, DotState> = { waiting: "idle", running: "waiting", done: "working", skipped: "working", failed: "down" };
+
 function RunView({ run }: { run: Run }) {
   return (
-    <ol className="ap-run" aria-label="Steps">
+    <ul className="lrows ap-rows" aria-label="Steps">
       {run.steps.map((s) => (
-        <li key={s.id} className={s.state}>
-          <span className={`dot ${s.state === "failed" ? "bad" : s.state === "running" ? "warn" : s.state === "waiting" ? "quiet" : "good"}`} aria-hidden="true" />
-          <span className="ap-grow">
-            <strong>{s.title}</strong>
-            <span className="ap-hint">{s.state === "failed" && s.problem ? s.problem.message : s.detail}</span>
+        <ListRow key={s.id} title={<span className={s.state === "waiting" ? "ap-later" : ""}>{s.title}</span>}
+          sub={<>
+            {s.state === "failed" && s.problem ? s.problem.message : s.detail}
             {s.state === "failed" && s.problem?.fix && <span className="ap-fix">{s.problem.fix}</span>}
             {s.output && (s.state === "failed" || s.state === "done") && (
-              <details open={s.state === "failed"}><summary>What it printed</summary><pre className="log">{s.output}</pre></details>
+              <details open={s.state === "failed"}><summary>What it printed</summary><pre className="ap-log">{s.output}</pre></details>
             )}
-          </span>
-          <span className="ap-hint">{STATE_WORDS[s.state] ?? s.state}</span>
-        </li>
+          </>}
+          status={{ state: STATE_DOT[s.state] ?? "idle", text: STATE_WORDS[s.state] ?? s.state }} />
       ))}
-    </ol>
+    </ul>
   );
 }
 
@@ -322,6 +315,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
   const [steps, setSteps] = useState<{ id: string; title: string; detail: string }[]>([]);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     get<Info>("/api/add-project").then((i) => {
@@ -358,12 +352,21 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
   const last = tab === WIZARD.length - 1;
   const progress = run ? runProgress(run) : null;
   const name = form.repo ? form.repo.split("/").pop() : form.path.split("/").pop();
+  const createAsk: ConfirmSpec = {
+    title: `Create ${name ?? "the project"}?`,
+    checks: [{ title: "Review found nothing in the way", met: problem === null && steps.length > 0 && blocked === null,
+      ...(problem ? { sub: problem.message } : blocked ? { sub: blocked } : {}) }],
+    happens: "Each step on Review runs on this machine, one after another, and you see each one as it goes. Everything is committed on a setup branch and opened as a pull request for you to merge.",
+    doesNot: `Nothing is pushed to ${form.mainBranch || "the main branch"}, and no agent is started.`,
+    action: "Create",
+    tone: "primary",
+  };
 
   return (
     <div className="ap-page">
       <header className="ap-top">
-        <span className="ap-logo"><span>F</span>factory</span>
-        <span className="ap-hint"><span className={`dot ${live ? "good" : "warn"}`} aria-hidden="true" />{live ? "Live" : "Reconnecting…"}</span>
+        <span className="ap-logo"><span aria-hidden="true">F</span>factory</span>
+        <span className="ap-hint" role="status"><StatusDot state={live ? "working" : "waiting"} />{live ? "Live" : "Reconnecting…"}</span>
       </header>
       <Stepper current={run || stage === "setup" ? 4 : 3} />
       <main className={`ap-card${stage === "setup" || run ? " wide" : ""}`}>
@@ -371,20 +374,20 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
           <>
             <div className="ap-head">
               <h1>Setting up {run.name ?? name}</h1>
-              <p role="status"><span className={`dot ${progress?.tone}`} aria-hidden="true" /> {progress?.text}</p>
+              <p role="status"><StatusDot state={progress?.tone === "bad" ? "down" : progress?.tone === "good" ? "working" : "waiting"} />{progress?.text}</p>
             </div>
             <RunView run={run} />
             <div className="ap-foot">
               <span className="ap-hint">{run.state === "failed" ? "The steps before it are kept: Retry goes on from there." : run.state === "done"
                 ? "Merge the setup pull request on GitHub, then start the team from the project." : "You can leave this page; it goes on."}</span>
               <div className="ap-row">
-                {run.state !== "running" && <button className="ap-btn" onClick={() => { setRun(null); close(); }}>Close</button>}
+                {run.state !== "running" && <button className="btn" onClick={() => { setRun(null); close(); }}>Close</button>}
                 {run.state === "failed" && run.id && (
-                  <button className="ap-btn primary" disabled={busy} onClick={() => void act(`/api/add-project/runs/${encodeURIComponent(run.id as string)}/retry`, { confirm: true })}>
+                  <button className="btn primary" disabled={busy} onClick={() => void act(`/api/add-project/runs/${encodeURIComponent(run.id as string)}/retry`, { confirm: true })}>
                     {busy ? "Starting…" : "Retry"}</button>
                 )}
                 {run.project && run.state !== "running" && (
-                  <button className="ap-btn primary" onClick={() => { const p = run.project as string; setRun(null); open(p); }}>Open {run.name ?? name}</button>
+                  <button className="btn primary" onClick={() => { const p = run.project as string; setRun(null); open(p); }}>Open {run.name ?? name}</button>
                 )}
               </div>
             </div>
@@ -395,8 +398,8 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
             <div className="ap-foot">
               <span className="ap-hint">{blocked ?? "Nothing changes in the repo yet."}</span>
               <div className="ap-row">
-                <button className="ap-btn" onClick={close}>Back</button>
-                <button className="ap-btn primary" disabled={blocked !== null} onClick={() => { setStage("setup"); setTab(0); }}>Continue</button>
+                <button className="btn" onClick={close}>Back</button>
+                <button className="btn primary" disabled={blocked !== null} onClick={() => { setStage("setup"); setTab(0); }}>Continue</button>
               </div>
             </div>
           </>
@@ -406,7 +409,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
               <h1>Set up {name}</h1>
               <p>Five short steps. Your answers are saved in the project; you can change any of them later in Settings.</p>
             </div>
-            <nav aria-label="Wizard steps" className="ap-tabs">
+            <nav aria-label="Wizard steps" className="tabs ap-wizard">
               {WIZARD.map((w, i) => (
                 <button key={w} aria-current={i === tab ? "step" : undefined} onClick={() => setTab(i)}>{i < tab && <Check />}{w}</button>
               ))}
@@ -419,21 +422,20 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
                 {tab === 3 && <CiTab form={form} />}
                 {last && <ReviewTab steps={steps} problem={problem} checking={busy && !steps.length} />}
                 <div className="ap-foot">
-                  <button className="ap-btn" onClick={() => (tab ? setTab(tab - 1) : setStage("source"))}>Back</button>
-                  {!last && <button className="ap-btn primary" onClick={() => setTab(tab + 1)}>Next: {WIZARD[tab + 1]}</button>}
+                  <button className="btn" onClick={() => (tab ? setTab(tab - 1) : setStage("source"))}>Back</button>
+                  {!last && <button className="btn primary" onClick={() => setTab(tab + 1)}>Next: {WIZARD[tab + 1]}</button>}
                   {last && (
-                    <button className="ap-btn primary" disabled={busy || blocked !== null || problem !== null || !steps.length}
-                      onClick={() => void act("/api/add-project", { confirm: true, ...requestOf(form) })}>Create</button>
+                    <button className="btn primary" disabled={busy || blocked !== null || problem !== null || !steps.length}
+                      onClick={() => setConfirming(true)}>Create</button>
                   )}
                 </div>
                 {last && blocked && <p className="ap-hint" role="status">{blocked}</p>}
               </div>
               <aside aria-label="What will be created" className="ap-aside">
                 <h2 className="ap-h2">What will be created</h2>
-                <ul className="ap-list">
+                <ul className="lrows ap-rows">
                   {createsOf(form, info?.messaging ?? "github").map((c) => (
-                    <li key={c.title}><span className="ap-between"><strong>{c.title}</strong><span className="ap-hint">{c.where}</span></span>
-                      <span className="ap-hint">{c.detail}</span></li>
+                    <ListRow key={c.title} title={c.title} sub={c.detail} action={<span className="ap-where">{c.where}</span>} />
                   ))}
                 </ul>
                 <p className="ap-hint">Nothing is pushed until you press Create on Review. Running it twice adds nothing twice.</p>
@@ -442,89 +444,94 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
           </>
         )}
       </main>
+      {confirming && !run && (
+        <ConfirmDialog spec={createAsk} busy={busy} onCancel={() => setConfirming(false)}
+          onConfirm={() => { setConfirming(false); void act("/api/add-project", { confirm: true, ...requestOf(form) }); }} />
+      )}
     </div>
   );
 }
 
-/** The screens' look: the onboarding layout of the design (centred card on a soft background, a stepper on top). */
+/** The screens' look: the onboarding layout of the design (a centred white card on the subtle background, a stepper on
+ * top), only with the theme's variables; tabs, list rows, buttons and the dialog come from the shared parts. */
 export const ADD_CSS = String.raw`
-.rail button.add { background: transparent; border: 1px dashed var(--faint); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
-.ap-page { min-height: 100%; background: var(--bg-soft); display: flex; flex-direction: column; align-items: center; gap: 28px;
-  padding: 28px 16px 64px; overflow-y: auto; }
+.ap-page { min-height: 100%; background: var(--bg-subtle); color: var(--text); display: flex; flex-direction: column; align-items: center; gap: 28px;
+  padding: 28px 16px 64px; }
 .ap-top { width: 100%; max-width: 1040px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-.ap-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
-.ap-logo span { width: 32px; height: 32px; border-radius: 10px; background: var(--text); color: var(--bg); display: inline-flex;
+.ap-logo { display: flex; align-items: center; gap: 10px; font: 700 18px/1 var(--title-font); }
+.ap-logo span { width: 32px; height: 32px; border-radius: 10px; background: var(--primary); color: var(--on-primary); display: inline-flex;
   align-items: center; justify-content: center; }
 .ap-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px; }
-.ap-steps li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.ap-steps li { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
 .ap-steps li.on { color: var(--text); font-weight: 600; }
-.ap-mark { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); display: inline-flex; align-items: center;
-  justify-content: center; font-size: 11px; font-weight: 600; background: var(--bg); color: var(--faint); }
+.ap-mark { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border-strong); display: inline-flex; align-items: center;
+  justify-content: center; font-size: 11px; font-weight: 600; background: var(--surface); color: var(--text-3); }
 .ap-steps li.past .ap-mark { color: var(--text); }
-.ap-steps li.on .ap-mark { background: var(--text); border-color: var(--text); color: var(--bg); }
-.ap-card { width: 100%; max-width: 880px; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 48px;
+.ap-steps li.on .ap-mark { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
+.ap-card { width: 100%; max-width: 880px; min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 48px;
   display: flex; flex-direction: column; gap: 28px; }
 .ap-card.wide { max-width: 1040px; }
-.ap-head { display: flex; flex-direction: column; gap: 6px; }
-.ap-head h1 { margin: 0; font-size: 34px; font-weight: 700; letter-spacing: -.01em; }
-.ap-head p { margin: 0; color: var(--muted); display: flex; align-items: center; gap: 8px; }
-.ap-tabs { display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--line); }
-.ap-tabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 0; min-height: 44px; color: var(--muted);
-  cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
-.ap-tabs button[aria-selected="true"], .ap-tabs button[aria-current="step"] { border-bottom-color: var(--text); color: var(--text); font-weight: 600; }
-.ap-section { display: flex; flex-direction: column; gap: 16px; }
+.ap-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ap-head h1 { margin: 0; font: 700 34px/1.15 var(--title-font); overflow-wrap: anywhere; }
+.ap-head p { margin: 0; color: var(--text-2); display: flex; align-items: center; gap: 8px; }
+.ap-top .ap-hint { display: inline-flex; align-items: center; gap: 8px; }
+.ap-card .tabs { flex-wrap: wrap; column-gap: 24px; overflow: visible; }
+.ap-card .tabs button { min-height: 44px; }
+.ap-wizard button[aria-current="step"] { border-bottom-color: var(--text); color: var(--text); font-weight: 600; }
+.ap-section { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .ap-section p { margin: 0; }
-.ap-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 0 12px; height: 44px; color: var(--faint); }
+.ap-search { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; height: 44px;
+  color: var(--text-3); background: var(--surface); }
 .ap-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent; font: inherit; color: var(--text); }
 .ap-repos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; max-height: 340px; overflow-y: auto; }
 .ap-repos li { display: flex; align-items: center; gap: 14px; padding: 12px; min-height: 48px; border-radius: 10px; cursor: pointer; }
-.ap-repos li:hover { background: var(--bg-soft); }
-.ap-repos li.on { background: var(--bg-soft); }
-.ap-repos li[aria-disabled="true"] { cursor: default; opacity: .7; }
+.ap-repos li:hover, .ap-repos li.on { background: var(--bg-active); }
+.ap-repos li[aria-disabled="true"] { cursor: default; color: var(--text-2); }
+.ap-repos strong { overflow-wrap: anywhere; }
 .ap-grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.ap-field { display: flex; flex-direction: column; gap: 6px; }
+.ap-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ap-field label, .ap-fieldset legend { font-weight: 600; }
-.ap-fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.ap-fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .ap-fieldset legend { font-size: 20px; margin-bottom: 4px; padding: 0; }
-.ap-page input:not([type]), .ap-page input[type="text"], .ap-page select, .ap-row input { height: 44px; border: 1px solid var(--line);
-  border-radius: 10px; padding: 0 12px; font: inherit; background: var(--bg); color: var(--text); min-width: 0; }
+.ap-page input:not([type]), .ap-page input[type="text"], .ap-page select { height: 44px; border: 1px solid var(--border-strong);
+  border-radius: 10px; padding: 0 12px; font: inherit; background: var(--surface); color: var(--text); min-width: 0; width: 100%; }
+.ap-search input:not([type]) { border: 0; height: auto; padding: 0; }
 .ap-page .mono { font-family: var(--mono); font-size: 13px; }
-.ap-hint { font-size: 13px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; }
+.ap-hint { font-size: 13px; color: var(--text-2); }
 .ap-ink { color: var(--text); }
-.ap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px 20px; }
-.ap-choice { border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; gap: 12px; cursor: pointer; }
+.ap-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px 20px; }
+.ap-choice { border: 1px solid var(--border-strong); border-radius: 14px; padding: 16px; display: flex; gap: 12px; cursor: pointer; background: var(--surface); }
 .ap-choice.on { border: 1.5px solid var(--text); }
-.ap-choice input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--text); }
-.ap-choice > span { display: flex; flex-direction: column; gap: 4px; }
+.ap-choice input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--primary); flex: none; }
+.ap-choice > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .ap-chips { display: flex; flex-wrap: wrap; gap: 8px; }
-.ap-chip { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 4px 0 12px; border-radius: 999px; border: 1px solid var(--line); font-size: 13px; }
-.ap-chip button { width: 24px; height: 24px; border-radius: 50%; border: 0; background: transparent; color: var(--faint); cursor: pointer; }
-.ap-pick { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--line); cursor: pointer; }
-.ap-pick.on { border-color: var(--text); font-weight: 600; }
-.ap-pick input { accent-color: var(--text); }
-.ap-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.ap-row input { flex: 1; }
-.ap-btn { height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); cursor: pointer; }
-.ap-btn.primary { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 600; padding: 0 22px; }
-.ap-btn:disabled { opacity: .45; cursor: default; }
-.ap-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 24px; }
+.ap-chip { display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 4px 0 12px; border-radius: 999px; border: 1px solid var(--border-strong);
+  font-size: 13px; background: var(--surface); max-width: 100%; }
+.ap-chip code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-chip button { width: 24px; height: 24px; border-radius: 50%; border: 0; background: transparent; color: var(--text-3); cursor: pointer; flex: none; }
+.ap-pick { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border-strong);
+  background: var(--surface); cursor: pointer; }
+.ap-pick.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 600; }
+.ap-pick input { accent-color: var(--primary); }
+.ap-row { display: flex; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.ap-row input { flex: 1 1 180px; }
+.ap-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--border); padding-top: 24px; }
 .ap-split { display: flex; flex-wrap: wrap; gap: 56px; align-items: flex-start; }
-.ap-main { flex: 3 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 32px; }
-.ap-aside { flex: 2 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.ap-main { flex: 3 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 32px; }
+.ap-aside { flex: 2 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .ap-h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.ap-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.ap-list li { padding: 10px 0; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
-.ap-between { display: flex; justify-content: space-between; gap: 8px; }
-.ap-facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-.ap-facts dt { font-size: 13px; color: var(--muted); }
-.ap-facts dd { margin: 0; font-weight: 600; }
-.ap-problem { display: flex; flex-direction: column; gap: 4px; }
-.ap-problem strong::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-right: 8px; }
-.ap-run { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
-.ap-run li { display: flex; gap: 14px; align-items: flex-start; padding: 14px 0; border-top: 1px solid var(--line); }
-.ap-run li .dot { margin-top: 6px; }
-.ap-run li.waiting strong { color: var(--muted); font-weight: 500; }
-.ap-fix { font-size: 13px; }
-.ap-run details summary { cursor: pointer; font-size: 13px; color: var(--muted); }
-@media (max-width: 640px) { .ap-card { padding: 24px 18px; } .ap-head h1 { font-size: 26px; } }
+.ap-rows .lrow-who { display: none; }
+.ap-rows .lrow { align-items: flex-start; }
+.ap-rows .lrow-sub { white-space: normal; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 4px; }
+.ap-where { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
+.ap-later { color: var(--text-2); font-weight: 500; }
+.ap-fix { color: var(--text); }
+.ap-log { margin: 6px 0 0; padding: 10px 12px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; font-size: 12px;
+  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; color: var(--text); }
+.ap-rows details summary { cursor: pointer; color: var(--text-2); }
+.ap-facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; }
+.ap-facts dt { font-size: 13px; color: var(--text-3); }
+.ap-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.ap-problem { display: flex; gap: 10px; align-items: baseline; }
+@media (max-width: 640px) { .ap-card { padding: 24px 18px; } .ap-head h1 { font-size: 26px; } .ap-split { gap: 32px; } }
 `;

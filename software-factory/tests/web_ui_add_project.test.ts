@@ -6,7 +6,7 @@
 // keeps its remotes as local bare repos; `factory` is a fake script (committed in each "cloned" repo) that logs what it
 // was asked. Nothing here reaches the network.
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { api, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { git, gitRepo, read, readJson, sh, write, writeExe } from "./support.ts";
@@ -206,7 +206,8 @@ test("GET /api/add-project: the repos from gh, the one already in the factory ma
     { name: "acme/shop", private: true, updatedAt: "2026-11-01T10:00:00Z", inFactory: null },
     { name: "acme/work", private: false, updatedAt: "2026-10-01T10:00:00Z", inFactory: "work" },
   ]);
-  expect(r.json.folder).toBe(s.folder);
+  // the server knows its project by its real path (git gives it that way: /private/var for /var on macOS)
+  expect(realpathSync(String(r.json.folder))).toBe(realpathSync(s.folder));
   expect((r.json.projects as Row[]).map((x) => x.id)).toEqual(["work"]);
   expect(r.json.messaging).toBe("github");
   expect(r.json.legends).toEqual(["menelik", "taytu", "haile", "tewodros", "yohannes", "zewditu", "lalibela", "ezana", "alula", "abebe",

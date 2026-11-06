@@ -1,0 +1,105 @@
+// The task board's rules that aren't drawing (#439): its columns, one per factory label, and its swim lanes, by the
+// agent that holds a task or by its epic (#440; a task in none goes by its milestone, or the plan's phase). The filter is the tasks channel's own
+// (filterRows), applied before the board is laid out. No React here, so tests/web_ui_board_model.test.ts runs it as it is.
+import type { TaskRow } from "./views_model.ts";
+
+export interface Column {
+  state: string;
+  title: string;
+}
+
+export type LaneBy = "agent" | "epic";
+
+export interface Lane {
+  /** The agent's name or the epic; "" for the last lane (nobody holds them, or no epic). */
+  key: string;
+  title: string;
+  count: number;
+  /** The lane's tasks by state, one entry per column (empty when none), in build order. */
+  cells: Record<string, TaskRow[]>;
+}
+
+/** The columns, left to right, from the factory's labels. */
+export const COLUMNS: Column[] = [
+  { state: "ready", title: "Ready" },
+  { state: "in-progress", title: "In progress" },
+  { state: "in-review", title: "In review" },
+  { state: "blocked", title: "Blocked" },
+  { state: "done", title: "Done" },
+];
+
+const NOT_READY: Column = { state: "new", title: "Not ready" };
+
+/** The columns for `tasks`: a Not ready column first only when some task has no ready label yet. */
+export function columnsOf(tasks: TaskRow[]): Column[] {
+  return tasks.some((t) => t.state === NOT_READY.state) ? [NOT_READY, ...COLUMNS] : COLUMNS;
+}
+
+function emptyCells(): Record<string, TaskRow[]> {
+  return Object.fromEntries([NOT_READY, ...COLUMNS].map((c) => [c.state, [] as TaskRow[]]));
+}
+
+/** A card's one status, on its right (the reference design's tag): "Needs you" (with the red dot) when its pull request
+ *  waits for the owner to merge, "Checks failing" when that PR's checks are red, else the task's state in words. */
+export function cardTag(t: TaskRow, pull?: { next: { action: string } }): { text: string; needsYou: boolean } {
+  if (pull?.next.action === "owner-merges") return { text: "Needs you", needsYou: true };
+  if (t.pr?.checks?.state === "red") return { text: "Checks failing", needsYou: false };
+  return { text: t.stateText, needsYou: false };
+}
+
+/** The lane a task goes in by epic: the epic (#440) that lists it, keyed `#<id>`, else its group (milestone or phase). */
+function epicKey(t: TaskRow, known: Map<string, string>): [string, string] {
+  if (t.epic && known.has(t.epic)) return [`#${t.epic}`, known.get(t.epic) as string];
+  return [t.group, t.group];
+}
+
+/** The swim lanes for `tasks`. By agent: one per first holder, by name, then Nobody. By epic: one per epic in `epics`'
+ *  order, then one per group in the order they first come (build order), then No epic. A lane with no task isn't there. */
+export function boardOf(tasks: TaskRow[], by: LaneBy, epics: { id: string; title: string }[] = []): Lane[] {
+  const known = new Map(epics.map((e) => [e.id, `#${e.id} ${e.title}`]));
+  const lanes = new Map<string, Lane>();
+  for (const t of tasks) {
+    const [key, title] = by === "agent" ? [t.holders[0] ?? "", t.holders[0] ?? ""] : epicKey(t, known);
+    let lane = lanes.get(key);
+    if (!lane) {
+      lane = { key, title: title || (by === "agent" ? "Nobody" : "No epic"), count: 0, cells: emptyCells() };
+      lanes.set(key, lane);
+    }
+    (lane.cells[t.state] ??= []).push(t);
+    lane.count++;
+  }
+  const named = [...lanes.values()].filter((l) => l.key);
+  if (by === "agent") named.sort((a, b) => a.key.localeCompare(b.key));
+  else {
+    const order = epics.map((e) => `#${e.id}`);
+    const rank = (l: Lane) => (order.includes(l.key) ? order.indexOf(l.key) : order.length);
+    named.sort((a, b) => rank(a) - rank(b)); // stable: the groups keep the order they came in
+  }
+  const last = lanes.get("");
+  return last ? [...named, last] : named;
+}
+
+/** The palette's categories an epic's chip dot takes, in the epics' order (the reference design's: violet, pink, green,
+ *  blue), then round again. */
+const EPIC_COLOURS = ["violet", "pink", "green", "blue", "yellow"];
+
+/** The category colour of the epic at `index` in the epics' order. */
+export function epicColour(index: number): string {
+  return EPIC_COLOURS[((index % EPIC_COLOURS.length) + EPIC_COLOURS.length) % EPIC_COLOURS.length] as string;
+}
+
+export type TaskAction = "release" | "block" | "reassign";
+
+/** What a card's action does and doesn't do, in plain words, for its confirm. The commands change the issue's labels
+ *  and claim; they don't stop a session already working on the task, so the confirm says so. `agent` is the one picked
+ *  for reassign ("" before one is). */
+export function taskAsk(action: TaskAction, t: { id: string; holders: string[] }, agent = ""): { happens: string; doesNot: string } {
+  const id = `#${t.id}`;
+  const who = t.holders[0];
+  const claim = who ? ` ${who}'s claim comes off.` : "";
+  const session = who ? "A session already working on it isn't stopped. " : "";
+  if (action === "release") return { happens: `${id} goes back to Ready and the next free agent takes it.${claim}`, doesNot: `${session}Its branch and pull request stay.` };
+  if (action === "block") return { happens: `${id} moves to Blocked with your reason.${claim}`, doesNot: `${session}Nothing is deleted: Release puts it back to Ready.` };
+  return { happens: `${id} goes back to Ready, then ${agent || "the agent you pick"} is told to take it.${claim}`,
+    doesNot: `${session}${who ? `${who}'s branch stays.` : "Nothing is deleted."}` };
+}
