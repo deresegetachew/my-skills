@@ -3,6 +3,7 @@
 // data is, with a button that reads it again. The CI channel puts the verdict first and its actions (#396) are buttons
 // that ask first, then run the same commands the cockpit's CI view runs, on the machine that serves the page.
 import { type ReactNode, useEffect, useState } from "react";
+import { Avatar } from "./avatar_view.tsx";
 import { Cited } from "./docs.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
@@ -82,7 +83,7 @@ function NoMatch({ typed }: { typed: string }) {
 }
 
 function AgentLink({ name, open }: { name: string; open: ViewProps["open"] }) {
-  return <button className="link" onClick={() => open(`agent:${name}`)}>{name}</button>;
+  return <button className="link agent-link" onClick={() => open(`agent:${name}`)}><Avatar name={name} size={20} />{name}</button>;
 }
 
 // --- tasks -------------------------------------------------------------------------------------------------------------

@@ -10,6 +10,7 @@ import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, us
 import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
   type Tone } from "./model.ts";
+import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
 import type { DocSection } from "./docs_model.ts";
@@ -238,6 +239,7 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
                 return (
                   <li key={a.name}>
                     <Dot tone={st.tone} label={a.state} />
+                    <Avatar name={a.name} role={a.role} />
                     <button className="link" onClick={() => open(`agent:${a.name}`)}>{a.name}</button>
                     <span className="detail">{st.text}</span>
                   </li>
@@ -513,7 +515,7 @@ function App() {
     const st = agentState(a, live?.limit ?? null);
     return (
       <button key={c.id} className="chan" aria-current={c.id === channel?.id} onClick={() => go(project.id, c.id)} title={`${c.name}: ${st.text}`}>
-        <Dot tone={live ? st.tone : "quiet"} />
+        <Avatar name={c.name} role={c.role} size={28} tone={live ? st.tone : "quiet"} />
         <span className="name">{c.name}<span className="sub">{ROLE_TITLE[c.role ?? ""] ?? c.role}</span></span>
         {a?.task && <span className="meta">#{a.task}</span>}
       </button>
@@ -525,7 +527,10 @@ function App() {
   const subtitle = channel?.kind === "agent" ? [role, agentState(agent, live?.limit ?? null).text].filter(Boolean).join(" · ")
     : `${project.name} · ${project.current ? "this project" : project.path}`;
 
+  const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => [c.name, { role: c.role, avatar: c.avatar }]));
+
   return (
+    <AgentsContext.Provider value={agentsHere}>
     <div className={`app${menu ? " open" : ""}`}>
       {menu && <button className="backdrop" aria-label="Close the menu" onClick={() => setMenu(false)} />}
       <nav className="rail" aria-label="Projects">
@@ -562,7 +567,7 @@ function App() {
               <h2>{hits.length + rowHits.length + docHits.length ? `${hits.length + rowHits.length + docHits.length} match${hits.length + rowHits.length + docHits.length > 1 ? "es" : ""}` : `No match for "${query}"`}</h2>
               {hits.map((h) => (
                 <button key={`${h.project}/${h.channel.id}`} className="chan" onClick={() => go(h.project, h.channel.id)}>
-                  <span className="hash">#</span>
+                  {h.channel.kind === "agent" ? <Avatar name={h.channel.name} role={h.channel.role} image={h.channel.avatar} size={20} /> : <span className="hash">#</span>}
                   <span className="name">{h.channel.title}<span className="sub">{h.projectName}{h.channel.role ? ` · ${ROLE_TITLE[h.channel.role] ?? h.channel.role}` : ""}</span></span>
                 </button>
               ))}
@@ -625,7 +630,9 @@ function App() {
         <header className="main-head">
           <button className="menu" aria-label="Projects and channels" onClick={() => setMenu(true)}><MenuIcon /></button>
           <div className="grow">
-            <h2><span className="hash">{docRoute ? "§" : "#"}</span>{docRoute ? docPage?.title ?? docRoute.id : channel?.title ?? "—"}</h2>
+            <h2>{docRoute ? <span className="hash">§</span>
+              : channel?.kind === "agent" ? <Avatar name={channel.name} role={channel.role} size={26} /> : <span className="hash">#</span>}
+              {docRoute ? docPage?.title ?? docRoute.id : channel?.title ?? "—"}</h2>
             <div className="subtitle">{docRoute ? `Docs · ${project.name}` : subtitle}</div>
           </div>
           {!docRoute && channel?.kind === "agent" && live && !project.problem && agentActions(agent, channel, project, setAsk)}
@@ -663,10 +670,11 @@ function App() {
         </div>
       )}
     </div>
+    </AgentsContext.Provider>
   );
 }
 
 const style = document.createElement("style");
-style.textContent = CSS + VIEWS_CSS + DOCS_CSS;
+style.textContent = CSS + VIEWS_CSS + DOCS_CSS + AVATAR_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);
