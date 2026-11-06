@@ -40,8 +40,9 @@ export function Cited({ text, docs, open }: { text: string; docs: DocPage[] | un
 }
 
 /** "cites decision 0004 · US-12": what a task or pull request body cites that has a page, each a link; nothing when none. */
-export function Cites({ cites, docs, open }: { cites: string[] | undefined; docs: DocPage[] | undefined; open: Open }) {
-  const links = citeLinks(cites ?? [], docs ?? []);
+export function Cites({ cites, title, docs, open }: { cites: string[] | undefined; title: string; docs: DocPage[] | undefined; open: Open }) {
+  // what the title cites is already a link in the title
+  const links = citeLinks((cites ?? []).filter((c) => !title.includes(c)), docs ?? []);
   if (!links.length) return null;
   return (
     <span className="cites">cites {links.map((c, i) => (

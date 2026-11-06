@@ -102,7 +102,7 @@ function TaskLine({ t, open, docs }: { t: TaskRow; open: ViewProps["open"]; docs
           {t.todos.all > 0 && <span>{t.todos.done} of {t.todos.all} todos done</span>}
           {t.dependsOn.length > 0 && <span>after {t.dependsOn.map((d) => `#${d.replace(/^#/, "")}`).join(", ")}</span>}
           {t.pr && <span>PR <button className="link" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>#{t.pr.number}</button></span>}
-          <Cites cites={t.cites} docs={docs} open={open} />
+          <Cites cites={t.cites} title={t.title} docs={docs} open={open} />
         </span>
       </span>
       <span className="vwho">{t.holders.length ? t.holders.map((h) => <AgentLink key={h} name={h} open={open} />) : <span className="empty">—</span>}</span>
@@ -150,7 +150,7 @@ function PullCard({ pr, open, docs }: { pr: PullRow; open: ViewProps["open"]; do
         <div><dt>Task</dt><dd>{pr.task ? <button className="link" onClick={() => open("view:tasks", `#${pr.task}`)}>#{pr.task}</button> : <span className="empty">—</span>}</dd></div>
         <div><dt>Next</dt><dd>{pr.next.text}</dd></div>
       </dl>
-      <p className="vsub"><span className="mono">{pr.branch}</span><Cites cites={pr.cites} docs={docs} open={open} /></p>
+      <p className="vsub"><span className="mono">{pr.branch}</span><Cites cites={pr.cites} title={pr.title} docs={docs} open={open} /></p>
     </li>
   );
 }
