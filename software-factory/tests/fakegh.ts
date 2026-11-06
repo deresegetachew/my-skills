@@ -77,7 +77,7 @@ if (m && method === "POST") {
   const k = m[1] as string;
   ((db.comments ??= {})[k] ??= []).push(data.body ?? "");
   const id = 1000 * Number(k) + db.comments[k].length;
-  save("comment", { issue: Number(k), body: data.body ?? "", id }); out({ id, body: data.body ?? "" });
+  save("comment", { issue: Number(k), body: data.body ?? "" }); out({ id, body: data.body ?? "" });
 }
 if (m) {
   const k = m[1] as string;

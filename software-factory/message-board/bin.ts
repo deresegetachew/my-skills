@@ -36,12 +36,15 @@ events on Postgres.
                                      line); every write is recorded as <actor>, and no tool can name another sender.
                                      --role owner or manager adds the tools that move, create, assign and link cards
                                      (default builder); \`factory board mcp --help\` shows how to add it to Claude Code
-  factory board import github [--closed] [--dry-run] [--repo owner/name]
+  factory board import github [--closed] [--dry-run] [--repo owner/name] [--board-is-record]
                                      bring the repo's open issues in as tasks (--closed: the closed ones too, as done),
                                      their comments as threads; safe to run twice. --dry-run says what it would do and
                                      writes nothing. The repo is the git remote origin unless --repo names it
                                      GitHub wins on status unless the task is held on the board (a task done on the
-                                     board but open on GitHub is reopened); comments deleted on GitHub stay on the board
+                                     board but open on GitHub is reopened); comments deleted on GitHub stay on the board.
+                                     --board-is-record: a status the board changed since the last import is kept too
+                                     (the factory passes it when tasks.source is board). Comments the board's mirror
+                                     wrote are never brought back
   factory board login add <name> [--json]
                                      on the machine that runs the board: a login of its own for another machine, with
                                      only the board's rights (connect, read and write the board's tables). Prints its URL
@@ -544,7 +547,7 @@ async function login(argv: string[]): Promise<number> {
 }
 
 // ---------- import ----------
-const IMPORT_USAGE = "factory board import github [--closed] [--dry-run] [--repo owner/name]";
+const IMPORT_USAGE = "factory board import github [--closed] [--dry-run] [--repo owner/name] [--board-is-record]";
 const IMPORTER = "github-import"; // the actor an import writes as: its tasks and edges are created_by it
 
 const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
@@ -564,10 +567,12 @@ function importReport(s: ImportSummary): void {
     k.notImported ? plural(k.notImported, "comment on an issue not imported", "comments on issues not imported") : "",
     k.deps ? plural(k.deps, "dependency on an issue not on the board", "dependencies on issues not on the board") : "",
     k.gone ? plural(k.gone, "task whose issue GitHub no longer has", "tasks whose issues GitHub no longer has") : "",
+    k.mirrored ? plural(k.mirrored, "comment the board mirrored", "comments the board mirrored") : "",
     r.skipped.length ? plural(r.skipped.length, "item left as it was (below)", "items left as they were (below)") : "",
   ].filter(Boolean);
   print(`skipped    ${skips.length ? skips.join("; ") : "nothing"}`);
   for (const x of r.skipped) print(`  ${x.ref}: ${x.why}`);
+  if (s.boardIsRecord) print("status     kept for the tasks the board moved since the last import: the board is the record");
   print(`comments   ${s.since ? `changed since ${s.since} (the last import, less 10 minutes)` : "all of them"}`);
   print(`GitHub calls: ${s.calls}`);
 }
@@ -580,6 +585,7 @@ async function importVerb(argv: string[]): Promise<number> {
   }
   const closed = flag(args, "--closed");
   const dryRun = flag(args, "--dry-run");
+  const boardIsRecord = flag(args, "--board-is-record");
   const given = option(args, "--repo");
   leftovers(args, IMPORT_USAGE);
   const repo = repoName(given);
@@ -589,7 +595,7 @@ async function importVerb(argv: string[]): Promise<number> {
     if (missing.length) {
       fail("schema-old", `The board's schema is behind: ${missing.join(", ")} not applied yet.`, "Run `factory board migrate`, then run this again. Nothing was read or written.");
     }
-    return importFromGithub(b, { repo, closed, dryRun });
+    return importFromGithub(b, { repo, closed, dryRun, boardIsRecord });
   }, IMPORTER);
   importReport(summary);
   return 0;

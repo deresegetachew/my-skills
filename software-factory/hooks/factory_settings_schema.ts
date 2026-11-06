@@ -248,9 +248,10 @@ export const SETTINGS: Record<string, Setting> = table([
   S("turbo.secretsCommand", "str", "ci", "A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins.", { default: "" }),
   S("ci.lightLabel", "str", "ci", "The light runner's label (default `<repo>-light`).", { default: "" }),
   S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or board (the message board, for the kinds in messaging.kinds). Unset: board on a machine with a board set up, else github.", { options: ["github", "board"], default: null }),
-  S("messaging.kinds", "list", "messaging", "The message kinds that have moved to the board (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub.", { default: [] }),
+  S("messaging.kinds", "list", "messaging", "The message kinds that have moved to the board (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr, ask); every other kind stays on GitHub. ask: owner asks are written to the board and mirrored to the owner-queue issue.", { default: [] }),
   S("messaging.githubCopy", "list", "messaging", "The moved kinds that are still also written to GitHub. Only claim (with its releases) and wake can leave it; every other kind is always written there. Unset: the same as messaging.kinds.", { default: null }),
   S("messaging.pollMinutes", "int", "messaging", "With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up on the board before it looks at GitHub anyway.", { default: 15 }),
+  S("board.mirror", "bool", "messaging", "Mirror the message board to GitHub, one way (`factory board mirror`): a task's state change sets its issue's labels with one short line, and owner asks and answers go to the owner-queue issue, whose answers come back. Off: nothing is sent to GitHub.", { default: true, read_by: "factory_board.ts (`factory board mirror`, `factory board ask`, `factory owner answer`)" }),
   S("messaging.fallback", "enum", "messaging", "When the message board can't be reached: github goes on over GitHub and says so; none stops the command.", { options: ["github", "none"], default: "github" }),
   S("ui.projects", "list", "ui", "Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout.", { default: [] }),
   S("ui.port", "int", "ui", "The port `factory ui` listens on (`--port` wins for one run).", { default: 4747 }),
@@ -462,6 +463,13 @@ const MORE: Record<string, More> = {
     "on a machine with a board set up, else github. nats was removed (#504): a project file that still says nats is " +
     "refused, with the fix `factory settings set messaging.transport board`.",
   examples: ["factory settings set messaging.transport board", "factory settings unset messaging.transport"] },
+  "board.mirror": { long: "With the message board as the record (`tasks.source` board, or ask in `messaging.kinds`), `factory board mirror` " +
+    "carries the board to GitHub one way: a task whose state the board changed gets its issue's factory label (and agent:<name> " +
+    "while in progress) in one call and one short line saying the new state; a state that ends where it was sent sends nothing. " +
+    "Owner asks and answers are posted to the owner-queue issue once, so GitHub notifies the owner, and an answer the owner " +
+    "gives there is read back once. Its place is kept on the board, so it is safe to run twice and goes on after a GitHub " +
+    "failure. false: nothing is sent; owner asks then stay on the board.",
+  examples: ["factory settings set board.mirror false"] },
   "messaging.fallback": { long: "With github, a command whose message board can't be reached goes on over GitHub and " +
     "prints the error (`board-unreachable`, `board-missing`) once, with the fix. With none, the command stops with that " +
     "error instead.",
@@ -785,8 +793,8 @@ export function validateAll(data: Record<string, unknown>, root = "."): [string[
   return [errors, warnings];
 }
 
-// The kinds `messaging.kinds` may move: the envelope's, and claims, releases, wake-ups, hand-offs and the PR feed.
-export const MESSAGING_KINDS = [...MESSAGE_KINDS,"claim", "release", "wake", "handoff", "pr"];
+// The kinds `messaging.kinds` may move: the envelope's, and claims, releases, wake-ups, hand-offs, the PR feed and owner asks.
+export const MESSAGING_KINDS = [...MESSAGE_KINDS,"claim", "release", "wake", "handoff", "pr", "ask"];
 
 function messagingErrors(data: Record<string, unknown>): string[] {
   const errors: string[] = [];

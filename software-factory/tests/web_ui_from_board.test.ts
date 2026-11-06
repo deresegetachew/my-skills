@@ -243,6 +243,12 @@ test("Release on a board task still runs through the GitHub path", async () => {
 
 const BOARD_CONFIG = { ...CONFIG, tasks: { source: "board" } };
 
+/** Stops the server and closes the test's board connections, so the tests after it have connections to spare. */
+async function finish(ui: Running): Promise<void> {
+  await ui.stop();
+  for (const b of boards.splice(0)) await b.end().catch(() => {});
+}
+
 /** The project's factory commands the server ran, without the snapshots. */
 function factoryRan(p: Project): string[] {
   return readFileSync(p.factoryLog, "utf8").split("\n").filter((l) => l && !l.startsWith("snapshot"));
@@ -262,6 +268,7 @@ test("with tasks.source board, Release takes the task back on the board, with it
   expect(factoryRan(p)).toEqual([]);
   const json = await tasksUntil(ui, (j) => byId(j)["7"]?.state === "ready", 15_000);
   expect(byId(json)["7"]?.holders).toEqual([]);
+  await finish(ui);
 }, T);
 
 test("with tasks.source board, Block moves the task to blocked with a blocker note; the board and the tracker both call it blocked", async () => {
@@ -278,6 +285,7 @@ test("with tasks.source board, Block moves the task to blocked with a blocker no
   const json = await tasksUntil(ui, (j) => byId(j)["12"]?.state === "blocked", 15_000);
   expect(byId(json)["12"]?.state).toBe("blocked"); // deferred is blocked, as the task tracker says (not "not ready")
   expect(byId(json)["12"]?.actions).toEqual(["release"]);
+  await finish(ui);
 }, T);
 
 test("with tasks.source board, Reassign hands the task to the agent on the board, then tells that agent; no factory issues", async () => {
@@ -290,6 +298,7 @@ test("with tasks.source board, Reassign hands the task to the agent on the board
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(await board.get(id[7] as number)).toMatchObject({ assignee: "taytu", holder: null, status: "open" });
   expect(factoryRan(p)).toEqual(["say taytu /next-task issue-7"]);
+  await finish(ui);
 }, T);
 
 test("with tasks.source board and the board down, an action is refused with the fix and nothing runs on GitHub", async () => {
@@ -299,6 +308,7 @@ test("with tasks.source board and the board down, an action is refused with the 
   expect(r.status, JSON.stringify(r.json)).toBe(503);
   expect(r.json.code).toBe("ui_board_unreachable");
   expect(factoryRan(p)).toEqual([]);
+  await finish(ui);
 }, T);
 
 // --- falling back ------------------------------------------------------------------------------------------------------

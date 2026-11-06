@@ -109,6 +109,12 @@ function labelsOf(w: World, n: number): string[] {
   return ((i.labels as Row[]) ?? []).map((l) => String(l.name)).sort();
 }
 
+/** The id the fake gave a posted comment: the one its listing gives it (1000 x issue + its place). */
+function idOf(w: World, c: Row | undefined): number {
+  const list = ((gh(w).comments as Record<string, unknown[]>)[String(c?.issue)] ?? []);
+  return 1000 * Number(c?.issue) + list.findIndex((b) => b === c?.body) + 1;
+}
+
 function err(p: Proc): { code: string; message: string; fix: string } {
   return JSON.parse(p.stderr.trim().split("\n").at(-1) as string) as { code: string; message: string; fix: string };
 }
@@ -212,6 +218,25 @@ test("board.mirror false turns the mirror off: no call to GitHub", async () => {
   expect(posted(w)).toEqual([]);
 });
 
+test("--watch sends a change soon after it lands on the board, without being run again", async () => {
+  const w = await world();
+  const t = await w.board.create({ title: "Add login", ref: ref(101) });
+  const p = Bun.spawn([process.execPath, "--no-env-file", join(HOOKS, "factory_board.ts"), "mirror", "--watch", "--every", "60"],
+    { cwd: w.d, env: w.env, stdout: "pipe", stderr: "pipe" });
+  try {
+    await Bun.sleep(1500); // it is listening
+    await (await w.as("haile")).claim(t.id);
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline && posted(w).length < 2) await Bun.sleep(200);
+    expect(posted(w).map((x) => [x.kind, x.issue])).toEqual([["patch", 101], ["comment", 101]]);
+    await Bun.sleep(1500); // its own writes don't make it send again
+    expect(posted(w)).toHaveLength(2);
+  } finally {
+    p.kill();
+    await p.exited;
+  }
+});
+
 // --- the owner queue -----------------------------------------------------------------------------------------------------
 
 async function asks(w: World): Promise<Message[]> {
@@ -240,7 +265,7 @@ test("an owner ask is written to the board and mirrored once to the owner-queue 
   expect(comments[0]?.issue).toBe(103);
   expect(String(comments[0]?.body).startsWith("<!-- factory-owner-ask id=palette -->")).toBe(true); // today's readers still find it
   expect(String(comments[0]?.body)).toContain("<!-- factory-mirror");
-  expect(ask?.ref).toBe(`github:${REPO}/comments/${comments[0]?.id}`);
+  expect(ask?.ref).toBe(`github:${REPO}/comments/${idOf(w, comments[0])}`);
 
   // the same ask again, and the mirror again: nothing new on either side
   const twice = hook(w, "factory_board", ["ask", "palette", "Which colour for the buttons?"]);
@@ -296,7 +321,7 @@ test("`factory owner answer` writes the answer to the board first, then mirrors 
   const sent = posted(w).slice(before);
   expect(sent.map((p) => [p.kind, p.issue])).toEqual([["comment", 103]]);
   expect(String(sent[0]?.body).startsWith("<!-- factory-owner-answer id=palette -->")).toBe(true);
-  expect(answer?.ref).toBe(`github:${REPO}/comments/${sent[0]?.id}`);
+  expect(answer?.ref).toBe(`github:${REPO}/comments/${idOf(w, sent[0])}`);
 
   // the mirror and a second answer add nothing
   expect(mirror(w).code).toBe(0);

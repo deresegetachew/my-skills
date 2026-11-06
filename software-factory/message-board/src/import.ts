@@ -2,6 +2,9 @@
 // and messages, each keyed by its outside id, so a second run updates what changed and never duplicates. The board's
 // rules hold: a task held on the board keeps its status, an edge or parent that would make a loop is left out, and an
 // answer marks the question it replies to answered. Knows nothing of GitHub: the adapters build the batch.
+// With keepBoardStatus (the board is the record, #502), a task whose status the board changed since the last import from
+// the same source keeps it too: the moves that count are the board's own (a claim, release, close, move, hand-off, sweep,
+// or an update that set the status), never an import's.
 import type { SQL } from "bun";
 import { refuse } from "./errors.ts";
 import { GRAPH_LOCK, type NewEvent, reaches } from "./graph.ts";
@@ -30,6 +33,9 @@ class Run {
   private readonly ids = new Map<string, number>();
   private readonly changed = new Map<number, Set<string>>();
   private readonly created = new Set<number>();
+
+  /** The tasks whose status the board changed since the last import from this source (with keepBoardStatus). */
+  keep = new Set<number>();
 
   constructor(private readonly tx: SQL, private readonly as: string, dryRun: boolean) {
     this.result = {
@@ -101,6 +107,7 @@ class Run {
     if (now.kind !== kind) put("kind", "kind", kind);
     if (now.status !== t.status || now.outcome !== outcome) {
       if (now.holder) this.skip(t.ref, `status kept: held on the board by ${now.holder}`);
+      else if (this.keep.has(now.id)) this.skip(t.ref, `status kept: the board moved it to ${now.status} since the last import (the board is the record)`);
       else {
         if (now.status !== t.status) put("status", "status", t.status);
         if (now.outcome !== outcome) put("outcome", "outcome", outcome);
@@ -268,10 +275,23 @@ function check(batch: ImportBatch): void {
   }
 }
 
+/** The board's own moves: the events that change a task's status, other than an import's. */
+const MOVES = ["task.claimed", "task.released", "task.closed", "task.moved", "task.assigned", "task.swept", "task.taken_back"];
+
+/** The tasks whose status the board changed after the last import from `source` (every such task when there was none). */
+async function movedOnBoard(tx: SQL, source: string): Promise<Set<number>> {
+  const last = (await tx`SELECT COALESCE(max(seq), 0)::bigint::text AS seq FROM events WHERE kind = 'import.applied'
+    AND subject = ${`import:${source}`}`) as Row[];
+  const r = (await tx.unsafe(`SELECT DISTINCT subject FROM events WHERE seq > $1::bigint AND subject LIKE 'task:%'
+    AND (kind IN (${MOVES.map((k) => `'${k}'`).join(", ")}) OR (kind = 'task.updated' AND payload->'fields' @> '"status"'::jsonb))`, [String(last[0]?.seq ?? "0")])) as Row[];
+  return new Set(r.map((x) => Number(String(x.subject).slice("task:".length))).filter((n) => Number.isInteger(n)));
+}
+
 /** Apply `batch` in `tx` as `as`; returns what it did and the events to record. */
-export async function applyImport(tx: SQL, batch: ImportBatch, as: string, dryRun: boolean): Promise<{ result: ImportResult; events: NewEvent[] }> {
+export async function applyImport(tx: SQL, batch: ImportBatch, as: string, dryRun: boolean, keepBoardStatus = false): Promise<{ result: ImportResult; events: NewEvent[] }> {
   check(batch);
   const run = new Run(tx, as, dryRun);
+  if (keepBoardStatus) run.keep = await movedOnBoard(tx, batch.source);
   // The graph lock before any row lock, as every write that touches edges or parents takes them (#503), so an import
   // and an edit can't wait on each other.
   await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;

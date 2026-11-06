@@ -578,6 +578,33 @@ export class Board {
     });
   }
 
+  /** One message, by its id. */
+  async message(id: number): Promise<Message> {
+    return this.run(async () => {
+      const r = rows(await this.sql.unsafe(`SELECT ${MESSAGE_COLS} FROM messages WHERE id = $1`, [wholeNumber("A message id", id)]));
+      if (!r[0]) refuse("not-found", `There is no message ${id}.`, "Check the id (board.thread lists a thread).");
+      return toMessage(r[0]);
+    });
+  }
+
+  /** Record where a message was copied to outside (`github:owner/repo/comments/123`), so an import that meets it there
+   * knows it as this message: a reply to it joins its thread, and it is never brought in twice. Linking it again to the
+   * same ref changes nothing; a message already linked elsewhere, or a ref another message has, is refused. */
+  async linkMessage(id: number, ref: string): Promise<Message> {
+    named("A message's ref", ref);
+    return this.write(async (tx) => {
+      const r = rows(await tx.unsafe(`SELECT ${MESSAGE_COLS} FROM messages WHERE id = $1 FOR UPDATE`, [wholeNumber("A message id", id)]));
+      if (!r[0]) refuse("not-found", `There is no message ${id}.`, "Check the id (board.thread lists a thread).");
+      const m = toMessage(r[0]);
+      if (m.ref === ref) return { result: m, event: null };
+      if (m.ref !== null) refuse("bad-input", `Message ${id} is already linked to ${m.ref}.`, "Leave it linked where it is.");
+      const other = rows(await tx`SELECT id::int AS id FROM messages WHERE external_ref = ${ref}`);
+      if (other[0]) refuse("bad-input", `${ref} is already message ${other[0].id}.`, "Link each outside copy to one message.");
+      const u = rows(await tx.unsafe(`UPDATE messages SET external_ref = $2 WHERE id = $1 RETURNING ${MESSAGE_COLS}`, [id, ref]));
+      return { result: toMessage(u[0] as Row), event: { kind: "message.linked", subject: `message:${id}`, payload: { ref } } };
+    });
+  }
+
   /** A thread's messages, oldest first: by thread id, or every message on a task. */
   async thread(ref: { thread: number } | { task: number }): Promise<Message[]> {
     return this.run(async () => {
@@ -741,14 +768,16 @@ export class Board {
   // ---------- import ----------
   /** Bring in tasks and their threads from somewhere else, keyed by outside ids: safe to run twice (a second run updates
    * what changed and adds what is new). All of it is one transaction. `dryRun` does the same work and rolls it back, so
-   * the counts are what a real run would do and nothing is written. Writes events `task.imported` and `import.applied`. */
-  async import(batch: ImportBatch, options: { dryRun?: boolean } = {}): Promise<ImportResult> {
+   * the counts are what a real run would do and nothing is written. Writes events `task.imported` and `import.applied`.
+   * `keepBoardStatus`: the board is the record, so a task whose status the board changed since the last import from this
+   * source keeps it (a held task always does); its title, body, edges and new messages still come in. */
+  async import(batch: ImportBatch, options: { dryRun?: boolean; keepBoardStatus?: boolean } = {}): Promise<ImportResult> {
     const dryRun = options.dryRun === true;
     let out: ImportResult | null = null;
     try {
       await this.run(() =>
         this.sql.begin(async (tx) => {
-          const { result, events } = await applyImport(tx, batch, this.as, dryRun);
+          const { result, events } = await applyImport(tx, batch, this.as, dryRun, options.keepBoardStatus === true);
           out = result;
           if (dryRun) throw new DryRun();
           await recordEvents(tx, this.as, this.session, events);

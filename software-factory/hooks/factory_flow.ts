@@ -18,7 +18,8 @@ import { join } from "node:path";
 import { type Config, load, taskLabels } from "./factory_config.ts";
 import { comment, type Comment, ghAll, type Issue, names } from "./factory_issues.ts";
 import { refuse } from "./factory_machine.ts";
-import { ownerQueue } from "./factory_orchestrator.ts";
+import { ownerQueueOnBoard } from "./core/compose.ts";
+import { askOnBoard, ownerQueue } from "./factory_orchestrator.ts";
 import { parseStories, storyRefs } from "./factory_prd.ts";
 import { CHAT_SUMMARY, trustedOf } from "./factory_prs.ts";
 import { pyDumps, runMain } from "./factory_lib.ts";
@@ -182,8 +183,13 @@ export function ask(cfg: Config, stage: string, rows: Row[]): void {
     return;
   }
   const queue = ownerQueue(cfg, true) as number;
-  comment(queue, `<!-- factory-owner-ask id=stage-${stage} -->\nPlease approve the ${stage}: ${row.line}.\n\n` +
-    "Reply `yes` to approve it, or say what to change; the product owner reads the reply.");
+  const body = `<!-- factory-owner-ask id=stage-${stage} -->\nPlease approve the ${stage}: ${row.line}.\n\n` +
+    "Reply `yes` to approve it, or say what to change; the product owner reads the reply.";
+  if (ownerQueueOnBoard(cfg) && askOnBoard(`stage-${stage}`, body)) {
+    console.log(`stage-${stage}: asked on the message board, mirrored to the owner queue (#${queue}).`);
+    return;
+  }
+  comment(queue, body);
   console.log(`stage-${stage}: asked in the owner queue (#${queue}).`);
 }
 

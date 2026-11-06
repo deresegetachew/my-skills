@@ -8,7 +8,9 @@
 //                                            that commit (the one a screen showed, #309), else `pr_changed`
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
-//   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`
+//   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`; with the
+//                                            owner queue on the message board (#502) it is written there first, then mirrored
+//                                            to the owner-queue issue (factory_board.ts)
 //   factory owner release <X.Y.Z>            tags main's commit vX.Y.Z and pushes the tag, when software-factory/VERSION
 //                                            on main says X.Y.Z (the release workflow then publishes it)
 //   factory owner start <role> [name]        starts `factory loop -i` as that role in its own tmux window on this machine,
@@ -25,6 +27,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { alive as claimAlive, type Claims, HOST, isLoop, stateDir as claimsDir } from "./factory_claims.ts";
+import { ownerQueueOnBoard } from "./core/compose.ts";
 import { type Config, load, loadFromMain, toFloat } from "./factory_config.ts";
 import { processes } from "./factory_heartbeat.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
@@ -212,9 +215,15 @@ function label(n: string, name: string | undefined, remove: boolean, me: Who): v
 
 // --- answer ---------------------------------------------------------------------------------------------------------
 
-function answer(id: string | undefined, text: string): void {
+async function answer(id: string | undefined, text: string): Promise<void> {
   if (!id) refuse("needs_id", "Say which ask you answer.", "`factory prs` lists the open asks with their ids.");
   if (!text.trim()) refuse("needs_text", `Write the answer to ${id}.`, `factory owner answer ${id} "yes, go ahead"`);
+  const cfg = load();
+  if (ownerQueueOnBoard(cfg)) {
+    // the board first (decision 0007 point 5); an ask the board doesn't have is answered on GitHub, as before
+    const { answerOnBoard } = await import("./factory_board.ts");
+    if ((await answerOnBoard(cfg, id, text)) !== "absent") return;
+  }
   const queue = apiAll<Issue & Row>(`${REPO}/issues?state=open`)
     .find((i) => str(i.title).startsWith(OWNER_QUEUE_TITLE) && !("pull_request" in i && i.pull_request));
   if (!queue) {
@@ -396,7 +405,7 @@ function mergeArgs(rest: string[]): [string, string | null] {
   return [number(words[0], "pull request", "factory owner merge 12"), sha];
 }
 
-export function main(argv: string[]): number {
+export async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv;
   if (!cmd || cmd === "help" || cmd === "-h" || cmd === "--help") {
     console.log(USAGE);
@@ -425,7 +434,7 @@ export function main(argv: string[]): number {
     label(number(words[0], "issue or pull request", "factory owner label 12 factory:ready"), words[1], remove, me);
   } else if (cmd === "answer") {
     if (me === "dev-manager") ownerOnly("Answering the owner queue");
-    answer(rest[0], rest.slice(1).join(" "));
+    await answer(rest[0], rest.slice(1).join(" "));
   } else {
     if (me === "dev-manager") ownerOnly("Publishing a release");
     release(rest[0]);

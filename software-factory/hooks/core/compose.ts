@@ -89,6 +89,14 @@ export function githubCopies(config: Config, kind: string): boolean {
   return !(s.transport === "board" && s.kinds.includes(kind) && BUS_ONLY_KINDS.includes(kind) && !s.githubCopy.includes(kind));
 }
 
+/** Whether the owner queue is on the board (#502, decision 0007 points 5 and 9): with `tasks.source` board, or with ask in
+ * `messaging.kinds` on the board transport. Then an ask is written to the board and mirrored to the owner-queue issue. */
+export function ownerQueueOnBoard(config: Config): boolean {
+  if (taskSource(config) === "board") return true;
+  const s = messagingSettings(config);
+  return s.transport === "board" && s.kinds.includes("ask");
+}
+
 /** The refusal for a config that still names NATS (#504). */
 export function transportRemoved(): CoreError {
   return new CoreError("transport-removed", "messaging.transport is nats, but NATS was removed from the factory (decision 0007, #504): " +

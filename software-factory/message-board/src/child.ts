@@ -61,7 +61,7 @@ const CLOCK_MARGIN_MS = 1000;
 const OPS = new Set([
   "info", "migrate", "tasks", "get", "create", "update", "link", "unlink", "edges", "ready", "claim", "heartbeat", "release",
   "close", "note", "contextFor", "post", "thread", "messages", "lease", "unlease", "leaseHolder", "dropLease", "signal",
-  "setValue", "value", "events", "lastSeq", "prime", "onMe", "delegated", "actor",
+  "setValue", "value", "events", "lastSeq", "prime", "onMe", "delegated", "actor", "message", "linkMessage",
 ]);
 
 function bad(message: string): never {

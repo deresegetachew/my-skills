@@ -17,6 +17,9 @@
 //   factory-review-claim, factory-answer-claim, factory-claim-release   hooks/factory_manager_claims.ts
 //   factory-msg (the envelope)                                          hooks/core/domain/message.ts, docs/messages.md
 //   the owner queue "Dev manager: needs the owner"                      hooks/factory_prs.ts (OWNER_QUEUE_TITLE)
+//   factory-mirror (what the board's mirror wrote, #502)                 src/github/mirror.ts (MIRROR_MARK)
+// A comment the board's own mirror wrote is never brought back as a message: the board already has it. Its markers still
+// count (an ask's id, a blocked reason), so a reply to it joins the board's message, which the mirror linked to it.
 import type { Board } from "../board.ts";
 import type { ImportBatch, ImportMessage, ImportResult, ImportTask, Message, MessageKind, Outcome, Task, TaskKind } from "../types.ts";
 
@@ -83,14 +86,16 @@ export interface GhComment {
 export interface Gh {
   /** GET one REST path (relative to the API's root); throws a GithubError. */
   get(path: string): unknown;
+  /** A write (POST, PATCH, PUT, DELETE) to one REST path with a JSON body; GitHub's answer. Throws a GithubError. */
+  send(method: string, path: string, body?: unknown): unknown;
   /** Whether gh is signed in (no call to GitHub). */
   signedIn(): boolean;
   readonly calls: number;
 }
 
-function spawn(args: string[]): { code: number; out: string; err: string } {
+function spawn(args: string[], input?: string): { code: number; out: string; err: string } {
   try {
-    const p = Bun.spawnSync(["gh", ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout: 120_000 });
+    const p = Bun.spawnSync(["gh", ...args], { stdout: "pipe", stderr: "pipe", stdin: input === undefined ? "ignore" : Buffer.from(input), timeout: 120_000 });
     return { code: p.exitCode ?? 124, out: p.stdout.toString(), err: p.stderr.toString() };
   } catch {
     throw new GithubError("gh-missing", "GitHub's CLI (gh) isn't installed or isn't on your PATH; the import reads GitHub through it.",
@@ -101,38 +106,42 @@ function spawn(args: string[]): { code: number; out: string; err: string } {
 /** The `gh` CLI, counting each `gh api` call. */
 export function ghCli(): Gh {
   let calls = 0;
+  const api = (args: string[], path: string, input?: string): unknown => {
+    calls++;
+    const r = spawn(args, input);
+    if (r.code !== 0) {
+      const why = (r.err || r.out).trim().slice(-300);
+      if (/rate limit/i.test(why)) {
+        throw new GithubError("gh-rate-limited", `GitHub's hourly limit is used up: ${why}`, "Wait until the limit is back (`gh api rate_limit` says when), then run this again. Nothing was written.");
+      }
+      if (/auth login|401|Bad credentials/i.test(why)) {
+        throw new GithubError("gh-signed-out", `gh can't read GitHub: ${why}`, "Run `gh auth login`, then run this again. Nothing was written.");
+      }
+      if (/HTTP (404|410)/.test(why)) {
+        throw new GithubError("gh-not-found", `GitHub has no ${path.split("?")[0]}: ${why}`, "Check the repo name (--repo owner/name) and that gh can read it, then run this again. Nothing was written.");
+      }
+      throw new GithubError("gh-failed", `gh api ${path.split("?")[0]} failed: ${why}`, "Run this again once GitHub answers; check the repo name (--repo owner/name) if it keeps failing. Nothing was written.");
+    }
+    if (!r.out.trim()) return null; // a write GitHub answers with no body
+    try {
+      return JSON.parse(r.out) as unknown;
+    } catch {
+      throw new GithubError("gh-failed", `gh api ${path.split("?")[0]} didn't answer with JSON.`, "Run it again; if it keeps failing, check `gh api` by hand.");
+    }
+  };
   return {
     get calls() {
       return calls;
     },
     signedIn: () => spawn(["auth", "token"]).code === 0,
-    get(path: string): unknown {
-      calls++;
-      const r = spawn(["api", path]);
-      if (r.code !== 0) {
-        const why = (r.err || r.out).trim().slice(-300);
-        if (/rate limit/i.test(why)) {
-          throw new GithubError("gh-rate-limited", `GitHub's hourly limit is used up: ${why}`, "Wait until the limit is back (`gh api rate_limit` says when), then run this again. Nothing was written.");
-        }
-        if (/auth login|401|Bad credentials/i.test(why)) {
-          throw new GithubError("gh-signed-out", `gh can't read GitHub: ${why}`, "Run `gh auth login`, then run this again. Nothing was written.");
-        }
-        if (/HTTP (404|410)/.test(why)) {
-          throw new GithubError("gh-not-found", `GitHub has no ${path.split("?")[0]}: ${why}`, "Check the repo name (--repo owner/name) and that gh can read it, then run this again. Nothing was written.");
-        }
-        throw new GithubError("gh-failed", `gh api ${path.split("?")[0]} failed: ${why}`, "Run this again once GitHub answers; check the repo name (--repo owner/name) if it keeps failing. Nothing was written.");
-      }
-      try {
-        return JSON.parse(r.out) as unknown;
-      } catch {
-        throw new GithubError("gh-failed", `gh api ${path.split("?")[0]} didn't answer with JSON.`, "Run it again; if it keeps failing, check `gh api` by hand.");
-      }
-    },
+    get: (path: string): unknown => api(["api", path], path),
+    send: (method: string, path: string, body?: unknown): unknown =>
+      api(["api", "-X", method, path, "-H", "Accept: application/vnd.github+json", "--input", "-"], path, JSON.stringify(body ?? {})),
   };
 }
 
 /** Every page of a list, each item once by its key (a live repo can shift items between pages while they are read). */
-function pages<T>(gh: Gh, path: string, key: (x: T) => number): T[] {
+export function pages<T>(gh: Gh, path: string, key: (x: T) => number): T[] {
   const all = new Map<number, T>();
   for (let page = 1; ; page++) {
     const got = gh.get(`${path}&page=${page}`);
@@ -172,6 +181,8 @@ const NAMED = /\b(?:agent|manager)=([\w.-]+)/;
 const BLOCKED = /\*\*Blocked:\*\*\s*(.+)/;
 const DEPENDS = /depends on\s+((?:#\d+[\s,and]*)+)/gi;
 const EPIC_LINE = /^\s*[-*]\s+\[[ xX]\]\s+#(\d+)\b/gm;
+/** What the board's mirror writes on each comment it posts (src/github/mirror.ts). */
+export const MIRRORED = /<!--\s*factory-mirror\b[^>]*-->/;
 
 function attributes(text: string): Record<string, string> {
   const out: Record<string, string> = {};
@@ -252,6 +263,8 @@ interface Known {
 export interface Read {
   repo: string;
   closed: boolean;
+  /** The board is the record: an issue already on the board brings no notes from its labels (its status is the board's). */
+  boardIsRecord?: boolean;
   issues: GhIssue[];
   comments: GhComment[];
   /** Comments brought by an earlier run, on the issues this run looks at. */
@@ -262,7 +275,7 @@ export interface Read {
 
 export interface Built {
   batch: ImportBatch;
-  skipped: { prComments: number; notImported: number; deps: number };
+  skipped: { prComments: number; notImported: number; deps: number; mirrored: number };
 }
 
 export const issueRef = (repo: string, n: number): string => `github:${repo}#${n}`;
@@ -284,7 +297,7 @@ export function buildBatch(read: Read, map: GithubMapping, options: Record<strin
   const mine = new Set(issues.map((i) => i.number));
   const ref = (n: number): string => issueRef(repo, n);
   const reachable = (n: number): boolean => mine.has(n) || read.onBoard.has(ref(n));
-  const skipped = { prComments: 0, notImported: 0, deps: 0 };
+  const skipped = { prComments: 0, notImported: 0, deps: 0, mirrored: 0 };
 
   // Comments, in the order they were said: the board's (an earlier run's) and the new ones, per issue.
   type Line = { ref: string; issue: number; body: string; at: number; login: string; fresh: boolean };
@@ -327,6 +340,10 @@ export function buildBatch(read: Read, map: GithubMapping, options: Record<strin
     const blocked = BLOCKED.exec(l.body);
     if (blocked) blockedWhy.set(l.issue, (blocked[1] as string).trim());
     if (!l.fresh) continue;
+    if (MIRRORED.test(l.body)) {
+      skipped.mirrored++; // the board's own, copied there by its mirror
+      continue;
+    }
     messages.push({ ref: l.ref, task: ref(l.issue), kind: s.kind, tag: s.tag, from: s.from ?? l.login, to: s.to, body: l.body,
       inReplyTo: replyTo, createdAt: new Date(l.at) });
   }
@@ -342,6 +359,7 @@ export function buildBatch(read: Read, map: GithubMapping, options: Record<strin
     const labels = labelNames(i);
     const r = ref(i.number);
     const notes: ImportTask["notes"] = [];
+    const labelNotes = !(read.boardIsRecord && read.onBoard.has(r));
     let status: ImportTask["status"] = "open";
     let outcome: Outcome | null = null;
     if (i.state === "closed") {
@@ -364,7 +382,7 @@ export function buildBatch(read: Read, map: GithubMapping, options: Record<strin
     const p = parentOf.get(i.number);
     return {
       ref: r, title: i.title, body, kind: kindOf(i, map), status, outcome, createdAt: i.created_at ? new Date(i.created_at) : undefined,
-      parentRef: p !== undefined && mine.has(p) ? ref(p) : null, blockedBy, notes,
+      parentRef: p !== undefined && mine.has(p) ? ref(p) : null, blockedBy, notes: labelNotes ? notes : undefined,
     };
   });
   return { batch: { source: `github:${repo}`, tasks, messages, options }, skipped };
@@ -375,6 +393,8 @@ export function buildBatch(read: Read, map: GithubMapping, options: Record<strin
 export interface ImportSummary {
   repo: string;
   closed: boolean;
+  /** The board is the record: statuses the board changed since the last import were kept. */
+  boardIsRecord: boolean;
   result: ImportResult;
   skipped: Built["skipped"] & { gone: number };
   /** The since the comments were read from, or null for all of them. */
@@ -386,7 +406,9 @@ export interface ImportSummary {
 const SINCE_MARGIN_MS = 10 * 60 * 1000;
 
 /** Read `repo`'s issues (open, or all with `closed`) and their comments from GitHub, and import them into `board`. */
-export async function importFromGithub(board: Board, opts: { repo: string; closed?: boolean; dryRun?: boolean; gh?: Gh; mapping?: GithubMapping }): Promise<ImportSummary> {
+export async function importFromGithub(board: Board, opts: { repo: string; closed?: boolean; dryRun?: boolean; gh?: Gh; mapping?: GithubMapping;
+  boardIsRecord?: boolean }): Promise<ImportSummary> {
+  const boardIsRecord = opts.boardIsRecord === true;
   const gh = opts.gh ?? ghCli();
   const map = opts.mapping ?? FACTORY_MAPPING;
   const closed = opts.closed === true;
@@ -427,10 +449,10 @@ export async function importFromGithub(board: Board, opts: { repo: string; close
   const comments = pages<GhComment>(gh, `repos/${opts.repo}/issues/comments?per_page=100${since ? `&since=${since}` : ""}`, (c) => c.id);
 
   const known = since ? await knownComments(board, onBoard, comments, issues, opts.repo, map) : [];
-  const built = buildBatch({ repo: opts.repo, closed, issues, comments, known, onBoard: new Set(onBoard.keys()) }, map,
+  const built = buildBatch({ repo: opts.repo, closed, issues, comments, known, onBoard: new Set(onBoard.keys()), boardIsRecord }, map,
     { startedAt: startedAt.toISOString(), closed });
-  const result = await board.import(built.batch, { dryRun: opts.dryRun === true });
-  return { repo: opts.repo, closed, result, skipped: { ...built.skipped, gone }, since, calls: gh.calls };
+  const result = await board.import(built.batch, { dryRun: opts.dryRun === true, keepBoardStatus: boardIsRecord });
+  return { repo: opts.repo, closed, boardIsRecord, result, skipped: { ...built.skipped, gone }, since, calls: gh.calls };
 }
 
 /** The comments an earlier run brought, on the issues this run has new comments for or must read a reason on. */

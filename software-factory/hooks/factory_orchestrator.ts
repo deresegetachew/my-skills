@@ -44,6 +44,7 @@ import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./fac
 import { remember, settled } from "./factory_views_cache.ts";
 import { ensureWatcher, freshPrs, prFeedIsOn } from "./factory_pr_feed.ts";
 import type { PrSnapshot } from "./core/ports/messaging.ts";
+import { ownerQueueOnBoard } from "./core/compose.ts";
 import { wakeUp } from "./factory_wake.ts";
 import { type Job, running as sessionRunning, sessionName, startWindow, type Started, WindowError, windowName } from "./factory_window.ts";
 
@@ -112,7 +113,16 @@ export function ownerQueue(_cfg: Config, create = false): number | null {
   return made.number;
 }
 
-/** Posts a report to the owner queue once per id. Returns true when it posted (or would, in a dry run). */
+/** Writes ask `askId` (its whole comment, `body`) to the message board through `factory board ask` (#502), which mirrors
+ * it to the owner-queue issue. False when the board couldn't take it: the caller posts it on GitHub instead. */
+export function askOnBoard(askId: string, body: string): boolean {
+  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_board.ts"), "ask", askId, "--body", "-"],
+    { input: body });
+  return p.code === 0;
+}
+
+/** Posts a report to the owner queue once per id. Returns true when it posted (or would, in a dry run). With the owner
+ * queue on the message board (#502) it is written there and mirrored to the issue. */
 export function postAsk(cfg: Config, name: string, askId: string, line: string, out: Out): boolean {
   let queue = ownerQueue(cfg, false);
   if (queue) {
@@ -129,6 +139,10 @@ export function postAsk(cfg: Config, name: string, askId: string, line: string, 
   const login = ownerLogin(cfg);
   const body = `<!-- factory-owner-ask id=${askId} -->\n${login ? "@" + login + " " : ""}for your attention: ${line}\n\n` +
     `Posted by the dev manager ${name}. If you want it handled differently, say so here; the next pass reads the reply.`;
+  if (ownerQueueOnBoard(cfg) && askOnBoard(askId, body)) {
+    out(`asked on the message board, mirrored to the owner queue (id ${askId}): ${line}`);
+    return true;
+  }
   comment(queue, body);
   out(`posted to the owner queue (id ${askId}): ${line}`);
   return true;
