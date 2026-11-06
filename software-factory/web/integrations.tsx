@@ -30,7 +30,7 @@ type Action = IntegrationRow["actions"][number];
 function Row({ it, open, toggle, testing, tested, test, ask }: { it: IntegrationRow; open: boolean; toggle: () => void; testing: boolean;
   tested: Tested | undefined; test: () => void; ask: (a: Action) => void }) {
   const detail = `int-${it.id}`;
-  const start = it.actions.find((a) => a.name === "start"); // a row that is off and can be turned on here: its one action
+  const start = it.state === "off" ? it.actions.find((a) => a.name === "start") : undefined; // off, and can start here: its one action
   const more = it.actions.filter((a) => a !== start);
   return (
     <li className="int-row">

@@ -227,12 +227,17 @@ function buildCache(p: UiProject): Integration {
     { label: "Address", value: api || "none" },
     { label: "Team", value: str(t.team) || "the repository's name" },
   ];
-  if (!api) {
-    return item("cache", "Build cache", "off", "Agents and CI build without a shared cache", { settings, actions: [{ name: "start",
-      label: "Turn on here", does: `starts the build cache on ${hostname()} in Docker and gives CI the same cache` }] });
+  if (!api) { // the cache can't start without an address to serve (factory turbo install refuses)
+    return item("cache", "Build cache", "off", "Agents and CI build without a shared cache", { settings: [...settings,
+      { label: "To turn it on", value: "Give it an address on its machine (Tailscale or LAN) in a settings pull request; Start then appears here." }] });
   }
-  return item("cache", "Build cache", "ok", api, { settings, testable: true, actions: [{ name: "stop", label: "Turn off",
-    does: `stops the build cache on ${hostname()}; agents and CI then build without it, and what it kept stays for the next start` }] });
+  const here = hostname();
+  return item("cache", "Build cache", "ok", api, { settings, testable: true, actions: [
+    { name: "start", label: "Start here", does: `starts the build cache on this machine (${here}) in Docker, or updates it, and gives CI the ` +
+      "same cache; when its address is another machine's, start it there instead" },
+    { name: "stop", label: "Stop here", does: `stops the build cache on this machine (${here}); agents and CI then build without it, and ` +
+      "what it kept stays for the next start. A cache on another machine keeps running" },
+  ] });
 }
 
 const CACHE_STEPS: Record<string, string[]> = { start: ["turbo", "install"], stop: ["turbo", "down"] };
