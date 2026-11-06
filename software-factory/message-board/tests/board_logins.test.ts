@@ -134,6 +134,18 @@ test("the login connects and reads and writes the board, and nothing more", asyn
   expect(await tryQuery(made.url, "insert into mb_migrations (name) values ('999_x.sql')")).toMatch(/permission denied/i);
   expect(await tryQuery(made.url, "create role sneaky login")).toMatch(/permission denied/i);
   expect(await tryQuery(made.url, "drop table tasks")).toMatch(/must be (the )?owner|permission denied/i);
+  expect(await tryQuery(made.url, "create temp table scratch (x int)")).toMatch(/permission denied/i);
+});
+
+test("the login reaches only the board's database: not postgres, not template1", async () => {
+  const w = await hub();
+  const made = add(w, "laptop");
+  for (const other of ["postgres", "template1"]) {
+    const u = new URL(made.url);
+    u.pathname = `/${other}`;
+    expect(await tryQuery(u.toString(), "select 1"), other).toMatch(/permission denied|not permitted/i);
+  }
+  expect(await tryQuery(made.url, "select 1")).toBe("ok");
 });
 
 test("ls says when each login was first used, and says so for a login connected now", async () => {

@@ -331,6 +331,18 @@ test("a join whose login doesn't connect keeps nothing and puts back the URL tha
   expect(existsSync(urlFile(fresh))).toBe(false);
 });
 
+test("a join that can't record itself after reaching the board keeps nothing: the URL goes again", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const m = world();
+  mkdirSync(join(m.cfg, "machine-joins.json"), { recursive: true }); // a folder where the used codes go: the write fails
+  const p = machine(m, ["join", a.code, "--no-doctor"]);
+  expect(p.code, p.out).toBe(1);
+  expect(error(p).code).toBe("join-not-saved");
+  expect(existsSync(urlFile(m))).toBe(false);
+  expect(existsSync(m.board)).toBe(false);
+});
+
 test("join runs the doctor and reports it unless --no-doctor", async () => {
   const h = await hub();
   const a = add(h, "laptop");
