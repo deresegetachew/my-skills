@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Designs and artifacts</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="docs" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1100px;">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Designs and artifacts</h1>
+<p style="margin: 0; color: var(--text-2);">The designs builders work from, kept as reviewed copies in the repo. 2 have a newer version.</p>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Check for new versions</button>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add an artifact</button>
+</div>
+</header>
+
+<div role="tablist" aria-label="Documents" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<a href="Docs.dc.html" role="tab" aria-selected="false" style="padding: 10px 0; color: var(--text-2); text-decoration: none;">PRD and decisions</a>
+<a href="Artifacts.dc.html" role="tab" aria-selected="true" style="padding: 10px 0; border-bottom: 2px solid var(--text); color: var(--text); font-weight: 600; text-decoration: none;">Designs and artifacts <span style="color: var(--text-3); font-weight: 400;">5</span></a>
+</div>
+
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--border);">
+<span style="flex: 0 0 36px; height: 36px; border-radius: 10px; background: var(--bg-subtle); color: var(--text-2); display: flex; align-items: center; justify-content: center;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"></rect><path d="M3 9h18M9 21V9"></path></svg></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none; font-size: 15px;">{{r.name}}</a>
+<span style="color: var(--text-2); font-size: 13px;">{{r.kind}} · {{r.used}} · copied {{r.copied}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 170px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.dot}}; flex-shrink: 0;"></span>{{r.state}}</span>
+<div style="width: 170px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{r.primary}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;">{{r.action}}</button></sc-if>
+<sc-if value="{{r.secondary}}" hint-placeholder-val="{{ true }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{r.action}}</button></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+
+<section aria-labelledby="pull-h" style="max-width: 640px; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="pull-h" style="margin: 0; font-size: 15px; font-weight: 600;">Pull the new copy of Factory web UI screens?</h2>
+<p style="margin: 0; color: var(--text-2); line-height: 1.55;">Since 1 Nov, 6 screens were added and 2 changed. This opens a pull request with the new files; fasil reviews it, and builders keep the current copy until it merges.</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Pull the new copy</button>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Not now</button>
+</div>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">With none yet: "Add a design so builders work from a reviewed copy, not a link that can change." If a source can't be read: "A Figma link asked for a sign-in. Add a Figma token in Integrations, then check for new versions."</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var states = {
+      newer: { state: 'Newer version', dot: 'var(--waiting)', action: 'Pull new copy' },
+      ok: { state: 'Up to date', dot: 'var(--working)', action: 'Open' },
+      review: { state: 'New copy in review', dot: 'var(--idle)', action: 'Open the PR' }
+    };
+    var row = function (o, s, first) {
+      var st = states[s];
+      o.state = st.state; o.dot = st.dot; o.action = st.action;
+      o.primary = !!first; o.secondary = !first;
+      return o;
+    };
+    return {
+      theme: this.props.theme ?? 'light',
+      rows: [
+        row({ name: 'Factory web UI screens', kind: 'Design canvas', used: 'used by #420', copied: '1 Nov' }, 'newer', true),
+        row({ name: 'Agent avatars', kind: 'Design', used: 'used by #437', copied: '30 Oct' }, 'newer', false),
+        row({ name: 'The palette', kind: 'Design', used: 'used by #420', copied: '1 Nov' }, 'ok', false),
+        row({ name: 'NATS messaging, how a claim travels', kind: 'Diagram', used: 'decision 0004', copied: '28 Oct' }, 'ok', false),
+        row({ name: 'Remanual flows', kind: 'Figma file', used: 'remanual', copied: '20 Oct' }, 'review', false)
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

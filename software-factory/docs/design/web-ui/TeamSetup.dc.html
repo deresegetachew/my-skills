@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Team setup</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="home" height="1200" hint-size="312px,1200px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px;">
+
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<a href="Main.dc.html" style="color: var(--text-3); text-decoration: none; font-size: 13px;">Home / Team setup</a>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; line-height: 1.15;">Team setup</h1>
+<p style="margin: 0; color: var(--text-2);">5 agents. One needs you: menelik has no key yet.</p>
+</div>
+<a href="#add-agent" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add an agent</a>
+</header>
+
+<section aria-label="The team" style="display: flex; flex-direction: column;">
+<div style="overflow-x: auto;">
+<ul style="min-width: 760px; margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<li aria-hidden="true" style="display: grid; grid-template-columns: minmax(240px, 1.6fr) 130px 150px 150px 130px; gap: 16px; padding: 0 4px 10px; font-size: 13px; color: var(--text-3); border-bottom: 1px solid var(--border);"><span>Agent</span><span>Runs on</span><span>Key</span><span>Start on boot</span><span></span></li>
+<sc-for list="{{team}}" as="a" hint-placeholder-count="5">
+<li style="display: grid; grid-template-columns: minmax(240px, 1.6fr) 130px 150px 150px 130px; gap: 16px; align-items: center; padding: 16px 4px; border-bottom: 1px solid var(--border);">
+<div style="display: flex; align-items: center; gap: 14px; min-width: 0;"><dc-import name="Avatar" agent="{{a.id}}" size="36" hint-size="36px,36px"></dc-import><span style="display: flex; flex-direction: column; gap: 3px; min-width: 0;"><a href="{{a.href}}" style="font-weight: 600; font-size: 15px; color: var(--text); text-decoration: none;">{{a.id}}</a><span style="font-size: 13px; color: var(--text-2);">{{a.role}} · {{a.state}}</span></span></div>
+<select aria-label="Machine for {{a.id}}" style="height: 40px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; padding: 0 8px;"><option>{{a.machine}}</option><option>{{a.other}}</option></select>
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2);"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{a.keyDot}}; flex-shrink: 0;"></span>{{a.key}}</span>
+<button role="switch" aria-checked="{{a.autoOn}}" aria-label="Start {{a.id}} on boot" style="height: 44px; display: flex; align-items: center; gap: 10px; background: none; border: none; font: inherit; color: var(--text-2); cursor: pointer; padding: 0;"><span style="width: 36px; height: 20px; border-radius: 999px; background: {{a.trackBg}}; display: flex; justify-content: {{a.knobSide}}; align-items: center; padding: 3px; box-sizing: border-box;"><span style="width: 14px; height: 14px; border-radius: 50%; background: var(--bg);"></span></span><span style="font-size: 13px;">{{a.autoLabel}}</span></button>
+<div style="display: flex; justify-content: flex-end;">
+<sc-if value="{{a.keyMissing}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;">Make key</button></sc-if>
+<sc-if value="{{a.keyMade}}" hint-placeholder-val="{{ true }}"><a href="{{a.href}}" style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box;">Open</a></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+</div>
+<p style="margin: 14px 0 0; font-size: 13px; color: var(--text-3); line-height: 1.5;">All agents use your Claude account. Each key lets its agent speak only as itself; it is kept on its own machine, readable only by the factory user. After a reboot dev-pc starts the dev stack, then each agent with Start on boot on.</p>
+</section>
+
+<section id="add-agent" aria-labelledby="add-h" style="display: flex; flex-direction: column; gap: 20px; max-width: 720px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="add-h" style="margin: 0; font-size: 17px;">Add an agent</h2>
+<span style="color: var(--text-2); font-size: 13px;">Give it a name, a role and a machine. We make its key and add it to the team.</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px;">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600;">Name<input type="text" value="tewodros" style="height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; padding: 0 12px;"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600;">Role<select style="height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; padding: 0 10px;"><option>Builder</option><option>Dev manager</option><option>Product owner</option></select></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600;">Machine<select style="height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; padding: 0 10px;"><option>dev-pc</option><option>Mac</option></select></label>
+</div>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px;"><input type="checkbox" checked style="width: 18px; height: 18px; accent-color: var(--primary);">Start it on boot on dev-pc</label>
+<p style="margin: 0; font-size: 13px; color: var(--text-2); line-height: 1.5;">The team list is protected, so adding tewodros opens a settings pull request for you to merge. The key and the boot entry are made on dev-pc right away.</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 20px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Add tewodros</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Cancel</button>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--text-3); line-height: 1.5;">If dev-pc’s hub isn’t answering, keys can’t be made: start it in <a href="Machines.dc.html" style="color: var(--text-2);">Machines</a>, then try again. A name already in use is refused before anything changes.</p>
+</section>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const made = { key: 'Made', keyDot: 'var(--working)', keyMissing: false, keyMade: true };
+    const missing = { key: 'Missing, needs you', keyDot: 'var(--red-dot)', keyMissing: true, keyMade: false };
+    const on = { autoOn: 'true', autoLabel: 'On', trackBg: 'var(--text)', knobSide: 'flex-end' };
+    const off = { autoOn: 'false', autoLabel: 'Off', trackBg: 'var(--border-strong)', knobSide: 'flex-start' };
+    const row = (id, role, machine, other, state, keyState, auto) =>
+      ({ id, role, machine, other, state, href: id === 'mentewab' || id === 'fasil' ? 'Chat.dc.html' : 'Agent.dc.html', ...keyState, ...auto });
+    return {
+      theme: this.props.theme ?? 'light',
+      team: [
+        row('mentewab', 'Product owner', 'dev-pc', 'Mac', 'idle until PR #402 merges', made, on),
+        row('fasil', 'Dev manager', 'dev-pc', 'Mac', 'reviewing #402', made, on),
+        row('haile', 'Builder', 'dev-pc', 'Mac', 'working on #437', made, on),
+        row('taytu', 'Builder', 'dev-pc', 'Mac', 'working on #425', made, on),
+        row('menelik', 'Builder', 'Mac', 'dev-pc', 'waiting: its messages are refused', missing, off)
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,58 @@
+/* Factory web UI: the palette. Light by default; [data-theme="dark"] on any element switches it and its children.
+   Every screen uses only these variables, so dark mode works everywhere and code copies the same names. */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  /* Surfaces */
+  --bg: #FFFFFF;            /* the app */
+  --bg-subtle: #F7F7F8;     /* panels, wells, table stripes */
+  --bg-active: #EFEFF1;     /* the selected nav item */
+  --surface: #FFFFFF;       /* cards */
+  --border: #ECECEF;        /* hairlines */
+  --border-strong: #D9D9DE; /* inputs, secondary buttons */
+  /* Text */
+  --text: #111214;
+  --text-2: #5E6169;        /* secondary, 6.2:1 on white */
+  --text-3: #75787F;        /* tertiary, 4.6:1 on white: labels, times */
+  /* Actions */
+  --primary: #111214;       /* the black pill and primary button */
+  --on-primary: #FFFFFF;
+  --focus: #8B5CF6;
+  --badge: #2F7CF6;         /* unread counts */
+  /* Categories: fill (card / chip background), dot, ink (text on the fill and coloured labels) */
+  --pink-fill: #FCE8F1;   --pink-dot: #E5489A;   --pink-ink: #A3195B;
+  --green-fill: #E3F5EA;  --green-dot: #2DB36F;  --green-ink: #146C3E;
+  --violet-fill: #EEEAFE; --violet-dot: #8B5CF6; --violet-ink: #5B2EC0;
+  --blue-fill: #E6EFFD;   --blue-dot: #3B82F6;   --blue-ink: #1D4FB0;
+  --yellow-fill: #FBF2DE; --yellow-dot: #E2A928; --yellow-ink: #7A5508;
+  --red-fill: #FDE8E8;    --red-dot: #E5484D;    --red-ink: #B4232A;
+  --grey-fill: #F1F1F3;   --grey-dot: #9A9DA5;   --grey-ink: #4A4D55;
+  /* Roles map onto categories */
+  --product-fill: var(--pink-fill);   --product-dot: var(--pink-dot);   --product-ink: var(--pink-ink);
+  --manager-fill: var(--violet-fill); --manager-dot: var(--violet-dot); --manager-ink: var(--violet-ink);
+  --builder-fill: var(--green-fill);  --builder-dot: var(--green-dot);  --builder-ink: var(--green-ink);
+  /* States */
+  --working: var(--green-dot); --waiting: var(--yellow-dot); --down: var(--red-dot); --idle: var(--grey-dot);
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0F1013;
+  --bg-subtle: #16171B;
+  --bg-active: #22242A;
+  --surface: #17181D;
+  --border: #26282F;
+  --border-strong: #363942;
+  --text: #F2F2F4;
+  --text-2: #A9ACB4;
+  --text-3: #8D9099;
+  --primary: #F2F2F4;
+  --on-primary: #0F1013;
+  --focus: #A78BFA;
+  --badge: #4C8DF8;
+  --pink-fill: #3A1D2C;   --pink-dot: #F06BAF;   --pink-ink: #F9B4D7;
+  --green-fill: #132E23;  --green-dot: #3DD68C;  --green-ink: #8BEBB7;
+  --violet-fill: #272044; --violet-dot: #A78BFA; --violet-ink: #C9B9FD;
+  --blue-fill: #172A47;   --blue-dot: #60A5FA;   --blue-ink: #A5C8FC;
+  --yellow-fill: #33281A; --yellow-dot: #F5C451; --yellow-ink: #F8D98C;
+  --red-fill: #3B1C1F;    --red-dot: #F87171;    --red-ink: #FCAFAF;
+  --grey-fill: #23252B;   --grey-dot: #8D9099;   --grey-ink: #C5C7CD;
+}

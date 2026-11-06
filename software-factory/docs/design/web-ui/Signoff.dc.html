@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign-off and testing</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="signoff" height="1200" hint-size="312px,1200px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1100px;">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Sign-off and testing</h1>
+<p style="margin: 0; color: var(--text-2);">What only a person can check. 7 items; 2 plans are waiting for you.</p>
+</div>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>Add something to check</button>
+</header>
+
+<div role="tablist" aria-label="Filter" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">All 7</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Waiting for you 2</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Ready to test 2</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Results 2</button>
+</div>
+
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+<section style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0 0 4px; font-size: 15px; font-weight: 600;">{{g.title}} <span style="color: var(--text-3); font-weight: 400;">{{g.count}}</span></h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{g.items}}" as="it" hint-placeholder-count="2">
+<li style="display: flex; align-items: center; gap: 16px; padding: 16px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{it.agent}}" size="32" hint-size="32px,32px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<a href="SignoffItem.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none; font-size: 15px;">{{it.title}}</a>
+<span style="color: var(--text-2); font-size: 13px;">{{it.line}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 170px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{it.dot}}; flex-shrink: 0;"></span>{{it.status}}</span>
+<div style="width: 150px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{it.primary}}" hint-placeholder-val="{{ false }}"><a href="SignoffItem.dc.html" style="height: 40px; padding: 0 16px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">{{it.action}}</a></sc-if>
+<sc-if value="{{it.secondary}}" hint-placeholder-val="{{ true }}"><a href="SignoffItem.dc.html" style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">{{it.action}}</a></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+</sc-for>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">With nothing to check: "When a task needs a person's eyes, mentewab adds it here. Or add one yourself." While loading: "Reading the sign-off queue from GitHub…". If a save fails: "GitHub refused the write: dev-pc's sign-in has no access to issues. Open Machines, sign dev-pc in again, then try again."</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var item = function (o) {
+      o.primary = !!o.mine;
+      o.secondary = !o.mine;
+      return o;
+    };
+    return {
+      theme: this.props.theme ?? 'light',
+      groups: [
+        { title: 'Proposed', count: 3, items: [
+          item({ title: 'Open the web UI on a phone and approve an ask', line: 'For epic #420 · plan of 4 steps by mentewab, today 10:05', agent: 'mentewab', status: 'Waiting for you', dot: 'var(--red-dot)', action: 'Review plan', mine: true }),
+          item({ title: 'Dark mode reads well on every screen', line: 'For epic #420 · plan of 3 steps by mentewab, yesterday', agent: 'mentewab', status: 'Waiting for you', dot: 'var(--waiting)', action: 'Review plan', mine: false }),
+          item({ title: 'Stop taytu from the Machines page and see it end', line: 'Added by you · mentewab writes the plan next', agent: 'mentewab', status: 'No plan yet', dot: 'var(--idle)', action: 'Open', mine: false })
+        ] },
+        { title: 'Ready to test', count: 2, items: [
+          item({ title: 'menelik comes back after the Mac restarts', line: 'For #445 Machines join · confirmed 2 Nov', agent: 'menelik', status: 'Confirmed', dot: 'var(--idle)', action: 'Record result', mine: false }),
+          item({ title: 'A claim still goes through when GitHub is slow', line: 'For NATS messaging · confirmed 1 Nov', agent: 'haile', status: 'Confirmed', dot: 'var(--idle)', action: 'Record result', mine: false })
+        ] },
+        { title: 'Results', count: 2, items: [
+          item({ title: 'Merge a protected PR from the web UI', line: 'Recorded 3 Nov by you', agent: 'fasil', status: 'Passed', dot: 'var(--working)', action: 'Open', mine: false }),
+          item({ title: 'Answer mentewab from the Inbox', line: 'Recorded 2 Nov by you · seen after 4 min, expected under 1', agent: 'mentewab', status: 'Failed', dot: 'var(--text)', action: 'Make it a task', mine: false })
+        ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

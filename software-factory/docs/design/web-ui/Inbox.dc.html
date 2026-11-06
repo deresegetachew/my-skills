@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inbox</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="inbox" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px;">
+
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; line-height: 1.15;">Inbox</h1>
+<p style="margin: 0; color: var(--text-2);">6 things only you can decide. Answer here and the asker hears back right away.</p>
+</div>
+<span style="color: var(--text-3); font-size: 13px;">Up to date · read 20 s ago</span>
+</header>
+
+<div role="tablist" aria-label="Filter" style="display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--border);">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="5">
+<button role="tab" aria-selected="{{t.selected}}" style="background: none; border: none; border-bottom: {{t.line}}; padding: 10px 0; font: inherit; font-weight: {{t.weight}}; color: {{t.color}}; cursor: pointer;">{{t.label}} {{t.count}}</button>
+</sc-for>
+</div>
+
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{items}}" as="it" hint-placeholder-count="6">
+<li style="display: flex; flex-direction: column; border-bottom: 1px solid var(--border);">
+<div style="display: flex; align-items: center; gap: 16px; padding: 18px 4px;">
+<sc-if value="{{it.hasAgent}}" hint-placeholder-val="{{ true }}"><dc-import name="Avatar" agent="{{it.agent}}" size="36" hint-size="36px,36px"></dc-import></sc-if>
+<sc-if value="{{it.isSystem}}" hint-placeholder-val="{{ false }}"><span style="width: 36px; height: 36px; border-radius: 50%; background: var(--bg-subtle); color: var(--text-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3l9 16H3z"></path><path d="M12 10v4M12 17h.01"></path></svg></span></sc-if>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600; font-size: 15px; line-height: 1.4;">{{it.q}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{it.sub}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 160px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{it.dot}}; flex-shrink: 0;"></span>{{it.status}}</span>
+<div style="width: 150px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{it.primary}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;">{{it.action}}</button></sc-if>
+<sc-if value="{{it.secondary}}" hint-placeholder-val="{{ true }}"><a href="{{it.href}}" style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">{{it.action}}</a></sc-if>
+</div>
+</div>
+<sc-if value="{{it.confirm}}" hint-placeholder-val="{{ false }}">
+<div role="alertdialog" aria-labelledby="cf-h" style="margin: 0 4px 18px 56px; background: var(--bg-subtle); border-radius: 10px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+<h3 id="cf-h" style="margin: 0; font-size: 15px;">Merge PR #402?</h3>
+<p style="margin: 0; color: var(--text-2); line-height: 1.5;">Checks pass and fasil approved. If someone pushes before you confirm, nothing is merged and you are asked again. mentewab starts once it merges.</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Merge PR #402</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Cancel</button>
+</div>
+</div>
+</sc-if>
+</li>
+</sc-for>
+</ul>
+
+<section aria-labelledby="ans-h" style="display: flex; flex-direction: column; gap: 4px; margin-top: 16px;">
+<h2 id="ans-h" style="margin: 0 0 6px; font-size: 15px;">Answered today</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{answered}}" as="a" hint-placeholder-count="3">
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{a.agent}}" size="28" hint-size="28px,28px"></dc-import>
+<span style="flex: 1; min-width: 0; color: var(--text-2);">{{a.q}} <span style="color: var(--text);">You: {{a.answer}}</span></span>
+<span style="font-size: 13px; color: var(--text-3);">{{a.time}}</span>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<p style="margin: 0; color: var(--text-2); font-size: 13px;">Desktop notices are on. <a href="Settings.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none;">Change notices ›</a></p>
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">When nothing needs you this page says so, and the team keeps going. If GitHub can't be read, it shows the last copy and points you to Health.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const tab = (label, count, selected) => ({ label, count, selected: selected ? 'true' : 'false',
+      line: selected ? '2px solid var(--text)' : 'none', weight: selected ? 600 : 400, color: selected ? 'var(--text)' : 'var(--text-2)' });
+    const item = (o) => ({ confirm: false, primary: false, href: 'Chat.dc.html', ...o,
+      hasAgent: !!o.agent, isSystem: !o.agent, secondary: !o.primary });
+    return {
+      theme: this.props.theme ?? 'light',
+      tabs: [tab('All', '6', true), tab('Decisions', '2', false), tab('Merges', '1', false), tab('Sign-off', '1', false), tab('Problems', '2', false)],
+      items: [
+        item({ agent: 'fasil', q: 'Merge PR #402 Product owner: try what was built?', sub: 'fasil · changes protected files · 6 min ago',
+          status: 'Waiting for you', dot: 'var(--red-dot)', action: 'Merge', primary: true, confirm: true }),
+        item({ agent: 'mentewab', q: 'Keep epics as GitHub issues or as files next to the PRD?', sub: 'mentewab · for #440 Epics above tasks · 14 min ago',
+          status: 'Decision', dot: 'var(--waiting)', action: 'Answer' }),
+        item({ agent: 'mentewab', q: 'Give remanual the web UI now, or after #446 UI parity?', sub: 'mentewab · remanual is paused · 40 min ago',
+          status: 'Decision', dot: 'var(--waiting)', action: 'Answer' }),
+        item({ agent: 'mentewab', q: 'Confirm the test plan for #437 An avatar for every agent', sub: 'mentewab · 3 checks on the team page · 1 h ago',
+          status: 'Sign-off', dot: 'var(--waiting)', action: 'Open plan', href: 'Signoff.dc.html' }),
+        item({ agent: '', q: 'menelik has no NATS key, so the hub refuses its claims', sub: "The factory · the owner's Mac · 25 min",
+          status: 'Problem', dot: 'var(--idle)', action: 'Make its key', href: 'TeamSetup.dc.html' }),
+        item({ agent: '', q: 'GitHub calls are nearly used up', sub: 'The factory · [PLACEHOLDER] left until [PLACEHOLDER] · now',
+          status: 'Problem', dot: 'var(--idle)', action: 'Open', href: 'Health.dc.html' })
+      ],
+      answered: [
+        { agent: 'fasil', q: 'Merge #436 messaging over NATS?', answer: 'Merged', time: '00:52' },
+        { agent: 'mentewab', q: 'Make NATS on dev-pc the hub for every machine?', answer: 'Yes', time: '00:40' },
+        { agent: 'fasil', q: 'taytu crashed holding #425. Release its claims?', answer: 'Release', time: '00:18' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign-off item</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="signoff" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1100px;">
+
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-3);">
+<a href="Signoff.dc.html" style="color: var(--text-2); text-decoration: none;">Sign-off and testing</a><span aria-hidden="true">/</span>
+<span style="color: var(--text);">Proposed</span>
+</nav>
+
+<div style="display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; justify-content: space-between;">
+<header style="flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot);"></span>Confirmed · waiting for your result</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700; line-height: 1.15;">Open the web UI on a phone and approve an ask</h1>
+<div style="display: flex; align-items: flex-start; gap: 12px; margin-top: 4px;">
+<dc-import name="Avatar" agent="mentewab" size="32" hint-size="32px,32px"></dc-import>
+<p style="margin: 0; color: var(--text-2); line-height: 1.55;"><span style="color: var(--text); font-weight: 600;">mentewab</span> proposed this today at 10:05. It checks that you can act from your phone, the point of epic <a href="Epic.dc.html" style="color: var(--text); font-weight: 600;">#420 Web UI: the one window</a>, using the ask on <a href="PR.dc.html" style="color: var(--text); font-weight: 600;">PR #402</a>.</p>
+</div>
+</header>
+
+<form aria-labelledby="talk-h" style="flex: 0 1 340px; min-width: 0; border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="talk-h" style="margin: 0; font-size: 15px; font-weight: 600;">Talk about this</h2>
+<fieldset style="margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 6px;">
+<legend style="font-size: 13px; color: var(--text-2); padding: 0; margin-bottom: 6px;">To</legend>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--text); cursor: pointer;"><input type="radio" name="to" value="mentewab" checked style="margin: 0;"><dc-import name="Avatar" agent="mentewab" size="24" hint-size="24px,24px"></dc-import><span><span style="font-weight: 600;">mentewab</span> <span style="color: var(--text-2);">(product owner)</span></span></label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border-strong); cursor: pointer;"><input type="radio" name="to" value="fasil" style="margin: 0;"><dc-import name="Avatar" agent="fasil" size="24" hint-size="24px,24px"></dc-import><span><span style="font-weight: 600;">fasil</span> <span style="color: var(--text-2);">(dev manager)</span></span></label>
+</fieldset>
+<div style="display: flex; gap: 8px;">
+<input type="text" placeholder="Ask or tell them something" aria-label="Message" style="flex: 1; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 12px; box-sizing: border-box;">
+<button type="submit" style="height: 44px; padding: 0 16px; border: none; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Send</button>
+</div>
+<span style="font-size: 12px; color: var(--text-3); line-height: 1.45;">Your message goes on this item's thread; the answer appears here and in your Inbox.</span>
+</form>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+
+<section aria-labelledby="plan-h" style="flex: 2 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 8px; max-width: 700px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
+<h2 id="plan-h" style="margin: 0; font-size: 20px; font-weight: 600;">Test plan</h2>
+<span style="font-size: 13px; color: var(--text-2);">1 of 4 checked</span>
+</div>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+<li style="display: flex; flex-direction: column; gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--border);">
+<label style="display: flex; gap: 12px; align-items: flex-start; cursor: pointer;">
+<sc-if value="{{s.done}}" hint-placeholder-val="{{ false }}"><input type="checkbox" checked aria-label="Step {{s.n}} done" style="width: 20px; height: 20px; margin: 2px 0 0; flex-shrink: 0;"></sc-if><sc-if value="{{s.notDone}}" hint-placeholder-val="{{ true }}"><input type="checkbox" aria-label="Step {{s.n}} done" style="width: 20px; height: 20px; margin: 2px 0 0; flex-shrink: 0;"></sc-if>
+<span style="display: flex; flex-direction: column; gap: 4px;">
+<span style="line-height: 1.5;"><span style="color: var(--text-3);">{{s.n}}.</span> {{s.text}}</span>
+<span style="font-size: 13px; color: var(--text-2);">You should see: {{s.expect}}</span>
+</span>
+</label>
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding-left: 32px;">
+<div role="radiogroup" aria-label="Step {{s.n}} result" style="display: flex; gap: 6px;">
+<button type="button" role="radio" aria-checked="{{s.passChecked}}" style="height: 36px; padding: 0 14px; border-radius: 999px; border: {{s.passBorder}}; background: {{s.passBg}}; color: {{s.passInk}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;">Pass</button>
+<button type="button" role="radio" aria-checked="false" style="height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer;">Fail</button>
+</div>
+<input type="text" value="{{s.note}}" placeholder="Note (optional)" aria-label="Step {{s.n}} note" style="flex: 1 1 180px; min-width: 0; height: 36px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 13px; padding: 0 10px; box-sizing: border-box;">
+<label style="height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text-2); font-size: 13px; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 15V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10"></path><circle cx="9" cy="9" r="2"></circle><path d="M21 15l-5-5-8 8"></path></svg>Screenshot<input type="file" accept="image/*" aria-label="Attach a screenshot for step {{s.n}}" style="display: none;"></label>
+</div>
+</li>
+</sc-for>
+</ol>
+
+<div style="display: flex; flex-direction: column; gap: 6px; padding-top: 12px;">
+<span style="font-size: 13px; color: var(--text-2);">Passes when the ask leaves the Inbox on the phone and on the Mac within 10 seconds, and PR #402 shows your approval.</span>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 10px; padding-top: 12px;">
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Passed</button>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Failed: make it a task</button>
+</div>
+<span style="font-size: 12px; color: var(--text-3);">Failed opens a task for the builders with your notes and screenshots; mentewab links it to #420.</span>
+</section>
+
+<aside style="flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600;">History</h2>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{history}}" as="h" hint-placeholder-count="3">
+<li style="display: flex; gap: 10px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--border);">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{h.dot}}; flex-shrink: 0; margin-top: 6px;"></span>
+<span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-size: 13px;">{{h.text}}</span><span style="font-size: 12px; color: var(--text-3);">{{h.when}}</span></span>
+</li>
+</sc-for>
+</ol>
+</aside>
+</div>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">Before you confirm the plan, the step results are locked: "Confirm plan" and "Ask mentewab to change it" show in their place. If a save fails: "GitHub refused the write. Open Machines, sign dev-pc in again with access to issues, then try again."</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const step = (n, text, expect, done, note) => ({
+      n, text, expect, done: !!done, notDone: !done, note: note || '',
+      passChecked: done ? 'true' : 'false',
+      passBorder: done ? '1px solid var(--text)' : '1px solid var(--border-strong)',
+      passBg: done ? 'var(--primary)' : 'var(--surface)',
+      passInk: done ? 'var(--on-primary)' : 'var(--text)'
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      steps: [
+        step(1, "On Machines, open dev-pc's web UI to Tailscale.", 'an address on 100.99.7.67 with a token.', true, 'Took two tries, the token was cut off on copy.'),
+        step(2, 'On your phone, on Tailscale, open that address.', 'the Inbox, without a sign-in, in under 3 seconds.'),
+        step(3, "Open fasil's ask about PR #402 and tap Approve.", 'a confirm asking "Merge PR #402?".'),
+        step(4, 'Confirm, then look at the Inbox on the Mac.', 'the ask is gone on both screens.')
+      ],
+      history: [
+        { text: 'You recorded a result for step 1', when: 'Today 11:20', dot: 'var(--grey-dot)' },
+        { text: 'You confirmed the plan', when: 'Today 10:40', dot: 'var(--grey-dot)' },
+        { text: 'mentewab proposed the plan, 4 steps', when: 'Today 10:05', dot: 'var(--grey-dot)' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

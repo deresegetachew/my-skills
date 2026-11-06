@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Search</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1300px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="home" height="1300" hint-size="312px,1300px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px;">
+
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700;">Search</h1>
+<p style="margin: 0; color: var(--text-2);">Find any task, pull request, message, doc, setting or agent in this project.</p>
+</header>
+
+<div role="search" style="display: flex; flex-direction: column; gap: 8px;">
+<label style="display: flex; align-items: center; gap: 12px; height: 52px; border: 1px solid var(--border-strong); border-radius: 12px; padding: 0 16px; background: var(--surface); box-sizing: border-box;">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="color: var(--text-3);"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<input type="search" value="nats" aria-label="Search everything" aria-controls="results" style="flex: 1; min-width: 0; border: none; outline: none; font: inherit; font-size: 17px; background: transparent; color: var(--text);">
+<span style="font-size: 13px; color: var(--text-3);">14 results</span>
+</label>
+<span style="font-size: 13px; color: var(--text-3);">Press / from any page to search. Arrow keys move, Enter opens, Esc goes back.</span>
+</div>
+
+<div role="tablist" aria-label="Show only" style="display: flex; flex-wrap: wrap; column-gap: 28px; border-bottom: 1px solid var(--border);">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="7">
+<button role="tab" aria-selected="{{t.selected}}" style="background: none; border: none; border-bottom: {{t.line}}; padding: 10px 0; font: inherit; font-weight: {{t.weight}}; color: {{t.color}}; cursor: pointer;">{{t.label}} {{t.n}}</button>
+</sc-for>
+</div>
+
+<div id="results" role="listbox" aria-label="Results for nats" style="display: flex; flex-direction: column; gap: 28px;">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="6">
+<section style="display: flex; flex-direction: column;">
+<h2 style="margin: 0 0 4px; font-size: 15px;">{{g.name}} <span style="font-weight: 400; color: var(--text-3);">{{g.n}}</span></h2>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="2">
+<a href="{{r.href}}" role="option" aria-selected="{{r.selected}}" style="display: flex; align-items: center; gap: 16px; min-height: 56px; padding: 10px 8px; border-bottom: 1px solid var(--border); border-radius: {{r.radius}}; text-decoration: none; color: var(--text); background: {{r.bg}}; box-sizing: border-box;">
+<span style="width: 32px; height: 32px; border-radius: 8px; background: var(--bg-subtle); color: var(--text-2); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{g.icon}}"></path></svg></span>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
+<span style="font-weight: 500;">{{r.pre}}<sc-if value="{{r.hasHit}}" hint-placeholder-val="{{ true }}"><mark style="background: var(--bg-active); color: var(--text); font-weight: 700; border-radius: 3px; padding: 0 2px;">{{r.hit}}</mark></sc-if>{{r.post}}</span>
+<span style="font-size: 13px; color: var(--text-2);">{{r.where}}</span>
+</span>
+<span style="width: 120px; flex-shrink: 0; display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><sc-if value="{{r.hasStatus}}" hint-placeholder-val="{{ true }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.dot}}; flex-shrink: 0;"></span>{{r.status}}</sc-if></span>
+</a>
+</sc-for>
+</section>
+</sc-for>
+</div>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">With nothing typed, this page lists your recent searches. If the hub on dev-pc doesn't answer, messages are left out and the page says so, with a link to Machines.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const states = {
+      blocked: { status: 'Blocked', dot: 'var(--waiting)' },
+      ready: { status: 'Ready', dot: 'var(--idle)' },
+      done: { status: 'Done', dot: 'var(--working)' },
+      merged: { status: 'Merged', dot: 'var(--working)' },
+      answered: { status: 'Answered', dot: 'var(--idle)' },
+      up: { status: 'Up', dot: 'var(--working)' },
+      waiting: { status: 'Waiting', dot: 'var(--waiting)' },
+      none: { status: '', dot: '' }
+    };
+    let first = true;
+    const row = (pre, hit, post, where, state, href) => {
+      const selected = first; first = false;
+      return { pre, hit, post, hasHit: !!hit, where, href, ...states[state], hasStatus: state !== 'none',
+        selected: selected ? 'true' : 'false', bg: selected ? 'var(--bg-subtle)' : 'transparent', radius: selected ? '8px' : '0' };
+    };
+    const groups = [
+      { name: 'Tasks', icon: 'M4 5h16v14H4zM8 12l3 3 5-6', rows: [
+        row('#443 Network guard lets ', 'NATS', ' replies out', 'NATS messaging · needs a one-time step on dev-pc', 'blocked', 'Task.dc.html'),
+        row('#445 Add a machine and let it join', '', '', 'Machines join', 'ready', 'Task.dc.html'),
+        row('#431 Wake-ups and claims over ', 'NATS', '', 'NATS messaging · menelik', 'done', 'Task.dc.html')
+      ] },
+      { name: 'Pull requests', icon: 'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9c0 6-12 3-12 6', rows: [
+        row('#436 my-skills on ', 'NATS', ': wake-ups and claims', 'fasil merged it today', 'merged', 'PR.dc.html')
+      ] },
+      { name: 'Messages', icon: 'M4 5h16v11H9l-5 4z', rows: [
+        row('haile: Does giving an agent its ', 'NATS', ' key need the hub running first?', 'To fasil · on #437 · 5 Nov', 'answered', 'Task.dc.html'),
+        row('fasil: The ', 'NATS', ' hub restarted; claims came back', 'To everyone · 6 Nov 09:40', 'none', 'Activity.dc.html')
+      ] },
+      { name: 'Docs and decisions', icon: 'M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h5', rows: [
+        row('Decision 0004: Agent messaging over ', 'NATS', '', 'Decisions · accepted 6 Nov', 'none', 'Decision.dc.html'),
+        row('Messages over ', 'NATS', '', 'Wiki', 'none', 'Docs.dc.html'),
+        row('D10: GitHub is the state and the transport', '', '', 'PRD · amended by decision 0004', 'none', 'Docs.dc.html')
+      ] },
+      { name: 'Settings', icon: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3', rows: [
+        row('How agents send messages: ', 'NATS', '', 'Messaging · this project', 'none', 'Settings.dc.html'),
+        row('Messaging server: ', 'NATS', ' hub on dev-pc', 'Messaging · this project', 'none', 'Settings.dc.html'),
+        row('Which messages go through the hub', '', '', 'Messaging · this project', 'none', 'Settings.dc.html')
+      ] },
+      { name: 'Agents and machines', icon: 'M3 5h18v11H3zM8 20h8M12 16v4', rows: [
+        row('dev-pc: the ', 'NATS', ' hub', 'Linux · Tailscale 100.99.7.67', 'up', 'Machines.dc.html'),
+        row('menelik on the Mac: joined through a ', 'NATS', ' leaf', 'Builder', 'waiting', 'Agent.dc.html')
+      ] }
+    ];
+    const tab = (label, n, selected) => ({ label, n, selected: selected ? 'true' : 'false',
+      line: selected ? '2px solid var(--text)' : 'none', weight: selected ? 600 : 400, color: selected ? 'var(--text)' : 'var(--text-2)' });
+    return {
+      theme: this.props.theme ?? 'light',
+      groups: groups.map((g) => ({ ...g, n: String(g.rows.length) })),
+      tabs: [tab('All', '14', true), tab('Tasks', '3', false), tab('Pull requests', '1', false), tab('Messages', '2', false),
+        tab('Docs', '3', false), tab('Settings', '3', false), tab('Agents', '2', false)]
+    };
+  }
+}
+</script>
+</body>
+</html>
