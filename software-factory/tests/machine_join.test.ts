@@ -3,8 +3,8 @@
 // Two worlds: the hub (nats up done, fake tailscale 100.64.0.7) and a new machine (own HOME, config folder and git
 // repo). `docker` and `tailscale` are fakes on PATH that log what they were given. What is checked is what a person
 // sees: output, exit codes, files written with their modes, and the docker commands run. The code is opaque.
-import { expect, test } from "bun:test";
-import { existsSync, readdirSync, statSync, symlinkSync } from "node:fs";
+import { afterAll, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readdirSync, statSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { read, runHook, SF, sh, type Proc, tmp, write, writeExe } from "./support.ts";
 
@@ -59,9 +59,53 @@ function hook(name: string, w: World, args: string[], extra: Env = {}): Proc {
 }
 const machine = (w: World, args: string[], extra: Env = {}): Proc => hook("factory_machine", w, args, extra);
 
-function hub(o: Opts = {}): World {
+// ---------- the hub's monitoring port: a fake in its own process (the hooks run with spawnSync) ----------
+const procs: { kill(n?: number): void }[] = [];
+afterAll(() => procs.forEach((p) => p.kill(9)));
+
+function startScript(code: string, ...args: string[]): number {
+  const d = tmp("mjoin-srv-");
+  const script = write(join(d, "srv.ts"), code);
+  const portFile = join(d, "port");
+  const p = Bun.spawn(["sh", "-c", 'exec "$0" --no-env-file "$@" > "$PORT_FILE"', process.execPath, script, ...args],
+    { stdout: "ignore", stderr: "ignore", env: { ...process.env, PORT_FILE: portFile } });
+  procs.push(p);
+  const deadline = Date.now() + 10_000;
+  while (!(existsSync(portFile) && read(portFile).includes("\n")) && Date.now() < deadline) Bun.sleepSync(20);
+  return Number(read(portFile).trim());
+}
+
+// Answers /healthz, and /leafz and /connz from a file the test rewrites: {"leafz": {...}, "connz": {...}}.
+const MONITOR = String.raw`import { readFileSync } from "node:fs";
+const seen = process.argv[2];
+const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req) {
+  const u = new URL(req.url);
+  let now = {};
+  try { now = JSON.parse(readFileSync(seen, "utf8")); } catch {}
+  if (u.pathname === "/healthz") return Response.json({ status: "ok" });
+  if (u.pathname === "/leafz") return Response.json(now.leafz ?? { leafnodes: 0, leafs: [] });
+  if (u.pathname === "/connz") return Response.json(now.connz ?? { num_connections: 0, connections: [] });
+  return new Response("", { status: 404 });
+} });
+console.log(server.port);
+`;
+
+interface Monitor { port: number; see(what: { leafz?: unknown; connz?: unknown }): void }
+function monitor(): Monitor {
+  const file = join(tmp("mjoin-seen-"), "seen.json");
+  write(file, "{}");
+  return { port: startScript(MONITOR, file), see: (what) => write(file, JSON.stringify(what)) };
+}
+
+/** A port nothing listens on: a server is started there and stopped again. */
+function deadPort(): number {
+  return startScript("const s = Bun.serve({ hostname: \"127.0.0.1\", port: 0, fetch: () => new Response('') }); console.log(s.port); s.stop(true);");
+}
+
+/** A hub; its monitoring port is `monitorPort`, else one nothing answers on (so a NATS server on this machine can't leak in). */
+function hub(o: Opts = {}, monitorPort = deadPort()): World {
   const w = world(o);
-  expect(hook("factory_nats", w, ["up"]).code).toBe(0);
+  expect(hook("factory_nats", w, ["up", "--monitor-port", String(monitorPort)]).code).toBe(0);
   return w;
 }
 
@@ -278,13 +322,14 @@ test("ls lists each machine with its agents and whether its code is live or expi
   expect(line).toContain("haile");
   expect(line).toContain("taytu");
   expect(line).toContain("waiting for join (expires in 15 min)");
+  const j = JSON.parse(machine(w, ["ls", "--json"]).stdout) as { name: string; agents: { name: string; role: string }[]; state: string; expiresAt: number }[];
+  expect(j).toEqual([{ name: "laptop", agents: [{ name: "haile", role: "builder" }, { name: "taytu", role: "manager" }], state: "waiting",
+    expiresAt: NOW + 900, joinedAt: null, revokedAt: null }]);
   p = machine(w, ["ls"], { FACTORY_NOW: String(NOW + 16 * 60) });
   line = p.stdout.split("\n").find((l) => l.includes("laptop")) as string;
   expect(line).toContain("code expired");
-  const j = JSON.parse(machine(w, ["ls", "--json"]).stdout) as { name: string; agents: { name: string; role: string }[]; state: string; expiresAt: number }[];
-  expect(j).toEqual([{ name: "laptop", agents: [{ name: "haile", role: "builder" }, { name: "taytu", role: "manager" }], state: "waiting", expiresAt: NOW + 900 }]);
   const k = JSON.parse(machine(w, ["ls", "--json"], { FACTORY_NOW: String(NOW + 2000) }).stdout) as { state: string }[];
-  expect(k[0]?.state).toBe("expired");
+  expect(k[0]?.state).toBe("expired-unchecked"); // this hub's monitoring port doesn't answer
 });
 
 test("remove drops the record, revokes the keys, deletes the hub's seeds and reloads the server", () => {
@@ -359,6 +404,110 @@ test("an agent that already has a key, here or on another machine, is refused an
   expect(read(join(w.dir, "users.json"))).toBe(before);
   expect(machine(w, ["remove", "laptop"]).code).toBe(0);
   expect(machine(w, ["add", "desktop", "--agent", "haile"]).code).toBe(0); // free again after remove
+});
+
+// ---------- the hub enforces the code's expiry (review of #445) ----------
+interface Row { name: string; state: string; joinedAt: number | null; revokedAt: number | null }
+const lsJson = (w: World, at: number): Row[] => JSON.parse(machine(w, ["ls", "--json"], { FACTORY_NOW: String(at) }).stdout) as Row[];
+const lsLine = (w: World, name: string, at: number): string =>
+  machine(w, ["ls"], { FACTORY_NOW: String(at) }).stdout.split("\n").find((l) => l.startsWith(name)) ?? "";
+const leafUsers = (w: World): { user: string }[] =>
+  existsSync(join(w.dir, "leaf-users.json")) ? JSON.parse(read(join(w.dir, "leaf-users.json"))) as { user: string }[] : [];
+const userNames = (w: World): string[] => (existsSync(join(w.dir, "users.json")) ? users(w).map((u) => u.name).sort() : []);
+const LATER = NOW + 16 * 60;
+
+test("add says the code's keys come off the hub if the machine hasn't joined by the time it expires", () => {
+  const w = hub();
+  const p = machine(w, ["add", "laptop", "--agent", "haile"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toMatch(/expires in 15 min/);
+  expect(p.stdout).toMatch(/removed from the hub/);
+});
+
+test("a code that expires before its machine joins: its keys and leaf user come off the hub, and ls says so", () => {
+  const mon = monitor();
+  const w = hub({}, mon.port);
+  add(w, "laptop");
+  expect(lsLine(w, "laptop", NOW + 60)).toContain("waiting for join (expires in 14 min)");
+  expect(userNames(w)).toEqual(["haile", "taytu"]); // before expiry nothing is touched
+  expect(leafUsers(w).length).toBe(1);
+  const line = lsLine(w, "laptop", LATER);
+  expect(line).toContain("code expired; its keys were removed from the hub");
+  expect(line).toContain("factory machine remove laptop");
+  expect(userNames(w)).toEqual([]);
+  expect(leafUsers(w)).toEqual([]);
+  const conf = read(join(w.dir, "conf", "nats-server.conf"));
+  expect(conf).not.toContain("haile");
+  expect(conf).not.toMatch(/"m-[0-9a-f]+"/);
+  expect(existsSync(join(seeds(w), "haile.nk"))).toBe(false);
+  expect(dockerLog(w)).toContain("kill -s SIGHUP");
+  const [row] = lsJson(w, LATER + 60);
+  expect(row?.state).toBe("revoked");
+  expect(row?.revokedAt).toBe(LATER);
+  expect(row?.joinedAt).toBeNull();
+  expect(machine(w, ["remove", "laptop"]).code).toBe(0); // the record is kept until remove
+  expect(machine(w, ["ls"]).stdout).not.toContain("laptop");
+});
+
+test("add sweeps too: an expired code that never joined is revoked when the next machine is added", () => {
+  const mon = monitor();
+  const w = hub({}, mon.port);
+  add(w, "laptop");
+  add(w, "desktop", ["tewodros"], [], { FACTORY_NOW: String(LATER) });
+  expect(userNames(w)).toEqual(["tewodros"]);
+  expect(lsJson(w, LATER).map((r) => [r.name, r.state])).toEqual([["laptop", "revoked"], ["desktop", "waiting"]]);
+});
+
+test("a machine whose leaf the hub sees is joined, and stays joined (keys kept) after its code expires", () => {
+  const mon = monitor();
+  const h = hub({}, mon.port);
+  const a = add(h, "laptop");
+  const m = world();
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
+  const user = leafUsers(h)[0]!.user;
+  const name = /server_name: "([^"]+)"/.exec(read(join(m.dir, "conf", "nats-server.conf")))?.[1] ?? "";
+  expect(name).toContain(user); // the leaf names itself after its leaf user, so the hub can tell it
+  mon.see({ leafz: { leafnodes: 1, leafs: [{ name: "factory-leaf-other", account: "$G" }, { name, account: "$G", ip: "100.64.0.9" }] } });
+  expect(lsLine(h, "laptop", NOW + 60)).toContain("joined");
+  expect(lsJson(h, NOW + 60)[0]).toMatchObject({ state: "joined", joinedAt: NOW + 60, revokedAt: null });
+  mon.see({}); // the leaf went away for a while
+  expect(lsJson(h, LATER + 600)[0]?.state).toBe("joined");
+  expect(lsLine(h, "laptop", LATER + 600)).not.toContain("expired");
+  expect(userNames(h)).toEqual(["haile", "taytu"]);
+  expect(leafUsers(h).map((l) => l.user)).toEqual([user]);
+});
+
+test("a machine without Docker is joined when one of its agents' keys connects to the hub", () => {
+  const mon = monitor();
+  const h = hub({}, mon.port);
+  add(h, "laptop");
+  const key = users(h).find((u) => u.name === "taytu") as unknown as { nkey: string };
+  mon.see({ connz: { num_connections: 2, connections: [{ cid: 1, authorized_user: "someone-else" }, { cid: 2, authorized_user: key.nkey, account: "$G" }] } });
+  expect(lsJson(h, LATER)[0]).toMatchObject({ state: "joined", joinedAt: LATER });
+  expect(userNames(h)).toEqual(["haile", "taytu"]);
+});
+
+test("when the hub's monitoring port doesn't answer, nothing is revoked and ls says it couldn't check", () => {
+  const w = hub(); // a monitoring port nothing listens on
+  add(w, "laptop");
+  const line = lsLine(w, "laptop", LATER);
+  expect(line).toContain("code expired; not checked");
+  expect(line).toContain("factory nats up");
+  expect(lsJson(w, LATER)[0]).toMatchObject({ state: "expired-unchecked", joinedAt: null, revokedAt: null });
+  expect(userNames(w)).toEqual(["haile", "taytu"]);
+  expect(leafUsers(w).length).toBe(1);
+});
+
+test("add that can't write the machine's record undoes the keys and the leaf user it made", () => {
+  const w = hub();
+  mkdirSync(join(w.dir, "machines.json")); // a folder where the records go: the write fails
+  const p = machine(w, ["add", "laptop", "--agent", "haile"]);
+  expect(p.code, p.out).toBe(1);
+  expect(error(p).code).toBe("record-failed");
+  expect(userNames(w)).toEqual([]);
+  expect(leafUsers(w)).toEqual([]);
+  expect(existsSync(join(seeds(w), "haile.nk"))).toBe(false);
+  expect(read(join(w.dir, "conf", "nats-server.conf"))).not.toContain("haile");
 });
 
 // ---------- help ----------
