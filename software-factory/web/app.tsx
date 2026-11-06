@@ -12,10 +12,11 @@ import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
   type Tone } from "./model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
+import { BOARD_CSS } from "./board.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
 import type { DocSection } from "./docs_model.ts";
-import { channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
+import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
 import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx";
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
 import { CSS } from "./style.ts";
@@ -383,6 +384,12 @@ const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel
 
 // --- the app -----------------------------------------------------------------------------------------------------------
 
+/** The page the address bar names; a page's own name (`page:board`) is read as the address it opens. */
+function routeOf(hash: string): { project: string; channel: string } | null {
+  const r = parseHash(hash);
+  return r ? { ...r, channel: addressOf(r.channel) } : null;
+}
+
 function Gate({ onToken, wrong }: { onToken: (t: string) => void; wrong: boolean }) {
   const [text, setText] = useState("");
   return (
@@ -410,7 +417,7 @@ function App() {
   const [docHits, setDocHits] = useState<{ project: string; projectName: string; hit: DocHit }[]>([]);
   const [find, setFind] = useState(""); // the filter a view channel opens with (the search's row, #392)
   const [conn, setConn] = useState<Conn>("connecting");
-  const [route, setRoute] = useState(() => parseHash(location.hash));
+  const [route, setRoute] = useState(() => routeOf(location.hash));
   const [query, setQuery] = useState("");
   const [ask, setAsk] = useState<Ask | null>(null);
   const [busy, setBusy] = useState(false);
@@ -517,7 +524,7 @@ function App() {
   }, [token, projects, query]);
 
   useEffect(() => {
-    const onHash = (): void => setRoute(parseHash(location.hash));
+    const onHash = (): void => setRoute(routeOf(location.hash));
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
   }, []);
@@ -763,6 +770,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + AVATAR_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

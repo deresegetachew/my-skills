@@ -1,9 +1,12 @@
 // The web app's tasks, pull requests and CI channels (#424): the cockpit's views as channels, from the API's views data
-// (factory_ui_views.ts, live over the WebSocket). Each has a filter (#392: every word, any case) and says how old its
+// (factory_ui_views.ts, live over the WebSocket). The tasks channel shows a board (#439, board.tsx) or a list. Each has
+// a filter (#392: every word, any case) and says how old its
 // data is, with a button that reads it again. The CI channel puts the verdict first and its actions (#396) are buttons
 // that ask first, then run the same commands the cockpit's CI view runs, on the machine that serves the page.
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
+import { Board, EpicChips } from "./board.tsx";
+import type { LaneBy } from "./board_model.ts";
 import { Cited, Cites } from "./docs.tsx";
 import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
 import { Tabs } from "./parts.tsx";
@@ -117,24 +120,41 @@ function TaskLine({ t, open, docs }: { t: TaskRow; open: ViewProps["open"]; docs
   );
 }
 
+type TaskTab = LaneBy | "list";
+
+const TASK_TABS: Array<[TaskTab, string]> = [["epic", "By epic"], ["agent", "By agent"], ["list", "List"]];
+
 export function TasksChannel(p: ViewProps) {
   const [typed, setTyped] = useFilter(p.find);
+  const [picked, setTab] = useState<TaskTab | null>(null);
+  const [epic, setEpic] = useState<string | null>(null);
   if (!p.views) return <Loading name={p.project.name} />;
   const v = p.views;
+  const epics = v.epics.epics;
+  const tab: TaskTab = picked ?? (epics.length ? "epic" : "agent"); // the design opens by epic; with no epics, by agent
   const all = v.tasks.tasks;
-  const rows = filterRows(all, typed);
+  const withTasks = epics.filter((e) => all.some((t) => t.epic === e.id));
+  const chosen = epic && withTasks.some((e) => e.id === epic) ? epic : null;
+  const rows = filterRows(all, typed).filter((t) => chosen === null || t.epic === chosen);
+  const mode = tab === "list" ? "list" : "board";
   return (
     <div className="body">
-      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="tasks" />
+      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="cards" />
       <Problems list={[...v.problems, ...v.tasks.problems]} />
-      <div className="lanes" aria-label="Tasks by state">
-        {LANES.map(([s, name]) => <span key={s}><Dot tone={taskTone(s)} />{name} {all.filter((t) => t.state === s).length}</span>)}
+      <div className="bfilters">
+        <Tabs label="Group lanes by" value={tab} onChange={setTab} tabs={TASK_TABS.map(([id, label]) => ({ id, label }))} />
+        {withTasks.length > 0 && <EpicChips epics={withTasks} all={epics} chosen={chosen} choose={setEpic} />}
       </div>
-      <p className="vnote">In the order the builders take them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>
+      {mode === "list" && <div className="lanes" aria-label="Tasks by state">
+        {LANES.map(([s, name]) => <span key={s}><Dot tone={taskTone(s)} />{name} {all.filter((t) => t.state === s).length}</span>)}
+      </div>}
+      {mode === "list" && <p className="vnote">In the order the builders take them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>}
       {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && v.epics.epics.length === 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>}
-      {rows.length > 0 && v.epics.epics.length > 0 && groupByEpic(rows, v.epics.epics).map((g) => (
+      {rows.length > 0 && tab !== "list" && <Board tasks={rows} all={all} epics={epics} pulls={v.pulls.pulls} by={tab} project={p.project} open={p.open}
+        post={p.post} say={p.say} />}
+      {rows.length > 0 && mode === "list" && v.epics.epics.length === 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>}
+      {rows.length > 0 && mode === "list" && v.epics.epics.length > 0 && groupByEpic(rows, v.epics.epics).map((g) => (
         <section key={g.epic?.id ?? "none"} aria-label={g.epic ? `Tasks in epic ${g.epic.title}` : "Tasks in no epic"}>
           <h3 className="vgroup">{g.epic
             ? <button className="link" onClick={() => p.open("view:epics", `#${g.epic?.id}`)}>Epic #{g.epic.id} {g.epic.title}</button>
