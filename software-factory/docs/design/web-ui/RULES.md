@@ -82,7 +82,7 @@ menelik (builder, the owner's Mac, #438 The PRD and decisions one click away).
 Machines: dev-pc (Linux, Tailscale 100.99.7.67, hub: NATS JetStream, 3 CI runners + light lane, Docker 29),
 Mac (macOS, joined via tunnel; menelik). Projects: my-skills (active), remanual (paused by the owner).
 Open PRs: #402 Product owner: try what was built (protected .claude/, needs owner), #434 [PLACEHOLDER title].
-Epics: Web UI: the one window #420 (Building, 3 of 14), Epics above tasks #440 (Investigating), NATS messaging
+Epics: Web UI: the one window #420 (Building, 3 of 14), Epics above tasks #440 (Investigating), Agent messaging
 (decision 0004, Building 9 of 12), Machines join #445.
 Ready tasks: #439 board, #441 integrations, #443 network guard, #444 roles separate, #445 machine add/join, #446 UI
 parity, #447 add project. Decisions: 0002 cockpit (replaced), 0003 ports and adapters, 0004 NATS, 0005 web UI.
