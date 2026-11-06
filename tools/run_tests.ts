@@ -137,10 +137,12 @@ async function runFile(path: string): Promise<Result> {
       // Its own process group, so whatever it starts can be stopped with it (#476).
       detached: true,
     });
+    LIVE.add(proc.pid);
     const timer = setTimeout(() => killGroup(proc.pid), TIMEOUT_MS);
     code = await proc.exited;
     clearTimeout(timer);
-    killGroup(proc.pid); // anything the file left running (a server a failed test never stopped) goes too
+    killGroup(proc.pid);
+    LIVE.delete(proc.pid); // anything the file left running (a server a failed test never stopped) goes too
     out = await Bun.file(outFile).text();
     if (proc.signalCode === "SIGKILL") out += `\ntimed out after ${TIMEOUT_MS / 1000} s\n`;
   } catch (e) {
@@ -150,6 +152,21 @@ async function runFile(path: string): Promise<Result> {
   }
   return { rel, code, out, seconds: (Date.now() - start) / 1000 };
 }
+
+// The test files running now. Each is its own process group, so Ctrl-C on the runner reaches only the runner: it stops
+// them all on the way out (#476).
+const LIVE = new Set<number>();
+function stopLive(): void {
+  for (const pid of LIVE) killGroup(pid);
+  LIVE.clear();
+}
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
+  process.on(signal, () => {
+    stopLive();
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  });
+}
+process.on("exit", stopLive);
 
 /** Stop a test file's whole process group: the file and every process it started. */
 function killGroup(pid: number): void {

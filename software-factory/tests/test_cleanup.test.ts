@@ -48,12 +48,14 @@ test("a test file killed for taking too long takes the processes it started with
   write(join(dir, "hangs.test.ts"), `import { test } from "bun:test";
 test("starts a child, then never ends", async () => {
   ${CHILD(mark)}
+  console.log("SPAWNED");
   await new Promise(() => {});
 });
 `);
   const r = runner(dir, { FACTORY_TEST_TIMEOUT_MS: "3000" });
   expect(r.code, r.out).toBe(1);
   expect(r.out).toContain("timed out after 3 s");
+  expect(r.out, "the child was started before the kill").toContain("SPAWNED");
   expect(alive(mark), "a child of the killed test file is still running").toEqual([]);
 });
 
@@ -75,4 +77,25 @@ test("starts the UI, then fails", async () => {
   const pid = /UI_PID=(\d+)/.exec(out)?.[1] ?? "";
   expect(pid, out).not.toBe("");
   expect(sh(["kill", "-0", pid]).code, "the factory ui server from the failed test is still running").not.toBe(0);
+});
+
+test("Ctrl-C on the runner stops every test file it runs and what they started", async () => {
+  const mark = marker();
+  const dir = tmp("cleanup-");
+  write(join(dir, "slow.test.ts"), `import { test } from "bun:test";
+test("starts a child, then waits", async () => {
+  ${CHILD(mark)}
+  await Bun.sleep(60_000);
+}, 120_000);
+`);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
+  const runner = Bun.spawn([...BUN, "--config=/dev/null", join(ROOT, "tools", "run_tests.ts"), "--jobs", "1"],
+    { cwd: ROOT, env: { ...env, FACTORY_TEST_DIR: dir }, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  for (let i = 0; i < 100 && !alive(mark).length; i++) await Bun.sleep(100);
+  expect(alive(mark).length, "the test file's child never started").toBeGreaterThan(0);
+  runner.kill("SIGINT");
+  await runner.exited;
+  await Bun.sleep(300);
+  expect(alive(mark), "a child is still running after Ctrl-C on the runner").toEqual([]);
 });
