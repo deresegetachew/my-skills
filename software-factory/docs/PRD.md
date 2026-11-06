@@ -448,6 +448,41 @@ Then the cockpit, in steps.
 Not in the cockpit, on purpose: the commands that agents and the gate use (`review-pass`, `wait`, `run-check`, the
 guard, rereview record and reply, the `manager-claims` actions). (#295)
 
+### 4.11 The factory's own record (decision 0007)
+
+From #472 (owner, 6 Nov 2026) and [decisions/0007](decisions/0007-own-record.md). The numbers start at US-40, so the
+web UI section proposed on #293 (US-14 onward) keeps its range. Until the owner accepts 0007, these are proposals.
+
+- **US-40.** As the owner, the factory's tasks, epics, dependencies, claims and every conversation about them (questions,
+  answers, hand-offs, the PO's proposals, the owner queue, the dev manager's notes, a pull request's back-and-forth) are
+  kept in the factory's own database, so agents stop reading GitHub as a database and the shared account's hourly limit
+  stops running out. GitHub keeps the code, the pull requests, CI, the dev manager's final verdict and the labels the PR
+  gate and the Factory guard read. *Proposal.* (#472; 0007 point 2)
+- **US-41.** As the owner, setting up a new factory and connecting GitHub, I can import the repo's issues and their
+  comments as tasks, from the first-launch screens and from the command line. A dry run says first what it will bring
+  and what it skips. Running it twice updates and never duplicates. *Proposal.* (#472; #457; 0007 point 4)
+- **US-42.** As the owner, I can still follow the work on GitHub: a task's issue is updated when its state changes, one
+  way, on by default and off with a setting. Each new owner ask also appears on the owner-queue issue, so GitHub's
+  notifications still reach my phone, and my answer there is read back. *Proposal.* (#472; M6; 0007 point 5)
+- **US-43.** As the owner, the web UI shows tasks, threads and the owner queue from the database, updated live, with no
+  GitHub calls for them; `factory status`, `prd`, `next` and `messages` give the same answers. *Proposal.* (#472; 0007
+  point 6)
+- **US-44.** As the owner, the database runs like the NATS hub: on the hub machine in Docker, reached over Tailscale
+  only, with `up`, `down`, `status` and `backup` commands, a nightly backup, and `factory doctor` saying when it can't be
+  reached and the fix. Moving to a hosted Postgres later is a change of address. *Proposal.* (#472; 0007 points 3 and 8)
+- **US-45.** As the owner, the move happens one kind at a time with both copies kept: for a period each moved kind is
+  written to the database and to GitHub, misses are counted, and I stop the GitHub copy when nothing was missed.
+  *Proposal.* (#472; 0007 point 9)
+- **US-46.** As the author of another agent system, I can use the task and messaging layer without the factory: it has
+  a generic model (agents and people, tasks, claims, threads, verdicts), its own docs, tests, settings and run
+  commands, and imports nothing from the factory. The factory is one user of it, through its ports. Where it lives and
+  its name are the owner's. *Proposal.* (#472, owner's direction 6 Nov; 0007 point 1)
+- **US-47.** As a builder or a manager, a task can hold subtasks to any depth and typed dependencies to tasks at any
+  level (blocks, waits-for, discovered-from, supersedes, duplicates); a cycle is refused, and "blocked" and the ready
+  list that `factory next` reads are computed from them, never from prose. *Proposal.* (#472, #469; 0007 point 7)
+- **US-48.** As a builder, when I take a task I see the discoveries, blockers and decisions other agents recorded on the
+  tasks linked to it, without searching for them. *Proposal.* (#469, plandb's context entries; 0007 point 7)
+
 ## 5. Out of scope
 
 - **A custom UI other than the terminal cockpit**: no web dashboard, no web console, no phone queue. (D1; #114, #295)
