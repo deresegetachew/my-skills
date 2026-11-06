@@ -12,7 +12,7 @@ export const TASK_SELECT = `
   LEFT JOIN (SELECT task_id, array_agg(blocker_id::int ORDER BY blocker_id) AS blockers FROM task_blockers GROUP BY task_id) kb
     ON kb.task_id = t.id`;
 
-export const MESSAGE_COLS = "id, task_id, thread_id, kind, sender, addressee, state, in_reply_to, body, created_at";
+export const MESSAGE_COLS = "id, external_ref, tag, task_id, thread_id, kind, sender, addressee, state, in_reply_to, body, created_at";
 export const CONTEXT_COLS = "id, task_id, kind, body, author, created_at";
 export const EVENT_COLS = "seq, kind, subject, actor, actor_session, payload, at";
 
@@ -57,6 +57,8 @@ export function toTask(r: Row): Task {
 export function toMessage(r: Row): Message {
   return {
     id: num(r.id),
+    ref: strOrNull(r.external_ref),
+    tag: strOrNull(r.tag),
     taskId: numOrNull(r.task_id),
     threadId: num(r.thread_id),
     kind: str(r.kind) as MessageKind,

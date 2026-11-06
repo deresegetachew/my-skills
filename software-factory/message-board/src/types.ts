@@ -55,6 +55,10 @@ export interface Edge {
 
 export interface Message {
   id: number;
+  /** An outside id (`github:owner/repo/comments/123`), set by an import; unique. */
+  ref: string | null;
+  /** The user's own word for what it is (free text), such as the marker a GitHub comment carried. */
+  tag: string | null;
   taskId: number | null;
   threadId: number;
   kind: MessageKind;
@@ -133,7 +137,77 @@ export type Next = { next: "ready"; reason: string } | { next: "deferred"; reaso
 export interface NewMessage {
   task?: number | null;
   kind: MessageKind;
+  tag?: string | null;
   to?: string | null;
   body: string;
   inReplyTo?: number | null;
+}
+
+// ---------- import ----------
+// An import brings tasks and their threads from somewhere else (a GitHub repo, a tracker) and is safe to run twice:
+// everything is keyed by its outside id (`ref`), so a second run updates what changed and adds what is new.
+
+/** A task to bring in. `status` is where it is outside; a task held on the board keeps its own. */
+export interface ImportTask {
+  ref: string;
+  title: string;
+  body?: string;
+  kind?: TaskKind;
+  status: "open" | "in_review" | "deferred" | "done";
+  /** For a done task (default `done`). */
+  outcome?: Outcome | null;
+  /** When it was made outside; it orders the ready queue as there. */
+  createdAt?: Date;
+  /** Its parent's ref (in the batch or on the board). null: no parent from the import, so a parent that is an imported
+   * task is cleared, and one set on the board is kept. Left out: the parent is left as it is. */
+  parentRef?: string | null;
+  /** The refs of the tasks that block it. The `blocks` edges into it that an import made follow this list; edges made
+   * on the board are kept. Left out: its edges are left as they are. */
+  blockedBy?: string[];
+  /** Context entries kept on it, each with its own ref. The import's entries on it that aren't listed are removed. */
+  notes?: { ref: string; kind: ContextKind; body: string }[];
+}
+
+/** A message to bring in, on a task of the batch or the board. It is written as `from`, not as the importing actor. */
+export interface ImportMessage {
+  ref: string;
+  /** The task's ref. */
+  task: string;
+  kind: MessageKind;
+  tag?: string | null;
+  from: string;
+  to?: string | null;
+  body: string;
+  /** The ref of the message it replies to: it joins that thread, and an answer marks an open question answered.
+   * Without one, it joins the task's thread. */
+  inReplyTo?: string | null;
+  createdAt?: Date;
+}
+
+export interface ImportBatch {
+  /** Where it comes from (`github:owner/repo`): `lastImport(source)` finds the last run. */
+  source: string;
+  tasks: ImportTask[];
+  /** In the order they were said: a reply comes after what it replies to. */
+  messages: ImportMessage[];
+  /** Kept with the run's event, for the next run (for example when it started and with which options). */
+  options?: Record<string, unknown>;
+}
+
+export interface Tally {
+  created: number;
+  updated: number;
+  unchanged: number;
+}
+
+export interface ImportResult {
+  dryRun: boolean;
+  tasks: Tally;
+  edges: { added: number; removed: number };
+  /** Parents set or changed. */
+  parents: number;
+  messages: Tally;
+  notes: { created: number; updated: number; removed: number };
+  /** What it left out or left as it was, and why. */
+  skipped: { ref: string; why: string }[];
 }

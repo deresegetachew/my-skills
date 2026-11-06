@@ -415,3 +415,40 @@ test("refusals: no board, a board that doesn't answer, gh signed out, an unknown
   expect(err(e).code).toBe("schema-old");
   expect(err(e).fix).toContain("factory board migrate");
 });
+
+test("Board.import keeps the board's rules: a loop is left out, a bad batch is refused, and nothing is half done", async () => {
+  const url = await migrated();
+  const b = await Board.open(url, { as: "importer", max: 1 });
+  try {
+    const r = await b.import({
+      source: "test:x",
+      tasks: [
+        { ref: "x#1", title: "One", status: "open", blockedBy: ["x#2"] },
+        { ref: "x#2", title: "Two", status: "open", blockedBy: ["x#1"] },
+        { ref: "x#3", title: "Three", status: "open", parentRef: "x#3" },
+      ],
+      messages: [{ ref: "x/m1", task: "x#1", kind: "note", tag: "comment", from: "someone", body: "hello" },
+        { ref: "x/m2", task: "x#9", kind: "note", from: "someone", body: "on nothing" }],
+    });
+    expect(r.edges.added).toBe(1);
+    expect(r.skipped.map((s) => s.why).join("\n")).toContain("would make a loop");
+    expect(r.skipped.map((s) => s.ref)).toContain("x/m2");
+    const one = (await b.tasks({ all: true })).find((t) => t.ref === "x#1") as Task;
+    expect((await b.thread({ task: one.id }))[0]).toMatchObject({ from: "someone", tag: "comment", ref: "x/m1" });
+
+    const before = await counts(url);
+    let code = "";
+    try {
+      await b.import({ source: "test:x", tasks: [{ ref: "x#4", title: "Four", status: "open" }, { ref: "x#4", title: "Again", status: "open" }], messages: [] });
+    } catch (e) {
+      code = (e as { code: string }).code;
+    }
+    expect(code).toBe("bad-input");
+    expect(await counts(url)).toEqual(before);
+
+    const posted = await b.post({ task: one.id, kind: "note", tag: "hand-written", body: "a tag on post" });
+    expect(posted).toMatchObject({ tag: "hand-written", ref: null });
+  } finally {
+    await b.end();
+  }
+});
