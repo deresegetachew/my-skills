@@ -156,10 +156,14 @@ document (`- docs/artifacts/prd/index.html - the PRD as designed, a copy of an a
 exists. This works on every machine, with no connector, and keeps a role's context small.
 
 ```
-factory artifacts pull <url|id> [dest] [--from DIR] [--title T] [--version V] [--force] [--dry-run]
+factory artifacts pull <url|id> [dest] [--from DIR] [--title T] [--version V] [--force] [--dry-run] [--pr]
 factory artifacts status [--json]      per copy: up to date, OLDER than its artifact, edited locally, missing, or can't tell
 factory artifacts list
 ```
+
+`pull --pr` does the same on a new branch `artifacts/<id>/<time>`, made from the main branch as origin has it in a temporary
+worktree, then commits, pushes and opens the pull request; your own checkout is not changed, and a step that fails leaves no
+branch behind. The web UI's "Pull the new copy" and "Add an artifact" run it.
 
 `pull` copies the artifact's published files into `dest` (default `<artifacts.dir>/<id>`, `docs/artifacts/<id>`) and records the
 copy in the manifest `docs/artifacts.json` (`artifacts.manifest`): the artifact's url and id, title, version or updated time when

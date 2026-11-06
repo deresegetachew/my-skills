@@ -5,10 +5,13 @@
 // and the roles read that: a role's `reads.md` names the copy's path like any other document. This command brings a copy
 // into the project and keeps a manifest of where each came from, so anyone can tell which copy is older than its artifact.
 //
-//   factory artifacts pull <url|id> [dest] [--from DIR] [--title T] [--version V] [--force] [--dry-run]
+//   factory artifacts pull <url|id> [dest] [--from DIR] [--title T] [--version V] [--force] [--dry-run] [--pr]
 //         copy the artifact's published files into the project (default dest: <artifacts.dir>/<id>) and record it in the
 //         manifest. The files come from `artifacts.fetch` (a command, below), or from DIR, an export made by hand.
+//         --pr (#454): the same on a new branch from origin's main branch, in a temporary worktree, then a pull request;
+//         this checkout is not changed (the web UI's "Pull the new copy").
 //   factory artifacts status [--json]     per copy: up to date, OLDER than its artifact, edited locally, missing, or can't tell
+//                                         (--json also gives each copy's title, url, pulledAt and pulledBy)
 //   factory artifacts list                the manifest
 //
 // Two settings tell the factory how to reach an artifact; both are commands, empty by default, because an unattended
@@ -214,9 +217,19 @@ interface PullArgs {
   updated?: string;
   force: boolean;
   dryRun: boolean;
+  /** Open a pull request with the copy instead of changing this checkout (#454). */
+  pr?: boolean;
 }
 
 export function pull(cfg: Config, a: PullArgs): void {
+  const done = copy(cfg, a);
+  if (!done) return;
+  console.log(`pulled ${done.id} into ${done.dest} (${done.files} file(s)); recorded in ${setting(cfg, "manifest")}. ` +
+    "Review it and commit both in a pull request.");
+}
+
+/** Copies the artifact into the project and records it in the manifest, in the current folder; null on a dry run. */
+function copy(cfg: Config, a: PullArgs): { id: string; dest: string; title: string; files: number } | null {
   const [aid, url] = identify(a.artifact);
   const dest = a.dest || `${setting(cfg, "dir")}/${aid}`;
   const full = inside(dest);
@@ -264,17 +277,79 @@ export function pull(cfg: Config, a: PullArgs): void {
     };
     if (a.dryRun) {
       console.log(`would copy ${n} file(s) of ${aid} into ${dest} and record it in ${setting(cfg, "manifest")}`);
-      return;
+      return null;
     }
     if (isDir(full)) rmSync(full, { recursive: true, force: true });
     mkdirSync(dirname(full), { recursive: true });
     cpSync(tmp, full, { recursive: true });
     manifest.artifacts = [...manifest.artifacts.filter((e) => e.id !== aid), row];
     writeManifest(cfg, manifest);
-    console.log(`pulled ${aid} into ${dest} (${n} file(s)); recorded in ${setting(cfg, "manifest")}. ` +
-      "Review it and commit both in a pull request.");
+    return { id: aid, dest, title: row.title, files: n };
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+function git(args: string[]): { code: number; stdout: string; stderr: string } {
+  return run(["git", ...args]);
+}
+
+/** `pull --pr` (#454): the same pull on a new branch `artifacts/<id>/<time>`, made from the main branch as origin has it
+ * in a temporary worktree, committed, pushed, and proposed in a pull request. The person's own checkout (any branch, any
+ * state) is never touched, and a step that fails leaves no branch and no worktree behind. */
+export function pullPr(cfg: Config, a: PullArgs): void {
+  const [aid] = identify(a.artifact);
+  const main = String(cfg.mainBranch || "main");
+  const branch = `artifacts/${aid}/${nowIso().replace(/\D/g, "").slice(0, 14)}`;
+  const from = a.from ? resolve(a.from) : undefined; // read from where the command was run, not from the worktree
+  if (a.dryRun) {
+    console.log(`would copy ${aid} onto a new branch ${branch} made from origin/${main}, push it and open a pull request; ` +
+      "nothing is changed now.");
+    return;
+  }
+  const fetched = git(["fetch", "-q", "origin", main]);
+  if (fetched.code) {
+    refuse("pr-fetch-failed", `Can't fetch ${main} from origin: ${(fetched.stderr || fetched.stdout).trim().slice(0, 200)}.`,
+      "Check `git remote -v` and your network, then pull again.");
+  }
+  const base = git(["rev-parse", "FETCH_HEAD"]).stdout.trim();
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "factory-artifact-pr-"));
+  const tree = join(dir, "tree");
+  const home = process.cwd();
+  let added = false;
+  let pushed = false;
+  try {
+    const w = git(["worktree", "add", "-q", "-b", branch, tree, base]);
+    if (w.code) refuse("pr-worktree-failed", `Can't make the branch ${branch}: ${w.stderr.trim().slice(0, 200)}.`, "Fix what git says, then pull again.");
+    added = true;
+    process.chdir(tree);
+    const done = copy(cfg, { ...a, from, dryRun: false }) as NonNullable<ReturnType<typeof copy>>;
+    const manifestPath = setting(cfg, "manifest");
+    const title = `Artifacts: the new copy of ${done.title}`;
+    const body = `A new copy of ${done.title} (${a.artifact}) in \`${done.dest}\` (${done.files} file(s)), recorded in ` +
+      `\`${manifestPath}\`. Builders keep reading the copy on ${main} until this merges.`;
+    for (const args of [["add", "-A", "--", done.dest, manifestPath], ["commit", "-q", "-m", `${title}\n\n${body}`]]) {
+      const c = git(args);
+      if (c.code) refuse("pr-commit-failed", `git ${args[0]} failed: ${(c.stderr || c.stdout).trim().slice(0, 200)}.`, "Fix what git says, then pull again.");
+    }
+    const push = git(["push", "-q", "-u", "origin", branch]);
+    if (push.code) {
+      refuse("pr-push-failed", `The push of ${branch} failed: ${push.stderr.trim().slice(0, 200)}.`,
+        "Fix the remote (`git remote -v`, `gh auth status`), then pull again.");
+    }
+    pushed = true;
+    const pr = run(["gh", "pr", "create", "--base", main, "--head", branch, "--title", title, "--body", body]);
+    if (pr.code) {
+      refuse("pr-create-failed", `The branch ${branch} is pushed, but \`gh pr create\` failed: ${pr.stderr.trim().slice(0, 200)}.`,
+        `Open the pull request by hand: gh pr create --base ${main} --head ${branch}`);
+    }
+    console.log(`${pr.stdout.trim() || `Pull request opened from ${branch}.`}\n` +
+      `pulled ${done.id} into ${done.dest} on ${branch}; your checkout is unchanged. The copy on ${main} changes when it merges.`);
+  } finally {
+    process.chdir(home);
+    if (added) git(["worktree", "remove", "--force", tree]);
+    if (added && !pushed) git(["branch", "-D", branch]); // nothing left behind when nothing went out
+    rmSync(dir, { recursive: true, force: true });
   }
 }
 
@@ -302,7 +377,8 @@ function ljust(s: string, n: number): string {
 export function status(cfg: Config, json: boolean): void {
   const rows = readManifest(cfg).artifacts.map((entry) => ({ entry, state: judge(cfg, entry) }));
   if (json) {
-    console.log(pyDumps(rows.map((r) => ({ id: r.entry.id, dest: r.entry.dest, state: r.state[0], detail: r.state[1] })), { indent: 2 }));
+    console.log(pyDumps(rows.map((r) => ({ id: r.entry.id, dest: r.entry.dest, state: r.state[0], detail: r.state[1], title: r.entry.title,
+      url: r.entry.url, pulledAt: r.entry.pulledAt, pulledBy: r.entry.pulledBy })), { indent: 2 }));
   } else {
     console.log(rows.map((r) => `${ljust(r.entry.id, 28)} ${ljust(r.entry.dest, 36)} ${r.state[1]}`).join("\n") ||
       "no artifacts are pulled into this project");
@@ -318,7 +394,7 @@ export function listing(cfg: Config): void {
 const USAGE = "usage: factory artifacts [-h] {pull,status,list} ...";
 const PULL_USAGE = "usage: factory artifacts pull [-h] [--from FROM_DIR] [--title TITLE]\n" +
   "                              [--version VERSION] [--updated UPDATED]\n" +
-  "                              [--force] [--dry-run]\n" +
+  "                              [--force] [--dry-run] [--pr]\n" +
   "                              artifact [dest]";
 const STATUS_USAGE = "usage: factory artifacts status [-h] [--json]";
 const LIST_USAGE = "usage: factory artifacts list [-h]";
@@ -326,7 +402,9 @@ const HELP = USAGE + "\n\n`factory artifacts` (#104): the project's artifacts an
   "positional arguments:\n  {pull,status,list}\n\noptions:\n  -h, --help          show this help message and exit";
 const PULL_HELP = PULL_USAGE + "\n\npositional arguments:\n  artifact\n  dest\n\noptions:\n" +
   "  -h, --help         show this help message and exit\n  --from FROM_DIR\n  --title TITLE\n  --version VERSION\n" +
-  "  --updated UPDATED\n  --force\n  --dry-run";
+  "  --updated UPDATED\n  --force\n  --dry-run\n" +
+  "  --pr               copy it on a new branch from origin's main branch and open\n" +
+  "                     a pull request; this checkout is not changed";
 const STATUS_HELP = STATUS_USAGE + "\n\noptions:\n  -h, --help  show this help message and exit\n  --json";
 const LIST_HELP = LIST_USAGE + "\n\noptions:\n  -h, --help  show this help message and exit";
 
@@ -372,6 +450,7 @@ export function parse(argv: string[]): { cmd: string; pull?: PullArgs; json: boo
         a[valued[key] as "from"] = v;
       } else if (x === "--force") a.force = true;
       else if (x === "--dry-run") a.dryRun = true;
+      else if (x === "--pr") a.pr = true;
       else if (x.startsWith("-") && x !== "-" && !x.includes(" ")) extra.push(x); // argparse: a word with a space is a value
       else if (pos.length < 2) pos.push(x);
       else extra.push(x);
@@ -397,7 +476,8 @@ export function parse(argv: string[]): { cmd: string; pull?: PullArgs; json: boo
 export function main(argv: string[]): void {
   const a = parse(argv);
   const cfg = load();
-  if (a.cmd === "pull") pull(cfg, a.pull as PullArgs);
+  if (a.cmd === "pull" && a.pull?.pr) pullPr(cfg, a.pull);
+  else if (a.cmd === "pull") pull(cfg, a.pull as PullArgs);
   else if (a.cmd === "status") status(cfg, a.json);
   else listing(cfg);
 }
