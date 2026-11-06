@@ -169,7 +169,8 @@ export function serve(o: ServeOptions): Running {
   const viewsSent = new Map<string, string>();
   const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
     changed: (p) => pushViews(p), fellBack: (p) => refresher.start(p, true) });
-  const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
+  const feedStarted = feed.start();
+  const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null), feedStarted);
   function viewsMessage(p: UiProject): string {
     return JSON.stringify({ type: "views", project: p.id, ...viewsOf(p, refresher.running(p), Date.now(), feed.view(p)) });
   }
@@ -365,7 +366,6 @@ export function serve(o: ServeOptions): Running {
     port = s.port ?? port;
     servers.push(s);
   }
-  void feed.start();
   return {
     port,
     stop: () => {

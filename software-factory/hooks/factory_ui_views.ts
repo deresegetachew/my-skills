@@ -537,8 +537,9 @@ export class Refresher {
 
   /** `fromBoard(p)`: project `p`'s tasks come from the message board (#498), so its snapshot leaves them out
    *  (FACTORY_SNAPSHOT_TASKS=board) and reads only what the board doesn't have: pull requests, CI, agents. null: not
-   *  known yet (the board is being opened), so no read starts until it is. */
-  constructor(private readonly changed: (p: UiProject) => void, private readonly fromBoard: (p: UiProject) => boolean | null = () => false) {}
+   *  known yet (the board is being opened), so a read waits for `known`. */
+  constructor(private readonly changed: (p: UiProject) => void, private readonly fromBoard: (p: UiProject) => boolean | null = () => false,
+    private readonly known: Promise<void> = Promise.resolve()) {}
 
   running(p: UiProject): boolean {
     return this.busy.has(p.id);
@@ -549,7 +550,10 @@ export class Refresher {
     if (p.problem || this.busy.has(p.id)) return false;
     const last = this.started.get(p.id) ?? 0;
     if (!force && Date.now() - last < ttl() * 1000) return false; // one that failed is not tried again at each tick
-    if (this.fromBoard(p) === null) return false; // the message board is still being opened: the next tick reads
+    if (this.fromBoard(p) === null) { // the message board is still being opened: read once it is known
+      void this.known.then(() => this.start(p, force));
+      return true;
+    }
     this.started.set(p.id, Date.now());
     const env = { ...envFor(p), FACTORY_SNAPSHOT_TASKS: this.fromBoard(p) === true ? "board" : "" };
     const job = spawn(["bash", factoryScript(p), "snapshot"], p.path, env, REFRESH_TIMEOUT_MS)
