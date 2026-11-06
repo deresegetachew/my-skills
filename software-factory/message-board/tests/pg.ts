@@ -1,16 +1,17 @@
 // A real Postgres for the message board's tests (decision 0007 point 10). Not a test file.
 //
 // MB_TEST_URL names a server the tests may create databases on (CI sets it to its `postgres` service). Without it,
-// the tests start a throwaway postgres:17-alpine container with Docker on a free port and remove it when they finish:
-// in afterAll, and again when the process exits or is stopped. A container left by a run that was killed is removed by
-// the next run (each one carries the process id that made it). Without either, the tests fail and say how to fix it.
+// the tests start a throwaway postgres:17-alpine container with Docker on a free port, its data in memory (tmpfs), and
+// remove it when they finish: in afterAll, and again when the process exits or is stopped. A container left by a run
+// that was killed is removed by the next run (each one carries the process id that made it). Without either, the
+// tests fail and say how to fix it.
 import { SQL } from "bun";
 import { randomBytes } from "node:crypto";
 
 const IMAGE = "postgres:17-alpine";
 const LABEL = "factory-message-board-test";
 const USER = "factory";
-const PASSWORD = "factory-test";
+const PASSWORD = `pw${randomBytes(9).toString("hex")}`; // unlike any path, so a test can check it is never printed
 
 export interface Server {
   /** A URL with rights to create databases and roles. */
@@ -78,7 +79,7 @@ export async function startServer(): Promise<Server> {
   if (docker(["info"], 30_000).code !== 0) throw new Error(`No Postgres for the message board's tests: MB_TEST_URL is unset and Docker isn't running. ${HOW}`);
   removeLeftovers();
   const run = docker(["run", "-d", "--rm", "--label", `${LABEL}=${process.pid}`, "-e", `POSTGRES_USER=${USER}`,
-    "-e", `POSTGRES_PASSWORD=${PASSWORD}`, "-e", "POSTGRES_DB=postgres", "-p", "127.0.0.1::5432", IMAGE], 600_000);
+    "-e", `POSTGRES_PASSWORD=${PASSWORD}`, "-e", "POSTGRES_DB=postgres", "--tmpfs", "/var/lib/postgresql/data", "-p", "127.0.0.1::5432", IMAGE], 600_000);
   if (run.code !== 0) throw new Error(`docker run ${IMAGE} failed: ${run.out.slice(-400)}. ${HOW}`);
   const id = run.out.split("\n").at(-1) as string;
   let stopped = false;

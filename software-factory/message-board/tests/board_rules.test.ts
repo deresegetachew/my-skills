@@ -1,7 +1,7 @@
 // The board's rules against a real Postgres (decision 0007 point 10, #489): migrations, ready and blocked from typed
 // edges, the atomic claim and its token, release with what happens next, the sweep, versioned edits, events with
 // NOTIFY, context for linked tasks, prime, onMe and delegated. Each test file gets its own database.
-import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { SQL } from "bun";
 import { Board, BoardError, type BoardEvent } from "../src/index.ts";
 import { freshDatabase, type Server, startServer } from "./pg.ts";
@@ -17,11 +17,16 @@ beforeAll(async () => {
   db = await freshDatabase(server);
   const b = await Board.open(db.url);
   await b.migrate();
-  await b.close();
+  await b.end();
 }, 600_000);
 
+// Each test closes its boards, so the connections don't pile up.
+afterEach(async () => {
+  for (const b of open.splice(0)) await b.end().catch(() => {});
+});
+
 afterAll(async () => {
-  for (const b of open) await b.close().catch(() => {});
+  for (const b of open) await b.end().catch(() => {});
   await db?.drop().catch(() => {});
   server?.stop();
 });
@@ -69,7 +74,7 @@ test("two claimers race for one task: exactly one wins, the other gets nothing",
   // Its own priority puts it first in the queue, so both claimers aim at it.
   const t = await setup.create({ title: title("the only one"), priority: -1000 });
   const [a, b] = [await board("haile"), await board("taytu")];
-  const [ca, cb] = await Promise.all([a.claim(t.id), b.claim(t.id).catch((e: unknown) => e)]);
+  const [ca, cb] = await Promise.all([a.claim(t.id).catch((e: unknown) => e), b.claim(t.id).catch((e: unknown) => e)]);
   const results = [ca, cb];
   const wins = results.filter((r) => r !== null && !(r instanceof Error) && typeof r === "object" && "token" in r);
   expect(wins.length).toBe(1);
@@ -115,11 +120,11 @@ test("an old token is refused (claim-lost) once the task has passed to someone e
   const now = await b.claim(t.id);
   expect(now?.task.holder).toBe("taytu");
   for (const write of [
-    a.close(t.id, { token: old.token, outcome: "done" }),
-    a.heartbeat(t.id, old.token),
-    a.release(t.id, old.token, { next: "ready", reason: "again" }),
+    () => a.close(t.id, { token: old.token, outcome: "done" }),
+    () => a.heartbeat(t.id, old.token),
+    () => a.release(t.id, old.token, { next: "ready", reason: "again" }),
   ]) {
-    expect((await refusal(write)).code).toBe("claim-lost");
+    expect((await refusal(write())).code).toBe("claim-lost");
   }
   const after = await po.get(t.id);
   expect(after.status).toBe("in_progress");
@@ -352,7 +357,7 @@ test("prime returns what the actor holds, what is ready, what is blocked, and re
   const a = await board("primer");
   const held = await po.create({ title: title("primed held") });
   const blocked = await po.create({ title: title("primed blocked") });
-  const blocker = await po.create({ title: title("primed blocker") });
+  const blocker = await po.create({ title: title("primed blocker"), priority: -3000 });
   await po.link(blocker.id, blocked.id, "blocks");
   await a.claim(held.id);
   const p = await a.prime("primer");

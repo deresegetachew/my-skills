@@ -109,8 +109,8 @@ test("migrate, then tasks, ready, show, prime and sweep print what is on the boa
   await po.note(a.id, { kind: "decision", body: "Keep the issue number as the ref" });
   const haile = await Board.open(url, { as: "haile" });
   await haile.claim(a.id, { ttlSeconds: 1 });
-  await po.close();
-  await haile.close();
+  await po.end();
+  await haile.end();
 
   const tasks = board(w, ["tasks"]);
   expect(tasks.code, tasks.stderr).toBe(0);
@@ -299,4 +299,14 @@ test("a url file that others can read is fixed to mode 600 when read", () => {
   chmodSync(join(w.dir, "url"), 0o644);
   expect(board(w, ["tasks"]).code).toBe(0);
   expect(mode(join(w.dir, "url"))).toBe(0o600);
+});
+
+test("the tests' own Postgres: without MB_TEST_URL and with Docker down, they fail and say how to fix it", () => {
+  const w = world();
+  const code = `import { startServer } from ${JSON.stringify(join(import.meta.dir, "pg.ts"))};\n` +
+    "try { await startServer(); console.log('started'); } catch (e) { console.log(String(e)); process.exit(3); }";
+  const p = Bun.spawnSync([process.execPath, "--no-env-file", "-e", code], { env: { ...w.env, FAKE_DOCKER_DOWN: "1" }, stdout: "pipe", stderr: "pipe" });
+  expect(p.exitCode).toBe(3);
+  expect(p.stdout.toString()).toContain("MB_TEST_URL is unset and Docker isn't running");
+  expect(p.stdout.toString()).toContain("Set MB_TEST_URL");
 });
