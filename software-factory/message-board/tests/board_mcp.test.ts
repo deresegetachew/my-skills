@@ -2,6 +2,7 @@
 // starts `bun bin.ts mcp` against a real Postgres and talks JSON-RPC to it over stdin and stdout, as a client would:
 // the lifecycle, the tools and their schemas, each tool's happy path, the refusals, the fixed actor, and a clean exit.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { SQL } from "bun";
 import { join } from "node:path";
 import { Board } from "../src/index.ts";
 import { freshDatabase, type Server, startServer } from "./pg.ts";
@@ -55,10 +56,10 @@ class Client {
   private nextId = 1;
   stderr = "";
 
-  constructor(url: string, args: string[] = ["--as", "haile"]) {
+  constructor(url: string, args: string[] = ["--as", "haile"], read = true) {
     this.proc = Bun.spawn([process.execPath, "--no-env-file", BIN, "mcp", ...args], { env: env(url), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     clients.push(this);
-    void this.read();
+    if (read) void this.read();
     const proc = this.proc;
     void (async () => {
       this.stderr = await new Response(proc.stderr).text();
@@ -394,4 +395,116 @@ test("it won't start without --as, or without a board, and says how to fix it", 
 test("factory board help lists the mcp verb", () => {
   const p = Bun.spawnSync([process.execPath, "--no-env-file", BIN, "help"], { env: env(), stdout: "pipe", stderr: "pipe" });
   expect(p.stdout.toString()).toContain("factory board mcp --as <actor> [--session <id>]");
+});
+
+/** How many connections are open to the database at `url`, other than this query's. */
+async function connections(url: string): Promise<number> {
+  const name = new URL(url).pathname.slice(1);
+  const u = new URL(url);
+  u.pathname = "/postgres";
+  const sql = new SQL(u.toString(), { max: 1 });
+  try {
+    const r = (await sql`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = ${name} AND pid <> pg_backend_pid()`) as { n: number }[];
+    return r[0]?.n ?? 0;
+  } finally {
+    await sql.close();
+  }
+}
+
+/** The connections still open to `url` after waiting up to 10 s for them to close. */
+async function noConnections(url: string): Promise<number> {
+  const deadline = Date.now() + 10_000;
+  let n = await connections(url);
+  while (n > 0 && Date.now() < deadline) {
+    await Bun.sleep(100);
+    n = await connections(url);
+  }
+  return n;
+}
+
+const STACK = /\n\s+at /;
+
+for (const [signal, code] of [["SIGTERM", 143], ["SIGINT", 130]] as const) {
+  test(`${signal} closes the board's connection and exits ${code}, writing nothing more to stdout`, async () => {
+    const url = await database();
+    const c = new Client(url);
+    await c.start();
+    await c.request("tools/list");
+    expect(await connections(url)).toBeGreaterThan(0);
+    const replies = c.replies.length;
+    c.proc.kill(signal);
+    expect(await c.proc.exited).toBe(code);
+    await Bun.sleep(50);
+    expect(c.replies.length).toBe(replies);
+    expect(await noConnections(url)).toBe(0);
+    expect(c.stderr).not.toMatch(STACK);
+  });
+}
+
+test("when the client stops reading stdout, the server closes the board and exits without a stack trace", async () => {
+  const url = await database();
+  const c = new Client(url, ["--as", "haile"], false);
+  await c.proc.stdout.cancel();
+  c.raw(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "1" } } }));
+  for (let i = 2; i < 40; i++) c.raw(JSON.stringify({ jsonrpc: "2.0", id: i, method: "tools/list" }));
+  const exited = await Promise.race([c.proc.exited, Bun.sleep(15_000).then(() => -1)]);
+  expect(exited).toBe(0);
+  await Bun.sleep(50);
+  expect(c.stderr).toContain("stopped reading");
+  expect(c.stderr).not.toMatch(STACK);
+  expect(c.stderr).not.toContain("unexpected");
+  expect(await noConnections(url)).toBe(0);
+});
+
+test("a batch is refused with -32600, and the server keeps serving", async () => {
+  const c = new Client(await database());
+  await c.start();
+  c.raw(JSON.stringify([{ jsonrpc: "2.0", id: 50, method: "ping" }, { jsonrpc: "2.0", id: 51, method: "ping" }]));
+  const r = await c.reply(null);
+  expect(r.error?.code).toBe(-32600);
+  expect(r.error?.message).toContain("batch");
+  expect((await c.request("ping")).result).toEqual({});
+  expect(c.replies.some((x) => x.id === 50 || x.id === 51)).toBe(false);
+  expect(await c.end()).toBe(0);
+});
+
+test("a body over the cap on a very large line is bad-input, and the server keeps serving", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  const c = new Client(url);
+  await c.start();
+  const e = await c.refused("board_post", { task: a.id, kind: "note", body: "x".repeat(1_000_000) });
+  expect(e.code).toBe("bad-input");
+  expect(e.message).toContain("body");
+  expect(e.message).toContain("20000");
+  expect(await po.thread({ task: a.id })).toEqual([]);
+  expect((await c.ok("board_post", { task: a.id, kind: "note", body: "x".repeat(20_000) })).message).toMatchObject({ from: "haile" });
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("requests sent back to back without waiting are answered in order", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  await po.end();
+  const c = new Client(url);
+  await c.start();
+  const before = c.replies.length;
+  const call = (id: number, name: string, args: Json): string => JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
+  c.raw([
+    call(101, "board_claim", { task: a.id }),
+    call(102, "board_show", { task: a.id }),
+    JSON.stringify({ jsonrpc: "2.0", id: 103, method: "ping" }),
+    call(104, "board_post", { task: a.id, kind: "status", body: "Started" }),
+    call(105, "board_thread", { task: a.id }),
+  ].join("\n"));
+  await c.reply(105);
+  expect(c.replies.slice(before).map((r) => r.id)).toEqual([101, 102, 103, 104, 105]);
+  const shown = (await c.reply(102)).result as unknown as ToolResult;
+  expect((shown.structuredContent as { task: { holder: string } }).task.holder).toBe("haile");
+  const thread = (await c.reply(105)).result as unknown as ToolResult;
+  expect((thread.structuredContent as { messages: unknown[] }).messages.length).toBe(1);
+  expect(await c.end()).toBe(0);
 });
