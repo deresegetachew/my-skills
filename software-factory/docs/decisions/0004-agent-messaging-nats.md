@@ -131,7 +131,7 @@ Decision 0003 says that an adapter with npm dependencies is a plugin. This point
 - **The Ink cockpit becomes a plugin under the same mechanism.** That means one build step, one import rule and one
   "missing" error, instead of a special case. It is on by default because the cockpit is D1, and without it
   `factory cockpit` says what is missing and the plain text commands still work. Decision 0002's rule 4 (only the cockpit
-  may import Ink and React) becomes this rule.
+  may import Ink and React) becomes this rule. *(Dropped: the cockpit was retired in #425; decision 0005.)*
 
 ### 6. Subjects and message shape
 
@@ -222,7 +222,7 @@ messaging port with its GitHub and in-memory adapters is step 3 of 0003's migrat
    `check_skills.ts` rule, the loader with its errors and the GitHub fallback, and the doctor's check. Tested with a tiny
    test plugin.
 4. **The cockpit as a plugin:** its Ink UI moves under the mechanism (with decision 0002's build task, if that isn't
-   done yet).
+   done yet). *(Dropped: the cockpit was retired in #425; decision 0005.)*
 5. **`factory nats up|down|status`:** the compose file, hub and leaf config, JetStream, the Tailscale address, the
    network guard's allow rule, and the doctor's "server answers" check.
 6. **Credentials:** `factory nats user add`, the role permissions, the seed files and their modes, and the doctor's

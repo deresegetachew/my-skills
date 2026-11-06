@@ -98,3 +98,39 @@ test("signoff dry run and bad ids write nothing", () => {
   expect(posted(d)).toEqual([]);
   expect(signoff(work, env, "confirm", "ghost").code).not.toBe(0);
 });
+
+test("each item says who started it and when, with its history oldest first", () => {
+  const [d, work, env] = project();
+  const c = (body: string, login: string, at: string) => ({ body, created_at: at, user: { login } });
+  write(join(d, "db.json"), JSON.stringify({
+    issues: [{ number: 50, title: "Sign-off and testing queue", body: "", state: "open", labels: [] }],
+    comments: { "50": [
+      c("<!-- factory-testplan id=login-flow task=13 -->\n1. Open the link.", "mentewab", "2026-11-05T10:05:00Z"),
+      c("<!-- factory-testplan-confirm id=login-flow by=boss -->", "boss", "2026-11-05T10:40:00Z"),
+      c("<!-- factory-testresult id=login-flow result=pass by=boss -->\nAll good", "boss", "2026-11-05T11:20:00Z"),
+      c("<!-- factory-signoff id=arabic-label task=12 -->\nTo check: Read the warning", "fasil", "2026-11-05T12:00:00Z"),
+    ] },
+  }));
+  const p = signoff(work, env, "ls", "--all", "--json");
+  expect(p.code, p.out).toBe(0);
+  type Item = { kind: string; id: string; task: string; confirmed: boolean; state: string; by: string; at: string;
+    results: string[][]; history: { what: string; by: string; at: string; result?: string; note?: string }[] };
+  const items = JSON.parse(p.stdout) as Item[];
+  const plan = items.find((i) => i.id === "login-flow") as Item;
+  expect(plan.kind).toBe("testplan");
+  expect(plan.confirmed).toBe(true);
+  expect(plan.state).toBe("passed");
+  expect(plan.by).toBe("mentewab");
+  expect(plan.at).toBe("2026-11-05T10:05:00Z");
+  expect(plan.results[0]?.[0]).toBe("pass");
+  expect(plan.history).toEqual([
+    { what: "proposed", by: "mentewab", at: "2026-11-05T10:05:00Z" },
+    { what: "confirmed", by: "boss", at: "2026-11-05T10:40:00Z" },
+    { what: "result", by: "boss", at: "2026-11-05T11:20:00Z", result: "pass", note: "All good" },
+  ]);
+  const item = items.find((i) => i.id === "arabic-label") as Item;
+  expect(item.kind).toBe("signoff");
+  expect(item.by).toBe("fasil");
+  expect(item.at).toBe("2026-11-05T12:00:00Z");
+  expect(item.history).toEqual([{ what: "added", by: "fasil", at: "2026-11-05T12:00:00Z" }]);
+});

@@ -1,8 +1,8 @@
-// The web app's tasks, pull requests and CI channels (#424): the cockpit's views as channels, from the API's views data
-// (factory_ui_views.ts, live over the WebSocket). The tasks channel shows a board (#439, board.tsx) or a list. Each has
-// a filter (#392: every word, any case) and says how old its
-// data is, with a button that reads it again. The CI channel puts the verdict first and its actions (#396) are buttons
-// that ask first, then run the same commands the cockpit's CI view runs, on the machine that serves the page.
+// The web app's tasks, pull requests and CI channels (#424), from the API's views data (factory_ui_views.ts, live over
+// the WebSocket). The tasks channel shows a board (#439, board.tsx) or a list. Each has a filter (#392: every word, any
+// case) and says how old its data is, with a button that reads it again. The CI channel puts the verdict first and its
+// actions (#396) are buttons that ask first, then run their factory commands (factory_ci_view.ts), on the machine that
+// serves the page.
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
 import { Board, EpicChips } from "./board.tsx";

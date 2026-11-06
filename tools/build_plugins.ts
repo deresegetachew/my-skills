@@ -10,14 +10,31 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import type { BunPlugin } from "bun";
 import { FactoryError } from "../software-factory/hooks/factory_lib.ts";
 import { PLUGIN_NAME, pluginHeader } from "../software-factory/hooks/factory_plugins.ts";
-import { fromOwn } from "./build_cockpit.ts";
 
 /** Where plugins live, relative to software-factory/, and where their bundles go in the release archive. */
 export const PLUGINS = "plugins";
 export const BUNDLES = "hooks/plugins";
 const OWN = resolve(import.meta.dir, "..", "software-factory");
+
+/** For a checkout with no node_modules: its packages come from `own` (the folder holding the builder's node_modules). */
+function fromOwn(own: string): BunPlugin {
+  return {
+    name: "builder-modules",
+    setup(b) {
+      b.onResolve({ filter: /^[^./]/ }, (args) => {
+        if (/^(node|bun):/.test(args.path)) return undefined;
+        try {
+          return { path: Bun.resolveSync(args.path, own) };
+        } catch {
+          return undefined; // the bundler says it can't be resolved
+        }
+      });
+    },
+  };
+}
 
 /** The plugins in a list of software-factory/-relative paths: each folder under plugins/ with an index.ts. Throws
  * {code: plugin_name} for a folder whose name isn't lowercase letters, digits and dashes. */
@@ -43,7 +60,7 @@ function failed(dir: string, why: string): FactoryError {
 
 async function buildTo(dir: string, name: string, version: string, out: string): Promise<void> {
   // A checkout with no node_modules in the plugin's folder (a release built with --root from another checkout) takes the
-  // plugin's packages from the builder's own install of that plugin, as the cockpit's build does.
+  // plugin's packages from the builder's own install of that plugin.
   const own = join(OWN, PLUGINS, name);
   const plugins = !existsSync(join(dir, "node_modules")) && existsSync(join(own, "node_modules")) ? [fromOwn(own)] : [];
   let r: Awaited<ReturnType<typeof Bun.build>>;

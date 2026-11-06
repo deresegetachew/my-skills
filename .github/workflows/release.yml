@@ -45,7 +45,7 @@ jobs:
             exit 1
           fi
 
-      # Ink and React, build-time only (decision 0002): the build bundles the cockpit's UI with them, and its tests use them.
+      # React and react-dom, build-time only (decision 0005): the build bundles the web app with them.
       - name: Install the build-time dependencies
         working-directory: software-factory
         run: bun install --frozen-lockfile

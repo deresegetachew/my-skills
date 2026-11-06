@@ -11,5 +11,5 @@
     "jsx": "react-jsx",
     "types": ["bun"]
   },
-  "include": ["hooks", "ci", "cockpit", "web", "plugins", "message-board", "tests", "../tools"]
+  "include": ["hooks", "ci", "web", "plugins", "message-board", "tests", "../tools"]
 }

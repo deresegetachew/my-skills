@@ -1,8 +1,8 @@
 // The rules of the web app's tasks, pull requests and CI channels (#424) that aren't drawing: the API's shapes
 // (factory_ui_views.ts), the search within a view and across views (#392: every word typed is in the row's text, in any
-// case, as the cockpit's `/` matches), and the tone of each state. No React here, so tests/web_ui_views_model.test.ts
+// case, factory_match.ts), and the tone of each state. No React here, so tests/web_ui_views_model.test.ts
 // runs it as it is.
-import { matchesTyped } from "../hooks/factory_cockpit_match.ts";
+import { matchesTyped } from "../hooks/factory_match.ts";
 import type { Tone } from "./model.ts";
 
 export { matchesTyped };
@@ -241,12 +241,12 @@ export function runnerTone(state: string): Tone {
   return state === "busy" ? "good" : state === "offline" ? "bad" : "quiet";
 }
 
-/** The verdict's tone: the cockpit's green, amber and red. */
+/** The verdict's tone, from factory_ci_view.ts's green, amber and red. */
 export function verdictTone(tone: string): Tone {
   return tone === "green" ? "good" : tone === "red" ? "bad" : "warn";
 }
 
-/** "3 min", "2 h", "4 d", as the cockpit's CI view says how long ago. */
+/** "3 min", "2 h", "4 d": how long ago, in the CI channel. */
 export function minutesText(minutes: number): string {
   const m = Math.max(Math.floor(minutes), 0);
   return m < 120 ? `${m} min` : m < 2880 ? `${Math.floor(m / 60)} h` : `${Math.floor(m / 1440)} d`;

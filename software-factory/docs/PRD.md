@@ -44,7 +44,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 
 | # | Decision | Source |
 |---|---|---|
-| D1 | **One terminal window, the cockpit** (`factory cockpit`), built on tmux. The left side lists the sessions and the views. The right side is the selected agent's real Claude Code session, or a view. tmux hosts the live sessions and provides popups, the status line and keys; the sidebar and views are Ink (React for terminals) components, bundled into one file at release, so a project still installs no npm package (decision 0002, 31 Oct 2026). The cockpit needs tmux 3.2 or newer. Every screen is built on one core of factory commands, and the plain text commands (`factory status`, `factory agents ls`, `factory follow`, `factory prs`) stay. It replaces the earlier D1, "No custom UI" (the Claude app plus a Remote Control `-i` session as the UI). A web console, Claude Code's agent view and VS Code's Agents window were set aside. | #295 (owner, 28 Oct 2026), [decisions/0001-cockpit.md](decisions/0001-cockpit.md), [0002](decisions/0002-cockpit-ink.md) (owner, 31 Oct 2026); earlier: #114, #97, #101, #106 |
+| D1 | *Replaced by the web UI, `factory ui` (decision 0005, 5 Nov 2026); the cockpit was retired in #425 (6 Nov 2026), and `factory cockpit` now only says it moved there. As decided before:* **One terminal window, the cockpit** (`factory cockpit`), built on tmux. The left side lists the sessions and the views. The right side is the selected agent's real Claude Code session, or a view. tmux hosts the live sessions and provides popups, the status line and keys; the sidebar and views are Ink (React for terminals) components, bundled into one file at release, so a project still installs no npm package (decision 0002, 31 Oct 2026). The cockpit needs tmux 3.2 or newer. Every screen is built on one core of factory commands, and the plain text commands (`factory status`, `factory agents ls`, `factory follow`, `factory prs`) stay. It replaces the earlier D1, "No custom UI" (the Claude app plus a Remote Control `-i` session as the UI). A web console, Claude Code's agent view and VS Code's Agents window were set aside. | #295 (owner, 28 Oct 2026), [decisions/0001-cockpit.md](decisions/0001-cockpit.md), [0002](decisions/0002-cockpit-ink.md) (owner, 31 Oct 2026), [0005](decisions/0005-web-ui.md) (owner, 5 Nov 2026), #425; earlier: #114, #97, #101, #106 |
 | D2 | **The factory installs from numbered releases** of my-skills: an archive plus a SHA-256 checksum file, on GitHub. The submodule goes away (the old submodule step keeps working until a project migrates). | #113 (owner, option D) |
 | D3 | **The installed factory is committed in the project's repo** as real files with a pin file saying which release, so a fresh clone works and an update is a reviewable diff. *Recorded.* | #113 |
 | D4 | **Versions are semantic**, such as `v1.4.0`. *Recorded.* | #113, `software-factory/VERSION` |
@@ -56,7 +56,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 | D10 | **GitHub is the record and what the PR gate trusts; agents' messages go through a setting, GitHub by default, NATS as a plugin.** Reviewer passes, `factory-approved`, `factory-mustfix`, holds, owner asks and answers, the issues, PRs and the board's labels stay on GitHub. With `messaging.transport: "nats"`, the kinds listed in `messaging.kinds` (claims, wake-ups, hand-offs, questions between agents) go over NATS, one kind at a time, and a send NATS doesn't confirm falls back to GitHub. Nothing that arrives over NATS changes what may merge. *Being built (decision 0004's tasks, #403 onwards); until then every message goes over GitHub.* It replaces the earlier D10, "GitHub is the state and the transport; nothing opens a port or adds a service". **Changing (decision 0007, accepted 6 Nov 2026):** the factory's own database becomes the record for tasks and conversations; GitHub keeps the code, the pull requests, CI and what the PR gate trusts. Until each kind has moved (0007 point 9), this row holds. | #97, [decisions/0004](decisions/0004-agent-messaging-nats.md) (owner, #293, 5 Nov 2026), [messages.md](messages.md), wiki/agent-loops.md "Messages between agents" |
 | D11 | **Agents run the agreed process and do not change it** (owner's rule, 21 Oct 2026). Agents cannot edit what governs them: the PR gate, the guard, the agents' rules (`.claude/factory/settings.json`), agent definitions, `.claude/factory.json`, `factory` and `factory-loop.sh` are protected. | DEV-MANAGER.md, my-skills `CLAUDE.md`, `.claude/factory.json`, #263 |
 | D12 | **Owner-only actions** (the list below). | #150, #114, `manage-pass` skill, `CLAUDE.md` |
-| D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash; an npm package is used only inside a **plugin** (decision 0004): a folder `software-factory/plugins/<name>/` with its own pinned `package.json`, bundled into one JavaScript file at release (as decision 0002 first did for the cockpit's Ink and React), so a project installs nothing and gets no `node_modules`. Nothing outside a plugin's folder imports its packages, a plugin is turned on by the setting that needs it, and no package is added this way without the owner. *The plugin mechanism is being built (0004's tasks 3 and 4); until it lands the cockpit UI is the one exception, its Ink and React bundled into the release (decision 0002)*; there is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), [decisions/0004](decisions/0004-agent-messaging-nats.md) point 5 (plugins), `CLAUDE.md` |
+| D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash; an npm package is used only inside a **plugin** (decision 0004): a folder `software-factory/plugins/<name>/` with its own pinned `package.json`, bundled into one JavaScript file at release (as decision 0002 first did for the cockpit's Ink and React), so a project installs nothing and gets no `node_modules`. Nothing outside a plugin's folder imports its packages, a plugin is turned on by the setting that needs it, and no package is added this way without the owner. *The plugin mechanism is being built (0004's tasks 3 and 4); until it lands the web UI is the one exception, its React and react-dom bundled into the release (decision 0005; Ink went with the cockpit, #425)*; there is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), [decisions/0004](decisions/0004-agent-messaging-nats.md) point 5 (plugins), `CLAUDE.md` |
 | D14 | **The agents' rules are passed only to the sessions the factory starts.** `factory loop` and `factory agent` start Claude with `--settings`: `.claude/factory/settings.json` and the `permissions.allow` from `.claude/factory.json`, both read from `main` on origin, never from the agent's own folder. A project's own `.claude/settings.json` stays the project's and still applies. The Stop check runs only in a factory run. So the owner's own sessions in a project are not governed by the agents' rules. | #258, #256 (owner, 27 Oct 2026) |
 | D15 | **Token budgets are per task and advisory.** The unit is one task (issue); it counts fresh input (input + cache writes) + output as `factory usage` reports them, never money or cache reads. It is set by a `Budget:` line in the task issue, else `budget.builder` in factory.json. The budget is taken from the issue when the task is claimed, and a coding agent may not change it. Over 80% the checkpoint warns; there is no hard stop, because stopping mid-change leaves broken branches. An overrun is the dev manager's call at review; CI never fails on it. | #183 (owner, 28 Oct 2026) |
 
@@ -241,7 +241,8 @@ until he agrees them."
 
 - **O1.** As the owner, I can run the factory with plain text commands, and from my phone with the Claude app plus a
   Remote Control `-i` session. Remote Control needs a claude.ai login on a Pro, Max, Team or Enterprise plan. From a
-  terminal, the cockpit (section 4.10) is the main way. *Built (the commands); changed by the new D1 (#295).* (#114;
+  browser, the web UI (`factory ui`, decision 0005) is the main way; it replaced the terminal cockpit of section 4.10
+  (#425). *Built (the commands); changed by the new D1 (#295).* (#114;
   wiki/agent-loops.md "From your phone")
 - **O2.** As the owner, I am told only what needs me, each as one item on the owner-queue issue ("Dev manager: needs the
   owner") with the question, a recommendation and the exact command or step, posted once however many managers want to
@@ -397,22 +398,26 @@ From #295 (owner, 28 Oct 2026; D1). The design is the Claude Design canvas "Fact
 to 11, linked from #295. The repo keeps this text, not the pictures. These stories have `US-<n>` ids, so tasks can say
 `PRD: US-<n>` and `factory prd` shows their progress. The stories above keep their letter ids.
 
+*The cockpit was replaced by the web UI (`factory ui`, decision 0005) and retired in #425. The core stories stand; where
+a story names the cockpit, the web UI now does that part.*
+
 The core first: every screen needs it.
 
-- **US-1.** As the owner, one command gives the whole factory as data: `factory cockpit --json` prints one snapshot
+- **US-1.** As the owner, one command gives the whole factory as data: `factory snapshot` prints one snapshot
   (sessions and their states across machines, the items that need me, pull request rows, CI, the version and the summary
-  from `factory doctor`). `factory cockpit --status` prints one line for tmux's status line, from a cache, fast enough
-  to run on every status refresh. *Decided.* (#295)
+  from `factory doctor`), and keeps it as a cache the web UI reads. *Decided.* (#295; it was `factory cockpit --json`
+  until #425. The tmux status line, `factory cockpit --status`, went with the cockpit.)
 - **US-2.** As the owner, the heartbeat covers every role, not only coding agents: dev managers, product owners and
   sub-managers each have a row with their role, and `factory agents ls` shows them. *Decided.* (#295; L1)
 - **US-3.** As the owner, every session the factory starts runs in its own tmux window, through one shared step used by
-  the cockpit, `factory autostart`, resume and `loop -i` (today `loop -i` runs in the current terminal). *Decided.* (#295)
+  `factory owner start`, `factory autostart`, resume and `loop -i` (today `loop -i` runs in the current terminal). *Decided.* (#295)
 - **US-4.** As the owner, I can see what a sub-manager is doing: it runs in its own tmux window, started through the
-  shared step of US-3, and the cockpit shows that window read-only. Today a sub-manager runs as `claude -p` with no
+  shared step of US-3, and `tmux attach -r -t =<session>` (the orchestrator prints it) shows that window read-only
+  (`factory cockpit watch` until #425). Today a sub-manager runs as `claude -p` with no
   screen. *Decided.* (#295; owner's answer in #293, 28 Oct 2026)
 - **US-5.** As the owner, `factory follow <name>` finds a session on this machine directly, not only through an ssh
   remote. *Decided.* (#295; O5)
-- **US-6.** As the owner, what I do by hand is a factory command, so the cockpit and the command line share it:
+- **US-6.** As the owner, what I do by hand is a factory command, so the web UI and the command line share it:
   `factory owner merge`, `label`, `answer` and `release`. `merge` keeps the protected-file check: it says when a pull
   request touches protected paths. The dev manager may run them too, still under the PR gate; a coding agent may not,
   so inside a coding agent's session they refuse with `{code, message, fix}`. *Decided.* (#295; D12; owner's answer in
@@ -422,11 +427,12 @@ The core first: every screen needs it.
 - **US-8.** As the owner, the GitHub views (`factory prs`, `watch`, `messages`, CI) read from one background cache, like
   `factory agents ls` does, so a view opens without waiting on GitHub, and `factory ci status --json` gives CI as data.
   *Decided.* (#295; C6)
-- **US-9.** As the owner, settings I change in the cockpit collect into one `factory settings pr`; machine settings save
+- **US-9.** As the owner, settings I stage collect into one `factory settings pr`; machine settings save
   at once, as they do in `factory settings` today. *Built* (`set --stage`, `diff --staged`, `unstage`, #306; the
-  cockpit's settings view is US-13). (#295; S2, S3, S4)
+  cockpit's settings view, US-13, was retired with the cockpit, #425). (#295; S2, S3, S4)
 
-Then the cockpit, in steps.
+Then the cockpit, in steps. *Replaced by the web UI (decision 0005): its channels (agents, tasks, pull requests, CI,
+owner queue, machines) took over US-10 to US-13, and the cockpit was retired in #425.*
 
 - **US-10.** As the owner, `factory cockpit` opens one terminal window that works over plain ssh. On the left, SESSIONS
   (dev managers, product owners, coding agents, other machines), each with its state and a "needs you" badge, and under
@@ -435,17 +441,18 @@ Then the cockpit, in steps.
   need you"; at the bottom, the keys that work now. `:` opens a fuzzy command bar over the factory commands; `/` inside
   a session stays Claude's. The cockpit has its own prefix, `C-a`, so tmux nested over ssh keeps `C-b`. Views open as
   popups that run the existing commands. Read-only in this step. Without tmux 3.2 or newer it stops with
-  `{code, message, fix}`. *Built* (#308; `C-a C-a` comes back to the list). (#295)
+  `{code, message, fix}`. *Built* (#308; `C-a C-a` comes back to the list). *Replaced by the web UI (#425).* (#295)
 - **US-11.** As the owner, I act from the cockpit: merge, label, release, answer, start and stop an agent, say. Each
   asks me first when it changes GitHub or the machine. *Built* (#309; the `:` bar runs `factory owner merge`, `label`,
   `answer`, `release`, `start`, `stop` and `factory say` after a y/N question; `m` in the Pull requests view merges
-  pinned to the head it shows, `s`, `x` and `n` in the list say, stop and start). (#295; US-6)
+  pinned to the head it shows, `s`, `x` and `n` in the list say, stop and start). *Replaced by the web UI (#425).* (#295; US-6)
 - **US-12.** As the owner, the cockpit shows the alerts of US-7 in its own window: the badge, the count and the bell.
-  *Built* (#310; the bell rings from the list once per new owner ask, no second desktop notice). (#295)
+  *Built* (#310; the bell rings from the list once per new owner ask, no second desktop notice). *Replaced by the web
+  UI (#425); `factory alerts` still rings and notifies.* (#295)
 - **US-13.** As the owner, the views move towards the canvas boards: pull request detail, CI cards, the settings table,
-  usage bars. *Decided.* (#295)
+  usage bars. *Decided.* *Replaced by the web UI's channels (#424, #425).* (#295)
 
-Not in the cockpit, on purpose: the commands that agents and the gate use (`review-pass`, `wait`, `run-check`, the
+Not in the cockpit, nor in the web UI, on purpose: the commands that agents and the gate use (`review-pass`, `wait`, `run-check`, the
 guard, rereview record and reply, the `manager-claims` actions). (#295)
 
 ### 4.11 The factory's own record (decision 0007)
@@ -485,7 +492,8 @@ web UI section proposed on #293 (US-14 onward) keeps its range. Until the owner 
 
 ## 5. Out of scope
 
-- **A custom UI other than the terminal cockpit**: no web dashboard, no web console, no phone queue. (D1; #114, #295)
+- **A custom UI other than the web UI** (`factory ui`, decision 0005, which replaced the terminal cockpit, #425): no
+  second dashboard or console, no phone queue. (D1; #114, #295)
 - **New dependencies.** The factory is TypeScript on Bun, with Bun and Node built-ins only, and bash. An npm package
   lives only inside a plugin, bundled at release, and only with the owner's yes. (D13, decision 0004, `CLAUDE.md`)
 - **An agent changing the process.** Agents do not edit the gate, the guard, the agents' rules, agent definitions or
@@ -541,7 +549,7 @@ processes per test) still apply.
 
 ### C. Other things that are later or not agreed
 
-- **A VS Code extension on stable APIs**, as a second screen on the same core as the cockpit. (#295)
+- **A VS Code extension on stable APIs**, as a second screen on the same core as the web UI. (#295)
 - **An A2A adapter** for the message envelope, in the heartbeat daemon. GitHub stays the transport; the adapter is a later
   step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
@@ -578,7 +586,7 @@ PR #39 was a draft PRD, written 22 to 24 Oct, that nobody had reviewed (#114, #1
 |---|---|
 | Roles, what exists today | Section 3 and section 4, checked against `main` and updated. |
 | The numbered stories, marked Must/Should/Could | Rewritten as the stories above, marked by status, each naming its issue. Stories for work that is now built say *Built*. |
-| UI options (CLI, TUI, dashboard, mobile inbox) and a recommendation to start with a mobile inbox | **Dropped.** Superseded by D1 (then "no custom UI"; since #295, the terminal cockpit). |
+| UI options (CLI, TUI, dashboard, mobile inbox) and a recommendation to start with a mobile inbox | **Dropped.** Superseded by D1 (then "no custom UI"; since #295, the terminal cockpit; since decision 0005 and #425, the web UI). |
 | Architecture options (a state store, a local daemon) | **Dropped as options.** D10: GitHub is the record (agents' messages may go over NATS, decision 0004). The per-machine heartbeat daemon exists for liveness (#108). |
 | 31 numbered pains with evidence from 21 to 24 Oct | Not carried over as a list. The ones that led to built features appear as the issues those features name. |
 | Roadmap of five phases | Dropped. The order is issue #114. |

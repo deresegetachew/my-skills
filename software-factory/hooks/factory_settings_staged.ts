@@ -1,4 +1,4 @@
-// Staged project settings (#306): changes the owner makes one by one, from the cockpit or `factory settings set
+// Staged project settings (#306): changes the owner makes one by one, from `factory settings` or `factory settings set
 // --stage`, collect here and go out together in one `factory settings pr`.
 //
 // The staging file sits in the git directory (`<git common dir>/factory/settings-staged.json`), so it is never

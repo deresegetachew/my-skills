@@ -67,26 +67,20 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | Command | In the UI | Where | Task |
 |---|---|---|---|
 | `status` | planned | Home (Main.dc.html) | #451 |
-| `cockpit --json` | built | What the UI reads; refresh asks for it again | |
-| `cockpit --needs` | built | The owner queue channel: answer in place | #451 |
+| `snapshot` | built | What the UI reads; refresh asks for it again | |
+| `talk` | built | An agent channel's talk box for the dev manager and the product owner: one turn, answer in the chat | |
 | `owner answer` | built | The owner queue channel: answer, after a confirm | |
 | `alerts check` | planned | Inbox (Inbox.dc.html): notify me | #451 |
 | `alerts watch` | planned | Inbox (Inbox.dc.html): notify me | #451 |
 | `messages` | planned | Activity (Activity.dc.html): the feed and open questions | #451 |
-| `cockpit watch` | planned | Activity (Activity.dc.html) | #451 |
 | `issues` | built | The tasks channel; issues setup is in the Project wizard (ProjectWizard.dc.html) | #452 |
-| `cockpit --tasks` | built | The tasks channel; Board (Board.dc.html) | #439 |
 | `next` | planned | Task (Task.dc.html): next in line | #452 |
-| `cockpit` | terminal only | The tmux cockpit, which the web UI replaces (decision 0005) | |
-| `cockpit --ink` | terminal only | The Ink cockpit (decision 0002), which the web UI replaces | |
-| `cockpit --status` | terminal only | One line for tmux's status bar | |
 
 ## Tasks and pull requests
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
 | `prs` | built | The pull requests channel | #452 |
-| `cockpit --prs` | built | The pull requests channel; PRs (PRs.dc.html) | #452 |
 | `owner merge` | planned | PR (PR.dc.html): merge pinned to the head, after a confirm; Inbox | #452 |
 | `owner label` | planned | Task (Task.dc.html), PR (PR.dc.html) | #452 |
 | `reviews` | agents only | PR (PR.dc.html): checks and reviews | |
@@ -108,21 +102,20 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `signoff ls` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
-| `signoff add` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
-| `signoff plan` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
-| `signoff confirm` | planned | Sign-off item (SignoffItem.dc.html) | #454 |
-| `signoff result` | planned | Sign-off item (SignoffItem.dc.html) | #454 |
-| `artifacts pull` | planned | Artifacts (Artifacts.dc.html) | #454 |
-| `artifacts status` | planned | Artifacts (Artifacts.dc.html) | #454 |
-| `artifacts list` | planned | Artifacts (Artifacts.dc.html) | #454 |
+| `signoff ls` | built | Sign-off and testing (Signoff.dc.html) | #454 |
+| `signoff add` | built | Sign-off and testing (Signoff.dc.html): Add something to check | #454 |
+| `signoff plan` | agents only | Sign-off item (SignoffItem.dc.html): the product owner writes the plan; you confirm it or ask for a change | |
+| `signoff confirm` | built | Sign-off item (SignoffItem.dc.html): Confirm plan | #454 |
+| `signoff result` | built | Sign-off item (SignoffItem.dc.html): Passed, Failed | #454 |
+| `artifacts pull` | built | Artifacts (Artifacts.dc.html): Pull new copy, Add an artifact (each opens a pull request) | #454 |
+| `artifacts status` | built | Artifacts (Artifacts.dc.html): each copy's state, Check for new versions | #454 |
+| `artifacts list` | built | Artifacts (Artifacts.dc.html) | #454 |
 
 ## CI
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
 | `ci status` | built | The CI channel: the verdict first, runs, runners | #455 |
-| `cockpit --ci` | built | The CI channel | #455 |
 | `ci use local` | built | The CI channel: run CI here, after a confirm | |
 | `ci use github` | built | The CI channel: run CI on GitHub, after a confirm | |
 | `ci install` | built | The CI channel: install the runners, after a confirm | |
@@ -140,10 +133,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `cockpit --agents` | built | The machines channel | #455 |
-| `cockpit --health` | planned | Health (Health.dc.html) | #455 |
 | `reset-run` | planned | Health (Health.dc.html), Maintenance (Maintenance.dc.html): list, then clean after a confirm | #455 |
-| `cockpit --usage` | planned | Usage and cost (Usage.dc.html) | #455 |
 | `usage` | planned | Usage and cost (Usage.dc.html) | #455 |
 | `usage --task` | planned | Usage and cost (Usage.dc.html); Task (Task.dc.html): its budget | #455 |
 | `report` | planned | Usage and cost (Usage.dc.html) | #455 |
@@ -191,7 +181,6 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | Command | In the UI | Where | Task |
 |---|---|---|---|
 | `settings` | planned | Settings (Settings.dc.html): browse by section, search, help, change | #456 |
-| `cockpit --settings` | planned | Settings (Settings.dc.html) | #456 |
 | `settings list` | planned | Settings (Settings.dc.html) | #456 |
 | `settings help` | planned | Settings (Settings.dc.html): each setting's help | #456 |
 | `settings show` | planned | Settings (Settings.dc.html) | #456 |

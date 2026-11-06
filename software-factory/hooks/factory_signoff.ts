@@ -4,7 +4,8 @@
 // One issue, "Sign-off and testing queue" (pin it), holds one comment per item. The state of an item is read from the
 // comments after it, so nothing is edited and a second run changes nothing.
 //
-//   factory signoff ls [--all] [--json]       open items (--all: finished ones too), one line each
+//   factory signoff ls [--all] [--json]       open items (--all: finished ones too), one line each; --json gives each
+//                                             with who started it and when (by, at) and its story (history), for the web UI
 //   factory signoff add <id> --task N --check "how to check it"
 //                                             a task's "Done when" needs a person: say how they check it
 //   factory signoff plan <id> [--task N] (--file PLAN.md | --text "...")
@@ -32,6 +33,16 @@ const WORD: Record<string, string> = { pass: "passed", fail: "failed", blocked: 
 
 export type Result = [result: string, by: string, note: string];
 
+/** One step of an item's story, oldest first: added (a sign-off item), proposed (a test plan, again when revised),
+ * confirmed, or a result. */
+export interface Event {
+  what: "added" | "proposed" | "confirmed" | "result";
+  by: string;
+  at: string;
+  result?: string;
+  note?: string;
+}
+
 export interface Item {
   kind: "signoff" | "testplan";
   id: string;
@@ -40,6 +51,10 @@ export interface Item {
   confirmed: boolean;
   results: Result[];
   state: string;
+  /** Who posted the item's first comment, and when ("" when GitHub didn't say). */
+  by: string;
+  at: string;
+  history: Event[];
 }
 
 /** The number of the open queue issue (made on demand when `create`), else null. */
@@ -69,16 +84,25 @@ export function read(comments: fi.Comment[]): Map<string, Item> {
     const i = attrs.id;
     if (!i) continue;
     const text = body.replace(new RegExp(MARK.source, "g"), "").trim();
+    const at = c.created_at ?? "";
     if (what === "signoff" || what === "testplan") {
       if (what === "signoff" && items.has(i)) continue; // the first entry stands
-      // a revised test plan replaces the old one: it has to be confirmed again and its results start over
-      items.set(i, { kind: what, id: i, task: attrs.task ?? null, text, confirmed: false, results: [], state: "" });
+      // a revised test plan replaces the old one: it has to be confirmed again and its results start over; who started
+      // it and its story stay
+      const was = items.get(i);
+      const by = c.user?.login ?? "";
+      const history: Event[] = [...(was?.history ?? []), { what: what === "signoff" ? "added" : "proposed", by, at }];
+      items.set(i, { kind: what, id: i, task: attrs.task ?? null, text, confirmed: false, results: [], state: "",
+        by: was?.by ?? by, at: was?.at ?? at, history });
     } else if (items.has(i)) {
       const it = items.get(i) as Item;
-      if (what === "testplan-confirm" && it.kind === "testplan") it.confirmed = true;
-      else if ((what === "signoff-result" || what === "testresult") && (RESULTS as readonly string[]).includes(attrs.result ?? "")) {
+      if (what === "testplan-confirm" && it.kind === "testplan") {
+        it.confirmed = true;
+        it.history.push({ what: "confirmed", by: attrs.by ?? "", at });
+      } else if ((what === "signoff-result" || what === "testresult") && (RESULTS as readonly string[]).includes(attrs.result ?? "")) {
         if (it.kind === "testplan" && !it.confirmed) continue; // a result for a plan nobody confirmed counts for nothing
         it.results.push([attrs.result as string, attrs.by ?? "", text]);
+        it.history.push({ what: "result", by: attrs.by ?? "", at, result: attrs.result as string, note: text });
       }
     }
   }
@@ -169,7 +193,7 @@ export function main(argv: string[]): void {
     const shown = a.all ? [...items.values()] : openItems(items);
     if (a.json) {
       console.log(pyDumps(shown.map((it) => ({ kind: it.kind, id: it.id, task: it.task, text: it.text, confirmed: it.confirmed,
-        results: it.results, state: it.state })), { indent: 2 }));
+        results: it.results, state: it.state, by: it.by, at: it.at, history: it.history })), { indent: 2 }));
     } else {
       console.log(shown.map(line).join("\n") || "nothing waits in the sign-off and testing queue");
     }

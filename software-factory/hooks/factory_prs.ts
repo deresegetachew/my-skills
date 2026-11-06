@@ -37,7 +37,8 @@ const OWNER_ANSWER = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const PO_REPLY = /<!--\s*factory-po-reply\s+ask=([\w.-]+)([^>]*?)-->/; // "done" may follow
 const PO_OWN = /<!--\s*factory-po-/;
 const NAMES_PO = /\bPO\b|product[ -]owner/i;
-/** The summary of a talk with a role in the cockpit (#395): context for the next pass, never the owner's answer. */
+/** The summary of a talk with a role (`factory talk`, #395; the marker keeps the cockpit's name, so earlier summaries
+ *  still read the same): context for the next pass, never the owner's answer. */
 export const CHAT_SUMMARY = /<!--\s*factory-cockpit-chat\b/;
 const ASK_TEXT_MAX = 4000;
 
@@ -292,7 +293,7 @@ export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()
       under = [po[1] as string];
       continue;
     }
-    if (CHAT_SUMMARY.test(body)) continue; // a cockpit talk's summary answers nothing (#395)
+    if (CHAT_SUMMARY.test(body)) continue; // a talk's summary (`factory talk`) answers nothing (#395)
     if (PO_OWN.test(body)) continue; // the product owner's own record (a review), never the owner's answer (#397)
     if (trusted.size && !trusted.has(loginOf(c))) continue;
     const answered = markerIds(OWNER_ANSWER, body);
