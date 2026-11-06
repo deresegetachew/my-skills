@@ -49,6 +49,8 @@ const PAGES: Record<string, { label: string; channel: string; title: string; pur
   epics: { label: "Epics", channel: "view:epics", title: "Epics", purpose: "The bigger pieces of work, each with its stage and its tasks." },
   prs: { label: "Pull requests", channel: "view:pull-requests", title: "Pull requests", purpose: "What the builders opened, its checks and its review." },
   docs: { label: "PRD and decisions", channel: "page:docs", title: "PRD and decisions", purpose: "What the product is for, and the decisions taken on the way." },
+  artifacts: { label: "Designs and artifacts", channel: "page:artifacts", title: "Designs and artifacts",
+    purpose: "The designs builders work from, kept as reviewed copies in the repo." },
   signoff: { label: "Sign-off and testing", channel: "page:signoff", title: "Sign-off and testing", purpose: "What was built and waits for you to try it." },
   activity: { label: "Activity", channel: "page:activity", title: "Activity", purpose: "Everything that happened, newest first." },
   ci: { label: "CI and runners", channel: "view:ci", title: "CI and runners", purpose: "Whether the checks pass, and the machines that run them." },
@@ -77,6 +79,7 @@ export function channelOf(page: string): string {
 export function pageOf(channel: string): string {
   if (channel.startsWith("agent:")) return channel.slice("agent:".length);
   if (channel.startsWith("doc:")) return "docs";
+  if (channel.startsWith("signoff:")) return "signoff"; // an item's page (#454)
   for (const [page, p] of Object.entries(PAGES)) if (p.channel === channel) return page;
   return "home";
 }
@@ -98,7 +101,7 @@ function rank(role: string): number {
 
 function item(page: string, active: string, counts: Record<string, number>): NavItem {
   const p = PAGES[page];
-  const on = page === "settings" ? SETTINGS.includes(active) : page === active;
+  const on = page === "settings" ? SETTINGS.includes(active) : page === "docs" ? active === "docs" || active === "artifacts" : page === active;
   const n = counts[page] ?? 0;
   return { page, label: p?.label ?? page, channel: channelOf(page), on, badge: n > 0 ? { count: n, tone: page === "inbox" ? "red" : "blue" } : null };
 }

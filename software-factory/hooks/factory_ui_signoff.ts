@@ -13,6 +13,7 @@
 // (`bun factory_ui_signoff.ts read`), this file prints {queue, items}: the server reads GitHub in a child process, so a slow
 // GitHub never holds up the page.
 import { join } from "node:path";
+import type { Comment } from "./factory_issues.ts";
 import { type ActionResult, envFor, factoryScript, type Obj, type Problem, spawn, type UiProject } from "./factory_ui_data.ts";
 
 const ID = /^[A-Za-z0-9][\w.-]{0,63}$/; // factory_signoff.ts's own
@@ -122,7 +123,7 @@ if (import.meta.main) {
   await runMain(() => {
     if (process.argv[2] !== "read") throw new Error("usage: factory_ui_signoff.ts read");
     const n = queue();
-    const items = n ? [...read(fi.ghAll<fi.Comment>(`repos/{owner}/{repo}/issues/${n}/comments`)).values()] : [];
+    const items = n ? [...read(fi.ghAll<Comment>(`repos/{owner}/{repo}/issues/${n}/comments`)).values()] : [];
     console.log(JSON.stringify({ queue: n, items }));
   });
 }
