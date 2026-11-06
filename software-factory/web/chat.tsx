@@ -7,6 +7,7 @@
 // then runs `factory owner answer`.
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 import { type AskView, type ChatItemView, itemLabel, mergeItems, orderAsks, type ProblemView, type QueueView } from "./chat_model.ts";
+import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
 
 interface LiveMessage {
@@ -137,6 +138,7 @@ export function ChatLog({ chat, agent }: { chat: Chat; agent: string }) {
               return (
                 <li key={x.id} className={`msg${l.mine ? " mine" : ""}${x.kind === "error" ? " bad" : ""}`}>
                   <p className="msg-head">
+                    {!l.mine && x.from && <Avatar name={x.from} size={22} />}
                     <strong>{l.who}</strong>
                     {l.what && <span>{l.what}</span>}
                     {x.state && x.kind !== "owner" && x.kind !== "reply" && <span className="tag quiet">{x.state}</span>}

@@ -7,6 +7,8 @@ export interface ChannelView {
   name: string;
   title: string;
   role?: string;
+  /** The owner's image for the agent (#437), as the server read it. */
+  avatar?: string;
 }
 
 export interface ProjectView {
