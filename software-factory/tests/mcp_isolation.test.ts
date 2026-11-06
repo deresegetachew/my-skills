@@ -135,3 +135,62 @@ test("factory agent starts claude isolated and passes its own arguments on", () 
   expect(JSON.parse(read(mainCopy(work)))).toEqual(DOCS);
   expect(args[args.length - 1]).toBe("--resume");
 });
+
+// With the board on (#501), the one server allowed in is the board's, for this agent: main's .mcp.json is not used.
+const BOARD_ON = '{"waitMinutes": 0, "tasks": {"source": "board"}}';
+const BOARD_URL = "postgres://factory:s3cret-pw-501@127.0.0.1:1/board";
+
+/** The board server the args start, after checking it is the only server, and its arguments after bin.ts. */
+function boardOnly(args: string[]): string[] {
+  const cfg = JSON.parse(flag(args, "--mcp-config")) as { mcpServers: Record<string, { command: string; args: string[] }> };
+  expect(Object.keys(cfg.mcpServers)).toEqual(["board"]);
+  const s = cfg.mcpServers.board as { command: string; args: string[] };
+  const i = s.args.findIndex((a) => a.endsWith(join("message-board", "bin.ts")));
+  expect(i, JSON.stringify(s)).toBeGreaterThanOrEqual(0);
+  expect(JSON.stringify(args)).not.toContain("s3cret-pw-501");
+  expect(JSON.stringify(args)).not.toContain("docs-server");
+  return s.args.slice(i + 1);
+}
+
+/** The board beside the hooks folder, as a release and a linked project have it. */
+function withBoard(work: string): void {
+  symlinkSync(join(SF, "message-board"), join(work, ".claude", "message-board"));
+}
+
+test("a headless loop run with the board on gets only the board's server, as its agent", () => {
+  const [work, env] = loopProject(DOCS, undefined, BOARD_ON);
+  withBoard(work);
+  env.MB_URL = BOARD_URL;
+  const args = headless(work, env);
+  expect(args).toContain("--strict-mcp-config");
+  const a = boardOnly(args);
+  expect(a.slice(0, 5)).toEqual(["mcp", "--as", "solo", "--role", "builder"]);
+  expect(a[5]).toBe("--session");
+  expect((a[6] ?? "").length).toBeGreaterThan(0);
+});
+
+test("factory agent with the board on starts claude with only the board's server, as that agent", () => {
+  const d = tmp();
+  const work = join(d, "proj");
+  quiet(["git", "init", "-q", "-b", "main", work]);
+  write(join(work, ".claude", "hooks", ".keep"), "");
+  for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) symlinkSync(join(HOOKS, f), join(work, ".claude", "hooks", f));
+  withBoard(work);
+  write(join(work, ".claude", "factory", "settings.json"), read(KIT_AGENT_SETTINGS));
+  write(join(work, ".claude", "factory.json"), JSON.stringify({ agents: ["menelik", "taytu"], tasks: { source: "board" } }));
+  write(join(work, ".mcp.json"), JSON.stringify(DOCS));
+  quiet(["git", "add", "-A"], work);
+  quiet(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "start"], work);
+  const origin = join(d, "origin.git");
+  quiet(["git", "init", "-q", "--bare", "-b", "main", origin]);
+  quiet(["git", "remote", "add", "origin", origin], work);
+  quiet(["git", "push", "-q", "origin", "HEAD:main"], work);
+  const env = fakeClaude(d);
+  env.MB_URL = BOARD_URL;
+  const p = sh(["bash", join(SF, "factory"), "agent", "menelik"], { cwd: work, env, timeoutMs: 60_000 });
+  expect(p.code, p.out).toBe(0);
+  const got = calls(env);
+  expect(got.length).toBe(1);
+  const a = boardOnly(got[0] as string[]);
+  expect(a.slice(0, 5)).toEqual(["mcp", "--as", "menelik", "--role", "builder"]);
+});

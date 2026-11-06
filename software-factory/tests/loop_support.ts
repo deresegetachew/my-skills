@@ -1,7 +1,7 @@
 // Running the real factory-loop.sh in a throwaway repo with stub hooks and a stub `claude`: the stub loop project and
 // a fake `claude` that records its arguments (mcp_isolation, models), and a logging stub loop (countdown, reload, once,
 // machines, autostart). Not a test file.
-import { copyFileSync, existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { HOOKS, KIT, SF, sh, tmp, write, writeExe } from "./support.ts";
 
@@ -100,7 +100,7 @@ export function flag(args: string[], name: string): string {
 export const MAIN_COPY = join(".git", "factory-mcp.json");
 
 export function mainCopy(work: string): string {
-  return join(resolve(work), MAIN_COPY);
+  return join(realpathSync(resolve(work)), MAIN_COPY); // git prints the real path (macOS: /var is /private/var)
 }
 
 /** Hook lines with the script's folder left out: the kit's `"$CLAUDE_PROJECT_DIR"/.claude/hooks/x.ts` and the
