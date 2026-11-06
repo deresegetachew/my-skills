@@ -122,8 +122,9 @@ function q(text: string): string {
 /** The compose file: the pinned image, the config folder read-only, the data volume, and the host ports on
  * localhost and the Tailscale address only. */
 export function composeYaml(s: State): string {
-  const binds = ["127.0.0.1", ...(s.address ? [s.address] : [])];
-  const ports = binds.map((b) => `${b}:${s.ports.client}:4222`);
+  // One address for the agents' port: Docker 29 refuses the same host port on two addresses ("address already in
+  // use"). The Tailscale address when there is one (this machine's own agents reach it too), else localhost.
+  const ports = [`${s.address || "127.0.0.1"}:${s.ports.client}:4222`];
   ports.push(`127.0.0.1:${s.ports.monitor}:8222`);
   // The hub's leaf port is for the other machines: on the Tailscale address only.
   if (s.mode === "hub" && s.address) ports.push(`${s.address}:${s.ports.leaf}:7422`);
@@ -348,7 +349,8 @@ async function cmdUp(argv: string[]): Promise<number> {
       "Fix what Docker says, then run `factory nats up` again. Nothing was changed.");
   }
   console.log(w.changed ? `Started the NATS ${mode} (${IMAGE}) from ${dir}.` : `The NATS ${mode} is up to date (${dir}).`);
-  console.log(`Agents connect on nats://127.0.0.1:${ports.client}` + (address ? ` and nats://${address}:${ports.client}.` : "."));
+  console.log(`Agents connect on nats://${address || "127.0.0.1"}:${ports.client}.` +
+    (address ? ` Set it once: factory settings set messaging.url nats://${address}:${ports.client}` : ""));
   if (!address) {
     console.log("note: Tailscale isn't installed or isn't up here, so the server listens on localhost only: other " +
       "machines can't reach it. Start Tailscale (`tailscale up`) and run `factory nats up` again.");
@@ -401,7 +403,7 @@ async function cmdStatus(argv: string[]): Promise<number> {
     return 1;
   }
   console.log(`mode        ${s.mode}` + (s.mode === "leaf" ? ` (hub ${s.hub})` : ""));
-  console.log(`listens     127.0.0.1:${s.ports.client}` + (s.address ? `, ${s.address}:${s.ports.client}` : " (localhost only: no Tailscale)"));
+  console.log(`listens     ${s.address || "127.0.0.1"}:${s.ports.client}` + (s.address ? " (Tailscale)" : " (localhost only: no Tailscale)"));
   console.log(`files       ${natsDir()}`);
   console.log(`keys        ${readUsers().length}`);
   const health = await httpGet(`http://127.0.0.1:${s.ports.monitor}/healthz`);
