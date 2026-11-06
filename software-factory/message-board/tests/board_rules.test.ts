@@ -163,6 +163,7 @@ test("release says what happens next: ready, deferred, or a hand-off only the na
   expect((await refusal((await board("taytu")).claim(t3.id))).code).toBe("not-ready");
   const other = await (await board("zewditu")).claim();
   expect(other?.task.id).not.toBe(t3.id);
+  expect((await po.ready()).map((t) => t.id)).not.toContain(t3.id);
   const got = await (await board("menelik")).claim();
   expect(got?.task.id).toBe(t3.id);
   const ev = (await po.events(0)).filter((e) => e.subject === `task:${t3.id}` && e.kind === "task.released");
@@ -411,4 +412,108 @@ test("a refused write emits no event", async () => {
   const before = (await po.events(0)).at(-1)?.seq ?? 0;
   await refusal(po.update(t.id, { version: t.version + 5, body: "x" }));
   expect(await po.events(before)).toEqual([]);
+});
+
+// ---------- races on the graph, and event order ----------
+test("two links that together close a loop, sent at once: exactly one wins, the other is a cycle", async () => {
+  for (let round = 0; round < 5; round++) {
+    const po = await board("po");
+    const [a, b] = [await po.create({ title: title("race A") }), await po.create({ title: title("race B") })];
+    const [x, y] = [await board("x"), await board("y")];
+    const results = await Promise.all([x.link(a.id, b.id, "blocks").catch((e: unknown) => e), y.link(b.id, a.id, "waits_for").catch((e: unknown) => e)]);
+    expect(results.filter((r) => r === true).length).toBe(1);
+    expect(results.filter((r) => r instanceof BoardError && r.code === "cycle").length).toBe(1);
+  }
+});
+
+test("two parent changes that together make a loop, sent at once: exactly one wins, the other is a cycle", async () => {
+  for (let round = 0; round < 5; round++) {
+    const po = await board("po");
+    const [a, b] = [await po.create({ title: title("parent A") }), await po.create({ title: title("parent B") })];
+    const [x, y] = [await board("x"), await board("y")];
+    const results = await Promise.all([
+      x.update(a.id, { version: a.version, parentId: b.id }).catch((e: unknown) => e),
+      y.update(b.id, { version: b.version, parentId: a.id }).catch((e: unknown) => e),
+    ]);
+    expect(results.filter((r) => r instanceof BoardError && r.code === "cycle").length).toBe(1);
+    expect(results.filter((r) => !(r instanceof Error)).length).toBe(1);
+  }
+});
+
+test("events from many writers at once reach a listener in commit order, none skipped", async () => {
+  const watcher = await board("watcher");
+  const start = (await watcher.events(0)).at(-1)?.seq ?? 0;
+  const got: number[] = [];
+  const sub = await watcher.listen((e) => {
+    got.push(e.seq);
+  }, { after: start });
+  try {
+    const writers = await Promise.all(Array.from({ length: 8 }, (_, i) => board(`writer-${i}`)));
+    await Promise.all(writers.map(async (w) => {
+      for (let k = 0; k < 5; k++) await w.create({ title: title("burst") });
+    }));
+    const all = (await watcher.events(start)).map((e) => e.seq);
+    expect(all.length).toBe(40);
+    const deadline = Date.now() + 10_000;
+    while (got.length < all.length && Date.now() < deadline) await Bun.sleep(50);
+    expect(got).toEqual(all);
+  } finally {
+    await sub.close();
+  }
+});
+
+// ---------- states and kinds ----------
+test("the sweep keeps an in-review task in review and only drops its holder", async () => {
+  const po = await board("po");
+  const a = await board("reviewing");
+  const t = await po.create({ title: title("in review") });
+  const c = await a.claim(t.id, { ttlSeconds: 1 });
+  await po.update(t.id, { version: c?.task.version ?? 0, status: "in_review" });
+  await Bun.sleep(2200);
+  const swept = (await (await board("system")).sweep({ quietSeconds: 1 })).map((s) => s.id);
+  expect(swept).toContain(t.id);
+  const after = await po.get(t.id);
+  expect([after.status, after.holder]).toEqual(["in_review", null]);
+});
+
+test("closing a done task without a token is refused and keeps its outcome; reopening clears the outcome", async () => {
+  const po = await board("po");
+  const t = await po.create({ title: title("done once") });
+  const done = await po.close(t.id, { outcome: "wont_do" });
+  const err = await refusal(po.close(t.id, { outcome: "done" }));
+  expect(err.code).toBe("bad-input");
+  expect((await po.get(t.id)).outcome).toBe("wont_do");
+  const reopened = await po.update(t.id, { version: done.version, status: "open" });
+  expect([reopened.status, reopened.outcome]).toEqual(["open", null]);
+  const deferred = await po.update(t.id, { version: reopened.version, status: "deferred" });
+  expect(deferred.outcome).toBeNull();
+});
+
+test("only tasks and bugs are claimed: epics, notes and decisions are never ready", async () => {
+  const po = await board("po");
+  const kinds = ["epic", "note", "decision"] as const;
+  const made = [];
+  for (const kind of kinds) made.push(await po.create({ title: title(kind), kind, priority: -9000 }));
+  const bug = await po.create({ title: title("bug"), kind: "bug", priority: -8999 });
+  const ready = (await po.ready()).map((t) => t.id);
+  for (const m of made) expect(ready).not.toContain(m.id);
+  expect(ready).toContain(bug.id);
+  const a = await board("kind-claimer");
+  for (const m of made) {
+    const msg = (await refusal(a.claim(m.id))).message;
+    expect(msg).toContain(m.kind);
+    expect(msg).toContain("only tasks and bugs are claimed");
+  }
+  expect((await a.claim())?.task.id).toBe(bug.id);
+});
+
+test("ready without an actor leaves out tasks handed to someone; with one it includes theirs", async () => {
+  const po = await board("po");
+  const a = await board("hander");
+  const t = await po.create({ title: title("handed") });
+  const c = await a.claim(t.id);
+  await a.release(t.id, c?.token ?? "", { next: "handoff", to: "receiver", reason: "yours" });
+  expect((await po.ready()).map((x) => x.id)).not.toContain(t.id);
+  expect((await po.ready({ for: "receiver" })).map((x) => x.id)).toContain(t.id);
+  expect((await po.ready({ for: "someone-else" })).map((x) => x.id)).not.toContain(t.id);
 });

@@ -31,6 +31,7 @@ echo "$*" >>"$FAKE_LOG"
 [ "$1" = info ] && { [ "\${FAKE_DOCKER_DOWN:-0}" = 1 ] && exit 1; exit 0; }
 case " $* " in *" up "*) [ "\${FAKE_COMPOSE_FAIL:-0}" = 1 ] && { echo "Error: port is already allocated" >&2; exit 1; } ;; esac
 case " $* " in *" pg_dump "*) echo "-- PostgreSQL database dump"; echo "CREATE TABLE tasks ();" ;; esac
+case " $* " in *" volume inspect "*) [ "\${FAKE_VOLUME:-0}" = 1 ] && exit 0; exit 1 ;; esac
 exit 0
 `;
 const FAKE_TAILSCALE = `#!/usr/bin/env bash
@@ -309,4 +310,33 @@ test("the tests' own Postgres: without MB_TEST_URL and with Docker down, they fa
   expect(p.exitCode).toBe(3);
   expect(p.stdout.toString()).toContain("MB_TEST_URL is unset and Docker isn't running");
   expect(p.stdout.toString()).toContain("Set MB_TEST_URL");
+});
+
+test("up refuses when the password is gone but the data volume is still there, and changes nothing", () => {
+  const w = world();
+  const r = board(w, ["up"], { FAKE_VOLUME: "1" });
+  expect(r.code).toBe(1);
+  const e = err(r);
+  expect(e.code).toBe("password-missing");
+  expect(e.fix).toContain("factory board down --purge");
+  expect(e.fix).toContain(join(w.dir, "password"));
+  expect(existsSync(w.dir)).toBe(false);
+  expect(dockerLog(w)).not.toMatch(/ up -d/);
+});
+
+test("ready leaves out tasks handed to someone else; --for <actor> shows that actor's queue", async () => {
+  const url = (db as { url: string }).url;
+  const w = world(url);
+  board(w, ["migrate"]);
+  const po = await Board.open(url, { as: "po" });
+  const t = await po.create({ title: "Handed to menelik", priority: -50 });
+  const a = await Board.open(url, { as: "haile" });
+  const c = await a.claim(t.id);
+  await a.release(t.id, c?.token ?? "", { next: "handoff", to: "menelik", reason: "yours" });
+  await po.end();
+  await a.end();
+  expect(board(w, ["ready"]).stdout).not.toContain("Handed to menelik");
+  const mine = board(w, ["ready", "--for", "menelik"]);
+  expect(mine.code, mine.stderr).toBe(0);
+  expect(mine.stdout).toMatch(new RegExp(`#${t.id}\\s+open\\s+menelik\\s+Handed to menelik`));
 });
