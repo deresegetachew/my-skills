@@ -146,7 +146,11 @@ export interface Move {
   outcome?: Outcome;
 }
 
-export type Next ={ next: "ready"; reason: string } | { next: "deferred"; reason: string } | { next: "review"; reason: string } | { next: "handoff"; to?: string; reason: string };
+export type Next =
+  | { next: "ready"; reason: string }
+  | { next: "deferred"; reason: string }
+  | { next: "review"; reason: string }
+  | { next: "handoff"; to?: string; reason: string };
 
 export interface NewMessage {
   task?: number | null;

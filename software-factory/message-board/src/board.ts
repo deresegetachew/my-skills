@@ -50,6 +50,9 @@ function translate(e: unknown): unknown {
   const state = err.errno ?? "";
   const msg = (err.message ?? String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
   if (state === "42P01" || state === "42703") return new BoardError("schema-old", `The board's tables are missing or old: ${msg}`, MIGRATE_FIX);
+  if (state === "40P01" || state === "40001") {
+    return new BoardError("busy", "Another write to the same tasks crossed this one, so the board undid it; nothing was changed.", "Try again.");
+  }
   if (state === "23503") return new BoardError("not-found", `That refers to something that isn't on the board: ${msg}`, "Check the id, then try again.");
   if (state === "23505") return new BoardError("bad-input", `That is already on the board: ${msg}`, "Use the one that is there (an external ref is unique).");
   if (state === "23514" || state === "22P02" || state === "23502") return new BoardError("bad-input", `The board doesn't take that value: ${msg}`, "Check the value against the README's API.");
@@ -440,7 +443,7 @@ export class Board {
   async move(id: number, m: Move): Promise<Task> {
     const to = oneOf("to", m.to, MOVE_TARGETS);
     const reason = m.reason === undefined ? undefined : said("A reason", m.reason);
-    const blockedBy = (m.blockedBy ?? []).map((b) => wholeNumber("A blocking task's id", b));
+    const blockedBy = [...new Set((m.blockedBy ?? []).map((b) => wholeNumber("A blocking task's id", b)))];
     if (blockedBy.length && to !== "blocked") refuse("bad-input", "blockedBy goes only with to blocked.", "Leave blockedBy out, or move it to blocked.");
     if (m.outcome !== undefined && to !== "done") refuse("bad-input", "An outcome goes only with to done.", "Leave outcome out, or move it to done.");
     const outcome = to === "done" ? oneOf("An outcome", m.outcome ?? "done", OUTCOMES) : null;
@@ -449,6 +452,8 @@ export class Board {
     }
     return this.run(() =>
       this.sql.begin(async (tx) => {
+        // Lock order: the graph lock before the row, as update and link take them, so two writes can't wait on each other.
+        if (blockedBy.length) await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
         await tx`SELECT id FROM tasks WHERE id = ${wholeNumber("A task id", id)} FOR NO KEY UPDATE`;
         const before = await this.mustTask(tx, id);
         if (to === "in_progress") {

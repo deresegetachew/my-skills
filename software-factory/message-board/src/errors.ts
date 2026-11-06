@@ -8,7 +8,8 @@ export type ErrorCode =
   | "cycle" // an edge or a parent that would make a loop
   | "bad-input" // a value the board doesn't take
   | "no-answer" // the database can't be reached
-  | "schema-old"; // the database hasn't had this version's migrations
+  | "schema-old" // the database hasn't had this version's migrations
+  | "busy"; // the write crossed another one at the same moment (a deadlock or serialization failure) and was undone
 
 export class BoardError extends Error {
   constructor(readonly code: ErrorCode, message: string, readonly fix: string) {

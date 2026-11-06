@@ -125,6 +125,9 @@ and the counts, `end()` closes the connections.
 - **Taking a claim back is recorded.** `move` and `assign` on a held task need a reason. They clear the claim, so the
   holder's token stops working (its next heartbeat, release or close is `claim-lost`), and record a
   `task.taken_back` event whose actor is who took it and whose payload names the holder and the reason.
+- **The graph lock comes before row locks.** Every write that touches edges or parents (link, update with a parent, a
+  move with blockedBy, an import) takes it first. A write that still crosses another one (a Postgres deadlock or
+  serialization failure) is undone and refused with `busy`: try again.
 - **Every write records an event in the same transaction**, then sends `NOTIFY mb_events, '<seq>'`. Event inserts take
   a lock until commit, so the order of the sequence numbers is the order of the commits, and a reader's cursor never
   skips one. A refused write records nothing.
