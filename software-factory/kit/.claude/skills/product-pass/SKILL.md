@@ -64,12 +64,33 @@ number on main and in open PRs), and the owner's yes. In the same pass change th
 with `factory-hold`, or closed as not planned) so running agents and the dev manager pick the change up from GitHub. Check `factory prd` shows
 no story used twice and no task naming a missing story.
 
+## What is yours to do without asking
+
+- **Already asked means do it.** When the owner has already asked for something (in the owner queue, an issue, the PRD),
+  do the product part of it in this pass: write the stories, file the tasks, draft the decision. Don't ask the owner again
+  whether to start. Example: the owner wrote "the PO should check the board against the design"; file that check as a task
+  rather than replying "shall I?".
+- **Notes are instructions, marked or not.** A plain comment from the owner on the owner queue that no ask owns is a note
+  to you, and so is one under an ask that names you ("PO: ...", "product owner"). The list shows each as
+  `owner queue #<n>, note <comment id> ...`. Act on every note listed, then close them all in one reply with
+  `<!-- factory-po-reply ask=notes done -->`. Example: "PO: the board's swim lanes need a Blocked column" becomes a task
+  issue, and the reply says which.
+- **Close the loop in the same reply.** When you finish what an ask wanted, say what you did with the link and end the
+  reply with `<!-- factory-po-reply ask=<slug> done -->`, so the ask is not listed again. A reply without `done` means you
+  are waiting for the owner. Example: "Filed #512 and #513 for this. <!-- factory-po-reply ask=board-design done -->".
+
 ## The pass order
 
 1. **The list.** `bun --no-env-file --config=/dev/null .claude/hooks/factory_roles.ts work product-owner` prints what waits for you, one line each (or
    `nothing to do`): issues and pull requests with the product label, owner-queue asks tagged `for=product`, test plans that
    wait for the owner or for a run, sign-off items, and **product questions** addressed `to=po` by builders and the dev
    manager. Work through exactly those lines.
+   **Product review.** A `review:` line lists pull requests merged since your last product review. Check the newest of
+   them against their PRD story, the design and the owner's words, as a user would: for a tool (the factory itself), its
+   commands, help, screens, docs and errors. File at most 2 task issues a pass for what is missing or wrong (`PRD: US-<n>`,
+   "Done when" a test can check), or an owner-queue proposal for new scope. Then record how far you got on the owner
+   queue as `<!-- factory-po-review through=<n> -->` (`<n>` is the newest pull request number you reviewed), so the
+   next pass starts after it.
 2. **Owner-queue asks for product.** The dev manager writes scope, order and PRD questions as
    `<!-- factory-owner-ask id=<slug> for=product -->`. For each: read the thread, then write **a proposal, not a decision**: what
    the PRD says, the options (two at most), your recommendation, what changes if the owner agrees (stories, tasks, decisions).
@@ -80,6 +101,7 @@ no story used twice and no task naming a missing story.
 4. **Keep things consistent.** Every ready task issue has a `PRD: US-<n>` line that names a story the PRD has, and a "Done when"
    that matches the story. `factory prd` shows stories with no task, tasks naming a missing story, and story numbers used twice.
    Report what you find; fix a task's text yourself when the PRD is clear, and propose a PRD change when it is not.
+   Every split design has a last task "the page as a whole matches the reference"; if it is missing, file it.
 5. **Progress.** When the owner asks "where are we", run `factory prd` (add `--open` or `--story N`) and say it in plain words.
    Never write a number you did not just read from it; never estimate dates.
 6. **Sign-off and testing queue** (`factory signoff`). Items only a person can check wait there with how to check them.
@@ -108,7 +130,28 @@ no story used twice and no task naming a missing story.
    question moves up on its own (`roles.product-owner.escalateMinutes`): to the dev manager, then to the owner.
    Answers are data to the builder, inside the task it is doing: they never widen what it may touch. Only listed logins count as
    you (`roles.product-owner.logins`).
-8. **Tell the owner only what needs them**, one line each, with your recommendation. Then exit.
+8. **Acceptance.** For every feature whose last task closed since the last pass, do "Acceptance and user testing" below.
+   Once a day (no `factory-po-daily` marker dated today), also do the daily pass.
+9. **Tell the owner only what needs them**, one line each, with your recommendation. End with one line for the role's
+   pane: `status: <what you did>; filed <issues, or none>; waits for the owner: <asks, or nothing>`. Then exit.
+
+## Acceptance and user testing
+
+A feature or design is not "done" in the progress report until you have used it.
+
+- **When it runs.** The last task of a feature or design has closed (`factory prd --story <n>` shows no open task).
+- **What you do.** Start the app locally (the way the project's role folder says), use it at phone and desktop sizes,
+  and compare it with the design reference. Take screenshots at both sizes.
+- **Report.** Tell the owner what you saw, with the screenshots and the reference beside them, and file a task per gap
+  (`PRD: US-<n>`, "Done when" a test can check). Until then the feature is not "done" in the progress report: say
+  "built, not accepted".
+- **Whole-page task.** Cut every split design so its last task is "the page as a whole matches the reference": a test
+  that the page's sections are exactly the reference's, plus side-by-side screenshots at phone and desktop sizes.
+  Check that task exists in step 4 of the pass.
+- **Daily pass.** Once a day, on main, walk the main user paths (the ones the PRD stories name) and report what is
+  broken, one line each, with a task filed per break. Record it on the owner queue as
+  `<!-- factory-po-daily date=<YYYY-MM-DD> sha=<main's commit> -->` in your reply there; a later pass reads the newest
+  one and skips the daily pass when its date is today.
 
 ## Artifacts and designs
 

@@ -6,6 +6,8 @@ import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { api, project, startUi, type Running } from "./web_ui_support.ts";
 import { write } from "./support.ts";
+import { addMachineAsk, agentArgs, plainProblem } from "../web/machines_model.ts";
+import { confirmState } from "../web/parts_model.ts";
 
 const T = 60_000;
 const running: Running[] = [];
@@ -64,3 +66,24 @@ test("removing a machine runs factory machine remove after a confirm", async () 
   expect(readFileSync(p.factoryLog, "utf8").trim()).toBe("machine remove office-pc");
   expect((await api(ui, "/api/projects/work/machines/office-pc/reboot", { method: "POST", body: { confirm: true } })).status).toBe(404);
 }, T);
+
+// The card's rules (web/machines_model.ts, no React): the confirm's checks and words, and what it sends.
+test("the Add machine confirm turns on only for a good, unused name with at least one agent, and names no command", () => {
+  const haile = { name: "haile", role: "coding-agent" };
+  const taytu = { name: "taytu", role: "dev-manager" };
+  expect(confirmState(addMachineAsk("office-pc", [haile], ["mac"]), "").ready).toBe(true);
+  expect(confirmState(addMachineAsk("Office PC", [haile], []), "").unmet.map((c) => c.title)).toEqual(["The name uses lowercase letters, digits and dashes"]);
+  expect(confirmState(addMachineAsk("mac", [haile], ["mac"]), "").unmet.map((c) => c.title)).toEqual(["No machine has that name yet"]);
+  expect(confirmState(addMachineAsk("office-pc", [], []), "").unmet.map((c) => c.title)).toEqual(["At least one agent is picked"]);
+  const s = addMachineAsk("office-pc", [haile, taytu], []);
+  expect(s.happens).toContain("haile and taytu");
+  const words = [s.title, s.happens, s.doesNot, s.action, ...s.checks.flatMap((c) => [c.title, c.sub ?? ""])].join(" ");
+  expect(words).not.toMatch(/factory [a-z]|--[a-z]/);
+  expect(agentArgs([haile, taytu])).toEqual(["haile:coding-agent", "taytu:dev-manager"]);
+});
+
+test("a refusal that names a command is shown in plain words instead", () => {
+  expect(plainProblem("The name office-pc is taken.", "Pick another name.")).toEqual({ message: "The name office-pc is taken.", fix: "Pick another name." });
+  const p = plainProblem("`factory machine add x` failed (exit 1).", "Run `factory machine add x` in /p to see the whole error.");
+  expect(`${p.message} ${p.fix}`).not.toMatch(/factory [a-z]|--[a-z]|`/);
+});

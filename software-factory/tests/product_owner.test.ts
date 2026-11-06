@@ -218,6 +218,26 @@ test("a po reply marked done closes the ask, and a later owner comment brings it
   expect(workOf([ask("a", "for=product"), PO_REPLY("a", " done"), "One more thing."]).out).toContain("ask a for product");
 });
 
+// --- a plain note to the product owner is an instruction (#397) --------------------------------------------------------------
+
+test("a plain note on the owner queue, with no marker and no ask above it, is listed (#397)", () => {
+  const r = workOf(["Please file the CI follow-up, I already asked for it."]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.out).toContain("owner queue #40, note");
+  expect(r.out).toContain("Please file the CI follow-up");
+});
+
+test("a note stays listed until a po reply closes it with done, and a reply without done does not (#397)", () => {
+  const note = "Please file the CI follow-up.";
+  expect(workOf([note, PO_REPLY("notes")]).out).toContain("owner queue #40, note");
+  expect(workOf([note, PO_REPLY("notes", " done")]).out).not.toContain("owner queue #40, note");
+  expect(workOf([note, PO_REPLY("notes", " done"), "And the cockpit too."]).out).toContain("And the cockpit too.");
+});
+
+test("a comment with a factory marker is not a note (#397)", () => {
+  expect(workOf(["<!-- factory-digest -->\nfive PRs open"]).out).not.toContain("owner queue #40, note");
+});
+
 test("the product owner loop with only waiting asks exits at once with nothing to do (#352)", () => {
   const [, work, env] = poProject({ db: { issues: [QUEUE], comments: { "40": [
     ask("a", "for=product"), ask("b", "for=product", "this needs your yes: b?"), PO_REPLY("a"), PO_REPLY("b")] } } });
@@ -226,4 +246,93 @@ test("the product owner loop with only waiting asks exits at once with nothing t
   expect(p.out).toContain("Nothing to do");
   expect(p.out).not.toContain("came up 3 times");
   expect(claudeCalls(env)).toEqual([]);
+});
+
+// --- notes to the product owner, finished asks and the product review (#397) ----------------------------------------------
+
+// The fake gh numbers queue #40's comments 40001, 40002, ... in order.
+function workWith(comments: string[], pulls: Record<string, unknown>[] = []): { out: string; code: number } {
+  const [, work, env] = poProject({ db: { issues: [QUEUE], pulls, comments: { "40": comments } } });
+  const p = factory(work, env, ["product-owner", "loop", "--once", "--dry-run"]);
+  return { out: p.stdout, code: p.code };
+}
+
+test("an unmarked note to the product owner is listed with its comment id (#397)", () => {
+  const r = workWith(["PO: please review the cockpit against US-12 and file what is missing.",
+    "Note for the product owner: the CI view should say who is running."]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.out).toContain("owner queue #40, note 40001 (an instruction, marked or not): PO: please review the cockpit against US-12");
+  expect(r.out).toContain("owner queue #40, note 40002 (an instruction, marked or not): Note for the product owner: the CI view");
+});
+
+test("under a dev manager ask, a plain answer is not a note but one that names the product owner is (#397)", () => {
+  const r = workWith([ask("ci-queued", "", "CI is queued"),
+    "Restart the runner.",
+    "PO: file the follow-up for the CI view, I already asked for it."]);
+  expect(r.out).not.toContain("Restart the runner.");
+  expect(r.out).toContain("note 40003 (an instruction, marked or not): PO: file the follow-up for the CI view");
+});
+
+test("a finished ask marked done is not listed again after the product owner's later notes and reviews (#397)", () => {
+  const r = workWith([ask("hosting", "for=product", "this needs your yes: where do we host?"),
+    "<!-- factory-po-reply ask=hosting done -->\nRecorded in decision 0007.",
+    "<!-- factory-po-review through=9 -->\nReviewed #9 against US-3: filed #80.",
+    "<!-- factory-po-reply ask=notes done -->\nNo notes open."]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.out).not.toContain("ask hosting");
+  expect(r.out).toContain("] nothing to do");
+});
+
+test("a reply without done waits for the owner and the product owner's own markers do not hand it back (#397)", () => {
+  const r = workWith([ask("hosting", "for=product", "this needs your yes: where do we host?"),
+    "<!-- factory-po-reply ask=hosting -->\nI recommend Fly because it is what we run now.",
+    "<!-- factory-po-review through=9 -->\nReviewed #9."]);
+  expect(r.out).not.toContain("ask hosting");
+});
+
+function merged(n: number, title: string): Record<string, unknown> {
+  return { number: n, title, state: "closed", merged_at: "2026-11-04T10:00:00Z", head: { sha: "a".repeat(40), ref: `task/${n}-x` }, labels: [] };
+}
+
+test("pull requests merged since the last product review are listed for review (#397)", () => {
+  const pulls = [merged(9, "cockpit: the CI view"), merged(11, "cockpit: search"),
+    { number: 12, title: "closed unmerged", state: "closed", merged_at: null, labels: [] },
+    { number: 13, title: "still open", state: "open", merged_at: null, labels: [] }];
+  const first = workWith([], pulls);
+  expect(first.out).toContain("review: 2 pull requests merged since the last product review: #11 cockpit: search, #9 cockpit: the CI view");
+  const later = workWith(["<!-- factory-po-review through=9 -->\nReviewed #9 against US-3."], pulls);
+  expect(later.out).toContain("review: 1 pull request merged since the last product review: #11 cockpit: search");
+  const done = workWith(["<!-- factory-po-review through=11 -->\nReviewed #11."], pulls);
+  expect(done.out).not.toContain("review:");
+  expect(done.out).toContain("] nothing to do");
+});
+
+test("the product pass skill has the proactive review, the unmarked note rule and the already asked rule (#397)", () => {
+  const skill = readFileSync(join(KIT, ".claude", "skills", "product-pass", "SKILL.md"), "utf8");
+  expect(skill).toContain("<!-- factory-po-review through=<n> -->");
+  expect(skill).toContain("<!-- factory-po-reply ask=notes done -->");
+  expect(skill).toContain("<!-- factory-po-reply ask=<slug> done -->");
+  expect(skill).toContain("at most 2 task issues a pass");
+  expect(skill).toMatch(/already asked/i);
+  expect(skill).toMatch(/status:/);
+});
+
+test("the product pass skill has the acceptance and user testing, the whole-page task and the daily pass (#397)", () => {
+  const skill = readFileSync(join(KIT, ".claude", "skills", "product-pass", "SKILL.md"), "utf8");
+  expect(skill).toMatch(/acceptance/i);
+  expect(skill).toMatch(/phone and desktop/i);
+  expect(skill).toMatch(/screenshots/i);
+  expect(skill).toMatch(/files? a task per gap/i);
+  expect(skill).toMatch(/not "?done"? in the progress report/i);
+  expect(skill).toMatch(/the page as a whole matches the reference/i);
+  expect(skill).toMatch(/side-by-side/i);
+  expect(skill).toMatch(/daily pass/i);
+});
+
+test("the manage pass skill does not merge a PR that changes what a user sees without phone and desktop screenshots (#397)", () => {
+  const skill = readFileSync(join(KIT, ".claude", "skills", "manage-pass", "SKILL.md"), "utf8");
+  expect(skill).toMatch(/screenshots/i);
+  expect(skill).toMatch(/phone and desktop/i);
+  expect(skill).toMatch(/reference beside/i);
+  expect(skill).toMatch(/never merge[^\n]*screenshots/i);
 });
