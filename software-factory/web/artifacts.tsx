@@ -41,6 +41,11 @@ function FileIcon() {
   );
 }
 
+/** An https address, else "": the manifest and the cache are files, so their links are not trusted as they are. */
+function safe(url: string | undefined): string {
+  return url && /^https:\/\//i.test(url) ? url : "";
+}
+
 function Ext({ href, className, children }: { href: string; className?: string; children: string }) {
   return <a className={className} href={href} target="_blank" rel="noreferrer noopener">{children}</a>;
 }
@@ -96,13 +101,15 @@ export function ArtifactsPage(p: Props) {
           {rows.map((r, i) => {
             const a = list[i] as Artifact;
             const pullable = r.action === "Pull new copy" || r.action === "Pull again";
+            const url = safe(a.url);
+            const pr = safe(a.review?.url);
             return (
-              <ListRow key={r.id} lead={<FileIcon />} sub={r.sub} status={{ state: r.status.dot, text: r.status.text }}
-                title={a.url ? <Ext href={a.url} className="atitle">{r.name}</Ext> : r.name}
+              <ListRow key={r.id} lead={<FileIcon />} sub={r.sub} status={{ state: r.status.dot === "down" ? "ink" : r.status.dot, text: r.status.text }}
+                title={url ? <Ext href={url} className="atitle">{r.name}</Ext> : r.name}
                 action={pullable
                   ? <button className={`btn small${r.primary ? " primary" : ""}`} onClick={() => setAsk({ spec: pullAsk(a, data?.fetch ?? false), artifact: a.url || a.id, dest: a.dest })}>{r.action}</button>
-                  : r.action === "Open the PR" && a.review ? <Ext href={a.review.url} className="btn small">{r.action}</Ext>
-                  : a.url ? <Ext href={a.url} className="btn small">{r.action}</Ext> : null} />
+                  : r.action === "Open the PR" ? (pr ? <Ext href={pr} className="btn small">{r.action}</Ext> : null)
+                  : url ? <Ext href={url} className="btn small">{r.action}</Ext> : null} />
             );
           })}
         </ul>

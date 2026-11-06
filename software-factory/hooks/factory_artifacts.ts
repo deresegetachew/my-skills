@@ -296,7 +296,7 @@ function git(args: string[]): { code: number; stdout: string; stderr: string } {
 
 /** `pull --pr` (#454): the same pull on a new branch `artifacts/<id>/<time>`, made from the main branch as origin has it
  * in a temporary worktree, committed, pushed, and proposed in a pull request. The person's own checkout (any branch, any
- * state) is never touched, and a step that fails leaves no branch and no worktree behind. */
+ * state) is never touched; no worktree is left, and no branch unless it was pushed (then the error says how to open the PR). */
 export function pullPr(cfg: Config, a: PullArgs): void {
   const [aid] = identify(a.artifact);
   const main = String(cfg.mainBranch || "main");
