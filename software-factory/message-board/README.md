@@ -24,6 +24,7 @@ It uses Bun's built-in Postgres client (`SQL` from `bun`). It adds no npm packag
 | `src/import.ts` | An import, applied in one transaction (`Board.import`) |
 | `src/logins.ts` | Logins for other machines: one Postgres role each, with only the board's rights (`Board.addLogin`, `logins`, `removeLogin`) |
 | `src/github/import.ts` | The GitHub adapter: a repo's issues and comments as an import, read with the `gh` CLI |
+| `src/github/mirror.ts` | The GitHub adapter's mirror: the board's state changes, asks and answers sent to GitHub one way, and the answers there read back |
 | `bin.ts` | The command: `factory board <verb>` (`factory board help`) |
 | `tests/` | Tests against a real Postgres |
 
@@ -89,12 +90,18 @@ each.
 
 **From synchronous code:** `src/child.ts` reads one JSON request on stdin (`{ url, as, session?, calls: [{ op, args }] }`), makes the calls as that actor, prints `{ ok, results }` or `{ ok: false, code, message, fix }` on one line and exits. Run it with `Bun.spawnSync`. Besides the methods above it has `find`, the events of a kind since a time whose payload matches, and `wait`, the first such event, waiting up to a number of seconds (`or` lists other kinds and matches that also end it).
 
-**Import:** `import(batch, { dryRun? })` brings in tasks, parents, `blocks` edges, context entries and messages, each
+**Import:** `import(batch, { dryRun?, keepBoardStatus? })` brings in tasks, parents, `blocks` edges, context entries and messages, each
 keyed by an outside id (`ref`), in one transaction: a second run updates what changed and adds what is new, never a
 duplicate. A dry run does the same work and rolls it back, so its counts are a real run's. `lastImport(source)` gives
 the last run's time and options. The board's rules hold: a task held on the board keeps its status, an edge or parent
 that would make a loop is left out (and listed), an answer marks the question it replies to answered. Messages carry
 the `ref` they came with and a `tag`, the user's own word for what a message is (free text, like an actor's role).
+With `keepBoardStatus` the board is the record: a task whose status the board changed since the last import from the
+same source (a claim, release, close, move, hand-off, sweep, or an update that set it) keeps it too.
+
+**Messages by id:** `message(id)` reads one; `linkMessage(id, ref)` records where a message was copied to outside (a
+GitHub comment's ref), so an import that meets the copy knows it: a reply to it joins the message's thread, and the copy
+is never brought in as a second message. Linking twice to the same ref changes nothing; another ref is refused.
 
 **Also:** `boardUrl()` finds this machine's board as the command does (`MB_URL`, else the url file), or null; `actor(id, { kind, role })` records an agent or a person, `info()` gives the server version, the migrations
 and the counts, `end()` closes the connections.
@@ -156,11 +163,40 @@ reads again, with a comment saying where the factory defines each.
 - **GitHub is the source of truth for status,** unless the task is held on the board: a task done on the board but
   open on GitHub is reopened, and one held on the board keeps its status (the run lists it). Title, body and kind follow
   GitHub too. Comments deleted on GitHub stay on the board; an edited one is updated.
+- **Unless the board is the record** (`--board-is-record`, which `factory board import github` passes when the
+  project's `tasks.source` is `board`): then a task whose status the board changed since the last import keeps it, and
+  an issue already on the board brings no notes from its labels. New issues, edited titles and bodies, edges and new
+  comments still come in. With the mirror on, GitHub's labels follow the board anyway, so a later import agrees.
+- **What the mirror wrote** (a comment carrying `<!-- factory-mirror ... -->`) is never brought back as a message: the
+  board has it. Its markers still count, so a reply to a mirrored ask joins the board's ask.
 - **Threads:** each comment is a message keyed by `github:<owner>/<repo>/comments/<id>`. The factory's markers set the kind
   and the tag: `factory-question` and `factory-answer`, owner asks and answers (an answer replies to its ask),
   `factory-po-reply`, `factory-manager-note`, the claim markers (statuses), `factory-approved`, `factory-mustfix` and
   `pr-watch` (verdicts), and the `factory-msg` envelope (its from, to and in-reply-to). A plain comment is a note tagged
   `comment`.
+
+## The mirror to GitHub
+
+`mirrorToGithub(board, { repo })` (`src/github/mirror.ts`, decision 0007 point 5) sends the board to GitHub one way.
+The factory runs it as `factory board mirror` (its `board.mirror` setting turns it off).
+
+- **Tasks:** a task whose ref is one of the repo's issues and whose state the board changed (the events `task.claimed`,
+  `released`, `closed`, `moved`, `assigned`, `swept`, `taken_back`, and `task.updated` with its status) gets, per
+  change, one call that sets the issue's labels (the mapping's state label, `agent:<holder>` while in progress; every
+  other label is kept) and opens or closes it, and one short line under `<!-- factory-mirror v=1 task=<id> state=<s> -->`.
+  A state that comes back to what was last sent sends nothing; a heartbeat is no change; a task with no issue is left
+  alone. States: open is ready, in progress, in review, deferred is blocked (the line carries the reason as
+  `**Blocked:** ...`), done closes the issue.
+- **Asks and answers:** a message of kind `ask` to the mapping's `asksTo` (the owner), and an answer to one, on a task
+  with an issue, is posted there once as it is, with `<!-- factory-mirror v=1 message=<id> -->` under it, and linked to
+  that comment (`linkMessage`).
+- **Answers read back:** under each open ask it mirrored, a `factory-owner-answer id=<ask>` comment, or a plain comment
+  after the ask (from `trusted` logins when given), is imported once as the owner's answer, keyed by the comment's id
+  (source `github:<owner>/<repo>/owner-answers`).
+- **Its place** is the value `mirror:github:<owner>/<repo>`: the last event read and the state sent per task. It reads
+  the events after it, so it is safe to run twice and goes on after downtime; it moves its place only when it read
+  something new, so its own write never wakes it again. A GitHub failure keeps the place (with the states it did send)
+  and is thrown as a `GithubError` whose fix is to run it again: nothing is sent twice.
 
 ## Running it
 

@@ -100,6 +100,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `board show` | planned | Task (Task.dc.html), read from the message board | #472 |
 | `board prime` | agents only | An agent's start of task; the web UI's first read has the same shape | #472 |
 | `board mcp --as` | agents only | An agent's session reaches the message board through it, and with `--role owner` the owner's own Claude Code session moves, creates, assigns and links cards (#503); the owner sees what they wrote on Task (Task.dc.html) and the board, live | #495 |
+| `board mirror` | agents only | Runs beside the loops (`--watch`), so GitHub follows the board; the web UI's own writes are carried by it | #502 |
+| `board ask` | agents only | The dev manager's asks to the owner; the owner answers them in the owner-queue channel | #502 |
 | `board import github` | planned | First launch (decision 0007 step 2): import the issues when a new factory connects GitHub | #457 |
 
 ## Product

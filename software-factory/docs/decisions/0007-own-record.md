@@ -115,6 +115,11 @@ because the record is there, so using it for live delivery adds no connection or
   (the owner's only write path from the phone). The owner's answers from the web UI or `factory owner answer` go to the
   database first.
 - An edit someone makes on GitHub to a mirrored issue is not read back, except by running the import again.
+- *Built (#502):* `factory board mirror` (labels in one call and one line per change, its place kept on the board, `board.mirror`
+  turns it off); owner asks on the board (`factory board ask`) posted once to the owner queue and the answers there read
+  back once; `factory owner answer` and the web UI write to the board first. With `tasks.source: board` a re-import keeps a
+  status the board changed, and the web UI's Release, Block and Reassign write to the board. Deferred is "blocked" in the
+  web UI and the task tracker alike.
 
 ### 6. What the owner sees
 
