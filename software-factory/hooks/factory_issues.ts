@@ -206,10 +206,13 @@ export function ownIssue(n: number, agent: string, machine: string): boolean {
   return !winner || isMe(winner, agent, machine);
 }
 
+/** An issue labelled `epic` (#440) groups tasks; it is never a task itself. */
+export const isEpic = (i: Issue): boolean => names(i).has("epic");
+
 export function readyIssues(cfg: Config, openNow: Issue[] = taskIssues()): Issue[] {
   const L = taskLabels(cfg);
   const openNumbers = new Set(openNow.map((i) => i.number));
-  const ready = openNow.filter((i) => names(i).has(L.ready) && !names(i).has(L.blocked) &&
+  const ready = openNow.filter((i) => !isEpic(i) && names(i).has(L.ready) && !names(i).has(L.blocked) &&
     ![...names(i)].some((x) => x.startsWith(L.agentPrefix)));
   const lookedUp = new Map<number, boolean>();
   return sortedByOrder(ready).filter((i) => !openDependencies(i, openNumbers, lookedUp).length);

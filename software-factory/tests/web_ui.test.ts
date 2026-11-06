@@ -174,7 +174,7 @@ test("a project's channels: one per agent (coding agents, the dev manager, the p
   expect(agents.map((c) => [c.name, c.role])).toEqual([["fasil", "dev-manager"], ["mentewab", "product-owner"],
     ["menelik", "coding-agent"], ["taytu", "coding-agent"]]);
   const views = channels.filter((c) => c.kind === "view").map((c) => c.name);
-  expect(views).toEqual(["tasks", "pull-requests", "ci", "owner-queue", "machines"]);
+  expect(views).toEqual(["tasks", "epics", "pull-requests", "ci", "owner-queue", "machines"]);
   for (const c of channels) expect(c.id).toBe(`${c.kind}:${c.name}`);
 }, T);
 

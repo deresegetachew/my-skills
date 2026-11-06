@@ -998,10 +998,13 @@ async function tasksData(): Promise<Obj> {
   const base = { source, prd: plain(obj(cfg).prd) };
   try {
     const { taskTracker } = await import("./core/compose.ts");
-    const tasks = taskTracker(cfg).list().map((t) => ({ id: plain(t.id), title: plain(t.title), state: t.state,
+    const tracker = taskTracker(cfg);
+    const tasks = tracker.list().map((t) => ({ id: plain(t.id), title: plain(t.title), state: t.state,
       holders: t.holders.map(plain), group: plain(t.group), todos: t.todos.map((d) => ({ done: d.done })), dependsOn: t.dependsOn.map(plain),
       cites: (t.cites ?? []).map(plain) }));
-    return { ...base, tasks };
+    const epics = tracker.epics().map((e) => ({ id: plain(e.id), title: plain(e.title), stage: e.stage, prd: plain(e.prd),
+      decisions: e.decisions.map(plain), summary: plain(e.summary), cites: e.cites.map(plain), tasks: e.tasks.map((t) => ({ id: plain(t.id), done: t.done })), url: e.url }));
+    return { ...base, tasks, epics };
   } catch (e) {
     return { ...base, error: plain(e instanceof Error ? e.message : String(e)) || "the tracker gave no tasks" };
   }

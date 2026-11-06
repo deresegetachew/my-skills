@@ -7,11 +7,12 @@ import { claimRecord } from "../../../factory_budget.ts";
 import { citesIn } from "../../../factory_cites.ts";
 import { type Config, taskLabels } from "../../../factory_config.ts";
 import { addLabels, claimSettleSeconds, claimWinner, comment, gh, ghAll, humanComments, type Issue, names, openDependencies,
-  ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
+  isEpic, ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
 import { sleepSync } from "../../../factory_lib.ts";
 import { holderIsMe, holderName, leasesOn } from "../../../factory_leases.ts";
 import { type Claimant, isMe } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
+import { type Epic, parseEpic } from "../../domain/epic.ts";
 import { checkClaim, dependencies, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
 import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
 
@@ -23,7 +24,15 @@ export class GithubTaskTracker implements TaskTracker {
   constructor(private readonly cfg: Config) {}
 
   list(): Task[] {
-    return sortedByOrder(taskIssues()).map((i) => this.task(i));
+    return sortedByOrder(taskIssues().filter((i) => !isEpic(i))).map((i) => this.task(i));
+  }
+
+  epics(): Epic[] {
+    const all = taskIssues("all");
+    const open = new Set(all.filter((i) => i.state === "open" && !isEpic(i)).map((i) => String(i.number)));
+    return all.filter(isEpic).sort((a, b) => a.number - b.number).map((i) => ({
+      ...parseEpic({ number: i.number, title: i.title, body: i.body ?? "", labels: [...names(i)], closed: i.state !== "open", openIds: open }),
+      url: typeof i.html_url === "string" ? i.html_url : null }));
   }
 
   show(id: string): string {
@@ -64,6 +73,7 @@ export class GithubTaskTracker implements TaskTracker {
     const n = number(id);
     const i = gh<Issue | null>("GET", `repos/{owner}/{repo}/issues/${n}`, undefined, true);
     if (!i || i.state !== "open" || "pull_request" in i) throw notFound(id);
+    if (isEpic(i)) throw new CoreError("issue-epic", `#${n} is an epic, not a task.`, "Claim one of the tasks it lists instead, or run `factory next`.");
     const t = this.task(i);
     const [check, open] = checkClaim(t, who.agent, () => ownIssue(n, who.agent, who.machine),
       () => openDependencies(i, new Set(taskIssues().map((x) => x.number)), new Map()).map(String));
