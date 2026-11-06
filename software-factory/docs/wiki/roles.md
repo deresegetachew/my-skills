@@ -37,7 +37,7 @@ it and is not a failure, see [agent loops](agent-loops.md)), interactive mode, a
 | | coding agent | dev manager | product owner |
 |---|---|---|---|
 | Skill a pass runs | `/next-task` | `/manage-pass <item>`, started by the orchestrator once per item | `/product-pass` |
-| Has work when | a task is ready (it claims it) | `factory watch` lists something (the orchestrator, no model) | an issue or PR has `roles.product-owner.workLabel`, an owner-queue ask is tagged `for=product`, or a test plan or sign-off item waits |
+| Has work when | a task is ready (it claims it) | `factory watch` lists something (the orchestrator, no model) | an issue or PR has `roles.product-owner.workLabel`, an owner-queue ask is tagged `for=product`, the owner left a note on the owner queue, a pull request was merged since the last product review, or a test plan or sign-off item waits |
 | Settings | the agents' settings (`.claude/factory/settings.json`, passed at start) | `roles.dev-manager.profile` (`.claude/manager/settings.json`) | `roles.product-owner.profile` (`.claude/product-owner/settings.json`) |
 | Model | `models.builder` | `models.manager` | `models.product-owner` |
 | Wait after a pass | `waitMinutes` (inside the loop) | `manager.busyMinutes` (2) / `manager.idleMinutes` (5) | `roles.product-owner.busyMinutes` (30) / `idleMinutes` (60); 0 idle: exit |
@@ -80,9 +80,18 @@ There is no custom UI: the owner reads progress and queues as plain text, below.
 
 **What gives the role work** (`factory_roles.ts work product-owner`, one line each): an open issue or PR with
 `roles.product-owner.workLabel`; an owner-queue ask tagged `for=product` that nobody has answered, or that the owner
-answered after the product owner's reply ("ask <slug> for product, the owner answered"); a test plan that waits
-for the owner or for a run; sign-off items. `factory product-owner loop --once --dry-run` prints where the role reads, then
-that list, and the command it would run. It writes nothing.
+answered after the product owner's reply ("ask <slug> for product, the owner answered"); the owner's plain notes on the
+owner queue (#397); pull requests merged since the last product review (#397); a test plan that waits for the owner or for a
+run; sign-off items. `factory product-owner loop --once --dry-run` prints where the role reads, then that list, and the
+command it would run. It writes nothing.
+
+**Notes and the product review** (#397). A comment on the owner queue with no factory marker, from the owner, is an
+instruction to the product owner: "owner queue #<n>, note <comment id> (an instruction, marked or not): ...". One after an
+ask answers that ask instead, unless it names the product owner ("PO: ..."). The notes stay listed until the product owner
+replies `<!-- factory-po-reply ask=notes done -->`. The line "review: <k> pull requests merged since the last product
+review: #<n> ..." lists merged pull requests newer than the newest `<!-- factory-po-review through=<n> -->` on the owner
+queue: each pass the product owner checks the newest merged work against the PRD story and files what is missing (at most
+2 task issues a pass), then writes that marker. Neither marker gives an ask back to the product owner.
 
 **Asks for the product owner.** The dev manager writes scope, order and PRD questions to the owner queue as
 `<!-- factory-owner-ask id=<slug> for=product -->`. The product owner replies under it with a proposal (the options and a

@@ -279,7 +279,7 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
       {asks.map((a) => (
         <section key={a.id} className={`card ask${a.state === "open" ? "" : " answered"}`} aria-label={`Ask ${a.id}`}>
           <h3>
-            <span className="dot" aria-hidden="true" style={a.state === "open" ? { background: "var(--warn)" } : undefined} />
+            <span className="dot" aria-hidden="true" style={a.state === "open" ? { background: "var(--waiting)" } : undefined} />
             <code>{a.id}</code>
             {a.state === "open" ? <span className="tag">waiting for you</span> : <span className="tag quiet">answered</span>}
             {a.forProduct && <span className="tag quiet">product</span>}
@@ -324,40 +324,39 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
 
 const CHAT_CSS = String.raw`
 .chat { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.msg { max-width: min(680px, 92%); background: var(--bg-soft); border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; }
-.msg.mine { align-self: flex-end; background: var(--accent-soft); border-color: transparent; }
-.msg.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.msg { max-width: min(680px, 92%); background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; }
+.msg.mine { align-self: flex-end; background: var(--bg-active); border-color: transparent; }
+.msg.bad { border-color: var(--red-dot); }
 .msg p { margin: 0; }
-.msg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; font-size: 12px; color: var(--muted); }
+.msg-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; font-size: 12px; color: var(--text-2); }
 .msg-head strong { color: var(--text); font-size: 13px; }
-.msg-head time { color: var(--faint); }
-.msg-head a { color: var(--accent-text); }
+.msg-head time { color: var(--text-3); }
+.msg-head a { color: var(--blue-ink); }
 .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px !important; }
-.msg-fix { color: var(--muted); font-size: 13px; margin-top: 4px !important; }
-.typing { color: var(--muted); font-style: italic; margin: 12px 0 0; }
-.chat-problem, .send-problem { color: var(--bad); margin: 0 0 10px; font-size: 13px; }
+.msg-fix { color: var(--text-2); font-size: 13px; margin-top: 4px !important; }
+.typing { color: var(--text-2); font-style: italic; margin: 12px 0 0; }
+.chat-problem, .send-problem { color: var(--red-ink); margin: 0 0 10px; font-size: 13px; }
 .chat-problem strong, .send-problem strong { font-weight: 600; }
 form.send { display: flex; flex-direction: column; gap: 6px; }
 .send-row { display: flex; gap: 8px; align-items: flex-end; }
-.send textarea { flex: 1; resize: vertical; min-height: 44px; max-height: 240px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
-  background: var(--bg); color: var(--text); font: inherit; }
-.send textarea:disabled { background: var(--bg-soft); }
-.send .btn { height: 40px; }
-.send-hint { font-size: 12px; color: var(--faint); }
-.send-hint code { background: var(--code-bg); padding: 0 4px; border-radius: 4px; }
-.queue-head { color: var(--muted); margin: 0; }
-.queue-head a { color: var(--accent-text); }
+.send textarea { flex: 1; resize: vertical; min-height: 44px; max-height: 240px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px;
+  background: var(--surface); color: var(--text); font: inherit; }
+.send textarea:disabled { background: var(--bg-subtle); }
+.send .btn { height: 44px; }
+.send-hint { font-size: 12px; color: var(--text-3); }
+.send-hint code { background: var(--bg-subtle); padding: 0 4px; border-radius: 4px; }
+.queue-head { color: var(--text-2); margin: 0; }
+.queue-head a { color: var(--blue-ink); }
 .ask h3 { flex-wrap: wrap; }
 .ask h3 code { color: var(--text); font-size: 13px; background: none; padding: 0; }
-.ask .ask-age { color: var(--faint); font-weight: 400; }
-.ask .ask-link { margin-left: auto; color: var(--accent-text); font-weight: 400; }
+.ask .ask-age { color: var(--text-3); font-weight: 400; }
+.ask .ask-link { margin-left: auto; color: var(--blue-ink); font-weight: 400; }
 .ask.answered { opacity: .75; }
 .ask-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 12px; }
 .options { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
 .own { display: flex; gap: 8px; }
-.own input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; background: var(--bg); color: var(--text); font: inherit; }
-.ask-answer { margin: 0; color: var(--muted); }
-.notice.good { border-color: color-mix(in srgb, var(--good) 45%, transparent); background: color-mix(in srgb, var(--good) 8%, var(--bg)); }
+.own input { flex: 1; min-width: 0; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; height: 44px; background: var(--surface); color: var(--text); font: inherit; }
+.ask-answer { margin: 0; color: var(--text-2); }
 `;
 
 if (typeof document !== "undefined") {

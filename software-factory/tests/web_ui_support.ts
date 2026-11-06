@@ -4,6 +4,7 @@
 // script at its top that logs what it was asked (the server runs `factory owner start|stop` through it), and its own
 // state and config folders. `startUi` runs the real server (hooks/factory_ui.ts) on a free port and reads the address
 // and the token it prints.
+import { afterAll } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { installFakeGh } from "./fakegh.ts";
@@ -103,6 +104,16 @@ async function readUntil(stream: ReadableStream<Uint8Array>, done: (text: string
   return text;
 }
 
+// Every server startUi starts, until its stop() (#476). A test that fails or times out before it calls stop() would
+// leave its server running; these stop when the file's tests end, or when the test process exits.
+const RUNNING = new Set<ReturnType<typeof Bun.spawn>>();
+function stopAll(): void {
+  for (const p of RUNNING) p.kill(9);
+  RUNNING.clear();
+}
+afterAll(stopAll);
+process.on("exit", stopAll);
+
 /** Runs `factory ui` (the hook itself, or through `cmd`) in the project and waits for its address and token. */
 export async function startUi(p: Project, args: string[] = ["--port", "0"], cmd: string[] | null = null, env: Env = {}): Promise<Running> {
   const full = { ...p.env, ...env };
@@ -110,12 +121,14 @@ export async function startUi(p: Project, args: string[] = ["--port", "0"], cmd:
   for (const [k, v] of Object.entries(full)) if (v !== undefined) clean[k] = v;
   const proc = Bun.spawn([...(cmd ?? [...BUN, join(HOOKS, "factory_ui.ts")]), ...args], { cwd: p.d, env: clean, stdin: "ignore",
     stdout: "pipe", stderr: "pipe" });
+  RUNNING.add(proc);
   const out = await readUntil(proc.stdout as ReadableStream<Uint8Array>, (t) => t.includes("Ctrl-C stops it."), 20_000);
   const url = /(http:\/\/127\.0\.0\.1:\d+)\//.exec(out)?.[1] ?? "";
   const token = /token: (\S+)/.exec(out)?.[1] ?? "";
   const stop = async (): Promise<void> => {
     proc.kill();
     await proc.exited;
+    RUNNING.delete(proc);
   };
   if (!url || !token) {
     await stop();
