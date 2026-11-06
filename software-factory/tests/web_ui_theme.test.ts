@@ -67,12 +67,18 @@ test("every colour variable the app's styles use is one of theme.css's", () => {
   expect([...unknown]).toEqual([]);
 });
 
-test("no shadow anywhere: a card is a flat fill or a hairline", () => {
+test("no shadow but the palette's one: a card is a flat fill or a hairline, and only a Board card lifts off its lane", () => {
   const found: string[] = [];
+  const used: string[] = [];
   for (const [f, text] of sources()) {
-    for (const m of text.matchAll(/box-shadow\s*:\s*([^;}`]+)/g)) if ((m[1] as string).trim() !== "none") found.push(`${f}: ${m[0]}`);
+    for (const m of text.matchAll(/box-shadow\s*:\s*([^;}`]+)/g)) {
+      const v = (m[1] as string).trim();
+      if (v === "var(--card-shadow)") used.push(f);
+      else if (v !== "none") found.push(`${f}: ${m[0]}`);
+    }
   }
   expect(found).toEqual([]);
+  expect([...new Set(used)]).toEqual(["board.tsx"]);
 });
 
 test("the page follows the system's setting until the owner picks light or dark", () => {

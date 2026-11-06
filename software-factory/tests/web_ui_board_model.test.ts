@@ -1,7 +1,7 @@
 // The task board's rules that aren't drawing (#439): its columns, and its lanes by agent or by epic, from
 // web/board_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { blockersText, boardOf, cardTag, COLUMNS, columnsOf, epicColour, taskAsk } from "../web/board_model.ts";
+import { blockersText, boardOf, cardEdge, cardTag, COLUMNS, columnsOf, epicColour, laneColours, taskAsk } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
@@ -104,4 +104,42 @@ test("a card's blockers are listed in words, and a card with none says nothing (
   expect(blockersText({ blockedBy: ["11", "12"] })).toBe("Blocked by #11, #12");
   expect(blockersText({ blockedBy: [] })).toBe("");
   expect(blockersText({})).toBe("");
+});
+
+test("by epic, each lane's dot is its epic's chip colour, a milestone lane the next colour round, and No epic grey", () => {
+  const epics = [{ id: "10", title: "Login" }, { id: "11", title: "Export" }, { id: "12", title: "Search" }];
+  const t = (id: string, epic: string | null, group = "") => ({ ...task(id, "ready", [], group), epic });
+  const lanes = boardOf([t("1", "12"), t("2", null, "Phase 1"), t("3", "10"), t("4", null), t("5", null, "Phase 2")], "epic", epics);
+  expect(lanes.map((l) => l.key)).toEqual(["#10", "#12", "Phase 1", "Phase 2", ""]);
+  expect(laneColours(lanes, "epic", epics)).toEqual(["violet", "green", "blue", "yellow", "grey"]);
+});
+
+test("by epic, an epic keeps its colour when the board is filtered to it", () => {
+  const epics = [{ id: "10", title: "Login" }, { id: "11", title: "Export" }];
+  const lanes = boardOf([{ ...task("1", "ready"), epic: "11" }], "epic", epics);
+  expect(laneColours(lanes, "epic", epics)).toEqual(["pink"]);
+});
+
+test("with no epics, the milestone lanes take the colours in order and No epic is grey", () => {
+  const lanes = boardOf([task("1", "ready", [], "Phase 1"), task("2", "ready", [], "Phase 2"), task("3", "ready")], "epic");
+  expect(laneColours(lanes, "epic")).toEqual(["violet", "pink", "grey"]);
+});
+
+test("by agent, each lane's dot is the agent's role colour, an unknown role is a builder, and Nobody is grey", () => {
+  const agents = { abebe: { role: "product-owner" }, fasil: { role: "dev-manager" }, menelik: { role: "coding-agent" }, taytu: {} };
+  const lanes = boardOf([task("1", "ready", ["taytu"]), task("2", "ready", ["menelik"]), task("3", "ready", ["fasil"]),
+    task("4", "ready", ["abebe"]), task("5", "ready"), task("6", "ready", ["zewditu"])], "agent");
+  expect(lanes.map((l) => l.key)).toEqual(["abebe", "fasil", "menelik", "taytu", "zewditu", ""]);
+  expect(laneColours(lanes, "agent", [], agents)).toEqual(["product", "manager", "builder", "builder", "builder", "grey"]);
+});
+
+test("a card's left edge: by epic its lane's colour; by agent its epic's colour in the epics' order, and grey with no epic", () => {
+  const epics = [{ id: "10", title: "Login" }, { id: "11", title: "Export" }];
+  expect(cardEdge({ epic: "11" }, "epic", "pink", epics)).toBe("pink");
+  expect(cardEdge({ epic: null }, "epic", "yellow", epics)).toBe("yellow");
+  expect(cardEdge({ epic: null }, "epic", "grey", epics)).toBe("grey");
+  expect(cardEdge({ epic: "10" }, "agent", "builder", epics)).toBe("violet");
+  expect(cardEdge({ epic: "11" }, "agent", "manager", epics)).toBe("pink");
+  expect(cardEdge({ epic: null }, "agent", "builder", epics)).toBe("grey");
+  expect(cardEdge({ epic: "99" }, "agent", "builder", epics)).toBe("grey");
 });

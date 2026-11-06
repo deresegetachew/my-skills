@@ -6,7 +6,7 @@
 // taskAction); the board is live through the views message. Colours are the palette's (theme.ts) only.
 import { useContext, useEffect, useState } from "react";
 import { Avatar, AgentsContext } from "./avatar_view.tsx";
-import { blockersText, boardOf, cardTag, columnsOf, epicColour, type LaneBy, type TaskAction, taskAsk } from "./board_model.ts";
+import { blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, type TaskAction, taskAsk } from "./board_model.ts";
 import { Chips } from "./parts.tsx";
 import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
@@ -126,12 +126,13 @@ function TaskThread({ t, project, token, close }: { t: TaskRow; project: ViewPro
   );
 }
 
-function Card({ t, pull, open, act, thread }: { t: TaskRow; pull?: PullRow; open: ViewProps["open"]; act: (a: Ask) => void; thread?: (t: TaskRow) => void }) {
+function Card({ t, edge, pull, open, act, thread }: { t: TaskRow; edge: string; pull?: PullRow; open: ViewProps["open"]; act: (a: Ask) => void;
+  thread?: (t: TaskRow) => void }) {
   const actions = (t.actions ?? []).filter((a): a is TaskAction => a in LABELS);
   const tag = cardTag(t, pull);
   const blockers = blockersText(t);
   return (
-    <li className="bcard">
+    <li className="bcard" data-edge={edge} style={{ borderLeftColor: `var(--${edge}-dot)` }}>
       <p className="btitle">{t.url ? <a className="ext" href={t.url} target="_blank" rel="noreferrer noopener">#{t.id}</a> : `#${t.id}`} {t.title}</p>
       <div className="bfoot">
         <span className="bwho">{t.holders.length ? t.holders.map((h) => (
@@ -171,19 +172,21 @@ export function Board({ tasks, all, epics, pulls, by, project, open, post, say, 
   const [reading, setReading] = useState<TaskRow | null>(null);
   const columns = columnsOf(all);
   const lanes = boardOf(tasks, by, epics);
+  const colours = laneColours(lanes, by, epics, useContext(AgentsContext));
   const pullOf = new Map(pulls.map((p) => [p.number, p]));
   const grid = { gridTemplateColumns: `repeat(${columns.length}, minmax(150px, 1fr))` };
   return (
     <div className="board" role="region" aria-label={`Board, lanes by ${by}`}>
       <div className="bgrid bcols" style={grid}>
         {columns.map((c) => (
-          <div key={c.state} className="bcol-head"><Dot tone={taskTone(c.state)} /><strong>{c.title}</strong>
+          <div key={c.state} className={`bcol-head ${taskTone(c.state)}`}><Dot tone={taskTone(c.state)} /><strong>{c.title}</strong>
             <span className="bcount">{tasks.filter((t) => t.state === c.state).length}</span></div>
         ))}
       </div>
-      {lanes.map((l) => (
-        <section key={l.key || "-"} className="blane" aria-label={l.title}>
+      {lanes.map((l, i) => (
+        <section key={l.key || "-"} className="blane" aria-label={l.title} data-colour={colours[i]}>
           <div className="blane-head">
+            <span className="blane-dot" aria-hidden="true" style={{ background: `var(--${colours[i]}-dot)` }} />
             {by === "agent" && l.key ? <button className="blink bagent" onClick={() => open(`agent:${l.key}`)}><Avatar name={l.key} size={22} />{l.title}</button>
               : by === "epic" && l.key.startsWith("#") ? <button className="blink" onClick={() => open("view:epics", l.key)}>{l.title}</button>
               : <h2>{l.title}</h2>}
@@ -192,7 +195,8 @@ export function Board({ tasks, all, epics, pulls, by, project, open, post, say, 
           <div className="bgrid" style={grid}>
             {columns.map((c) => (
               <ul key={c.state} className="bcell" data-col={c.title} aria-label={`${l.title}: ${c.title}`}>
-                {(l.cells[c.state] ?? []).map((t) => <Card key={t.id} t={t} pull={t.pr ? pullOf.get(t.pr.number) : undefined} open={open} act={setAsk}
+                {(l.cells[c.state] ?? []).map((t) => <Card key={t.id} t={t} edge={cardEdge(t, by, colours[i] ?? "grey", epics)}
+                  pull={t.pr ? pullOf.get(t.pr.number) : undefined} open={open} act={setAsk}
                   thread={token ? setReading : undefined} />)}
               </ul>
             ))}
@@ -215,21 +219,28 @@ export function EpicChips({ epics, all, chosen, choose }: { epics: EpicRow[]; al
 
 export const BOARD_CSS = String.raw`
 .bfilters { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.board { overflow-x: auto; display: flex; flex-direction: column; gap: 28px; padding-bottom: 6px; }
+.board { overflow-x: auto; display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; }
 .bgrid { display: grid; gap: 16px; min-width: min-content; align-items: start; }
-.bcols { padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-.bcol-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
+.bcol-head { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); background: var(--bg-subtle);
+  border: 1px solid var(--border); border-top: 3px solid var(--idle); border-radius: 8px; padding: 8px 10px; }
+.bcol-head.good { border-top-color: var(--working); }
+.bcol-head.warn { border-top-color: var(--waiting); }
+.bcol-head.bad { border-top-color: var(--down); }
 .bcol-head strong { color: var(--text); font-weight: 600; }
 .bcount { color: var(--text-3); }
-.blane { display: flex; flex-direction: column; gap: 12px; }
+/* a lane is plain: a dot in its colour (laneColours) by its title, a hairline above it; the colour is on the cards */
+.blane { display: flex; flex-direction: column; gap: 12px; min-width: min-content; border-top: 1px solid var(--border); padding-top: 20px; }
 .blane-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; position: sticky; left: 0; max-width: calc(100vw - 32px); }
+.blane-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; align-self: center; }
 .blane-head h2, .blane-head .blink { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
 .blane-head .bagent { align-self: center; }
-.bsub { color: var(--text-3); font-size: 13px; }
+.bsub { color: var(--text-2); font-size: 13px; }
 .blink { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .blink:hover { text-decoration: underline; }
 .bcell { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; min-height: 40px; }
-.bcard { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+/* a card's left edge is its lane's colour, or by agent its epic's (cardEdge) */
+.bcard { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-left: 4px solid var(--grey-dot); border-radius: 10px; padding: 12px 12px 12px 11px; display: flex;
+  flex-direction: column; gap: 8px; box-shadow: var(--card-shadow); }
 .btitle { margin: 0; font-weight: 600; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .btitle .ext { color: inherit; text-decoration: none; }
 .btitle .ext:hover { text-decoration: underline; }
@@ -259,6 +270,7 @@ export const BOARD_CSS = String.raw`
   .board { overflow-x: visible; }
   .bcols { display: none; }
   .bgrid { grid-template-columns: minmax(0, 1fr) !important; min-width: 0; gap: 10px; }
+  .blane { min-width: 0; }
   .blane-head { position: static; max-width: none; }
   .bcell { min-height: 0; }
   .bcell:empty { display: none; }
