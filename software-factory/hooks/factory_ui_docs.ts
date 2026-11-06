@@ -35,7 +35,7 @@ export interface DocHit {
 
 export interface DocReply {
   status: number;
-  body: Record<string, unknown>;
+  body: object;
 }
 
 const MAX_BYTES = 2_000_000;

@@ -3,6 +3,8 @@
 // data is, with a button that reads it again. The CI channel puts the verdict first and its actions (#396) are buttons
 // that ask first, then run the same commands the cockpit's CI view runs, on the machine that serves the page.
 import { type ReactNode, useEffect, useState } from "react";
+import { Cited } from "./docs.tsx";
+import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
 import { type ActionRow, checksText, checksTone, filterRows, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
   type RunRow, runnerText, runnerTone, runStateText, runTone, type TaskRow, taskTone, verdictTone, type ViewsData } from "./views_model.ts";
@@ -17,6 +19,8 @@ export interface ViewProps {
   find: string;
   open: (channel: string, find?: string) => void;
   post: Post;
+  /** The project's doc pages: a decision or a story that a title cites links to it (#438). */
+  docs?: DocPage[];
   say: Say;
 }
 
@@ -86,12 +90,12 @@ function AgentLink({ name, open }: { name: string; open: ViewProps["open"] }) {
 const LANES: Array<[string, string]> = [["in-progress", "in progress"], ["in-review", "in review"], ["ready", "ready"], ["blocked", "blocked"],
   ["new", "not ready"]];
 
-function TaskLine({ t, open }: { t: TaskRow; open: ViewProps["open"] }) {
+function TaskLine({ t, open, docs }: { t: TaskRow; open: ViewProps["open"]; docs?: DocPage[] }) {
   return (
     <li className={t.next ? "vrow next" : "vrow"}>
       <span className="vid"><Ext href={t.url}>#{t.id}</Ext></span>
       <span className="vmain">
-        <span className="vtitle">{t.title}{t.next && <span className="tag">next</span>}</span>
+        <span className="vtitle"><Cited text={t.title} docs={docs} open={open} />{t.next && <span className="tag">next</span>}</span>
         <span className="vsub">
           {t.group && <span>{t.group}</span>}
           {t.todos.all > 0 && <span>{t.todos.done} of {t.todos.all} todos done</span>}
@@ -121,19 +125,19 @@ export function TasksChannel(p: ViewProps) {
       <p className="vnote">In the order <code>factory next</code> walks them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>
       {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} />)}</ul>}
+      {rows.length > 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>}
     </div>
   );
 }
 
 // --- pull requests -----------------------------------------------------------------------------------------------------
 
-function PullCard({ pr, open }: { pr: PullRow; open: ViewProps["open"] }) {
+function PullCard({ pr, open, docs }: { pr: PullRow; open: ViewProps["open"]; docs?: DocPage[] }) {
   return (
     <li className="card pr">
       <div className="prhead">
         <span className="vid"><Ext href={pr.url}>#{pr.number}</Ext></span>
-        <span className="vtitle">{pr.title}</span>
+        <span className="vtitle"><Cited text={pr.title} docs={docs} open={open} /></span>
         {pr.draft && <span className="tag quiet">draft</span>}
       </div>
       <dl className="facts">
@@ -161,7 +165,7 @@ export function PullsChannel(p: ViewProps) {
       <Problems list={[...v.problems, ...v.pulls.problems]} />
       {!all.length && !v.problems.length && <p className="empty">No open pull request.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && <ul className="prs" aria-label="Pull requests">{rows.map((pr) => <PullCard key={pr.number} pr={pr} open={p.open} />)}</ul>}
+      {rows.length > 0 && <ul className="prs" aria-label="Pull requests">{rows.map((pr) => <PullCard key={pr.number} pr={pr} open={p.open} docs={p.docs} />)}</ul>}
     </div>
   );
 }
