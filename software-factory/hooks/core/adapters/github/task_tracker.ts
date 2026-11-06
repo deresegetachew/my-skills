@@ -11,6 +11,7 @@ import { sleepSync } from "../../../factory_lib.ts";
 import { holderIsMe, holderName, leasesOn } from "../../../factory_leases.ts";
 import { type Claimant, isMe } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
+import { type Epic, parseEpic } from "../../domain/epic.ts";
 import { checkClaim, dependencies, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
 import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
 
@@ -18,11 +19,21 @@ import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_track
  * the dev manager's sweep of a silent agent end it sooner. */
 const TASK_SECONDS = 7 * 24 * 3600;
 
+const isEpic = (i: Issue): boolean => names(i).has("epic");
+
 export class GithubTaskTracker implements TaskTracker {
   constructor(private readonly cfg: Config) {}
 
   list(): Task[] {
-    return sortedByOrder(taskIssues()).map((i) => this.task(i));
+    return sortedByOrder(taskIssues().filter((i) => !isEpic(i))).map((i) => this.task(i));
+  }
+
+  epics(): Epic[] {
+    const all = taskIssues("all");
+    const open = new Set(all.filter((i) => i.state === "open" && !isEpic(i)).map((i) => String(i.number)));
+    return all.filter(isEpic).sort((a, b) => a.number - b.number).map((i) => ({
+      ...parseEpic({ number: i.number, title: i.title, body: i.body ?? "", labels: [...names(i)], closed: i.state !== "open", openIds: open }),
+      url: typeof i.html_url === "string" ? i.html_url : null }));
   }
 
   show(id: string): string {

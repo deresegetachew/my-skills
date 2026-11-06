@@ -26,14 +26,14 @@ const EPICS: Row[] = [
   { id: "42", title: "Billing", stage: "investigating", tasks: [], prd: "", decisions: [] },
 ];
 
-function cache(p: Project, epics: Row[] | undefined): void {
+function cache(p: Project, epics: Row[] | null): void {
   const tasks: Row = { source: "issues", tasks: TASKS };
   if (epics) tasks.epics = epics;
   write(join(p.state, "cockpit.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [], tasks,
     pulls: [], ci: { mode: "local", repo: "o/work", label: "", runners: [], runs: [], errors: [] } }));
 }
 
-async function started(withCache = true, epics: Row[] | undefined = EPICS): Promise<Running> {
+async function started(withCache = true, epics: Row[] | null = EPICS): Promise<Running> {
   const p = project();
   roots.push(p.root);
   if (withCache) cache(p, epics);
@@ -65,7 +65,7 @@ test("epics: the url is the issue's page when the project has one, else null", a
 }, T);
 
 test("epics: a cache with no epics gives an empty list", async () => {
-  const ui = await started(true, undefined);
+  const ui = await started(true, null);
   const r = await api(ui, "/api/projects/work/epics");
   expect(r.status).toBe(200);
   expect(r.json.epics).toEqual([]);
@@ -91,7 +91,7 @@ test("tasks: each says which epic it is in, the first that names it, or null", a
 }, T);
 
 test("tasks: a cache without epics leaves every task in none", async () => {
-  const ui = await started(true, undefined);
+  const ui = await started(true, null);
   const tasks = (await api(ui, "/api/projects/work/tasks")).json.tasks as Row[];
   expect(tasks.map((t) => t.epic)).toEqual([null, null, null]);
 }, T);

@@ -92,6 +92,7 @@ export interface Live {
 /** The views every project has, in the sidebar's order. The owner queue fills in with #423, tasks, pull requests and CI with #424. */
 export const VIEWS: Channel[] = [
   { id: "view:tasks", kind: "view", name: "tasks", title: "Tasks" },
+  { id: "view:epics", kind: "view", name: "epics", title: "Epics" },
   { id: "view:pull-requests", kind: "view", name: "pull-requests", title: "Pull requests" },
   { id: "view:ci", kind: "view", name: "ci", title: "CI" },
   { id: "view:owner-queue", kind: "view", name: "owner-queue", title: "Owner queue" },

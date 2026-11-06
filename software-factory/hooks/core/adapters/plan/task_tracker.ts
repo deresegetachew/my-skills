@@ -11,6 +11,7 @@ import { alive, type Claims, claimTask, locked } from "../../../factory_claims.t
 import { blockedIds, type Config, toFloat } from "../../../factory_config.ts";
 import { run } from "../../../factory_lib.ts";
 import type { Claimant } from "../../domain/claim.ts";
+import type { Epic } from "../../domain/epic.ts";
 import { CoreError } from "../../domain/error.ts";
 import { checkClaim, dependencies, type Task, tickTodo, todos } from "../../domain/task.ts";
 import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
@@ -101,6 +102,10 @@ export class PlanTaskTracker implements TaskTracker {
     locked((data) => void delete data.tasks[id]); // a block ends the claim, as on GitHub
     const text = existsSync(this.cfg.blocked) ? readFileSync(this.cfg.blocked, "utf8") : "# Blocked\n\n";
     writeFileSync(this.cfg.blocked, `${text}${text.endsWith("\n") ? "" : "\n"}- ${id}: ${reason}\n`);
+  }
+
+  epics(): Epic[] {
+    return [];
   }
 
   file(task: NewTask): Filed {

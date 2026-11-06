@@ -13,7 +13,7 @@ import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHa
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { CSS } from "./style.ts";
-import { CiChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
+import { CiChannel, EpicsChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
 import { searchRows, type ViewsData } from "./views_model.ts";
 
 // --- the API's shapes --------------------------------------------------------------------------------------------------
@@ -263,6 +263,7 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
 
 const COMING: Record<string, [string, string]> = {
   tasks: ["Tasks", "factory cockpit --tasks"],
+  epics: ["Epics", "factory cockpit --tasks"],
   "pull-requests": ["Pull requests", "factory cockpit --prs"],
   ci: ["CI", "factory cockpit --ci"],
 };
@@ -281,7 +282,7 @@ function ComingChannel({ name }: { name: string }) {
 }
 
 /** The views that are channels of their own (#424, web/views.tsx). */
-const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel, "pull-requests": PullsChannel, ci: CiChannel };
+const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel, epics: EpicsChannel, "pull-requests": PullsChannel, ci: CiChannel };
 
 // --- the app -----------------------------------------------------------------------------------------------------------
 
