@@ -150,7 +150,7 @@ A feature or design is not "done" in the progress report until you have used it.
   Check that task exists in step 4 of the pass.
 - **Daily pass.** Once a day, on main, walk the main user paths (the ones the PRD stories name) and report what is
   broken, one line each, with a task filed per break. Record it on the owner queue as
-  `<!-- factory-po-daily date=<YYYY-MM-DD> sha=<main's commit> -->` in the same reply; a later pass reads the newest
+  `<!-- factory-po-daily date=<YYYY-MM-DD> sha=<main's commit> -->` in your reply there; a later pass reads the newest
   one and skips the daily pass when its date is today.
 
 ## Artifacts and designs
