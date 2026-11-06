@@ -6,7 +6,7 @@
 // keeps its remotes as local bare repos; `factory` is a fake script (committed in each "cloned" repo) that logs what it
 // was asked. Nothing here reaches the network.
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { api, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { git, gitRepo, read, readJson, sh, write, writeExe } from "./support.ts";
@@ -585,7 +585,61 @@ test("folder: a repo with uncommitted changes is refused with ui_add_dirty and n
   expect(ghCalls(s.p)).toEqual([]);
 }, T);
 
-// --- new ---------------------------------------------------------------------------------------------------------------
+test("clone or new into a checkout of the repo with an untracked file: ui_add_dirty, nothing is touched or pushed", async () => {
+  const s = await setup();
+  const dir = folderRepo(s, "shop");
+  write(join(dir, ".env"), "SECRET=1\n");
+  for (const source of ["clone", "new"]) {
+    const r = await api(s.ui, "/api/add-project", { method: "POST", body: { confirm: true, ...req(s, { source, path: dir }) } });
+    expect(r.status, JSON.stringify(r.json)).toBe(400);
+    expect(r.json.code).toBe("ui_add_dirty");
+  }
+  expect(existsSync(join(dir, ".claude", "hooks"))).toBe(false);
+  expect(ghCalls(s.p)).toEqual([]);
+  expect(git(dir, "ls-remote", "--heads", "origin").trim().split("\n").filter(Boolean)).toHaveLength(1);
+}, T);
+
+test("check: a main branch that starts with a dash or is the setup branch is refused with ui_add_branch", async () => {
+  const s = await setup();
+  for (const mainBranch of ["-main", ".main", "factory/setup"]) {
+    const r = await check(s, req(s, { mainBranch }));
+    expect(r.status, `${mainBranch} -> ${JSON.stringify(r.json)}`).toBe(400);
+    expect(r.json.code).toBe("ui_add_branch");
+  }
+  const ok = await check(s, req(s, { mainBranch: "release/2" }));
+  expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+}, T);
+
+test("folder: a subfolder of a checkout is refused with ui_add_not_top; a symlink to the top is accepted", async () => {
+  const s = await setup();
+  const dir = folderRepo(s, "mine");
+  mkdirSync(join(dir, "sub"));
+  write(join(dir, "sub", "keep.txt"), "x\n");
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "sub");
+  const r = await check(s, req(s, { source: "folder", repo: "", path: join(dir, "sub") }));
+  expect(r.status, JSON.stringify(r.json)).toBe(400);
+  expect(r.json.code).toBe("ui_add_not_top");
+  expect(String(r.json.fix)).toContain(dir);
+  const link = join(s.folder, "mine-link");
+  symlinkSync(dir, link);
+  const ok = await check(s, req(s, { source: "folder", repo: "", path: link }));
+  expect(ok.status, JSON.stringify(ok.json)).toBe(200);
+}, T);
+
+test("the setup pull request step fails when the main branch can't be fetched, and nothing is pushed", async () => {
+  const s = await setup();
+  const dir = folderRepo(s, "mine");
+  git(dir, "remote", "set-url", "origin", join(s.remotes, "acme", "gone.git"));
+  const run = await waitRun(s.ui, await start(s, req(s, { source: "folder", repo: "", path: dir })));
+  expect(run.state).toBe("failed");
+  expect(step(run, "commit").state).toBe("failed");
+  expect(String((step(run, "commit").problem as Row).code)).toBe("ui_add_fetch");
+  expect(git(dir, "branch", "--show-current").trim()).toBe("main");
+  expect(ghCalls(s.p).filter((l) => l.startsWith("gh pr create"))).toEqual([]);
+}, T);
+
+// --- new---------------------------------------------------------------------------------------------------------------
 
 test("new: gh repo view says it is missing, so gh repo create --private --add-readme runs, then the clone", async () => {
   const s = await setup();
