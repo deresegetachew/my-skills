@@ -120,11 +120,11 @@ function Card({ t, open, act }: { t: TaskRow; open: ViewProps["open"]; act: (a: 
 }
 
 /** The board for `tasks` (already filtered), with its lanes by `by`. */
-export function Board({ tasks, all, by, project, open, post, say }: { tasks: TaskRow[]; all: TaskRow[]; by: LaneBy; project: ViewProps["project"];
-  open: ViewProps["open"]; post: Post; say: Say }) {
+export function Board({ tasks, all, epics, by, project, open, post, say }: { tasks: TaskRow[]; all: TaskRow[]; epics: { id: string; title: string }[];
+  by: LaneBy; project: ViewProps["project"]; open: ViewProps["open"]; post: Post; say: Say }) {
   const [ask, setAsk] = useState<Ask | null>(null);
   const columns = columnsOf(all);
-  const lanes = boardOf(tasks, by);
+  const lanes = boardOf(tasks, by, epics);
   const grid = { gridTemplateColumns: `repeat(${columns.length}, minmax(220px, 1fr))` };
   return (
     <div className="board" role="region" aria-label={`Board, lanes by ${by}`}>

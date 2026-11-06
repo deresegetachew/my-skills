@@ -367,6 +367,10 @@ async function cmdUp(argv: string[]): Promise<number> {
     console.log(`On a sandboxed machine, let agents through the network guard: sudo factory bootstrap machine --apply ` +
       `--allow-host ${address}:${ports.tailnet}`);
   }
+  if (address && which("ufw")) {
+    console.log(`ufw is installed here and drops forwarded traffic, so the tailnet can't reach the container yet. ` +
+      `Run once: sudo ufw route allow in on tailscale0 to any port 4222 proto tcp`);
+  }
   const a = await waitForHealth(s);
   console.log(a.ok ? `The server answers (http://127.0.0.1:${ports.monitor}/healthz).`
     : `note: the server doesn't answer yet (${a.detail}). \`factory nats status\` checks again.`);

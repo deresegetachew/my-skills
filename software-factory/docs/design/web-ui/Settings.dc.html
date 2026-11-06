@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory settings</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="settings" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1100px;">
+
+<nav aria-label="Settings sections" style="display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--border);">
+<a href="Settings.dc.html" aria-current="page" style="display: inline-flex; align-items: center; min-height: 44px; border-bottom: 2px solid var(--text); font-weight: 600; color: var(--text); text-decoration: none; margin-bottom: -1px;">General</a>
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">This machine</a>
+<a href="Integrations.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Integrations</a>
+<a href="Releases.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Releases and updates</a>
+<a href="Maintenance.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Maintenance</a>
+</nav>
+
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700;">Factory settings</h1>
+<p style="margin: 0; color: var(--text-2);">Project changes go to main as one pull request that you merge. This machine's settings save at once.</p>
+</header>
+
+<div style="display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start;">
+
+<nav aria-label="Sections" style="flex: 0 1 200px; min-width: 180px; display: flex; flex-direction: column; gap: 12px;">
+<label style="display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 10px; height: 44px; color: var(--text-2);">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<span style="position: absolute; left: -9999px;">Search settings</span>
+<input type="search" placeholder="Search" value="" style="flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); font: inherit; outline: none;">
+</label>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<sc-for list="{{sections}}" as="s" hint-placeholder-count="7">
+<a href="#" style="display: flex; justify-content: space-between; align-items: center; padding: 9px 10px; border-radius: 9px; text-decoration: none; color: var(--text); background: {{s.bg}}; font-weight: {{s.weight}};"><span>{{s.label}}</span><span style="font-size: 12px; color: var(--text-3);">{{s.n}}</span></a>
+</sc-for>
+</div>
+</nav>
+
+<section aria-labelledby="sec-h" style="flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+<h2 id="sec-h" style="margin: 0; font-size: 15px;">Messaging</h2>
+<span style="color: var(--text-2); font-size: 13px; padding-bottom: 6px;">How agents send questions, answers and claims.</span>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 16px; padding: 16px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{r.name}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{r.help}}</span>
+</div>
+<div style="width: 220px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px;">
+<span>{{r.value}}</span>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-3); font-size: 13px;"><sc-if value="{{r.staged}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--waiting); flex-shrink: 0;"></span></sc-if>{{r.from}}</span>
+</div>
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Edit</button>
+</li>
+</sc-for>
+</ul>
+
+<div role="group" aria-label="Editing the hub address" style="display: flex; flex-direction: column; gap: 8px; padding: 20px 4px 0;">
+<label for="url-in" style="font-weight: 600;">Hub address</label>
+<input id="url-in" type="text" value="http://100.99.7.67:4222" aria-invalid="true" aria-describedby="url-err" style="height: 44px; max-width: 420px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font: inherit;">
+<span id="url-err" style="display: inline-flex; gap: 8px; align-items: center; color: var(--text); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot); flex-shrink: 0;"></span>The address must start with nats://. Try nats://100.99.7.67:4222, the hub on dev-pc.</span>
+<div style="display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px;">
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Stage this change</button>
+<button style="height: 40px; padding: 0 12px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;">Cancel</button>
+</div>
+</div>
+</section>
+
+</div>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">Agents cannot change their own rules: a project change is a pull request only you merge. The This machine tab lists agent names, Remote Control, autostart and CI runners for dev-pc, kept outside the repo.</p>
+
+<div style="flex: 1;"></div>
+
+<div role="region" aria-label="Staged changes" style="position: sticky; bottom: 0; margin: 0 -44px; padding: 14px 44px; background: var(--surface); border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--waiting);"></span>
+<span style="font-weight: 600;">3 changes staged</span>
+<span style="flex: 1 1 260px; color: var(--text-2); font-size: 13px;">Check for messages every, CI runners, how long views keep data.</span>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Review the diff</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Propose as a pull request</button>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const from = { main: 'From main', staged: 'Staged, was 5 min', machine: 'This machine only', def: 'Default' };
+    const row = (name, value, help, s) => ({ name, value, help, from: from[s], staged: s === 'staged' });
+    const sec = (label, n, on) => ({ label, n, bg: on ? 'var(--bg-active)' : 'transparent', weight: on ? 600 : 400 });
+    return {
+      theme: this.props.theme ?? 'light',
+      sections: [
+        sec('Agents', 6, false), sec('Tasks', 5, false), sec('Messaging', 4, true), sec('CI', 5, false),
+        sec('Review and protection', 7, false), sec('Views', 3, false), sec('Web UI', 2, false)
+      ],
+      rows: [
+        row('How messages travel', 'Messaging hub', 'Through the hub, or as GitHub comments', 'main'),
+        row('Hub address', 'nats://100.99.7.67:4222', 'Where the hub listens; every agent connects here', 'main'),
+        row('Messages sent through the hub', 'Questions, answers, claims', 'Which kinds of message use the hub', 'def'),
+        row('Check for messages every', '2 min', 'For an agent without the hub', 'staged'),
+        row('This machine\'s messaging key', 'Saved', 'Readable only by this machine\'s user', 'machine')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

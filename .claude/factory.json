@@ -77,5 +77,5 @@
     "manifest": "software-factory/docs/artifacts.json"
   },
   "waitMinutes": 5,
-  "messaging": { "transport": "nats", "url": "nats://127.0.0.1:4222", "kinds": ["wake", "claim"] }
+  "messaging": { "transport": "nats", "url": "nats://127.0.0.1:4222", "kinds": ["wake", "claim", "pr"], "githubCopy": [] }
 }

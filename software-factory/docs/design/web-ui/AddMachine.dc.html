@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Add a machine</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="machines" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px;">
+
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<a href="Machines.dc.html" style="color: var(--text-3); text-decoration: none; font-size: 13px;">Machines / Add a machine</a>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; line-height: 1.15;">Add a machine</h1>
+<p style="margin: 0; color: var(--text-2);">Join another computer to the hub on dev-pc, so its agents share claims and messages with the team.</p>
+</header>
+
+<ol aria-label="Steps" style="margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px 24px;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="3">
+<li aria-current="{{s.aria}}" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{s.labelColor}}; font-weight: {{s.weight}};"><span style="width: 22px; height: 22px; border-radius: 50%; background: {{s.circleBg}}; color: {{s.circleFg}}; border: 1px solid {{s.circleBorder}}; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box;">{{s.mark}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+
+<div style="display: flex; flex-direction: column; gap: 36px; max-width: 720px;">
+
+<section aria-labelledby="code-h" style="display: flex; flex-direction: column; gap: 16px;">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 10px;">
+<h2 id="code-h" style="margin: 0; font-size: 17px;">Join code for office-pc</h2>
+<span style="font-size: 13px; color: var(--text-3);">Works once · expires in 14:32</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px;">
+<output aria-label="Join code" style="flex: 1 1 300px; font-family: 'Space Grotesk', ui-monospace, monospace; font-size: 40px; font-weight: 700; letter-spacing: 0.08em; color: var(--text); background: var(--bg-subtle); border-radius: 12px; padding: 20px 22px; text-align: center;">{{code}}</output>
+<button style="height: 44px; padding: 0 20px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Copy code</button>
+</div>
+<p style="margin: 0; color: var(--text-2); line-height: 1.55;">On office-pc, open the factory, choose Join my factory and enter this code. It carries the hub’s address and a one-time pass, but no key: office-pc makes its own and the hub signs it.</p>
+<p style="margin: 0; font-size: 13px; color: var(--text-3);">Machine name: office-pc · <a href="#" style="color: var(--text-2);">Rename</a></p>
+</section>
+
+<section aria-labelledby="wait-h" aria-live="polite" style="display: flex; flex-direction: column; gap: 8px;">
+<h2 id="wait-h" style="margin: 0 0 4px; font-size: 17px;">Waiting for office-pc</h2>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{joinSteps}}" as="s" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); color: {{s.color}};">
+<span style="width: 16px; display: inline-flex; justify-content: center; flex-shrink: 0; color: var(--text-3);">
+<sc-if value="{{s.done}}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></sc-if>
+<sc-if value="{{s.notDone}}" hint-placeholder-val="{{ true }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{s.dot}};"></span></sc-if>
+</span>{{s.text}}</li>
+</sc-for>
+</ol>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; padding-top: 8px;">
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Make a new code</button>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Cancel and void the code</button>
+</div>
+<p style="margin: 8px 0 0; font-size: 13px; color: var(--text-3); line-height: 1.5;">When office-pc joins, give it agents in Team setup. If nobody uses the code in 15 minutes it expires: choose Make a new code. If office-pc can’t reach the hub, sign in to Tailscale there and enter the code again.</p>
+</section>
+
+<section aria-labelledby="other-h" style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="other-h" style="margin: 0 0 6px; font-size: 15px;">Other ways to add one</h2>
+<sc-for list="{{others}}" as="o" hint-placeholder-count="2">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 14px 0; border-top: 1px solid var(--border);">
+<span style="flex: 1 1 320px; display: flex; flex-direction: column; gap: 3px;"><span style="font-weight: 600;">{{o.title}}</span><span style="font-size: 13px; color: var(--text-2);">{{o.body}}</span></span>
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{o.action}}</button>
+</div>
+</sc-for>
+<p style="margin: 8px 0 0; font-size: 13px; color: var(--text-3);">Already here: dev-pc (hub) and the Mac. <a href="Machines.dc.html" style="color: var(--text-2);">See all machines</a></p>
+</section>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const labels = ['Name it', 'Give it the code', 'It joins'];
+    const cur = 1;
+    const steps = labels.map((label, i) => ({
+      label, aria: i === cur ? 'step' : 'false',
+      mark: i < cur ? '✓' : String(i + 1),
+      circleBg: i === cur ? 'var(--primary)' : 'var(--surface)',
+      circleFg: i === cur ? 'var(--on-primary)' : i < cur ? 'var(--text)' : 'var(--text-3)',
+      circleBorder: i === cur ? 'var(--primary)' : 'var(--border-strong)',
+      labelColor: i === cur ? 'var(--text)' : 'var(--text-2)', weight: i === cur ? 600 : 400
+    }));
+    const step = (text, s) => ({
+      text, done: s === 'done', notDone: s !== 'done',
+      dot: s === 'now' ? 'var(--waiting)' : 'var(--border-strong)',
+      color: s === 'later' ? 'var(--text-3)' : 'var(--text)'
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      steps,
+      code: 'K7QM-4D2P',
+      joinSteps: [
+        step('Code made on dev-pc', 'done'),
+        step('office-pc reaches the hub (looking every few seconds)', 'now'),
+        step('office-pc makes its key; the hub signs it', 'later'),
+        step('A NATS leaf starts on office-pc and connects', 'later')
+      ],
+      others: [
+        { title: 'A cloud agent', body: 'An agent running on claude.ai: paste its session link and the team can follow it and talk to it.', action: 'Add cloud agent' },
+        { title: 'A machine over SSH', body: 'For a machine that can’t run the join: the UI follows its agents over SSH instead.', action: 'Reach over SSH' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

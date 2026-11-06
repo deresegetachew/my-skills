@@ -5,7 +5,9 @@
 //   - one stream per project, `factory-<project>`, holding `factory.<project>.>`;
 //   - a message to issue or PR n from <from> is published on `factory.<project>.<issue|pr>.<n>.<from>` as JSON with the
 //     envelope's fields (v, id, kind, from, to, state, ref, in-reply-to, sha) plus text and at;
-//   - claims are the key-value bucket `claims-<project>`: a value names its holder and until when it holds.
+//   - claims are the key-value bucket `claims-<project>`: a value names its holder and until when it holds;
+//   - the pull request watcher's snapshot is the bucket `prs-<project>` (key `open`), and its change events go on
+//     `factory.<project>.prs.<watcher>` (kind `pr`).
 // A reader drops a message whose `from` isn't its subject's last token (the sender the server's permissions checked).
 //
 // The cursor is the stream's sequence (`nats1:<seq>`): a read gives every matching message after it, so a reader that
@@ -21,7 +23,8 @@ import { Kvm } from "@nats-io/kv";
 import { connect, type NatsConnection, nanos, nkeyAuthenticator } from "@nats-io/transport-node";
 import { CoreError } from "../../hooks/core/domain/error.ts";
 import { badCursor, ID, Message, NAME, needsRef, newId, REF, unknownMessage, visible } from "../../hooks/core/domain/message.ts";
-import type { ClaimResult, Cursor, Leases, Messaging, Read, Scope, Wake, Wakes, WakeWait } from "../../hooks/core/ports/messaging.ts";
+import type { ClaimResult, Cursor, Leases, Messaging, PrEvent, PrFeed, PrSnapshot, PrWait, Read, Scope, Wake, Wakes, WakeWait }
+  from "../../hooks/core/ports/messaging.ts";
 
 export interface NatsOptions {
   url: string; // nats://<address>:4222 or tls://
@@ -30,7 +33,7 @@ export interface NatsOptions {
   timeoutMs?: number; // how long one call may take in all (default 10 s); connecting gets a third of it
 }
 
-export type { ClaimResult, Wake, WakeWait };
+export type { ClaimResult, PrEvent, PrSnapshot, PrWait, Wake, WakeWait };
 
 const PREFIX = "nats1:";
 const PROJECT = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -46,7 +49,10 @@ type Op =
   | { op: "holder"; key: string }
   | { op: "drop"; key: string }
   | { op: "wake"; subject: string; payload: string }
-  | { op: "wait"; filter: string; names: string[]; since: number; seconds: number };
+  | { op: "wait"; filter: string; names: string[]; since: number; seconds: number; prs?: string; prChanges?: string[] }
+  | { op: "prs-put"; snapshot: string; events: { subject: string; payload: string }[] }
+  | { op: "prs-get" }
+  | { op: "prs-events"; filter: string; since: number; seconds: number; pr: number; first: boolean };
 
 type Answer = { ok: true; result: unknown } | { ok: false; code: string; message: string; fix: string };
 
@@ -62,7 +68,7 @@ export function createMessaging(opts: NatsOptions): NatsMessaging {
   return new NatsMessaging(opts);
 }
 
-export class NatsMessaging implements Messaging, Leases, Wakes {
+export class NatsMessaging implements Messaging, Leases, Wakes, PrFeed {
   private known = new Set<string>();
   private readonly opts: NatsOptions;
 
@@ -146,8 +152,40 @@ export class NatsMessaging implements Messaging, Leases, Wakes {
   /** Wait for a wake-up (see WakeWait); null when none came in time. */
   waitWake(w: WakeWait): Wake | null {
     const seconds = Math.max(1, Math.floor(w.seconds));
-    return this.call({ op: "wait", filter: `${this.base()}.wake.*`, names: w.names, since: w.since, seconds },
-      seconds * 1000) as Wake | null;
+    return this.call({ op: "wait", filter: `${this.base()}.wake.*`, names: w.names, since: w.since, seconds,
+      ...(w.prChanges ? { prs: `${this.base()}.prs.*`, prChanges: w.prChanges } : {}) }, seconds * 1000) as Wake | null;
+  }
+
+  /** Keep the watcher's snapshot (the key-value bucket prs-<project>, key `open`) and publish each change on
+   * factory.<project>.prs.<from>, the watcher being the sender. */
+  putPrs(snapshot: PrSnapshot, events: PrEvent[]): void {
+    if (!NAME.test(snapshot.by) || events.some((e) => e.from !== snapshot.by)) {
+      throw new CoreError("bad-pr-event", `Pull request events need their watcher's name as the sender, not '${snapshot.by}'.`,
+        "Report it as a bug with the command you ran.");
+    }
+    const subject = `${this.base()}.prs.${snapshot.by}`;
+    this.call({ op: "prs-put", snapshot: JSON.stringify(snapshot), events: events.map((e) => ({ subject,
+      payload: JSON.stringify({ v: 1, id: newId(), kind: "pr", from: e.from, ref: `pr#${e.pr}`, change: e.change, head: e.head,
+        checks: e.checks, labels: e.labels, at: e.at }) })) });
+  }
+
+  /** The current snapshot of the open pull requests, or null when no watcher has written one. */
+  prs(): PrSnapshot | null {
+    const got = this.call({ op: "prs-get" }) as string | null;
+    if (!got) return null;
+    try {
+      const s = JSON.parse(got) as PrSnapshot;
+      return s && s.v === 1 && typeof s.at === "number" && Array.isArray(s.prs) && Array.isArray(s.closed) ? s : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The pull request events said since `w.since` (see PrWait). */
+  prEvents(w: PrWait): PrEvent[] {
+    const seconds = Math.max(1, Math.floor(w.seconds));
+    return this.call({ op: "prs-events", filter: `${this.base()}.prs.*`, since: w.since, seconds, pr: w.pr ?? 0,
+      first: Boolean(w.first) }, seconds * 1000) as PrEvent[];
   }
 
   private base(): string {
@@ -264,17 +302,29 @@ async function helper(): Promise<Answer> {
 
 const streamName = (project: string): string => `factory-${project}`;
 
+// NATS is not the record (6 Nov 2026): GitHub keeps what anyone reads later, so the stream only has to cover a reader
+// that was away. 30 days is far longer than any machine is off; 1 GiB is thousands of times a busy month's wake-ups and
+// claims events (each well under 1 KiB) and still small on the hub's disk. The oldest messages go first.
+export const STREAM_MAX_AGE_MS = 30 * 24 * 3600 * 1000;
+export const STREAM_MAX_BYTES = 1024 * 1024 * 1024;
+
 async function ensureStream(jsm: JetStreamManager, project: string): Promise<void> {
+  const limits = { max_age: nanos(STREAM_MAX_AGE_MS), max_bytes: STREAM_MAX_BYTES, discard: DiscardPolicy.Old };
+  let have: Awaited<ReturnType<JetStreamManager["streams"]["info"]>> | null = null;
   try {
-    await jsm.streams.info(streamName(project));
+    have = await jsm.streams.info(streamName(project));
   } catch {
     await jsm.streams.add({ name: streamName(project), subjects: [`factory.${project}.>`], storage: StorageType.File,
-      retention: RetentionPolicy.Limits, discard: DiscardPolicy.Old, allow_direct: true,
-      duplicate_window: nanos(60 * 60 * 1000) }).catch(async (e: unknown) => {
-      await jsm.streams.info(streamName(project)).catch(() => {
-        throw e; // made by someone else meanwhile is fine; anything else is not
+      retention: RetentionPolicy.Limits, allow_direct: true, duplicate_window: nanos(60 * 60 * 1000), ...limits })
+      .catch(async (e: unknown) => {
+        have = await jsm.streams.info(streamName(project)).catch(() => {
+          throw e; // made by someone else meanwhile is fine; anything else is not
+        });
       });
-    });
+  }
+  const c = have?.config;
+  if (c && (c.max_age !== limits.max_age || c.max_bytes !== limits.max_bytes || c.discard !== limits.discard)) {
+    await jsm.streams.update(streamName(project), limits); // a stream made before the limits: the running hub gets them
   }
 }
 
@@ -294,6 +344,19 @@ async function run(nc: NatsConnection, req: Request): Promise<unknown> {
     return true;
   }
   if (req.op === "wait") return waitWake(nc, jsm, req);
+  if (req.op === "prs-put" || req.op === "prs-get") {
+    const prs = await new Kvm(nc).create(`prs-${project}`, { history: 1 });
+    if (req.op === "prs-get") {
+      const e = await prs.get("open");
+      return e && e.operation === "PUT" ? e.string() : null;
+    }
+    await prs.put("open", req.snapshot as string);
+    const events = req.events as { subject: string; payload: string }[];
+    if (events.length) await ensureStream(jsm, project);
+    for (const e of events) await jetstream(nc, { timeout: req.timeout }).publish(e.subject, e.payload);
+    return true;
+  }
+  if (req.op === "prs-events") return prEvents(nc, jsm, req);
   const kv = await new Kvm(nc).create(`claims-${project}`, { history: 1 });
   const key = req.key as string;
   const holder = req.holder as string;
@@ -349,8 +412,9 @@ async function waitWake(nc: NatsConnection, jsm: JetStreamManager, req: Request)
   await ensureStream(jsm, req.project);
   const names = req.names as string[];
   const deadline = Date.now() + (req.seconds as number) * 1000;
+  const prChanges = Array.isArray(req.prChanges) ? (req.prChanges as string[]) : null;
   const consumer = await jetstream(nc, { timeout: req.timeout }).consumers.get(streamName(req.project), {
-    filter_subjects: [req.filter as string], deliver_policy: DeliverPolicy.StartTime,
+    filter_subjects: [req.filter as string, ...(prChanges ? [req.prs as string] : [])], deliver_policy: DeliverPolicy.StartTime,
     opt_start_time: new Date(req.since as number).toISOString() });
   try {
     while (Date.now() < deadline) {
@@ -364,10 +428,52 @@ async function waitWake(nc: NatsConnection, jsm: JetStreamManager, req: Request)
       }
       const str = (k: string): string => (typeof b[k] === "string" ? (b[k] as string) : "");
       const from = str("from");
+      if (b.kind === "pr" && prChanges) { // the pull request watcher saw a change (the `pr` kind)
+        if (from !== m.subject.split(".").at(-1) || (prChanges.length && !prChanges.includes(str("change")))) continue;
+        return { from, to: names[0] ?? "", ref: str("ref"), why: `pull request ${str("change")}`, at: str("at") };
+      }
       if (b.kind !== "wake" || from !== m.subject.split(".").at(-1) || from === names[0] || !names.includes(str("to"))) continue;
       return { from, to: str("to"), ref: str("ref"), why: str("text"), at: str("at") };
     }
     return null;
+  } finally {
+    await consumer.delete().catch(() => {});
+  }
+}
+
+/** The pull request events on `req.filter` said since `req.since` (about `req.pr` when it isn't 0) that come within
+ * `req.seconds`: all of them, or the first only (`req.first`). An event whose sender isn't its subject's last token is
+ * dropped. */
+async function prEvents(nc: NatsConnection, jsm: JetStreamManager, req: Request): Promise<PrEvent[]> {
+  await ensureStream(jsm, req.project);
+  const deadline = Date.now() + (req.seconds as number) * 1000;
+  const want = req.pr as number;
+  const out: PrEvent[] = [];
+  const consumer = await jetstream(nc, { timeout: req.timeout }).consumers.get(streamName(req.project), {
+    filter_subjects: [req.filter as string], deliver_policy: DeliverPolicy.StartTime,
+    opt_start_time: new Date(req.since as number).toISOString() });
+  try {
+    while (Date.now() < deadline) {
+      const m = await consumer.next({ expires: Math.max(1000, Math.min(req.first ? 30_000 : 1000, deadline - Date.now())) });
+      if (!m) {
+        if (!req.first) break; // nothing more was said: that is all of them
+        continue;
+      }
+      let b: Record<string, unknown>;
+      try {
+        b = m.json<Record<string, unknown>>();
+      } catch {
+        continue;
+      }
+      const str = (k: string): string => (typeof b[k] === "string" ? (b[k] as string) : "");
+      const from = str("from");
+      const pr = Number(/^pr#(\d+)$/.exec(str("ref"))?.[1] ?? 0);
+      if (b.kind !== "pr" || from !== m.subject.split(".").at(-1) || !pr || (want && pr !== want)) continue;
+      out.push({ pr, change: str("change"), from, head: str("head"), checks: str("checks"),
+        labels: Array.isArray(b.labels) ? b.labels.filter((x): x is string => typeof x === "string") : [], at: str("at") });
+      if (req.first) break;
+    }
+    return out;
   } finally {
     await consumer.delete().catch(() => {});
   }

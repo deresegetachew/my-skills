@@ -62,10 +62,77 @@ export interface WakeWait {
   names: string[];
   since: number;
   seconds: number;
+  /** With `pr` on NATS: a pull request event with one of these changes wakes the waiter too (empty: every change). */
+  prChanges?: string[];
 }
 
 export interface Wakes {
   wake(w: Wake): void;
   /** The first such wake, waiting up to `seconds` for one; null when none came. */
   waitWake(w: WakeWait): Wake | null;
+}
+
+// --- pull requests and CI over NATS (the `pr` kind) -----------------------------------------------------------------
+// One watcher per project reads GitHub (hooks/factory_pr_feed.ts) and keeps what it saw here: a snapshot of the open
+// pull requests, and one event per change. GitHub stays the record; this only says what changed, so a reader need not
+// ask. Only a transport with a store has it (NATS); on GitHub every reader asks GitHub, as it always did.
+
+/** An open pull request as the watcher last saw it. `runs` and `statuses` are its head's check runs and commit
+ * statuses, cut to the fields the readers judge CI by. */
+export interface PrState {
+  number: number;
+  title: string;
+  body: string;
+  author: string;
+  draft: boolean;
+  branch: string;
+  base: string;
+  headRepo: string;
+  head: string;
+  headAt: string | null; // the head commit's committer date
+  labels: string[];
+  updated: string; // the pull request's updated_at
+  mergeable: string; // mergeable_state, "" when GitHub hasn't worked it out
+  checks: string; // the dev manager's CI verdict (factory_ci_judge.ts): green, pending, failed or none
+  runs: Record<string, unknown>[];
+  statuses: Record<string, unknown>[];
+}
+
+/** What the watcher saw at `at` (ms since the epoch): the open pull requests, and the latest closed ones. */
+export interface PrSnapshot {
+  v: 1;
+  at: number;
+  by: string; // the watcher
+  login: string; // the account it reads as (D9: every role's)
+  repo: string; // owner/name
+  prs: PrState[];
+  closed: { number: number; merged: boolean; at: string }[];
+}
+
+/** One change to one pull request: opened, head, checks, labels, draft, merged or closed. */
+export interface PrEvent {
+  pr: number;
+  change: string;
+  from: string;
+  head: string;
+  checks: string;
+  labels: string[];
+  at: string;
+}
+
+/** The events said since `since` (ms), about pull request `pr` when given, waiting up to `seconds` for them: all that
+ * came in that time, or (`first`) the first one only. */
+export interface PrWait {
+  since: number;
+  seconds: number;
+  pr?: number;
+  first?: boolean;
+}
+
+export interface PrFeed {
+  /** Keep `snapshot` as the project's current one and publish `events`. */
+  putPrs(snapshot: PrSnapshot, events: PrEvent[]): void;
+  /** The current snapshot, or null when no watcher has written one. */
+  prs(): PrSnapshot | null;
+  prEvents(w: PrWait): PrEvent[];
 }

@@ -5,7 +5,7 @@
 //   GET  /api/projects                         this project and those in ui.projects
 //   GET  /api/projects/:p/channels             one per agent (with `avatar`, the owner's image, when there is one), one
 //                                              per view
-//   GET  /api/projects/:p/agents[/:name]       the agents live (factory_ui_data.ts live())
+//   GET  /api/projects/:p/agents[/:name]       the agents live (factory_ui_data.ts live()), limit, githubCalls (the last hour)
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
 //   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
 //   POST /api/projects/:p/agents/:name/stop    {confirm: true}: factory owner stop <name>
@@ -14,6 +14,7 @@
 //   GET  /api/ws?token=...                     a WebSocket: {type: "hello"}, then {type: "state", project, ...live} for
 //                                              each project, and again whenever one changes; likewise {type: "views",
 //                                              project, ...} for the tasks, pull requests and CI channels
+//   GET  /api/projects/:p/docs, .../docs/page?id=, .../docs/search?q=: the PRD, the decisions and the wiki (factory_ui_docs.ts, #438)
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
 //   POST /api/projects/:p/tasks/:id/actions/:name  the board's release, block and reassign (#439): factory_ui_views.ts
 //
@@ -25,6 +26,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { ciAction, Refresher, taskAction, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
@@ -45,7 +47,7 @@ export interface Running {
 const TOPIC = "live";
 
 /** The views' channels (#424) and the part of factory_ui_views.ts's Views each one is. */
-const VIEW_PARTS: Record<string, "tasks" | "pulls" | "ci"> = { tasks: "tasks", "pull-requests": "pulls", ci: "ci" };
+const VIEW_PARTS: Record<string, "tasks" | "epics" | "pulls" | "ci"> = { tasks: "tasks", epics: "epics", "pull-requests": "pulls", ci: "ci" };
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -183,10 +185,19 @@ export function serve(o: ServeOptions): Running {
     const talked = await chat.api(req, p, rest, seen(p));
     if (talked) return json(talked.status, talked.body);
     const ttl = o.pollSeconds * 1000;
+    if (rest[0] === "docs" && rest.length <= 2) { // the PRD, the decisions and the wiki (#438)
+      if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
+      if (rest.length === 1) return json(200, { project: p.id, sections: docsOf(p) });
+      if (rest[1] === "page") {
+        const r = pageById(p, url.searchParams.get("id") ?? "");
+        return json(r.status, r.status === 200 ? { project: p.id, ...r.body } : r.body);
+      }
+      if (rest[1] === "search") return json(200, { project: p.id, q: url.searchParams.get("q") ?? "", hits: searchDocs(p, url.searchParams.get("q") ?? "") });
+    }
     if (rest.length === 1 && rest[0] === "channels" && req.method === "GET") return json(200, { project: p.id, channels: channels(p, seen(p)) });
     if (rest.length === 1 && rest[0] === "agents" && req.method === "GET") {
       const s = await state(p, ttl);
-      return json(200, { project: p.id, agents: s.data.agents, limit: s.data.limit, problems: s.data.problems });
+      return json(200, { project: p.id, agents: s.data.agents, limit: s.data.limit, githubCalls: s.data.githubCalls, problems: s.data.problems });
     }
     if (rest.length === 1 && rest[0] === "machines" && req.method === "GET") {
       const s = await state(p, ttl);

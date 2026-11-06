@@ -4,7 +4,8 @@
 // factory_ui_server.ts routes to it and sends what changed over the WebSocket.
 //
 //   GET  /api/projects/:p/tasks                 the tasks in build order (the order `factory next` walks), and the next one
-//   GET  /api/projects/:p/pull-requests         each open pull request: checks, review, protected files, agent, task
+//   GET  /api/projects/:p/epics                 each epic (#440): stage, tasks done of all, PRD, decisions
+//   GET  /api/projects/:p/pull-requests        each open pull request: checks, review, protected files, agent, task
 //   GET  /api/projects/:p/ci                    the verdict first, then the runs, the runners and the actions
 //   POST /api/projects/:p/ci/actions/:name      {confirm: true[, run: <id>]}: that action's commands (log needs no confirm)
 //   POST /api/projects/:p/refresh               runs `factory cockpit --json` in the background (202)
@@ -40,6 +41,11 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
 }
 
+/** The strings of a list, at most 20 of 80 characters (a body's cites, from the cache). */
+function strings(v: unknown): string[] {
+  return (Array.isArray(v) ? v : []).filter((x): x is string => typeof x === "string" && x !== "").slice(0, 20).map((x) => x.slice(0, 80));
+}
+
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
@@ -60,6 +66,9 @@ export interface TaskRow {
   next: boolean;
   /** What the board offers on it (#439): issues mode only, by its state. */
   actions: TaskActionName[];
+  /** The id of the first epic that names this task (#440), or null. */
+  epic: string | null;
+  cites: string[];
   find: string;
 }
 
@@ -75,6 +84,28 @@ const OFFERED: Record<TaskActionName, string[]> = { release: ["in-progress", "bl
 
 function actionsFor(state: string, source: string): TaskActionName[] {
   return source === "issues" ? TASK_ACTIONS.filter((a) => OFFERED[a].includes(state)) : [];
+}
+
+export interface EpicView {
+  id: string;
+  title: string;
+  stage: string;
+  stageText: string;
+  done: number;
+  all: number;
+  tasks: { id: string; done: boolean }[];
+  prd: string;
+  decisions: string[];
+  summary: string;
+  cites: string[];
+  url: string | null;
+  find: string;
+}
+
+export interface EpicsView {
+  source: string;
+  epics: EpicView[];
+  problems: Problem[];
 }
 
 export interface TasksView {
@@ -97,6 +128,7 @@ export interface PullView {
   protected: boolean | null;
   next: { action: string; text: string };
   rework: string | null;
+  cites: string[];
   find: string;
 }
 
@@ -158,6 +190,7 @@ export interface Views {
   refreshing: boolean;
   problems: Problem[];
   tasks: TasksView;
+  epics: EpicsView;
   pulls: PullsView;
   ci: CiView;
 }
@@ -188,8 +221,29 @@ function missingOf(cache: Obj, codes: RegExp): Problem[] {
   return list(cache.missing).filter((m) => codes.test(str(m.code))).map((m) => ({ code: str(m.code), message: str(m.message), fix: str(m.fix) }));
 }
 
+function epicRows(part: Obj): Obj[] {
+  return list(part.epics).filter((e) => str(e.id));
+}
+
+function epicsView(part: Obj, repo: string): EpicsView {
+  const source = str(part.source);
+  const epics = epicRows(part).map((e): EpicView => {
+    const id = str(e.id);
+    const tasks = list(e.tasks).filter((t) => str(t.id)).map((t) => ({ id: str(t.id), done: t.done === true }));
+    const decisions = (Array.isArray(e.decisions) ? e.decisions : []).map(str).filter(Boolean);
+    const stage = str(e.stage) || "investigating";
+    const url = str(e.url) || (source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null);
+    const summary = str(e.summary).slice(0, 300);
+    return { id, title: str(e.title), stage, stageText: stage, done: tasks.filter((t) => t.done).length, all: tasks.length, tasks, prd: str(e.prd),
+      decisions, summary, cites: strings(e.cites), url, find: [`#${id}`, str(e.title), stage, str(e.prd), summary, ...decisions].join(" ") };
+  });
+  return { source, epics, problems: [] };
+}
+
 function tasksView(p: UiProject, cache: Obj, repo: string, pulls: PullView[]): TasksView {
   const part = obj(cache.tasks);
+  const epicOf = new Map<string, string>();
+  for (const e of epicRows(part)) for (const t of list(e.tasks)) if (str(t.id) && !epicOf.has(str(t.id))) epicOf.set(str(t.id), str(e.id));
   const source = str(part.source);
   const problems: Problem[] = [];
   if (str(part.error)) {
@@ -214,7 +268,7 @@ function tasksView(p: UiProject, cache: Obj, repo: string, pulls: PullView[]): T
       todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
       pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, next: isNext, actions: actionsFor(str(t.state), source),
-      find: taskText(t) };
+      epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
   });
   return { source, tasks, next, problems };
 }
@@ -240,7 +294,7 @@ function pullsView(cache: Obj): PullsView {
         failing: list(x.notGreen).filter((j) => str(j.state) === "red").map((j) => str(j.name)) },
       review: reviewOf(x), protected: typeof x.protected === "boolean" ? x.protected : null,
       next: { action: str(x.next) || "none", text: str(x.nextText) || str(x.next) || "none" }, rework: str(x.rework) || null,
-      find: prText(x) };
+      cites: strings(x.cites), find: prText(x) };
   });
   return { pulls, problems };
 }
@@ -316,6 +370,7 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Vie
     const ci: CiView = { verdict: null, mode: "", repo: "", label: "", runs: [], runners: [], waiting: [], host: host(),
       settings: { heavy: null, light: null }, actions: [], problems: [] };
     return { generatedAt: null, age: null, refreshing: false, problems: [p.problem], tasks: { source: "", tasks: [], next: null, problems: [] },
+      epics: { source: "", epics: [], problems: [] },
       pulls: { pulls: [], problems: [] }, ci };
   }
   const cache = cacheOf(p);
@@ -325,7 +380,7 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Vie
   const at = Date.parse(str(c.generatedAt));
   const limit = list(c.missing).filter((m) => str(m.code) === "github_limit").map((m) => ({ code: str(m.code), message: str(m.message), fix: str(m.fix) }));
   return { generatedAt: str(c.generatedAt) || null, age: Number.isNaN(at) ? null : Math.max(Math.round((now - at) / 1000), 0), refreshing,
-    problems: cache ? limit : [NO_SNAPSHOT(p)], tasks: tasksView(p, c, repo, pulls.pulls), pulls, ci: ciView(p, c, repo) };
+    problems: cache ? limit : [NO_SNAPSHOT(p)], tasks: tasksView(p, c, repo, pulls.pulls), epics: epicsView(obj(c.tasks), repo), pulls, ci: ciView(p, c, repo) };
 }
 
 /** The cache's age limit, in seconds (as `factory cockpit --status` has it). */

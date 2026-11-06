@@ -387,3 +387,18 @@ test("factory help lists nats, the script runs it, and the commands page has its
     expect(wiki).toContain(row);
   }
 });
+
+test("up on a machine with ufw prints the route rule that lets the tailnet reach the container, and never runs it", () => {
+  const w = world();
+  writeExe(join(w.root, "bin", "ufw"), `#!/usr/bin/env bash\necho "$*" >>"$FAKE_LOG.ufw"\nexit 0\n`);
+  const p = nats(w, ["up"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("sudo ufw route allow in on tailscale0 to any port 4222 proto tcp");
+  expect(existsSync(`${w.env.FAKE_LOG}.ufw`)).toBe(false);
+});
+
+test("up prints no ufw line without Tailscale", () => {
+  const w = world();
+  writeExe(join(w.root, "bin", "ufw"), "#!/usr/bin/env bash\nexit 0\n");
+  expect(nats(w, ["up"], { FAKE_TS_IP: "" }).stdout).not.toContain("ufw route");
+});

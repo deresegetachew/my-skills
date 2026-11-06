@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Epics</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="epics" height="1200" hint-size="312px,1200px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1180px;">
+
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; line-height: 1.15;">Epics</h1>
+<p style="margin: 0; color: var(--text-2);">The big pieces of work above tasks. 2 building, 12 of 26 tasks done, 1 question for you.</p>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<a href="Docs.dc.html" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box;">PRD and decisions</a>
+<a href="#new-epic" style="height: 44px; padding: 0 18px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 8px; box-sizing: border-box;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>New epic</a>
+</div>
+</header>
+
+<div role="tablist" aria-label="Epic views" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Board</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">List</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Against the PRD</button>
+</div>
+
+<div style="overflow-x: auto; padding-bottom: 6px;">
+<div style="display: grid; grid-template-columns: repeat(6, minmax(160px, 1fr)); gap: 16px; min-width: 1060px; align-items: start;">
+<sc-for list="{{stages}}" as="s" hint-placeholder-count="6">
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; padding: 4px 0 8px; border-bottom: 1px solid var(--border);"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--grey-dot);"></span>{{s.name}}<span style="color: var(--text-3); font-weight: 400;">{{s.count}}</span></h2>
+<sc-for list="{{s.epics}}" as="e" hint-placeholder-count="1">
+<article style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+<a href="Epic.dc.html" style="font-weight: 600; font-size: 13px; color: var(--text); text-decoration: none; line-height: 1.35;">{{e.title}}</a>
+<span style="font-size: 12px; color: var(--text-2); line-height: 1.4;">{{e.note}}</span>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; color: var(--text-2);">
+<span>{{e.tasks}}</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2);"><sc-if value="{{e.needsYou}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot);"></span></sc-if>{{e.ref}}</span>
+</div>
+</article>
+</sc-for>
+<sc-if value="{{s.empty}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; color: var(--text-3); line-height: 1.45; padding: 4px 0;">{{s.emptyText}}</span></sc-if>
+</section>
+</sc-for>
+</div>
+</div>
+
+<section id="new-epic" aria-labelledby="ne-h" style="max-width: 640px; display: flex; flex-direction: column; gap: 16px; padding-top: 8px;">
+<div style="display: flex; align-items: center; gap: 12px;">
+<dc-import name="Avatar" agent="mentewab" size="36" hint-size="36px,36px"></dc-import>
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 id="ne-h" style="margin: 0; font-size: 17px;">New epic</h2><span style="font-size: 13px; color: var(--text-2);">mentewab investigates it, asks you what is unclear, then proposes the PRD change.</span></div>
+</div>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600;">What do you want?<input type="text" value="Add a project from the UI" aria-label="Epic title" style="height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; padding: 0 12px;"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600;">Why, in a sentence or two<textarea aria-label="Why" rows="3" style="border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 400; padding: 10px 12px; resize: vertical;">Today a project joins the factory from a terminal. I want to add remanual-style projects from the window, with its settings.</textarea></label>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Give it to mentewab</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Cancel</button>
+</div>
+<span style="font-size: 13px; color: var(--text-3);">Nothing is built until you accept its PRD change.</span>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">While loading: "Reading epics from GitHub…". With no epics: "Tell mentewab what you want with New epic." If GitHub can't be read: "Showing the copy from 02:05. Check the GitHub sign-in in Health, then read again."</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const epic = (title, ref, note, done, total, cat, needsYou) => ({
+      title, ref, note,
+      fill: 'var(--' + cat + '-fill)',
+      tasks: total ? done + ' of ' + total + ' tasks' : 'Not split yet',
+      needsYou: !!needsYou
+    });
+    const stage = (name, epics, emptyText) => ({
+      name, epics, count: epics.length, empty: epics.length === 0, emptyText: emptyText || ''
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      stages: [
+        stage('Investigating', [epic('Epics above tasks', '#440', 'One question for you: epics as issues or as files?', 0, 0, 'pink', true)]),
+        stage('PRD', [], 'None. An epic moves here when mentewab proposes its PRD change.'),
+        stage('Decision', [], 'None waiting.'),
+        stage('Planned', [epic('Machines join', '#445', 'Add a machine and let it join with a one-use code.', 0, 0, 'blue')]),
+        stage('Building', [
+          epic('Web UI: the one window', '#420', 'Now: avatars, retire the tmux cockpit, PRD one click away.', 3, 14, 'violet'),
+          epic('NATS messaging', '0004', 'Left: network guard, roles separate, menelik\'s key.', 9, 12, 'green')
+        ]),
+        stage('Done', [epic('[PLACEHOLDER]', '[PLACEHOLDER]', 'Signed off by you on [PLACEHOLDER].', 1, 1, 'grey')])
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

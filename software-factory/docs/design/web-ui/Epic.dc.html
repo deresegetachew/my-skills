@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Epic</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="epics" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1100px;">
+
+<div style="display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; justify-content: space-between;">
+<header style="flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px;">
+<span style="color: var(--text-3); font-size: 13px;">Epic #420 · asked by you on 5 November</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px; line-height: 1.15;">Web UI: the one window</h1>
+<p style="margin: 0; color: var(--text-2); line-height: 1.55;">Replace the tmux cockpit with a web board: projects, a channel per agent, chat, approvals and live updates.</p>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; margin-top: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Building · 3 of 14 tasks done</span>
+</header>
+
+<form aria-labelledby="talk-h" style="flex: 0 1 340px; min-width: 0; border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="talk-h" style="margin: 0; font-size: 15px; font-weight: 600;">Talk about this</h2>
+<fieldset style="margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 6px;">
+<legend style="font-size: 13px; color: var(--text-2); padding: 0; margin-bottom: 6px;">To</legend>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--text); cursor: pointer;"><input type="radio" name="to" value="mentewab" checked style="margin: 0;"><dc-import name="Avatar" agent="mentewab" size="24" hint-size="24px,24px"></dc-import><span><span style="font-weight: 600;">mentewab</span> <span style="color: var(--text-2);">(product owner)</span></span></label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border-strong); cursor: pointer;"><input type="radio" name="to" value="fasil" style="margin: 0;"><dc-import name="Avatar" agent="fasil" size="24" hint-size="24px,24px"></dc-import><span><span style="font-weight: 600;">fasil</span> <span style="color: var(--text-2);">(dev manager)</span></span></label>
+</fieldset>
+<div style="display: flex; gap: 8px;">
+<input type="text" placeholder="Ask or tell them something" aria-label="Message" style="flex: 1; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 12px; box-sizing: border-box;">
+<button type="submit" style="height: 44px; padding: 0 16px; border: none; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Send</button>
+</div>
+<span style="font-size: 12px; color: var(--text-3); line-height: 1.45;">Your message goes on this item's thread; the answer appears here and in your Inbox.</span>
+</form>
+</div>
+
+<div role="tablist" aria-label="Epic views" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Overview</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Tasks</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Thread</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">History</button>
+</div>
+
+<ol aria-label="Stage" style="margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px;">
+<sc-for list="{{stages}}" as="s" hint-placeholder-count="6">
+<li aria-current="{{s.current}}" style="display: flex; flex-direction: column; gap: 8px;">
+<span style="height: 3px; border-radius: 999px; background: {{s.bar}};"></span>
+<span style="font-size: 13px; font-weight: {{s.weight}}; color: {{s.ink}};">{{s.name}}</span>
+<span style="font-size: 12px; color: var(--text-3);">{{s.when}}</span>
+</li>
+</sc-for>
+</ol>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+<section style="flex: 999 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 8px;">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600;">Tasks</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{tasks}}" as="t" hint-placeholder-count="8">
+<li style="display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--border);">
+<span style="width: 28px; flex-shrink: 0; display: flex;"><sc-if value="{{t.hasAgent}}" hint-placeholder-val="{{ true }}"><dc-import name="Avatar" agent="{{t.agent}}" size="28" hint-size="28px,28px"></dc-import></sc-if></span>
+<a href="Task.dc.html" style="flex: 1; min-width: 0; color: var(--text); font-weight: 600; text-decoration: none;">{{t.title}} <span style="color: var(--text-3); font-weight: 400;">#{{t.n}}</span></a>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 120px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{t.dot}}; flex-shrink: 0;"></span>{{t.state}}</span>
+</li>
+</sc-for>
+</ul>
+<a href="Board.dc.html" style="align-self: flex-start; color: var(--text); font-weight: 600; text-decoration: none; padding-top: 8px;">Show all 14 tasks ›</a>
+</section>
+
+<aside style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 32px;">
+<section style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0 0 6px; font-size: 15px; font-weight: 600;">Where it's written down</h2>
+<sc-for list="{{docs}}" as="d" hint-placeholder-count="3">
+<a href="Docs.dc.html" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 44px; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text);"><span style="font-size: 13px;">{{d.name}}</span><span style="font-size: 12px; color: var(--text-3);">{{d.tag}}</span></a>
+</sc-for>
+</section>
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600;">Latest on the thread</h2>
+<div style="display: flex; gap: 10px; align-items: flex-start;">
+<dc-import name="Avatar" agent="mentewab" size="28" hint-size="28px,28px"></dc-import>
+<p style="margin: 0; line-height: 1.5; color: var(--text-2); font-size: 13px;"><span style="color: var(--text); font-weight: 600;">mentewab</span> I tried the board on a phone: card text is cut at two lines. I filed it under #439.</p>
+</div>
+</section>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const done = { bar: 'var(--text-3)', ink: 'var(--text-2)', weight: 500, current: 'false' };
+    const now = { bar: 'var(--text)', ink: 'var(--text)', weight: 700, current: 'step' };
+    const later = { bar: 'var(--border-strong)', ink: 'var(--text-3)', weight: 500, current: 'false' };
+    const dots = { Done: 'var(--grey-dot)', 'In progress': 'var(--working)', 'In review': 'var(--waiting)', Ready: 'var(--idle)' };
+    const t = (n, title, state, agent) => ({ n, title, state, dot: dots[state], agent: agent || '', hasAgent: !!agent });
+    return {
+      theme: this.props.theme ?? 'light',
+      stages: [
+        { name: 'Investigating', when: '5 Nov', ...done },
+        { name: 'PRD written', when: '5 Nov', ...done },
+        { name: 'Decision', when: '0005', ...done },
+        { name: 'Planned', when: '14 tasks', ...done },
+        { name: 'Building', when: 'now', ...now },
+        { name: 'Done', when: '', ...later }
+      ],
+      tasks: [
+        t(402, 'Product owner: try what was built', 'In review', 'mentewab'),
+        t(437, 'An avatar for every agent', 'In progress', 'haile'),
+        t(425, 'Retire the tmux cockpit', 'In progress', 'taytu'),
+        t(438, 'The PRD and decisions one click away', 'In progress', 'menelik'),
+        t(439, 'A task board with swim lanes', 'Ready'),
+        t(444, 'Roles visually separate', 'Ready'),
+        t(428, 'Server, shell, agents and machines', 'Done', 'haile')
+      ],
+      docs: [
+        { name: "PRD: the owner's window", tag: 'Section 4' },
+        { name: 'Decision 0005: the web UI', tag: 'Accepted' },
+        { name: 'Decision 0002: the cockpit', tag: 'Replaced' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -29,7 +29,9 @@
 // question that has an answer, a claim that is unexpired, all clear their item.
 import { type Config, load, managerSetting, roleSetting, toFloat } from "./factory_config.ts";
 import { agentIssues, current, fields, nameOf, roleOf, stateOf } from "./factory_agents.ts";
-import { JudgeError, stateAt as judgeState, type Verdict } from "./factory_ci_judge.ts";
+import { judge, JudgeError, resultAt, type Row, stateAt as judgeState, type Verdict } from "./factory_ci_judge.ts";
+import { asPull } from "./factory_pr_feed.ts";
+import type { PrSnapshot } from "./core/ports/messaging.ts";
 import { type Comment, gh, ghAll, type Issue, readyIssues } from "./factory_issues.ts";
 import { now as leaseNow } from "./factory_lease.ts";
 import { parseComment, verdicts } from "./factory_messages.ts";
@@ -116,9 +118,15 @@ export function isOwn(pr: { body?: string | null; head?: { ref?: string } }): bo
   return OWN_BRANCH.test(pr.head?.ref ?? "") || OWN_BODY.test(pr.body || "");
 }
 
+/** The CI of the heads in the pull request watcher's snapshot, while collect() reads from one (the dev manager's cycle,
+ * with `pr` on NATS): ciState() answers from it without asking GitHub. */
+const fedChecks = new Map<string, [Verdict, string[], number | null]>();
+
 /** The manager's CI verdict for a commit, and when its newest result came in (seconds since the epoch, null when
  * unknown); "unknown" when GitHub cannot be read (nothing is acted on then). */
 export function ciState(head: string): [Verdict | "unknown", string[], number | null] {
+  const fed = fedChecks.get(head);
+  if (fed) return fed;
   try {
     const [verdict, jobs, at] = judgeState(head);
     return [verdict, jobs, when(at)];
@@ -138,7 +146,8 @@ const ACTIVITY = /<!--\s*(?:factory-(?:approved|mustfix|answer)|pr-watch|factory
 
 /** When a dev manager last did something visible: a verdict, an answer, a watch or an owner ask on an open PR, a merge,
  * or a "working" ping from a dev-manager agent issue. Claims are left out on purpose: taking a lease is not progress. */
-export function lastActivity(prs: Pull[], commentsOf: (n: number) => Comment[], agents: Map<string, Issue>, cfg: Config): number | null {
+export function lastActivity(prs: Pull[], commentsOf: (n: number) => Comment[], agents: Map<string, Issue>, cfg: Config,
+  merged: (string | null)[] | null = null): number | null {
   let best: number | null = null;
   const see = (t: number | null): void => {
     if (t && (best === null || t > best)) best = t;
@@ -149,9 +158,9 @@ export function lastActivity(prs: Pull[], commentsOf: (n: number) => Comment[], 
       if (ACTIVITY.test(body) || verdicts(body).length || parseComment(c).some((m) => m.kind === "answer")) see(when(c.created_at));
     }
   }
-  for (const p of ghAll<Pull>("repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=10").slice(0, 10)) {
-    see(when(p.merged_at));
-  }
+  const recent = merged ?? ghAll<Pull>("repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=10")
+    .slice(0, 10).map((p) => p.merged_at ?? null);
+  for (const t of recent) see(when(t));
   for (const issue of agents.values()) {
     if (roleOf(issue) === "dev-manager") {
       const st = stateOf(cfg, issue);
@@ -171,12 +180,21 @@ interface Info {
 }
 
 /** All items that need a manager or the owner, most urgent first. Reads GitHub only. `info`, when given, is filled
- * with "activity": the time of the last visible dev-manager action (see lastActivity). */
-export function collect(cfg: Config, nowArg: number | null = null, info: Info | null = null): Item[] {
+ * with "activity": the time of the last visible dev-manager action (see lastActivity).
+ *
+ * With `fed`, the pull request watcher's snapshot (`pr` on NATS, factory_pr_feed.ts), the open pull requests, their
+ * heads' times, CI and mergeable state come from it, and a pull request's comments and label events are read again
+ * only when its updated_at moved: a pass over pull requests that didn't change asks GitHub nothing about them. */
+export function collect(cfg: Config, nowArg: number | null = null, info: Info | null = null, fed: PrSnapshot | null = null): Item[] {
   const now = nowArg ?? leaseNow();
   const quiet = toFloat(managerSetting(cfg, "quietMinutes")) ?? 0;
   const stale = toFloat(managerSetting(cfg, "staleMinutes")) ?? 0;
-  const prs = ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open");
+  fedChecks.clear();
+  for (const p of fed?.prs ?? []) {
+    const runs = p.runs as Row[];
+    fedChecks.set(p.head, [...judge(runs, p.statuses as Row[]), when(resultAt(runs, p.statuses as Row[]))]);
+  }
+  const prs: Pull[] = fed ? fed.prs.map(asPull) : ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open");
   const byPr = new Map<number, Pull>(prs.map((p) => [p.number, p]));
   const cache = new Map<number, Comment[]>();
   // A pull request's comments are read again only when the PR changed since the last read (#347).
@@ -187,7 +205,7 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
     }
     return cache.get(n) as Comment[];
   };
-  const commitTimes = new Map<string, number | null>();
+  const commitTimes = new Map<string, number | null>((fed?.prs ?? []).map((p) => [p.head, when(p.headAt)]));
   const commitTime = (sha: string): number | null => {
     if (!commitTimes.has(sha)) {
       const c = gh<{ commit?: { committer?: { date?: string } | null } | null } | null>("GET", `repos/{owner}/{repo}/commits/${sha}`) ?? {};
@@ -257,7 +275,8 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
     const head = p.head.sha;
     const labels = new Set((p.labels ?? []).map((x) => x.name));
     for (const label of [poLabel, OWNER_LABEL].filter((x) => x && labels.has(x))) {
-      const events = ghAll<{ event?: string; created_at?: string; label?: { name?: string } | null }>(`repos/{owner}/{repo}/issues/${n}/events`);
+      const read = () => ghAll<{ event?: string; created_at?: string; label?: { name?: string } | null }>(`repos/{owner}/{repo}/issues/${n}/events`);
+      const events = fed ? remember(cfg, `events-${n}`, settled(p.updated_at), read) : read();
       const marked = events.filter((e) => e.event === "labeled" && (e.label ?? {}).name === label).map((e) => when(e.created_at));
       const ts = marked.filter((x): x is number => Boolean(x));
       const t = ts.length ? Math.max(...ts) : null;
@@ -281,7 +300,7 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
     if (verdict === "failed" && !covered && t && minutes(t, now) >= stale) reasons.push(`CI failed (${jobs.join(", ")})`);
     if (state === "mustfix" && markedAt && minutes(markedAt, now) >= stale) reasons.push("a must-fix waits for a new commit");
     if ((state === "approved" || state === "mustfix" || state === "watch") && t && minutes(t, now) >= stale) {
-      const detail = gh<Pull | null>("GET", `repos/{owner}/{repo}/pulls/${n}`) ?? ({} as Partial<Pull>);
+      const detail = fed ? p : gh<Pull | null>("GET", `repos/{owner}/{repo}/pulls/${n}`) ?? ({} as Partial<Pull>);
       if (detail.mergeable_state === "dirty") {
         reasons.push("a merge conflict");
         green = false; // approved and green, but it cannot merge as it is
@@ -349,7 +368,9 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
     if (!(e instanceof Exit)) throw e; // Actions not readable: nothing to report
   }
 
-  if (info !== null) info.activity = lastActivity(prs, commentsOf, agentRoles, cfg);
+  if (info !== null) {
+    info.activity = lastActivity(prs, commentsOf, agentRoles, cfg, fed ? fed.closed.filter((c) => c.merged).map((c) => c.at) : null);
+  }
   const dead = 4 * (toFloat(managerSetting(cfg, "deadManMinutes")) ?? 0); // 2 hours by default
 
   /** 0 for a task PR whose CI is green (#201), and for anything that has already waited four times `deadManMinutes`,

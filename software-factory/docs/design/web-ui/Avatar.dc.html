@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent avatar</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>body{margin:0}</style>
+</helmet>
+<svg width="{{size}}" height="{{size}}" viewBox="0 0 64 64" role="img" aria-label="{{label}}" style="display: block; flex-shrink: 0;">
+<defs>
+<radialGradient id="bg-{{uid}}" cx="35%" cy="25%" r="85%"><stop offset="0%" stop-color="{{bgLight}}"></stop><stop offset="100%" stop-color="{{bg}}"></stop></radialGradient>
+<radialGradient id="skin-{{uid}}" cx="38%" cy="32%" r="70%"><stop offset="0%" stop-color="{{skinLight}}"></stop><stop offset="60%" stop-color="{{skin}}"></stop><stop offset="100%" stop-color="{{skinDark}}"></stop></radialGradient>
+<linearGradient id="robe-{{uid}}" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="{{robeLight}}"></stop><stop offset="100%" stop-color="{{robeDark}}"></stop></linearGradient>
+<linearGradient id="gold-{{uid}}" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0%" stop-color="#FFF0B3"></stop><stop offset="45%" stop-color="#F2C24E"></stop><stop offset="100%" stop-color="#B07A12"></stop></linearGradient>
+<radialGradient id="hair-{{uid}}" cx="40%" cy="25%" r="80%"><stop offset="0%" stop-color="{{hairLight}}"></stop><stop offset="100%" stop-color="{{hair}}"></stop></radialGradient>
+<linearGradient id="cloth-{{uid}}" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#FFFFFF"></stop><stop offset="100%" stop-color="#D9D2C2"></stop></linearGradient>
+<radialGradient id="mane-{{uid}}" cx="50%" cy="60%" r="60%"><stop offset="0%" stop-color="#F6C25A"></stop><stop offset="100%" stop-color="#9A5B12"></stop></radialGradient>
+</defs>
+
+<circle cx="32" cy="32" r="32" fill="url(#bg-{{uid}})"></circle>
+<ellipse cx="32" cy="60" rx="20" ry="4" fill="#000000" opacity="0.10"></ellipse>
+
+<sc-if value="{{mane}}" hint-placeholder-val="{{ false }}">
+<path d="M32 3 L36.5 9 L42.5 5.5 L44 12.5 L51 11 L49.5 18 L56.5 19.5 L52 25.5 L57 31 L49 33 L15 33 L7 31 L12 25.5 L7.5 19.5 L14.5 18 L13 11 L20 12.5 L21.5 5.5 L27.5 9 Z" fill="url(#mane-{{uid}})"></path>
+</sc-if>
+<sc-if value="{{veilBack}}" hint-placeholder-val="{{ false }}">
+<path d="M16 30 C15 12 49 12 48 30 L51 50 C44 45 20 45 13 50 Z" fill="url(#cloth-{{uid}})"></path>
+</sc-if>
+<sc-if value="{{longHair}}" hint-placeholder-val="{{ false }}">
+<path d="M18 26 C16 12 48 12 46 26 L47 42 C44 40 41 36 41 30 L23 30 C23 36 20 40 17 42 Z" fill="url(#hair-{{uid}})"></path>
+</sc-if>
+
+<path d="M9 64 C10 50 19 43.5 32 43.5 C45 43.5 54 50 55 64 Z" fill="url(#robe-{{uid}})"></path>
+<path d="M14 54 C16 50 20 47.5 24 46.5" fill="none" stroke="#FFFFFF" stroke-width="1.4" stroke-linecap="round" opacity="0.35"></path>
+<sc-if value="{{goldCollar}}" hint-placeholder-val="{{ true }}">
+<path d="M21.5 46 C25.5 52.5 38.5 52.5 42.5 46 L40 44 C36 48.5 28 48.5 24 44 Z" fill="url(#gold-{{uid}})"></path>
+</sc-if>
+<sc-if value="{{bib}}" hint-placeholder-val="{{ false }}">
+<path d="M23 44 C26 49 38 49 41 44" fill="none" stroke="#FFFFFF" stroke-width="2.5"></path>
+<rect x="25" y="51" width="14" height="10" rx="1.5" fill="#FFFFFF"></rect>
+<text x="32" y="59" text-anchor="middle" style="font: 700 7px Inter, system-ui, sans-serif; fill: #111214;">11</text>
+</sc-if>
+<sc-if value="{{ribbons}}" hint-placeholder-val="{{ false }}">
+<rect x="19" y="51" width="7" height="2.2" rx="1" fill="#2DB36F"></rect><rect x="19" y="53.4" width="7" height="2.2" rx="1" fill="#F2C24E"></rect><rect x="19" y="55.8" width="7" height="2.2" rx="1" fill="#E5484D"></rect>
+</sc-if>
+
+<path d="M27.5 39 L36.5 39 L36 45 C34 46.5 30 46.5 28 45 Z" fill="{{skinDark}}"></path>
+<circle cx="20.6" cy="29.5" r="2.6" fill="url(#skin-{{uid}})"></circle><circle cx="43.4" cy="29.5" r="2.6" fill="url(#skin-{{uid}})"></circle>
+<circle cx="32" cy="28.5" r="12" fill="url(#skin-{{uid}})"></circle>
+<ellipse cx="27" cy="21.5" rx="4.5" ry="2.6" fill="#FFFFFF" opacity="0.18"></ellipse>
+
+<sc-if value="{{shortHair}}" hint-placeholder-val="{{ false }}">
+<path d="M20.2 25 C19.5 14.5 44.5 14.5 43.8 25 C42 20 36 18.2 32 18.2 C28 18.2 22 20 20.2 25 Z" fill="url(#hair-{{uid}})"></path>
+</sc-if>
+<sc-if value="{{afro}}" hint-placeholder-val="{{ false }}">
+<circle cx="21.5" cy="20" r="6.5" fill="url(#hair-{{uid}})"></circle><circle cx="32" cy="14" r="8" fill="url(#hair-{{uid}})"></circle><circle cx="42.5" cy="20" r="6.5" fill="url(#hair-{{uid}})"></circle><circle cx="26" cy="15.5" r="6" fill="url(#hair-{{uid}})"></circle><circle cx="38" cy="15.5" r="6" fill="url(#hair-{{uid}})"></circle>
+</sc-if>
+<sc-if value="{{braids}}" hint-placeholder-val="{{ false }}">
+<path d="M20.5 24 C21 15 43 15 43.5 24 C40 19.5 24 19.5 20.5 24 Z" fill="url(#hair-{{uid}})"></path>
+<path d="M23.5 18.5 C24.5 21 24 23 23 24 M27.5 17 C28.5 20 28 22.5 27.5 23.2 M32 16.5 V22.5 M36.5 17 C35.5 20 36 22.5 36.5 23.2 M40.5 18.5 C39.5 21 40 23 41 24" fill="none" stroke="{{hairLight}}" stroke-width="1" opacity="0.8"></path>
+</sc-if>
+<sc-if value="{{wildHair}}" hint-placeholder-val="{{ false }}">
+<path d="M18 27 C14 18 20 9 32 9 C44 9 50 18 46 27 C44 22 41 18.5 32 18.5 C23 18.5 20 22 18 27 Z" fill="url(#hair-{{uid}})"></path>
+<path d="M17 28 C15 33 16 38 18.5 41 M46.5 28 C48.5 33 48 38 45.5 41" fill="none" stroke="url(#hair-{{uid}})" stroke-width="3.2" stroke-linecap="round"></path>
+</sc-if>
+<sc-if value="{{veilFront}}" hint-placeholder-val="{{ false }}">
+<path d="M19 27 C19 14 45 14 45 27 C42 20 36 18.5 32 18.5 C28 18.5 22 20 19 27 Z" fill="url(#cloth-{{uid}})"></path>
+</sc-if>
+<sc-if value="{{turban}}" hint-placeholder-val="{{ false }}">
+<path d="M19 24 C18 12 46 12 45 24 C42 21 37 19.5 32 19.5 C27 19.5 22 21 19 24 Z" fill="url(#cloth-{{uid}})"></path>
+<path d="M21 19 C27 22 37 22 43 19 M23 15 C28 18 36 18 41 15" fill="none" stroke="#C9C0AE" stroke-width="1"></path>
+</sc-if>
+<sc-if value="{{headband}}" hint-placeholder-val="{{ false }}">
+<path d="M20.5 22.5 C25 19 39 19 43.5 22.5 L43 25 C39 22 25 22 21 25 Z" fill="{{bandColor}}"></path>
+</sc-if>
+<sc-if value="{{crownJewel}}" hint-placeholder-val="{{ false }}">
+<path d="M21 21 L22.5 10.5 L27.2 15.5 L32 7 L36.8 15.5 L41.5 10.5 L43 21 Z" fill="url(#gold-{{uid}})"></path>
+<rect x="21" y="19.3" width="22" height="3.6" rx="1.6" fill="#C98A2B"></rect>
+<circle cx="32" cy="13.2" r="1.9" fill="#E5484D"></circle><circle cx="26.5" cy="17.4" r="1.2" fill="#3B82F6"></circle><circle cx="37.5" cy="17.4" r="1.2" fill="#3B82F6"></circle>
+<circle cx="31.3" cy="12.5" r="0.6" fill="#FFFFFF" opacity="0.8"></circle>
+</sc-if>
+<sc-if value="{{crownTall}}" hint-placeholder-val="{{ false }}">
+<path d="M22.5 21 C22 13 24 8 32 5 C40 8 42 13 41.5 21 Z" fill="url(#gold-{{uid}})"></path>
+<path d="M24 14 H40 M23.2 17.5 H40.8" stroke="#B07A12" stroke-width="0.9"></path>
+<circle cx="32" cy="11" r="1.6" fill="#2DB36F"></circle>
+</sc-if>
+<sc-if value="{{diadem}}" hint-placeholder-val="{{ false }}">
+<path d="M22 19 C26 13 38 13 42 19 L40.5 21 C36 17 28 17 23.5 21 Z" fill="url(#gold-{{uid}})"></path>
+<circle cx="32" cy="15.6" r="2" fill="#E5489A"></circle><circle cx="26.5" cy="17.6" r="1.1" fill="#FFFFFF"></circle><circle cx="37.5" cy="17.6" r="1.1" fill="#FFFFFF"></circle>
+</sc-if>
+<sc-if value="{{disc}}" hint-placeholder-val="{{ false }}">
+<path d="M22 21 L23 13 L41 13 L42 21 Z" fill="url(#gold-{{uid}})"></path>
+<circle cx="32" cy="9.5" r="4" fill="url(#gold-{{uid}})"></circle><circle cx="32" cy="9.5" r="1.8" fill="#C98A2B"></circle>
+<path d="M27 13 V21 M32 13 V21 M37 13 V21" stroke="#B07A12" stroke-width="0.8"></path>
+</sc-if>
+
+<sc-if value="{{beard}}" hint-placeholder-val="{{ false }}">
+<path d="M21.5 30 C21.5 43.5 42.5 43.5 42.5 30 C41 36.5 37 37.8 32 37.8 C27 37.8 23 36.5 21.5 30 Z" fill="url(#hair-{{uid}})"></path>
+<path d="M27 34.2 C29 33.2 35 33.2 37 34.2" fill="none" stroke="{{hair}}" stroke-width="1.6" stroke-linecap="round"></path>
+</sc-if>
+<sc-if value="{{earrings}}" hint-placeholder-val="{{ false }}">
+<circle cx="20.6" cy="34" r="1.8" fill="url(#gold-{{uid}})"></circle><circle cx="43.4" cy="34" r="1.8" fill="url(#gold-{{uid}})"></circle>
+</sc-if>
+
+<path d="M25.3 25.3 C26.5 24.4 28.4 24.4 29.4 25.1 M34.6 25.1 C35.6 24.4 37.5 24.4 38.7 25.3" fill="none" stroke="{{brow}}" stroke-width="1.3" stroke-linecap="round"></path>
+<ellipse cx="27.5" cy="28.6" rx="2.3" ry="2.6" fill="#FFFFFF"></ellipse><ellipse cx="36.5" cy="28.6" rx="2.3" ry="2.6" fill="#FFFFFF"></ellipse>
+<circle cx="27.8" cy="29" r="1.5" fill="#3A2416"></circle><circle cx="36.8" cy="29" r="1.5" fill="#3A2416"></circle>
+<circle cx="28.3" cy="28.3" r="0.55" fill="#FFFFFF"></circle><circle cx="37.3" cy="28.3" r="0.55" fill="#FFFFFF"></circle>
+<path d="M31.2 31.5 C31.6 32.6 32.4 32.6 32.8 31.5" fill="none" stroke="{{skinDark}}" stroke-width="1" stroke-linecap="round"></path>
+<circle cx="24.8" cy="33" r="2" fill="#F28B82" opacity="0.35"></circle><circle cx="39.2" cy="33" r="2" fill="#F28B82" opacity="0.35"></circle>
+<sc-if value="{{smileMouth}}" hint-placeholder-val="{{ true }}">
+<path d="M28.6 34.4 C30.6 36.3 33.4 36.3 35.4 34.4" fill="none" stroke="#5A2A1A" stroke-width="1.4" stroke-linecap="round"></path>
+</sc-if>
+</svg>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"agent":{"editor":"enum","options":["menelik","taytu","haile","tewodros","yohannes","zewditu","lalibela","ezana","alula","abebe","fasil","mentewab"],"default":"menelik"},"size":{"editor":"int","default":96,"min":16,"max":256},"$preview":{"width":96,"height":96}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const agent = this.props.agent ?? 'menelik';
+    const size = this.props.size ?? 96;
+    const skins = {
+      deep: ['#8A5536', '#5C3520', '#3E2213'], warm: ['#A8714C', '#7A4A2E', '#55301B'],
+      rich: ['#9B6643', '#6B3F26', '#4A2915'], light: ['#C08A62', '#9A6542', '#6E4527']
+    };
+    const role = {
+      builder: ['#C7F0D6', '#86D9A8', '#2DB36F', '#146C3E'],
+      manager: ['#E4DDFE', '#B9A6F7', '#8B5CF6', '#5B2EC0'],
+      product: ['#FDE0EE', '#F4A3C8', '#E5489A', '#A3195B']
+    };
+    const P = {
+      menelik:  { r: 'builder', skin: 'deep',  hair: '#2B2620', hairLight: '#4A4238', mane: 1, beard: 1, shortHair: 1, label: 'Menelik II, with the lion-mane crown' },
+      taytu:    { r: 'builder', skin: 'light', hair: '#2A1A12', hairLight: '#5A3A28', braids: 1, veilBack: 1, earrings: 1, label: 'Empress Taytu, braided hair and a white netela' },
+      haile:    { r: 'builder', skin: 'warm',  hair: '#2E2A26', hairLight: '#55504A', shortHair: 1, beard: 1, ribbons: 1, robe: ['#3A3F4A', '#15181E'], label: 'Haile Selassie, the beard and the dark cape' },
+      tewodros: { r: 'builder', skin: 'rich',  hair: '#1C1612', hairLight: '#3D3128', wildHair: 1, beard: 1, label: 'Tewodros II, the long braided hair of a warrior emperor' },
+      yohannes: { r: 'builder', skin: 'warm',  hair: '#2A2420', hairLight: '#4F453D', crownTall: 1, beard: 1, label: 'Yohannes IV, in a tall gold crown' },
+      zewditu:  { r: 'builder', skin: 'light', hair: '#2A1A12', hairLight: '#5A3A28', veilBack: 1, veilFront: 1, crownTall: 1, earrings: 1, label: 'Empress Zewditu, crowned over a white veil' },
+      lalibela: { r: 'builder', skin: 'rich',  hair: '#2A2420', hairLight: '#4F453D', turban: 1, beard: 1, label: 'King Lalibela, builder of the rock churches, in a white wrap' },
+      ezana:    { r: 'builder', skin: 'deep',  hair: '#221C18', hairLight: '#463B33', disc: 1, beard: 1, label: 'King Ezana of Aksum, under a gold sun-disc crown' },
+      alula:    { r: 'builder', skin: 'warm',  hair: '#221C18', hairLight: '#463B33', shortHair: 1, headband: 1, bandColor: '#E5484D', beard: 1, label: 'Ras Alula, the general, with a red headband' },
+      abebe:    { r: 'builder', skin: 'deep',  hair: '#1A1512', hairLight: '#3A302A', shortHair: 1, bib: 1, goldCollar: 0, robe: ['#3DBB73', '#16793F'], label: 'Abebe Bikila, the barefoot marathon champion, bib 11' },
+      fasil:    { r: 'manager', skin: 'warm',  hair: '#2B2B2B', hairLight: '#4D4D4D', crownJewel: 1, beard: 1, label: 'Emperor Fasilides, builder of Gondar, in a jewelled crown' },
+      mentewab: { r: 'product', skin: 'light', hair: '#2A1A12', hairLight: '#5A3A28', afro: 1, veilBack: 1, diadem: 1, earrings: 1, label: 'Empress Mentewab, with a gold diadem' }
+    };
+    const p = P[agent] || { r: 'builder', skin: 'warm', hair: '#2A2420', hairLight: '#4F453D', shortHair: 1, label: agent };
+    const c = role[p.r];
+    const s = skins[p.skin];
+    const robe = p.robe || [c[2], c[3]];
+    const f = (k) => !!p[k];
+    return {
+      size, uid: agent, label: p.label,
+      bgLight: c[0], bg: c[1], robeLight: robe[0], robeDark: robe[1],
+      skinLight: s[0], skin: s[1], skinDark: s[2], hair: p.hair, hairLight: p.hairLight, brow: p.hair,
+      bandColor: p.bandColor || '#E5484D',
+      mane: f('mane'), veilBack: f('veilBack'), veilFront: f('veilFront'), longHair: f('longHair'), shortHair: f('shortHair'),
+      afro: f('afro'), braids: f('braids'), wildHair: f('wildHair'), turban: f('turban'), headband: f('headband'),
+      crownJewel: f('crownJewel'), crownTall: f('crownTall'), diadem: f('diadem'), disc: f('disc'),
+      beard: f('beard'), earrings: f('earrings'), ribbons: f('ribbons'), bib: f('bib'),
+      goldCollar: p.goldCollar === 0 ? false : true, smileMouth: !f('beard')
+    };
+  }
+}
+</script>
+</body>
+</html>

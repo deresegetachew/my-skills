@@ -27,7 +27,46 @@ export interface TaskRow {
   next: boolean;
   /** What the board offers on it (#439): release, block, reassign. */
   actions?: string[];
+  /** The id of the first epic that names this task (#440), or null. */
+  epic: string | null;
+  cites?: string[]; // the decisions and PRD stories its body cites
   find: string;
+}
+
+export interface EpicRow {
+  id: string;
+  title: string;
+  stage: string;
+  stageText: string;
+  done: number;
+  all: number;
+  tasks: { id: string; done: boolean }[];
+  prd: string;
+  decisions: string[];
+  summary?: string; // the first plain line of its body
+  cites?: string[]; // the decisions and PRD stories its title and body cite
+  url: string | null;
+  find: string;
+}
+
+/** The width of an epic's bar: percent of its tasks done, rounded; 0 for an epic with none. */
+export function epicBar(e: { done: number; all: number }): number {
+  return e.all > 0 ? Math.round((e.done / e.all) * 100) : 0;
+}
+
+/** The tasks under their epics, in the epics' order, then the tasks in none; a group with no task is left out. */
+export function groupByEpic(tasks: TaskRow[], epics: EpicRow[]): { epic: EpicRow | null; tasks: TaskRow[] }[] {
+  const groups = epics.map((epic) => ({ epic: epic as EpicRow | null, tasks: tasks.filter((t) => t.epic === epic.id) }));
+  const known = new Set(epics.map((e) => e.id));
+  groups.push({ epic: null, tasks: tasks.filter((t) => t.epic === null || !known.has(t.epic)) });
+  return groups.filter((g) => g.tasks.length > 0);
+}
+
+export function epicTone(stage: string): Tone {
+  if (stage === "building") return "good";
+  if (stage === "done") return "quiet";
+  if (stage === "parked") return "quiet";
+  return "warn";
 }
 
 export interface PullRow {
@@ -43,6 +82,7 @@ export interface PullRow {
   protected: boolean | null;
   next: { action: string; text: string };
   rework: string | null;
+  cites?: string[]; // the decisions and PRD stories its body cites
   find: string;
 }
 
@@ -82,6 +122,7 @@ export interface ViewsData {
   refreshing: boolean;
   problems: ProblemView[];
   tasks: { source: string; tasks: TaskRow[]; next: string | null; problems: ProblemView[] };
+  epics: { source: string; epics: EpicRow[]; problems: ProblemView[] };
   pulls: { pulls: PullRow[]; problems: ProblemView[] };
   ci: {
     verdict: { text: string; tone: string } | null;
@@ -107,7 +148,7 @@ export function filterRows<T extends { find: string }>(rows: T[], typed: string)
 export interface RowHit {
   project: string;
   projectName: string;
-  channel: "view:tasks" | "view:pull-requests" | "view:ci";
+  channel: "view:tasks" | "view:epics" | "view:pull-requests" | "view:ci";
   view: string;
   title: string;
   detail: string;
@@ -128,6 +169,10 @@ export function searchRows(projects: { id: string; name: string }[], views: Reco
     for (const t of filterRows(v.tasks.tasks, query)) {
       hits.push({ ...base, channel: "view:tasks", view: "Tasks", title: `#${t.id} ${t.title}`,
         detail: [t.stateText, t.holders.join(", ")].filter(Boolean).join(" · "), find: `#${t.id}` });
+    }
+    for (const e of filterRows(v.epics.epics, query)) {
+      hits.push({ ...base, channel: "view:epics", view: "Epics", title: `#${e.id} ${e.title}`, detail: `${e.stageText} · ${e.done} of ${e.all} tasks`,
+        find: `#${e.id}` });
     }
     for (const pr of filterRows(v.pulls.pulls, query)) {
       hits.push({ ...base, channel: "view:pull-requests", view: "Pull requests", title: `#${pr.number} ${pr.title}`,

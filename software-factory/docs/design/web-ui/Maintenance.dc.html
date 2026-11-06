@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Maintenance</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1150px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="maintenance" height="1150" hint-size="312px,1150px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px; max-width: 1100px;">
+
+<nav aria-label="Settings sections" style="display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--border);">
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">General</a>
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">This machine</a>
+<a href="Integrations.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Integrations</a>
+<a href="Releases.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Releases and updates</a>
+<a href="Maintenance.dc.html" aria-current="page" style="display: inline-flex; align-items: center; min-height: 44px; border-bottom: 2px solid var(--text); font-weight: 600; color: var(--text); text-decoration: none; margin-bottom: -1px;">Maintenance</a>
+</nav>
+
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-size: 13px; color: var(--text-3);">Factory settings</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700;">Maintenance</h1>
+<p style="margin: 0; color: var(--text-2);">Housekeeping for my-skills. 2 claims look stale and 9 things can be cleaned. Nothing changes until you confirm.</p>
+</header>
+
+<section aria-label="Who holds what" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 15px;">Who holds what</h2>
+<span style="color: var(--text-2); font-size: 13px;">Tasks the builders hold and what fasil has leased. Release a claim an agent left after a crash.</span>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{claims}}" as="c" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{c.agent}}" size="32" hint-size="32px,32px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{c.what}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{c.agent}} · {{c.detail}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 120px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{c.dot}}; flex-shrink: 0;"></span>{{c.status}}</span>
+<div style="width: 110px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{c.stale}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Release</button></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-label="Clean up" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 15px;">Clean up</h2>
+<span style="color: var(--text-2); font-size: 13px;">Only my-skills' own worktrees, branches and containers. Work in use or not committed is kept.</span>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{clean}}" as="k" hint-placeholder-count="2">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{k.title}}</span>
+<span style="color: var(--text-2); font-size: 13px; line-height: 1.45;">{{k.sub}}</span>
+</div>
+<div style="width: 140px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{k.action}}</button>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-label="Token-free waits" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 15px;">Waiting without tokens</h2>
+<span style="color: var(--text-2); font-size: 13px;">Agents paused for a merge, CI or an answer. They resume by themselves.</span>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{waits}}" as="w" hint-placeholder-count="3">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{w.agent}}" size="32" hint-size="32px,32px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{w.what}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{w.agent}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 120px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--waiting); flex-shrink: 0;"></span>{{w.since}}</span>
+</li>
+</sc-for>
+</ul>
+<div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px; padding-top: 6px;">
+<a href="Usage.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none;">Lessons file, 3 suggested ›</a>
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Manager handover for fasil ›</a>
+</div>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">Other states: Release asks first ("Release tewodros's claim on #430? The task goes back to Ready; its branch stays."). After a clean, one line says what was removed. With no waits, "No agent is waiting."</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const held = (agent, what, detail) => ({ agent, what, detail, status: 'Held', dot: 'var(--working)', stale: false });
+    const stale = (agent, what, detail) => ({ agent, what, detail, status: 'Stale', dot: 'var(--waiting)', stale: true });
+    return {
+      theme: this.props.theme ?? 'light',
+      claims: [
+        stale('tewodros', '#430 [PLACEHOLDER title]', 'last seen 2 h ago, not running'),
+        stale('fasil', 'Question on #441', 'lease ended 40 min ago'),
+        held('haile', '#437 An avatar for every agent', 'task and its worktree'),
+        held('taytu', '#425 Retire the tmux cockpit', 'task and its worktree'),
+        held('menelik', '#438 The PRD and decisions one click away', 'on the owner\'s Mac'),
+        held('fasil', 'Review of PR #402', 'lease ends in 12 min')
+      ],
+      clean: [
+        { title: 'Old worktrees and branches', sub: '1 unused worktree and 4 branches of done tasks (#432, #433, #429, #426). haile\'s and taytu\'s worktrees are kept.', action: 'Remove 5' },
+        { title: 'Left from an earlier run', sub: '2 exited CI containers, the offline runner my-skills-ci-3, the stale claim on #430', action: 'Clean 4' }
+      ],
+      waits: [
+        { agent: 'mentewab', what: 'For PR #402 to merge', since: '3 h 10 min' },
+        { agent: 'taytu', what: 'For an answer on #425', since: '18 min' },
+        { agent: 'menelik', what: 'For CI on PR #434', since: '6 min' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

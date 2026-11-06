@@ -193,7 +193,7 @@ function pullRequests(s: Step, missing: Problem[]): Prs {
       draft: Boolean(p.draft), ci: obj(p.ci).state ?? null, next: obj(p.next).action ?? null, nextText: obj(p.next).text ?? null,
       agent: p.agent ?? null, review: p.headMarker ?? null, gate: p.gate ?? null,
       notGreen: Array.isArray(obj(p.ci).notGreen) ? obj(p.ci).notGreen : [], protected: typeof p.protected === "boolean" ? p.protected : null,
-      claim: p.claim ?? null, rework: obj(p.rework).agent ?? null }));
+      claim: p.claim ?? null, rework: obj(p.rework).agent ?? null, cites: Array.isArray(p.cites) ? p.cites : [] }));
   } else {
     missing.push({ code: "pulls_unreadable", message: `The pull requests can't be read from GitHub (${str(obj(data.pulls).error).slice(0, 200)}).`,
       fix: GH_FIX });

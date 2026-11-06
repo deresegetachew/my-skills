@@ -58,6 +58,8 @@ uid (`meta skuid`):
 - DNS only to the resolver, which is read from `/etc/resolv.conf` and `resolvectl dns` (a systemd-resolved stub on
   127.0.0.53 needs no rule), not hard-coded;
 - `--allow-host ADDR[:PORT]` (repeat) lets one home-network host through, such as a Postgres or a build cache;
+- replies to connections that came in (`ct state established,related`) go out first, so a server the factory user runs,
+  such as the web UI, can answer a client on the tailnet; the agents still cannot start a connection to the home network;
 - everything private is dropped with the log prefix `FACTORY-BLOCK `: RFC1918, the Tailscale range 100.64.0.0/10,
   link-local, and IPv6 ULA and tailnet addresses;
 - loopback ports of other users' services are dropped: `--block-loopback-port PORT` (repeat) plus, at every run, every

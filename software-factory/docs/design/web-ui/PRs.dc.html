@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pull requests</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1000px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="prs" height="1000" hint-size="312px,1000px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px; max-width: 1100px;">
+
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px;">Pull requests</h1>
+<p style="margin: 0; color: var(--text-2);">3 open. One is waiting for you.</p>
+</header>
+
+<div role="tablist" aria-label="Filter" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">All 3</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Waiting for you 1</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">In review 2</button>
+</div>
+
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+<li style="display: flex; align-items: center; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{r.author}}" size="36" hint-size="36px,36px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<a href="PR.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none; font-size: 15px;">{{r.title}}</a>
+<span style="color: var(--text-2); font-size: 13px;">#{{r.n}} · {{r.author}} · {{r.sub}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 190px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.dot}}; flex-shrink: 0;"></span>{{r.status}}</span>
+<div style="width: 170px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{r.mine}}" hint-placeholder-val="{{ false }}"><a href="PR.dc.html" style="height: 40px; padding: 0 16px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">Review and merge</a></sc-if>
+<sc-if value="{{r.notMine}}" hint-placeholder-val="{{ true }}"><a href="PR.dc.html" style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">Open</a></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+
+<section style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 15px;">Also worth a look</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{also}}" as="a" hint-placeholder-count="2">
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{a.who}}" size="28" hint-size="28px,28px"></dc-import>
+<span style="flex: 1; min-width: 0; color: var(--text-2);"><span style="color: var(--text); font-weight: 600;">{{a.who}}</span> {{a.text}}</span>
+<a href="{{a.href}}" style="color: var(--text); font-weight: 600; text-decoration: none; white-space: nowrap;">{{a.action}} ›</a>
+</li>
+</sc-for>
+</ul>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const row = (o) => ({ ...o, notMine: !o.mine });
+    return {
+      theme: this.props.theme ?? 'light',
+      rows: [
+        row({ n: 402, title: 'Product owner: try what was built', author: 'mentewab', sub: 'changes protected files',
+          status: 'Approved, waiting for you', dot: 'var(--red-dot)', mine: true }),
+        row({ n: 434, title: '[PLACEHOLDER]', author: 'taytu', sub: 'fasil is reviewing',
+          status: 'Checks running', dot: 'var(--waiting)', mine: false }),
+        row({ n: 449, title: 'The PRD and decisions one click away', author: 'menelik', sub: 'a test fails',
+          status: 'Being fixed', dot: 'var(--idle)', mine: false })
+      ],
+      also: [
+        { who: 'haile', text: 'asked fasil where the avatar pictures should live (18 min ago).', action: 'Open', href: 'Task.dc.html' },
+        { who: 'menelik', text: "hasn't said anything for 26 minutes.", action: 'Check on menelik', href: 'Agent.dc.html' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

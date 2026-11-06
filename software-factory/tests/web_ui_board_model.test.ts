@@ -5,8 +5,8 @@ import { boardOf, COLUMNS, columnsOf } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
-  stateText: state, holders, group, todos: { done: 0, all: 0 }, dependsOn: [], url: null, pr: null, next: false, actions: [],
-  find: `#${id} ${title} ${state} ${holders.join(" ")} ${group}` });
+  stateText: state, holders, group, todos: { done: 0, all: 0 }, dependsOn: [], url: null, pr: null, next: false, actions: [], epic: null,
+  find:`#${id} ${title} ${state} ${holders.join(" ")} ${group}` });
 
 test("the columns are ready, in progress, in review, blocked and done", () => {
   expect(COLUMNS).toEqual([{ state: "ready", title: "Ready" }, { state: "in-progress", title: "In progress" },
@@ -60,4 +60,17 @@ test("filtering before the board keeps only the lanes of the cards that match", 
   const lanes = boardOf(filterRows(tasks, "login"), "agent");
   expect(lanes.map((l) => l.key)).toEqual(["menelik"]);
   expect(lanes[0]!.cells["in-progress"]!.map((t) => t.id)).toEqual(["1"]);
+});
+
+test("by epic: a task an epic lists (#440) is in that epic's lane, in the epics' order, before the milestone lanes and No epic", () => {
+  const epics = [{ id: "420", title: "Web UI" }, { id: "440", title: "Epics above tasks" }];
+  const inEpic = (id: string, epic: string | null, group = ""): TaskRow => ({ ...task(id, "ready", [], group), epic });
+  const tasks = [inEpic("1", null, "Phase 1"), inEpic("2", "440"), inEpic("3", "420", "Phase 1"), inEpic("4", null), inEpic("5", "420"),
+    inEpic("6", "999", "Phase 2")];
+  const lanes = boardOf(tasks, "epic", epics);
+  expect(lanes.map((l) => [l.key, l.title, l.count])).toEqual([["#420", "#420 Web UI", 2], ["#440", "#440 Epics above tasks", 1],
+    ["Phase 1", "Phase 1", 1], ["Phase 2", "Phase 2", 1], ["", "No epic", 1]]);
+  expect(lanes[0]!.cells.ready!.map((t) => t.id)).toEqual(["3", "5"]);
+  // an epic the epics list doesn't know (#6 names #999) falls back to the task's milestone
+  expect(lanes[3]!.cells.ready!.map((t) => t.id)).toEqual(["6"]);
 });

@@ -7,8 +7,11 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
 import { Board } from "./board.tsx";
 import type { LaneBy } from "./board_model.ts";
+import { Cited, Cites } from "./docs.tsx";
+import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
+import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
-import { type ActionRow, checksText, checksTone, filterRows, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
+import { type ActionRow, checksText, checksTone, epicBar, type EpicRow, epicTone, filterRows, groupByEpic, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
   type RunRow, runnerText, runnerTone, runStateText, runTone, type TaskRow, taskTone, verdictTone, type ViewsData } from "./views_model.ts";
 
 export type Post = (path: string, body: unknown) => Promise<Record<string, unknown>>;
@@ -21,7 +24,13 @@ export interface ViewProps {
   find: string;
   open: (channel: string, find?: string) => void;
   post: Post;
+  /** The project's doc pages: a decision or a story that a title cites links to it (#438). */
+  docs?: DocPage[];
   say: Say;
+  /** The token the chat calls need (the epic page talks to the product owner and the dev manager, #440). */
+  token?: string;
+  /** This project's product owner and dev manager. */
+  talkers?: Talker[];
 }
 
 function Dot({ tone, label }: { tone: Tone; label?: string }) {
@@ -90,17 +99,18 @@ function AgentLink({ name, open }: { name: string; open: ViewProps["open"] }) {
 const LANES: Array<[string, string]> = [["in-progress", "in progress"], ["in-review", "in review"], ["ready", "ready"], ["blocked", "blocked"],
   ["new", "not ready"]];
 
-function TaskLine({ t, open }: { t: TaskRow; open: ViewProps["open"] }) {
+function TaskLine({ t, open, docs }: { t: TaskRow; open: ViewProps["open"]; docs?: DocPage[] }) {
   return (
     <li className={t.next ? "vrow next" : "vrow"}>
       <span className="vid"><Ext href={t.url}>#{t.id}</Ext></span>
       <span className="vmain">
-        <span className="vtitle">{t.title}{t.next && <span className="tag">next</span>}</span>
+        <span className="vtitle"><Cited text={t.title} docs={docs} open={open} />{t.next && <span className="tag">next</span>}</span>
         <span className="vsub">
           {t.group && <span>{t.group}</span>}
           {t.todos.all > 0 && <span>{t.todos.done} of {t.todos.all} todos done</span>}
           {t.dependsOn.length > 0 && <span>after {t.dependsOn.map((d) => `#${d.replace(/^#/, "")}`).join(", ")}</span>}
           {t.pr && <span>PR <button className="link" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>#{t.pr.number}</button></span>}
+          <Cites cites={t.cites} title={t.title} docs={docs} open={open} />
         </span>
       </span>
       <span className="vwho">{t.holders.length ? t.holders.map((h) => <AgentLink key={h} name={h} open={open} />) : <span className="empty">—</span>}</span>
@@ -139,20 +149,123 @@ export function TasksChannel(p: ViewProps) {
       <p className="vnote">In the order <code>factory next</code> walks them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>
       {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && mode === "board" && <Board tasks={rows} all={all} by={by} project={p.project} open={p.open} post={p.post} say={p.say} />}
-      {rows.length > 0 && mode === "list" && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} />)}</ul>}
+      {rows.length > 0 && mode === "board" && <Board tasks={rows} all={all} epics={v.epics.epics} by={by} project={p.project} open={p.open} post={p.post} say={p.say} />}
+      {rows.length > 0 && mode === "list" && v.epics.epics.length === 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>}
+      {rows.length > 0 && mode === "list" && v.epics.epics.length > 0 && groupByEpic(rows, v.epics.epics).map((g) => (
+        <section key={g.epic?.id ?? "none"} aria-label={g.epic ? `Tasks in epic ${g.epic.title}` : "Tasks in no epic"}>
+          <h3 className="vgroup">{g.epic
+            ? <button className="link" onClick={() => p.open("view:epics", `#${g.epic?.id}`)}>Epic #{g.epic.id} {g.epic.title}</button>
+            : "In no epic"}</h3>
+          <ul className="vlist">{g.tasks.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+// --- epics -------------------------------------------------------------------------------------------------------------
+
+
+function EpicCard({ e, open, pick, docs }: { e: EpicRow; open: ViewProps["open"]; pick: (id: string) => void; docs?: DocPage[] }) {
+  const pct = epicBar(e);
+  return (
+    <li className="card epic">
+      <div className="prhead">
+        <span className="vid"><Ext href={e.url}>#{e.id}</Ext></span>
+        <span className="vtitle"><button className="link" onClick={() => pick(e.id)}><Cited text={e.title} docs={docs} open={open} /></button></span>
+        <span className="vstate"><Dot tone={epicTone(e.stage)} />{e.stageText}</span>
+      </div>
+      <div className="ebar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={`${e.done} of ${e.all} tasks done`}>
+        <span style={{ width: `${pct}%` }} />
+      </div>
+      <p className="vsub">{e.all ? `${e.done} of ${e.all} tasks done` : "No tasks yet"}</p>
+      <dl className="facts">
+        {e.prd && <div><dt>PRD</dt><dd>{e.prd}</dd></div>}
+        {e.decisions.length > 0 && <div><dt>Decisions</dt><dd>{e.decisions.join(", ")}</dd></div>}
+        {e.tasks.length > 0 && <div><dt>Tasks</dt><dd className="etasks">{e.tasks.map((t) => (
+          <button key={t.id} className={t.done ? "link done" : "link"} onClick={() => open("view:tasks", `#${t.id}`)}>{t.done ? "✓ " : ""}#{t.id}</button>))}</dd></div>}
+      </dl>
+    </li>
+  );
+}
+
+/** A column of the epics board: the stages in the order an epic walks them, then parked. */
+const BOARD: Array<[string, string]> = [["investigating", "Investigating"], ["prd", "PRD"], ["decision", "Decision"], ["planned", "Planned"],
+  ["building", "Building"], ["done", "Done"], ["parked", "Parked"]];
+
+function EpicBoard({ epics, open }: { epics: EpicRow[]; open: (id: string) => void }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div className="eboard" style={{ gridTemplateColumns: `repeat(${BOARD.length}, minmax(160px, 1fr))` }}>
+        {BOARD.map(([s, name]) => {
+          const here = epics.filter((e) => e.stage === s);
+          return (
+            <section key={s} aria-label={name}>
+              <h4><Dot tone={epicTone(s)} />{name} <span className="empty">{here.length}</span></h4>
+              {here.map((e) => (
+                <article key={e.id}>
+                  <button className="link" onClick={() => open(e.id)}>{e.title}</button>
+                  {e.summary && <span className="vsub">{e.summary}</span>}
+                  <span className="vsub">{e.all ? `${e.done} of ${e.all} tasks` : "Not split yet"} · #{e.id}</span>
+                </article>
+              ))}
+              {!here.length && <span className="vsub">None.</span>}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type EpicTab = "board" | "list";
+
+export function EpicsChannel(p: ViewProps) {
+  const [typed, setTyped] = useFilter(p.find);
+  const [tab, setTab] = useState<EpicTab>("board");
+  const [adding, setAdding] = useState(false);
+  const wanted = /^#(\d+)$/.exec(p.find.trim())?.[1] ?? null; // a task's epic link opens the epic itself
+  const [chosen, setChosen] = useState<string | null>(wanted);
+  useEffect(() => setChosen(wanted), [wanted]);
+  if (!p.views) return <Loading name={p.project.name} />;
+  const v = p.views;
+  const all = v.epics.epics;
+  const rows = filterRows(all, chosen ? "" : typed);
+  const epic = chosen ? all.find((e) => e.id === chosen) : undefined;
+  const talkers = p.talkers ?? [];
+  if (epic) {
+    return <EpicPage epic={epic} tasks={v.tasks.tasks} token={p.token ?? ""} project={p.project.id} talkers={talkers} docs={p.docs} open={p.open}
+      back={() => setChosen(null)} />;
+  }
+  return (
+    <div className="body">
+      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="epics" />
+      <Problems list={[...v.problems, ...v.epics.problems]} />
+      <div className="etabs-row">
+        <div role="tablist" aria-label="Epic views" className="etabs">
+          {(["board", "list"] as EpicTab[]).map((x) => (
+            <button key={x} role="tab" aria-selected={tab === x} className={tab === x ? "on" : ""} onClick={() => setTab(x)}>{x === "board" ? "Board" : "List"}</button>
+          ))}
+        </div>
+        <button className="btn primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>New epic</button>
+      </div>
+      {adding && <NewEpic token={p.token ?? ""} project={p.project.id} talkers={talkers} close={() => setAdding(false)} />}
+      {!all.length && !v.problems.length && <p className="empty">No epics. Tell the product owner what you want with New epic.</p>}
+      {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
+      {rows.length > 0 && tab === "board" && <EpicBoard epics={rows} open={setChosen} />}
+      {rows.length > 0 && tab === "list" && <ul className="vcards" aria-label="Epics">{rows.map((e) => <EpicCard key={e.id} e={e} open={p.open} pick={setChosen} docs={p.docs} />)}</ul>}
     </div>
   );
 }
 
 // --- pull requests -----------------------------------------------------------------------------------------------------
 
-function PullCard({ pr, open }: { pr: PullRow; open: ViewProps["open"] }) {
+function PullCard({ pr, open, docs }: { pr: PullRow; open: ViewProps["open"]; docs?: DocPage[] }) {
   return (
     <li className="card pr">
       <div className="prhead">
         <span className="vid"><Ext href={pr.url}>#{pr.number}</Ext></span>
-        <span className="vtitle">{pr.title}</span>
+        <span className="vtitle"><Cited text={pr.title} docs={docs} open={open} /></span>
         {pr.draft && <span className="tag quiet">draft</span>}
       </div>
       <dl className="facts">
@@ -163,7 +276,7 @@ function PullCard({ pr, open }: { pr: PullRow; open: ViewProps["open"] }) {
         <div><dt>Task</dt><dd>{pr.task ? <button className="link" onClick={() => open("view:tasks", `#${pr.task}`)}>#{pr.task}</button> : <span className="empty">—</span>}</dd></div>
         <div><dt>Next</dt><dd>{pr.next.text}</dd></div>
       </dl>
-      <p className="vsub mono">{pr.branch}</p>
+      <p className="vsub"><span className="mono">{pr.branch}</span><Cites cites={pr.cites} title={pr.title} docs={docs} open={open} /></p>
     </li>
   );
 }
@@ -180,7 +293,7 @@ export function PullsChannel(p: ViewProps) {
       <Problems list={[...v.problems, ...v.pulls.problems]} />
       {!all.length && !v.problems.length && <p className="empty">No open pull request.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && <ul className="prs" aria-label="Pull requests">{rows.map((pr) => <PullCard key={pr.number} pr={pr} open={p.open} />)}</ul>}
+      {rows.length > 0 && <ul className="prs" aria-label="Pull requests">{rows.map((pr) => <PullCard key={pr.number} pr={pr} open={p.open} docs={p.docs} />)}</ul>}
     </div>
   );
 }
@@ -337,10 +450,11 @@ export function CiChannel(p: ViewProps) {
 /** The three channels' data read through the API (GET tasks, pull-requests and ci), for when the WebSocket hasn't sent it. */
 export async function loadViews(get: (path: string) => Promise<Record<string, unknown>>, project: string): Promise<ViewsData> {
   const base = `/api/projects/${encodeURIComponent(project)}`;
-  const [t, pr, ci] = await Promise.all([get(`${base}/tasks`), get(`${base}/pull-requests`), get(`${base}/ci`)]);
+  const [t, ep, pr, ci] = await Promise.all([get(`${base}/tasks`), get(`${base}/epics`), get(`${base}/pull-requests`), get(`${base}/ci`)]);
   const own = (x: Record<string, unknown>) => (Array.isArray(x.problems) ? x.problems : []) as ProblemView[];
   return { generatedAt: (t.generatedAt as string | null) ?? null, age: (t.age as number | null) ?? null, refreshing: t.refreshing === true,
     problems: [], tasks: { ...(t as unknown as ViewsData["tasks"]), problems: own(t) },
+    epics: { source: String(ep.source ?? ""), epics: (ep.epics ?? []) as EpicRow[], problems: own(ep) },
     pulls: { pulls: (pr.pulls ?? []) as PullRow[], problems: own(pr) }, ci: { ...(ci as unknown as ViewsData["ci"]), problems: own(ci) } };
 }
 
@@ -356,12 +470,20 @@ export const VIEWS_CSS = String.raw`
 .vrow { display: grid; grid-template-columns: 64px 1fr minmax(80px, 160px) 120px; gap: 12px; align-items: center; padding: 10px 14px;
   border-top: 1px solid var(--line); }
 .vrow:first-child { border-top: 0; }
+.vgroup { font-size: 13px; margin: 12px 0 6px; color: var(--muted); }
+.vcards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.ebar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 10px 0 6px; }
+.ebar span { display: block; height: 100%; background: var(--accent); }
+.etasks { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+button.link.done { color: var(--muted); font-weight: 400; }
 .vrow.next { background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
 .vid { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
 .vmain { min-width: 0; display: flex; flex-direction: column; }
 .vtitle { font-weight: 600; min-width: 0; overflow-wrap: anywhere; display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .vsub { color: var(--muted); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; }
 .vsub.mono { font-family: var(--mono); margin-top: 10px; }
+.card .vsub { margin-top: 10px; }
+.vsub .mono { font-family: var(--mono); }
 .vwho { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .vstate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
 button.link { border: 0; background: none; padding: 0; cursor: pointer; font-weight: 600; color: inherit; }
@@ -387,4 +509,5 @@ a.ext { color: inherit; text-decoration: none; }
   .vwho, .vstate { grid-column: 2; }
   .vrunstate { width: auto; }
 }
-`;
+.etabs-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+${EPICS_CSS}`;

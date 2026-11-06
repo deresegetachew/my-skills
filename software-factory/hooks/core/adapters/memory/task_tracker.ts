@@ -2,6 +2,7 @@
 // are kept as GitHub keeps them, as events, so a race (`rival`) is decided by the same rule: the earliest claim wins.
 import { type Claimant, type ClaimEvent, isMe, winner } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
+import type { Epic } from "../../domain/epic.ts";
 import { checkClaim, type Task, type TaskState, tickTodo, type Todo } from "../../domain/task.ts";
 import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
 
@@ -99,6 +100,10 @@ export class MemoryTaskTracker implements TaskTracker {
     Object.assign(h.task, { state: "blocked", holders: [] });
     h.events.push({ release: true });
     h.why = reason;
+  }
+
+  epics(): Epic[] {
+    return [];
   }
 
   file(task: NewTask): Filed {

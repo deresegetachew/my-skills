@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chat with fasil</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="fasil" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px;">
+<header style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+<div style="display: flex; align-items: center; gap: 16px; min-width: 0;">
+<dc-import name="Avatar" agent="fasil" size="56" hint-size="56px,56px"></dc-import>
+<div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px; line-height: 1.15;">fasil</h1>
+<span style="display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-2);"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Dev manager on dev-pc · reviewing PR #402</span>
+</div>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Pause fasil</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Stop</button>
+</div>
+</header>
+
+<div role="tablist" aria-label="fasil views" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Chat</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Log</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Reviews</button>
+</div>
+
+<div style="flex: 1; display: flex; flex-direction: column; gap: 24px; max-width: 760px;">
+<span style="color: var(--text-3); font-size: 13px; text-align: center;">haile claimed #437 · 01:50</span>
+
+<div style="display: flex; gap: 12px; align-items: flex-start;">
+<dc-import name="Avatar" agent="fasil" size="32" hint-size="32px,32px"></dc-import>
+<div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+<span style="font-size: 13px; color: var(--text-3);"><span style="color: var(--text); font-weight: 600;">fasil</span> · 01:52</span>
+<p style="margin: 0; line-height: 1.6;">Reviewed #431 (wake-ups and claims). Clean. The loop test covers the builder's idle path; I asked menelik for the manager's path in a follow-up.</p>
+</div>
+</div>
+
+<div style="display: flex; justify-content: flex-end;">
+<div style="display: flex; flex-direction: column; gap: 4px; align-items: flex-end; max-width: 520px;">
+<span style="font-size: 13px; color: var(--text-3);"><span style="color: var(--text); font-weight: 600;">You</span> · 01:55</span>
+<p style="margin: 0; line-height: 1.6; background: var(--bg-subtle); border-radius: 12px; padding: 10px 14px;">Good. What's left before the board (#439) can start?</p>
+</div>
+</div>
+
+<div style="display: flex; gap: 12px; align-items: flex-start;">
+<dc-import name="Avatar" agent="fasil" size="32" hint-size="32px,32px"></dc-import>
+<div style="display: flex; flex-direction: column; gap: 12px; flex: 1; min-width: 0;">
+<span style="font-size: 13px; color: var(--text-3);"><span style="color: var(--text); font-weight: 600;">fasil</span> · 01:56</span>
+<p style="margin: 0; line-height: 1.6;">Nothing technical: haile picks it up after #437. One thing needs you first.</p>
+<article aria-label="Merge PR #402" style="border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px; max-width: 560px;">
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2);"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot);"></span>Waiting for you</span>
+<span style="font-weight: 600; font-size: 15px;">Merge PR #402 Product owner: try what was built?</span>
+<span style="color: var(--text-2); line-height: 1.5;">It changes protected files, so only you may merge it. Checks pass and fasil reviewed it.</span>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Merge</button>
+<a href="PR.dc.html" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box;">Look first</a>
+</div>
+</article>
+</div>
+</div>
+</div>
+
+<footer style="display: flex; flex-direction: column; gap: 8px; max-width: 760px;">
+<label style="display: flex; align-items: flex-end; gap: 10px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 14px; padding: 10px 10px 10px 14px;">
+<textarea rows="2" placeholder="Message fasil" aria-label="Message fasil" style="flex: 1; min-width: 0; border: none; outline: none; resize: none; font: inherit; background: transparent; color: var(--text);"></textarea>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 600; cursor: pointer;">Send</button>
+</label>
+<span style="font-size: 13px; color: var(--text-3);">fasil answers in this thread. Anything that needs you shows with its buttons.</span>
+</footer>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: this.props.theme ?? 'light' };
+  }
+}
+</script>
+</body>
+</html>

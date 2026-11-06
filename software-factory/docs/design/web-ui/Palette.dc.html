@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Palette and components</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 1440px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<sc-for list="{{themes}}" as="th" hint-placeholder-count="2">
+<section data-theme="{{th.id}}" style="background: var(--bg); color: var(--text); padding: 48px; display: flex; flex-direction: column; gap: 36px; box-sizing: border-box;">
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<span style="color: var(--text-3); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;">{{th.label}}</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px;">The palette</h1>
+<p style="margin: 0; color: var(--text-2);">White and calm; colour only where it means something: a category, a role, a state.</p>
+</header>
+
+<div style="display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0; font-size: 15px;">Surfaces and text</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">
+<sc-for list="{{surfaces}}" as="s" hint-placeholder-count="8">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span style="height: 52px; border-radius: 12px; background: var({{s.v}}); border: 1px solid var(--border);"></span>
+<span style="font-size: 12px; font-weight: 600;">{{s.name}}</span>
+<code style="font-size: 11px; color: var(--text-2);">{{s.v}}</code>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0; font-size: 15px;">Categories: fill, dot, ink</h2>
+<div style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px;">
+<sc-for list="{{cats}}" as="c" hint-placeholder-count="7">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="height: 72px; border-radius: 12px; background: var(--{{c.id}}-fill); display: flex; flex-direction: column; justify-content: space-between; padding: 10px; box-sizing: border-box;">
+<span style="width: 10px; height: 10px; border-radius: 50%; background: var(--{{c.id}}-dot);"></span>
+<span style="color: var(--{{c.id}}-ink); font-weight: 600; font-size: 12px;">Aa ink</span>
+</div>
+<span style="font-size: 12px; font-weight: 600;">{{c.name}}</span>
+<span style="font-size: 11px; color: var(--text-2);">{{c.use}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0; font-size: 15px;">Type</h2>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Page title 34</span>
+<span style="font-weight: 600; font-size: 22px;">Section 22 semibold</span>
+<span style="font-weight: 600; font-size: 15px;">Card title 15 semibold</span>
+<span style="font-size: 14px;">Body 14 regular, Inter. The PR touches .claude/, so only you can merge it.</span>
+<span style="font-size: 12px; color: var(--text-2);">Small 12, secondary</span>
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3);">Label 11 caps</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 14px;">
+<h2 style="margin: 0; font-size: 15px;">Components</h2>
+<div role="tablist" aria-label="Tabs" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Board</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">List</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Timeline</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 10px;">
+<button style="height: 40px; padding: 0 18px; border-radius: 999px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600;">All</button>
+<button style="height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; display: flex; align-items: center; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: var(--pink-dot);"></span>Product</button>
+<button style="height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; display: flex; align-items: center; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: var(--violet-dot);"></span>Management</button>
+<button style="height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; display: flex; align-items: center; gap: 8px;"><span style="width: 9px; height: 9px; border-radius: 50%; background: var(--green-dot);"></span>Builders</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 10px;">
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600;">Merge</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit;">Look first</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--violet-fill); color: var(--violet-ink); font: inherit; font-weight: 600;">Talk to fasil</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--red-fill); color: var(--red-ink); font: inherit; font-weight: 600;">Stop agent</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;">
+<article style="background: var(--pink-fill); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600; font-size: 13px;">Epics above tasks</span><span style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-2);">mentewab <span style="font-size: 10px; letter-spacing: 0.06em; color: var(--pink-ink);">INVESTIGATING</span></span></article>
+<article style="background: var(--green-fill); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600; font-size: 13px;">#437 Avatars</span><span style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-2);">haile <span style="font-size: 10px; letter-spacing: 0.06em; color: var(--green-ink);">IN PROGRESS</span></span></article>
+<article style="background: var(--red-fill); border: 1.5px solid var(--red-dot); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px;"><span style="align-self: flex-start; background: var(--red-dot); color: #FFFFFF; font-size: 10px; font-weight: 700; border-radius: 999px; padding: 1px 7px;">NEEDS YOU</span><span style="font-weight: 600; font-size: 13px;">Merge PR #402</span></article>
+</div>
+<div style="display: flex; gap: 6px; flex-direction: column; max-width: 300px;">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; background: var(--bg-active); color: var(--text); text-decoration: none; font-weight: 600;">Board</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 10px; color: var(--text); text-decoration: none;"><dc-import name="Avatar" agent="fasil" size="28" hint-size="28px,28px"></dc-import><span style="flex: 1;">fasil</span><span style="min-width: 20px; height: 20px; border-radius: 999px; background: var(--badge); color: #FFFFFF; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;">2</span></a>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--text-2);">
+<span style="display: flex; align-items: center; gap: 6px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Working</span>
+<span style="display: flex; align-items: center; gap: 6px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--waiting);"></span>Waiting</span>
+<span style="display: flex; align-items: center; gap: 6px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--idle);"></span>Idle</span>
+<span style="display: flex; align-items: center; gap: 6px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--down);"></span>Down</span>
+</div>
+</div>
+</section>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      themes: [{ id: 'light', label: 'Light' }, { id: 'dark', label: 'Dark' }],
+      surfaces: [
+        { name: 'App', v: '--bg' }, { name: 'Subtle', v: '--bg-subtle' }, { name: 'Selected', v: '--bg-active' },
+        { name: 'Card', v: '--surface' }, { name: 'Hairline', v: '--border' }, { name: 'Strong line', v: '--border-strong' },
+        { name: 'Text', v: '--text' }, { name: 'Secondary', v: '--text-2' }
+      ],
+      cats: [
+        { id: 'pink', name: 'Pink', use: 'Product' }, { id: 'violet', name: 'Violet', use: 'Management' },
+        { id: 'green', name: 'Green', use: 'Builders, done' }, { id: 'blue', name: 'Blue', use: 'Info, links' },
+        { id: 'yellow', name: 'Yellow', use: 'Waiting' }, { id: 'red', name: 'Red', use: 'Needs you, down' },
+        { id: 'grey', name: 'Grey', use: 'Idle, archived' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

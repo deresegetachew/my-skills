@@ -131,7 +131,9 @@ export function renderRules(uid: number | string, resolvers: readonly string[] =
   const out = ["# Written by `factory bootstrap machine`. Edit the settings and run it again, not this file.",
     `# The sandbox for uid ${who}: internet ${egress === "internet" ? "open" : "closed"}, home network closed.`,
     `add table inet ${TABLE}`, `delete table inet ${TABLE}`, `table inet ${TABLE} {`,
-    "  chain output {", "    type filter hook output priority 0; policy accept;"];
+    "  chain output {", "    type filter hook output priority 0; policy accept;",
+    // Replies of servers the factory user runs (the web UI) to a client on the tailnet are not new connections (#443).
+    "    ct state established,related accept"];
   for (const r of resolvers) {
     const v = isIP(r);
     if (!v) throw new Error(`${pyRepr(r)} does not appear to be an IPv4 or IPv6 address`);

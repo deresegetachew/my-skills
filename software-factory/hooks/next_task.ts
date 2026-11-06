@@ -44,6 +44,8 @@ import { claimRework, claimTask, describeRework, isMine, release, reworkHolder }
 import type { Comment } from "./factory_issues.ts";
 import { claimKey, describeHolder, holderIsMe, leasesOn } from "./factory_leases.ts";
 import { machineId } from "./factory_machine.ts";
+import { asPull, freshPrs } from "./factory_pr_feed.ts";
+import { remember, settled } from "./factory_views_cache.ts";
 import { verdicts } from "./factory_messages.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
 
@@ -54,6 +56,7 @@ interface Pull {
   title: string;
   labels?: { name?: string }[];
   head: { sha: string; ref: string };
+  updated_at?: string;
 }
 
 /** [[id, title, head]] for open PRs with a must-fix on their current head commit, oldest first, leaving out those whose
@@ -76,13 +79,29 @@ function rework(cfg: Config, me: string | null): Job[] {
   const hours = toFloat(cfg.claimStaleHours ?? 6) ?? 6;
   const machine = me ? machineId() : "";
   const nats = leasesOn(cfg);
-  const prs = ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open&per_page=100").sort((a, b) => a.number - b.number);
+  // With `pr` on NATS, the open pull requests come from the watcher's snapshot, and a pull request's comments are read
+  // again only when its updated_at moved (factory_pr_feed.ts). A rework found that way is checked once on GitHub: the
+  // snapshot may not have this agent's last push yet.
+  const fed = freshPrs(cfg);
+  const prs = (fed ? fed.prs.map(asPull) : ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open&per_page=100"))
+    .sort((a, b) => a.number - b.number);
   for (const pr of prs) {
     if ((pr.labels ?? []).some((l) => l.name === hold)) continue; // the dev manager is reviewing it: not rework
-    const comments = ghAll<Comment>(`repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`);
+    const read = () => ghAll<Comment>(`repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`);
+    const comments = fed ? remember(cfg, `rework-comments-${pr.number}`, settled(pr.updated_at), read) : read();
     const shas = comments.filter((c) => !trusted.size || trusted.has(String(c.user?.login ?? "")))
       .flatMap((c) => verdicts(c.body || "")).filter(([kind, sha]) => kind === "mustfix" && sha).map(([, sha]) => sha as string); // either form
     if (!shas.length || !pr.head.sha.startsWith(shas[shas.length - 1] as string)) continue;
+    if (fed) {
+      const now = run(["gh", "api", `repos/{owner}/{repo}/pulls/${pr.number}`]);
+      let head = "";
+      try {
+        head = (JSON.parse(now.stdout) as Pull).head.sha;
+      } catch {
+        head = "";
+      }
+      if (now.code !== 0 || head !== pr.head.sha) continue; // pushed since, or gone: not rework now
+    }
     if (nats) { // claims on NATS (#411): the bucket says who holds the rework
       const holder = nats.holder(claimKey("rework", pr.number));
       if (holder && !(me && holderIsMe(holder, me, machine))) {
