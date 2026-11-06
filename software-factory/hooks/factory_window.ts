@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // The one step that starts a factory session in its own tmux window (#300, PRD US-3). `factory loop -i`, `factory
-// resume` (what `factory autostart` runs at boot) and later the cockpit all start their sessions through it.
+// resume` (what `factory autostart` runs at boot) and `factory owner start` all start their sessions through it.
 //
 //   factory_window.ts loop --role R [--name N] -- <loop arguments>
 //       what `factory loop -i` runs on a terminal: start `factory loop <arguments>` as role R and name N (else the
@@ -10,8 +10,7 @@
 // window named <role>-<name>; dots, spaces and other signs become "-". A session that is already running is left
 // alone and said so. The command in the window gets FACTORY_WINDOW=<window>, so a `factory loop -i` inside it runs in
 // place. Without tmux the step stops with {code, message, fix} (resume, autostart); `factory loop -i` checks first and
-// runs in place instead, with a note. The cockpit needs tmux 3.2 or newer; an older tmux still
-// starts the session, with a note.
+// runs in place instead, with a note.
 //
 //   factory_window.ts job <file>
 //       what a sub-manager's window runs (#307, PRD US-4): the job file (mode 600, written by the orchestrator and
@@ -49,22 +48,12 @@ export function running(session: string): boolean {
   return run(["tmux", "has-session", "-t", `=${session}`]).code === 0;
 }
 
-/** The installed tmux is older than 3.2, which the cockpit needs: its version ("3.1"), else "" (newer, or no number). */
-export function tmuxTooOld(): string {
-  const m = /(\d+)\.(\d+)/.exec(run(["tmux", "-V"]).stdout);
-  return m && (Number(m[1]) < 3 || (Number(m[1]) === 3 && Number(m[2]) < 2)) ? m[0] : "";
-}
-
-/** Throws WindowError when there is no tmux; returns a note when it is older than 3.2, else "". */
+/** Throws WindowError when there is no tmux; else returns a note to print first, "" today (the 3.2 the retired cockpit
+ * needed is no longer asked for, #425). */
 export function checkTmux(): string {
   if (!which("tmux")) {
     throw new WindowError("no-tmux", "tmux is not installed, and every factory session runs in its own tmux window.",
       "Install tmux (for example `sudo apt install tmux` or `brew install tmux`), then run the command again.");
-  }
-  const old = tmuxTooOld();
-  if (old) {
-    return `Note: ${old} is older than tmux 3.2: the session starts, but the cockpit needs 3.2 or newer. ` +
-      "Upgrade tmux before you use `factory cockpit`.";
   }
   return "";
 }

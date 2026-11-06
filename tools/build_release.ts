@@ -16,9 +16,8 @@
 // every file with sha256, size, mode, and where a project gets it: install {kind, to}, or null for a file not
 // installed). The rules are the classify() beside this builder (the checkout it builds, unless --root says another), so a
 // client installs a release by that release's own rules, even when the client is older and would put a new file
-// elsewhere (#278). When the checkout has the cockpit's Ink UI (software-factory/cockpit/ui.tsx), the archive also holds
-// it bundled into one file, hooks/factory_cockpit_ink.js (build_cockpit.ts, decision 0002), and with the web app
-// (software-factory/web/app.tsx) hooks/factory_ui_app.js (build_web.ts, decision 0005): built, not tracked. Each
+// elsewhere (#278). When the checkout has the web app (software-factory/web/app.tsx), the archive also holds it bundled
+// into one file, hooks/factory_ui_app.js (build_web.ts, decision 0005): built, not tracked. Each
 // plugin (software-factory/plugins/<name>/, decision 0004) is bundled the same way into hooks/plugins/<name>.js, with
 // the version it was built for (build_plugins.ts); the plugins' sources stay out of the archive.
 import { createHash } from "node:crypto";
@@ -27,7 +26,6 @@ import { join, relative, resolve } from "node:path";
 import { FactoryError, pyDumps, run } from "../software-factory/hooks/factory_lib.ts";
 import { classify } from "../software-factory/hooks/factory_release.ts";
 import { gzipFixed, tarCreate, type TarInput } from "../software-factory/hooks/factory_tar.ts";
-import { BUNDLE, bundleCockpit, ENTRY } from "./build_cockpit.ts";
 import { bundleWeb, WEB_BUNDLE, WEB_ENTRY } from "./build_web.ts";
 import { BUNDLES, bundlePlugin, pluginNames, PLUGINS } from "./build_plugins.ts";
 
@@ -133,7 +131,7 @@ export function build(root: string, outDir: string, tag?: string | null): Built 
   const manifestFiles: { path: string; sha256: string; size: number; mode: string; install: { kind: string; to: string } | null }[] = [];
   const files: [string, number, Uint8Array][] = releaseFiles(root).map(([path, mode, source]) =>
     [path.slice(SRC.length + 1), mode, new Uint8Array(readFileSync(join(root, source)))]);
-  const bundles: [string, string, (dir: string) => Uint8Array][] = [[ENTRY, BUNDLE, bundleCockpit], [WEB_ENTRY, WEB_BUNDLE, bundleWeb]];
+  const bundles: [string, string, (dir: string) => Uint8Array][] = [[WEB_ENTRY, WEB_BUNDLE, bundleWeb]];
   for (const [entry, bundle, make] of bundles) {
     if (!files.some(([rel]) => rel === entry)) continue;
     if (files.some(([rel]) => rel === bundle)) {

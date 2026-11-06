@@ -91,7 +91,7 @@ An adapter that needs an npm package (the NATS client, a Jira client) is a **plu
   back to GitHub when `fallback: "github"` is set.
 - **No imports across the line:** `check_skills.ts` refuses a core import of a plugin's packages, and a plugin
   importing anything but the port interfaces and the domain.
-- The Ink cockpit moves under this mechanism once it exists.
+- The Ink cockpit moves under this mechanism once it exists. *(Dropped: the cockpit was retired in #425; decision 0005.)*
 
 ### 6. Layout and style
 

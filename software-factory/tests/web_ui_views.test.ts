@@ -1,9 +1,10 @@
-// The web UI's tasks, pull requests and CI channels (#424): their JSON from the cockpit's cache (written by hand here),
-// the CI view's actions (#396) running the same commands the cockpit's CI view runs, through a fake `factory` and a fake
-// `gh` that log what they were asked, the token on every new endpoint, a read-again that runs `factory cockpit --json`,
+// The web UI's tasks, pull requests and CI channels (#424): their JSON from the snapshot's cache (written by hand here),
+// the CI view's actions (#396), through a fake `factory` and a fake
+// `gh` that log what they were asked, the token on every new endpoint, a read-again that runs `factory snapshot`,
 // and the views sent over the WebSocket again when the cache changes.
 import { afterAll, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { api, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { write } from "./support.ts";
@@ -49,7 +50,7 @@ const CI: Row = {
 };
 
 function cache(p: Project, more: Row = {}): void {
-  write(join(p.state, "cockpit.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
     tasks: { source: "issues", tasks: TASKS }, pulls: PULLS, ci: CI, ...more }));
 }
 
@@ -82,7 +83,7 @@ test("tasks: in the order factory next walks them, with state, agent, links and 
   expect(r.json.next).toBe("10");
   expect(tasks.filter((t) => t.next).map((t) => t.id)).toEqual(["10"]);
   expect(tasks[2]?.todos).toEqual({ done: 1, all: 2 });
-  // the search matches what the cockpit's does (#392): number, title, lane, holders, phase
+  // the search matches a task by (#392): number, title, lane, holders, phase
   expect(String(tasks[0]?.find)).toBe("#7 Add the login page in progress menelik Phase 1");
 }, T);
 
@@ -137,6 +138,16 @@ test("CI: the verdict first, then the runs (going first), the runners by machine
   expect(r.json.settings).toMatchObject({ heavy: { raw: "2", source: "FACTORY_CI_RUNNERS" }, light: true });
 }, T);
 
+test("CI: only the runners of this machine's host name are marked as this machine", async () => {
+  const { ui } = await started();
+  const r = await api(ui, "/api/projects/work/ci");
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const host = hostname().split(".")[0];
+  expect(r.json.host).toBe(host);
+  for (const runner of r.json.runners as Row[]) expect(runner.here, String(runner.name)).toBe(runner.machine === host);
+  expect((r.json.runners as Row[]).find((x) => x.machine === "old-box")?.here).toBe(false);
+}, T);
+
 test("a CI action needs a confirm: without it 400 confirm_needed and nothing runs", async () => {
   const { ui, p } = await started();
   const r = await api(ui, "/api/projects/work/ci/actions/install", { method: "POST", body: {} });
@@ -145,7 +156,7 @@ test("a CI action needs a confirm: without it 400 confirm_needed and nothing run
   expect(factoryCalls(p)).toEqual([]);
 }, T);
 
-test("each CI action runs the command the cockpit's CI view runs", async () => {
+test("each CI action runs its factory command", async () => {
   const { ui, p } = await started(true, { FACTORY_CI_RUNNERS: "2" });
   const want: Array<[string, string[]]> = [
     ["install", ["ci install"]],
@@ -164,9 +175,9 @@ test("each CI action runs the command the cockpit's CI view runs", async () => {
     expect(r.json.command).toBe(calls.map((c) => `factory ${c}`).join(" then "));
     seen.push(...calls);
   }
-  // after an action the server reads the snapshot again (factory cockpit --json), so the channel shows what changed
-  expect(factoryCalls(p).filter((c) => c !== "cockpit --json")).toEqual(seen);
-  expect(factoryCalls(p)).toContain("cockpit --json");
+  // after an action the server reads the snapshot again (factory snapshot), so the channel shows what changed
+  expect(factoryCalls(p).filter((c) => c !== "snapshot")).toEqual(seen);
+  expect(factoryCalls(p)).toContain("snapshot");
 }, T);
 
 test("rerun runs gh run rerun on a failed run; a run that didn't fail is refused and nothing runs", async () => {
@@ -207,13 +218,13 @@ test("a failing CI action is 500 with the command's own error and its output", a
 
 // --- read again, the token, live --------------------------------------------------------------------------------------------
 
-test("read again runs factory cockpit --json in the project", async () => {
+test("read again runs factory snapshot in the project", async () => {
   const { ui, p } = await started();
   const r = await api(ui, "/api/projects/work/refresh", { method: "POST", body: {} });
   expect(r.status, JSON.stringify(r.json)).toBe(202);
-  expect(r.json).toMatchObject({ ok: true, command: "factory cockpit --json" });
+  expect(r.json).toMatchObject({ ok: true, command: "factory snapshot" });
   for (let i = 0; i < 50 && !factoryCalls(p).length; i++) await Bun.sleep(100);
-  expect(factoryCalls(p)).toEqual(["cockpit --json"]);
+  expect(factoryCalls(p)).toEqual(["snapshot"]);
 }, T);
 
 test("every new endpoint needs the token, and nothing runs without it", async () => {
@@ -233,7 +244,7 @@ test("every new endpoint needs the token, and nothing runs without it", async ()
   expect(factoryCalls(p)).toEqual([]);
 }, T);
 
-test("the WebSocket sends the views on connect, and again when the cockpit's cache changes", async () => {
+test("the WebSocket sends the views on connect, and again when the snapshot's cache changes", async () => {
   const { ui, p } = await started();
   const ws = new WebSocket(ui.url.replace("http", "ws") + `/api/ws?token=${ui.token}`);
   const views = (want: (m: Row) => boolean): Promise<Row | null> => new Promise((done) => {

@@ -1,4 +1,4 @@
-// The web UI's tasks and pull requests carry the citations in their bodies (`cites`) from the cockpit's cache, so the page
+// The web UI's tasks and pull requests carry the citations in their bodies (`cites`) from the snapshot's cache, so the page
 // can link them to the Docs section; a cache without them gives [].
 import { afterAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
@@ -22,7 +22,7 @@ const pull = (number: number, more: Row = {}): Row => ({ number, title: `Pull ${
 async function started(): Promise<Running> {
   const p = project();
   roots.push(p.root);
-  write(join(p.state, "cockpit.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
     tasks: { source: "issues", tasks: [task("1", { cites: ["decision 0004", "US-12"] }), task("2")] },
     pulls: [pull(21, { cites: ["ADR 5"] }), pull(22)], ci: null }));
   const ui = await startUi(p, ["--port", "0"]);

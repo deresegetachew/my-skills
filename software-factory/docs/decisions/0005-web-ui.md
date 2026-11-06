@@ -27,7 +27,7 @@ agent, approvals inline; AGPL-3.0) and squad.
 2. **Bound to localhost; `--host` adds the Tailscale address**, nothing else. A token, made once and kept in
    `.git/factory/ui-token` (mode 600), is printed with the address and required on every API call and the WebSocket.
    Starting it is the owner's: an agent session is refused.
-3. **The server reads through what exists**: `factory agents ls --json`, the cockpit's cache and the limit file today,
+3. **The server reads through what exists**: `factory agents ls --json`, the cockpit's cache (`factory snapshot`'s since #425) and the limit file today,
    the messaging port when NATS lands (0004). It pushes changes over a WebSocket from one poll loop, which runs only
    while a page is open. Actions run the same commands the command line runs (`factory owner start|stop`), after a
    confirm on the page.
@@ -39,6 +39,8 @@ agent, approvals inline; AGPL-3.0) and squad.
    `check_skills.ts` refuses anything else, as it does for the cockpit (0002 point 4).
 6. **The cockpit stays** until the web UI covers what it does (chat and the owner's approvals, #423; the tasks, pull
    requests and CI views, #424); then it is retired (#425). No new cockpit view is built meanwhile.
+   *Retired on 6 Nov 2026 (#425), at the owner's word:* `factory cockpit` now only says it moved to `factory ui`;
+   `factory cockpit --json` became `factory snapshot` and `--chat-send` became `factory talk`.
 
 ## Consequences
 

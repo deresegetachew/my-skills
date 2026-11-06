@@ -97,8 +97,8 @@ queue: each pass the product owner checks the newest merged work against the PRD
 `<!-- factory-owner-ask id=<slug> for=product -->`. The product owner replies under it with a proposal (the options and a
 recommendation); the owner's yes comes in a reply there. Asks without the tag stay with the owner.
 The reply starts with `<!-- factory-po-reply ask=<slug> -->` (#352): the ask then waits for the owner, is not offered
-to the product owner again (so the loop never stops on it), and `factory prs` and the cockpit's Needs you show it as
-waiting for the owner. An owner comment after it, `factory owner answer <slug>` or a plain reply, gives it back to the
+to the product owner again (so the loop never stops on it), and `factory prs` and `factory snapshot` (its `needsYou`,
+state `owner`) show it as waiting for the owner. An owner comment after it, `factory owner answer <slug>` or a plain reply, gives it back to the
 product owner. `<!-- factory-po-reply ask=<slug> done -->`, once the change is recorded, closes it.
 
 **`factory prd [--open] [--story N] [--json]`** shows progress against the PRD, computed from GitHub. A story's id is `US-<n>`
@@ -165,10 +165,14 @@ document (`- docs/artifacts/prd/index.html - the PRD as designed, a copy of an a
 exists. This works on every machine, with no connector, and keeps a role's context small.
 
 ```
-factory artifacts pull <url|id> [dest] [--from DIR] [--title T] [--version V] [--force] [--dry-run]
+factory artifacts pull <url|id> [dest] [--from DIR] [--title T] [--version V] [--force] [--dry-run] [--pr]
 factory artifacts status [--json]      per copy: up to date, OLDER than its artifact, edited locally, missing, or can't tell
 factory artifacts list
 ```
+
+`pull --pr` does the same on a new branch `artifacts/<id>/<time>`, made from the main branch as origin has it in a temporary
+worktree, then commits, pushes and opens the pull request; your own checkout is not changed. A step that fails before the push
+leaves no branch behind; when only the pull request can't be opened, the pushed branch stays and the error says how to open it. The web UI's "Pull the new copy" and "Add an artifact" run it.
 
 `pull` copies the artifact's published files into `dest` (default `<artifacts.dir>/<id>`, `docs/artifacts/<id>`) and records the
 copy in the manifest `docs/artifacts.json` (`artifacts.manifest`): the artifact's url and id, title, version or updated time when
@@ -237,4 +241,4 @@ or `<notes>/next-task.md` instead. To move: run `factory init-roles`, copy the n
 
 <br>
 
-Previous: [Agent loops](agent-loops.md) | Next: [The cockpit](cockpit.md)
+Previous: [Agent loops](agent-loops.md) | Next: [Reviews and gates](reviews-and-gates.md)

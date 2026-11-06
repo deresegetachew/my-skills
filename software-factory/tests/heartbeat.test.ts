@@ -1034,7 +1034,7 @@ test("ls keeps this machine's down row when GitHub says the same machine", () =>
   expect(taytuRows(w)).toEqual([["down", "this machine", "local"]]);
 });
 
-test("ls says which of this machine's rows its names file expects, so the cockpit lists those when they are down", () => {
+test("ls says which of this machine's rows its names file expects, so the web UI lists those when they are down", () => {
   const w = world({ agentIssue: false }); // this machine's names file names taytu, which does not run
   w.addAgentIssue(91, "kassa", "working", w.clock - 30, "bbbb2222", true);
   w.startLoop("haile"); // runs here without being in the names file

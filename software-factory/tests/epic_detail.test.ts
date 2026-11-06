@@ -68,7 +68,7 @@ test("the epics API gives each epic's summary and citations (none when the cache
   roots.push(p.root);
   const epics: Row[] = [{ id: "40", title: "Accounts", stage: "building", tasks: [], prd: "", decisions: [], summary: "Sign in.", cites: ["decision 0004"] },
     { id: "41", title: "Billing", stage: "planned", tasks: [], prd: "", decisions: [] }];
-  write(join(p.state, "cockpit.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
     tasks: { source: "issues", tasks: [], epics }, pulls: [], ci: { mode: "local", repo: "o/work", label: "", runners: [], runs: [], errors: [] } }));
   const ui = await startUi(p, ["--port", "0"]);
   running.push(ui);

@@ -233,8 +233,6 @@ The long parts of this guide are wiki pages in [`docs/wiki/`](docs/wiki). Each p
 - [The factory command](docs/wiki/commands.md): every `factory` subcommand and what it prints.
 - [Agent loops](docs/wiki/agent-loops.md): loops, tasks, live agents, messages, `factory follow` and `factory autostart`.
 - [Roles](docs/wiki/roles.md): the coding agent, the dev manager and the product owner.
-- [The cockpit](docs/wiki/cockpit.md): every agent in one window, answering owner asks, and talking to the dev manager
-  and the product owner.
 
 **Review and merge**
 
@@ -340,7 +338,6 @@ software-factory/
   VERSION                       the release number (a `vX.Y.Z` tag must match it)
   hooks/                        every hook and every `factory_*.ts` command, next_task.ts, pr-gate.ts, check.ts ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
-  cockpit/                      the cockpit's Ink UI (decision 0002): a release bundles it into hooks/factory_cockpit_ink.js
   plugins/                      adapters with npm packages (decision 0004): a release bundles each into hooks/plugins/<name>.js
   web/                          the web app `factory ui` serves (decision 0005): a release bundles it into hooks/factory_ui_app.js
   message-board/                factory-message-board (decision 0007): tasks, claims, threads and events on Postgres; `factory board`
