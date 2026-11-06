@@ -2,7 +2,7 @@
 // Postgres, and keeps what only the board has: a claim's token on this machine (mode 600), sent with every later write;
 // tasks of other projects on the same board left out; a filed task's own board id; a board out of reach said plainly.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { BoardChild } from "../hooks/core/adapters/board/child.ts";
 import { BoardTaskTracker } from "../hooks/core/adapters/board/task_tracker.ts";
 import { ClaimTokens } from "../hooks/core/adapters/board/tokens.ts";
@@ -54,11 +54,12 @@ test("board: a claim's token is kept on this machine, mode 600, and the release 
   expect(JSON.parse(readFileSync(f.tokens, "utf8"))[String(f.boardIds[0])]).toBeUndefined();
 });
 
-test("board: in review and done land on the board with the token; done ends the claim", () => {
+test("board: review ends the builder's claim (its token goes with it), and done lands on the board", () => {
   const f = world.tracker([{ title: "One" }, { title: "Two" }]);
   expect(f.port.pick(haile).task?.id).toBe("101");
   expect(f.port.setState("101", "in-review")).toContain("101");
-  expect(onBoard(f.boardIds[0] as number)).toMatchObject({ holder: "haile", status: "in_review" });
+  expect(onBoard(f.boardIds[0] as number)).toMatchObject({ holder: null, status: "in_review" });
+  expect(JSON.parse(readFileSync(f.tokens, "utf8"))[String(f.boardIds[0])]).toBeUndefined();
   f.port.setState("101", "done");
   expect(onBoard(f.boardIds[0] as number)).toMatchObject({ holder: null, status: "done", outcome: "done" });
 });
@@ -113,4 +114,48 @@ test("board: a board that can't be reached is a refusal with code, message and f
   expect(r.fix).toContain("factory board up");
   expect(r.message).not.toContain(new URL(world.url).password);
   expect(existsSync(tokens)).toBe(false);
+});
+
+test("board: a task in review is marked done from another machine, which never held its claim", () => {
+  const f = world.tracker([{ title: "One" }]);
+  f.port.claim("101", haile);
+  f.port.setState("101", "in-review");
+  const manager = new BoardTaskTracker({ child: world.child, repo: f.repo, tokens: new ClaimTokens(`${world.dir}/manager-${f.repo.replace("/", "-")}.json`) });
+  expect(manager.setState("101", "done")).toContain("101 is done");
+  expect(onBoard(f.boardIds[0] as number)).toMatchObject({ holder: null, status: "done" });
+});
+
+test("board: with its token file gone mid-claim, the holder's pick resumes the task with a new token", () => {
+  const f = world.tracker([{ title: "One" }, { title: "Two" }]);
+  f.port.claim("101", haile);
+  rmSync(f.tokens);
+  expect(f.port.pick(haile).task?.id).toBe("101");
+  expect(JSON.parse(readFileSync(f.tokens, "utf8"))[String(f.boardIds[0])]).toMatchObject({ agent: "haile" });
+  f.port.release("101", "the run ended"); // the new token holds the claim
+  expect(onBoard(f.boardIds[0] as number)).toMatchObject({ holder: null, status: "open" });
+});
+
+test("board: a claim whose token can't be kept is given back at once, and the refusal says why", () => {
+  const f = world.tracker([{ title: "One" }]);
+  const dir = `${world.dir}/locked-${f.repo.replace("/", "-")}`;
+  mkdirSync(dir);
+  chmodSync(dir, 0o500);
+  try {
+    const port = new BoardTaskTracker({ child: world.child, repo: f.repo, tokens: new ClaimTokens(`${dir}/claims.json`) });
+    expect(() => port.claim("101", haile)).toThrow();
+    expect(onBoard(f.boardIds[0] as number)).toMatchObject({ holder: null, status: "open" });
+  } finally {
+    chmodSync(dir, 0o700);
+  }
+});
+
+test("board: a corrupt token file is a refusal with code, message and fix, and is left as it was", () => {
+  const f = world.tracker([{ title: "One" }]);
+  writeFileSync(f.tokens, "{not json", { mode: 0o600 });
+  const r = refusal(() => f.port.pick(haile));
+  expect(r.code).toBe("board-claims-corrupt");
+  expect(r.message).toContain(f.tokens);
+  expect(r.fix).toContain("mv");
+  expect(readFileSync(f.tokens, "utf8")).toBe("{not json");
+  expect(onBoard(f.boardIds[0] as number).holder).toBeNull();
 });

@@ -107,7 +107,7 @@ test("a builder's claim, release, review and done land on the board, with its to
   const review = hook(p.d, p.env, "factory_issues", "review", "101");
   expect(review.code, review.out).toBe(0);
   expect(review.stdout).toContain("101 is in review");
-  expect(onBoard(p.ids[0] as number)).toMatchObject({ holder: "haile", status: "in_review" });
+  expect(onBoard(p.ids[0] as number)).toMatchObject({ holder: null, status: "in_review" });
   const done = inProject(p.d, p.env, `console.log(ports.tasks.setState("101", "done"));`);
   expect(done.code, done.out).toBe(0);
   expect(onBoard(p.ids[0] as number)).toMatchObject({ holder: null, status: "done", outcome: "done" });

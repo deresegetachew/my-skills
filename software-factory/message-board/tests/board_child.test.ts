@@ -183,3 +183,40 @@ test("a wait with alternatives ends on the first event any of them takes", async
     await b.end();
   }
 });
+
+test("a release to review ends the claim and leaves the task in review, so anyone may close it", async () => {
+  const b = await Board.open(url(), { as: "haile" });
+  const other = await Board.open(url(), { as: "lead" });
+  try {
+    const t = await b.create({ title: title("review") });
+    const c = await b.claim(t.id);
+    const r = await b.release(t.id, (c as { token: string }).token, { next: "review", reason: "pull request open" });
+    expect([r.holder, r.status]).toEqual([null, "in_review"]);
+    expect((await other.close(t.id, { outcome: "done" })).status).toBe("done");
+  } finally {
+    await b.end();
+    await other.end();
+  }
+});
+
+test("a wait or find whose caller's clock runs ahead still finds what was said since its `since` (by the board's clock)", async () => {
+  const b = await Board.open(url(), { as: "po" });
+  try {
+    const ahead = 60_000; // the caller's clock is a minute fast
+    const since = Date.now() + ahead;
+    await Bun.sleep(50);
+    await b.signal("wake", { to: "skew", why: "said after since" });
+    const clock = Date.now() + ahead;
+    const wait = { kind: "signal.wake", since, clock, seconds: 2, match: { to: ["skew"] } };
+    const [got] = results(child({ url: url(), calls: [{ op: "wait", args: [wait] }] }).answer) as [{ payload: { why: string } } | null];
+    expect(got?.payload.why).toBe("said after since");
+    const [found] = results(child({ url: url(), calls: [{ op: "find", args: [{ kind: "signal.wake", since, clock, match: { to: ["skew"] } }] }] }).answer) as [unknown[]];
+    expect(found).toHaveLength(1);
+    const top = (await b.lastSeq());
+    await b.signal("wake", { to: "skew", why: "after the cursor" });
+    const [byCursor] = results(child({ url: url(), calls: [{ op: "find", args: [{ kind: "signal.wake", since: 0, after: top, match: { to: ["skew"] } }] }] }).answer) as [{ payload: { why: string } }[]];
+    expect(byCursor.map((e) => e.payload.why)).toEqual(["after the cursor"]);
+  } finally {
+    await b.end();
+  }
+});
