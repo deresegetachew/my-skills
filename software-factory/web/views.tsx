@@ -5,7 +5,7 @@
 // that ask first, then run the same commands the cockpit's CI view runs, on the machine that serves the page.
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
-import { Board } from "./board.tsx";
+import { Board, EpicChips } from "./board.tsx";
 import type { LaneBy } from "./board_model.ts";
 import { Cited, Cites } from "./docs.tsx";
 import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
@@ -119,37 +119,41 @@ function TaskLine({ t, open, docs }: { t: TaskRow; open: ViewProps["open"]; docs
   );
 }
 
-function Toggle<T extends string>({ label, value, set, options }: { label: string; value: T; set: (v: T) => void; options: Array<[T, string]> }) {
-  return (
-    <span className="vmode" role="group" aria-label={label}>
-      {options.map(([v, text]) => <button key={v} aria-pressed={value === v} onClick={() => set(v)}>{text}</button>)}
-    </span>
-  );
-}
+type TaskTab = LaneBy | "list";
+
+const TASK_TABS: Array<[TaskTab, string]> = [["epic", "By epic"], ["agent", "By agent"], ["list", "List"]];
 
 export function TasksChannel(p: ViewProps) {
   const [typed, setTyped] = useFilter(p.find);
-  const [mode, setMode] = useState<"board" | "list">("board");
-  const [by, setBy] = useState<LaneBy>("agent");
+  const [picked, setTab] = useState<TaskTab | null>(null);
+  const [epic, setEpic] = useState<string | null>(null);
   if (!p.views) return <Loading name={p.project.name} />;
   const v = p.views;
+  const epics = v.epics.epics;
+  const tab: TaskTab = picked ?? (epics.length ? "epic" : "agent"); // the design opens by epic; with no epics, by agent
   const all = v.tasks.tasks;
-  const rows = filterRows(all, typed);
+  const withTasks = epics.filter((e) => all.some((t) => t.epic === e.id));
+  const chosen = epic && withTasks.some((e) => e.id === epic) ? epic : null;
+  const rows = filterRows(all, typed).filter((t) => chosen === null || t.epic === chosen);
+  const mode = tab === "list" ? "list" : "board";
   return (
     <div className="body">
-      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="tasks" />
+      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="cards" />
       <Problems list={[...v.problems, ...v.tasks.problems]} />
-      <div className="vbar">
-        <Toggle label="Show the tasks as" value={mode} set={setMode} options={[["board", "Board"], ["list", "List"]]} />
-        {mode === "board" && <Toggle label="Swim lanes by" value={by} set={setBy} options={[["agent", "By agent"], ["epic", "By epic"]]} />}
+      <div role="tablist" aria-label="Group lanes by" className="etabs">
+        {TASK_TABS.map(([x, name]) => (
+          <button key={x} role="tab" aria-selected={tab === x} className={tab === x ? "on" : ""} onClick={() => setTab(x)}>{name}</button>
+        ))}
       </div>
-      <div className="lanes" aria-label="Tasks by state">
+      {withTasks.length > 0 && <EpicChips epics={withTasks} chosen={chosen} choose={setEpic} />}
+      {mode === "list" && <div className="lanes" aria-label="Tasks by state">
         {LANES.map(([s, name]) => <span key={s}><Dot tone={taskTone(s)} />{name} {all.filter((t) => t.state === s).length}</span>)}
-      </div>
-      <p className="vnote">In the order <code>factory next</code> walks them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>
+      </div>}
+      {mode === "list" && <p className="vnote">In the order <code>factory next</code> walks them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>}
       {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && mode === "board" && <Board tasks={rows} all={all} epics={v.epics.epics} by={by} project={p.project} open={p.open} post={p.post} say={p.say} />}
+      {rows.length > 0 && tab !== "list" && <Board tasks={rows} all={all} epics={epics} pulls={v.pulls.pulls} by={tab} project={p.project} open={p.open}
+        post={p.post} say={p.say} />}
       {rows.length > 0 && mode === "list" && v.epics.epics.length === 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>}
       {rows.length > 0 && mode === "list" && v.epics.epics.length > 0 && groupByEpic(rows, v.epics.epics).map((g) => (
         <section key={g.epic?.id ?? "none"} aria-label={g.epic ? `Tasks in epic ${g.epic.title}` : "Tasks in no epic"}>

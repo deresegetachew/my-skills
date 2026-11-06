@@ -1,7 +1,7 @@
 // The task board's rules that aren't drawing (#439): its columns, and its lanes by agent or by epic, from
 // web/board_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { boardOf, COLUMNS, columnsOf } from "../web/board_model.ts";
+import { boardOf, cardTag, COLUMNS, columnsOf } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
@@ -73,4 +73,13 @@ test("by epic: a task an epic lists (#440) is in that epic's lane, in the epics'
   expect(lanes[0]!.cells.ready!.map((t) => t.id)).toEqual(["3", "5"]);
   // an epic the epics list doesn't know (#6 names #999) falls back to the task's milestone
   expect(lanes[3]!.cells.ready!.map((t) => t.id)).toEqual(["6"]);
+});
+
+test("a card's tag: Needs you when its PR waits for the owner, Checks failing when its PR is red, else its state", () => {
+  const withPr = (state: string): TaskRow => ({ ...task("7", "in-review"), stateText: "in review",
+    pr: { number: 21, url: null, checks: { state, failing: [] } } });
+  expect(cardTag(withPr("green"), { next: { action: "owner-merges" } })).toEqual({ text: "Needs you", needsYou: true });
+  expect(cardTag(withPr("red"), { next: { action: "waiting-for-agent" } })).toEqual({ text: "Checks failing", needsYou: false });
+  expect(cardTag(withPr("green"), { next: { action: "dev-manager-reviews" } })).toEqual({ text: "in review", needsYou: false });
+  expect(cardTag({ ...task("8", "ready"), stateText: "ready" })).toEqual({ text: "ready", needsYou: false });
 });

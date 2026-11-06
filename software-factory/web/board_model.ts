@@ -39,6 +39,14 @@ function emptyCells(): Record<string, TaskRow[]> {
   return Object.fromEntries([NOT_READY, ...COLUMNS].map((c) => [c.state, [] as TaskRow[]]));
 }
 
+/** A card's one status, on its right (the reference design's tag): "Needs you" (with the red dot) when its pull request
+ *  waits for the owner to merge, "Checks failing" when that PR's checks are red, else the task's state in words. */
+export function cardTag(t: TaskRow, pull?: { next: { action: string } }): { text: string; needsYou: boolean } {
+  if (pull?.next.action === "owner-merges") return { text: "Needs you", needsYou: true };
+  if (t.pr?.checks?.state === "red") return { text: "Checks failing", needsYou: false };
+  return { text: t.stateText, needsYou: false };
+}
+
 /** The lane a task goes in by epic: the epic (#440) that lists it, keyed `#<id>`, else its group (milestone or phase). */
 function epicKey(t: TaskRow, known: Map<string, string>): [string, string] {
   if (t.epic && known.has(t.epic)) return [`#${t.epic}`, known.get(t.epic) as string];
