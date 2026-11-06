@@ -7,12 +7,14 @@
 //   answer:   {"ok": true, "results": [<each call's result>]}
 //             {"ok": false, "code": "...", "message": "...", "fix": "..."}   (the first call refused; none after it ran)
 //
-// The URL comes on stdin so its password is never on a command line. The ops are the Board's own methods (the list in
-// OPS), plus `wait`: the first event of a kind, recorded since a time, whose payload matches, waiting up to a number of
-// seconds for it (null when none came). Dates go over as ISO strings; `events`' `since` is one.
+// The URL comes on stdin so its password is never on a command line; without one, the child finds the board as
+// `factory board` does (MB_URL, else the url file in this machine's settings folder).
+// The ops are the Board's own methods (the list in OPS), plus `wait`: the first event of a kind, recorded since a time,
+// whose payload matches, waiting up to a number of seconds for it (null when none came). Dates go over as ISO strings; `events`' `since` is one.
 import { Board } from "./board.ts";
 import type { BoardEvent } from "./types.ts";
 import { BoardError } from "./errors.ts";
+import { boardUrl } from "./server.ts";
 
 export interface Call {
   op: string;
@@ -20,7 +22,7 @@ export interface Call {
 }
 
 export interface Request {
-  url: string;
+  url?: string;
   as?: string;
   session?: string;
   calls: Call[];
@@ -99,8 +101,13 @@ async function one(board: Board, call: Call): Promise<unknown> {
 export async function answer(req: Request): Promise<Answer> {
   let board: Board | null = null;
   try {
-    if (!req || typeof req.url !== "string" || !req.url || !Array.isArray(req.calls)) bad("A request needs a url and a list of calls.");
-    board = await Board.open(req.url, { as: req.as || "system", session: req.session, max: 2 });
+    if (!req || typeof req !== "object" || !Array.isArray(req.calls)) bad("A request needs a list of calls.");
+    const url = typeof req.url === "string" && req.url ? req.url : boardUrl();
+    if (!url) {
+      throw new BoardError("no-answer", "This machine has no message board: MB_URL is unset and there is no url file in its settings folder.",
+        "Start one with `factory board up` (or set MB_URL to the board's Postgres URL), then try again.");
+    }
+    board = await Board.open(url, { as: req.as || "system", session: req.session, max: 2 });
     const results: unknown[] = [];
     for (const call of req.calls) results.push((await one(board, call)) ?? null);
     return { ok: true, results };

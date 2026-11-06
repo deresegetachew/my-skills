@@ -66,6 +66,11 @@ test("a refusal is {code, message, fix}, and the URL's password is never printed
   expect(gone.answer).toMatchObject({ ok: false, code: "no-answer" });
   expect(gone.out + gone.err).not.toContain(password);
   expect(child({}).answer).toMatchObject({ ok: false, code: "bad-input" });
+  const none = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", CHILD], {
+    stdin: Buffer.from(JSON.stringify({ calls: [{ op: "tasks" }] })), stdout: "pipe", stderr: "pipe",
+    env: { PATH: process.env.PATH ?? "", HOME: "/nonexistent", FACTORY_CONFIG_DIR: "/nonexistent/mb" },
+  });
+  expect(JSON.parse(none.stdout.toString())).toMatchObject({ ok: false, code: "no-answer" });
 });
 
 test("edges() with no id gives every edge on the board", async () => {
