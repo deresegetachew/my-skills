@@ -380,17 +380,27 @@ async function mcp(argv: string[]): Promise<number> {
   const url = boardUrl();
   if (!url) noBoard();
   const b = await Board.open(url, { as, session, max: 2 });
-  const stop = (): void => {
-    void b.end().catch(() => {}).finally(() => process.exit(143));
+  // A signal, or a client that stopped reading stdout (EPIPE), ends the server: the board's connections are closed
+  // first, and nothing more is written to stdout.
+  let stopping = false;
+  const shutdown = (code: number, why?: string): void => {
+    if (stopping) return;
+    stopping = true;
+    if (why) console.error(`factory board mcp: ${why}`);
+    void b.end().catch(() => {}).finally(() => process.exit(code));
   };
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
+  const gone = "the client stopped reading stdout; closed the board and stopped.";
+  process.on("SIGTERM", () => shutdown(143));
+  process.on("SIGINT", () => shutdown(130));
+  process.stdout.on("error", () => shutdown(0, gone));
   console.error(`factory board mcp: serving the message board to ${as} over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
   try {
     await serveMcp({ board: b, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
       input: process.stdin,
+      // A failed write never resolves: the shutdown under way exits the process.
       write: (line) => new Promise<void>((done) => {
-        process.stdout.write(line + "\n", () => done());
+        if (stopping) return;
+        process.stdout.write(line + "\n", (e) => (e ? shutdown(0, gone) : done()));
       }),
       log: (line) => console.error(line),
     });
