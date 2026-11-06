@@ -117,6 +117,14 @@ Look
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
+  machine add <name> --agent <agent>[:role] ... [--ttl minutes]
+                         on the hub: make the keys of the agents another machine will run and print one join code
+                         (short-lived, works once; it holds the hub's Tailscale address, the leaf password, the keys)
+  machine join <code> [--no-tailscale] [--no-doctor]
+                         on the new machine: check Tailscale and Docker, start the leaf (or, without Docker, connect
+                         the agents straight to the hub), write the keys, run factory doctor
+  machine ls [--json]    the machines added and whether their code is still waiting
+  machine remove <name>  forget a machine and take its agents' keys off the hub
   follow [<agent>] [--read|--log] [--on R] [--all]
                          watch and talk to an agent by name, on another machine or in the cloud: without a name,
                          every agent and one-item sub-manager we can find, where it runs and its Remote Control link
@@ -173,6 +181,12 @@ Check
                          one task: its fields, edges, context and thread
   board prime <actor> [--json]
                          an actor's start: what it holds, what is ready, what is blocked, recent events
+  board import github [--closed] [--dry-run] [--repo owner/name]
+                         the repo's open issues into the board as tasks (--closed: the closed ones too, as done):
+                         labels as status, "Depends on #n" as edges, epics as parents, comments as threads with the
+                         factory's markers as their own kinds; safe to run twice; --dry-run writes nothing
+                         GitHub wins on status unless the task is held on the board (done here but open there:
+                         reopened); comments deleted on GitHub stay on the board
   doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
                          of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user

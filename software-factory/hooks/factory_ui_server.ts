@@ -9,6 +9,9 @@
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
 //   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
 //   POST /api/projects/:p/agents/:name/stop    {confirm: true}: factory owner stop <name>
+//   POST /api/projects/:p/machines             {confirm: true, name, agents: ["haile", "taytu:manager"]}: factory machine add
+//                                              <name> --json --agent ...; the answer carries `join` (code, command, expiresAt) (#445)
+//   POST /api/projects/:p/machines/:name/remove {confirm: true}: factory machine remove <name>
 //   GET|POST /api/projects/:p/agents/:name/chat, GET /api/projects/:p/owner-queue, POST .../owner-queue/:id/answer
 //                                              the chat with each agent and the owner queue (factory_ui_chat.ts, #423)
 //   GET  /api/ws?token=...                     a WebSocket: {type: "hello"}, then {type: "state", project, ...live} for
@@ -30,7 +33,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { AddRuns } from "./factory_ui_add.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
-import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
@@ -239,6 +242,36 @@ export function serve(o: ServeOptions): Running {
     if (rest.length === 1 && rest[0] === "machines" && req.method === "GET") {
       const s = await state(p, ttl);
       return json(200, { project: p.id, machines: s.data.machines, runners: s.data.runners, problems: s.data.problems });
+    }
+    if (rest[0] === "machines" && (rest.length === 1 || rest.length === 3) && req.method === "POST") { // #445
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await req.json()) as Record<string, unknown>;
+      } catch {
+        // no body: no confirm
+      }
+      if (body === null || typeof body !== "object" || body.confirm !== true) {
+        return problem(400, "confirm_needed", "Adding or removing a machine changes the hub's keys, so it needs a confirm.", 'Send {"confirm": true} (the page asks you first).');
+      }
+      const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()) : []);
+      const flag = (s: string): boolean => s.startsWith("-"); // a value never becomes an option of the command
+      let args: string[];
+      if (rest.length === 1) {
+        const name = typeof body.name === "string" ? body.name.trim() : "";
+        const agents = strs(body.agents);
+        if (flag(name) || agents.some(flag)) return problem(400, "ui_bad_machine", "A machine's name and agents can't start with a dash.", "Use lowercase letters, digits and dashes.");
+        args = ["add", name, "--json", ...agents.flatMap((a) => ["--agent", a])];
+      } else if (rest[2] === "remove" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(rest[1] ?? "")) args = ["remove", rest[1] as string]; // already decoded once
+      else return problem(404, "not_found", `There is no ${url.pathname}.`, "A machine has remove.");
+      const r = await machineCommand(p, args);
+      if (r.status === 200 && args[0] === "add") {
+        try {
+          return json(200, { ...r.body, join: JSON.parse(String(r.body.output)) as unknown });
+        } catch {
+          return json(200, r.body);
+        }
+      }
+      return json(r.status, r.body);
     }
     if (rest[0] === "agents" && rest.length === 2 && req.method === "GET") {
       const s = await state(p, ttl);

@@ -438,6 +438,13 @@ export async function owner(p: UiProject, args: string[]): Promise<ActionResult>
   return resultOf(p, command, r, (r.stdout + r.stderr).trim());
 }
 
+/** Runs `factory machine <args>` in project `p` (#445: add a machine, remove one) and says how it went. */
+export async function machineCommand(p: UiProject, args: string[]): Promise<ActionResult> {
+  const command = `factory machine ${args.join(" ")}`;
+  const r = await spawn(["bash", factoryScript(p), "machine", ...args], p.path, envFor(p), ACTION_TIMEOUT_MS);
+  return resultOf(p, command, r, (r.stdout + r.stderr).trim());
+}
+
 /** How `command` (run in project `p`, giving `r`) went: 200 with `output`, or 500 with its own {code, message, fix} when
  * its last line on stderr is one, else one that says how to see the whole error. */
 export function resultOf(p: UiProject, command: string, r: Ran, output: string): ActionResult {

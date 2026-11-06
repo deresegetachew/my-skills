@@ -19,7 +19,8 @@
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts show                   the id and the names this machine runs
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts setup haile,tewodros   write the names file (issues mode: refuses a
 //                                                                             name another machine has live)
-//   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts remote                 1 or 0: whether sessions start with Remote Control
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts add|join|ls|remove   see factory_machine_join.ts (#445)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts remote                1 or 0: whether sessions start with Remote Control
 // Errors are `{code, message, fix}` on stderr.
 import { randomUUID } from "node:crypto";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync, writeSync } from "node:fs";
@@ -196,7 +197,7 @@ function setup(names: string): void {
   console.log(`${path}: ${mine.join(", ")}`);
 }
 
-function main(argv: string[]): void {
+async function main(argv: string[]): Promise<void> {
   const cmd = argv[0] ?? "show";
   if (cmd === "id") console.log(machineId());
   else if (cmd === "show") {
@@ -210,7 +211,11 @@ function main(argv: string[]): void {
   else if (cmd === "setup") {
     if (argv.length < 2) refuse("no-names", "No agent names were given.", "factory machine setup haile,tewodros");
     setup(argv[1] as string);
-  } else refuse("unknown-command", `unknown command ${pyRepr(cmd)}.`, "Use id, show or setup <names>.");
+  } else if (["add", "join", "ls", "remove"].includes(cmd)) {
+    const { machineMain } = await import("./factory_machine_join.ts"); // loaded here: it imports this file and factory_nats.ts
+    const code = await machineMain(cmd, argv.slice(1));
+    if (code) throw new Exit(code);
+  } else refuse("unknown-command", `unknown command ${pyRepr(cmd)}.`, "Use id, show, setup <names>, add, join, ls or remove.");
 }
 
 if (import.meta.main) await runMain(() => main(process.argv.slice(2)));

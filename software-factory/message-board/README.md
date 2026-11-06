@@ -19,6 +19,8 @@ It uses Bun's built-in Postgres client (`SQL` from `bun`). It adds no npm packag
 | `src/board.ts` | The rules, as SQL inside one transaction per write |
 | `src/migrations/NNN_name.sql` | The schema, applied in order by `migrate` and recorded in `mb_migrations` |
 | `src/server.ts` | The board's own Postgres container, for the command |
+| `src/import.ts` | An import, applied in one transaction (`Board.import`) |
+| `src/github/import.ts` | The GitHub adapter: a repo's issues and comments as an import, read with the `gh` CLI |
 | `bin.ts` | The command: `factory board <verb>` (`factory board help`) |
 | `tests/` | Tests against a real Postgres |
 
@@ -53,7 +55,7 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
 - `close(id, { outcome, token?, reason? })`: outcome is `done`, `wont_do`, `duplicate` or `superseded`.
 - `sweep({ quietSeconds? })`.
 
-**Threads:** `post({ task?, kind, to?, body, inReplyTo? })` and `thread({ thread } | { task })`. Kind is `question`,
+**Threads:** `post({ task?, kind, tag?, to?, body, inReplyTo? })` and `thread({ thread } | { task })`. Kind is `question`,
 `answer`, `status`, `note`, `verdict` or `ask`. A reply joins its parent's thread. An answer marks its question
 answered. A question or an ask stays open until then.
 
@@ -68,6 +70,13 @@ answered. A question or an ask stays open until then.
 
 **Live:** `events(after)` reads the log. `listen(onEvent, { after? })` calls `onEvent` for each new event, in order, once
 each.
+
+**Import:** `import(batch, { dryRun? })` brings in tasks, parents, `blocks` edges, context entries and messages, each
+keyed by an outside id (`ref`), in one transaction: a second run updates what changed and adds what is new, never a
+duplicate. A dry run does the same work and rolls it back, so its counts are a real run's. `lastImport(source)` gives
+the last run's time and options. The board's rules hold: a task held on the board keeps its status, an edge or parent
+that would make a loop is left out (and listed), an answer marks the question it replies to answered. Messages carry
+the `ref` they came with and a `tag`, the user's own word for what a message is (free text, like an actor's role).
 
 **Also:** `actor(id, { kind, role })` records an agent or a person, `info()` gives the server version, the migrations
 and the counts, `end()` closes the connections.
@@ -102,6 +111,33 @@ and the counts, `end()` closes the connections.
 - **Context reaches linked tasks.** `contextFor(task)` returns the task's own entries and those of every task linked
   to it by an edge, either way. `prime` shows them with each task the actor holds.
 
+## The import from GitHub
+
+`factory board import github [--closed] [--dry-run] [--repo owner/name]` (`src/github/import.ts`) reads a repo's issues
+with the `gh` CLI (`gh api`, 100 a page; the repo's comments in bulk, `since` the last run when no new issue came in)
+and prints how many calls it made. What an issue means is the software factory's convention, given as
+`FACTORY_MAPPING` (a caller may pass its own); the adapter imports nothing from the factory and writes the few markers it
+reads again, with a comment saying where the factory defines each.
+
+- **Tasks:** open issues (`--closed`: closed ones too, as done, with GitHub's reason as the outcome), each with the ref
+  `github:<owner>/<repo>#<n>` (owner and repo in lower case, as GitHub ignores case). Pull requests are left out. Label `epic` makes an epic, `bug` a bug; agent issues and the
+  owner queue are notes (never claimed). The body is kept, with its `PRD:` and `Budget:` lines, and a `Milestone:` line
+  is added.
+- **Status:** ready or no label is open; in review is in review; closed is done. **In progress comes in open, with no
+  holder,** and a context entry "was in progress on GitHub, claimed by <agent>": a holder needs a claim token, which only
+  `claim` gives, so claims start fresh on the board (the agent claims it again). Blocked comes in open with the reason
+  (the `**Blocked:**` comment) as a blocker entry: blocked on the board is computed from edges only.
+- **Edges and parents:** `Depends on #n` lines become `blocks` edges (the import's own edges follow the lines on the next
+  run; edges made on the board are kept); an epic's `- [ ] #n` lines set the parent.
+- **GitHub is the source of truth for status,** unless the task is held on the board: a task done on the board but
+  open on GitHub is reopened, and one held on the board keeps its status (the run lists it). Title, body and kind follow
+  GitHub too. Comments deleted on GitHub stay on the board; an edited one is updated.
+- **Threads:** each comment is a message keyed by `github:<owner>/<repo>/comments/<id>`. The factory's markers set the kind
+  and the tag: `factory-question` and `factory-answer`, owner asks and answers (an answer replies to its ask),
+  `factory-po-reply`, `factory-manager-note`, the claim markers (statuses), `factory-approved`, `factory-mustfix` and
+  `pr-watch` (verdicts), and the `factory-msg` envelope (its from, to and in-reply-to). A plain comment is a note tagged
+  `comment`.
+
 ## Running it
 
 `factory board up` starts Postgres (`postgres:17-alpine`) in Docker on this machine, on `127.0.0.1` and the Tailscale
@@ -110,7 +146,8 @@ address only. It writes the URL to `<machine settings folder>/message-board/url`
 
 ## Tests
 
-`bun tools/run_tests.ts board_rules board_cli`. The tests need a real Postgres:
+`bun tools/run_tests.ts board_rules board_cli board_import`. The import's tests put a fake `gh` on PATH that serves JSON
+fixtures. The tests need a real Postgres:
 
 - `MB_TEST_URL` is a server they may create databases on (CI sets it to its `postgres` service).
 - Without it, they start a throwaway `postgres:17-alpine` container with Docker and remove it when they finish.
