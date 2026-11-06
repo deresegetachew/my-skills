@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
+import { PROTOCOL_VERSIONS, serveMcp } from "./src/mcp.ts";
 import {
   boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
   masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
@@ -29,6 +30,9 @@ events on Postgres.
   factory board show <id> [--json]   one task: its fields, edges, context and thread
   factory board prime <actor> [--json]
                                      an actor's start: what it holds, what is ready, what is blocked, recent events
+  factory board mcp --as <actor> [--session <id>]
+                                     serve the board to one agent as an MCP server over stdio (JSON-RPC, one message a
+                                     line); every write is recorded as <actor>, and no tool can name another sender
 
 The URL lives in ${join("<machine settings folder>", "message-board", "url")} (MB_URL overrides it).`;
 
@@ -367,8 +371,37 @@ async function prime(argv: string[]): Promise<number> {
   return 0;
 }
 
+async function mcp(argv: string[]): Promise<number> {
+  const args = [...argv];
+  const as = option(args, "--as");
+  const session = option(args, "--session");
+  leftovers(args, "factory board mcp --as <actor> [--session <id>]");
+  if (as === undefined || !as.trim()) fail("bad-input", "mcp needs the actor it serves: --as <actor>.", "For example: factory board mcp --as haile");
+  const url = boardUrl();
+  if (!url) noBoard();
+  const b = await Board.open(url, { as, session, max: 2 });
+  const stop = (): void => {
+    void b.end().catch(() => {}).finally(() => process.exit(143));
+  };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  console.error(`factory board mcp: serving the message board to ${as} over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
+  try {
+    await serveMcp({ board: b, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
+      input: process.stdin,
+      write: (line) => new Promise<void>((done) => {
+        process.stdout.write(line + "\n", () => done());
+      }),
+      log: (line) => console.error(line),
+    });
+  } finally {
+    await b.end().catch(() => {});
+  }
+  return 0;
+}
+
 const VERBS: Record<string, (args: string[]) => number | Promise<number>> = {
-  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime,
+  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, mcp,
 };
 
 async function main(argv: string[]): Promise<number> {

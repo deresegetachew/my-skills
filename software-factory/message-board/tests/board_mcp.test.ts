@@ -59,8 +59,9 @@ class Client {
     this.proc = Bun.spawn([process.execPath, "--no-env-file", BIN, "mcp", ...args], { env: env(url), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     clients.push(this);
     void this.read();
+    const proc = this.proc;
     void (async () => {
-      this.stderr = await new Response(this.proc.stderr).text();
+      this.stderr = await new Response(proc.stderr).text();
     })();
   }
 
