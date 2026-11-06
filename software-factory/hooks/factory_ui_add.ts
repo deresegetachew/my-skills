@@ -11,7 +11,7 @@
 //   POST /api/add-project/runs/:id/retry    {confirm: true}: go on from the failed step
 //
 // Every change is pushed to the page as {type: "add-project", run}; {type: "projects"} once the new project is listed.
-import { existsSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { addedFile, addedPaths, envFor, factoryScript, type Obj, type Problem, projectAt, readJson, type Ran, spawn,
   type UiProject } from "./factory_ui_data.ts";
@@ -163,20 +163,26 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
     if (!isDir(path)) return problem("ui_add_path", `${path} isn't there.`, "Pick a folder that exists on this machine, or clone the repo instead.");
     const top = await git(path, ["rev-parse", "--show-toplevel"]);
     if (top.code !== 0) return problem("ui_add_not_git", `${path} isn't a git repo.`, "Pick the folder of a git checkout of the project, or clone it from GitHub instead.");
-    const dirty = await git(path, ["status", "--porcelain"]);
-    if (dirty.stdout.trim()) {
-      return problem("ui_add_dirty", `${path} has changes that aren't committed.`, "Commit or put them aside in that folder, then press Continue again.");
+    const root = top.stdout.trim();
+    if (realpathSync(root) !== realpathSync(path)) {
+      return problem("ui_add_not_top", `${path} is inside the checkout ${root}, not its top folder.`, `Pick ${root} instead.`);
     }
   } else if (existsSync(path) && !(await isCheckoutOf(path, repo))) {
     return problem("ui_add_path_taken", `${path} is already there and isn't a checkout of ${repo}.`, "Pick another folder to clone into.");
+  }
+  // the setup commits everything in the folder, so a checkout already there must have nothing uncommitted (an untracked .env too)
+  if (existsSync(path) && (await git(path, ["status", "--porcelain"])).stdout.trim()) {
+    return problem("ui_add_dirty", `${path} has changes that aren't committed.`, "Commit or put them aside in that folder, then press Continue again.");
   }
   const known = host.projects().find((p) => resolve(p.path) === path);
   if (known) return problem("ui_add_known", `${path} is already in this factory, as ${known.name}.`, `Open ${known.name} on the left instead.`);
   const tasks = b.tasks;
   if (tasks !== "issues" && tasks !== "plan") return problem("ui_add_tasks", "Say where tasks come from.", "Pick GitHub issues or A build plan file.");
   const mainBranch = str(b.mainBranch);
-  if (!mainBranch || !/^[A-Za-z0-9._/-]+$/.test(mainBranch)) {
-    return problem("ui_add_branch", `${mainBranch ? `"${mainBranch}"` : "No main branch"} isn't a branch name.`, "Type the branch pull requests go into, usually main.");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(mainBranch) || mainBranch === SETUP_BRANCH) {
+    return problem("ui_add_branch", `${!mainBranch ? "No main branch" : mainBranch === SETUP_BRANCH
+      ? `"${SETUP_BRANCH}" is the branch the setup goes on, so it` : `"${mainBranch}"`} isn't a main branch name.`,
+      "Type the branch pull requests go into, usually main. It starts with a letter or digit.");
   }
   const t: Obj = typeof b.team === "object" && b.team !== null ? (b.team as Obj) : {};
   const team = { devManager: str(t.devManager), productOwner: str(t.productOwner),
@@ -358,9 +364,12 @@ async function stepCommit(req: AddRequest, step: AddStep): Promise<Done> {
   if (!changed && branch !== SETUP_BRANCH) return { state: "skipped", output: "Nothing changed in the repo: it already runs the factory." };
   if (branch !== SETUP_BRANCH) {
     // from the main branch as GitHub has it, so the pull request holds the setup and nothing else; the changes come along
-    await git(req.path, ["fetch", "-q", "origin", req.mainBranch]);
-    const base = (await git(req.path, ["rev-parse", "--verify", "-q", `refs/remotes/origin/${req.mainBranch}`])).code === 0 ? [`origin/${req.mainBranch}`] : [];
-    outs.push(await must(step, ["git", "-C", req.path, "checkout", "-B", SETUP_BRANCH, ...base], req.path, env,
+    const fetched = await git(req.path, ["fetch", "-q", "origin", req.mainBranch]);
+    if (fetched.code !== 0) {
+      throw new StepFailed(problem("ui_add_fetch", `${req.mainBranch} couldn't be fetched from the repo's origin, so the setup branch has nothing to start from.`,
+        `Check that ${req.mainBranch} is on GitHub and that you can read the repo from this machine, then press Retry.`), tail(fetched.stderr));
+    }
+    outs.push(await must(step, ["git", "-C", req.path, "checkout", "-B", SETUP_BRANCH, `origin/${req.mainBranch}`], req.path, env,
       `A file the setup changed differs between the branch checked out in ${req.path} and ${req.mainBranch} (what it printed names it). ` +
       `In that folder, put the setup's changes aside, check out ${req.mainBranch}, then add the project again.`));
   }
