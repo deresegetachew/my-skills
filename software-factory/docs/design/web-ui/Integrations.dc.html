@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Integrations</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1150px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="integrations" height="1150" hint-size="312px,1150px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px; max-width: 1100px;">
+
+<nav aria-label="Settings sections" style="display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--border);">
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">General</a>
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">This machine</a>
+<a href="Integrations.dc.html" aria-current="page" style="display: inline-flex; align-items: center; min-height: 44px; border-bottom: 2px solid var(--text); font-weight: 600; color: var(--text); text-decoration: none; margin-bottom: -1px;">Integrations</a>
+<a href="Releases.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Releases and updates</a>
+<a href="Maintenance.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Maintenance</a>
+</nav>
+
+<header style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-size: 13px; color: var(--text-3);">Factory settings</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700;">Integrations</h1>
+<p style="margin: 0; color: var(--text-2);">7 connections. One needs you: menelik's Claude sign-in expired.</p>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Test all</button>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Add a plugin</button>
+</div>
+</header>
+
+<div role="tablist" aria-label="Filter" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">All 7</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Needs a fix 1</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Not set up 1</button>
+</div>
+
+<ul style="margin: -8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{rows}}" as="c" hint-placeholder-count="7">
+<li style="display: flex; align-items: center; gap: 16px; padding: 16px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600; font-size: 15px;">{{c.name}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{c.sub}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 150px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{c.dot}}; flex-shrink: 0;"></span>{{c.state}}</span>
+<div style="width: 170px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{c.mine}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;">{{c.action}}</button></sc-if>
+<sc-if value="{{c.notMine}}" hint-placeholder-val="{{ true }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{c.action}}</button></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+
+<section aria-labelledby="mx-h" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="mx-h" style="margin: 0; font-size: 15px;">What each agent may use</h2>
+<span style="font-size: 13px; color: var(--text-2);">A change here becomes a settings pull request that only you merge.</span>
+</div>
+<div style="overflow-x: auto;">
+<table style="width: 100%; border-collapse: collapse; min-width: 720px;">
+<thead><tr>
+<th scope="col" style="text-align: left; padding: 10px 4px; font-size: 13px; color: var(--text-3); font-weight: 500; border-bottom: 1px solid var(--border);">Agent</th>
+<sc-for list="{{cols}}" as="h" hint-placeholder-count="6">
+<th scope="col" style="padding: 10px 8px; font-size: 13px; color: var(--text-3); font-weight: 500; text-align: center; border-bottom: 1px solid var(--border);">{{h.label}}</th>
+</sc-for>
+</tr></thead>
+<tbody>
+<sc-for list="{{matrix}}" as="r" hint-placeholder-count="5">
+<tr>
+<th scope="row" style="text-align: left; padding: 8px 4px; font-weight: 400; border-bottom: 1px solid var(--border);"><span style="display: flex; align-items: center; gap: 10px;"><dc-import name="Avatar" agent="{{r.agent}}" size="28" hint-size="28px,28px"></dc-import><span style="display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600;">{{r.agent}}</span><span style="font-size: 12px; color: var(--text-3);">{{r.role}}</span></span></span></th>
+<sc-for list="{{r.cells}}" as="x" hint-placeholder-count="6">
+<td style="text-align: center; padding: 4px 8px; border-bottom: 1px solid var(--border);"><label style="display: inline-flex; width: 44px; height: 44px; align-items: center; justify-content: center; cursor: pointer;"><sc-if value="{{x.on}}" hint-placeholder-val="{{ true }}"><input type="checkbox" checked aria-label="{{x.label}}" style="width: 18px; height: 18px; accent-color: var(--primary);"></sc-if><sc-if value="{{x.off}}" hint-placeholder-val="{{ false }}"><input type="checkbox" aria-label="{{x.label}}" style="width: 18px; height: 18px; accent-color: var(--primary);"></sc-if></label></td>
+</sc-for>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding-top: 8px;">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--waiting);"></span>
+<span style="flex: 1 1 280px; font-size: 13px; color: var(--text-2);"><span style="color: var(--text); font-weight: 600;">1 change staged:</span> menelik may use the build cache.</span>
+<button style="height: 40px; padding: 0 12px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;">Undo</button>
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none;">Propose as a pull request</a>
+</div>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">Other states: Test shows "Testing…" in the row, then the result. A failed test says what is wrong and the one step that fixes it, as for menelik's sign-in. Switching CI to GitHub's runners lives on the CI page.</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = {
+      ok: { state: 'Connected', dot: 'var(--working)' },
+      bad: { state: 'Needs a fix', dot: 'var(--red-dot)' },
+      off: { state: 'Not set up', dot: 'var(--idle)' }
+    };
+    const r = (name, sub, s, action) => ({ name, sub, ...st[s], action, mine: s === 'bad', notMine: s !== 'bad' });
+    const cols = [
+      { id: 'gh', label: 'GitHub' }, { id: 'nats', label: 'Hub' }, { id: 'ci', label: 'CI runners' },
+      { id: 'turbo', label: 'Build cache' }, { id: 'pw', label: 'Playwright' }, { id: 'ph', label: '[PLACEHOLDER]' }
+    ];
+    const row = (agent, role, on) => ({
+      agent, role,
+      cells: cols.map((c, i) => ({ on: !!on[i], off: !on[i], label: agent + ' may use ' + c.label }))
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      rows: [
+        r('Claude accounts', 'menelik\'s sign-in expired on the Mac; it cannot start its next task', 'bad', 'Fix menelik'),
+        r('GitHub', 'deresegetachew/my-skills · tasks from GitHub issues', 'ok', 'Configure'),
+        r('Messaging hub', 'dev-pc · 100.99.7.67:4222 · 5 of 5 agent keys', 'ok', 'Configure'),
+        r('CI runners', 'dev-pc · 3 heavy runners and the light lane', 'ok', 'Configure'),
+        r('Plugins', 'NATS messaging installed', 'ok', 'Manage'),
+        r('MCP connectors', 'Playwright, for checking screens', 'ok', 'Add a connector'),
+        r('Build cache', 'Agents and CI build without a shared cache until it is set', 'off', 'Start on dev-pc')
+      ],
+      cols,
+      matrix: [
+        row('mentewab', 'Product owner', [1, 1, 0, 0, 0, 0]),
+        row('fasil', 'Dev manager', [1, 1, 1, 0, 0, 0]),
+        row('haile', 'Builder', [1, 1, 1, 1, 1, 0]),
+        row('taytu', 'Builder', [1, 1, 1, 1, 1, 0]),
+        row('menelik', 'Builder', [1, 1, 1, 1, 1, 0])
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

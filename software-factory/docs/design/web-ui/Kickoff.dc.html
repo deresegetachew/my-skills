@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kick off</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; background: var(--bg-subtle); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 28px 16px 56px; box-sizing: border-box;">
+
+<header style="width: 100%; max-width: 1100px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+<span style="display: flex; align-items: center; gap: 10px;"><span style="width: 32px; height: 32px; border-radius: 10px; background: var(--primary); color: var(--on-primary); display: inline-flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700;">F</span><span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 18px;">factory</span></span>
+<span style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Hub on dev-pc</span>
+</header>
+
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 22px;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+<li aria-current="{{s.aria}}" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{s.labelColor}}; font-weight: {{s.weight}};"><span style="width: 24px; height: 24px; border-radius: 50%; background: {{s.circleBg}}; color: {{s.circleFg}}; border: 1px solid {{s.circleBorder}}; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; box-sizing: border-box;">{{s.mark}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+
+<main style="width: 100%; max-width: 1100px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 40px 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">From an idea to a first milestone</h1>
+<p style="margin: 0; color: var(--text-2);">mentewab turns your idea into a plan, one step at a time. Nothing moves past a gate until you approve it.</p>
+</div>
+
+<ol aria-label="Gates" style="list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px;">
+<sc-for list="{{gates}}" as="g" hint-placeholder-count="5">
+<li aria-current="{{g.aria}}" style="display: flex; flex-direction: column; gap: 8px;">
+<span style="height: 3px; border-radius: 999px; background: {{g.bar}};"></span>
+<span style="font-weight: {{g.weight}}; color: {{g.ink}};">{{g.name}}</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3);"><sc-if value="{{g.isCurrent}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot);"></span></sc-if>{{g.who}}</span>
+</li>
+</sc-for>
+</ol>
+
+<section aria-labelledby="vision-h" style="display: flex; flex-direction: column; gap: 20px; max-width: 760px;">
+<div style="display: flex; align-items: center; gap: 14px;">
+<dc-import name="Avatar" agent="mentewab" size="44" hint-size="44px,44px"></dc-import>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 2px;">
+<h2 id="vision-h" style="margin: 0; font-size: 20px; font-weight: 600;">mentewab proposes the vision</h2>
+<span style="font-size: 13px; color: var(--text-2);">Written from your idea and two answers you gave · [PLACEHOLDER time] ago</span>
+</div>
+</div>
+
+<div style="background: var(--bg-subtle); border-radius: 10px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px;">
+<p style="margin: 0; font-size: 16px; line-height: 1.5; font-weight: 500;">[PLACEHOLDER project] helps [PLACEHOLDER: who] [PLACEHOLDER: do what], without [PLACEHOLDER: the pain today].</p>
+<ul style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; line-height: 1.5;">
+<li><strong>For whom:</strong> [PLACEHOLDER: the first users], who today [PLACEHOLDER: what they do instead].</li>
+<li><strong>The first win:</strong> one thing they can do end to end in the first milestone: [PLACEHOLDER].</li>
+<li><strong>Not now:</strong> [PLACEHOLDER: what we leave out on purpose], so the first milestone stays small.</li>
+</ul>
+</div>
+<span style="font-size: 13px; color: var(--text-2);">The [PLACEHOLDER] parts need your words. Fill them in your comment, or approve and she asks later.</span>
+
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<label for="gate-comment" style="font-weight: 600;">Your comment to mentewab</label>
+<textarea id="gate-comment" rows="3" placeholder="What is right, what is missing, what to change" style="border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; font: inherit; background: var(--surface); color: var(--text); resize: vertical;"></textarea>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+<button style="height: 44px; padding: 0 22px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Approve the vision</button>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Ask for changes</button>
+<a href="Docs.dc.html" style="margin-left: auto; color: var(--text); font-weight: 600; text-decoration: none;">Open in the PRD ›</a>
+</div>
+<span style="font-size: 13px; color: var(--text-3);">Approve asks first: "Approve the vision? It goes into the PRD as a pull request and mentewab starts the design. You can change it later."</span>
+</section>
+
+<section aria-labelledby="next-h" style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="next-h" style="margin: 0 0 6px; font-size: 15px; font-weight: 600;">What happens after each gate</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{next}}" as="n" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--border);">
+<span style="display: flex; gap: 4px; width: 84px; flex-shrink: 0;"><sc-for list="{{n.agents}}" as="a" hint-placeholder-count="2"><dc-import name="Avatar" agent="{{a}}" size="24" hint-size="24px,24px"></dc-import></sc-for></span>
+<span style="font-weight: 600; width: 140px; flex-shrink: 0;">{{n.title}}</span>
+<span style="flex: 1; min-width: 0; color: var(--text-2); font-size: 13px; line-height: 1.45;">{{n.body}}</span>
+</li>
+</sc-for>
+</ul>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const labels = ['Welcome', 'Check this machine', 'Connect', 'Add a project', 'Set it up', 'Kick off'];
+    const cur = 5;
+    const steps = labels.map((label, i) => ({
+      label, aria: i === cur ? 'step' : 'false',
+      mark: i < cur ? '✓' : String(i + 1),
+      circleBg: i < cur ? 'var(--bg-active)' : i === cur ? 'var(--primary)' : 'var(--surface)',
+      circleFg: i < cur ? 'var(--text-2)' : i === cur ? 'var(--on-primary)' : 'var(--text-2)',
+      circleBorder: i === cur ? 'var(--primary)' : i < cur ? 'var(--bg-active)' : 'var(--border-strong)',
+      labelColor: i === cur ? 'var(--text)' : 'var(--text-2)', weight: i === cur ? 600 : 400
+    }));
+    const gl = [
+      ['Idea', 'You wrote it'],
+      ['Vision', 'Waiting for you'],
+      ['Design', 'mentewab drafts'],
+      ['Plan', 'Epics and tasks'],
+      ['First milestone', 'Builders ship it']
+    ];
+    const gcur = 1;
+    const gates = gl.map(([name, who], i) => ({
+      name, who, aria: i === gcur ? 'step' : 'false', isCurrent: i === gcur,
+      bar: i < gcur ? 'var(--text-3)' : i === gcur ? 'var(--text)' : 'var(--border-strong)',
+      ink: i <= gcur ? 'var(--text)' : 'var(--text-3)',
+      weight: i === gcur ? 700 : 500
+    }));
+    return {
+      theme: this.props.theme ?? 'light',
+      steps, gates,
+      next: [
+        { title: 'After Vision', agents: ['mentewab'], body: 'mentewab writes the design: the screens, the user stories and the decisions to take. She asks you at the Design gate.' },
+        { title: 'After Design', agents: ['mentewab', 'fasil'], body: 'The plan: epics, and tasks marked ready, each tied to a user story. You approve the plan.' },
+        { title: 'After Plan', agents: ['haile', 'taytu', 'menelik'], body: 'Builders claim tasks, write failing tests first and open pull requests. fasil reviews and merges.' },
+        { title: 'First milestone', agents: ['mentewab'], body: 'mentewab puts a test plan on Sign-off. You try the running app and say what works.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

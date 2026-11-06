@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Health</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="health" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px; max-width: 1100px;">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Health</h1>
+<p style="margin: 0; color: var(--text-2);">27 checks on dev-pc, the Mac and my-skills. 1 to fix, 2 warnings. Ran 3 min ago.</p>
+</div>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 500; cursor: pointer;">Check again</button>
+</header>
+
+<div role="tablist" aria-label="Show" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Needs attention 4</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">dev-pc</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Mac</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Project</button>
+</div>
+
+<ul style="margin: -8px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{problems}}" as="c" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600; font-size: 15px;">{{c.name}}</span>
+<span style="color: var(--text-2); font-size: 13px; line-height: 1.45;">{{c.where}} · {{c.detail}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 120px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{c.dot}}; flex-shrink: 0;"></span>{{c.status}}</span>
+<div style="width: 200px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{c.primary}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;">{{c.btn}}</button></sc-if>
+<sc-if value="{{c.secondary}}" hint-placeholder-val="{{ true }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{c.btn}}</button></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+
+<section aria-label="Passed" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 15px;">Passed</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{passed}}" as="p" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 16px; padding: 12px 4px; border-bottom: 1px solid var(--border);">
+<span style="flex: 1; min-width: 0;"><span style="font-weight: 600;">{{p.title}}</span> <span style="color: var(--text-2); font-size: 13px;">· {{p.sub}}</span></span>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 120px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working); flex-shrink: 0;"></span>{{p.count}}</span>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-label="GitHub and version" style="display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; flex-direction: column; gap: 8px; max-width: 520px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline;"><span style="font-weight: 600;">GitHub calls left this hour</span><span style="color: var(--text-2); font-size: 13px;">3,412 of 5,000 · resets 14:00</span></div>
+<div role="meter" aria-label="GitHub calls left" aria-valuemin="0" aria-valuemax="5000" aria-valuenow="3412" style="height: 6px; border-radius: 999px; background: var(--bg-active); overflow: hidden;"><div style="width: 68%; height: 100%; background: var(--text);"></div></div>
+</div>
+<span style="color: var(--text-2); font-size: 13px;">Factory v[X.Y.Z] on dev-pc and the Mac, the newest release. <a href="Releases.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none;">What changed ›</a></span>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">Other states: while checks run, "Checking dev-pc… 18 of 27", about 20 s. If a machine does not answer, its results show their age and the fix is to restart it on Machines. Checking never changes anything.</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var look = { fail: ['To fix', 'var(--red-dot)'], warn: ['Warning', 'var(--waiting)'] };
+    var ck = function (s, name, where, detail, btn, primary) {
+      return { status: look[s][0], dot: look[s][1], name: name, where: where, detail: detail, btn: btn, primary: !!primary, secondary: !primary };
+    };
+    return {
+      theme: this.props.theme ?? 'light',
+      problems: [
+        ck('fail', 'tmux is too old', 'Mac', 'Found 3.1, needs 3.2. menelik cannot restart by itself.', 'Update tmux', true),
+        ck('warn', 'GitHub sign-in may not rerun CI', 'Mac', 'Reruns started from the Mac fail.', 'Sign in again'),
+        ck('warn', 'menelik has no hub key', 'Mac', 'It is in the agent list but cannot publish yet.', 'Add the key'),
+        ck('warn', 'Left from an earlier run', 'my-skills', '2 stale claims (#431, #429) and the offline runner my-skills-ci-4.', 'Clean 3')
+      ],
+      passed: [
+        { title: 'Tools', sub: 'Bun, Git, GitHub CLI, Node, Docker 29', count: '9 ok' },
+        { title: 'Sign-ins and secrets', sub: 'Claude, GitHub on dev-pc, 5 hub keys', count: '5 ok' },
+        { title: 'Project my-skills', sub: 'labels and settings', count: '7 ok' },
+        { title: 'Sandbox', sub: 'network guard, no sudo for the factory user', count: '3 ok' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Releases</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1150px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="releases" height="1150" hint-size="312px,1150px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px; max-width: 1100px;">
+
+<nav aria-label="Settings sections" style="display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--border);">
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">General</a>
+<a href="Settings.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">This machine</a>
+<a href="Integrations.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Integrations</a>
+<a href="Releases.dc.html" aria-current="page" style="display: inline-flex; align-items: center; min-height: 44px; border-bottom: 2px solid var(--text); font-weight: 600; color: var(--text); text-decoration: none; margin-bottom: -1px;">Releases and updates</a>
+<a href="Maintenance.dc.html" style="display: inline-flex; align-items: center; min-height: 44px; color: var(--text-2); text-decoration: none;">Maintenance</a>
+</nav>
+
+<header style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-size: 13px; color: var(--text-3);">Factory settings</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700;">Releases and updates</h1>
+<p style="margin: 0; color: var(--text-2);">Which version of the factory each project runs, and what changed. remanual can update to v[NEXT].</p>
+</div>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Check for a new release</button>
+</header>
+
+<section aria-label="Your projects" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 15px;">Your projects</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{projects}}" as="p" hint-placeholder-count="2">
+<li style="display: flex; align-items: center; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600; font-size: 15px;">{{p.name}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{p.sub}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 190px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{p.dot}}; flex-shrink: 0;"></span>{{p.state}}</span>
+<div style="width: 170px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{p.mine}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;">{{p.action}}</button></sc-if>
+<sc-if value="{{p.notMine}}" hint-placeholder-val="{{ true }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{p.action}}</button></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-label="What changed in v[NEXT]" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 15px;">What changed in v[NEXT]</h2>
+<span style="color: var(--text-2); font-size: 13px;">Since v[X.Y.Z], the release remanual pins.</span>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{changes}}" as="c" hint-placeholder-count="5">
+<li style="display: flex; gap: 16px; align-items: baseline; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<span style="width: 70px; flex-shrink: 0; color: var(--text-3); font-size: 13px;">{{c.kind}}</span>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;"><span style="font-weight: 600;">{{c.title}}</span><span style="color: var(--text-2); font-size: 13px;">{{c.note}}</span></span>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-label="All releases" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 15px;">All releases</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{releases}}" as="r" hint-placeholder-count="4">
+<li style="display: flex; gap: 16px; align-items: baseline; padding: 12px 4px; border-bottom: 1px solid var(--border);">
+<span style="width: 110px; flex-shrink: 0; font-weight: 600;">{{r.v}}</span>
+<span style="flex: 1; min-width: 0; color: var(--text-2);">{{r.note}}</span>
+<span style="width: 120px; flex-shrink: 0; color: var(--text-3); font-size: 13px; text-align: right;">{{r.tag}}</span>
+</li>
+</sc-for>
+</ul>
+<div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px;">
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Roll remanual back to v[PREVIOUS] ›</a>
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Install from a file ›</a>
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Move a project to releases ›</a>
+</div>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">Other states: an update shows its steps in place (download, checksum, runner services, verify, pull request) and ends with a pull request that pins the release. If the checksum does not match, nothing is changed: press Update again, or install from a file. Moving a project is refused while it has uncommitted changes.</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1150}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const proj = (o) => ({ ...o, notMine: !o.mine });
+    return {
+      theme: this.props.theme ?? 'light',
+      projects: [
+        proj({ name: 'my-skills', sub: 'Runs the factory from its own source', state: 'Always the newest', dot: 'var(--idle)', action: 'See what changed', mine: false }),
+        proj({ name: 'remanual', sub: 'Pins v[X.Y.Z] · paused by the owner', state: 'v[NEXT] available', dot: 'var(--idle)', action: 'Update', mine: false })
+      ],
+      changes: [
+        { kind: 'New', title: 'Messages over NATS', note: 'Agents send questions and claims through the hub on dev-pc.' },
+        { kind: 'New', title: 'The web UI', note: 'Every project in one browser page, with a channel per agent.' },
+        { kind: 'Changed', title: 'Settings go out as one pull request', note: 'Stage changes, then propose them.' },
+        { kind: 'Changed', title: 'Heartbeat knows waiting from idle', note: 'An agent in a token-free wait shows as waiting, not down.' },
+        { kind: 'Fixed', title: 'Runner copies are refreshed on update', note: 'CI no longer reports old copies after an update.' }
+      ],
+      releases: [
+        { v: 'v[NEXT]', note: 'NATS messaging, the web UI, settings as one pull request.', tag: 'Newest' },
+        { v: 'v[X.Y.Z]', note: 'Heartbeat on every machine and one list of agents across them.', tag: 'remanual pins' },
+        { v: 'v[PREVIOUS]', note: 'The cockpit on Ink and the owner\'s controls.', tag: '' },
+        { v: 'v[PLACEHOLDER]', note: 'Install from a file, for machines without a network.', tag: '' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

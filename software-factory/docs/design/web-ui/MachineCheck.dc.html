@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Check this machine</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; background: var(--bg-subtle); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 28px 16px 64px; box-sizing: border-box;">
+
+<header style="width: 100%; max-width: 880px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+<span style="display: flex; align-items: center; gap: 10px;"><span style="width: 32px; height: 32px; border-radius: 10px; background: var(--primary); color: var(--on-primary); display: inline-flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700;">F</span><span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 18px;">factory</span></span>
+<span style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;">dev-pc · Linux · Tailscale 100.99.7.67</span>
+</header>
+
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+<li aria-current="{{s.aria}}" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{s.labelColor}}; font-weight: {{s.weight}};"><span style="width: 22px; height: 22px; border-radius: 50%; background: {{s.circleBg}}; color: {{s.circleFg}}; border: 1px solid {{s.circleBorder}}; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box;">{{s.mark}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+
+<main style="width: 100%; max-width: 880px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px;">
+
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 20px;">
+<div style="display: flex; flex-direction: column; gap: 6px; flex: 1 1 380px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Check this machine</h1>
+<p style="margin: 0; color: var(--text-2);">8 of 11 ready on dev-pc. Checking changes nothing; only a Fix button does.</p>
+</div>
+<div style="display: flex; gap: 10px;">
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; display: flex; align-items: center; gap: 8px; cursor: pointer;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"></path></svg>Check again</button>
+<a href="JoinHub.dc.html" style="height: 44px; padding: 0 20px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; display: flex; align-items: center; text-decoration: none;">Continue</a>
+</div>
+</div>
+
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+<section style="display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; padding-bottom: 6px;">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600;">{{g.title}}</h2>
+<span style="font-size: 13px; color: var(--text-3);">{{g.note}}</span>
+</div>
+<ul style="list-style: none; margin: 0; padding: 0;">
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="4">
+<li style="display: flex; flex-direction: column; border-top: 1px solid var(--border);">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 14px 4px; min-height: 48px; box-sizing: border-box;">
+<span style="width: 16px; display: inline-flex; justify-content: center; flex-shrink: 0; color: var(--text-3);">
+<sc-if value="{{r.isOk}}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg></sc-if>
+<sc-if value="{{r.notOk}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.dot}};"></span></sc-if>
+</span>
+<span style="flex: 1 1 260px; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600;">{{r.name}}</span><span style="font-size: 13px; color: var(--text-2);">{{r.detail}}</span></span>
+<span style="font-size: 13px; color: var(--text-2);">{{r.state}}</span>
+<sc-if value="{{r.fixable}}" hint-placeholder-val="{{ false }}">
+<button style="height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 600; cursor: pointer;">{{r.fixLabel}}</button>
+</sc-if>
+</div>
+<sc-if value="{{r.expanded}}" hint-placeholder-val="{{ false }}">
+<div style="padding: 0 4px 20px 34px; display: flex; flex-direction: column; gap: 12px;">
+<p style="margin: 0; line-height: 1.55; color: var(--text-2);">Agents on dev-pc can still reach your home network (192.168.x). The network guard blocks that and still lets replies to the hub out. It needs root, and this page never asks for your password, so run it once yourself in a terminal on dev-pc, as dev:</p>
+<div style="border: 1px solid var(--border); border-radius: 10px; background: var(--bg-subtle); display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px;">
+<pre style="margin: 0; flex: 1; font-size: 13px; line-height: 1.6; white-space: pre-wrap;"><code>sudo factory bootstrap machine            # read the plan first
+sudo factory bootstrap machine --apply    # then apply it</code></pre>
+<button aria-label="Copy the command" style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; cursor: pointer;">Copy</button>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--text-3);">When it is done, press Check again.</p>
+</div>
+</sc-if>
+</li>
+</sc-for>
+</ul>
+</section>
+</sc-for>
+
+<p style="margin: 0; font-size: 13px; color: var(--text-3); line-height: 1.5;">While checking, this page shows “Checking 6 of 11: Tailscale…”. If GitHub can’t be reached, its checks are skipped: check your connection, then press Check again.</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const labels = ['Welcome', 'Check this machine', 'Connect', 'Add a project', 'Set it up', 'Kick off'];
+    const cur = 1;
+    const steps = labels.map((label, i) => ({
+      label, aria: i === cur ? 'step' : 'false',
+      mark: i < cur ? '✓' : String(i + 1),
+      circleBg: i === cur ? 'var(--primary)' : 'var(--surface)',
+      circleFg: i === cur ? 'var(--on-primary)' : i < cur ? 'var(--text)' : 'var(--text-3)',
+      circleBorder: i === cur ? 'var(--primary)' : 'var(--border-strong)',
+      labelColor: i === cur ? 'var(--text)' : 'var(--text-2)', weight: i === cur ? 600 : 400
+    }));
+    const row = (name, detail, kind, fixLabel, expanded) => ({
+      name, detail,
+      isOk: kind === 'ok', notOk: kind !== 'ok',
+      dot: kind === 'sudo' ? 'var(--red-dot)' : 'var(--waiting)',
+      state: kind === 'ok' ? 'Ready' : kind === 'fix' ? 'Needs a fix' : 'Needs you',
+      fixable: kind === 'fix', fixLabel: fixLabel || 'Fix it',
+      expanded: !!expanded
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      steps,
+      groups: [
+        {
+          title: 'This machine', note: 'Tools and sign-ins',
+          rows: [
+            row('git', 'Found, with your name and email set', 'ok'),
+            row('GitHub sign-in', 'Signed in as deresegetachew, with repo and workflow access', 'ok'),
+            row('Bun', 'Found; the factory runs on it', 'ok'),
+            row('Node', 'Not found. Claude Code needs it.', 'fix', 'Install Node'),
+            row('Docker', 'Docker 29, running', 'ok'),
+            row('Tailscale', 'Connected as dev-pc, 100.99.7.67', 'ok'),
+            row('Claude Code sign-in', 'Not signed in on this machine', 'fix', 'Sign in')
+          ]
+        },
+        {
+          title: 'Sandbox for agents', note: 'Keeps agents away from your files and home network',
+          rows: [
+            row('Dedicated user', 'Agents run as factory, not as you; no sudo', 'ok'),
+            row('Rootless Docker', 'The agents’ containers run without root', 'ok'),
+            row('Network guard', 'Not set up: agents can reach your home network', 'sudo', '', true)
+          ]
+        },
+        {
+          title: 'Limits', note: 'Read from GitHub now',
+          rows: [
+            row('GitHub API calls left', '[N] of 5,000 this hour, resets at [HH:MM].', 'ok')
+          ]
+        }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

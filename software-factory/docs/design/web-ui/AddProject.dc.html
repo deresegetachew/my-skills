@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Add a project</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; background: var(--bg-subtle); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 28px 16px 64px; box-sizing: border-box;">
+
+<header style="width: 100%; max-width: 880px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+<span style="display: flex; align-items: center; gap: 10px;"><span style="width: 32px; height: 32px; border-radius: 10px; background: var(--primary); color: var(--on-primary); display: inline-flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700;">F</span><span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 18px;">factory</span></span>
+<span style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Live · hub on dev-pc</span>
+</header>
+
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+<li aria-current="{{s.aria}}" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{s.labelColor}}; font-weight: {{s.weight}};"><span style="width: 22px; height: 22px; border-radius: 50%; background: {{s.circleBg}}; color: {{s.circleFg}}; border: 1px solid {{s.circleBorder}}; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box;">{{s.mark}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+
+<main style="width: 100%; max-width: 880px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Add a project</h1>
+<p style="margin: 0; color: var(--text-2);">Each project is one GitHub repo. Bring one you have, or start a new one; you set it up on the next step.</p>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 24px;">
+<div role="tablist" aria-label="Where the project comes from" style="display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--border);">
+<sc-for list="{{paths}}" as="p" hint-placeholder-count="3">
+<button role="tab" aria-selected="{{p.selected}}" style="background: none; border: none; border-bottom: {{p.underline}}; padding: 10px 0; min-height: 44px; font: inherit; font-weight: {{p.weight}}; color: {{p.color}}; cursor: pointer;">{{p.title}}</button>
+</sc-for>
+</div>
+
+<section aria-label="Clone from GitHub" style="display: flex; flex-direction: column; gap: 16px;">
+<label style="display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; height: 44px;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="color: var(--text-3);"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<input aria-label="Search your repositories" value="deresegetachew/" style="flex: 1; min-width: 0; border: none; outline: none; background: transparent; font: inherit; color: var(--text);">
+</label>
+<ul role="listbox" aria-label="Your repositories" style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;">
+<sc-for list="{{repos}}" as="r" hint-placeholder-count="3">
+<li role="option" aria-selected="{{r.selected}}" style="display: flex; align-items: center; gap: 14px; padding: 12px; min-height: 48px; box-sizing: border-box; border-radius: 10px; background: {{r.bg}};">
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600;">{{r.name}}</span><span style="font-size: 13px; color: var(--text-2);">{{r.note}}</span></span>
+<sc-if value="{{r.isOn}}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--text);"><path d="M5 12l5 5 9-10"></path></svg></sc-if>
+</li>
+</sc-for>
+</ul>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="clone-to" style="font-size: 13px; font-weight: 600;">Clone into</label>
+<input id="clone-to" value="~/Documents/dev/[PLACEHOLDER repo]" style="height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; font: inherit; font-family: ui-monospace, monospace; font-size: 13px; background: var(--surface); color: var(--text); box-sizing: border-box;">
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--text-3);">Uses your GitHub sign-in, deresegetachew. If the list is empty, GitHub is not signed in on this Mac: <a href="MachineCheck.dc.html" style="color: var(--text); font-weight: 600;">sign in to GitHub</a>, then search again.</p>
+</section>
+</div>
+
+<p style="margin: 0; font-size: 13px; color: var(--text-2);">Already in this factory: <span style="color: var(--text); font-weight: 600;">my-skills</span> (active) and <span style="color: var(--text); font-weight: 600;">remanual</span> (paused by you).</p>
+
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid var(--border); padding-top: 24px;">
+<span style="font-size: 13px; color: var(--text-3);">Nothing changes in the repo yet.</span>
+<div style="display: flex; gap: 10px;">
+<a href="Welcome.dc.html" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); display: flex; align-items: center; text-decoration: none; box-sizing: border-box;">Back</a>
+<a href="ProjectWizard.dc.html" style="height: 44px; padding: 0 22px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; display: flex; align-items: center; text-decoration: none;">Continue</a>
+</div>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const labels = ['Welcome', 'Check this machine', 'Connect', 'Add a project', 'Set it up', 'Kick off'];
+    const cur = 3;
+    const steps = labels.map((label, i) => ({
+      label, aria: i === cur ? 'step' : 'false',
+      mark: i < cur ? '✓' : String(i + 1),
+      circleBg: i === cur ? 'var(--primary)' : 'var(--surface)',
+      circleFg: i === cur ? 'var(--on-primary)' : i < cur ? 'var(--text)' : 'var(--text-3)',
+      circleBorder: i === cur ? 'var(--primary)' : 'var(--border-strong)',
+      labelColor: i === cur ? 'var(--text)' : 'var(--text-2)', weight: i === cur ? 600 : 400
+    }));
+    const path = (title, on) => ({
+      title, selected: on ? 'true' : 'false',
+      underline: on ? '2px solid var(--text)' : '2px solid transparent',
+      weight: on ? 600 : 400, color: on ? 'var(--text)' : 'var(--text-2)'
+    });
+    const repo = (name, note, on) => ({
+      name, note, selected: on ? 'true' : 'false', isOn: on,
+      bg: on ? 'var(--bg-active)' : 'transparent'
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      steps,
+      paths: [
+        path('Clone from GitHub', true),
+        path('A folder on this Mac', false),
+        path('Create a new repo', false)
+      ],
+      repos: [
+        repo('deresegetachew/[PLACEHOLDER repo]', 'Private · updated [PLACEHOLDER]', true),
+        repo('deresegetachew/remanual', 'Already in this factory, paused', false),
+        repo('deresegetachew/my-skills', 'Already in this factory, active', false)
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>CI and runners</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1550px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="ci" height="1550" hint-size="312px,1550px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px; max-width: 1100px;">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">CI</h1>
+<p style="margin: 0; color: var(--text-2);">3 runners online on dev-pc, queue empty. One pull request has a failed run.</p>
+</div>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 500; cursor: pointer;">Read again</button>
+</header>
+
+<section aria-label="Latest runs" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 15px;">Latest runs</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{runs}}" as="r" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 16px; padding: 16px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600; font-size: 15px;">{{r.title}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{r.where}} · {{r.took}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 170px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{r.dot}}; flex-shrink: 0;"></span>{{r.status}}</span>
+<div style="width: 150px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{r.failed}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;">Rerun failed job</button></sc-if>
+<sc-if value="{{r.ok}}" hint-placeholder-val="{{ true }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Log</button></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+<p style="margin: 4px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.5;">PR #434 failed in "Tests": the messaging hub listened on every address instead of only this machine and its private network address. <a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Full log ›</a></p>
+</section>
+
+<section aria-label="Runners on dev-pc" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 15px;">Runners on dev-pc</h2>
+<span style="color: var(--text-2); font-size: 13px;">This machine's count; the project default is 1.</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px;">
+<div role="group" aria-label="Heavy runners" style="display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 10px; overflow: hidden;">
+<button aria-label="One fewer runner" style="width: 44px; height: 44px; border: none; background: var(--surface); color: var(--text); font: inherit; font-size: 18px; cursor: pointer;">−</button>
+<span style="min-width: 32px; text-align: center; font-weight: 600;">3</span>
+<button aria-label="One more runner" style="width: 44px; height: 44px; border: none; background: var(--surface); color: var(--text); font: inherit; font-size: 18px; cursor: pointer;">+</button>
+</div>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Save and install</button>
+</div>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{runners}}" as="u" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{u.name}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{u.line}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 170px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{u.dot}}; flex-shrink: 0;"></span>{{u.state}}</span>
+<div style="width: 150px; flex-shrink: 0; display: flex; justify-content: flex-end; gap: 4px;">
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Stop</button>
+<button aria-label="Remove {{u.name}}" style="height: 40px; padding: 0 10px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;">Remove</button>
+</div>
+</li>
+</sc-for>
+</ul>
+<div role="dialog" aria-labelledby="rm-h" style="border: 1px solid var(--border-strong); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px; margin-top: 6px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h3 id="rm-h" style="margin: 0; font-size: 15px;">Before you remove my-skills-ci</h3>
+<span style="color: var(--text-2); font-size: 13px;">This must be done before Remove turns on.</span>
+</div>
+<div style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--waiting); flex-shrink: 0;"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">No job is running on it</span>
+<span style="color: var(--text-2); font-size: 13px; line-height: 1.45;">It is running PR #437, 2 of 3 steps. Remove turns on when the job ends.</span>
+</div>
+<span style="color: var(--text-3); font-size: 13px; width: 140px; flex-shrink: 0; text-align: right;">Waiting</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-weight: 600;">What removing does</span>
+<span style="color: var(--text-2); font-size: 13px; line-height: 1.5;">The runner stops and is unregistered from GitHub. New jobs go to the other runners on dev-pc. The heavy runner count drops to 2.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-2);">Type my-skills-ci to confirm
+<input type="text" value="" aria-label="Type the runner name to confirm" style="height: 44px; width: 220px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font: inherit;">
+</label>
+<button disabled style="height: 44px; padding: 0 16px; border-radius: 10px; border: none; background: var(--red-fill); color: var(--red-ink); font: inherit; font-weight: 600; opacity: 0.5; cursor: not-allowed;">Remove my-skills-ci</button>
+<button style="height: 44px; padding: 0 12px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;">Cancel</button>
+</div>
+</div>
+<span style="color: var(--text-3); font-size: 13px;">Mac has no runners. dev-pc runs CI for my-skills. <a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Install runners on Mac ›</a></span>
+</section>
+
+<section aria-label="Settings and upkeep" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 15px;">Upkeep</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{upkeep}}" as="k" hint-placeholder-count="4">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{k.title}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{k.sub}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 170px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{k.dot}}; flex-shrink: 0;"></span>{{k.status}}</span>
+<div style="width: 150px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{k.action}}</button>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">Other states: while loading, "Reading runs and runners from GitHub…". With no runners, jobs run on GitHub's runners. If no runner is online, jobs wait and this page offers "Start runners on dev-pc".</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1550}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var run = function (o) { o.failed = o.dot === 'var(--red-dot)'; o.ok = !o.failed; return o; };
+    return {
+      theme: this.props.theme ?? 'light',
+      runs: [
+        run({ where: 'PR #434', title: '[PLACEHOLDER title]', status: 'Failed: Tests', took: '3 min 40 s', dot: 'var(--red-dot)' }),
+        run({ where: 'PR #437', title: 'An avatar for every agent', status: 'Running, 2 of 3', took: '1 min so far', dot: 'var(--waiting)' }),
+        run({ where: 'main', title: 'Merge #436: messaging over NATS', status: 'Passed', took: '4 min 12 s', dot: 'var(--working)' }),
+        run({ where: 'PR #402', title: 'Product owner: try what was built', status: 'Passed', took: '4 min 05 s', dot: 'var(--working)' })
+      ],
+      runners: [
+        { name: 'my-skills-ci', line: 'Heavy · running PR #437', state: 'Busy', dot: 'var(--waiting)' },
+        { name: 'my-skills-ci-2', line: 'Heavy', state: 'Online', dot: 'var(--working)' },
+        { name: 'my-skills-ci-3', line: 'Heavy', state: 'Online', dot: 'var(--working)' },
+        { name: 'my-skills-light', line: 'Light lane · guard and small checks', state: 'Online', dot: 'var(--working)' }
+      ],
+      upkeep: [
+        { title: 'Where jobs run', sub: "This machine's runners. GitHub's use Actions minutes on a private repo.", status: 'Local', dot: 'var(--idle)', action: 'Change' },
+        { title: 'Leftovers', sub: 'my-skills-ci-4 offline since 30 Oct, 2 exited containers', status: '3 to clean', dot: 'var(--waiting)', action: 'Clean' },
+        { title: 'Runner copies', sub: 'Copied 2 Nov; main changed the runner script on 5 Nov', status: 'Older than main', dot: 'var(--waiting)', action: 'Update' },
+        { title: 'Build cache', sub: 'Turborepo cache on dev-pc, shared by agents and CI', status: 'Answers', dot: 'var(--working)', action: 'Open' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
