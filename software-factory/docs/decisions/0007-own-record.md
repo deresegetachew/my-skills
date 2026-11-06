@@ -40,7 +40,11 @@ The task and messaging layer is built as a framework that knows nothing about th
   Bun only, no new npm package (Bun's built-in Postgres client), tests never weakened.
 - **GitHub is an adapter, not the core:** the importer and the mirror (points 4 and 5) plug into it.
 
-**Where it lives and its name are the owner's.** Two options:
+**Decided by the owner (6 Nov, on #481):** it lives in a folder under the factory, `software-factory/message-board/`,
+and is called **factory-message-board**. The table below was the choice put to the owner. A folder under
+`software-factory/` is not a top-level skill, so it needs no `SKILL.md`; `check_skills.ts` enforces the import rule.
+
+The options were:
 
 | | (a) A folder in my-skills | (b) Its own repo |
 |---|---|---|
@@ -53,8 +57,8 @@ The task and messaging layer is built as a framework that knows nothing about th
 this repo uses the framework yet. A folder that imports nothing from the factory can be split into its own repo later
 with its history (`git subtree split`). Moving to (b) is then a change of address, decided when a second user exists.
 
-The name: the board and the epics page already say "Agent messaging" (vendor-neutral, owner, 6 Nov). The framework's
-name is the owner's to choose; until then this record calls it "the framework".
+The board and the epics page say "Agent messaging" (vendor-neutral, owner, 6 Nov); the framework itself is
+factory-message-board.
 
 ### 2. What moves and what stays
 
@@ -78,8 +82,13 @@ because the record is there, so using it for live delivery adds no connection or
 - **Claims** are one transaction: insert, or take over only when the old claim has expired, with the claims history
   written in the same transaction (a real compare-and-set, which closes 0004's gap where any agent could overwrite a
   claim).
-- **NATS stays as an optional adapter** behind the same ports, for larger setups (hundreds of listeners). Nothing
-  merged is deleted. Removing the NATS plugin and service is a later call for the owner, not part of this build.
+- **NATS stays as an optional adapter** behind the same ports for now. Nothing merged is deleted. The owner asked
+  (6 Nov) whether NATS is needed once Postgres is in. The answer: not at our size. NATS can store messages and do
+  compare-and-set claims, but it can't answer the questions the record is for (the ready list, what blocks what, "on me"
+  and "delegated") without our own code keeping copies in shape for each. Skein, the closest product, keeps Postgres as
+  the truth and uses NATS only to fan events out to its services; codeaf and plandb use no bus at all. **Recommendation:**
+  once every kind has moved (point 9), remove the NATS plugin and the hub's NATS service, unless a need appears by then
+  (many machines, or listeners that can't reach the database). That removal is the owner's call.
 - **Hosted Postgres** (RDS, Neon, Supabase) later is a change of address. Listeners use the direct address, because
   poolers in transaction mode don't carry `LISTEN`.
 
@@ -144,17 +153,98 @@ As with NATS (0004 point 8): a kind moves when it is listed in a setting; for a 
 and to GitHub, and readers count what they find on one but not the other. After a period with nothing missed, the
 owner stops the GitHub copy for that kind. The web UI's reads move first.
 
-### 10. The technical half (fasil)
+### 10. The technical half
 
-fasil writes this part in this PR, or in a follow-up commit on it:
+Written by the owner's session (6 Nov), since the owner stopped the agents and asked it to build this. It takes
+fasil's answers on #469 and #472 and the ideas in point 7.
 
-- the schema: tasks, epics and subtasks, dependency edges, threads and messages, the claims history, the owner queue,
-  events;
-- the adapters for `TaskTracker` and `Messaging` (with `Leases`, `Wakes`, `PrFeed`), and the contract suite they pass;
-- the ports are synchronous today and Bun's Postgres client is async: how that changes;
-- the run commands (`up`, `down`, `status`, `backup`), nightly `pg_dump`, the doctor's checks;
-- how the PR gate and the Factory guard keep working;
-- the import and the mirror in detail, and the order of the move.
+**The folder.**
+- `software-factory/message-board/` holds `src/` (the framework), `tests/`, `README.md`, and `bin.ts` (its command).
+- It imports only Bun and Node built-ins. `check_skills.ts` fails if a file in it imports from outside the folder, or
+  if a factory file imports anything there other than `message-board/src/index.ts`.
+- `tools/run_tests.ts` also runs `message-board/tests/*.test.ts`.
+
+**The client.** Bun's built-in `SQL` (Bun 1.4: queries, transactions, `listen`), so no new package.
+
+**The schema.** Migrations are numbered SQL files, applied in order in one transaction each and recorded in
+`mb_migrations`; running them twice changes nothing. The tables:
+- `actors`: who (an agent or a person), with a kind and the role the user of the framework gives it, which is free text.
+- `tasks`: id; an external ref (`github:owner/repo#123`, unique, used by the import); title; body; kind (task, epic,
+  bug, decision, note); a status (`open`, `in_progress`, `in_review`, `done`, `deferred`); a close outcome (`done`,
+  `wont_do`, `duplicate`, `superseded`); priority; parent id; the holder and claim fields (holder, a claim token, since,
+  until); a version, raised by every write; created and updated times.
+- `edges`: from, to, kind (`blocks`, `waits_for`, `discovered_from`, `supersedes`, `duplicates`, `related`). A cycle
+  of `blocks` edges is refused in the same transaction. Parent and child is the `parent` column, not an edge.
+- `messages`: id, task id or none, thread id, kind (`question`, `answer`, `status`, `note`, `verdict`, `ask`), sender,
+  addressee, state, in-reply-to, body, created time. This is the factory's envelope as columns.
+- `context`: task id, kind (`discovery`, `decision`, `blocker`, `result`), body, author, time.
+- `events`: a bigint sequence, kind, subject, actor, actor session, payload as JSON, time. Every write above inserts
+  its event in the same transaction, then `NOTIFY mb_events, '<seq>'` (the notification carries only the sequence).
+
+**The rules, in SQL.**
+- **"Blocked" and "ready" are a view, computed when read.** A task is blocked while any `blocks` or `waits_for` edge
+  points to it from a task that isn't done, its own or one of its parents'. Ready means open, not blocked, and nobody
+  holds it. Nothing is stored that a write could forget to refresh (plandb's weak point).
+- **Claim** is one statement: `UPDATE tasks SET holder, token, until, status = 'in_progress' WHERE id = (SELECT id
+  FROM ready ... ORDER BY priority, created LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING`. A claim of a named task
+  succeeds only if the task is ready, or the caller already holds it. The new token goes back to the caller.
+- **Every later write by the holder** (release, hand-off, close, heartbeat) names the token. A write with an old token
+  is refused (`claim-lost`), so a builder whose task was given to someone else can't close it (codeaf's fencing).
+- **Release says what happens next:** `ready` (give it up), `deferred`, or hand off to a named actor, with a reason.
+- **A stale claim** is released by `sweep` only when its `until` has passed **and** the holder sent no heartbeat for
+  the quiet time (default 30 minutes). Both are re-checked in the same `UPDATE`, so a heartbeat that lands meanwhile
+  wins.
+- **Edits carry the version they read.** A mismatch is a `conflict` error, not an overwrite.
+
+**The API** (`src/index.ts`), async and plain. One `Board` object opened with a URL:
+- tasks: `create`, `get`, `update`, `link`, `unlink`, `ready`, `claim`, `heartbeat`, `release`, `close`;
+- threads: `post` and `thread`;
+- context: `note` and `contextFor` (a task's own entries, and those of the tasks linked to it);
+- `prime(actor)`: what the actor holds, what is ready, what is blocked, and recent events, in one call;
+- views: `onMe(actor)` and `delegated(actor)`;
+- live: `events(after)` and `listen(onEvent)`;
+- `import`, for the GitHub importer.
+
+Errors are `{code, message, fix}`.
+
+**The command:** `factory board <verb>` runs `message-board/bin.ts`:
+- `up`, `down`, `status`: a Postgres container from the official image, published only on 127.0.0.1 and the Tailscale
+  address, like the NATS hub;
+- `migrate`, `backup` (a `pg_dump` from inside the container), and `sweep`;
+- `import github [--closed] [--dry-run]`;
+- `tasks`, `show <id>`, `ready`, `prime <actor>`.
+
+The URL and the password live in the machine's settings folder (`message-board/url`, mode 600). They are never printed.
+
+**The factory's side: sync ports.** The ports stay synchronous. The Postgres adapter for `TaskTracker`, `Messaging`
+and `Leases` does what the NATS plugin does: each call runs a child Bun with `Bun.spawnSync`, which connects, does the
+one thing, prints JSON and exits. This costs about 100 ms a call, which the loops can afford, and adds no shared state.
+`Wakes.waitWake` is a child that `listen`s until a matching event or its time limit. Making the ports async is a later
+refactor, not part of this.
+
+The adapters pass 0003's contract suite (`hooks/core/adapters/memory`, the same tests the GitHub adapter passes).
+
+**Tests** need a real Postgres. They read `MB_TEST_URL`. When it's unset:
+- **CI:** the job runs a `postgres` service container, so it is always set.
+- **Locally:** the tests start a throwaway container with Docker and remove it when they finish.
+- **Without Docker:** the tests fail and say how to fix it. They never pass quietly.
+
+**The PR gate and the Factory guard** read only GitHub, as today. Nothing in the board changes what may merge.
+
+**The import:** issues become tasks with an external ref; comments become a thread; `factory:*` labels set the status
+(`ready` maps to open); `Depends on #n` lines become `blocks` edges; a parent comes from an epic's `- [ ] #n` lines;
+`PRD:` and `Budget:` are kept in the body. A second run updates by external ref and makes no duplicates.
+
+**The order of the build:**
+1. The framework: schema, rules, API, command, and tests against Postgres.
+2. The import (command line), then the first-launch screen (#457).
+3. The adapters behind the ports, with the contract suite; the web UI reads from them first.
+4. The mirror to GitHub, and the owner queue to #293.
+5. The kinds move one at a time (point 9).
+
+The ideas filed on 6 Nov plug in as follows:
+- #485 (typed dependencies) and #486 (context to the next agent) are in step 1.
+- #483 (results to read) and #484 (on me and delegated) are views over step 1, shown in the web UI.
 
 ## Alternatives
 
@@ -183,7 +273,7 @@ fasil writes this part in this PR, or in a follow-up commit on it:
 
 Each one PR, each with a `PRD: US-<n>` line. fasil sets the final split and order.
 
-1. The framework's folder (or repo), its public API, the import rule in `check_skills.ts`, and its run commands.
+1. The framework's folder (`software-factory/message-board/`), its public API, the import rule in `check_skills.ts`, and its run commands.
 2. The schema and the Postgres adapters for `TaskTracker` and `Messaging`, passing 0003's contract suite.
 3. The import from GitHub, from the command line, safe to run twice, with a dry run.
 4. The import from the first-launch screens (#457).
