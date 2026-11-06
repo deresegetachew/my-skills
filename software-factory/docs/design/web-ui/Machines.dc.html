@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Machines</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1650px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="machines" height="1650" hint-size="312px,1650px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 36px; max-width: 1100px;">
+
+<header style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Machines</h1>
+<p style="margin: 0; color: var(--text-2);">2 machines, 5 agents. All heartbeats are fresh.</p>
+</div>
+<a href="AddMachine.dc.html" style="height: 44px; padding: 0 16px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box;">Add machine</a>
+</header>
+
+<sc-for list="{{machines}}" as="m" hint-placeholder-count="2">
+<section aria-label="{{m.name}}" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 15px;">{{m.name}}</h2>
+<span style="color: var(--text-2); font-size: 13px;">{{m.line}}</span>
+</div>
+<div style="display: flex; gap: 8px;">
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Start an agent</button>
+<button aria-label="Remove {{m.name}}" style="height: 40px; padding: 0 12px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;">Remove</button>
+</div>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{m.agents}}" as="a" hint-placeholder-count="2">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{a.id}}" size="36" hint-size="36px,36px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600; font-size: 15px;">{{a.id}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{a.role}} · {{a.doing}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 150px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{a.dot}}; flex-shrink: 0;"></span>{{a.status}}</span>
+<div style="width: 110px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<a href="Chat.dc.html" style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center;">Follow</a>
+</div>
+</li>
+</sc-for>
+</ul>
+<span style="color: var(--text-3); font-size: 13px;">{{m.foot}}</span>
+</section>
+</sc-for>
+
+<section role="dialog" aria-labelledby="rm-h" style="border: 1px solid var(--border-strong); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="rm-h" style="margin: 0; font-size: 15px;">Before you remove the Mac</h2>
+<span style="color: var(--text-2); font-size: 13px;">All three must be done before Remove turns on.</span>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{removeChecks}}" as="k" hint-placeholder-count="3">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{k.dot}}; flex-shrink: 0;"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{k.title}}</span>
+<span style="color: var(--text-2); font-size: 13px; line-height: 1.45;">{{k.sub}}</span>
+</div>
+<div style="width: 140px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{k.hasAction}}" hint-placeholder-val="{{ false }}"><button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;">{{k.action}}</button></sc-if>
+<sc-if value="{{k.done}}" hint-placeholder-val="{{ true }}"><span style="color: var(--text-3); font-size: 13px;">Done</span></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-weight: 600;">What removing does</span>
+<span style="color: var(--text-2); font-size: 13px; line-height: 1.5;">The Mac leaves the factory. Its agents' keys stop working at once and it disappears from Machines. Nothing on the Mac itself is deleted, and it can join again later with a new code.</span>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-2);">Type Mac to confirm
+<input type="text" value="" aria-label="Type the machine name to confirm" style="height: 44px; width: 220px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font: inherit;">
+</label>
+<button disabled style="height: 44px; padding: 0 16px; border-radius: 10px; border: none; background: var(--red-fill); color: var(--red-ink); font: inherit; font-weight: 600; opacity: 0.5; cursor: not-allowed;">Remove the Mac</button>
+<button style="height: 44px; padding: 0 12px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;">Cancel</button>
+</div>
+<span style="color: var(--text-3); font-size: 13px;">For dev-pc the second check fails: it is the hub, and removing the hub is refused. Move the hub to another machine first.</span>
+</section>
+
+<section aria-label="Messaging hub"style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0; font-size: 15px;">Messaging hub on dev-pc</h2>
+<span style="color: var(--text-2); font-size: 13px;">How agents send claims and messages. Reachable on dev-pc and 100.99.7.67 only.</span>
+</div>
+<button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Restart hub</button>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{hub}}" as="h" hint-placeholder-count="3">
+<li style="display: flex; align-items: center; gap: 16px; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600;">{{h.title}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{h.sub}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 150px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{h.dot}}; flex-shrink: 0;"></span>{{h.status}}</span>
+</li>
+</sc-for>
+</ul>
+<div style="display: flex; gap: 24px; flex-wrap: wrap; font-size: 13px;">
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Keys per agent ›</a>
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none;">Ways in to other machines ›</a>
+</div>
+</section>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.5;">Other states: if the hub stops answering, agents fall back to GitHub (slower) and this page offers "Restart hub". A machine with no heartbeat for 10 min shows its agents as down until it is back.</p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1650}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var ag = function (id, role, state, status, doing) {
+      return { id: id, role: role, dot: 'var(--' + state + ')', status: status, doing: doing };
+    };
+    return {
+      theme: this.props.theme ?? 'light',
+      machines: [
+        { name: 'dev-pc', line: 'Linux · Tailscale 100.99.7.67 · runs the hub',
+          agents: [
+            ag('fasil', 'Dev manager', 'working', 'Working', 'Reviewing #402'),
+            ag('haile', 'Builder', 'working', 'Working', '#437 An avatar for every agent'),
+            ag('taytu', 'Builder', 'working', 'Working', '#425 Retire the tmux cockpit'),
+            ag('mentewab', 'Product owner', 'waiting', 'Waiting', 'Idle until PR #402 merges')
+          ],
+          foot: 'Comes back after a reboot. Heartbeat 2 min ago.' },
+        { name: 'Mac', line: 'macOS · joined through the tunnel',
+          agents: [
+            ag('menelik', 'Builder', 'working', 'Working', '#438 The PRD and decisions one click away')
+          ],
+          foot: 'Does not come back after a reboot: start menelik by hand. Heartbeat 6 s ago.' }
+      ],
+      removeChecks: [
+        { title: 'Its agents are stopped', sub: 'menelik is working on #438. Stopping him saves his unfinished work to a branch and puts the task back to Ready.', dot: 'var(--waiting)', hasAction: true, done: false, action: 'Stop menelik' },
+        { title: 'It is not the hub', sub: 'dev-pc is the hub, so the Mac can go.', dot: 'var(--working)', hasAction: false, done: true, action: '' },
+        { title: 'Its CI runners are removed or moved', sub: 'The Mac has no runners.', dot: 'var(--working)', hasAction: false, done: true, action: '' }
+      ],
+      hub: [
+        { title: 'Answers', sub: 'in 3 ms · 3 streams, 5,191 messages', status: 'Running', dot: 'var(--working)' },
+        { title: 'Mac', sub: 'Linked through the tunnel for 3 h', status: 'Linked', dot: 'var(--working)' },
+        { title: 'Connections', sub: '4 agents on dev-pc, the Mac, this page', status: '6 open', dot: 'var(--idle)' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

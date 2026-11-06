@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sidebar</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div style="width: 312px; min-height: {{height}}px; height: 100%; display: flex; font-family: Inter, system-ui, sans-serif; font-size: 14px; color: var(--text);">
+<nav aria-label="Projects" style="flex: 0 0 64px; background: var(--bg-subtle); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px 0; box-sizing: border-box;">
+<a href="Main.dc.html" aria-label="my-skills" style="width: 40px; height: 40px; border-radius: 12px; background: var(--violet-fill); color: var(--violet-ink); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; text-decoration: none; box-shadow: 0 0 0 2px var(--bg-subtle), 0 0 0 4px var(--violet-dot);">MS</a>
+<a href="Main.dc.html" aria-label="remanual, paused" style="width: 40px; height: 40px; border-radius: 12px; background: var(--green-fill); color: var(--green-ink); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px; text-decoration: none; opacity: 0.7;">RM</a>
+<a href="AddProject.dc.html" aria-label="Add a project" style="width: 40px; height: 40px; border-radius: 12px; border: 1.5px dashed var(--border-strong); color: var(--text-2); display: flex; align-items: center; justify-content: center; font-size: 20px; text-decoration: none; box-sizing: border-box;">+</a>
+<span style="flex: 1;"></span>
+<a href="Settings.dc.html" aria-label="Settings" style="width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; text-decoration: none;"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"></path></svg></a>
+</nav>
+<aside style="flex: 1; background: var(--bg); border-right: 1px solid var(--border); padding: 18px 14px; display: flex; flex-direction: column; gap: 14px; box-sizing: border-box;">
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 0 6px;">
+<span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 18px;">my-skills</span>
+<span style="display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 12px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Live · hub on dev-pc</span>
+</div>
+<a href="Search.dc.html" style="display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 9px 10px; color: var(--text-2); text-decoration: none;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<span style="flex: 1;">Search</span><span style="font-size: 11px; border: 1px solid var(--border-strong); border-radius: 6px; padding: 1px 6px;">/</span></a>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<sc-for list="{{main}}" as="n" hint-placeholder-count="7">
+<a href="{{n.href}}" style="display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; border-radius: 9px; text-decoration: none; color: var(--text); background: {{n.bg}}; font-weight: {{n.weight}};"><span>{{n.label}}</span><sc-if value="{{n.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="min-width: 20px; height: 20px; border-radius: 999px; background: {{n.badgeBg}}; color: #FFFFFF; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; box-sizing: border-box;">{{n.badge}}</span></sc-if></a>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); padding: 4px 10px;">Your team</span>
+<sc-for list="{{team}}" as="t" hint-placeholder-count="5">
+<a href="{{t.href}}" style="display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 9px; text-decoration: none; color: var(--text); background: {{t.bg}}; font-weight: {{t.weight}};">
+<dc-import name="Avatar" agent="{{t.id}}" size="28" hint-size="28px,28px"></dc-import>
+<span style="flex: 1; display: flex; flex-direction: column; line-height: 1.2;"><span>{{t.id}}</span><span style="font-size: 11px; color: {{t.ink}}; font-weight: 600;">{{t.role}}</span></span>
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{t.dot}};"></span>
+</a>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); padding: 4px 10px;">Run the factory</span>
+<sc-for list="{{ops}}" as="n" hint-placeholder-count="6">
+<a href="{{n.href}}" style="display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 9px; text-decoration: none; color: var(--text); background: {{n.bg}}; font-weight: {{n.weight}};"><span>{{n.label}}</span><sc-if value="{{n.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="min-width: 20px; height: 20px; border-radius: 999px; background: {{n.badgeBg}}; color: #FFFFFF; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; box-sizing: border-box;">{{n.badge}}</span></sc-if></a>
+</sc-for>
+</div>
+</aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"active":{"editor":"enum","options":["home","inbox","board","epics","prs","docs","signoff","activity","ci","machines","health","usage","releases","maintenance","integrations","settings","mentewab","fasil","haile","taytu","menelik"],"default":"home"},"height":{"editor":"int","default":1040},"$preview":{"width":312,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const active = this.props.active ?? 'home';
+    const height = this.props.height ?? 1040;
+    const on = (id) => id === active ? { bg: 'var(--bg-active)', weight: 600 } : { bg: 'transparent', weight: 400 };
+    const item = (id, label, href, badge, badgeBg) => ({ id, label, href, ...on(id), hasBadge: !!badge, badge: badge || '', badgeBg: badgeBg || 'var(--badge)' });
+    const roleInk = { Product: 'var(--text-3)', Manager: 'var(--text-3)', Builder: 'var(--text-3)' };
+    const mate = (id, role, dot) => ({ id, role, ink: roleInk[role], dot, href: id === 'fasil' || id === 'mentewab' ? 'Chat.dc.html' : 'Agent.dc.html', ...on(id) });
+    return {
+      height,
+      main: [
+        item('home', 'Home', 'Main.dc.html'),
+        item('inbox', 'Inbox', 'Inbox.dc.html', '2', 'var(--red-dot)'),
+        item('board', 'Board', 'Board.dc.html'),
+        item('epics', 'Epics', 'Epics.dc.html'),
+        item('prs', 'Pull requests', 'PRs.dc.html', '3', 'var(--badge)'),
+        item('docs', 'PRD and decisions', 'Docs.dc.html'),
+        item('signoff', 'Sign-off and testing', 'Signoff.dc.html'),
+        item('activity', 'Activity', 'Activity.dc.html')
+      ],
+      team: [
+        mate('mentewab', 'Product', 'var(--working)'),
+        mate('fasil', 'Manager', 'var(--working)'),
+        mate('haile', 'Builder', 'var(--working)'),
+        mate('taytu', 'Builder', 'var(--working)'),
+        mate('menelik', 'Builder', 'var(--waiting)')
+      ],
+      ops: [
+        item('ci', 'CI and runners', 'CI.dc.html'),
+        item('machines', 'Machines', 'Machines.dc.html'),
+        item('health', 'Health', 'Health.dc.html'),
+        item('usage', 'Usage and cost', 'Usage.dc.html'),
+        { ...item('settings', 'Factory settings', 'Settings.dc.html'), ...(['settings', 'releases', 'maintenance', 'integrations'].indexOf(active) !== -1 ? { bg: 'var(--bg-active)', weight: 600 } : {}) }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

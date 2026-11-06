@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How your factory runs</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<section data-theme="{{theme}}" aria-label="How your factory runs" style="background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; max-width: 1100px; padding: 28px; display: flex; flex-direction: column; gap: 24px; box-sizing: border-box; min-height: 620px;">
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<h2 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 26px;">How your factory runs</h2>
+<span style="color: var(--text-2);">Pick any part to see what it does.</span>
+</header>
+
+<div role="tablist" aria-label="Where it runs" style="display: flex; gap: 28px; flex-wrap: wrap; border-bottom: 1px solid var(--border);">
+<sc-for list="{{modes}}" as="m" hint-placeholder-count="3">
+<button role="tab" aria-selected="{{m.sel}}" onClick="{{m.pick}}" style="background: none; border: none; border-bottom: {{m.line}}; padding: 10px 0; font: inherit; font-weight: {{m.weight}}; color: {{m.ink}}; cursor: pointer;">{{m.label}}</button>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start;">
+<div style="flex: 999 1 600px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+
+<div style="display: flex; gap: 16px; align-items: center; flex-wrap: wrap;">
+<button onClick="{{n.you.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.you.bg}}; border: {{n.you.border}};"><span style="font-weight: 600;">You</span><span style="font-size: 13px; color: var(--text-2);">this web app, on any device</span></button>
+<span aria-hidden="true" style="flex: 1; min-width: 40px; border-top: 1px dashed var(--border-strong);"></span>
+<button onClick="{{n.github.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.github.bg}}; border: {{n.github.border}};"><span style="font-weight: 600;">GitHub</span><span style="font-size: 13px; color: var(--text-2);">code, tasks, pull requests, checks</span></button>
+</div>
+
+<sc-if value="{{isOne}}" hint-placeholder-val="{{ true }}">
+<div style="border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 13px; color: var(--text-3);">Your computer</span>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px;">
+<button onClick="{{n.hub.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.hub.bg}}; border: {{n.hub.border}};"><span style="font-weight: 600;">Messaging hub</span><span style="font-size: 13px; color: var(--text-2);">agents talk and take turns here</span></button>
+<button onClick="{{n.ui.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.ui.bg}}; border: {{n.ui.border}};"><span style="font-weight: 600;">The web app</span><span style="font-size: 13px; color: var(--text-2);">what you are looking at</span></button>
+<button onClick="{{n.ci.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.ci.bg}}; border: {{n.ci.border}};"><span style="font-weight: 600;">Test runners</span><span style="font-size: 13px; color: var(--text-2);">run the checks for each change</span></button>
+</div>
+<button onClick="{{n.agents.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 8px; background: {{n.agents.bg}}; border: {{n.agents.border}};">
+<span style="font-weight: 600;">Your agents</span>
+<span style="display: flex; gap: 6px; flex-wrap: wrap;"><dc-import name="Avatar" agent="mentewab" size="32" hint-size="32px,32px"></dc-import><dc-import name="Avatar" agent="fasil" size="32" hint-size="32px,32px"></dc-import><dc-import name="Avatar" agent="haile" size="32" hint-size="32px,32px"></dc-import><dc-import name="Avatar" agent="taytu" size="32" hint-size="32px,32px"></dc-import><dc-import name="Avatar" agent="menelik" size="32" hint-size="32px,32px"></dc-import></span>
+<span style="font-size: 13px; color: var(--text-2);">each in its own folder, in a sandbox</span>
+</button>
+</div>
+</sc-if>
+
+<sc-if value="{{isMany}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap;">
+<div style="flex: 3 1 340px; border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 13px; color: var(--text-3);">dev-pc, the main machine</span>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+<button onClick="{{n.hub.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.hub.bg}}; border: {{n.hub.border}};"><span style="font-weight: 600;">Messaging hub</span><span style="font-size: 13px; color: var(--text-2);">the one everyone joins</span></button>
+<button onClick="{{n.ui.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.ui.bg}}; border: {{n.ui.border}};"><span style="font-weight: 600;">The web app</span><span style="font-size: 13px; color: var(--text-2);">open it from any machine</span></button>
+<button onClick="{{n.ci.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.ci.bg}}; border: {{n.ci.border}};"><span style="font-weight: 600;">Test runners</span><span style="font-size: 13px; color: var(--text-2);">3 and a quick lane</span></button>
+</div>
+<button onClick="{{n.agents.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 8px; background: {{n.agents.bg}}; border: {{n.agents.border}};"><span style="font-weight: 600;">Agents here</span><span style="display: flex; gap: 6px;"><dc-import name="Avatar" agent="mentewab" size="32" hint-size="32px,32px"></dc-import><dc-import name="Avatar" agent="fasil" size="32" hint-size="32px,32px"></dc-import><dc-import name="Avatar" agent="haile" size="32" hint-size="32px,32px"></dc-import><dc-import name="Avatar" agent="taytu" size="32" hint-size="32px,32px"></dc-import></span></button>
+</div>
+<button onClick="{{n.net.pick}}" style="flex: 0 1 160px; text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; justify-content: center; gap: 4px; background: {{n.net.bg}}; border: {{n.net.border}};"><span style="font-weight: 600;">Private network</span><span style="font-size: 13px; color: var(--text-2);">Tailscale links your machines; nothing is public</span></button>
+<div style="flex: 2 1 220px; border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 13px; color: var(--text-3);">Your Mac, joined</span>
+<button onClick="{{n.relay.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.relay.bg}}; border: {{n.relay.border}};"><span style="font-weight: 600;">Local relay</span><span style="font-size: 13px; color: var(--text-2);">passes messages to the hub</span></button>
+<button onClick="{{n.agents.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 8px; background: {{n.agents.bg}}; border: {{n.agents.border}};"><span style="font-weight: 600;">Agents here</span><span style="display: flex; gap: 6px;"><dc-import name="Avatar" agent="menelik" size="32" hint-size="32px,32px"></dc-import></span></button>
+<a href="AddMachine.dc.html" style="height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); text-decoration: none; display: flex; align-items: center; justify-content: center;">Add another machine</a>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isCloud}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap;">
+<div style="flex: 3 1 340px; border: 1px dashed var(--border-strong); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 13px; color: var(--text-3);">In the cloud · coming later</span>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px;">
+<button onClick="{{n.hub.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.hub.bg}}; border: {{n.hub.border}};"><span style="font-weight: 600;">Hosted hub</span><span style="font-size: 13px; color: var(--text-2);">always on, no machine to keep awake</span></button>
+<button onClick="{{n.ui.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.ui.bg}}; border: {{n.ui.border}};"><span style="font-weight: 600;">The web app, online</span><span style="font-size: 13px; color: var(--text-2);">sign in from anywhere</span></button>
+</div>
+<button onClick="{{n.agents.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.agents.bg}}; border: {{n.agents.border}};"><span style="font-weight: 600;">Cloud agents</span><span style="font-size: 13px; color: var(--text-2);">add builders when you need more, stop them when you don't</span></button>
+</div>
+<div style="flex: 2 1 220px; border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<span style="font-size: 13px; color: var(--text-3);">Your machines, if you like</span>
+<button onClick="{{n.relay.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.relay.bg}}; border: {{n.relay.border}};"><span style="font-weight: 600;">Local relay</span><span style="font-size: 13px; color: var(--text-2);">your own computers still join</span></button>
+<button onClick="{{n.ci.pick}}" style="text-align: left; padding: 12px 14px; border-radius: 12px; font: inherit; color: var(--text); cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{n.ci.bg}}; border: {{n.ci.border}};"><span style="font-weight: 600;">Your test runners</span><span style="font-size: 13px; color: var(--text-2);">or GitHub's</span></button>
+</div>
+</div>
+</sc-if>
+</div>
+
+<aside aria-live="polite" style="flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding-top: 4px;">
+<span style="font-size: 13px; color: var(--text-3);">{{modeLabel}}</span>
+<h3 style="margin: 0; font-size: 17px;">{{info.title}}</h3>
+<p style="margin: 0; line-height: 1.6; color: var(--text-2);">{{info.body}}</p>
+<p style="margin: 0; line-height: 1.6; color: var(--text-2);">{{info.note}}</p>
+</aside>
+</div>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1100,"height":620}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { mode: 'many', sel: 'hub' }; }
+  renderVals() {
+    const mode = this.state.mode;
+    const sel = this.state.sel;
+    const box = (id) => ({
+      pick: () => this.setState({ sel: id }),
+      bg: sel === id ? 'var(--bg-subtle)' : 'var(--surface)',
+      border: sel === id ? '1.5px solid var(--text)' : '1px solid var(--border)'
+    });
+    const m = (id, label) => ({ id, label, sel: mode === id ? 'true' : 'false',
+      line: mode === id ? '2px solid var(--text)' : 'none', weight: mode === id ? 600 : 400,
+      ink: mode === id ? 'var(--text)' : 'var(--text-2)', pick: () => this.setState({ mode: id }) });
+    const info = {
+      you: ['You', 'You watch and decide from this app: approve merges, answer questions, start and stop agents. It works on a phone too.', 'Nothing goes live without you where it matters: protected changes, product decisions, releases.'],
+      github: ['GitHub', 'Your code, the tasks (as issues) and every change (as a pull request) live on GitHub. Its test service can run the checks too.', 'GitHub stays the record of what was built and why.'],
+      hub: ['The messaging hub', 'Agents tell each other what they are doing here: who took which task, a question for the product owner, "wake up, a review is ready". Only one agent can take a task.', 'It replaced polling GitHub, so agents no longer get stuck when GitHub limits them.'],
+      ui: ['The web app', 'Runs next to the hub and shows everything live. Open it from any of your machines.', 'Only you can open it: it needs your key.'],
+      ci: ['Test runners', 'Each change is checked before it can merge: types, tests, the build. They run on your machine, or on GitHub.', "Running them here is free and fast; GitHub's cost minutes on private projects."],
+      agents: ['Your agents', 'Each agent works in its own copy of the project, in a sandbox that cannot reach your home network or your other computers.', 'Builders take one task at a time: tests first, then the change, then a pull request.'],
+      net: ['Private network', 'Your machines find each other over Tailscale, a private network only your devices are on. Nothing is open to the internet.', 'Add a machine with a one-time code; it joins in a minute.'],
+      relay: ['Local relay', 'A small helper on each extra machine. Agents there talk to it, and it passes everything to the hub. If the network drops, it reconnects by itself.', 'While it is cut off, its agents fall back to GitHub so nothing is lost.']
+    }[sel] || ['', '', ''];
+    const label = { one: 'One machine', many: 'Across your machines', cloud: 'In the cloud' }[mode];
+    return {
+      theme: this.props.theme ?? 'light',
+      modes: [m('one', 'One machine'), m('many', 'Across your machines'), m('cloud', 'In the cloud (later)')],
+      isOne: mode === 'one', isMany: mode === 'many', isCloud: mode === 'cloud', modeLabel: label,
+      n: { you: box('you'), github: box('github'), hub: box('hub'), ui: box('ui'), ci: box('ci'),
+        agents: box('agents'), net: box('net'), relay: box('relay') },
+      info: { title: info[0], body: info[1], note: info[2] }
+    };
+  }
+}
+</script>
+</body>
+</html>

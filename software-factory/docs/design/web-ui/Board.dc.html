@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Task board</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1100px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="board" height="1100" hint-size="312px,1100px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1240px;">
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px; line-height: 1.15;">Board</h1>
+<p style="margin: 0; color: var(--text-2);">Every task in my-skills, one lane per epic. One is waiting for you.</p>
+</div>
+<label style="display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; height: 44px; background: var(--surface); color: var(--text-3); box-sizing: border-box;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+<input type="search" placeholder="Filter cards" aria-label="Filter cards" style="border: none; outline: none; font: inherit; width: 160px; background: transparent; color: var(--text);">
+</label>
+</header>
+
+<div style="display: flex; flex-direction: column; gap: 16px;">
+<div role="tablist" aria-label="Group lanes by" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">By epic</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">By agent</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">List</button>
+</div>
+
+<div role="group" aria-label="Filter by epic" style="display: flex; flex-wrap: wrap; gap: 8px;">
+<button aria-pressed="true" style="height: 36px; padding: 0 16px; border-radius: 999px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">All epics</button>
+<sc-for list="{{chips}}" as="ch" hint-placeholder-count="4">
+<button aria-pressed="false" style="height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer; display: flex; align-items: center; gap: 8px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{ch.dot}};"></span>{{ch.name}}</button>
+</sc-for>
+</div>
+</div>
+
+<div style="overflow-x: auto;">
+<div style="min-width: 1000px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border);">
+<sc-for list="{{columns}}" as="c" hint-placeholder-count="5">
+<div style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{c.dot}};"></span>
+<span style="font-weight: 600; color: var(--text);">{{c.name}}</span>
+<span style="color: var(--text-3);">{{c.count}}</span>
+</div>
+</sc-for>
+</div>
+
+<sc-for list="{{lanes}}" as="lane" hint-placeholder-count="4">
+<section style="min-width: 1000px; margin-top: 28px; display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; align-items: baseline; gap: 12px;">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600;">{{lane.name}}</h2>
+<span style="color: var(--text-3); font-size: 13px;">{{lane.sub}}</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; align-items: start;">
+<sc-for list="{{lane.cols}}" as="col" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; gap: 8px; min-height: 40px;">
+<sc-for list="{{col.cards}}" as="card" hint-placeholder-count="1">
+<article style="background: {{card.fill}}; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+<span style="font-weight: 600; font-size: 13px; line-height: 1.35;">#{{card.n}} {{card.title}}</span>
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2);">
+<sc-if value="{{card.hasAgent}}" hint-placeholder-val="{{ true }}"><dc-import name="Avatar" agent="{{card.agent}}" size="20" hint-size="20px,20px"></dc-import></sc-if>
+<sc-if value="{{card.noAgent}}" hint-placeholder-val="{{ false }}"><span style="color: var(--text-3);">Unassigned</span></sc-if>
+<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); text-align: right;"><sc-if value="{{card.needsYou}}" hint-placeholder-val="{{ false }}"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot); flex-shrink: 0;"></span></sc-if>{{card.tag}}</span>
+</div>
+</article>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">An empty lane says "No tasks yet; mentewab adds them when the epic is planned." While loading: "Reading the issues from GitHub…". If GitHub does not answer: "Could not load the board. Check the connection on Integrations, then reload."</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const card = (n, title, agent, tag, needsYou) => ({
+      n, title, agent: agent || '', hasAgent: !!agent, noAgent: !agent, tag: tag || '', needsYou: !!needsYou
+    });
+    const lane = (name, cat, sub, cols) => ({
+      name, sub,
+      cols: cols.map((cards) => ({
+        cards: cards.map((c) => ({ ...c, fill: 'var(--' + cat + '-fill)' }))
+      }))
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      chips: [
+        { name: 'Web UI', dot: 'var(--violet-dot)' },
+        { name: 'Epics', dot: 'var(--pink-dot)' },
+        { name: 'NATS', dot: 'var(--green-dot)' },
+        { name: 'Machines', dot: 'var(--blue-dot)' }
+      ],
+      columns: [
+        { name: 'Ready', dot: 'var(--idle)', count: 7 },
+        { name: 'In progress', dot: 'var(--working)', count: 3 },
+        { name: 'In review', dot: 'var(--waiting)', count: 2 },
+        { name: 'Blocked', dot: 'var(--down)', count: 1 },
+        { name: 'Done today', dot: 'var(--grey-dot)', count: 9 }
+      ],
+      lanes: [
+        lane('Web UI: the one window #420', 'violet', 'Building · 3 of 14 done', [
+          [card(439, 'A task board with swim lanes', '', 'Ready'), card(444, 'Roles visually separate', '', 'Ready'), card(446, 'Everything the terminal does, in the UI', '', 'Ready')],
+          [card(437, 'An avatar for every agent', 'haile', 'Tests first'), card(425, 'Retire the tmux cockpit', 'taytu', 'Building'), card(438, 'The PRD and decisions one click away', 'menelik', 'Building')],
+          [card(402, 'Product owner: try what was built', 'mentewab', 'Needs you', true)],
+          [],
+          [card(428, 'Server, shell, agents and machines', 'haile', 'Merged'), card(430, 'Tasks, pull requests and CI views', 'taytu', 'Merged')]
+        ]),
+        lane('Epics above tasks #440', 'pink', 'Investigating · design by mentewab', [
+          [card(440, 'Epics above tasks: stages from investigation to done', '', 'Investigating')],
+          [], [], [], []
+        ]),
+        lane('NATS messaging', 'green', 'Building · 9 of 12 done · decision 0004', [
+          [],
+          [],
+          [],
+          [card(443, 'Network guard lets replies out', '', 'Needs sudo on dev-pc')],
+          [card(436, 'my-skills on NATS: wake-ups and claims', 'fasil', 'Merged'), card(431, 'Wake-ups and claims over NATS', 'menelik', 'Merged')]
+        ]),
+        lane('Machines join #445', 'blue', 'Ready · 1 task', [
+          [card(445, 'Add a machine and let it join', '', 'Ready')],
+          [], [], [], []
+        ])
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

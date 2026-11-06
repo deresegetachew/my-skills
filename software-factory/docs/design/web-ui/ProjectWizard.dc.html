@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set up the project</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; background: var(--bg-subtle); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 28px 16px 64px; box-sizing: border-box;">
+
+<header style="width: 100%; max-width: 1040px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+<span style="display: flex; align-items: center; gap: 10px;"><span style="width: 32px; height: 32px; border-radius: 10px; background: var(--primary); color: var(--on-primary); display: inline-flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700;">F</span><span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 18px;">factory</span></span>
+<span style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Live · hub on dev-pc</span>
+</header>
+
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+<li aria-current="{{s.aria}}" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{s.labelColor}}; font-weight: {{s.weight}};"><span style="width: 22px; height: 22px; border-radius: 50%; background: {{s.circleBg}}; color: {{s.circleFg}}; border: 1px solid {{s.circleBorder}}; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box;">{{s.mark}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+
+<main style="width: 100%; max-width: 1040px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px;">
+
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px;">Set up [PLACEHOLDER project]</h1>
+<p style="margin: 0; color: var(--text-2);">Five short steps. Your answers are saved in the project; you can change any of them later in Settings.</p>
+</div>
+
+<nav aria-label="Wizard steps" style="display: flex; flex-wrap: wrap; gap: 28px; border-bottom: 1px solid var(--border);">
+<sc-for list="{{wizard}}" as="w" hint-placeholder-count="5">
+<a href="#" aria-current="{{w.aria}}" style="display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: {{w.color}}; font-weight: {{w.weight}}; padding: 10px 0; min-height: 44px; box-sizing: border-box; border-bottom: {{w.underline}};">
+<sc-if value="{{w.done}}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--text-3);"><path d="M5 12l5 5 9-10"></path></svg></sc-if>{{w.label}}</a>
+</sc-for>
+</nav>
+
+<div style="display: flex; flex-wrap: wrap; gap: 56px; align-items: flex-start;">
+
+<form aria-label="Tasks" style="flex: 3 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 32px;">
+
+<fieldset style="border: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px;">
+<legend style="font-size: 20px; font-weight: 600; padding: 0; margin-bottom: 4px;">Where do tasks come from?</legend>
+<div role="radiogroup" aria-label="Task source" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+<label style="border: 1.5px solid var(--text); border-radius: 14px; padding: 16px; display: flex; gap: 12px; cursor: pointer;">
+<input type="radio" name="source" checked style="width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--primary);">
+<span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-weight: 600;">GitHub issues <span style="font-weight: 400; color: var(--text-3); font-size: 13px;">· recommended</span></span><span style="font-size: 13px; color: var(--text-2); line-height: 1.45;">Each task is an issue. Agents claim one with a label, and you see the board on GitHub too.</span></span>
+</label>
+<label style="border: 1px solid var(--border-strong); border-radius: 14px; padding: 16px; display: flex; gap: 12px; cursor: pointer;">
+<input type="radio" name="source" style="width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--primary);">
+<span style="display: flex; flex-direction: column; gap: 4px;"><span style="font-weight: 600;">A build plan file</span><span style="font-size: 13px; color: var(--text-2); line-height: 1.45;">A checklist in the repo; agents tick a box when a task merges. Good for a small project.</span></span>
+</label>
+</div>
+<span style="font-size: 13px; color: var(--text-3);">We add four labels on GitHub: ready, in progress, in review and blocked. Labels that already exist are left as they are.</span>
+</fieldset>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="main-branch" style="font-weight: 600;">Main branch</label>
+<input id="main-branch" value="main" style="height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; font: inherit; background: var(--surface); color: var(--text); box-sizing: border-box;">
+<span style="font-size: 13px; color: var(--text-3);">Agents never push here.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="test-cmd" style="font-weight: 600;">Test command</label>
+<input id="test-cmd" value="bun test" style="height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; font: inherit; font-family: ui-monospace, monospace; font-size: 13px; background: var(--surface); color: var(--text); box-sizing: border-box;">
+<span style="font-size: 13px; color: var(--text-3);">Suggested from your scripts</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<label for="lint-cmd" style="font-weight: 600;">Lint and type check</label>
+<input id="lint-cmd" value="bun x tsc --noEmit" style="height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; font: inherit; font-family: ui-monospace, monospace; font-size: 13px; background: var(--surface); color: var(--text); box-sizing: border-box;">
+<span style="font-size: 13px; color: var(--text-3);">Runs before every pull request</span>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px;">
+<span style="font-weight: 600;">Protected paths</span>
+<span style="font-size: 13px; color: var(--text-2);">A pull request that touches one of these waits for you. The agent that wrote it can never merge it.</span>
+<div style="display: flex; flex-wrap: wrap; gap: 8px;">
+<sc-for list="{{protectedPaths}}" as="p" hint-placeholder-count="4">
+<span style="display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 4px 0 12px; border-radius: 999px; border: 1px solid var(--border-strong); font-size: 13px;"><code>{{p}}</code><button aria-label="Remove" style="width: 24px; height: 24px; border-radius: 50%; border: none; background: transparent; color: var(--text-3); font: inherit; font-size: 15px; cursor: pointer; line-height: 1;">×</button></span>
+</sc-for>
+</div>
+<div style="display: flex; gap: 8px;">
+<input aria-label="Add a protected path" placeholder="Add a path, e.g. migrations/" style="flex: 1; min-width: 0; height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; font: inherit; background: var(--surface); color: var(--text); box-sizing: border-box;">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Add</button>
+</div>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; border-top: 1px solid var(--border); padding-top: 24px;">
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Back</button>
+<button type="button" style="height: 44px; padding: 0 22px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Next: Team</button>
+</div>
+</form>
+
+<aside aria-label="What will be created" style="flex: 2 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600;">What will be created</h2>
+<ul style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;">
+<sc-for list="{{creates}}" as="c" hint-placeholder-count="6">
+<li style="padding: 10px 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px;">
+<span style="display: flex; justify-content: space-between; gap: 8px;"><span style="font-weight: 600; font-size: 13px;">{{c.title}}</span><span style="font-size: 12px; color: var(--text-3); white-space: nowrap;">{{c.where}}</span></span>
+<span style="font-size: 13px; color: var(--text-2); word-break: break-word;">{{c.detail}}</span>
+</li>
+</sc-for>
+</ul>
+<p style="margin: 0; font-size: 13px; color: var(--text-3); line-height: 1.5;">Nothing is pushed until you press Create on Review. Running it twice adds nothing twice.</p>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const labels = ['Welcome', 'Check this machine', 'Connect', 'Add a project', 'Set it up', 'Kick off'];
+    const cur = 4;
+    const steps = labels.map((label, i) => ({
+      label, aria: i === cur ? 'step' : 'false',
+      mark: i < cur ? '✓' : String(i + 1),
+      circleBg: i === cur ? 'var(--primary)' : 'var(--surface)',
+      circleFg: i === cur ? 'var(--on-primary)' : i < cur ? 'var(--text)' : 'var(--text-3)',
+      circleBorder: i === cur ? 'var(--primary)' : 'var(--border-strong)',
+      labelColor: i === cur ? 'var(--text)' : 'var(--text-2)', weight: i === cur ? 600 : 400
+    }));
+    const wl = ['About the project', 'Tasks', 'Team', 'CI', 'Review'];
+    const wcur = 1;
+    const wizard = wl.map((label, i) => ({
+      label, done: i < wcur,
+      aria: i === wcur ? 'step' : 'false',
+      underline: i === wcur ? '2px solid var(--text)' : '2px solid transparent',
+      color: i === wcur ? 'var(--text)' : 'var(--text-2)',
+      weight: i === wcur ? 600 : 400
+    }));
+    return {
+      theme: this.props.theme ?? 'light',
+      steps, wizard,
+      protectedPaths: ['.claude/', '.github/workflows/', 'factory', 'factory-loop.sh'],
+      creates: [
+        { title: 'Role folders', where: 'Repo', detail: 'One for the product owner, the dev manager and the builders' },
+        { title: '4 task labels', where: 'GitHub', detail: 'Ready, in progress, in review, blocked' },
+        { title: 'The owner queue', where: 'GitHub issue', detail: 'One issue where the agents ask what only you decide' },
+        { title: 'A starter PRD', where: 'Repo', detail: 'docs/PRD.md with headings for mentewab to fill in with you' },
+        { title: 'PRD-change PR template', where: 'Repo', detail: 'Every change to the PRD says what changed and why' },
+        { title: 'Your answers', where: 'Repo', detail: 'Task source, protected paths and test command, saved in the project' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Welcome</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1000px; background: var(--bg-subtle); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 28px 16px 64px; box-sizing: border-box;">
+
+<header style="width: 100%; max-width: 960px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+<span style="display: flex; align-items: center; gap: 10px;"><span style="width: 32px; height: 32px; border-radius: 10px; background: var(--primary); color: var(--on-primary); display: inline-flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700;">F</span><span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 18px;">factory</span></span>
+<span style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--idle);"></span>This Mac · not set up yet</span>
+</header>
+
+<ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px;">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="6">
+<li aria-current="{{s.aria}}" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{s.labelColor}}; font-weight: {{s.weight}};"><span style="width: 22px; height: 22px; border-radius: 50%; background: {{s.circleBg}}; color: {{s.circleFg}}; border: 1px solid {{s.circleBorder}}; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; box-sizing: border-box;">{{s.mark}}</span>{{s.label}}</li>
+</sc-for>
+</ol>
+
+<main style="width: 100%; max-width: 960px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 56px 48px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 40px;">
+
+<div style="display: flex; flex-direction: column; align-items: center; gap: 20px; text-align: center; max-width: 640px;">
+<div style="display: flex; flex-wrap: wrap; justify-content: center; gap: 20px;">
+<sc-for list="{{agents}}" as="a" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px; width: 84px;">
+<dc-import name="Avatar" agent="{{a.name}}" size="56" hint-size="56px,56px"></dc-import>
+<span style="font-weight: 600; font-size: 13px;">{{a.name}}</span>
+<span style="font-size: 12px; color: var(--text-3);">{{a.role}}</span>
+</div>
+</sc-for>
+</div>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 36px;">Welcome to your factory</h1>
+<p style="margin: 0; color: var(--text-2); font-size: 16px; line-height: 1.55;">Five AI agents build your project one task at a time. They write the tests first, open a pull request and review each other. You decide what only a person should: product calls, protected merges and releases.</p>
+</div>
+
+<div style="width: 100%; display: flex; flex-direction: column; gap: 16px;">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600;">How do you want to start?</h2>
+<div style="width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;">
+<sc-for list="{{choices}}" as="c" hint-placeholder-count="3">
+<article style="border: 1px solid var(--border); border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 12px;">
+<span style="color: var(--text-2); display: inline-flex;">
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{c.icon}}"></path></svg>
+</span>
+<h3 style="margin: 0; font-size: 17px; font-weight: 600;">{{c.title}}</h3>
+<p style="margin: 0; color: var(--text-2); line-height: 1.5; flex: 1;">{{c.body}}</p>
+<sc-if value="{{c.primary}}" hint-placeholder-val="{{ false }}"><a href="{{c.href}}" style="height: 44px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none;">{{c.cta}}</a></sc-if>
+<sc-if value="{{c.secondary}}" hint-placeholder-val="{{ true }}"><a href="{{c.href}}" style="height: 44px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); font-weight: 600; display: flex; align-items: center; justify-content: center; text-decoration: none; box-sizing: border-box;">{{c.cta}}</a></sc-if>
+</article>
+</sc-for>
+</div>
+</div>
+
+<p role="note" style="margin: 0; align-self: flex-start; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>We found a factory on your Tailscale network: dev-pc at 100.99.7.67. If it is yours, join it instead of starting a second one. <a href="JoinHub.dc.html" style="color: var(--text); font-weight: 600;">Join dev-pc</a></p>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const labels = ['Welcome', 'Check this machine', 'Connect', 'Add a project', 'Set it up', 'Kick off'];
+    const cur = 0;
+    const steps = labels.map((label, i) => ({
+      label, aria: i === cur ? 'step' : 'false',
+      mark: i < cur ? '✓' : String(i + 1),
+      circleBg: i === cur ? 'var(--primary)' : 'var(--surface)',
+      circleFg: i === cur ? 'var(--on-primary)' : i < cur ? 'var(--text)' : 'var(--text-3)',
+      circleBorder: i === cur ? 'var(--primary)' : 'var(--border-strong)',
+      labelColor: i === cur ? 'var(--text)' : 'var(--text-2)', weight: i === cur ? 600 : 400
+    }));
+    const choice = (o) => ({ ...o, secondary: !o.primary });
+    return {
+      theme: this.props.theme ?? 'light',
+      steps,
+      agents: [
+        { name: 'mentewab', role: 'Product owner' },
+        { name: 'fasil', role: 'Dev manager' },
+        { name: 'haile', role: 'Builder' },
+        { name: 'taytu', role: 'Builder' },
+        { name: 'menelik', role: 'Builder' }
+      ],
+      choices: [
+        choice({
+          primary: true, title: 'Start the factory here',
+          body: 'This machine becomes the hub that the agents and your other machines talk to. We check git, GitHub, Docker and Tailscale first.',
+          href: 'MachineCheck.dc.html', cta: 'Start here',
+          icon: 'M4 7h16v10H4zM8 21h8M12 17v4M7 11h2M11 11h2'
+        }),
+        choice({
+          primary: false, title: 'Join my factory',
+          body: 'Your factory already runs on another machine. Paste the join code from Machines › Add machine on the hub.',
+          href: 'JoinHub.dc.html', cta: 'Paste a join code',
+          icon: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1'
+        }),
+        choice({
+          primary: false, title: 'Open a project',
+          body: 'Pick a folder that already has the factory in it, such as a clone of my-skills. Nothing changes until you act.',
+          href: 'AddProject.dc.html', cta: 'Choose a folder',
+          icon: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z'
+        })
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

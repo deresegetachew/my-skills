@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agent haile</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="haile" height="1200" hint-size="312px,1200px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px;">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px;">
+<div style="display: flex; align-items: center; gap: 20px;">
+<dc-import name="Avatar" agent="haile" size="72" hint-size="72px,72px"></dc-import>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; line-height: 1.15;">haile</h1>
+<span style="color: var(--text-2);">Builder on dev-pc. Claims a task, writes failing tests first, then opens a pull request.</span>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Working since 01:50</span>
+</div>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Open its session</button>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Restart</button>
+<button style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Stop</button>
+</div>
+</header>
+
+<div role="tablist" aria-label="Agent views" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Overview</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Full output</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Past tasks</button>
+</div>
+
+<section aria-labelledby="task-h" style="display: flex; flex-direction: column; gap: 8px;">
+<span style="color: var(--text-3); font-size: 13px;">Current task</span>
+<h2 id="task-h" style="margin: 0; font-size: 20px;"><a href="Task.dc.html" style="color: var(--text); text-decoration: none;">#437 An avatar for every agent</a></h2>
+<span style="color: var(--text-2);">Step 2 of 6: writing failing tests. 2 failing, 1 passing so far. Pull request [PLACEHOLDER] opens when they pass.</span>
+</section>
+
+<section aria-labelledby="say-h" style="display: flex; flex-direction: column; gap: 8px;">
+<h2 id="say-h" style="margin: 0; font-size: 15px;">Send haile a message</h2>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<label style="flex: 1 1 320px; display: flex;"><input type="text" value="Keep the avatars as inline SVG, no image files." aria-label="Message to haile" style="flex: 1; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 12px;"></label>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Send</button>
+</div>
+<span style="font-size: 13px; color: var(--text-3);">It arrives in haile's session as if you typed it.</span>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+<div style="flex: 3 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 28px;">
+
+<section aria-labelledby="out-h" style="display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 8px;">
+<h2 id="out-h" style="margin: 0; font-size: 15px;">Recent output</h2>
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2);"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Live</span>
+</div>
+<pre aria-label="haile's recent output" style="margin: 0; background: var(--bg-subtle); border-radius: 10px; padding: 14px 16px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12.5px; line-height: 1.7; color: var(--text-2); overflow-x: auto; white-space: pre;"><sc-for list="{{log}}" as="l" hint-placeholder-count="8"><span style="display: block;"><span style="color: var(--text-3);">{{l.t}}</span>  {{l.text}}</span></sc-for></pre>
+</section>
+
+<section aria-labelledby="tl-h" style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="tl-h" style="margin: 0 0 6px; font-size: 15px;">Today</h2>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{timeline}}" as="e" hint-placeholder-count="6">
+<li style="display: flex; gap: 16px; padding: 10px 4px; border-bottom: 1px solid var(--border);">
+<span style="flex: 0 0 44px; font-size: 13px; color: var(--text-3);">{{e.t}}</span>
+<span style="flex: 1; color: var(--text-2); line-height: 1.5;">{{e.text}}</span>
+</li>
+</sc-for>
+</ol>
+</section>
+</div>
+
+<aside aria-labelledby="det-h" style="flex: 2 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="det-h" style="margin: 0; font-size: 15px;">Details</h2>
+<dl style="margin: 0; display: flex; flex-direction: column;">
+<sc-for list="{{details}}" as="d" hint-placeholder-count="6">
+<div style="display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px;">
+<dt style="color: var(--text-3);">{{d.k}}</dt>
+<dd style="margin: 0; text-align: right; overflow-wrap: anywhere;">{{d.v}}</dd>
+</div>
+</sc-for>
+</dl>
+<a href="#" style="color: var(--text); font-weight: 600; text-decoration: none; font-size: 13px;">Watch from your phone (Remote Control) ›</a>
+<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
+<span style="font-size: 13px; color: var(--text-2); line-height: 1.5;">After a crash, release haile's claims so #437 goes back to ready. Not needed now: haile is working.</span>
+<button style="align-self: flex-start; height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Release claims</button>
+</div>
+<span style="font-size: 13px; color: var(--text-3); line-height: 1.5; margin-top: 12px;">If dev-pc sends no heartbeat for 5 minutes, the dot turns red and this page offers Restart.</span>
+</aside>
+</div>
+
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      theme: this.props.theme ?? 'light',
+      log: [
+        { t: '02:09', text: 'Write software-factory/tests/ui_avatar.test.ts' },
+        { t: '02:10', text: 'bun tools/run_tests.ts ui_avatar' },
+        { t: '02:10', text: '✗ every agent has its own avatar (no avatar for taytu)' },
+        { t: '02:10', text: '✗ the avatar has a label naming the agent and role' },
+        { t: '02:11', text: '✓ an unknown agent gets a plain grey avatar' },
+        { t: '02:11', text: '2 failing, 1 passing: the failing tests are written' },
+        { t: '02:12', text: 'Read software-factory/ui/components/Avatar.tsx' },
+        { t: '02:13', text: 'Edit Avatar.tsx: add taytu and menelik' }
+      ],
+      timeline: [
+        { t: '01:50', text: 'Claimed #437 An avatar for every agent' },
+        { t: '01:52', text: 'Worktree ready on dev-pc, with its own ports and database' },
+        { t: '01:58', text: 'Asked fasil: inline SVG or image files for avatars?' },
+        { t: '02:03', text: 'fasil answered: inline SVG' },
+        { t: '02:11', text: 'Failing tests written: 2 failing, 1 passing' }
+      ],
+      details: [
+        { k: 'Machine', v: 'dev-pc' },
+        { k: 'Worktree', v: '[PLACEHOLDER]/my-skills/worktrees/haile' },
+        { k: 'App port', v: '[PLACEHOLDER]' },
+        { k: 'Database', v: '[PLACEHOLDER]_haile' },
+        { k: 'Holds', v: '#437 and the avatar folder' },
+        { k: 'Tokens on #437', v: '62% of [PLACEHOLDER]' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

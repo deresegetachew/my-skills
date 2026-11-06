@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone inbox</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="width: 390px; height: 844px; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; box-sizing: border-box;">
+
+<div style="flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 24px;">
+
+<header style="display: flex; flex-direction: column; gap: 2px; padding-top: 8px;">
+<span style="font-size: 13px; color: var(--text-3);">my-skills · updated 1 min ago</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 28px; font-weight: 700;">Inbox</h1>
+<span style="font-size: 14px; color: var(--text-2);">2 need you · 3 updates</span>
+</header>
+
+<section aria-labelledby="need-h" style="display: flex; flex-direction: column; gap: 12px;">
+<h2 id="need-h" style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot);"></span>Needs you</h2>
+
+<article style="border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<dc-import name="Avatar" agent="mentewab" size="32" hint-size="32px,32px"></dc-import>
+<span style="flex: 1; display: flex; flex-direction: column; line-height: 1.3;"><span style="font-weight: 600; font-size: 16px;">Merge PR #402</span><span style="font-size: 13px; color: var(--text-2);">Checks passed · fasil approved · 3 h</span></span>
+</div>
+<span style="font-size: 14px; color: var(--text-2); line-height: 1.5;">Product owner: try what was built. It changes the agents’ rules, which are protected, so only you can merge it. It merges only while its head is still the one you saw.</span>
+<div style="display: flex; gap: 8px;">
+<button style="flex: 1; height: 52px; border-radius: 12px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-size: 16px; font-weight: 600; cursor: pointer;">Merge #402</button>
+<a href="PRs.dc.html" style="flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; height: 52px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); text-decoration: none; box-sizing: border-box;">Look first</a>
+</div>
+</article>
+
+<article style="border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+<div style="display: flex; align-items: center; gap: 10px;">
+<dc-import name="Avatar" agent="mentewab" size="32" hint-size="32px,32px"></dc-import>
+<span style="flex: 1; display: flex; flex-direction: column; line-height: 1.3;"><span style="font-weight: 600;">mentewab asks</span><span style="font-size: 13px; color: var(--text-2);">#440 Epics above tasks · 40 min</span></span>
+</div>
+<span style="font-weight: 600; font-size: 16px; line-height: 1.4;">On the board, should an epic be its own lane or a filter over the tasks?</span>
+<span style="font-size: 14px; color: var(--text-2); line-height: 1.5;">A lane shows progress at a glance; a filter keeps the board as it is. I lean to a filter.</span>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<button style="height: 52px; border-radius: 12px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;">A filter, as you suggest</button>
+<button style="height: 52px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 15px; cursor: pointer;">Its own lane</button>
+</div>
+<label style="display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-strong); border-radius: 12px; padding: 0 4px 0 12px; height: 52px;">
+<span style="position: absolute; left: -9999px;">Answer mentewab in your words</span>
+<input type="text" placeholder="Or answer in your words" style="flex: 1; min-width: 0; border: none; background: transparent; color: var(--text); font: inherit; outline: none;">
+<button aria-label="Send answer" style="width: 44px; height: 44px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); display: flex; align-items: center; justify-content: center; cursor: pointer;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+</label>
+</article>
+</section>
+
+<section aria-labelledby="up-h" style="display: flex; flex-direction: column;">
+<h2 id="up-h" style="margin: 0 0 4px; font-size: 15px; font-weight: 600;">Updates</h2>
+<sc-for list="{{updates}}" as="u" hint-placeholder-count="3">
+<div style="display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{u.agent}}" size="28" hint-size="28px,28px"></dc-import>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600; font-size: 14px;">{{u.title}}</span><span style="font-size: 13px; color: var(--text-2);">{{u.agent}} · {{u.when}}</span></span>
+</div>
+</sc-for>
+</section>
+
+</div>
+
+<nav aria-label="Main" style="flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--border); background: var(--surface); padding: 6px 8px 24px;">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+<a href="{{t.href}}" aria-current="{{t.current}}" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 52px; text-decoration: none; color: {{t.color}}; font-size: 11px; font-weight: {{t.weight}};">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{t.icon}}"></path></svg>
+<span>{{t.label}}</span>
+<sc-if value="{{t.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="position: absolute; top: 4px; left: 54%; min-width: 18px; height: 18px; border-radius: 999px; background: var(--badge); color: #FFFFFF; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; box-sizing: border-box;">{{t.badge}}</span></sc-if>
+</a>
+</sc-for>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const active = 'inbox';
+    const tab = (id, label, href, icon, badge) => ({
+      label, href, icon, hasBadge: !!badge, badge: badge || '',
+      color: id === active ? 'var(--text)' : 'var(--text-3)', weight: id === active ? 700 : 500, current: id === active ? 'page' : 'false'
+    });
+    return {
+      theme: this.props.theme ?? 'light',
+      updates: [
+        { agent: 'fasil', title: 'Merged #436 into main', when: '12 min' },
+        { agent: 'haile', title: 'Opened PR #434 for #437', when: '25 min' },
+        { agent: 'menelik', title: 'Waiting for CI on #434', when: '6 min' }
+      ],
+      tabs: [
+        tab('home', 'Home', 'PhoneHome.dc.html', 'M3 11l9-7 9 7M5 10v10h14V10'),
+        tab('inbox', 'Inbox', 'PhoneInbox.dc.html', 'M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6z', '2'),
+        tab('board', 'Board', 'Board.dc.html', 'M4 4h5v16H4zM10 4h5v10h-5zM16 4h4v13h-4z'),
+        tab('team', 'Team', 'PhoneHome.dc.html', 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21c0-4 3-6 7-6s7 2 7 6M16 3.5a4 4 0 0 1 0 7.5M18 15c2.5.5 4 2.5 4 6')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
