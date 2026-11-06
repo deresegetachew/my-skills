@@ -247,7 +247,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("turbo.port", "int", "ci", "The port the cache server listens on.", { default: 3335 }),
   S("turbo.secretsCommand", "str", "ci", "A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins.", { default: "" }),
   S("ci.lightLabel", "str", "ci", "The light runner's label (default `<repo>-light`).", { default: "" }),
-  S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds).", { options: ["github", "nats"], default: "github" }),
+  S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds), or board (the message board, for the same kinds).", { options: ["github", "nats", "board"], default: "github" }),
   S("messaging.url", "str", "messaging", "The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats.", { default: "" }),
   S("messaging.creds", "str", "messaging", "The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/.", { default: "" }),
   S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub.", { default: [] }),
@@ -458,8 +458,11 @@ const MORE: Record<string, More> = {
   examples: ["factory settings set design.references design/screens"] },
   "messaging.transport": { long: "github is today's behaviour and needs no setup. nats loads the NATS plugin and sends " +
     "the kinds in `messaging.kinds` over it; every other kind, and everything the PR gate or the owner reads, stays on " +
-    "GitHub. A kind that moves is sent both ways for its first week (decision 0004).",
-  examples: ["factory settings set messaging.transport nats"] },
+    "GitHub. A kind that moves is sent both ways for its first week (decision 0004). board does the same on the message " +
+    "board (decision 0007, #500): claims, wake-ups and the pull request feed (`claim`, `wake`, `pr`) and the message kinds " +
+    "listed; it needs no messaging.url (the board is found as `factory board` finds it: MB_URL, else this machine's url " +
+    "file), and `factory board up` starts one.",
+  examples: ["factory settings set messaging.transport nats", "factory settings set messaging.transport board"] },
   "messaging.fallback": { long: "With github, a command whose NATS plugin is missing or fails to load, or whose NATS " +
     "server can't be reached, goes on over GitHub and prints the error (`plugin-missing`, `plugin-load` or " +
     "`nats-unreachable`) once, with the fix. With none, the command stops with that error instead.",

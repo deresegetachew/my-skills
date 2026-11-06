@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { type Config, load, roleNames, toFloat } from "./factory_config.ts";
 import { Exit, pyDumps, runMain, sleepSync } from "./factory_lib.ts";
-import { messagingSettings, natsFor } from "./core/compose.ts";
+import { busTransport, messagingSettings, natsFor } from "./core/compose.ts";
 import type { CoreError } from "./core/domain/error.ts";
 import type { Wake, Wakes } from "./core/ports/messaging.ts";
 
@@ -41,16 +41,16 @@ export function notice(e: CoreError): void {
   process.stderr.write(pyDumps({ code: e.code, message: e.message, fix: e.fix }) + "\n");
 }
 
-/** Whether the settings move wake-ups to NATS (no connection is made to answer). */
+/** Whether the settings move wake-ups to NATS or the message board (no connection is made to answer). */
 export function wakeIsOn(cfg: Config): boolean {
   const s = messagingSettings(cfg);
-  return s.transport === "nats" && s.kinds.includes("wake");
+  return busTransport(s) && s.kinds.includes("wake");
 }
 
 /** Whether the pull request watcher's events come over NATS (`pr` in messaging.kinds; factory_pr_feed.ts). */
 export function prEventsOn(cfg: Config): boolean {
   const s = messagingSettings(cfg);
-  return s.transport === "nats" && s.kinds.includes("pr");
+  return busTransport(s) && s.kinds.includes("pr");
 }
 
 /** NATS's wake-ups, or null: neither wake nor pr is on, or NATS can't be had (then `notice` says so, once). With only

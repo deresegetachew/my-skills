@@ -287,7 +287,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 
 | Key | Type | Default | What it sets |
 |---|---|---|---|
-| `messaging.transport` | one of github/nats | `"github"` | How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds). |
+| `messaging.transport` | one of github/nats/board | `"github"` | How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds), or board (the message board, for the same kinds). |
 | `messaging.url` | str | `""` | The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats. |
 | `messaging.creds` | str | `""` | The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/. |
 | `messaging.kinds` | list | `[]` | The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub. |
