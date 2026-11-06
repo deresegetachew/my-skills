@@ -7,7 +7,7 @@
 // title, the CI runners and GitHub's limit come from that project's state folder (the cockpit's cache and the limit file),
 // so a read here never calls GitHub itself. Start and stop run that project's `factory owner start|stop`, the commands
 // the cockpit and the command line run.
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type Config, DEFAULTS, roleNames } from "./factory_config.ts";
@@ -231,7 +231,8 @@ function ownAvatar(p: UiProject, name: string): string | null {
     if (dot <= 0 || f.slice(0, dot) !== name || !type) continue;
     try {
       const path = join(dir, f);
-      if (!statSync(path).isFile() || statSync(path).size > AVATAR_MAX_BYTES) continue;
+      const st = lstatSync(path); // a link is not followed: only a file in the folder itself is sent
+      if (!st.isFile() || st.size > AVATAR_MAX_BYTES) continue;
       return `data:${type};base64,${readFileSync(path).toString("base64")}`;
     } catch {
       continue;

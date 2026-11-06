@@ -2,7 +2,7 @@
 // webp|gif|svg>, comes with that agent's channel as a data address the page shows in place of the drawn one. Run against
 // the real server on a free port.
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { api, heartbeat, hbRow, project, startUi, type Running } from "./web_ui_support.ts";
 
@@ -65,4 +65,14 @@ test("an agent name a heartbeat reports is never read as a path out of the avata
   const c = await channelsOf(p, "/api/projects/work/agents");
   expect(c["../secret"]).toBeDefined();
   expect(c["../secret"]?.avatar ?? null).toBeNull();
+}, T);
+
+test("a link in the avatars folder is not followed: an image named after an agent that points elsewhere is not sent", async () => {
+  const p = project();
+  const dir = avatars(p);
+  const outside = join(p.root, "outside.png");
+  writeFileSync(outside, PNG);
+  symlinkSync(outside, join(dir, "menelik.png"));
+  const c = await channelsOf(p);
+  expect(c.menelik?.avatar ?? null).toBeNull();
 }, T);
