@@ -39,13 +39,24 @@ export interface EventRule {
   not?: Record<string, string[]>;
 }
 
-/** What a `wait` looks for: an event recorded at or after `since` (ms since the epoch) that the rule (`kind`, `match`,
- * `not`) or one of `or` takes. `seconds` is how long it waits for one. A `find` takes the same, without waiting. */
+/** What a `wait` looks for: an event recorded after the cursor `after` (an event seq the caller kept), else at or after
+ * `since` (ms since the epoch), that the rule (`kind`, `match`, `not`) or one of `or` takes. `seconds` is how long it
+ * waits for one. A `find` takes the same, without waiting.
+ *
+ * Events carry the board's times, and the caller's clock may differ: `clock` is the caller's clock when it sent the
+ * request (Date.now()), and `since` is moved by how far the board's clock is from it, so a caller whose clock runs fast
+ * doesn't miss what was said. The time the request took to arrive counts in that distance, so `since` is moved a second
+ * further back (CLOCK_MARGIN_MS): a wait may hear something said just before it, never miss one said after. Without
+ * `clock`, `since` is taken as the board's time. */
 export interface WaitFor extends Partial<EventRule> {
   since: number;
+  after?: number;
+  clock?: number;
   seconds?: number;
   or?: EventRule[];
 }
+
+const CLOCK_MARGIN_MS = 1000;
 
 const OPS = new Set([
   "info", "migrate", "tasks", "get", "create", "update", "link", "unlink", "edges", "ready", "claim", "heartbeat", "release",
@@ -74,8 +85,11 @@ function takes(e: BoardEvent, rules: EventRule[]): boolean {
 async function history(board: Board, w: WaitFor, rules: EventRule[], top: number, first: boolean): Promise<BoardEvent[]> {
   const out: BoardEvent[] = [];
   const kinds = [...new Set(rules.map((r) => r.kind))];
-  for (let after = 0; ;) {
-    const page = await board.events(after, 500, { since: new Date(w.since), ...(kinds.length === 1 ? { kind: kinds[0] } : {}) });
+  const cursor = typeof w.after === "number" && Number.isInteger(w.after) && w.after >= 0 ? w.after : null;
+  const since = cursor !== null ? undefined
+    : new Date(w.since + (typeof w.clock === "number" ? (await board.now()).getTime() - w.clock - CLOCK_MARGIN_MS : 0));
+  for (let after = cursor ?? 0; ;) {
+    const page = await board.events(after, 500, { ...(since ? { since } : {}), ...(kinds.length === 1 ? { kind: kinds[0] } : {}) });
     for (const e of page) {
       if (e.seq > top || !takes(e, rules)) continue;
       out.push(e);

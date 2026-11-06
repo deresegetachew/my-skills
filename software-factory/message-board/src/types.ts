@@ -132,7 +132,7 @@ export interface TaskChanges {
   status?: "open" | "in_review" | "deferred";
 }
 
-export type Next = { next: "ready"; reason: string } | { next: "deferred"; reason: string } | { next: "handoff"; to?: string; reason: string };
+export type Next = { next: "ready"; reason: string } | { next: "deferred"; reason: string } | { next: "review"; reason: string } | { next: "handoff"; to?: string; reason: string };
 
 export interface NewMessage {
   task?: number | null;

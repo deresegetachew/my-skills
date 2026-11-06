@@ -378,13 +378,14 @@ export class Board {
     });
   }
 
-  /** Give a held task back, saying what happens next: ready (anyone may claim it), deferred, or handed to one actor. */
+  /** Give a held task back, saying what happens next: ready (anyone may claim it), deferred, review (its work waits for a
+   * review: in review, held by nobody, so anyone may close it or send it back), or handed to one actor. */
   async release(id: number, token: string, next: Next): Promise<Task> {
-    const n = oneOf("next", next.next, ["ready", "deferred", "handoff"] as const);
+    const n = oneOf("next", next.next, ["ready", "deferred", "review", "handoff"] as const);
     if (typeof next.reason !== "string" || !next.reason.trim()) refuse("bad-input", "A release says why.", "Pass { next, reason: \"...\" }.");
     const to = next.next === "handoff" ? next.to : undefined;
     if (n === "handoff" && (typeof to !== "string" || !to.trim())) refuse("bad-input", "A hand-off names who takes it.", "Pass { next: \"handoff\", to: \"<actor>\", reason }.");
-    const status = n === "deferred" ? "deferred" : "open";
+    const status = n === "deferred" ? "deferred" : n === "review" ? "in_review" : "open";
     return this.write(async (tx) => {
       const task = await this.fenced(tx, id, token,
         "holder = NULL, claim_token = NULL, claimed_at = NULL, claim_until = NULL, status = $3, assignee = $4", [status, to ?? null]);
@@ -660,6 +661,14 @@ export class Board {
     return this.run(async () => rows(await this.sql.unsafe(`SELECT ${EVENT_COLS} FROM events WHERE seq > $1
       AND ($3::timestamptz IS NULL OR at >= $3::timestamptz) AND ($4::text IS NULL OR kind = $4::text) ORDER BY seq LIMIT $2`,
       [after, Math.floor(limit), since, options.kind ?? null])).map(toEvent));
+  }
+
+  /** The board's clock now: what a caller compares its own clock with (events carry the board's times). */
+  async now(): Promise<Date> {
+    return this.run(async () => {
+      const v = rows(await this.sql`SELECT clock_timestamp() AS now`)[0]?.now;
+      return v instanceof Date ? v : new Date(String(v));
+    });
   }
 
   /** The last event's seq: 0 when there is none. */

@@ -6,6 +6,7 @@
 import { chmodSync, closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { flock } from "../../../factory_lib.ts";
+import { CoreError } from "../../domain/error.ts";
 
 export interface Held {
   agent: string;
@@ -35,13 +36,33 @@ export class ClaimTokens {
     });
   }
 
+  /** What is kept: {} when the file isn't there yet. A file that can't be read as tokens is refused, never written
+   * over, so no claim's token is lost without a word. */
   private read(): Kept {
+    let text: string;
     try {
-      const raw = JSON.parse(readFileSync(this.file, "utf8")) as unknown;
-      return raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Kept) : {};
-    } catch {
-      return {};
+      text = readFileSync(this.file, "utf8");
+    } catch (e) {
+      if ((e as { code?: string }).code === "ENOENT") return {};
+      throw this.corrupt(e instanceof Error ? e.message : String(e));
     }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      throw this.corrupt("it isn't JSON");
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw) ||
+      !Object.values(raw).every((h) => h && typeof h === "object" && typeof (h as Held).token === "string" && typeof (h as Held).agent === "string")) {
+      throw this.corrupt("it isn't a set of claim tokens");
+    }
+    return raw as Kept;
+  }
+
+  private corrupt(why: string): CoreError {
+    return new CoreError("board-claims-corrupt", `The board's claim tokens on this machine can't be read (${this.file}): ${why}. Nothing was changed.`,
+      `Move it aside (\`mv ${this.file} ${this.file}.bad\`), then run the command again: an agent that holds a task on the board ` +
+      "takes its claim back with a new token on its next pick.");
   }
 
   private change(f: (k: Kept) => void): void {

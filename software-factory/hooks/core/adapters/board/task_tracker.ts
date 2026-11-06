@@ -8,8 +8,13 @@
 //   no repo known (no GitHub origin and no GH_REPO), every task on the board is the project's.
 // - States: open is ready, in_progress in progress, in_review in review, done done, and deferred blocked (a block sends
 //   the task there, with its reason as a `blocker` note). Dependencies are the `blocks` and `waits_for` edges into it.
-// - A claim's token is kept on this machine (tokens.ts) and sent with release, in review, done, block and tick. A task
-//   another agent holds can't be released, closed or blocked from here: the board's sweep frees a stale claim.
+// - A claim's token is kept on this machine (tokens.ts) and sent with release, review, done, block and tick. A task
+//   another agent holds can't be released, closed or blocked from here: the board's sweep frees a stale claim. Going to
+//   review ends the claim (in review, held by nobody), so the dev manager on any machine can mark it done. A holder whose
+//   token was lost here (the file, or a claim whose answer timed out) takes the claim back on its next pick.
+// - Heartbeats: a claim lasts 30 minutes (the board's CLAIM_SECONDS); only a tick sends a heartbeat, so a build quiet for
+//   longer may be released by `factory board sweep` once its holder has also been quiet that long. Follow-up: a
+//   periodic heartbeat from the loop.
 // - Epics are the project's tasks of kind epic; their tasks are the `- [ ] #n` lines and the board's children.
 import { randomUUID } from "node:crypto";
 import type { Edge, Task as BoardTask } from "../../../../message-board/src/index.ts";
@@ -137,6 +142,9 @@ export class BoardTaskTracker implements TaskTracker {
     const v = this.view();
     const own = v.mine.find((t) => t.status === "in_progress" && t.holder === who.agent && this.mineHere(t, who));
     if (own) return { task: v.task(own) };
+    const lost = v.mine.find((t) => this.lostHere(t, who));
+    const back = lost ? this.take(lost, who) : null; // held on the board with no token here: take the claim back
+    if (back) return { task: v.task(back) };
     for (const t of this.candidates(v, who.agent)) {
       const got = this.take(t, who);
       if (got) return { task: v.task(got) };
@@ -148,6 +156,10 @@ export class BoardTaskTracker implements TaskTracker {
     const v = this.view();
     const t = v.must(id, true);
     if (!WORK.has(t.kind)) throw new CoreError("task-not-ready", `${id} is ${t.kind === "epic" ? "an" : "a"} ${t.kind}; only tasks and bugs are claimed.`, "Pick another task.");
+    if (this.lostHere(t, who)) {
+      const back = this.take(t, who);
+      if (back) return v.task(back);
+    }
     const task = v.task(t);
     const [check, open] = checkClaim(task, who.agent, () => this.mineHere(t, who), () => v.waitingFor(t));
     if (check === "mine") return task;
@@ -187,12 +199,12 @@ export class BoardTaskTracker implements TaskTracker {
       if (held) this.o.tokens.drop(t.id);
       return `${id} is done.`;
     }
-    // A heartbeat first: it fails (claim-lost) unless the token still holds the task, and the version it leaves is the
-    // one the update names, so nothing that changed in between is overwritten.
-    const calls = held
-      ? [{ op: "heartbeat", args: [t.id, held.token] }, { op: "update", args: [t.id, { version: t.version + 1, status: "in_review" }] }]
-      : [{ op: "update", args: [t.id, { version: t.version, status: "in_review" }] }];
-    this.o.child.call(held?.agent ?? this.actor, calls);
+    // In review, the builder's claim ends (a release to review, with its token): the token lives only on the builder's
+    // machine, so a task still held could be closed by nobody else, and nothing sweeps a task in review.
+    if (held) {
+      this.o.child.call(held.agent, [{ op: "release", args: [t.id, held.token, { next: "review", reason: "its pull request is open" }] }]);
+      this.o.tokens.drop(t.id);
+    } else this.o.child.call(this.actor, [{ op: "update", args: [t.id, { version: t.version, status: "in_review" }] }]);
     return `${id} is in review.`;
   }
 
@@ -263,7 +275,14 @@ export class BoardTaskTracker implements TaskTracker {
     return held !== null && held.agent === who.agent && (!held.machine || !who.machine || held.machine === who.machine);
   }
 
-  /** Claim `t` on the board for `who` and keep its token; null when it was no longer ready (someone was first). */
+  /** Whether `who` holds `t` on the board but this machine has no token for it: the token file was lost, or the claim
+   * landed and its answer didn't (a time limit). The board gives its holder a new token on a claim of the same task. */
+  private lostHere(t: BoardTask, who: Claimant): boolean {
+    return t.status === "in_progress" && t.holder === who.agent && this.o.tokens.get(t.id) === null;
+  }
+
+  /** Claim `t` on the board for `who` and keep its token; null when it was no longer ready (someone was first). A token
+   * that can't be kept here gives the claim back at once, so no task is held that nobody can release. */
   private take(t: BoardTask, who: Claimant): BoardTask | null {
     let got: { task: BoardTask; token: string };
     try {
@@ -272,7 +291,18 @@ export class BoardTaskTracker implements TaskTracker {
       if (e instanceof CoreError && e.code === "not-ready") return null;
       throw e;
     }
-    this.o.tokens.put(t.id, { agent: who.agent, machine: who.machine, token: got.token });
+    try {
+      this.o.tokens.put(t.id, { agent: who.agent, machine: who.machine, token: got.token });
+    } catch (e) {
+      try {
+        this.o.child.call(who.agent, [{ op: "release", args: [t.id, got.token, { next: "ready", reason: "its claim token couldn't be kept on this machine" }] }]);
+      } catch {
+        // the claim stays until the board's sweep; the refusal below says what happened
+      }
+      if (e instanceof CoreError) throw e;
+      throw new CoreError("board-claims-unwritable", `The claim on board task ${t.id} was given back: its token couldn't be kept in ${this.o.tokens.file} (${
+        e instanceof Error ? e.message : String(e)}).`, `Make ${this.o.tokens.file}'s folder writable, then claim again.`);
+    }
     return got.task;
   }
 

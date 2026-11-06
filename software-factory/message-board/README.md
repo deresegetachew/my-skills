@@ -53,7 +53,8 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
   `duplicates` or `related`. "from blocks to".
 - `claim(id?, { ttlSeconds? })`: returns `{ task, token }`.
 - `heartbeat(id, token, { ttlSeconds? })`.
-- `release(id, token, { next: "ready" | "deferred" | "handoff", to?, reason })`.
+- `release(id, token, { next: "ready" | "deferred" | "review" | "handoff", to?, reason })`: `review` ends the claim and
+  leaves the task in review, held by nobody, so anyone may close it.
 - `close(id, { outcome, token?, reason? })`: outcome is `done`, `wont_do`, `duplicate` or `superseded`.
 - `sweep({ quietSeconds? })`.
 

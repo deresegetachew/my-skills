@@ -5,6 +5,8 @@
 // - A wake-up is a `signal.wake` event; a wait is a child that listens until a matching one or its time limit.
 // - The watcher's snapshot of the open pull requests is the board's value `<project>:prs`, and each change it saw a
 //   `signal.pr` event, written in the same transaction. A wait with `prChanges` also ends on such an event.
+// A wait sends this machine's clock with its `since`, and the board moves `since` by how far its own clock is from it
+// (message-board/src/child.ts), so a machine whose clock runs fast doesn't miss a wake-up.
 // Keys, values and signals carry the project (compose.ts's messagingProject), so projects sharing a board don't meet.
 import type { BoardEvent, EventRule, WaitFor } from "../../../../message-board/src/index.ts";
 import { CoreError } from "../../domain/error.ts";
@@ -51,7 +53,7 @@ export class BoardBus implements Leases, Wakes, PrFeed {
     const or: EventRule[] = w.prChanges
       ? [{ kind: "signal.pr", match: { project: [this.o.project], ...(w.prChanges.length ? { change: w.prChanges } : {}) } }]
       : [];
-    const wait: WaitFor = { kind: "signal.wake", since: w.since, seconds, match: { project: [this.o.project], to: w.names },
+    const wait: WaitFor = { kind: "signal.wake", since: w.since, clock: Date.now(), seconds, match: { project: [this.o.project], to: w.names },
       not: { from: w.names.slice(0, 1) }, or };
     const e = this.o.child.call(w.names[0] || "factory", [{ op: "wait", args: [wait] }], seconds * 1000)[0] as BoardEvent | null;
     if (!e) return null;
@@ -78,7 +80,7 @@ export class BoardBus implements Leases, Wakes, PrFeed {
 
   prEvents(w: PrWait): PrEvent[] {
     const seconds = Math.max(1, Math.floor(w.seconds));
-    const rule = { kind: "signal.pr", since: w.since, match: { project: [this.o.project], ...(w.pr ? { pr: [String(w.pr)] } : {}) } };
+    const rule = { kind: "signal.pr", since: w.since, clock: Date.now(), match: { project: [this.o.project], ...(w.pr ? { pr: [String(w.pr)] } : {}) } };
     const got = w.first
       ? [this.o.child.call("factory", [{ op: "wait", args: [{ ...rule, seconds }] }], seconds * 1000)[0] as BoardEvent | null]
       : this.o.child.one("factory", "find", rule) as BoardEvent[];
