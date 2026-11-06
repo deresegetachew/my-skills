@@ -1,5 +1,5 @@
-// Leases, wake-ups and the pull request feed on the message board (#500, decision 0007 point 10): everything the factory
-// sent over NATS (decision 0004: the claim, wake and pr kinds), with `messaging.transport` "board".
+// Leases, wake-ups and the pull request feed on the message board (#500, decision 0007 point 10): the claim, wake
+// and pr kinds of messaging.kinds, with `messaging.transport` "board".
 //
 // - A lease is the board's `leases` row: one holder per key until its time runs out.
 // - A wake-up is a `signal.wake` event; a wait is a child that listens until a matching one or its time limit.

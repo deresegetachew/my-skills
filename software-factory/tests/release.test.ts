@@ -326,137 +326,15 @@ test("a tracked bundle is refused: the release builds it", () => {
   expect((JSON.parse(r.stderr.trim()) as Record<string, string>).code).toBe("bundle_tracked");
 });
 
-// ---- plugins (#405, decision 0004 point 5) ----
-
-/** The repo above with plugin sources committed: { "<name>": { "index.ts": ..., ... } }, and node_modules ignored. */
-function withPlugins(plugins: Record<string, Record<string, string>>, more: Record<string, string> = {}): string {
-  const d = repo();
-  const files: Record<string, string> = { ".gitignore": "node_modules/\n", ...more };
-  for (const [name, fs] of Object.entries(plugins)) {
-    for (const [rel, body] of Object.entries(fs)) files[`software-factory/plugins/${name}/${rel}`] = body;
-  }
-  for (const [rel, body] of Object.entries(files)) {
-    mkdirSync(dirname(join(d, rel)), { recursive: true });
-    writeFileSync(join(d, rel), body);
-  }
-  git(d, "add", "-A");
-  git(d, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "plugins");
-  return d;
-}
-
-/** The untracked, ignored fake package a plugin imports. */
-function tinyDep(d: string, plugin: string): void {
-  const dir = join(d, "software-factory", "plugins", plugin, "node_modules", "tiny-dep-405");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "tiny-dep-405", version: "1.0.0", main: "index.js" }));
-  writeFileSync(join(dir, "index.js"), 'exports.dep = () => "from dep";\n');
-}
+// ---- no plugins (#504: the plugin mechanism went with NATS) ----
 
 const ARCHIVE = "software-factory-1.2.3.tar.gz";
 const PREFIX = "software-factory-1.2.3/";
 
-test("each plugin is bundled to hooks/plugins/<name>.js with the version header, runs with no node_modules, and is the same bytes each time (#405)", () => {
-  const d = withPlugins({
-    tiny: { "index.ts": 'import { dep } from "tiny-dep-405";\nimport { word } from "./word.ts";\nconsole.log(`plugin ${word} ${dep()}`);\n',
-      "word.ts": 'export const word = "bundled";\n', "package.json": JSON.stringify({ name: "tiny", dependencies: { "tiny-dep-405": "1.0.0" } }),
-      "tests/tiny.test.ts": "x\n" },
-    other: { "index.ts": 'console.log("other");\n' },
-  });
-  tinyDep(d, "tiny");
-  const a = tmp();
-  const b = tmp();
-  for (const out of [a, b]) {
-    const r = run(d, out);
-    expect(r.code, r.out).toBe(0);
-  }
-  expect(Buffer.compare(readFileSync(join(a, ARCHIVE)), readFileSync(join(b, ARCHIVE)))).toBe(0);
-  const list = members(join(a, ARCHIVE));
-  const js = member(list, PREFIX + "hooks/plugins/tiny.js");
-  expect(js.mode & 0o777).toBe(0o644);
-  expect(text(js).split("\n")[0]).toBe('// factory-plugin {"name":"tiny","factory":"1.2.3"}');
-  expect(text(member(list, PREFIX + "hooks/plugins/other.js")).split("\n")[0]).toBe('// factory-plugin {"name":"other","factory":"1.2.3"}');
-  const manifest = JSON.parse(text(member(list, PREFIX + "MANIFEST.json"))) as
-    { files: { path: string; sha256: string; install: { kind: string; to: string } | null }[] };
-  const entry = manifest.files.find((f) => f.path === "hooks/plugins/tiny.js");
-  expect(entry?.install).toEqual({ kind: "engine", to: ".claude/hooks/plugins/tiny.js" });
-  expect(entry?.sha256).toBe(sha(js.data));
-  // sources, their package.json and tests stay out of the archive
-  const names = list.map((m) => m.name);
-  expect(names.filter((n) => n.startsWith(PREFIX + "plugins/") || n.includes("/plugins/tiny/"))).toEqual([]);
-  expect(names.some((n) => n.endsWith("word.ts") || n.endsWith("tiny.test.ts"))).toBe(false);
-  const dir = tmp();
-  writeFileSync(join(dir, "tiny.js"), js.data);
-  const ran = sh([...BUN, "--no-install", join(dir, "tiny.js")], { cwd: dir });
-  expect(ran.stdout.trim(), ran.out).toBe("plugin bundled from dep");
-});
-
-test("a plugin with no node_modules in the checkout takes its packages from the builder's own install of that plugin", () => {
-  const d = withPlugins({ nats: { "index.ts": 'import { nuid } from "@nats-io/nuid";\nconsole.log(`nuid ${typeof nuid.next()}`);\n' } });
-  expect(existsSync(join(d, "software-factory", "plugins", "nats", "node_modules"))).toBe(false);
-  const out = tmp();
-  const r = run(d, out);
-  expect(r.code, r.out).toBe(0);
-  const js = member(members(join(out, ARCHIVE)), PREFIX + "hooks/plugins/nats.js");
-  const dir = tmp();
-  writeFileSync(join(dir, "nats.js"), js.data);
-  const ran = sh([...BUN, "--no-install", join(dir, "nats.js")], { cwd: dir });
-  expect(ran.stdout.trim(), ran.out).toBe("nuid string");
-});
-
-test("a release with no plugins has no hooks/plugins entries", () => {
+test("a release has no hooks/plugins entries", () => {
   const out = tmp();
   expect(run(repo(), out).code).toBe(0);
   expect(members(join(out, ARCHIVE)).some((m) => m.name.includes("hooks/plugins"))).toBe(false);
-});
-
-test("a plugin that can't be bundled stops the build with the fix, and writes no archive", () => {
-  const d = withPlugins({ broken: { "index.ts": 'import { x } from "no-such-package-405";\nconsole.log(x);\n' } });
-  const out = tmp();
-  const r = run(d, out);
-  expect(r.code, r.out).toBe(1);
-  const err = JSON.parse(r.stderr.trim()) as Record<string, string>;
-  expect(err.code).toBe("plugin_build_failed");
-  expect(err.fix).toContain("bun install --frozen-lockfile");
-  expect(err.fix).toContain("software-factory/plugins/broken");
-  expect(existsSync(join(out, ARCHIVE))).toBe(false);
-});
-
-test("a tracked plugin bundle is refused: the release builds it", () => {
-  const d = withPlugins({ tiny: { "index.ts": 'console.log("x");\n' } }, { "software-factory/hooks/plugins/tiny.js": "old\n" });
-  const r = run(d, tmp());
-  expect(r.code, r.out).toBe(1);
-  expect((JSON.parse(r.stderr.trim()) as Record<string, string>).code).toBe("bundle_tracked");
-});
-
-test("a plugin folder named with anything but lowercase letters, digits and dashes is refused", () => {
-  for (const name of ["Bad_Name", "1abc"]) {
-    const d = withPlugins({ [name]: { "index.ts": 'console.log("x");\n' } });
-    const r = run(d, tmp());
-    expect(r.code, `${name}: ${r.out}`).toBe(1);
-    expect((JSON.parse(r.stderr.trim()) as Record<string, string>).code).toBe("plugin_name");
-  }
-  expect(run(withPlugins({ "good-name2": { "index.ts": 'console.log("x");\n' } }), tmp()).code).toBe(0);
-});
-
-test("a release's plugin bundle loads through the factory's loader in a project with no node_modules (#405)", async () => {
-  const d = withPlugins({
-    tiny: { "index.ts": 'import { dep } from "tiny-dep-405";\nexport const hello = (): string => `hi ${dep()}`;\n',
-      "package.json": JSON.stringify({ name: "tiny", dependencies: { "tiny-dep-405": "1.0.0" } }) },
-  });
-  tinyDep(d, "tiny");
-  const out = tmp();
-  const r = run(d, out);
-  expect(r.code, r.out).toBe(0);
-  const js = member(members(join(out, ARCHIVE)), PREFIX + "hooks/plugins/tiny.js");
-  const project = tmp();
-  const hooks = join(project, ".claude", "hooks");
-  mkdirSync(join(hooks, "plugins"), { recursive: true });
-  mkdirSync(join(project, ".claude", "factory"), { recursive: true });
-  writeFileSync(join(project, ".claude", "factory", "release.json"), JSON.stringify({ version: "1.2.3" }));
-  writeFileSync(join(hooks, "plugins", "tiny.js"), js.data);
-  const { loadPlugin } = (await import(join(ROOT, "software-factory", "hooks", "factory_plugins.ts"))) as typeof import("../hooks/factory_plugins.ts");
-  const mod = loadPlugin("tiny", { hooks }) as { hello: () => string };
-  expect(mod.hello()).toBe("hi from dep");
 });
 
 test("the message board ships with its adapters (#500): its code, command and README under .claude/message-board/, never its tests", () => {

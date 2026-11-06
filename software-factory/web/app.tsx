@@ -327,7 +327,7 @@ function AddMachine({ project, live, post }: { project: Project; live: Live; pos
       <h3>Add machine</h3>
       {!openForm ? (
         <>
-          <p className="muted card-text">Join another computer to this hub, so its agents share claims and messages with the team.</p>
+          <p className="muted card-text">Join another computer to this hub's message board, so its agents share claims and messages with the team.</p>
           <div className="actions"><button className="btn primary" onClick={() => setOpenForm(true)}>Add machine</button></div>
         </>
       ) : made ? (
@@ -339,13 +339,13 @@ function AddMachine({ project, live, post }: { project: Project; live: Live; pos
             <button className="btn primary" onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
             <button className="btn plain" onClick={() => { reset(); setOpenForm(false); }}>Done</button>
           </div>
-          <p className="muted card-note">It holds the agents' keys: send it over a private channel.</p>
+          <p className="muted card-note">It holds the machine's login to the board: send it over a private channel.</p>
         </div>
       ) : (
         <form className="join-form" onSubmit={(e) => { e.preventDefault(); setAsking(true); }}>
           {problem && <Notice tone="bad" title={problem.message}>{problem.fix && <p>{problem.fix}</p>}</Notice>}
           <label className="field">Machine name
-            <input value={name} maxLength={63} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="office-pc" autoComplete="off" />
+            <input value={name} maxLength={40} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="office-pc" autoComplete="off" />
           </label>
           <fieldset className="field">
             <legend>Agents it will run</legend>

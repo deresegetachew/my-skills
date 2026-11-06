@@ -1,9 +1,45 @@
-// A factory project for the NATS plugin's end-to-end tests (#410-#412): a git repo whose origin names the project, its
-// own HOME (for the seeds) and config folder, `.claude/factory.json` with the `messaging` settings, and the stateful fake
-// gh of tests/fakegh.ts on PATH. Not a test file.
+// A factory project for the end-to-end tests of claims, wake-ups and the pull request feed on the message board (#410-
+// #412, moved from NATS to the board in #504): a git repo whose origin names the project, its own HOME and config
+// folder, `.claude/factory.json` with the `messaging` settings, MB_URL pointing at a real, migrated board (board_pg.ts),
+// and a stateful fake gh on PATH. Not a test file.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { type Proc, readJson, runHook, sh, tmp, write, writeExe } from "../../../tests/support.ts";
+import { BoardBus } from "../hooks/core/adapters/board/bus.ts";
+import { BoardChild } from "../hooks/core/adapters/board/child.ts";
+import { freshDb, type Pg, startPg } from "./board_pg.ts";
+import { type Proc, readJson, runHook, sh, tmp, write, writeExe } from "./support.ts";
+
+/** A board nothing answers on, for "the board is down". */
+export const DOWN = "postgres://factory:pw@127.0.0.1:9/board";
+
+let started: { pg: Pg; db: { url: string; drop(): Promise<void> }; child: BoardChild } | null = null;
+
+/** Start the tests' board (once per file): a fresh, migrated database. */
+export async function startBoard(): Promise<void> {
+  const pg = await startPg();
+  const db = await freshDb(pg);
+  const child = new BoardChild({ url: db.url, timeoutMs: 30_000 });
+  child.call("system", [{ op: "migrate" }]);
+  started = { pg, db, child };
+}
+
+export async function endBoard(): Promise<void> {
+  await started?.db.drop().catch(() => {});
+  started?.pg.stop();
+  started = null;
+}
+
+/** The board's URL. */
+export function boardUrl(): string {
+  if (!started) throw new Error("startBoard() first");
+  return started.db.url;
+}
+
+/** The board's claims, wake-ups and pull request feed for the project named `name` (lowercase, as the factory names it). */
+export function busOf(name: string): BoardBus {
+  if (!started) throw new Error("startBoard() first");
+  return new BoardBus({ child: started.child, project: name.toLowerCase() });
+}
 
 // A stateful fake gh: issues (labels, PATCH), comments (GET, POST, PATCH, one by id), pulls and branches, kept in
 // FAKE_DB. Every call is logged to LOOP_LOG as `<METHOD> <path>`.
@@ -96,8 +132,9 @@ export interface Project {
 
 export type Db = Record<string, unknown>;
 
-/** A project named `repo` on origin, with `config` as its factory.json and `db` as GitHub's state. */
-export function project(repo: string, config: Record<string, unknown>, db: Db = {}): Project {
+/** A project named `repo` on origin, with `config` as its factory.json and `db` as GitHub's state; its board is the
+ * tests' board unless `mbUrl` names another (DOWN). */
+export function project(repo: string, config: Record<string, unknown>, db: Db = {}, mbUrl: string = boardUrl()): Project {
   const root = tmp();
   const dir = join(root, repo.toLowerCase());
   mkdirSync(dir, { recursive: true });
@@ -110,7 +147,7 @@ export function project(repo: string, config: Record<string, unknown>, db: Db = 
   write(join(dir, ".claude", "factory.json"), JSON.stringify(config));
   const env: Record<string, string | undefined> = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home,
     FACTORY_CONFIG_DIR: join(home, "cfg"), FAKE_DB: dbPath, LOOP_LOG: join(root, "gh.log"), FACTORY_CLAIM_SETTLE_SECONDS: "0",
-    GH_TOKEN: "x" };
+    GH_TOKEN: "x", MB_URL: mbUrl };
   for (const k of ["FACTORY_AGENT", "FACTORY_ROLE", "FACTORY_LOOP", "FACTORY_MACHINE_ID"]) delete env[k];
   return { dir, home, env, db: dbPath, log: join(root, "gh.log") };
 }

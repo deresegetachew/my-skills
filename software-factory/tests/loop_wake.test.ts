@@ -1,7 +1,7 @@
 // An idle loop waits through `factory_wake.ts` (#410): it asks how long to wait (`minutes`, which is
-// messaging.pollMinutes while wake-ups come over NATS), waits with `wait --seconds N --since <when it last looked>`,
+// messaging.pollMinutes while wake-ups come on the message board), waits with `wait --seconds N --since <when it last looked>`,
 // and looks again as soon as that says it was woken, instead of after its waitMinutes. A release without
-// factory_wake.ts sleeps as before. (factory_wake.ts itself is tested against a real NATS server in plugins/nats.)
+// factory_wake.ts sleeps as before. (factory_wake.ts itself is tested against a real board in bus_wake.test.ts.)
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

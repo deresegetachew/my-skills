@@ -1,16 +1,16 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Pull requests and CI over NATS: one reader per hub, everyone else listens. When `pr` is in `messaging.kinds` (and
-// `messaging.transport` is nats), one watcher per project reads the open pull requests, their head, checks and labels
-// from GitHub, keeps what it saw as a snapshot in the hub's key-value bucket, and publishes one event per change
+// Pull requests and CI on the board: one reader per hub, everyone else listens. When `pr` is in `messaging.kinds` (and
+// `messaging.transport` is board), one watcher per project reads the open pull requests, their head, checks and labels
+// from GitHub, keeps what it saw as a snapshot on the message board, and publishes one event per change
 // (opened, head, checks, labels, draft, merged, closed). The readers (`factory wait slot` and `ci`, the PR-slot check
 // before a pull request opens, the dev manager's pass over the open pull requests, the coding agents' rework check)
 // read the snapshot and listen for the events instead of asking GitHub. GitHub stays the record: the PR gate, the
 // merge and every write still go to GitHub, and a reader whose snapshot is older than `messaging.pollMinutes` (no
-// watcher, NATS down) asks GitHub exactly as before.
+// watcher, the board down) asks GitHub exactly as before.
 //
 // The watcher asks with conditional requests (`If-None-Match` with the ETag of the last answer): an unchanged list or
 // check run comes back as 304 Not Modified, which doesn't count against GitHub's REST limit. Only one runs per
-// project: it holds the NATS claim `pr-feed` and gives up when another holder has it. The dev manager's orchestrator
+// project: it holds the board claim `pr-feed` and gives up when another holder has it. The dev manager's orchestrator
 // starts it (factory_orchestrator.ts cycle) on the machine the dev manager runs on; it ends when that loop ends.
 //
 //   factory_pr_feed.ts look [--name N]                 one look at GitHub: write the snapshot, publish the changes
@@ -22,7 +22,7 @@ import { join, resolve } from "node:path";
 import { type Config, load, roleNames, safeAgent, toFloat } from "./factory_config.ts";
 import { judge, type Row } from "./factory_ci_judge.ts";
 import { bunCmd, Exit, GITHUB_BUSY, githubBusy, parseArgs, pyDumps, run, runMain } from "./factory_lib.ts";
-import { busTransport, messagingSettings, natsFor } from "./core/compose.ts";
+import { busFor, messagingSettings } from "./core/compose.ts";
 import type { CoreError } from "./core/domain/error.ts";
 import type { Leases, PrEvent, PrFeed, PrSnapshot, PrState } from "./core/ports/messaging.ts";
 import { notice, waitForWake } from "./factory_wake.ts";
@@ -30,17 +30,17 @@ import { notice, waitForWake } from "./factory_wake.ts";
 export const FEED_CLAIM = "pr-feed";
 const BODY_MAX = 4000;
 
-/** Whether the settings move pull request reads to NATS or the message board (no connection is made to answer). */
+/** Whether the settings move pull request reads to the message board (no connection is made to answer). */
 export function prFeedIsOn(cfg: Config): boolean {
   const s = messagingSettings(cfg);
-  return busTransport(s) && s.kinds.includes("pr");
+  return s.transport === "board" && s.kinds.includes("pr");
 }
 
-/** NATS's pull request feed (and its claims), or null: `pr` isn't on, or NATS can't be had (`notice` says so, once). */
+/** the board's pull request feed (and its claims), or null: `pr` isn't on, or the board can't be had (`notice` says so, once). */
 export function feedOn(cfg: Config): (PrFeed & Leases) | null {
   if (!prFeedIsOn(cfg)) return null;
   try {
-    return natsFor(cfg, "pr", notice);
+    return busFor(cfg, "pr", notice);
   } catch (e) {
     notice(e as CoreError);
     return null;
@@ -65,7 +65,7 @@ export function freshPrs(cfg: Config): PrSnapshot | null {
 export type Waker = (seconds: number, since: number) => boolean;
 
 /** A waker that listens for the watcher's events (about pull request `pr` when given), and how long a wait listens
- * before it reads again (messaging.pollMinutes). Null while `pr` isn't on NATS. */
+ * before it reads again (messaging.pollMinutes). Null while `pr` isn't on the board. */
 export function prWaker(cfg: Config, pr?: number): { wake: Waker; seconds: number } | null {
   const feed = feedOn(cfg);
   if (!feed) return null;
@@ -324,7 +324,7 @@ export function watch(cfg: Config, name: string, feed: PrFeed & Leases, parent: 
 }
 
 /** For the dev manager's cycle: start the watcher for this project when nobody holds its claim. Says who watches and
- * whether it was started now, or null while `pr` isn't on NATS. */
+ * whether it was started now, or null while `pr` isn't on the board. */
 export function ensureWatcher(cfg: Config, name: string, dry = false): { holder: string; started: boolean } | null {
   const feed = feedOn(cfg);
   if (!feed) return null;
@@ -368,7 +368,7 @@ export function main(argv: string[]): number {
   const name = safeAgent(given || (roleNames(cfg, "dev-manager")[0] ?? "manager"));
   const feed = feedOn(cfg);
   if (!feed) {
-    console.log("pr isn't in messaging.kinds, or NATS can't be reached: nothing to watch");
+    console.log("pr isn't in messaging.kinds, or the board can't be reached: nothing to watch");
     return 2;
   }
   if (cmd === "watch") {

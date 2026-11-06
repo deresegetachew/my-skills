@@ -575,14 +575,14 @@ function postReworkRelease(n: number, agent: string, machine: string): void {
 export function claimRework(cfg: Config, n: number, head: string, agent: string): boolean {
   const hours = staleOf(cfg);
   const machine = machineId();
-  const nats = leasesOn(cfg);
-  if (nats) { // claims on NATS (#411): the bucket decides; the marker is its GitHub copy, and a loser writes nothing
+  const bus = leasesOn(cfg);
+  if (bus) { // claims on the board (#411): the board decides; the marker is its GitHub copy, and a loser writes nothing
     const key = claimKey("rework", n);
-    const was = nats.holder(key);
+    const was = bus.holder(key);
     if (was) return holderIsMe(was, agent, machine);
-    const took = nats.claim(key, holderName(agent, machine), hours * 3600);
+    const took = bus.claim(key, holderName(agent, machine), hours * 3600);
     if (!took.held) return holderIsMe(took.holder, agent, machine);
-    if (!claimCopy(cfg)) return true; // NATS only (messaging.githubCopy)
+    if (!claimCopy(cfg)) return true; // the board only (messaging.githubCopy)
     const until = now() + hours * 3600;
     const host = hostLabel();
     const where = machine ? ` machine=${machine}` : "";
@@ -609,9 +609,9 @@ export function claimRework(cfg: Config, n: number, head: string, agent: string)
 /** Release this agent's live rework claim on PR `n`, if it has one; true when a release was posted. */
 export function releaseRework(cfg: Config, n: number, agent: string): boolean {
   const machine = machineId();
-  const nats = leasesOn(cfg);
-  if (nats) { // claims on NATS (#411): give it back there, and post the GitHub copy of the release
-    const released = nats.release(claimKey("rework", n), holderName(agent, machine));
+  const bus = leasesOn(cfg);
+  if (bus) { // claims on the board (#411): give it back there, and post the GitHub copy of the release
+    const released = bus.release(claimKey("rework", n), holderName(agent, machine));
     if (released && claimCopy(cfg)) postReworkRelease(n, agent, machine);
     return released;
   }

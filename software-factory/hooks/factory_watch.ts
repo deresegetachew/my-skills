@@ -119,7 +119,7 @@ export function isOwn(pr: { body?: string | null; head?: { ref?: string } }): bo
 }
 
 /** The CI of the heads in the pull request watcher's snapshot, while collect() reads from one (the dev manager's cycle,
- * with `pr` on NATS): ciState() answers from it without asking GitHub. */
+ * with `pr` on the board): ciState() answers from it without asking GitHub. */
 const fedChecks = new Map<string, [Verdict, string[], number | null]>();
 
 /** The manager's CI verdict for a commit, and when its newest result came in (seconds since the epoch, null when
@@ -182,7 +182,7 @@ interface Info {
 /** All items that need a manager or the owner, most urgent first. Reads GitHub only. `info`, when given, is filled
  * with "activity": the time of the last visible dev-manager action (see lastActivity).
  *
- * With `fed`, the pull request watcher's snapshot (`pr` on NATS, factory_pr_feed.ts), the open pull requests, their
+ * With `fed`, the pull request watcher's snapshot (`pr` on the board, factory_pr_feed.ts), the open pull requests, their
  * heads' times, CI and mergeable state come from it, and a pull request's comments and label events are read again
  * only when its updated_at moved: a pass over pull requests that didn't change asks GitHub nothing about them. */
 export function collect(cfg: Config, nowArg: number | null = null, info: Info | null = null, fed: PrSnapshot | null = null): Item[] {

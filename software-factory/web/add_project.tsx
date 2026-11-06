@@ -434,7 +434,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
               <aside aria-label="What will be created" className="ap-aside">
                 <h2 className="ap-h2">What will be created</h2>
                 <ul className="lrows ap-rows">
-                  {createsOf(form, info?.messaging ?? "github").map((c) => (
+                  {createsOf(form).map((c) => (
                     <ListRow key={c.title} title={c.title} sub={c.detail} action={<span className="ap-where">{c.where}</span>} />
                   ))}
                 </ul>

@@ -144,8 +144,7 @@ export function addProtected(list: string[], text: string): string[] {
 }
 
 /** "What will be created", beside the wizard. */
-export function createsOf(form: Form, messaging: string): { title: string; where: string; detail: string }[] {
-  const agents = 2 + form.team.builders.length;
+export function createsOf(form: Form): { title: string; where: string; detail: string }[] {
   return [
     ...(form.source === "new" ? [{ title: "The repo", where: "GitHub", detail: `${form.repo || "owner/name"}, ${form.visibility}, with a README` }] : []),
     { title: "Role folders", where: "Repo", detail: "One for the product owner, the dev manager and the builders" },
@@ -153,7 +152,6 @@ export function createsOf(form: Form, messaging: string): { title: string; where
     { title: "The owner queue", where: "GitHub issue", detail: "One issue where the agents ask what only you decide" },
     { title: "A starter PRD", where: "Repo", detail: `docs/PRD.md with headings for ${form.team.productOwner} to fill in with you` },
     { title: "Your answers", where: "Repo", detail: "Task source, protected paths, commands and the team, saved in the project" },
-    ...(messaging === "nats" ? [{ title: "Agent keys", where: "This machine", detail: `A key for each of the ${agents} agents on the NATS hub` }] : []),
     { title: "The setup pull request", where: "GitHub", detail: "All of the above, for you to merge" },
   ];
 }

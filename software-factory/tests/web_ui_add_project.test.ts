@@ -1,8 +1,7 @@
 // The web UI's "add or set up a new project" (#447), server side: GET /api/add-project (repos from gh, the folder, the
-// projects, messaging, the legends), POST /api/add-project/check (a dry run: the eight steps, or a problem), POST
+// projects, messaging, the legends), POST /api/add-project/check (a dry run: the seven steps, or a problem), POST
 // /api/add-project (a run that clones or creates the repo, installs the kit with the real install.sh, writes the answers,
-// runs the new project's `factory init`, asks for NATS keys, opens a setup pull request, lists the project and runs
-// `factory doctor`), a retry from the failed step, and the WebSocket messages. gh is a fake that logs every call and
+// runs the new project's `factory init`, opens a setup pull request, lists the project and runs `factory doctor`), a retry from the failed step, and the WebSocket messages. gh is a fake that logs every call and
 // keeps its remotes as local bare repos; `factory` is a fake script (committed in each "cloned" repo) that logs what it
 // was asked. Nothing here reaches the network.
 import { afterAll, expect, test } from "bun:test";
@@ -216,10 +215,10 @@ test("GET /api/add-project: the repos from gh, the one already in the factory ma
   expect(ghCalls(s.p)).toContain("gh repo list --json nameWithOwner,isPrivate,updatedAt --limit 100");
 }, T);
 
-test("GET /api/add-project: the serving project's messaging transport is given as nats", async () => {
-  const s = await setup({ tasks: { source: "issues" }, agents: ["menelik"], messaging: { transport: "nats" } });
+test("GET /api/add-project: the serving project's messaging transport is given as board", async () => {
+  const s = await setup({ tasks: { source: "issues" }, agents: ["menelik"], messaging: { transport: "board" } });
   const r = await api(s.ui, "/api/add-project");
-  expect(r.json.messaging).toBe("nats");
+  expect(r.json.messaging).toBe("board");
 }, T);
 
 test("GET /api/add-project: when gh fails there are no repos and one ui_add_github problem, not a crash", async () => {
@@ -236,14 +235,14 @@ test("GET /api/add-project: when gh fails there are no repos and one ui_add_gith
 
 // --- check -------------------------------------------------------------------------------------------------------------
 
-test("check: a good request gives the eight steps in order and writes nothing, runs no gh write", async () => {
+test("check: a good request gives the seven steps in order and writes nothing, runs no gh write", async () => {
   const s = await setup();
   const before = readFileSync(join(s.p.d, ".claude", "factory.json"), "utf8");
   const r = await check(s, req(s));
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(r.json.ok).toBe(true);
   const steps = r.json.steps as Row[];
-  expect(steps.map((x) => x.id)).toEqual(["repo", "kit", "answers", "init", "keys", "commit", "list", "doctor"]);
+  expect(steps.map((x) => x.id)).toEqual(["repo", "kit", "answers", "init", "commit", "list", "doctor"]);
   for (const x of steps) {
     expect(typeof x.title).toBe("string");
     expect(typeof x.detail).toBe("string");
@@ -349,7 +348,7 @@ test("clone: every step runs, the answers are written, the project is listed, an
   const id = await start(s, req(s));
   const run = await waitRun(s.ui, id);
   expect(run.state, JSON.stringify(run)).toBe("done");
-  expect(states(run)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "keys:skipped", "commit:done", "list:done", "doctor:done"]);
+  expect(states(run)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "commit:done", "list:done", "doctor:done"]);
   expect(run).toMatchObject({ name: "shop", path: join(s.folder, "shop"), project: "shop" });
   for (const x of run.steps as Row[]) expect(x.problem).toBeNull();
   expect(String(step(run, "repo").command)).toContain("gh repo clone acme/shop");
@@ -385,7 +384,6 @@ test("clone: every step runs, the answers are written, the project is listed, an
   const calls = factoryCalls(s.p);
   expect(calls).toContain("init");
   expect(calls).toContain("doctor");
-  expect(calls.some((l) => l.startsWith("nats"))).toBe(false);
 
   expect(git(dest, "branch", "--list", "factory/setup").trim()).toContain("factory/setup");
   expect(git(s.remotes + "/acme/shop.git", "branch", "--list", "factory/setup").trim()).toContain("factory/setup");
@@ -454,23 +452,16 @@ test("a path that is already a checkout of the repo skips the clone", async () =
   expect(ghCalls(s.p).filter((l) => l.startsWith("gh repo clone"))).toEqual([]);
 }, T);
 
-// --- nats --------------------------------------------------------------------------------------------------------------
+// --- the board -------------------------------------------------------------------------------------------------------
 
-test("nats: the serving factory is asked for a key per agent with its role, and the new project uses nats", async () => {
-  const s = await setup({ tasks: { source: "issues" }, agents: ["menelik"], messaging: { transport: "nats" },
+test("a serving project that names the board gives the new project the board too, and no step makes keys", async () => {
+  const s = await setup({ tasks: { source: "issues" }, agents: ["menelik"], messaging: { transport: "board" },
     roles: { "dev-manager": { names: ["fasil"] }, "product-owner": { names: ["mentewab"] } } });
   const run = await waitRun(s.ui, await start(s, req(s, { repo: "acme/Shop" })));
   expect(run.state, JSON.stringify(run)).toBe("done");
-  expect(step(run, "keys").state).toBe("done");
-  const calls = factoryCalls(s.p).filter((l) => l.startsWith("nats"));
-  expect(calls.sort()).toEqual([
-    "nats user add abebe --role po --project shop",
-    "nats user add haile --role manager --project shop",
-    "nats user add menelik --role builder --project shop",
-    "nats user add taytu --role builder --project shop",
-  ]);
+  expect((run.steps as Row[]).map((x) => x.id)).not.toContain("keys");
   const cfg = readJson<Row>(join(s.folder, "shop", ".claude", "factory.json"));
-  expect((cfg.messaging as Row).transport).toBe("nats");
+  expect((cfg.messaging as Row).transport).toBe("board");
 }, T);
 
 // --- doctor fails, then a retry ----------------------------------------------------------------------------------------
@@ -481,7 +472,7 @@ test("doctor fails: the run stops there with its output; a retry goes on from it
   const id = await start(s, req(s));
   const failed = await waitRun(s.ui, id);
   expect(failed.state).toBe("failed");
-  expect(states(failed)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "keys:skipped", "commit:done", "list:done",
+  expect(states(failed)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "commit:done", "list:done",
     "doctor:failed"]);
   const doctor = step(failed, "doctor");
   expect(String(doctor.output)).toContain("the fake doctor found something");

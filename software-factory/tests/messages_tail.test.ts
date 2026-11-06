@@ -205,12 +205,13 @@ test("tail refuses an --every that is negative or not a number, without calling 
   }
 });
 
-test("tail with transport nats and no server url goes on with GitHub and says nats-unreachable once", () => {
-  const w = basic({}, { messaging: { transport: "nats" } });
+test("tail with transport board and a board that doesn't answer goes on with GitHub and says board-unreachable once", () => {
+  const w = basic({}, { messaging: { transport: "board" } });
+  w.env.MB_URL = "postgres://factory:pw@127.0.0.1:9/board";
   const p = tail(w, "--polls", "2", "--every", "0");
   expect(p.code, p.out).toBe(0);
   expect(lines(p.stdout).length).toBe(3);
-  expect(count(p.stderr, "nats-unreachable")).toBe(1);
+  expect(count(p.stderr, "board-unreachable")).toBe(1);
 });
 
 test("factory messages tail runs through the factory script", () => {

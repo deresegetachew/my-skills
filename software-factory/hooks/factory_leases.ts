@@ -1,11 +1,11 @@
-// Claims over NATS (decision 0004 points 2 and 8, #411, #412). With `claim` in `messaging.kinds` (and
-// `messaging.transport` nats), who holds a review, an answer, an orchestrator's item, a rework or a task is decided by a
-// compare-and-set in the project's NATS key-value bucket, not by reading the comments back and letting the earliest one
+// Claims on the message board (#411, #412, #500). With `claim` in `messaging.kinds` (and
+// `messaging.transport` board), who holds a review, an answer, an orchestrator's item, a rework or a task is decided by a
+// compare-and-set in the board's leases (the project's keys), not by reading the comments back and letting the earliest one
 // win: a claim that lost costs no GitHub write, and nobody re-reads a thread to find out who won. The winner writes the
 // GitHub marker too (the double send of a kind's first week) while `claim` is in `messaging.githubCopy` (unset: the
-// same as messaging.kinds). NATS is not the record (6 Nov 2026): with `claim` left out of githubCopy a claim and its
-// release are on NATS only, and a task claim writes only the labels the board, `factory next` and the PR gate read.
-// Without `claim` in the kinds, or when NATS can't be had (`nats-unreachable`, said once), every claim is the GitHub
+// same as messaging.kinds). The board's copy is not the record (6 Nov 2026): with `claim` left out of githubCopy a claim and its
+// release are on the board only, and a task claim writes only the labels the board, `factory next` and the PR gate read.
+// Without `claim` in the kinds, or when the board can't be had (`board-unreachable`, said once), every claim is the GitHub
 // one, exactly as before.
 //
 // The keys, one per thing that can be held:
@@ -14,13 +14,13 @@
 // `machine=`.
 import { type Config, load } from "./factory_config.ts";
 import { Exit, pyDumps } from "./factory_lib.ts";
-import { githubCopies, natsFor } from "./core/compose.ts";
+import { githubCopies, busFor } from "./core/compose.ts";
 import type { CoreError } from "./core/domain/error.ts";
 import type { Leases } from "./core/ports/messaging.ts";
 import { notice } from "./factory_wake.ts";
 
-/** NATS's claims, or null while `claim` hasn't moved (or NATS can't be had and messaging.fallback is github). With
- * fallback "none" and NATS out of reach, the command stops with {code, message, fix}. */
+/** the board's claims, or null while `claim` hasn't moved (or the board can't be had and messaging.fallback is github). With
+ * fallback "none" and the board out of reach, the command stops with {code, message, fix}. */
 export function leasesOn(cfg: Config | null = null): Leases | null {
   let config: Config;
   try {
@@ -29,7 +29,7 @@ export function leasesOn(cfg: Config | null = null): Leases | null {
     return null;
   }
   try {
-    return natsFor(config, "claim", notice);
+    return busFor(config, "claim", notice);
   } catch (e) {
     const x = e as CoreError;
     process.stderr.write(pyDumps({ code: x.code, message: x.message, fix: x.fix }) + "\n");
@@ -37,8 +37,8 @@ export function leasesOn(cfg: Config | null = null): Leases | null {
   }
 }
 
-/** Whether a claim taken on NATS (and its release) is also written to GitHub as a marker or comment:
- * `claim` in messaging.githubCopy. Only asked once leasesOn gave NATS's claims. */
+/** Whether a claim taken on the board (and its release) is also written to GitHub as a marker or comment:
+ * `claim` in messaging.githubCopy. Only asked once leasesOn gave the board's claims. */
 export function claimCopy(cfg: Config | null = null): boolean {
   try {
     return githubCopies(cfg ?? load(), "claim");

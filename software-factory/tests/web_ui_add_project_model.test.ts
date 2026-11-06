@@ -78,15 +78,14 @@ test("adding a protected path trims it and adds it once", () => {
   expect(addProtected(["a/"], "  ")).toEqual(["a/"]);
 });
 
-test("What will be created names the labels only for issues, and the keys only with NATS", () => {
+test("What will be created names the labels only for issues, and no keys", () => {
   const f = withRepo(emptyForm("/d"), "boss/shop");
   const titles = (x: ReturnType<typeof createsOf>) => x.map((c) => c.title);
-  expect(titles(createsOf(f, "github"))).toContain("4 task labels");
-  expect(titles(createsOf({ ...f, tasks: "plan" }, "github"))).not.toContain("4 task labels");
-  expect(titles(createsOf(f, "github")).some((t) => /key/i.test(t))).toBe(false);
-  expect(createsOf(f, "nats").find((c) => /key/i.test(c.title))?.detail).toContain("4 agents");
-  expect(titles(createsOf({ ...f, source: "new" }, "github"))[0]).toBe("The repo");
-  expect(titles(createsOf(f, "github"))).toContain("The setup pull request");
+  expect(titles(createsOf(f))).toContain("4 task labels");
+  expect(titles(createsOf({ ...f, tasks: "plan" }))).not.toContain("4 task labels");
+  expect(titles(createsOf(f)).some((t) => /key/i.test(t))).toBe(false);
+  expect(titles(createsOf({ ...f, source: "new" }))[0]).toBe("The repo");
+  expect(titles(createsOf(f))).toContain("The setup pull request");
 });
 
 test("a run's progress: how many steps are through, and where it stopped", () => {

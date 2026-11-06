@@ -17,9 +17,7 @@
 // installed). The rules are the classify() beside this builder (the checkout it builds, unless --root says another), so a
 // client installs a release by that release's own rules, even when the client is older and would put a new file
 // elsewhere (#278). When the checkout has the web app (software-factory/web/app.tsx), the archive also holds it bundled
-// into one file, hooks/factory_ui_app.js (build_web.ts, decision 0005): built, not tracked. Each
-// plugin (software-factory/plugins/<name>/, decision 0004) is bundled the same way into hooks/plugins/<name>.js, with
-// the version it was built for (build_plugins.ts); the plugins' sources stay out of the archive.
+// into one file, hooks/factory_ui_app.js (build_web.ts, decision 0005): built, not tracked.
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
@@ -27,15 +25,13 @@ import { FactoryError, pyDumps, run } from "../software-factory/hooks/factory_li
 import { classify } from "../software-factory/hooks/factory_release.ts";
 import { gzipFixed, tarCreate, type TarInput } from "../software-factory/hooks/factory_tar.ts";
 import { bundleWeb, WEB_BUNDLE, WEB_ENTRY } from "./build_web.ts";
-import { BUNDLES, bundlePlugin, pluginNames, PLUGINS } from "./build_plugins.ts";
 
 const SCHEMA = "factory-release/1";
 const SRC = "software-factory";
 // Excluded from the archive: the factory's own tests (they test my-skills, a project does not run them), caches and
-// the dev-only files for type-checking the factory (#252: a project never installs them), and the plugins' sources (the
-// archive holds their bundles). The message board (decision 0007) ships with its adapters (#500): its code, command and
+// the dev-only files for type-checking the factory (#252: a project never installs them). The message board (decision 0007) ships with its adapters (#500): its code, command and
 // README, not its tests.
-const EXCLUDE_PREFIXES = [`${SRC}/tests/`, `${SRC}/${PLUGINS}/`, `${SRC}/message-board/tests/`];
+const EXCLUDE_PREFIXES = [`${SRC}/tests/`, `${SRC}/message-board/tests/`];
 const EXCLUDE_PARTS = ["__pycache__", "node_modules"];
 const EXCLUDE_FILES = [`${SRC}/package.json`, `${SRC}/tsconfig.json`, `${SRC}/bun.lock`, `${SRC}/bun.lockb`];
 const VERSION_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z][0-9A-Za-z.]*)?$/;
@@ -140,16 +136,6 @@ export function build(root: string, outDir: string, tag?: string | null): Built 
         `remove it from git (git rm --cached ${SRC}/${bundle}); the release makes it.`);
     }
     files.push([bundle, 0o644, make(join(root, SRC))]);
-  }
-  const plugins = pluginNames(git(root, "ls-files", "-z", "--", `${SRC}/${PLUGINS}`).split("\0").filter(Boolean)
-    .map((p) => p.slice(SRC.length + 1)));
-  for (const name of plugins) {
-    const rel = `${BUNDLES}/${name}.js`;
-    if (files.some(([f]) => f === rel)) {
-      throw new FactoryError("bundle_tracked", `${SRC}/${rel} is tracked, but the release builds it from ${SRC}/${PLUGINS}/${name}/.`,
-        `remove it from git (git rm --cached ${SRC}/${rel}); the release makes it.`);
-    }
-    files.push([rel, 0o644, bundlePlugin(join(root, SRC), name, version)]);
   }
   files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   for (const [rel, mode, data] of files) {

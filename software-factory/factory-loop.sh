@@ -239,7 +239,7 @@ reload_if_changed() {
 }
 
 # Waits `$1` minutes, still registered as idle: a manager or a product owner that sleeps is not dead (the dev manager's
-# sweep would otherwise mark it down). Ctrl-C stops it. A wake-up over NATS (#410) ends the wait early.
+# sweep would otherwise mark it down). Ctrl-C stops it. A wake-up on the board (#410) ends the wait early.
 role_sleep() {
   local left
   left=$(bun --no-env-file --config=/dev/null -e 'console.log(Math.trunc(Number(process.argv[1]) * 60))' "$1")
@@ -251,8 +251,8 @@ role_sleep() {
   done
 }
 
-# Wake-ups (#410, decision 0004): with `wake` in messaging.kinds, factory_wake.ts waits up to $1 seconds for one over
-# NATS that was said since this loop last looked ($looked), and returns 0 (one line says by whom) when it came; with
+# Wake-ups (#410, #500): with `wake` in messaging.kinds, factory_wake.ts waits up to $1 seconds for one on the
+# message board that was said since this loop last looked ($looked), and returns 0 (one line says by whom) when it came; with
 # wake-ups off it sleeps the time itself. A release without it, or a wait that failed, sleeps here. 1: nobody woke it.
 looked=$(date +%s)
 wake_wait() {
@@ -264,7 +264,7 @@ wake_wait() {
   fi
   sleep "$1"; return 1
 }
-# How long an idle wait of $1 minutes lasts: messaging.pollMinutes when that is longer and wake-ups come over NATS (they
+# How long an idle wait of $1 minutes lasts: messaging.pollMinutes when that is longer and wake-ups come on the board (they
 # end it early, so GitHub is asked less often), else $1.
 wake_minutes() {
   local m
@@ -368,7 +368,7 @@ for ((n = 1; n <= limit; n++)); do
     if [ "$rc" = 4 ]; then github_wait "$busy"
     elif [ "$rc" = 3 ]; then
       [ "$role_idle" != 0 ] || { echo "[$agent] Nothing to do; exiting (idleMinutes is 0)."; exit 0; }
-      role_sleep "$(wake_minutes "$(idle_minutes "$role_idle")")"  # with wake-ups on NATS, GitHub is asked less often
+      role_sleep "$(wake_minutes "$(idle_minutes "$role_idle")")"  # with wake-ups on the board, GitHub is asked less often
     else role_sleep "$role_busy"; fi
     continue
   fi

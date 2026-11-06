@@ -11,7 +11,7 @@
 // order is the tie-break). The loser does nothing. A new head commit is a different key (the sha differs). A manager that
 // dies leaves a claim that expires on its own; `release` ends it early by moving `until` to now.
 //
-// With claims on NATS (#411) the bucket decides, and the comment is only its GitHub copy: none at all, and no
+// With claims on the board (#411) the board decides, and the comment is only its GitHub copy: none at all, and no
 // "released" edit, while `claim` is left out of messaging.githubCopy (factory_leases.ts).
 //
 // Identity: every role shares one GitHub account, so the holder is the name inside the comment, never the login.
@@ -22,8 +22,8 @@ import * as fi from "./factory_issues.ts";
 import { isoUtc, parseIso } from "./factory_lib.ts";
 import { claimCopy, claimKey, leasesOn, shaKey } from "./factory_leases.ts";
 
-/** The NATS key of a lease (#411): review.<pr>.<sha>, answer.<question>, item.<target>.<key> (factory_leases.ts). */
-function natsKey(target: number | string, kind: string, key: string): string {
+/** The board key of a lease (#411): review.<pr>.<sha>, answer.<question>, item.<target>.<key> (factory_leases.ts). */
+function busKey(target: number | string, kind: string, key: string): string {
   if (kind === "review") return claimKey("review", target, shaKey(key));
   if (kind === "answer") return claimKey("answer", key);
   return claimKey(kind, target, key);
@@ -95,8 +95,8 @@ export function commentsOf(target: number | string): fi.Comment[] {
 
 /** The manager holding the lease on `key` (the earliest unexpired claim), or null. */
 export function holder(target: number | string, kind: string, key: unknown, comments: fi.Comment[] | null = null): string | null {
-  const nats = leasesOn();
-  if (nats) return nats.holder(natsKey(target, kind, String(key))) || null; // claims on NATS (#411)
+  const bus = leasesOn();
+  if (bus) return bus.holder(busKey(target, kind, String(key))) || null; // claims on the board (#411)
   const found = claimsOn(comments ?? commentsOf(target), kind, key);
   return found.length ? (found[0] as [fi.Comment, LeaseClaim])[1].holder : null;
 }
@@ -105,19 +105,19 @@ export function holder(target: number | string, kind: string, key: unknown, comm
  * an unexpired one is fine (the lease is returned as it is). */
 export function acquire(target: number | string, kind: string, key: unknown, who: string, minutes: number): Lease | null {
   const k = String(key);
-  const nats = leasesOn();
-  if (nats) { // claims on NATS (#411): the bucket decides; the GitHub marker is its copy (decision 0004 point 8)
-    const nk = natsKey(target, kind, k);
+  const bus = leasesOn();
+  if (bus) { // claims on the board (#411): the board decides; the GitHub marker is its copy (decision 0004 point 8)
+    const nk = busKey(target, kind, k);
     const copy = claimCopy();
-    const was = nats.holder(nk);
+    const was = bus.holder(nk);
     if (was && was !== who) return null;
     if (was && copy) {
       const mine = claimsOn(commentsOf(target), kind, k).find(([, c]) => c.holder === who);
       if (mine) return { target, kind, key: k, holder: who, comment: mine[0].id, until: mine[1].until };
     }
-    if (!nats.claim(nk, who, minutes * 60).held) return null;
+    if (!bus.claim(nk, who, minutes * 60).held) return null;
     const until = now() + minutes * 60;
-    if (!copy) return { target, kind, key: k, holder: who, comment: null, until }; // NATS only: nothing on GitHub
+    if (!copy) return { target, kind, key: k, holder: who, comment: null, until }; // the board only: nothing on GitHub
     const posted = fi.gh<fi.Comment | null>("POST", `repos/{owner}/{repo}/issues/${target}/comments`, { body: render(kind, who, k, until) });
     return { target, kind, key: k, holder: who, comment: posted?.id, until };
   }
@@ -143,7 +143,7 @@ export function end(target: number | string, commentId: unknown, kind: string, w
 
 /** Ends the lease early. Safe to call twice. */
 export function release(lease: Lease | null | undefined): void {
-  const nats = lease ? leasesOn() : null;
-  if (lease && nats) nats.release(natsKey(lease.target, lease.kind, lease.key), lease.holder);
+  const bus = lease ? leasesOn() : null;
+  if (lease && bus) bus.release(busKey(lease.target, lease.kind, lease.key), lease.holder);
   if (lease && lease.comment) end(lease.target, lease.comment, lease.kind, lease.holder, lease.key);
 }

@@ -1,19 +1,19 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Wake-ups over NATS (decision 0004 point 8, #410). When `wake` is in `messaging.kinds` (and `messaging.transport` is
-// nats), an agent that does something another one waits for says so with a wake-up on factory.<project>.wake.<from>,
+// Wake-ups on the message board (#410, #500). When `wake` is in `messaging.kinds` (and `messaging.transport` is
+// board), an agent that does something another one waits for says so with a wake-up on factory.<project>.wake.<from>,
 // and a loop with nothing to do listens for one instead of asking GitHub every minute. It still looks at GitHub every
 // `messaging.pollMinutes` (default 15), for what stays there: CI results, the owner's words, anything a wake-up missed.
-// Without `wake` in the kinds, or when NATS can't be reached, everything is as before: `wait` sleeps its time.
+// Without `wake` in the kinds, or when the board can't be reached, everything is as before: `wait` sleeps its time.
 // With `pr` in the kinds, the pull request watcher's events (factory_pr_feed.ts) end a wait too: every change for the dev
 // manager and the product owner, a merge or a close for a coding agent; and an idle wait lasts messaging.pollMinutes.
 //
 //   factory_wake.ts send --to <agent|dev-manager|po|coding-agent|all> [--ref pr#N|issue#N] [--why TEXT]
-//       as FACTORY_AGENT. Never fails: with wake off it does nothing, and a send NATS refused is a notice on stderr.
+//       as FACTORY_AGENT. Never fails: with wake off it does nothing, and a send the board refused is a notice on stderr.
 //   factory_wake.ts wait --seconds N [--since <epoch seconds>]
 //       wait up to N seconds for a wake-up addressed to this agent, its role (dev-manager, po, coding-agent) or all,
 //       said since --since (default now) by another agent. Exit 0 woken (one line says by whom and why), 2 none came.
 //   factory_wake.ts minutes <M>
-//       how long an idle loop waits: M, or messaging.pollMinutes when that is longer and wake-ups come over NATS.
+//       how long an idle loop waits: M, or messaging.pollMinutes when that is longer and wake-ups come on the board.
 //
 // Who wakes whom: the Claude hook (factory_agents.ts hook, PostToolUse) reads each shell command an agent ran, and
 // wakesFor() below names the wake-ups it calls for: a pull request opened, marked ready or pushed to wakes the dev
@@ -27,7 +27,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { type Config, load, roleNames, toFloat } from "./factory_config.ts";
 import { Exit, pyDumps, runMain, sleepSync } from "./factory_lib.ts";
-import { busTransport, messagingSettings, natsFor } from "./core/compose.ts";
+import { busFor, messagingSettings } from "./core/compose.ts";
 import type { CoreError } from "./core/domain/error.ts";
 import type { Wake, Wakes } from "./core/ports/messaging.ts";
 
@@ -41,23 +41,23 @@ export function notice(e: CoreError): void {
   process.stderr.write(pyDumps({ code: e.code, message: e.message, fix: e.fix }) + "\n");
 }
 
-/** Whether the settings move wake-ups to NATS or the message board (no connection is made to answer). */
+/** Whether the settings move wake-ups to the message board (no connection is made to answer). */
 export function wakeIsOn(cfg: Config): boolean {
   const s = messagingSettings(cfg);
-  return busTransport(s) && s.kinds.includes("wake");
+  return s.transport === "board" && s.kinds.includes("wake");
 }
 
-/** Whether the pull request watcher's events come over NATS (`pr` in messaging.kinds; factory_pr_feed.ts). */
+/** Whether the pull request watcher's events come on the board (`pr` in messaging.kinds; factory_pr_feed.ts). */
 export function prEventsOn(cfg: Config): boolean {
   const s = messagingSettings(cfg);
-  return busTransport(s) && s.kinds.includes("pr");
+  return s.transport === "board" && s.kinds.includes("pr");
 }
 
-/** NATS's wake-ups, or null: neither wake nor pr is on, or NATS can't be had (then `notice` says so, once). With only
+/** the board's wake-ups, or null: neither wake nor pr is on, or the board can't be had (then `notice` says so, once). With only
  * pr on, a wait hears the pull request watcher's events and nothing else. */
 export function wakesOn(cfg: Config): Wakes | null {
   try {
-    return natsFor(cfg, wakeIsOn(cfg) || !prEventsOn(cfg) ? "wake" : "pr", notice);
+    return busFor(cfg, wakeIsOn(cfg) || !prEventsOn(cfg) ? "wake" : "pr", notice);
   } catch (e) {
     notice(e as CoreError);
     return null;
@@ -84,7 +84,7 @@ export function addresses(cfg: Config, agent: string): string[] {
 }
 
 /** Wait up to `seconds` for a wake-up for `agent` said since `since` (ms). The wake, or null when none came. Without
- * NATS (wake off, or it can't be reached) it sleeps the time and gives null. */
+ * the board (wake off, or it can't be reached) it sleeps the time and gives null. */
 export function waitForWake(cfg: Config, agent: string, seconds: number, since: number = Date.now()): Wake | null {
   const started = Date.now();
   const wakes = agent && NAME.test(agent) ? wakesOn(cfg) : null;
@@ -101,7 +101,7 @@ export function waitForWake(cfg: Config, agent: string, seconds: number, since: 
   return null;
 }
 
-/** Send one wake-up as `from`; true when NATS took it. Never throws. */
+/** Send one wake-up as `from`; true when the board took it. Never throws. */
 export function wakeUp(cfg: Config, from: string, to: string, ref = "", why = ""): boolean {
   if (!wakeIsOn(cfg) || !NAME.test(from) || !NAME.test(to)) return false;
   const wakes = wakesOn(cfg);
@@ -161,7 +161,7 @@ function refOf(command: string): string {
 }
 
 /** For the Claude hook: send, in the background, the wake-ups `command` calls for, as FACTORY_AGENT. Does nothing (and
- * starts nothing) while wake-ups aren't on NATS. */
+ * starts nothing) while wake-ups aren't on the board. */
 export function wakeFromHook(cfg: Config, command: string): void {
   const agent = process.env.FACTORY_AGENT ?? "";
   if (!agent || !wakeIsOn(cfg)) return;

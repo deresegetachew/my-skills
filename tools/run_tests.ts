@@ -1,6 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Run the software factory's tests: each software-factory/tests/*.test.ts file, each plugin's
-// software-factory/plugins/<name>/tests/*.test.ts, and the message board's software-factory/message-board/tests/*.test.ts,
+// Run the software factory's tests: each software-factory/tests/*.test.ts file and the message board's
+// software-factory/message-board/tests/*.test.ts,
 // with `bun test`, in its own process, with its own scratch folders.
 // Exits 1 if any test fails, so CI goes red.
 //
@@ -13,7 +13,7 @@ import { join, relative, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..");
 // FACTORY_TEST_DIR and FACTORY_TEST_TIMEOUT_MS exist for the runner's own test (tests/test_cleanup.test.ts): another folder of
-// test files (and no plugin tests), and a shorter limit per file.
+// test files (and no board tests), and a shorter limit per file.
 const TESTS = process.env.FACTORY_TEST_DIR || join(ROOT, "software-factory", "tests");
 const TIMEOUT_MS = Number(process.env.FACTORY_TEST_TIMEOUT_MS) || 600_000;
 
@@ -48,21 +48,9 @@ function testFiles(argv: string[]): string[] {
     else if (!a.startsWith("-")) picks.push(a.replace(/^.*\//, "").replace(/(\.test)?\.ts$/, ""));
   }
   const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)),
-    ...(process.env.FACTORY_TEST_DIR ? [] : [...pluginTests(), ...boardTests()])];
+    ...(process.env.FACTORY_TEST_DIR ? [] : boardTests())];
   const name = (f: string): string => f.replace(/^.*\//, "").replace(/\.test\.ts$/, "");
   return picks.length ? all.filter((f) => picks.includes(name(f))) : all;
-}
-
-/** Each plugin's own tests (decision 0004): software-factory/plugins/<name>/tests/*.test.ts. */
-function pluginTests(): string[] {
-  const plugins = join(ROOT, "software-factory", "plugins");
-  const out: string[] = [];
-  for (const name of statSync(plugins, { throwIfNoEntry: false })?.isDirectory() ? readdirSync(plugins).sort() : []) {
-    const tests = join(plugins, name, "tests");
-    if (!statSync(join(plugins, name)).isDirectory() || !statSync(tests, { throwIfNoEntry: false })?.isDirectory()) continue;
-    for (const f of readdirSync(tests).sort()) if (f.endsWith(".test.ts")) out.push(join(tests, f));
-  }
-  return out;
 }
 
 /** The message board's own tests (decision 0007): software-factory/message-board/tests/*.test.ts. */
@@ -120,7 +108,7 @@ async function runFile(path: string): Promise<Result> {
   // gets its own. The tests make their folders under TMPDIR and do not remove them: the scratch folder goes at the end.
   const scratch = mkdtempSync(join(tmpdir(), "factory-test-"));
   const env: Record<string, string> = {};
-  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && k !== "MB_URL") env[k] = v; // no board unless a test names one
   Object.assign(env, {
     FACTORY_CONFIG_DIR: join(scratch, "config"),
     XDG_STATE_HOME: join(scratch, "state"),

@@ -1,5 +1,5 @@
-// The pull request watcher's GitHub side and its events (factory_pr_feed.ts; the NATS end of it is in
-// plugins/nats/tests/pr_feed.test.ts): it asks with the ETag of the last answer, so an unchanged list comes back as
+// The pull request watcher's GitHub side and its events (factory_pr_feed.ts; the board's end of it is in
+// bus_pr_feed.test.ts): it asks with the ETag of the last answer, so an unchanged list comes back as
 // 304 Not Modified and is answered from what it kept; and it says each change once.
 import { expect, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";

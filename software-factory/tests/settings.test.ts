@@ -690,10 +690,10 @@ test("tasks.source takes board (#500): the message board's tasks, with messages 
   expect(help.stdout).toContain("factory board up");
 });
 
-test("messaging.transport takes board (#500): the moved kinds go to the message board, as they went to NATS", () => {
+test("messaging.transport takes board (#500): the moved kinds go to the message board; nats is gone (#504)", () => {
   const d = project({});
   expect(settings(d, ["set", "messaging.transport", "board"]).code).toBe(0);
   expect(settings(d, ["validate"]).code).toBe(0); // no messaging.url needed: the board is found as `factory board` finds it
-  expect(settings(d, ["show", "messaging.transport"]).stdout).toContain("github, nats, board");
+  expect(settings(d, ["show", "messaging.transport"]).stdout).toContain("github, board");
   expect(settings(d, ["help", "messaging.transport"]).stdout).toContain("board");
 });

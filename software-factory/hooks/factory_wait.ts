@@ -18,7 +18,7 @@
 //
 // Waits default to 30 minutes and look every FACTORY_WAIT_START seconds (default 15), growing by half each time up to
 // FACTORY_WAIT_MAX seconds (default 60). Everything goes through the GitHub REST API (`gh api`), except that with `pr`
-// in messaging.kinds, `ci` and `slot` read the pull request watcher's snapshot over NATS (factory_pr_feed.ts) and wait
+// in messaging.kinds, `ci` and `slot` read the pull request watcher's snapshot on the board (factory_pr_feed.ts) and wait
 // for its events, and ask GitHub only when the snapshot is older than messaging.pollMinutes.
 import { type Config, load, taskLabels, toFloat } from "./factory_config.ts";
 import { agentIssues, current, stateOf } from "./factory_agents.ts";
@@ -51,7 +51,7 @@ with one short line. Exit codes: 0 = it happened, 2 = timed out (do other work),
 
 Waits default to 30 minutes and look every FACTORY_WAIT_START seconds (default 15), growing by half each time up to
 FACTORY_WAIT_MAX seconds (default 60). Everything goes through the GitHub REST API (\`gh api\`), except that with \`pr\`
-in messaging.kinds, \`ci\` and \`slot\` read the pull request watcher's snapshot over NATS and wait for its events.
+in messaging.kinds, \`ci\` and \`slot\` read the pull request watcher's snapshot on the board and wait for its events.
 `;
 
 export const QUESTION = /<!--\s*factory-question\b/; // the old markers: factory_watch.ts still reads them
@@ -75,8 +75,8 @@ export interface Pull {
 /** Listens for a wake-up said since `since` (ms) for up to `seconds`; true when one came. */
 export type Waker = (seconds: number, since: number) => boolean;
 
-/** With wake-ups on NATS (#410): this agent's waker, and how far apart the looks at GitHub are (messaging.pollMinutes,
- * or the given pause when that is longer). Null while wake-ups aren't on NATS, or NATS can't be reached. */
+/** With wake-ups on the board (#410): this agent's waker, and how far apart the looks at GitHub are (messaging.pollMinutes,
+ * or the given pause when that is longer). Null while wake-ups aren't on the board, or the board can't be reached. */
 export function wakerFor(cfg: Config): { wake: Waker; seconds: number } | null {
   const agent = process.env.FACTORY_AGENT ?? "";
   if (!agent || !wakeIsOn(cfg) || !wakesOn(cfg)) return null;
@@ -85,7 +85,7 @@ export function wakerFor(cfg: Config): { wake: Waker; seconds: number } | null {
 }
 
 /** Calls check() with a growing pause until it returns something (not null) or the minutes are up. With a `waker`
- * (wake-ups on NATS), the pause is a wait for a wake-up instead: GitHub is asked again when one comes, else after
+ * (wake-ups on the board), the pause is a wait for a wake-up instead: GitHub is asked again when one comes, else after
  * `waker.seconds` (or the pause, when longer). */
 export function waitUntil<T>(check: () => T | null, minutes: number, waker: { wake: Waker; seconds: number } | null = null): T | null {
   let delay = toFloat(process.env.FACTORY_WAIT_START ?? 15) ?? 15;
@@ -162,7 +162,7 @@ function shownMinutes(m: number | string): string {
   return String(m);
 }
 
-/** The PR's state from the pull request watcher's snapshot (`pr` on NATS): its head and CI, or how it ended. Null when
+/** The PR's state from the pull request watcher's snapshot (`pr` on the board): its head and CI, or how it ended. Null when
  * there is no fresh snapshot, or it doesn't know the PR: then GitHub is asked. */
 function fromFeed(cfg: Config | null, n: number): { open: false; merged: boolean } | { open: true; sha: string; ci: ["green" | "failed" | "pending", string] } | null {
   const s = cfg ? freshPrs(cfg) : null;
@@ -239,7 +239,7 @@ export function myReadyPrs(): number[] {
     .filter((p) => !p.draft && (p.user ?? {}).login === me).map((p) => p.number).sort((a, b) => a - b);
 }
 
-/** This account's ready pull requests: from the watcher's snapshot while it is fresh (`pr` on NATS), else GitHub. */
+/** This account's ready pull requests: from the watcher's snapshot while it is fresh (`pr` on the board), else GitHub. */
 export function readyPrs(cfg: Config): number[] {
   const s = freshPrs(cfg);
   return s ? readyOf(s) : myReadyPrs();
@@ -319,7 +319,7 @@ export function precheckItems(cfg: Config, prs: Pull[] | null = null, commentsOf
 
 /** What the dev manager has to do right now, one line each; empty when nothing. Reads GitHub only. */
 export function precheck(cfg: Config): string[] {
-  // With `pr` on NATS: the open pull requests from the watcher's snapshot, and a pull request's comments read again only
+  // With `pr` on the board: the open pull requests from the watcher's snapshot, and a pull request's comments read again only
   // when its updated_at moved (factory_pr_feed.ts).
   const fed = freshPrs(cfg);
   if (!fed) return precheckItems(cfg).map(([, , text]) => text);
