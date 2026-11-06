@@ -204,6 +204,16 @@ test("an agent session can't talk for the owner", () => {
   expect(claudeCalls(r)).toEqual([]);
 });
 
+test("a loop or a Claude Code session can't talk for the owner either", () => {
+  for (const env of [{ FACTORY_LOOP: "1" }, { CLAUDECODE: "1" }]) {
+    const r = rig();
+    const p = talk(r, ["dev-manager", "hello"], env);
+    expect(p.code, JSON.stringify(env)).not.toBe(0);
+    expect(problem(p).code).toBe("talk_agent_session");
+    expect(claudeCalls(r)).toEqual([]);
+  }
+});
+
 test("factory help and the commands page list talk", () => {
   const r = rig();
   const h = sh(["bash", join(SF, "factory"), "help"], { cwd: r.work, env: r.env });
