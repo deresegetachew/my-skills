@@ -61,6 +61,8 @@ export interface TaskRow {
   group: string;
   todos: { done: number; all: number };
   dependsOn: string[];
+  /** The open tasks that block it (#498): from the message board's edges; [] on the GitHub path. */
+  blockedBy: string[];
   url: string | null;
   pr: { number: number; url: string | null; checks: PullView["checks"] } | null;
   next: boolean;
@@ -102,13 +104,20 @@ export interface EpicView {
   find: string;
 }
 
-export interface EpicsView {
+/** Where a view's tasks come from (#498): the message board, live, or GitHub through the snapshot, read every `every`
+ *  seconds (null from the board). */
+export interface Origin {
+  from: "board" | "github";
+  every: number | null;
+}
+
+export interface EpicsView extends Origin {
   source: string;
   epics: EpicView[];
   problems: Problem[];
 }
 
-export interface TasksView {
+export interface TasksView extends Origin {
   source: string;
   tasks: TaskRow[];
   next: string | null;
@@ -205,6 +214,11 @@ function cacheOf(p: UiProject): Obj | null {
 const repos = new Map<string, string>();
 
 /** The project's `owner/name` on GitHub: CI's, else the origin remote's; "" when neither says. */
+export function repoOfProject(p: UiProject): string {
+  return repoOf(p, obj(cacheOf(p)?.ci));
+}
+
+/** The project's `owner/name` on GitHub, given its cache's CI part. */
 function repoOf(p: UiProject, ci: Obj): string {
   const given = str(ci.repo);
   if (/^[\w.-]+\/[\w.-]+$/.test(given)) return given;
@@ -225,24 +239,27 @@ function epicRows(part: Obj): Obj[] {
   return list(part.epics).filter((e) => str(e.id));
 }
 
-function epicsView(part: Obj, repo: string): EpicsView {
+/** The epics view from a tasks part: the snapshot's, or the board's (#498), whose stage is "" when the board doesn't know
+ *  it (a label on GitHub), so the last snapshot's `cached` stage is kept. */
+function epicsView(part: Obj, repo: string, origin: Origin, cached: Obj = {}): EpicsView {
   const source = str(part.source);
+  const stageBefore = new Map(epicRows(cached).map((e) => [str(e.id), str(e.stage)]));
   const epics = epicRows(part).map((e): EpicView => {
     const id = str(e.id);
     const tasks = list(e.tasks).filter((t) => str(t.id)).map((t) => ({ id: str(t.id), done: t.done === true }));
     const decisions = (Array.isArray(e.decisions) ? e.decisions : []).map(str).filter(Boolean);
-    const stage = str(e.stage) || "investigating";
+    const stage = str(e.stage) || stageBefore.get(id) || "investigating";
     const url = str(e.url) || (source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null);
     const summary = str(e.summary).slice(0, 300);
     return { id, title: str(e.title), stage, stageText: stage, done: tasks.filter((t) => t.done).length, all: tasks.length, tasks, prd: str(e.prd),
       decisions, summary, cites: strings(e.cites), url, find: [`#${id}`, str(e.title), stage, str(e.prd), summary, ...decisions].join(" ") };
   });
-  return { source, epics, problems: [] };
+  return { source, ...origin, epics, problems: [] };
 }
 
-function tasksView(p: UiProject, cache: Obj, repo: string, pulls: PullView[]): TasksView {
-  const part = obj(cache.tasks);
+function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], origin: Origin): TasksView {
   const epicOf = new Map<string, string>();
+  for (const t of list(part.tasks)) if (str(t.id) && str(t.epic)) epicOf.set(str(t.id), str(t.epic)); // the board's parents
   for (const e of epicRows(part)) for (const t of list(e.tasks)) if (str(t.id) && !epicOf.has(str(t.id))) epicOf.set(str(t.id), str(e.id));
   const source = str(part.source);
   const problems: Problem[] = [];
@@ -259,18 +276,19 @@ function tasksView(p: UiProject, cache: Obj, repo: string, pulls: PullView[]): T
     const id = str(t.id);
     const holders = (Array.isArray(t.holders) ? t.holders : []).map(str).filter(Boolean);
     const dependsOn = (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(str).filter(Boolean);
+    const blockedBy = (Array.isArray(t.blockedBy) ? t.blockedBy : []).map(str).filter(Boolean);
     const todos = list(t.todos);
     // `factory next`: the first ready task nobody holds whose dependencies are done
     const isNext = next === null && str(t.state) === "ready" && !holders.length && !dependsOn.some((d) => open.has(d.replace(/^#/, "")));
     if (isNext) next = id;
     const pr = prOf.get(id);
     return { id, title: str(t.title), state: str(t.state), stateText: taskStateText(str(t.state)), holders, group: str(t.group),
-      todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn,
+      todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn, blockedBy,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
       pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, next: isNext, actions: actionsFor(str(t.state), source),
       epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
   });
-  return { source, tasks, next, problems };
+  return { source, ...origin, tasks, next, problems };
 }
 
 function reviewOf(p: Obj): PullView["review"] {
@@ -361,16 +379,25 @@ function ciView(p: UiProject, cache: Obj, repo: string): CiView {
     waiting: waitingPulls(ci).map((r) => str(r.ref)), host: here, settings, actions: has ? actionsOf(ci, settings) : [], problems };
 }
 
+/** What the board gives a project (factory_ui_board.ts BoardFeed.view): its tasks part while they come from the board,
+ *  and the notice while the board can't be read. */
+export interface BoardSide {
+  part: Obj | null;
+  problem: Problem | null;
+}
+
 const NO_SNAPSHOT = (p: UiProject): Problem => ({ code: "ui_no_snapshot", message: `${p.name} has no snapshot yet; one is being read.`,
   fix: `Wait a minute, or run \`factory snapshot\` in ${p.path}.` });
 
-/** What the three channels show for project `p`, from its snapshot cache. */
-export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Views {
+/** What the three channels show for project `p`, from its snapshot cache, and its tasks and epics from the message board
+ *  while `board` gives them (#498). */
+export function viewsOf(p: UiProject, refreshing = false, now = Date.now(), board: BoardSide = { part: null, problem: null }): Views {
   if (p.problem) {
     const ci: CiView = { verdict: null, mode: "", repo: "", label: "", runs: [], runners: [], waiting: [], host: host(),
       settings: { heavy: null, light: null }, actions: [], problems: [] };
-    return { generatedAt: null, age: null, refreshing: false, problems: [p.problem], tasks: { source: "", tasks: [], next: null, problems: [] },
-      epics: { source: "", epics: [], problems: [] },
+    const origin: Origin = { from: "github", every: ttl() };
+    return { generatedAt: null, age: null, refreshing: false, problems: [p.problem], tasks: { source: "", ...origin, tasks: [], next: null, problems: [] },
+      epics: { source: "", ...origin, epics: [], problems: [] },
       pulls: { pulls: [], problems: [] }, ci };
   }
   const cache = cacheOf(p);
@@ -379,12 +406,20 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now()): Vie
   const pulls = pullsView(c);
   const at = Date.parse(str(c.generatedAt));
   const limit = list(c.missing).filter((m) => str(m.code) === "github_limit").map((m) => ({ code: str(m.code), message: str(m.message), fix: str(m.fix) }));
+  const origin: Origin = board.part ? { from: "board", every: null } : { from: "github", every: ttl() };
+  const part = board.part ?? obj(c.tasks);
+  const tasks = tasksView(p, part, repo, pulls.pulls, origin);
+  const epics = epicsView(part, repo, origin, obj(c.tasks));
+  if (board.problem) {
+    tasks.problems.unshift(board.problem);
+    epics.problems.unshift(board.problem);
+  }
   return { generatedAt: str(c.generatedAt) || null, age: Number.isNaN(at) ? null : Math.max(Math.round((now - at) / 1000), 0), refreshing,
-    problems: cache ? limit : [NO_SNAPSHOT(p)], tasks: tasksView(p, c, repo, pulls.pulls), epics: epicsView(obj(c.tasks), repo), pulls, ci: ciView(p, c, repo) };
+    problems: cache ? limit : [NO_SNAPSHOT(p)], tasks, epics, pulls, ci: ciView(p, c, repo) };
 }
 
 /** The cache's age limit, in seconds: a read costs a few GitHub calls per open pull request, on the agents' token. */
-function ttl(): number {
+export function ttl(): number {
   return toFloat(process.env.FACTORY_SNAPSHOT_CACHE_SECONDS || 300) ?? 300;
 }
 
@@ -454,7 +489,10 @@ const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** POST /api/projects/:p/tasks/:id/actions/:name with `body` (#439): release, block or reassign a task issue through the
  *  commands the dev manager runs. Reassign releases it, then tells that agent to take it (`factory say <agent>
  *  "/next-task issue-<n>"`), and says nothing when the release failed. */
-export async function taskAction(p: UiProject, id: string, name: string, body: unknown): Promise<Answer> {
+// With the message board (#498) the card comes from the board's tasks part (`part`), and the action still changes the
+// GitHub issue through these commands: GitHub stays the record for tasks until that kind moves (decision 0007 point 9),
+// and the board follows on the next `factory board import github`.
+export async function taskAction(p: UiProject, id: string, name: string, body: unknown, part: Obj | null = null): Promise<Answer> {
   if (!(TASK_ACTIONS as readonly string[]).includes(name)) {
     return refusal(404, "ui_action_unknown", `A task has no action ${name}.`, `Its actions: ${TASK_ACTIONS.join(", ")}.`);
   }
@@ -463,13 +501,13 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
   if (b.confirm !== true) {
     return refusal(400, "confirm_needed", `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
   }
-  const part = obj(cacheOf(p)?.tasks);
-  const task = /^\d+$/.test(id) ? list(part.tasks).find((t) => str(t.id) === id) : undefined; // an issue number, never an option
+  const tasksPart = part ?? obj(cacheOf(p)?.tasks);
+  const task = /^\d+$/.test(id) ? list(tasksPart.tasks).find((t) => str(t.id) === id) : undefined; // an issue number, never an option
   if (!task) {
     return refusal(404, "ui_task_unknown", `#${id} isn't one of ${p.name}'s tasks in the last snapshot.`, "Read the board again, then pick a task it shows.");
   }
-  if (!actionsFor(str(task.state), str(part.source)).includes(action)) {
-    const why = str(part.source) !== "issues" ? "only a task kept as a GitHub issue can be changed from here" : `#${id} is ${taskStateText(str(task.state))}`;
+  if (!actionsFor(str(task.state), str(tasksPart.source)).includes(action)) {
+    const why = str(tasksPart.source) !== "issues" ? "only a task kept as a GitHub issue can be changed from here" : `#${id} is ${taskStateText(str(task.state))}`;
     return refusal(400, "ui_action_unavailable", `#${id} can't be ${action === "block" ? "blocked" : `${action}d`}: ${why}.`,
       "Read the board again; a card shows only the actions it can take.");
   }
@@ -497,7 +535,10 @@ export class Refresher {
   private readonly busy = new Map<string, Promise<void>>();
   private readonly started = new Map<string, number>();
 
-  constructor(private readonly changed: (p: UiProject) => void) {}
+  /** `fromBoard(p)`: project `p`'s tasks come from the message board (#498), so its snapshot leaves them out
+   *  (FACTORY_SNAPSHOT_TASKS=board) and reads only what the board doesn't have: pull requests, CI, agents. null: not
+   *  known yet (the board is being opened), so no read starts until it is. */
+  constructor(private readonly changed: (p: UiProject) => void, private readonly fromBoard: (p: UiProject) => boolean | null = () => false) {}
 
   running(p: UiProject): boolean {
     return this.busy.has(p.id);
@@ -508,8 +549,10 @@ export class Refresher {
     if (p.problem || this.busy.has(p.id)) return false;
     const last = this.started.get(p.id) ?? 0;
     if (!force && Date.now() - last < ttl() * 1000) return false; // one that failed is not tried again at each tick
+    if (this.fromBoard(p) === null) return false; // the message board is still being opened: the next tick reads
     this.started.set(p.id, Date.now());
-    const job = spawn(["bash", factoryScript(p), "snapshot"], p.path, envFor(p), REFRESH_TIMEOUT_MS)
+    const env = { ...envFor(p), FACTORY_SNAPSHOT_TASKS: this.fromBoard(p) === true ? "board" : "" };
+    const job = spawn(["bash", factoryScript(p), "snapshot"], p.path, env, REFRESH_TIMEOUT_MS)
       .then(() => undefined).finally(() => {
         this.busy.delete(p.id);
         this.changed(p);

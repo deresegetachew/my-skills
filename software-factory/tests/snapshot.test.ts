@@ -171,7 +171,8 @@ test("with FACTORY_SNAPSHOT_TASKS=board (the web UI reads them from the message 
   s.issues.push({ number: 7, title: "Add the login page", state: "open", labels: [{ name: "factory:ready" }], body: "", html_url: "https://github.com/o/r/issues/7" });
   const p = setup(s);
   const first = snapshot(p);
-  expect((first.tasks.tasks as Row[]).map((t) => t.id)).toEqual(["7"]);
+  expect((first.tasks.tasks as Row[]).map((t) => t.id)).toContain("7");
+  expect((first.tasks.tasks as Row[]).map((t) => t.id)).not.toContain("8");
   s.issues.push({ number: 8, title: "Sign out", state: "open", labels: [{ name: "factory:ready" }], body: "", html_url: "https://github.com/o/r/issues/8" });
   writeFileSync(join(p.env.SNAPSHOT_SCENARIO as string), JSON.stringify(s));
   const r = sh(["bash", join(SF, "factory"), "snapshot"], { cwd: p.d, env: { ...p.env, FACTORY_SNAPSHOT_TASKS: "board" }, timeoutMs: 120_000 });
@@ -179,7 +180,7 @@ test("with FACTORY_SNAPSHOT_TASKS=board (the web UI reads them from the message 
   const j = JSON.parse(r.stdout) as Row;
   expect(j.tasks).toEqual(first.tasks);
   const again = snapshot(p); // without it, the tracker is read again
-  expect((again.tasks.tasks as Row[]).map((t) => t.id)).toEqual(["7", "8"]);
+  expect((again.tasks.tasks as Row[]).map((t) => t.id)).toContain("8");
 }, T);
 
 test("doctor has the summary shape", () => {

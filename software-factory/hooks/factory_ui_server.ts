@@ -22,6 +22,12 @@
 //   GET|POST /api/projects/:p/signoff, POST .../signoff/:id/confirm|result: the sign-off and testing queue (factory_ui_signoff.ts, #454)
 //   GET  /api/projects/:p/artifacts, POST .../artifacts/pull: designs and artifacts (factory_ui_artifacts.ts, #454)
 //   POST /api/projects/:p/tasks/:id/actions/:name  the board's release, block and reassign (#439): factory_ui_views.ts
+//   GET  /api/projects/:p/tasks/:id            a task's page from the message board (#498): the task, its thread and its
+//                                              context entries (404 ui_board_absent when its tasks aren't on a board)
+//
+// With a message board on this machine (#498, factory_ui_board.ts) a project's tasks and epics come from it, live: the
+// server keeps one listen() and pushes a project's views when the board changes. Its snapshot then leaves the tasks
+// out, so they aren't read from GitHub. A board that can't be read gives a notice and that project falls back to GitHub.
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
@@ -34,7 +40,8 @@ import { type Agent, channels, live, type Live, machineCommand, owner, type Prob
 import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
-import { ciAction, Refresher, taskAction, viewsOf } from "./factory_ui_views.ts";
+import { BoardFeed } from "./factory_ui_board.ts";
+import { ciAction, Refresher, repoOfProject, taskAction, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
   hosts: string[];
@@ -44,6 +51,8 @@ export interface ServeOptions {
   projects: UiProject[];
   /** The app's JavaScript. */
   app: string;
+  /** The message board's URL (#498); left out, this machine's (MB_URL, else the settings folder's url file), or none. */
+  boardUrl?: string | null;
 }
 
 export interface Running {
@@ -158,9 +167,11 @@ export function serve(o: ServeOptions): Running {
 
   // the tasks, pull requests and CI channels (#424): from the snapshot's cache, sent when they change
   const viewsSent = new Map<string, string>();
-  const refresher = new Refresher((p) => pushViews(p));
+  const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
+    changed: (p) => pushViews(p), fellBack: (p) => refresher.start(p, true) });
+  const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
   function viewsMessage(p: UiProject): string {
-    return JSON.stringify({ type: "views", project: p.id, ...viewsOf(p, refresher.running(p)) });
+    return JSON.stringify({ type: "views", project: p.id, ...viewsOf(p, refresher.running(p), Date.now(), feed.view(p)) });
   }
   function pushViews(p: UiProject): void {
     const text = viewsMessage(p);
@@ -279,7 +290,7 @@ export function serve(o: ServeOptions): Running {
     if (view) {
       if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
       refresher.ifStale(p);
-      const v = viewsOf(p, refresher.running(p));
+      const v = viewsOf(p, refresher.running(p), Date.now(), feed.view(p));
       const meta = { project: p.id, generatedAt: v.generatedAt, age: v.age, refreshing: v.refreshing };
       return json(200, view === "ci" ? { ...v.ci, ...meta, problems: [...v.problems, ...v.ci.problems] } // the verdict first
         : { ...meta, ...v[view], problems: [...v.problems, ...v[view].problems] });
@@ -292,8 +303,13 @@ export function serve(o: ServeOptions): Running {
     }
     if (rest[0] === "tasks" && rest[2] === "actions" && rest.length === 4) {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
-      const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null));
+      const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null), feed.view(p).part);
       if (r.status === 200 || r.status === 500) refresher.start(p, true); // read again: the board shows what changed
+      return json(r.status, r.body);
+    }
+    if (rest[0] === "tasks" && rest.length === 2) { // a task's page from the message board (#498)
+      if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
+      const r = await feed.detail(p, rest[1] as string);
       return json(r.status, r.body);
     }
     if (rest.length === 1 && rest[0] === "refresh") {
@@ -349,9 +365,11 @@ export function serve(o: ServeOptions): Running {
     port = s.port ?? port;
     servers.push(s);
   }
+  void feed.start();
   return {
     port,
     stop: () => {
+      feed.stop();
       if (timer) clearInterval(timer);
       for (const s of servers) s.stop(true);
     },

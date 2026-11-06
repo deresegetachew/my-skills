@@ -12,7 +12,7 @@ import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
 import { Tabs } from "./parts.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
-import { type ActionRow, checksText, checksTone, epicBar, type EpicRow, epicTone, filterRows, groupByEpic, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
+import { type ActionRow, checksText, checksTone, epicBar, type EpicRow, epicTone, filterRows, groupByEpic, minutesText, type Origin, originText, type ProblemView, protectedText, type PullRow, reviewTone,
   type RunRow, runnerText, runnerTone, runStateText, runTone, type TaskRow, taskTone, verdictTone, type ViewsData } from "./views_model.ts";
 
 export type Post = (path: string, body: unknown) => Promise<Record<string, unknown>>;
@@ -60,9 +60,12 @@ function ageText(v: ViewsData): string {
   return v.age < 60 ? "as of now" : `as of ${minutesText(v.age / 60)} ago`;
 }
 
-/** The filter box and how old the data is, with a read again. */
-function Toolbar({ typed, setTyped, views, project, post, say, what }: { typed: string; setTyped: (s: string) => void;
-  views: ViewsData; project: { id: string }; post: Post; say: Say; what: string }) {
+/** The filter box and how old the data is, with a read again. `origin` (the tasks and epics, #498): where they come
+ *  from, the message board, live, or GitHub, read every so often. */
+function Toolbar({ typed, setTyped, views, project, post, say, what, origin }: { typed: string; setTyped: (s: string) => void;
+  views: ViewsData; project: { id: string }; post: Post; say: Say; what: string; origin?: Origin }) {
+  const from = origin ? originText(origin) : "";
+  const age = origin?.from === "board" ? from : [from, ageText(views)].filter(Boolean).join(" · ");
   const again = async (): Promise<void> => {
     const r = await post(`/api/projects/${encodeURIComponent(project.id)}/refresh`, {});
     if (r.ok !== true) say({ title: String(r.message ?? "It didn't start."), text: String(r.fix ?? ""), tone: "bad" });
@@ -71,7 +74,7 @@ function Toolbar({ typed, setTyped, views, project, post, say, what }: { typed: 
     <div className="vbar">
       <input type="search" className="vfilter" placeholder={`Filter ${what}`} aria-label={`Filter ${what}`} value={typed}
         onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setTyped(""); }} />
-      <span className="vage" title={views.generatedAt ?? ""}>{ageText(views)}</span>
+      <span className="vage" title={views.generatedAt ?? ""}>{age}</span>
       <button className="btn" onClick={() => void again()} disabled={views.refreshing}>Read again</button>
     </div>
   );
@@ -139,7 +142,7 @@ export function TasksChannel(p: ViewProps) {
   const mode = tab === "list" ? "list" : "board";
   return (
     <div className="body">
-      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="cards" />
+      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="cards" origin={v.tasks} />
       <Problems list={[...v.problems, ...v.tasks.problems]} />
       <div className="bfilters">
         <Tabs label="Group lanes by" value={tab} onChange={setTab} tabs={TASK_TABS.map(([id, label]) => ({ id, label }))} />
@@ -152,7 +155,7 @@ export function TasksChannel(p: ViewProps) {
       {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
       {rows.length > 0 && tab !== "list" && <Board tasks={rows} all={all} epics={epics} pulls={v.pulls.pulls} by={tab} project={p.project} open={p.open}
-        post={p.post} say={p.say} />}
+        post={p.post} say={p.say} token={v.tasks.from === "board" ? p.token : undefined} />}
       {rows.length > 0 && mode === "list" && v.epics.epics.length === 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>}
       {rows.length > 0 && mode === "list" && v.epics.epics.length > 0 && groupByEpic(rows, v.epics.epics).map((g) => (
         <section key={g.epic?.id ?? "none"} aria-label={g.epic ? `Tasks in epic ${g.epic.title}` : "Tasks in no epic"}>
@@ -242,7 +245,7 @@ export function EpicsChannel(p: ViewProps) {
   }
   return (
     <div className="body">
-      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="epics" />
+      <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="epics" origin={v.epics} />
       <Problems list={[...v.problems, ...v.epics.problems]} />
       <div className="etabs-row">
         <Tabs<EpicTab> label="Epic views" value={tab} onChange={setTab} tabs={[{ id: "board", label: "Board" }, { id: "list", label: "List" }]} />

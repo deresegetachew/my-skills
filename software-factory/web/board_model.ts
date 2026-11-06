@@ -88,6 +88,12 @@ export function epicColour(index: number): string {
   return EPIC_COLOURS[((index % EPIC_COLOURS.length) + EPIC_COLOURS.length) % EPIC_COLOURS.length] as string;
 }
 
+/** A card's blockers in words (#498): "Blocked by #11, #12", or "" with none. */
+export function blockersText(t: { blockedBy?: string[] }): string {
+  const b = t.blockedBy ?? [];
+  return b.length ? `Blocked by ${b.map((x) => (/^\d+$/.test(x) ? `#${x}` : x)).join(", ")}` : "";
+}
+
 export type TaskAction = "release" | "block" | "reassign";
 
 /** What a card's action does and doesn't do, in plain words, for its confirm. The commands change the issue's labels

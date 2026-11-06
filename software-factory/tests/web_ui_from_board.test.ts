@@ -5,12 +5,12 @@
 // GitHub path is as before; a board that can't be reached shows a notice and that project falls back to GitHub.
 // A real Postgres (board_pg.ts), the real server (startUi), a fake gh and a fake `factory` that logs what it was asked.
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { readFileSync, rmSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
 import { freshDb, type Pg, startPg } from "./board_pg.ts";
 import { api, CONFIG, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
-import { write, writeExe } from "./support.ts";
+import { CI, copyHookFolders, HOOKS, SF, write, writeExe } from "./support.ts";
 
 const T = 90_000;
 const REPO = "o/work";
@@ -294,6 +294,24 @@ test("a project with no task on the board keeps the GitHub path, with no notice"
   await b.migrate();
   await b.create({ title: "Someone else's", ref: "github:x/other#1" });
   const ui = await started(workProject(), url);
+  await Bun.sleep(1_500);
+  const json = (await api(ui, "/api/projects/work/tasks")).json;
+  expect(json.from).toBe("github");
+  expect(Object.keys(byId(json))).toEqual(["99"]);
+  expect(problemsOf(json)).toEqual([]);
+}, T);
+
+test("an install without the board's code (a release, for now) keeps the GitHub path even with a board set up", async () => {
+  const url = await boardUrl();
+  await seeded(url);
+  const p = workProject();
+  const hooks = join(p.d, ".claude", "hooks");
+  mkdirSync(hooks, { recursive: true });
+  for (const f of readdirSync(HOOKS)) if (f.endsWith(".ts")) copyFileSync(join(HOOKS, f), join(hooks, f));
+  copyHookFolders(hooks);
+  cpSync(CI, join(p.d, ".claude", "ci"), { recursive: true });
+  const ui = await startUi(p, ["ui", "--port", "0"], ["bash", join(SF, "factory")], { MB_URL: url });
+  running.push(ui);
   await Bun.sleep(1_500);
   const json = (await api(ui, "/api/projects/work/tasks")).json;
   expect(json.from).toBe("github");

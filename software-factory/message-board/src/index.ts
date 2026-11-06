@@ -4,3 +4,5 @@ export { BoardError, type ErrorCode } from "./errors.ts";
 export { migrationNames } from "./migrate.ts";
 export * from "./types.ts";
 export { FACTORY_MAPPING, type GithubMapping, GithubError, type ImportSummary, importFromGithub } from "./github/import.ts";
+/** Where a user of the board finds it on this machine: MB_URL, else <machine settings folder>/message-board/url. */
+export { boardUrl } from "./server.ts";

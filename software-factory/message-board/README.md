@@ -78,7 +78,7 @@ the last run's time and options. The board's rules hold: a task held on the boar
 that would make a loop is left out (and listed), an answer marks the question it replies to answered. Messages carry
 the `ref` they came with and a `tag`, the user's own word for what a message is (free text, like an actor's role).
 
-**Also:** `actor(id, { kind, role })` records an agent or a person, `info()` gives the server version, the migrations
+**Also:** `boardUrl()` finds this machine's board as the command does (`MB_URL`, else the url file), or null; `actor(id, { kind, role })` records an agent or a person, `info()` gives the server version, the migrations
 and the counts, `end()` closes the connections.
 
 ## The rules
