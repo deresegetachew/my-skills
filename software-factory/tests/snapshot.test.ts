@@ -254,6 +254,16 @@ test("a pull row carries what the web UI's pull requests channel shows: review, 
     nextText: "owner merges (protected)", claim: null });
 }, T);
 
+test("a pull row carries the decisions and PRD stories its body cites, [] when it cites none (#438, #425)", () => {
+  const base = scenario();
+  const pulls = base.pulls as Row[];
+  const withCites = { ...base, pulls: [{ ...pulls[0], body: `${pulls[0].body}\nSee decision 0004 and US-12.` }] };
+  const row = (snapshot(setup(withCites)).pulls as Row[]).find((r) => r.number === 12);
+  expect(row?.cites, JSON.stringify(row)).toEqual(["decision 0004", "US-12"]);
+  const plain = (snapshot(setup(scenario())).pulls as Row[]).find((r) => r.number === 12);
+  expect(plain?.cites).toEqual([]);
+}, T);
+
 test("no sessions at all", () => {
   const p = setup({ issues: [] }, { tasks: { source: "issues" }, reviewMarkers: "tmp/reviews", agents: [] });
   const j = snapshot(p);
