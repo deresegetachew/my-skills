@@ -120,8 +120,8 @@ async function roles(w: World): Promise<string[]> {
   const db = new URL(w.url).pathname.slice(1);
   const sql = new SQL(w.url, { max: 1 });
   try {
-    const rows = (await sql`select rolname from pg_roles where rolname like ${`${db}_l_%`} order by rolname`) as { rolname: string }[];
-    return rows.map((r) => r.rolname);
+    const rows = (await sql`select rolname from pg_roles order by rolname`) as { rolname: string }[];
+    return rows.map((r) => r.rolname).filter((n) => n.startsWith(`${db}_l_`));
   } finally {
     await sql.close();
   }
