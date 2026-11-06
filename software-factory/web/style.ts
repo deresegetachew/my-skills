@@ -146,7 +146,9 @@ pre.log { margin: 0; background: var(--bg-subtle); border-radius: 10px; padding:
   .app.open .side { display: flex; position: fixed; left: 64px; top: 0; bottom: 0; width: min(280px, calc(100% - 64px)); z-index: 11; }
   .backdrop { display: block; position: fixed; inset: 0; background: color-mix(in srgb, var(--text) 35%, transparent); z-index: 10; border: 0; }
   .menu { display: inline-flex; }
-  .page-head { padding: 20px 16px 4px; }
+  .page-head { padding: 20px 16px 4px; flex-wrap: wrap; }
+  .page-head .grow { flex: 1 1 220px; }
+  .page-actions { width: 100%; }
   .page-head h1 { font-size: 26px; }
   .body { padding: 12px 16px 32px; }
   .composer { padding: 12px 16px 16px; }
