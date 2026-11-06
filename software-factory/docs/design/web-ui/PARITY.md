@@ -7,7 +7,8 @@ map as a design page.
 
 **In the UI** is one of:
 
-- `built`: the web UI does it today (`factory ui`).
+- `built`: the web UI does it today (`factory ui`). A **Task** on a built row is the screen task that redoes it to the
+  reference design.
 - `planned`: its screen is designed; **Task** is the issue that builds it.
 - `agents only`: a tool the agents run. The owner sees its result on the screen named.
 - `terminal only`: it stays in a terminal, and **Where** says why.
