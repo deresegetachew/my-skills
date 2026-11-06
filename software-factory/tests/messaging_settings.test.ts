@@ -76,7 +76,7 @@ test("the settings page has a Messaging table listing the five keys", () => {
   const page = read(join(WIKI, "settings.md"));
   const block = page.slice(page.indexOf("<!-- settings:begin -->"), page.indexOf("<!-- settings:end -->"));
   expect(block).toContain("**Messaging**");
-  for (const key of ["transport", "url", "creds", "kinds", "fallback"]) expect(block).toContain(`messaging.${key}`);
+  for (const key of ["transport", "url", "creds", "kinds", "githubCopy", "fallback"]) expect(block).toContain(`messaging.${key}`);
 });
 
 // --- validate: the whole-file checks --------------------------------------------------------------------------------
@@ -95,6 +95,27 @@ test("a messaging.url must start with nats:// or tls://", () => {
   expect(bad.out).toMatch(/(^|\n)(error: )?messaging\.url:/);
   expect(validate({ transport: "nats", url: "nats://h:4222" }).code).toBe(0);
   expect(validate({ transport: "nats", url: "tls://h:4222" }).code).toBe(0);
+});
+
+test("messaging.githubCopy is unset by default (the same as messaging.kinds), and its help says which kinds may drop it", () => {
+  const d = project({});
+  const get = settings(d, ["get", "messaging.githubCopy"]);
+  expect(get.code, get.out).toBe(0);
+  expect(get.stdout.trim()).toBe("null");
+  const help = settings(d, ["help", "messaging.githubCopy"]);
+  expect(help.code).toBe(0);
+  expect(help.out).toContain("messaging.kinds");
+  expect(help.out).toContain("NATS is not the record");
+  for (const kind of ["claim", "release", "wake"]) expect(help.out).toContain(kind);
+});
+
+test("a messaging.githubCopy item must be a message kind; an empty list is fine", () => {
+  const bad = validate({ kinds: ["claim"], githubCopy: ["gossip"] });
+  expect(bad.code).toBe(1);
+  expect(bad.out).toMatch(/(^|\n)(error: )?messaging\.githubCopy:/);
+  expect(bad.out).toContain("gossip");
+  expect(validate({ kinds: ["claim", "wake"], githubCopy: [] }).code).toBe(0);
+  expect(validate({ kinds: ["claim", "wake"], githubCopy: ["claim"] }).code).toBe(0);
 });
 
 test("a messaging.kinds item must be a message kind", () => {

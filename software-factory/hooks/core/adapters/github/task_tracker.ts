@@ -9,7 +9,7 @@ import { type Config, taskLabels } from "../../../factory_config.ts";
 import { addLabels, claimSettleSeconds, claimWinner, comment, gh, ghAll, humanComments, type Issue, names, openDependencies,
   isEpic, ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
 import { sleepSync } from "../../../factory_lib.ts";
-import { holderIsMe, holderName, leasesOn } from "../../../factory_leases.ts";
+import { claimCopy, holderIsMe, holderName, leasesOn } from "../../../factory_leases.ts";
 import { type Claimant, isMe } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
 import { type Epic, parseEpic } from "../../domain/epic.ts";
@@ -154,6 +154,7 @@ export class GithubTaskTracker implements TaskTracker {
       if (!took.held && !holderIsMe(took.holder, who.agent, who.machine)) return false;
       addLabels(n, [L.inProgress, mine]);
       removeLabel(n, L.ready);
+      if (!claimCopy(this.cfg)) return true; // NATS only (messaging.githubCopy): the labels, no comment
       const where = who.machine ? ` machine=${who.machine}` : "";
       comment(n, `<!-- factory-claim agent=${who.agent}${where} -->\n**${who.agent}** is working on this.\n${claimRecord(i.body)}`);
       return true;

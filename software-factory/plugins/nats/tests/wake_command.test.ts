@@ -2,6 +2,9 @@
 // request or answers, `minutes` (the slower GitHub poll), and that with wake not in messaging.kinds nothing goes to
 // NATS and a wait just sleeps. Against a real nats-server.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { HOOKS, runCode } from "../../../tests/support.ts";
 import { createMessaging } from "../index.ts";
 import { hook, type Project, project } from "./project.ts";
 import { MISSING, NATS_SERVER, type Server, startServer } from "./server.ts";
@@ -69,6 +72,39 @@ if (!NATS_SERVER) {
     expect(hookEvent(p, "dm-1", "gh pr comment 7 --body '<!-- factory-mustfix sha=abcdef1 -->'", "dev-manager").code).toBe(0);
     expect(heard("wake4", ["abebe", "coding-agent", "all"], since, 10))
       .toMatchObject({ from: "dm-1", to: "coding-agent", ref: "pr#7", why: "asked for a fix" });
+  });
+
+  // #413 (re-scoped 6 Nov 2026): questions, answers and hand-offs stay on GitHub; a wake-up tells the addressee at once.
+  test("the hook: a question written in a --body-file wakes its addressee", () => {
+    const p = project("Wake8", on());
+    writeFileSync(join(p.dir, "q.md"), "<!-- factory-msg v=1 id=01abc23def kind=question from=haile to=po state=submitted ref=issue#7 -->\n" +
+      "Which colour?\n");
+    const since = Date.now();
+    expect(hookEvent(p, "haile", "gh issue comment 7 --body-file q.md").code).toBe(0);
+    expect(heard("wake8", ["po"], since, 10)).toMatchObject({ from: "haile", to: "po", why: "asked a question" });
+  });
+
+  test("the hook: an answer addressed to one agent wakes that agent, not every loop", () => {
+    const p = project("Wake9", on());
+    const since = Date.now();
+    const body = "<!-- factory-msg v=1 id=01abc23dff kind=answer from=dm-1 to=haile state=completed ref=pr#5 in-reply-to=01abc23def -->";
+    expect(hookEvent(p, "dm-1", `gh pr comment 5 --body '${body}\nBlue.'`, "dev-manager").code).toBe(0);
+    expect(heard("wake9", ["haile"], since, 10)).toMatchObject({ from: "dm-1", to: "haile", ref: "pr#5", why: "answered a question" });
+  });
+
+  test("a sub-manager's hand-off on a pull request (its next step) wakes the coding agents", () => {
+    const pr = { number: 5, title: "Fix", state: "open", draft: true, head: { sha: "a".repeat(40), ref: "task/1-fix" }, labels: [] };
+    const p = project("Wake10", on(), { pulls: [pr], issues: [{ ...pr, pull_request: {} }], comments: { 5: [] } });
+    const since = Date.now();
+    const code = `import { leaveVerdict } from ${JSON.stringify(join(HOOKS, "factory_orchestrator.ts"))};
+      import { load } from ${JSON.stringify(join(HOOKS, "factory_config.ts"))};
+      const item = { pr: 5, kind: "review", ref: "pr-5", target: 5 } as unknown as Parameters<typeof leaveVerdict>[2];
+      console.log(leaveVerdict(load(), "dm-1", item, new Set(), () => {}));`;
+    const r = runCode(code, { cwd: p.dir, env: { ...p.env, FACTORY_AGENT: "dm-1", FACTORY_ROLE: "dev-manager" } });
+    expect(r.code, r.out).toBe(0);
+    expect(r.stdout.trim()).toBe("true");
+    expect(heard("wake10", ["abebe", "coding-agent", "all"], since, 10))
+      .toMatchObject({ from: "dm-1", to: "coding-agent", ref: "pr#5", why: "left the next step" });
   });
 
   test("minutes: an idle wait is messaging.pollMinutes while wake-ups come over NATS, else the loop's own", () => {

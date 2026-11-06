@@ -3,10 +3,11 @@
 // marker with no NATS claim behind it holds nothing, and the winner still writes the GitHub marker (and a task's
 // labels): the double send of decision 0004. Without `claim` in the kinds, the claims stay on GitHub. Real nats-server.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { HOOKS, runCode } from "../../../tests/support.ts";
 import { createMessaging } from "../index.ts";
-import { hook, type Project, project, state } from "./project.ts";
+import { calls, hook, type Project, project, state } from "./project.ts";
 import { MISSING, NATS_SERVER, type Server, startServer } from "./server.ts";
 
 setDefaultTimeout(90_000);
@@ -141,5 +142,90 @@ if (!NATS_SERVER) {
     expect(r.code, r.out).toBe(0);
     expect(r.stderr.split("nats-unreachable").length - 1).toBe(1);
     expect(posted(p, 5).filter((b) => b.includes("factory-review-claim manager=dm-1"))).toHaveLength(1);
+  });
+
+  // messaging.githubCopy (6 Nov 2026, "NATS is not the record"): with claim moved and not in githubCopy, a claim and its
+  // release are on NATS only. What a person or the PR gate reads (labels) is still written.
+  const writes = (p: Project): string[] => calls(p).filter((c) => !c.startsWith("GET "));
+
+  test("githubCopy without claim: a dev-manager pass over a PR waiting for the owner makes no GitHub write", () => {
+    const p = claimsProject("Copy1", ["claim", "wake"]);
+    const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+    (cfg.messaging as Record<string, unknown>).githubCopy = [];
+    writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+    // the orchestrator's lease around one sub-manager on PR #5 (it finds the PR waits for the owner and stops), twice
+    const code = `import * as lease from ${JSON.stringify(join(HOOKS, "factory_lease.ts"))};
+      for (let i = 0; i < 2; i++) {
+        const a = lease.acquire(5, "review", "${HEAD}", "dm-1", 20);
+        const b = lease.acquire(5, "review", "${HEAD}", "dm-2", 20);
+        console.log(JSON.stringify({ a: a?.holder ?? null, b: b?.holder ?? null, held: lease.holder(5, "review", "${HEAD}") }));
+        lease.release(a);
+      }`;
+    const r = runCode(code, { cwd: p.dir, env: p.env });
+    expect(r.code, r.out).toBe(0);
+    for (const line of r.stdout.trim().split("\n")) expect(JSON.parse(line)).toEqual({ a: "dm-1", b: null, held: "dm-1" });
+    expect(natsOf("copy1").holder("review.5.aaaaaaa")).toBe("");
+    expect(writes(p)).toEqual([]);
+    // `factory manager-claims review` and `release` by hand: no claim or release comment, only the hold label
+    const q = hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-1"]);
+    expect(q.code, q.out).toBe(0);
+    expect(posted(p, 5)).toEqual([]);
+    expect(writes(p).filter((w) => !w.includes("/labels"))).toEqual([]); // only the hold label, which the PR gate reads
+    const back = hook(p, "factory_manager_claims", ["release", "5", "--manager", "dm-1"]);
+    expect(back.code, back.out).toBe(0);
+    expect(natsOf("copy1").holder("review.5.aaaaaaa")).toBe("");
+    expect(posted(p, 5)).toEqual([]);
+  });
+
+  test("githubCopy without claim: the orchestrator's lease writes nothing at all to GitHub", () => {
+    const p = claimsProject("Copy2", ["claim"]);
+    const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+    (cfg.messaging as Record<string, unknown>).githubCopy = [];
+    writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+    const code = `import * as lease from ${JSON.stringify(join(HOOKS, "factory_lease.ts"))};
+      const a = lease.acquire(5, "item", "issue-9", "dm-1", 20);
+      lease.release(a);`;
+    const r = runCode(code, { cwd: p.dir, env: p.env });
+    expect(r.code, r.out).toBe(0);
+    expect(writes(p)).toEqual([]);
+  });
+
+  test("githubCopy without claim: rework and answer claims post no comment, and a task claim writes only its labels", () => {
+    const qc = { id: 61, body: "<!-- factory-question -->\nWhich one?", created_at: "2026-11-05T10:00:00Z", user: { login: "me" },
+      issue_url: "https://api.github.com/repos/o/r/issues/6" };
+    const p = claimsProject("Copy3", ["claim"], { 6: [qc] });
+    const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+    (cfg.messaging as Record<string, unknown>).githubCopy = ["wake"];
+    writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+    const code = `import { claimRework, releaseRework } from ${JSON.stringify(join(HOOKS, "factory_claims.ts"))};
+      import { load } from ${JSON.stringify(join(HOOKS, "factory_config.ts"))};
+      const cfg = load();
+      console.log(JSON.stringify([claimRework(cfg, 5, "${HEAD}", "haile"), claimRework(cfg, 5, "${HEAD}", "abebe"),
+        releaseRework(cfg, 5, "haile")]));`;
+    const r = runCode(code, { cwd: p.dir, env: p.env });
+    expect(r.code, r.out).toBe(0);
+    expect(JSON.parse(r.stdout.trim())).toEqual([true, false, true]);
+    expect(posted(p, 5)).toEqual([]);
+    expect(hook(p, "factory_manager_claims", ["answer", "61", "--manager", "dm-1"]).code).toBe(0);
+    expect(hook(p, "factory_manager_claims", ["release", "61", "--manager", "dm-1"]).code).toBe(0);
+    expect(posted(p, 6)).toEqual([]);
+    const t = hook(p, "next_task", ["--claim", "haile", "--pid", String(process.pid)], "haile");
+    expect(t.code, t.out).toBe(0);
+    expect(t.stdout).toContain("issue-1");
+    expect(natsOf("copy3").holder("task.1")).toMatch(/^haile/);
+    const s = state(p);
+    expect((s.posted ?? []).filter((x) => x.issue === 1 && x.kind === "comment")).toEqual([]);
+    const labels = (s.posted ?? []).filter((x) => x.issue === 1 && x.kind === "labels").flatMap((x) => x.labels as string[]);
+    expect(labels).toEqual(expect.arrayContaining(["factory:in-progress", "agent:haile"]));
+  });
+
+  test("githubCopy without wake: a wake-up writes nothing to GitHub", () => {
+    const p = claimsProject("Copy4", ["wake"]);
+    const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+    (cfg.messaging as Record<string, unknown>).githubCopy = [];
+    writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+    const r = hook(p, "factory_wake", ["send", "--to", "dev-manager", "--ref", "pr#5", "--why", "pushed"], "haile");
+    expect(r.code, r.out).toBe(0);
+    expect(calls(p)).toEqual([]);
   });
 }
