@@ -248,6 +248,15 @@ they land, every message goes over GitHub as above. It moves the agents' chatter
   A release, a block, giving a task back and the dev manager's sweep free the NATS claim too. A claim made on GitHub
   before the switch has no NATS claim behind it and holds nothing then, except a task's own in-progress issue, which
   its agent still finds by its GitHub marker.
+- **`pr`: pull requests and CI, one reader per hub.** It is not a message: one watcher per project
+  (`factory_pr_feed.ts watch`, started by the dev manager's orchestrator and held by the NATS claim `pr-feed`) reads the
+  open pull requests, their head, CI and labels from GitHub with conditional requests (an unchanged answer is a 304,
+  which costs no REST call), keeps them as a snapshot in the bucket `prs-<project>`, and publishes one event per change
+  (`opened`, `head`, `checks`, `labels`, `draft`, `merged`, `closed`) on `factory.<project>.prs.<watcher>`. The PR-slot
+  check, `factory wait slot|ci`, the dev manager's pass and the rework check read the snapshot and listen for the
+  events; a pull request's comments are read again only when its `updated_at` moved. GitHub stays the record: the PR
+  gate, merges and every write go to GitHub, a rework found in the snapshot is checked on GitHub before it is taken,
+  and with no fresh snapshot for `messaging.pollMinutes` every reader asks GitHub as before.
 - **Switching an agent over:** `factory nats up` on the machine, `factory nats user add <agent> --role <role>` for each
   agent, then `factory settings set messaging.transport nats`, `messaging.url nats://127.0.0.1:4222` and
   `messaging.kinds '["wake","claim"]'` (the settings are the project's, so every agent of it moves together).

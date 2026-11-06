@@ -4,6 +4,8 @@
 // and a loop with nothing to do listens for one instead of asking GitHub every minute. It still looks at GitHub every
 // `messaging.pollMinutes` (default 15), for what stays there: CI results, the owner's words, anything a wake-up missed.
 // Without `wake` in the kinds, or when NATS can't be reached, everything is as before: `wait` sleeps its time.
+// With `pr` in the kinds, the pull request watcher's events (factory_pr_feed.ts) end a wait too: every change for the dev
+// manager and the product owner, a merge or a close for a coding agent; and an idle wait lasts messaging.pollMinutes.
 //
 //   factory_wake.ts send --to <agent|dev-manager|po|coding-agent|all> [--ref pr#N|issue#N] [--why TEXT]
 //       as FACTORY_AGENT. Never fails: with wake off it does nothing, and a send NATS refused is a notice on stderr.
@@ -45,14 +47,28 @@ export function wakeIsOn(cfg: Config): boolean {
   return s.transport === "nats" && s.kinds.includes("wake");
 }
 
-/** NATS's wake-ups, or null: wake isn't on, or NATS can't be had (then `notice` says so, once). */
+/** Whether the pull request watcher's events come over NATS (`pr` in messaging.kinds; factory_pr_feed.ts). */
+export function prEventsOn(cfg: Config): boolean {
+  const s = messagingSettings(cfg);
+  return s.transport === "nats" && s.kinds.includes("pr");
+}
+
+/** NATS's wake-ups, or null: neither wake nor pr is on, or NATS can't be had (then `notice` says so, once). With only
+ * pr on, a wait hears the pull request watcher's events and nothing else. */
 export function wakesOn(cfg: Config): Wakes | null {
   try {
-    return natsFor(cfg, "wake", notice);
+    return natsFor(cfg, wakeIsOn(cfg) || !prEventsOn(cfg) ? "wake" : "pr", notice);
   } catch (e) {
     notice(e as CoreError);
     return null;
   }
+}
+
+/** The pull request changes that end an idle wait for this agent (with `pr` on): every one, for the dev manager and the
+ * product owner; a pull request merged or closed (a slot, or a task's dependency, may be free) for a coding agent. */
+function prChangesFor(cfg: Config, agent: string): string[] | undefined {
+  if (!prEventsOn(cfg)) return undefined;
+  return roleAddress(cfg, agent) === "coding-agent" ? ["merged", "closed"] : [];
 }
 
 /** The address a role answers to: dev-manager, po or coding-agent. */
@@ -74,7 +90,8 @@ export function waitForWake(cfg: Config, agent: string, seconds: number, since: 
   const wakes = agent && NAME.test(agent) ? wakesOn(cfg) : null;
   if (wakes) {
     try {
-      return wakes.waitWake({ names: addresses(cfg, agent), since, seconds });
+      const prChanges = prChangesFor(cfg, agent);
+      return wakes.waitWake({ names: addresses(cfg, agent), since, seconds, ...(prChanges ? { prChanges } : {}) });
     } catch (e) {
       notice(e as CoreError);
     }
@@ -188,7 +205,7 @@ export function main(argv: string[]): number {
   if (cmd === "minutes") {
     const m = toFloat(rest[0] ?? "") ?? usage("minutes needs a number");
     const poll = messagingSettings(cfg).pollMinutes;
-    console.log(String(m > 0 && poll > m && wakeIsOn(cfg) && wakesOn(cfg) ? poll : m));
+    console.log(String(m > 0 && poll > m && (wakeIsOn(cfg) || prEventsOn(cfg)) && wakesOn(cfg) ? poll : m));
     return 0;
   }
   return usage(cmd ? `unknown command ${cmd}` : "a command is needed");
