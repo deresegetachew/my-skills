@@ -73,3 +73,28 @@ test("plan: no epics", () => {
   write(join(d, "docs", "blocked.md"), "# Blocked\n");
   expect(new PlanTaskTracker({ plan: "docs/build-plan.md", blocked: "docs/blocked.md", mainBranch: "main" } as Config).epics()).toEqual([]);
 });
+
+test("github: factory next and a pick skip an epic labelled factory:ready", () => {
+  world([epic(1, ["factory:ready"], "- [ ] #2 x"), issue(2, ["factory:ready"])]);
+  const port = new GithubTaskTracker(cfg);
+  expect(port.next()?.id).toBe("2");
+  expect(port.pick({ agent: "haile", machine: "m1" }).task?.id).toBe("2");
+  expect(port.pick({ agent: "taytu", machine: "m1" }).task).toBeNull(); // the epic is all that is left, and it is not work
+});
+
+test("github: an epic alone is never the next task", () => {
+  world([epic(1, ["factory:ready"])]);
+  expect(new GithubTaskTracker(cfg).next()).toBeNull();
+});
+
+test("github: claiming an epic by number is refused with {code, message, fix}", () => {
+  world([epic(7, ["factory:ready"])]);
+  let got: unknown = null;
+  try {
+    new GithubTaskTracker(cfg).claim("7", { agent: "haile", machine: "m1" });
+  } catch (e) {
+    got = (e as { toJSON(): unknown }).toJSON();
+  }
+  expect(got).toEqual({ code: "issue-epic", message: "#7 is an epic, not a task.",
+    fix: "Claim one of the tasks it lists instead, or run `factory next`." });
+});
