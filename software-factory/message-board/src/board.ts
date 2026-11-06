@@ -3,10 +3,12 @@
 import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
 import { BoardError, refuse } from "./errors.ts";
+import { GRAPH_LOCK, reaches, recordEvents } from "./graph.ts";
+import { applyImport } from "./import.ts";
 import { applied, migrate } from "./migrate.ts";
 import { CONTEXT_COLS, EVENT_COLS, MESSAGE_COLS, type Row, TASK_SELECT, toContext, toEvent, toMessage, toTask } from "./rows.ts";
 import {
-  BLOCKING, type BoardEvent, type Claim, CONTEXT_KINDS, type ContextEntry, type ContextKind, type Delegated, EDGE_KINDS, type EdgeKind,
+  BLOCKING, type BoardEvent, type Claim, CONTEXT_KINDS, type ContextEntry, type ContextKind, type Delegated, type ImportBatch, type ImportResult, EDGE_KINDS, type EdgeKind,
   type Message, MESSAGE_KINDS, type NewMessage, type NewTask, type Next, type OnMe, type Outcome, OUTCOMES, type Prime, type Task,
   TASK_KINDS, type TaskChanges,
 } from "./types.ts";
@@ -14,8 +16,6 @@ import {
 /** How long a claim lasts before it needs a heartbeat, and how long a holder may be silent before the sweep. */
 export const CLAIM_SECONDS = 30 * 60;
 export const QUIET_SECONDS = 30 * 60;
-const GRAPH_LOCK = 4_891_008; // serialises edge and parent writes, so two of them can't close a loop together
-const EVENT_LOCK = 4_891_009; // serialises event inserts to commit order, so a reader's cursor never skips one
 /** The kinds a claim takes: epics, notes and decisions are not work items. */
 const CLAIMABLE_KINDS = ["task", "bug"] as const;
 const CLAIMABLE = CLAIMABLE_KINDS.map((k) => `'${k}'`).join(", ");
@@ -35,6 +35,9 @@ export interface Listener {
 }
 
 type Tx = SQL;
+
+/** Thrown inside a dry run's transaction to roll it back. */
+class DryRun extends Error {}
 
 function rows(r: unknown): Row[] {
   return r as Row[];
@@ -130,13 +133,7 @@ export class Board {
     return this.run(() =>
       this.sql.begin(async (tx) => {
         const { result, event } = await fn(tx);
-        if (event) {
-          await tx`SELECT pg_advisory_xact_lock(${EVENT_LOCK})`;
-          const ev = rows(await tx`INSERT INTO events (kind, subject, actor, actor_session, payload)
-            VALUES (${event.kind}, ${event.subject}, ${this.as}, ${this.session}, ${event.payload})
-            RETURNING seq::text AS seq`);
-          await tx`SELECT pg_notify('mb_events', ${String(ev[0]?.seq)})`;
-        }
+        if (event) await recordEvents(tx, this.as, this.session, [event]);
         return result;
       }) as Promise<T>,
     );
@@ -159,23 +156,6 @@ export class Board {
 
   private async seen(tx: Tx, actor: string): Promise<void> {
     await tx`INSERT INTO actors (id, seen_at) VALUES (${actor}, now()) ON CONFLICT (id) DO UPDATE SET seen_at = now()`;
-  }
-
-  /** Whether `target` is reachable from `start` by blocking edges and parent-to-child steps (a block on a task also
-   * blocks its children). An edge or parent that adds a step back from `target` to `start` would close a loop. */
-  private async reaches(tx: Tx, start: number, target: number): Promise<boolean> {
-    const r = rows(await tx.unsafe(`
-      WITH RECURSIVE reach (id) AS (
-        SELECT $1::bigint
-        UNION
-        SELECT n.id FROM reach r CROSS JOIN LATERAL (
-          SELECT e.to_id AS id FROM edges e WHERE e.from_id = r.id AND e.kind IN ('blocks', 'waits_for')
-          UNION ALL
-          SELECT c.id FROM tasks c WHERE c.parent_id = r.id
-        ) n
-      )
-      SELECT EXISTS (SELECT 1 FROM reach WHERE id = $2::bigint) AS hit`, [start, target]));
-    return Boolean(r[0]?.hit);
   }
 
   // ---------- actors ----------
@@ -231,7 +211,7 @@ export class Board {
       const before = await this.mustTask(tx, id);
       if (changes.parentId !== undefined && changes.parentId !== null) {
         await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
-        if (changes.parentId === id || (await this.reaches(tx, id, changes.parentId))) {
+        if (changes.parentId === id || (await reaches(tx, id, changes.parentId))) {
           refuse("cycle", `#${changes.parentId} can't be the parent of #${id}: that makes a loop (it is #${id} itself, under it, or waits on it).`,
             "Choose another parent, or remove the edge that makes the loop first.");
         }
@@ -263,7 +243,7 @@ export class Board {
       }
       if (BLOCKING.includes(k)) {
         await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
-        if (await this.reaches(tx, to, from)) {
+        if (await reaches(tx, to, from)) {
           refuse("cycle", `#${from} ${k.replace("_", " ")} #${to} would make a loop: #${from} already waits on #${to}, or is under it.`,
             "Remove the edge that makes the loop first, or link them the other way.");
         }
@@ -437,14 +417,8 @@ export class Board {
             status = CASE WHEN t.status = 'in_review' THEN 'in_review' ELSE 'open' END, version = t.version + 1, updated_at = now()
           FROM stale WHERE t.id = stale.id AND t.holder = stale.holder AND ${stale}
           RETURNING t.id::int AS id, stale.holder AS holder`, [quiet]));
-        if (swept.length) {
-          await tx`SELECT pg_advisory_xact_lock(${EVENT_LOCK})`;
-          for (const s of swept) {
-            const ev = rows(await tx`INSERT INTO events (kind, subject, actor, actor_session, payload)
-              VALUES ('task.swept', ${`task:${s.id}`}, 'system', ${this.session}, ${{ holder: s.holder, quietSeconds: quiet }}) RETURNING seq::text AS seq`);
-            await tx`SELECT pg_notify('mb_events', ${String(ev[0]?.seq)})`;
-          }
-        }
+        await recordEvents(tx, "system", this.session,
+          swept.map((s) => ({ kind: "task.swept", subject: `task:${s.id}`, payload: { holder: s.holder, quietSeconds: quiet } })));
         return swept;
       }));
       return r.map((s) => ({ id: Number(s.id), holder: String(s.holder) }));
@@ -468,9 +442,9 @@ export class Board {
       }
       const id = Number(rows(await tx`SELECT nextval(pg_get_serial_sequence('messages', 'id'))::int AS id`)[0]?.id);
       const state = kind === "question" || kind === "ask" ? "open" : "closed";
-      const r = rows(await tx.unsafe(`INSERT INTO messages (id, task_id, thread_id, kind, sender, addressee, state, in_reply_to, body)
-        OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING ${MESSAGE_COLS}`,
-        [id, task, thread ?? id, kind, this.as, input.to ?? null, state, input.inReplyTo ?? null, input.body]));
+      const r = rows(await tx.unsafe(`INSERT INTO messages (id, task_id, thread_id, kind, sender, addressee, state, in_reply_to, body, tag)
+        OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING ${MESSAGE_COLS}`,
+        [id, task, thread ?? id, kind, this.as, input.to ?? null, state, input.inReplyTo ?? null, input.body, input.tag ?? null]));
       const m = toMessage(r[0] as Row);
       return { result: m, event: { kind: "message.posted", subject: `message:${m.id}`, payload: { task: m.taskId, thread: m.threadId, kind, to: m.to, inReplyTo: m.inReplyTo } } };
     });
@@ -535,6 +509,40 @@ export class Board {
     const messages = await this.run(async () => rows(await this.sql.unsafe(
       `SELECT ${MESSAGE_COLS} FROM messages WHERE sender = $1 AND state = 'open' ORDER BY id`, [actor])).map(toMessage));
     return { tasks, messages };
+  }
+
+  // ---------- import ----------
+  /** Bring in tasks and their threads from somewhere else, keyed by outside ids: safe to run twice (a second run updates
+   * what changed and adds what is new). All of it is one transaction. `dryRun` does the same work and rolls it back, so
+   * the counts are what a real run would do and nothing is written. Writes events `task.imported` and `import.applied`. */
+  async import(batch: ImportBatch, options: { dryRun?: boolean } = {}): Promise<ImportResult> {
+    const dryRun = options.dryRun === true;
+    let out: ImportResult | null = null;
+    try {
+      await this.run(() =>
+        this.sql.begin(async (tx) => {
+          const { result, events } = await applyImport(tx, batch, this.as, dryRun);
+          out = result;
+          if (dryRun) throw new DryRun();
+          await recordEvents(tx, this.as, this.session, events);
+        }),
+      );
+    } catch (e) {
+      if (!(e instanceof DryRun)) throw e;
+    }
+    return out as unknown as ImportResult;
+  }
+
+  /** The last import from `source`: when it was recorded and the options it kept; null when there was none. */
+  async lastImport(source: string): Promise<{ at: Date; options: Record<string, unknown> } | null> {
+    return this.run(async () => {
+      const r = rows(await this.sql.unsafe(`SELECT ${EVENT_COLS} FROM events WHERE kind = 'import.applied' AND subject = $1 ORDER BY seq DESC LIMIT 1`,
+        [`import:${source}`]));
+      if (!r[0]) return null;
+      const e = toEvent(r[0]);
+      const o = e.payload.options;
+      return { at: e.at, options: typeof o === "object" && o !== null && !Array.isArray(o) ? (o as Record<string, unknown>) : {} };
+    });
   }
 
   // ---------- events ----------
