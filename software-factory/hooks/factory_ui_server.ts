@@ -223,7 +223,7 @@ export function serve(o: ServeOptions): Running {
         const agents = strs(body.agents);
         if (flag(name) || agents.some(flag)) return problem(400, "ui_bad_machine", "A machine's name and agents can't start with a dash.", "Use lowercase letters, digits and dashes.");
         args = ["add", name, "--json", ...agents.flatMap((a) => ["--agent", a])];
-      } else if (rest[2] === "remove" && !flag(rest[1] ?? "-")) args = ["remove", decodeURIComponent(rest[1] as string)];
+      } else if (rest[2] === "remove" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(rest[1] ?? "")) args = ["remove", rest[1] as string]; // already decoded once
       else return problem(404, "not_found", `There is no ${url.pathname}.`, "A machine has remove.");
       const r = await machineCommand(p, args);
       if (r.status === 200 && args[0] === "add") {

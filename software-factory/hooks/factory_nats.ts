@@ -39,11 +39,13 @@ type Mode = "hub" | "leaf";
 interface State {
   mode: Mode;
   hub: string; // a leaf's hub, nats-leaf://<host>:<port>, without the password
+  leafUser?: string; // the user a leaf connects to the hub as (default "leaf"; `factory machine join` sets its own)
   address: string; // this machine's Tailscale address, or "" for localhost only
   ports: { client: number; tailnet: number; monitor: number; leaf: number };
   image: string;
 }
 interface User { project: string; name: string; role: Role; nkey: string }
+export interface LeafUser { user: string; password: string }
 
 export class NatsError extends Error {
   constructor(readonly code: string, message: string, readonly fix: string) {
@@ -69,6 +71,11 @@ function readJson<T>(path: string): T | null {
 
 function readState(): State | null {
   return readJson<State>(join(natsDir(), "state.json"));
+}
+
+export function readLeafUsers(): LeafUser[] {
+  const u = readJson<LeafUser[]>(join(natsDir(), "leaf-users.json"));
+  return Array.isArray(u) ? u : [];
 }
 
 function readUsers(): User[] {
@@ -149,7 +156,7 @@ export function composeYaml(s: State): string {
 
 /** The server's config: JetStream on the hub, the leaf port or the remote, and the agents' keys with their
  * permissions. Without users it takes clients without a key, as a fresh server should. */
-export function serverConf(s: State, users: User[], leafPassword: string): string {
+export function serverConf(s: State, users: User[], leafPassword: string, leafUsers: LeafUser[] = readLeafUsers()): string {
   const lines = [
     "# Written by `factory nats up` and `factory nats user add` (decision 0004). Edits here are overwritten.",
     `server_name: ${q(`factory-${s.mode}-${hostname().toLowerCase().replace(/[^a-z0-9-]/g, "-")}`)}`,
@@ -158,10 +165,14 @@ export function serverConf(s: State, users: User[], leafPassword: string): strin
   ];
   if (s.mode === "hub") {
     lines.push('jetstream { store_dir: "/data" }');
-    lines.push(`leafnodes { listen: 0.0.0.0:7422, authorization { user: leaf, password: ${q(leafPassword)} } }`);
+    // `leaf` with the hub's own password (a leaf set up by hand), and one user per machine added with `factory machine add`
+    // (#445), so removing a machine takes its leaf access away.
+    const all = [{ user: "leaf", password: leafPassword }, ...leafUsers];
+    lines.push(!leafUsers.length ? `leafnodes { listen: 0.0.0.0:7422, authorization { user: leaf, password: ${q(leafPassword)} } }`
+      : `leafnodes { listen: 0.0.0.0:7422, authorization { users: [ ${all.map((l) => `{ user: ${q(l.user)}, password: ${q(l.password)} }`).join(", ")} ] } }`);
   } else {
     const u = new URL(s.hub);
-    const url = `nats-leaf://leaf:${encodeURIComponent(leafPassword)}@${u.host}`;
+    const url = `nats-leaf://${encodeURIComponent(s.leafUser ?? "leaf")}:${encodeURIComponent(leafPassword)}@${u.host}`;
     lines.push(`leafnodes { remotes: [ { url: ${q(url)} } ] }`);
   }
   if (users.length) {
@@ -302,7 +313,7 @@ function leftovers(args: string[], usage: string): void {
   if (args.length) refuse("unknown-option", `${args[0]} isn't an option here.`, `Usage: ${usage}`);
 }
 
-const UP_USAGE = "factory nats up [--leaf <hub>] [--hub] [--port N] [--monitor-port N] [--leaf-port N] [--leaf-password-file F]";
+const UP_USAGE = "factory nats up [--leaf <hub>] [--hub] [--port N] [--monitor-port N] [--leaf-port N] [--leaf-password-file F] [--leaf-user U]";
 
 async function cmdUp(argv: string[]): Promise<number> {
   const args = [...argv];
@@ -314,7 +325,11 @@ async function cmdUp(argv: string[]): Promise<number> {
   const p2 = option(args, "--monitor-port");
   const p3 = option(args, "--leaf-port");
   const pwFile = option(args, "--leaf-password-file") ?? join(natsDir(), "leaf.password");
+  const leafUser = option(args, "--leaf-user");
   leftovers(args, UP_USAGE);
+  if (leafUser !== undefined && !NAME.test(leafUser)) {
+    refuse("bad-leaf-user", `--leaf-user needs lowercase letters, digits and dashes, not ${JSON.stringify(leafUser)}.`, UP_USAGE);
+  }
   if (leaf !== undefined && hub) refuse("bad-mode", "--leaf and --hub can't go together.", UP_USAGE);
   if (p1 !== undefined) ports.client = port(p1, "--port");
   if (p2 !== undefined) ports.monitor = port(p2, "--monitor-port");
@@ -323,7 +338,9 @@ async function cmdUp(argv: string[]): Promise<number> {
   const hubUrl = leaf !== undefined ? hubAddress(leaf) : mode === "leaf" ? (before?.hub ?? "") : "";
   dockerReady();
   const address = tailscaleAddress();
-  const s: State = { mode, hub: hubUrl, address, ports, image: IMAGE };
+  const keptUser = mode === "leaf" && leaf === undefined ? before?.leafUser : undefined;
+  const asUser = mode === "leaf" ? leafUser ?? keptUser : undefined;
+  const s: State = { mode, hub: hubUrl, address, ports, image: IMAGE, ...(asUser ? { leafUser: asUser } : {}) };
 
   const dir = natsDir();
   const fresh = !existsSync(dir);
@@ -555,6 +572,34 @@ export function hubLeafPassword(): string {
 /** True when Docker is installed and answers (`docker info`). */
 export function dockerUsable(): boolean {
   return Boolean(which("docker")) && run(["docker", "info"], { timeoutMs: 30_000 }).code === 0;
+}
+
+/** Adds (`password` given) or drops (null) the hub's leaf user `user`, rewrites the hub's config and reloads a running
+ * server. A dropped user's leaf can no longer connect. */
+export function setLeafUser(user: string, password: string | null): boolean {
+  const dir = natsDir();
+  const left = readLeafUsers().filter((l) => l.user !== user);
+  const next = password === null ? left : [...left, { user, password }];
+  const w = new Writes();
+  try {
+    ensureDir(dir, 0o700);
+    w.put(join(dir, "leaf-users.json"), pyDumps(next, { indent: 2 }) + "\n", 0o600);
+    const s = readState();
+    if (s) {
+      ensureDir(join(dir, "conf"), 0o700);
+      w.put(join(dir, "conf", "nats-server.conf"), serverConf(s, readUsers(), hubLeafPassword(), next), 0o600);
+    }
+  } catch (e) {
+    w.undo();
+    throw e;
+  }
+  const r = readState() && which("docker") ? compose(["kill", "-s", "SIGHUP", "nats"]) : null;
+  return Boolean(r && r.code === 0);
+}
+
+/** The names that already have a key on this server (any project's), for `factory machine add` to refuse. */
+export function keyedNames(project: string): string[] {
+  return readUsers().filter((u) => u.project === project).map((u) => u.name);
 }
 
 /** Takes the keys of `names` (in `project`) off the server: users.json, the config, the seeds on this machine, and a

@@ -318,6 +318,49 @@ test("remove of an unknown machine, or the same one twice, is refused and change
   expect(read(join(w.dir, "conf", "nats-server.conf"))).toBe(confBefore);
 });
 
+// ---------- a machine's own way in (security review) ----------
+test("each machine has its own leaf user on the hub, and remove takes it away", () => {
+  const w = hub();
+  const a = add(w, "laptop");
+  const b = add(w, "desktop", ["tewodros"]);
+  const conf = (): string => read(join(w.dir, "conf", "nats-server.conf"));
+  const lines = (): string[] => conf().split("\n").filter((l) => l.includes("leafnodes") && l.includes("listen"));
+  expect(lines().length).toBe(1);
+  const leafUsers = JSON.parse(read(join(w.dir, "leaf-users.json"))) as { user: string; password: string }[];
+  expect(leafUsers.length).toBe(2);
+  expect(mode(join(w.dir, "leaf-users.json"))).toBe(0o600);
+  for (const l of leafUsers) expect(conf()).toContain(l.password);
+  // the codes carry their own passwords, not the hub's
+  const hubPw = read(join(w.dir, "leaf.password")).trim();
+  expect(Buffer.from(a.code.slice(4), "base64url").toString()).not.toContain(hubPw);
+  expect(a.code).not.toBe(b.code);
+  expect(machine(w, ["remove", "laptop"]).code).toBe(0);
+  const after = JSON.parse(read(join(w.dir, "leaf-users.json"))) as { user: string; password: string }[];
+  expect(after.length).toBe(1);
+  expect(conf()).not.toContain(leafUsers.find((l) => !after.some((x) => x.user === l.user))!.password);
+  expect(conf()).toContain(after[0]!.password);
+});
+
+test("the joined leaf connects as the machine's own user, with the code's password", () => {
+  const h = hub();
+  const a = add(h, "laptop");
+  const m = world();
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
+  const user = (JSON.parse(read(join(h.dir, "leaf-users.json"))) as { user: string; password: string }[])[0]!;
+  expect(read(join(m.dir, "conf", "nats-server.conf"))).toContain(`nats-leaf://${user.user}:${user.password}@100.64.0.7:7422`);
+});
+
+test("an agent that already has a key, here or on another machine, is refused and no key is touched", () => {
+  const w = hub();
+  add(w, "laptop");
+  const before = read(join(w.dir, "users.json"));
+  refused(machine(w, ["add", "desktop", "--agent", "haile"]), "agent-has-key");
+  refused(machine(w, ["add", "desktop", "--agent", "tewodros", "--agent", "tewodros"]), "agent-has-key");
+  expect(read(join(w.dir, "users.json"))).toBe(before);
+  expect(machine(w, ["remove", "laptop"]).code).toBe(0);
+  expect(machine(w, ["add", "desktop", "--agent", "haile"]).code).toBe(0); // free again after remove
+});
+
 // ---------- help ----------
 test("factory help lists machine add, join, ls and remove", () => {
   const w = world();

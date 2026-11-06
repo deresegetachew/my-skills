@@ -20,7 +20,7 @@ import { now } from "./factory_clock.ts";
 import { type Config, load } from "./factory_config.ts";
 import { Exit, pyDumps, run, which } from "./factory_lib.ts";
 import { configDir, machineSettings, refuse, saveMachineSettings } from "./factory_machine.ts";
-import { credsDir, dockerUsable, hubLeafPassword, natsDir, natsState, projectName, removeUsers } from "./factory_nats.ts";
+import { credsDir, dockerUsable, hubLeafPassword, keyedNames, natsDir, natsState, projectName, removeUsers, setLeafUser } from "./factory_nats.ts";
 import { NAME, publicKeyOf, type Role, roleOf } from "./factory_nats_keys.ts";
 
 const PREFIX = "FM1-";
@@ -36,6 +36,7 @@ interface Payload {
   exp: number;
   project: string;
   hub: { address: string; leaf: number; client: number };
+  leafUser: string;
   leafPassword: string;
   agents: (AgentKey & { seed: string })[];
 }
@@ -59,7 +60,7 @@ export function decodeCode(text: string): Payload {
     return bad();
   }
   const ok = p && p.v === 1 && typeof p.id === "string" && NAME.test(String(p.name)) && typeof p.exp === "number" &&
-    typeof p.project === "string" && NAME.test(p.project) && typeof p.leafPassword === "string" &&
+    typeof p.project === "string" && NAME.test(p.project) && typeof p.leafPassword === "string" && NAME.test(String(p.leafUser)) &&
     typeof p.hub?.address === "string" && Number.isInteger(p.hub.leaf) && Number.isInteger(p.hub.client) &&
     Array.isArray(p.agents) && p.agents.length > 0 &&
     p.agents.every((a) => NAME.test(String(a.name)) && roleOf(String(a.role)) && typeof a.seed === "string");
@@ -182,6 +183,12 @@ function cmdAdd(argv: string[]): number {
   }
   const project = projectName();
   const cfg = loadConfig();
+  const taken = new Set([...keyedNames(project), ...readRecords().flatMap((r) => r.agents.map((a) => a.name))]);
+  const dup = agents.find((a, i) => taken.has(a.name) || agents.findIndex((b) => b.name === a.name) !== i);
+  if (dup) {
+    refuse("agent-has-key", `${dup.name} already has a key (an agent here or on another machine), and one name is one agent.`,
+      "Choose a name no other agent uses; `factory machine ls` shows the names machines hold.");
+  }
   const made: Payload["agents"] = [];
   for (const a of agents) {
     const r = natsCli(["user", "add", a.name, "--role", a.role, "--project", project]);
@@ -193,11 +200,19 @@ function cmdAdd(argv: string[]): number {
     const seed = readFileSync(join(credsDir(cfg, project), `${a.name}.nk`), "utf8").trim();
     made.push({ ...a, seed });
   }
+  const id = randomBytes(6).toString("hex");
+  const leafUser = `m-${id}`; // this machine's own way into the hub's leaf port: `machine remove` drops it
+  const leafPassword = randomBytes(24).toString("base64url");
+  try {
+    setLeafUser(leafUser, leafPassword);
+  } catch (e) {
+    removeUsers(project, made.map((m) => m.name));
+    throw e;
+  }
   const t = now();
   const expiresAt = Math.floor(t + ttl * 60);
-  const id = randomBytes(6).toString("hex");
   const code = encodeCode({ v: 1, id, name, exp: expiresAt, project, hub: { address: hub.address, leaf: hub.ports.leaf, client: hub.ports.tailnet },
-    leafPassword: password, agents: made });
+    leafUser, leafPassword, agents: made });
   saveRecords([...readRecords(), { name, id, project, createdAt: Math.floor(t), expiresAt, agents }]);
   const command = `factory machine join ${code}`;
   if (json) {
@@ -272,7 +287,7 @@ function cmdJoin(argv: string[]): number {
       else m.files.push(pwFile);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       writeAtomic(pwFile, p.leafPassword + "\n", 0o600);
-      const r = natsCli(["up", "--leaf", `${p.hub.address}:${p.hub.leaf}`]);
+      const r = natsCli(["up", "--leaf", `${p.hub.address}:${p.hub.leaf}`, "--leaf-user", p.leafUser]);
       if (r.code !== 0) {
         const e = lastError(r.stderr);
         refuse("leaf-failed", `The leaf server didn't start: ${e?.message ?? (r.stderr || r.stdout).trim().slice(-300)}`,
@@ -336,6 +351,7 @@ function cmdRemove(argv: string[]): number {
   const r = all.find((x) => x.name === name);
   if (!r) refuse("unknown-machine", `There is no machine called ${JSON.stringify(name)}.`, "factory machine ls lists them.");
   const { removed, reloaded } = removeUsers(r.project, r.agents.map((a) => a.name));
+  setLeafUser(`m-${r.id}`, null); // its leaf can no longer connect with the code's password
   saveRecords(all.filter((x) => x !== r));
   console.log(`Removed ${name}. Took the keys of ${removed.join(", ") || "no agent"} off the hub` +
     (reloaded ? " and reloaded the server." : "; the server isn't running, so it takes effect at `factory nats up`."));
