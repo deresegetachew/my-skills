@@ -77,7 +77,7 @@ export function approvals(comments: Comment[], trusted: Set<string> = new Set())
       state[last] = "asked";
       continue;
     }
-    if (CHAT_SUMMARY.test(body)) continue; // a cockpit talk's summary answers nothing (#395)
+    if (CHAT_SUMMARY.test(body)) continue; // a talk's summary (`factory talk`) answers nothing (#395)
     if (trusted.size && !trusted.has(c.user?.login ?? "")) continue;
     const m = ANSWER.exec(body);
     if (m && (m[1] as string) in state) state[m[1] as string] = "approved";

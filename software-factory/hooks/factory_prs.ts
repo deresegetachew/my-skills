@@ -290,7 +290,7 @@ export function ownerAskStates(comments: Obj[], trusted: Set<string> = new Set()
       under = [po[1] as string];
       continue;
     }
-    if (CHAT_SUMMARY.test(body)) continue; // a cockpit talk's summary answers nothing (#395)
+    if (CHAT_SUMMARY.test(body)) continue; // a talk's summary (`factory talk`) answers nothing (#395)
     if (trusted.size && !trusted.has(loginOf(c))) continue;
     const answered = markerIds(OWNER_ANSWER, body);
     for (const slug of answered.length ? answered : under) {

@@ -175,6 +175,36 @@ test("the machine steps plan as shell text with the uid variable, the user and t
   }
 });
 
+test("the machine's packages no longer include tmux: the cockpit that needed it is retired (#425)", () => {
+  const base = tmp();
+  const bin = `${base}/bin`;
+  const root = `${base}/root`;
+  write(`${root}/etc/os-release`, 'ID=ubuntu\nID_LIKE=debian\nPRETTY_NAME="Ubuntu 24.04"\n');
+  write(`${root}/etc/resolv.conf`, "nameserver 127.0.0.53\n");
+  writeExe(`${bin}/id`, '#!/bin/bash\nexit 1\n');
+  writeExe(`${bin}/dpkg-query`, "#!/bin/bash\nexit 1\n");
+  writeExe(`${bin}/ss`, "#!/bin/bash\n");
+  writeExe(`${bin}/resolvectl`, "#!/bin/bash\n");
+  const saved = { ...process.env };
+  const savedRoot = M.ROOT;
+  process.env.PATH = `${bin}:${process.env.PATH ?? ""}`;
+  delete process.env.SUDO_USER;
+  M.setRoot(root);
+  try {
+    const steps = M.steps({ user: "sbxuser", egress: "internet", allow_hosts: [], block_loopback_ports: [],
+      block_inbound_ports: [], harden_ssh: false, keep_awake: false });
+    const ctx = new Context("sbxuser", false);
+    const install = (steps.find((s) => s.id === "packages")?.actions ?? []).map((a) => shellOf(a, ctx)).join("\n");
+    expect(install).toContain("apt-get install -y -q uidmap slirp4netns");
+    expect(install).toContain(" git ");
+    expect(install).not.toMatch(/\btmux\b/);
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in saved)) delete process.env[k];
+    Object.assign(process.env, saved);
+    M.setRoot(savedRoot);
+  }
+});
+
 test("a Bun only in someone's home folder does not count as installed for the factory user (#252)", () => {
   const savedRoot = M.ROOT;
   const savedPath = process.env.PATH;
