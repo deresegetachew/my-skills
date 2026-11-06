@@ -260,17 +260,28 @@ test("a connector that isn't set up is no column", async () => {
 
 // --- the build cache: turn it on and off -------------------------------------------------------------------------------
 
-test("the build cache offers to turn it on when it is off, and to turn it off when it is on", async () => {
-  const off = byId(await api((await started()).ui, "/api/projects/work/integrations"));
-  expect((off.cache?.actions as Row[]).map((a) => a.name)).toEqual(["start"]);
-  expect(String((off.cache?.actions as Row[])[0]?.does).length).toBeGreaterThan(0);
+test("with no address the build cache can't start (turbo install needs one): the row says how to give it one", async () => {
+  const { ui, p } = await started();
+  const off = byId(await api(ui, "/api/projects/work/integrations"));
+  expect(off.cache?.actions).toEqual([]);
+  const how = (off.cache?.settings as { label: string; value: string }[]).map((s) => s.value).join(" ");
+  expect(how).toContain("settings pull request");
+  const start = await api(ui, "/api/projects/work/integrations/cache/actions/start", { method: "POST", body: { confirm: true } });
+  expect(start.status).toBe(409);
+  expect(start.json).toMatchObject({ code: "ui_action_unavailable" });
+  expect(readFileSync(p.factoryLog, "utf8")).toBe(""); // nothing ran
+}, T);
+
+test("with an address the build cache can be started and stopped here, and each says it acts on this machine only", async () => {
   const on = byId(await api((await started({ ...CONFIG, turbo: { api: "http://127.0.0.1:3335" } })).ui, "/api/projects/work/integrations"));
-  expect((on.cache?.actions as Row[]).map((a) => a.name)).toEqual(["stop"]);
+  const actions = on.cache?.actions as Row[];
+  expect(actions.map((a) => a.name)).toEqual(["start", "stop"]);
+  for (const a of actions) expect(String(a.does)).toContain("this machine");
   for (const id of ["github", "messaging", "ci", "plugins", "mcp"]) expect(on[id]?.actions, id).toEqual([]);
 }, T);
 
-test("turning the build cache on asks first, then runs it on this machine", async () => {
-  const { ui, p } = await started();
+test("starting the build cache asks first, then runs it on this machine", async () => {
+  const { ui, p } = await started({ ...CONFIG, turbo: { api: "http://127.0.0.1:3335" } });
   const path = "/api/projects/work/integrations/cache/actions/start";
   const no = await api(ui, path, { method: "POST", body: {} });
   expect(no.status).toBe(400);
@@ -282,15 +293,12 @@ test("turning the build cache on asks first, then runs it on this machine", asyn
   expect(readFileSync(p.factoryLog, "utf8")).toContain("turbo install");
 }, T);
 
-test("turning it off runs turbo down; an action it doesn't offer now, or one it has none of, is refused", async () => {
+test("stopping it runs turbo down; an action it has none of, or an unknown one, is refused", async () => {
   const { ui, p } = await started({ ...CONFIG, turbo: { api: "http://127.0.0.1:3335" } });
   const base = "/api/projects/work/integrations";
   const stop = await api(ui, `${base}/cache/actions/stop`, { method: "POST", body: { confirm: true } });
   expect(stop.json, JSON.stringify(stop.json)).toMatchObject({ ok: true });
   expect(readFileSync(p.factoryLog, "utf8")).toContain("turbo down");
-  const start = await api(ui, `${base}/cache/actions/start`, { method: "POST", body: { confirm: true } });
-  expect(start.status).toBe(409);
-  expect(start.json).toMatchObject({ code: "ui_action_unavailable" });
   const none = await api(ui, `${base}/github/actions/start`, { method: "POST", body: { confirm: true } });
   expect(none.status).toBe(409);
   const unknown = await api(ui, `${base}/slack/actions/start`, { method: "POST", body: { confirm: true } });
