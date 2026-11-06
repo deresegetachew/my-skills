@@ -30,8 +30,7 @@ import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { COUNTED, short, taskBudget, WARN_PERCENT } from "./factory_budget.ts";
 import { type Config, load } from "./factory_config.ts";
-import { now as clockNow } from "./factory_clock.ts";
-import { die, GITHUB_CALLS_DIR, hourFile, pyDumps, pyRepr, runMain, splitLines } from "./factory_lib.ts";
+import { die, githubCallsLastHour, pyDumps, pyRepr, runMain, splitLines } from "./factory_lib.ts";
 import { limitStatus } from "./factory_views_cache.ts";
 
 const TASK = /^task\/(\d+(?:[.-]\d+)*?)-/;
@@ -548,55 +547,14 @@ function budgetOf(cfg: Config, task: string): { tokens: number | null; source: s
 
 const TOP = 10;
 
-interface HourCounts {
-  since: number;
-  total: number;
-  agents: [string, number][];
-  commands: [string, number][];
-  endpoints: [string, number][];
-}
-
-/** The calls factory_lib.ts counted in the last hour, in every project's state folder on this machine (they all share
- * the account's limit), grouped and biggest first. An agent is shown with its project: `haile (my-skills)`. */
-function lastHour(): HourCounts {
-  const since = Math.floor(clockNow()) - 3600;
-  const first = hourFile(since);
-  const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
-  const rows: { agent: string; command: string; endpoint: string }[] = [];
-  for (const state of listDir(base).filter((d) => d.endsWith("-factory"))) {
-    const dir = join(base, state, GITHUB_CALLS_DIR);
-    const project = state.slice(0, -"-factory".length);
-    for (const f of listDir(dir).filter((x) => x.endsWith(".log") && x >= first)) {
-      let text = "";
-      try {
-        text = readFileSync(join(dir, f), "utf8");
-      } catch {
-        continue;
-      }
-      for (const line of text.split("\n")) {
-        const [at, agent, command, endpoint] = line.split("\t");
-        if (endpoint === undefined || !(Number(at) >= since)) continue;
-        rows.push({ agent: `${agent} (${project})`, command: command ?? "", endpoint });
-      }
-    }
-  }
-  const group = (key: (r: (typeof rows)[number]) => string): [string, number][] => {
-    const m = new Map<string, number>();
-    for (const r of rows) m.set(key(r), (m.get(key(r)) ?? 0) + 1);
-    return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  };
-  return { since, total: rows.length, agents: group((r) => r.agent), commands: group((r) => r.command),
-    endpoints: group((r) => r.endpoint) };
-}
-
-/** `--github` (#371): this machine's GitHub calls in the last hour, from factory_github_calls.ts, biggest first; and
+/** `--github` (#371): this machine's GitHub calls in the last hour, as factory_lib.ts counted them, biggest first; and
  * what GitHub itself counts on the account (agents' own `gh` and other machines included), when it can be read. */
 function githubReport(json: boolean): number {
-  const h = lastHour();
+  const h = githubCallsLastHour();
   const core = limitStatus();
   if (json) {
     out(pyDumps({ since: isoformat(h.since * 1000), total: h.total, agents: Object.fromEntries(h.agents),
-      commands: Object.fromEntries(h.commands), endpoints: Object.fromEntries(h.endpoints),
+      commands: Object.fromEntries(h.commands), endpoints: Object.fromEntries(h.endpoints), callers: Object.fromEntries(h.callers),
       github: core ? { used: core.limit - core.remaining, limit: core.limit, reset: isoformat(core.reset * 1000) } : null },
     { indent: 2 }));
     return 0;

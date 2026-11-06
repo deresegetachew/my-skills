@@ -115,7 +115,7 @@ function cleanEnv(env: Record<string, string | undefined>): Record<string, strin
 /** Run a command and wait for it (Python's subprocess.run with capture_output=True, text=True).
  * A missing program gives code 127 and the error in stderr instead of throwing. */
 export function run(cmd: string[], opts: RunOptions = {}): RunResult {
-  if (cmd[0] === "gh") countGithubCall(cmd.slice(1), opts.cwd);
+  if (cmd[0] === "gh") countGithubCall(cmd.slice(1), opts.cwd, opts.env);
   try {
     const p = Bun.spawnSync(cmd, {
       cwd: opts.cwd,
@@ -159,6 +159,7 @@ export function git(args: string[], opts: RunOptions = {}): RunResult {
 //
 //   <seconds since 1970> TAB <agent or -> TAB <command> TAB <endpoint>
 //
+// <agent> is FACTORY_AGENT, else FACTORY_ROLE (a role's loop without a name), else `-`.
 // <command> is the factory script and its first word (`factory_issues show`); <endpoint> is what was asked, without the
 // repo and the numbers (`issues/:n/comments`, `POST issues/:n/comments`, `pr view`). `gh auth ...` and `gh api
 // rate_limit` are not counted: GitHub does not count them. A `--paginate` call counts once, whatever its pages; `gh`
@@ -224,8 +225,9 @@ function commandName(): string {
   return /^[a-z][a-z-]*$/.test(first) ? `${script} ${first}` : script;
 }
 
-/** Count one `gh <args>` this process is about to run (in `cwd`). Never throws. */
-function countGithubCall(args: string[], cwd?: string): void {
+/** Count one `gh <args>` this process is about to run (in `cwd`, with `env`, else this process's). Never throws.
+ * run() calls it; a place that starts `gh` some other way (an async spawn) calls it itself. */
+export function countGithubCall(args: string[], cwd?: string, env: Record<string, string | undefined> = process.env): void {
   try {
     const endpoint = githubEndpoint(args);
     if (endpoint === null) return;
@@ -234,7 +236,7 @@ function countGithubCall(args: string[], cwd?: string): void {
     const file = join(dir, hourFile(t));
     const fresh = !existsSync(file);
     mkdirSync(dir, { recursive: true });
-    const line = [String(Math.floor(t)), process.env.FACTORY_AGENT || "-", commandName(), endpoint]
+    const line = [String(Math.floor(t)), env.FACTORY_AGENT || env.FACTORY_ROLE || "-", commandName(), endpoint]
       .map((s) => s.replace(/[\t\n]/g, " ")).join("\t") + "\n";
     appendFileSync(file, line);
     if (!fresh) return;
@@ -243,6 +245,67 @@ function countGithubCall(args: string[], cwd?: string): void {
   } catch {
     // counting is a measurement: a full disk or a read-only home must not stop the call
   }
+}
+
+export interface GithubCalls {
+  since: number;
+  total: number;
+  /** `haile (my-skills)`: the agent and its project. */
+  agents: [string, number][];
+  /** The factory command: `factory_wait answer`. */
+  commands: [string, number][];
+  /** What was asked: `issues/:n/comments`. */
+  endpoints: [string, number][];
+  /** A command and what it asked, the thing to cut: `factory_wait answer: issues/:n/comments`. */
+  callers: [string, number][];
+}
+
+function listNames(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** The GitHub calls run() counted in the last hour, in every project's state folder on this machine (they all share
+ * the account's limit), grouped and biggest first. Read by `factory usage --github`, `factory status` and the web UI. */
+export function githubCallsLastHour(): GithubCalls {
+  const since = Math.floor(clockSeconds()) - 3600;
+  const first = hourFile(since);
+  const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
+  const rows: { agent: string; command: string; endpoint: string }[] = [];
+  for (const state of listNames(base).filter((d) => d.endsWith("-factory"))) {
+    const dir = join(base, state, GITHUB_CALLS_DIR);
+    const project = state.slice(0, -"-factory".length);
+    for (const f of listNames(dir).filter((x) => x.endsWith(".log") && x >= first)) {
+      for (const line of readText(join(dir, f)).split("\n")) {
+        const [at, agent, command, endpoint] = line.split("\t");
+        if (endpoint === undefined || !(Number(at) >= since)) continue;
+        rows.push({ agent: `${agent} (${project})`, command: command ?? "", endpoint });
+      }
+    }
+  }
+  const group = (key: (r: (typeof rows)[number]) => string): [string, number][] => {
+    const m = new Map<string, number>();
+    for (const r of rows) m.set(key(r), (m.get(key(r)) ?? 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  };
+  return { since, total: rows.length, agents: group((r) => r.agent), commands: group((r) => r.command),
+    endpoints: group((r) => r.endpoint), callers: group((r) => `${r.command}: ${r.endpoint}`) };
+}
+
+export interface GithubCallsSummary {
+  total: number;
+  agents: Record<string, number>;
+  callers: { caller: string; calls: number }[];
+}
+
+/** The last hour's counted calls in short, for `factory status` and the web UI: the total, by agent, the top callers. */
+export function githubCallsSummary(top = 5): GithubCallsSummary {
+  const h = githubCallsLastHour();
+  return { total: h.total, agents: Object.fromEntries(h.agents),
+    callers: h.callers.slice(0, top).map(([caller, calls]) => ({ caller, calls })) };
 }
 
 /** The JSON in a file, or `fallback` when it is missing or not valid JSON. */

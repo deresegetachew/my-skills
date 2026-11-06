@@ -12,7 +12,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type Config, DEFAULTS, roleNames } from "./factory_config.ts";
 import { limitSentence } from "./factory_cockpit.ts";
-import { run } from "./factory_lib.ts";
+import { countGithubCall, type GithubCallsSummary, githubCallsSummary, run } from "./factory_lib.ts";
 
 const HOOKS = import.meta.dir;
 const READ_TIMEOUT_MS = 30_000;
@@ -86,6 +86,8 @@ export interface Live {
   machines: Machine[];
   runners: Runner[];
   limit: Limit | null;
+  /** This machine's counted GitHub calls in the last hour (factory_lib.ts), as `factory status` shows them. */
+  githubCalls: GithubCallsSummary;
   problems: Problem[];
 }
 
@@ -270,6 +272,7 @@ export interface Ran {
 
 export async function spawn(cmd: string[], cwd: string, env: Record<string, string>, ms: number): Promise<Ran> {
   try {
+    if (cmd[0] === "gh") countGithubCall(cmd.slice(1), cwd, env); // run() counts its own; this one is async
     const proc = Bun.spawn(cmd, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => proc.kill(), ms);
     const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -354,7 +357,7 @@ function machinesOf(agents: Agent[], here: string | null): Machine[] {
 /** Everything live about project `p`: its agents (with their last lines of output when on this machine), its machines,
  * the CI runners, GitHub's limit, and what couldn't be read. */
 export async function live(p: UiProject): Promise<Live> {
-  if (p.problem) return { agents: [], machines: [], runners: [], limit: null, problems: [p.problem] };
+  if (p.problem) return { agents: [], machines: [], runners: [], limit: null, githubCalls: githubCallsSummary(), problems: [p.problem] };
   const problems: Problem[] = [];
   const r = await spawn([process.execPath, "--no-env-file", "--config=/dev/null", join(hooksOf(p), "factory_agents.ts"), "ls", "--json"],
     p.path, envFor(p), READ_TIMEOUT_MS);
@@ -387,7 +390,8 @@ export async function live(p: UiProject): Promise<Live> {
       since: strOrNull(a.since), lastSeen: strOrNull(a.lastSeen), log: here ? await logOf(a) : [] };
   }));
   const now = Date.now() / 1000;
-  return { agents, machines: machinesOf(agents, strOrNull(data.machine)), runners: runnersOf(cache), limit: limitOf(state, cache, now), problems };
+  return { agents, machines: machinesOf(agents, strOrNull(data.machine)), runners: runnersOf(cache), limit: limitOf(state, cache, now),
+    githubCalls: githubCallsSummary(), problems };
 }
 
 // --- the owner's actions -----------------------------------------------------------------------------------------------
