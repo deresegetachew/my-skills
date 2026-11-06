@@ -17,8 +17,11 @@ import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./c
 import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
 import type { DocSection } from "./docs_model.ts";
 import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
+import { ARTIFACTS_CSS, ArtifactsPage } from "./artifacts.tsx";
+import { MenuIcon } from "./page_head.tsx";
 import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx";
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
+import { SIGNOFF_CSS, SignoffPage } from "./signoff.tsx";
 import { CSS } from "./style.ts";
 import { THEME_CSS } from "./theme.ts";
 import { nextTheme, THEME_KEY, themeLabel, themeOf } from "./theme_model.ts";
@@ -186,14 +189,6 @@ function useTheme(): { choice: string | null; flip: () => void } {
 /** A project's square on the rail, in a category colour of its own. */
 const PROJECT_COLOURS = ["violet", "green", "blue", "pink", "yellow"];
 
-function MenuIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-      <path d="M4 6h16M4 12h16M4 18h16" />
-    </svg>
-  );
-}
-
 function Notice({ tone, title, children }: { tone: "good" | "warn" | "bad"; title: string; children?: ReactNode }) {
   return (
     <div className={`notice ${tone}`} role={tone === "bad" ? "alert" : "status"}>
@@ -329,7 +324,6 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
 /** A page of the design not built yet: what it will hold, and the pages that already have some of it. */
 const COMING: Record<string, { what: string; see: string[] }> = {
   home: { what: "Home will show what the team is doing now and what needs you, on one page.", see: ["inbox", "board", "prs"] },
-  signoff: { what: "Sign-off and testing will list what was built and waits for you to try it.", see: ["prs", "board"] },
   activity: { what: "Activity will show everything that happened, newest first.", see: ["prs", "ci"] },
   health: { what: "Health will check every part of the factory and give a fix for what doesn't work.", see: ["machines", "ci"] },
   usage: { what: "Usage and cost will show what each agent and task used, against its budget.", see: ["board"] },
@@ -366,7 +360,8 @@ function DocsIndex({ sections, open }: { sections: DocSection[] | undefined; ope
   if (!s) return <div className="body"><p className="empty">No PRD, decisions or wiki could be read for this project. Reload the page to try again.</p></div>;
   return (
     <div className="body">
-      <Tabs label="PRD and decisions" value={s.id} onChange={setTab} tabs={sections.map((x) => ({ id: x.id, label: x.title, count: x.pages.length }))} />
+      <Tabs label="PRD and decisions" value={s.id} onChange={(t) => (t === "artifacts" ? open(channelOf("artifacts")) : setTab(t))}
+        tabs={[...sections.map((x) => ({ id: x.id, label: x.title, count: x.pages.length })), { id: "artifacts", label: "Designs and artifacts" }]} />
       {s.problem && <ProblemNotice p={s.problem} />}
       {!s.problem && !s.pages.length && <p className="empty">Nothing here yet.</p>}
       <ul className="lrows" aria-label={s.title}>
@@ -574,7 +569,11 @@ function App() {
   const docPages = pagesOf(docsBy[project.id]);
   const docPage = docRoute ? docPages.find((d) => d.id === docRoute.id) : undefined;
   const channel = view.channels.find((c) => c.id === route?.channel);
-  const page = channel || docRoute ? pageOf(route?.channel ?? "") : pageOf(route?.channel?.startsWith("page:") ? route.channel : "page:home");
+  const pageRoute = route?.channel?.startsWith("page:") || route?.channel?.startsWith("signoff:");
+  const page = channel || docRoute ? pageOf(route?.channel ?? "") : pageOf(pageRoute ? route?.channel ?? "" : "page:home");
+  const signoffId = route?.channel?.startsWith("signoff:") ? route.channel.slice("signoff:".length) : null;
+  // the pages that write their own header from their data (#454)
+  const ownHead = !project.problem && !docRoute && !channel && (page === "signoff" || page === "artifacts");
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
   const go = (p: string, c: string, f = ""): void => {
@@ -737,19 +736,25 @@ function App() {
         )}
       </nav>
       <main className="main">
-        <header className="page-head">
-          <button className="menu" aria-label="Projects and pages" onClick={() => setMenu(true)}><MenuIcon /></button>
-          <div className="grow">
-            <h1>{channel?.kind === "agent" && <Avatar name={channel.name} role={channel.role} size={40} />}{head.title}</h1>
-            {head.purpose && <p>{head.purpose}</p>}
-          </div>
-          {!docRoute && channel?.kind === "agent" && live && !project.problem && <div className="page-actions">{agentActions(agent, channel, project, setAsk)}</div>}
-        </header>
+        {!ownHead && (
+          <header className="page-head">
+            <button className="menu" aria-label="Projects and pages" onClick={() => setMenu(true)}><MenuIcon /></button>
+            <div className="grow">
+              <h1>{channel?.kind === "agent" && <Avatar name={channel.name} role={channel.role} size={40} />}{head.title}</h1>
+              {head.purpose && <p>{head.purpose}</p>}
+            </div>
+            {!docRoute && channel?.kind === "agent" && live && !project.problem && <div className="page-actions">{agentActions(agent, channel, project, setAsk)}</div>}
+          </header>
+        )}
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
           : docRoute ? <DocPageView key={`${project.id}/${docRoute.id}`} project={project.id} id={docRoute.id} anchor={docRoute.anchor} get={get} pages={docPages}
             open={(c) => go(project.id, c)} />
           : channel?.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
           : page === "docs" ? <DocsIndex key={project.id} sections={docsBy[project.id]} open={(c) => go(project.id, c)} />
+          : ownHead && page === "signoff" ? <SignoffPage key={project.id} project={project} id={signoffId} token={token} get={get} post={post} say={setToast}
+            talkers={talkTargets(view.channels.filter((c) => c.kind === "agent"))} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} />
+          : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
+            open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
           : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} />
@@ -770,6 +775,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

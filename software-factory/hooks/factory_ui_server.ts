@@ -16,6 +16,8 @@
 //                                              project, ...} for the tasks, pull requests and CI channels
 //   GET  /api/projects/:p/docs, .../docs/page?id=, .../docs/search?q=: the PRD, the decisions and the wiki (factory_ui_docs.ts, #438)
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
+//   GET|POST /api/projects/:p/signoff, POST .../signoff/:id/confirm|result: the sign-off and testing queue (factory_ui_signoff.ts, #454)
+//   GET  /api/projects/:p/artifacts, POST .../artifacts/pull: designs and artifacts (factory_ui_artifacts.ts, #454)
 //   POST /api/projects/:p/tasks/:id/actions/:name  the board's release, block and reassign (#439): factory_ui_views.ts
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
@@ -26,7 +28,9 @@ import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
+import { signoffApi } from "./factory_ui_signoff.ts";
 import { ciAction, Refresher, taskAction, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
@@ -193,6 +197,14 @@ export function serve(o: ServeOptions): Running {
         return json(r.status, r.status === 200 ? { project: p.id, ...r.body } : r.body);
       }
       if (rest[1] === "search") return json(200, { project: p.id, q: url.searchParams.get("q") ?? "", hits: searchDocs(p, url.searchParams.get("q") ?? "") });
+    }
+    if (rest[0] === "signoff") { // the sign-off and testing page (#454)
+      const r = await signoffApi(req, p, rest);
+      return json(r.status, r.body);
+    }
+    if (rest[0] === "artifacts") { // designs and artifacts (#454)
+      const r = await artifactsApi(req, p, rest);
+      return json(r.status, r.body);
     }
     if (rest.length === 1 && rest[0] === "channels" && req.method === "GET") return json(200, { project: p.id, channels: channels(p, seen(p)) });
     if (rest.length === 1 && rest[0] === "agents" && req.method === "GET") {

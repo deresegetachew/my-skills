@@ -101,14 +101,14 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `signoff ls` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
-| `signoff add` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
-| `signoff plan` | planned | Sign-off and testing (Signoff.dc.html) | #454 |
-| `signoff confirm` | planned | Sign-off item (SignoffItem.dc.html) | #454 |
-| `signoff result` | planned | Sign-off item (SignoffItem.dc.html) | #454 |
-| `artifacts pull` | planned | Artifacts (Artifacts.dc.html) | #454 |
-| `artifacts status` | planned | Artifacts (Artifacts.dc.html) | #454 |
-| `artifacts list` | planned | Artifacts (Artifacts.dc.html) | #454 |
+| `signoff ls` | built | Sign-off and testing (Signoff.dc.html) | #454 |
+| `signoff add` | built | Sign-off and testing (Signoff.dc.html): Add something to check | #454 |
+| `signoff plan` | agents only | Sign-off item (SignoffItem.dc.html): the product owner writes the plan; you confirm it or ask for a change | |
+| `signoff confirm` | built | Sign-off item (SignoffItem.dc.html): Confirm plan | #454 |
+| `signoff result` | built | Sign-off item (SignoffItem.dc.html): Passed, Failed | #454 |
+| `artifacts pull` | built | Artifacts (Artifacts.dc.html): Pull new copy, Add an artifact (each opens a pull request) | #454 |
+| `artifacts status` | built | Artifacts (Artifacts.dc.html): each copy's state, Check for new versions | #454 |
+| `artifacts list` | built | Artifacts (Artifacts.dc.html) | #454 |
 
 ## CI
 
