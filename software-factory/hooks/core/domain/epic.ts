@@ -1,7 +1,7 @@
 // An epic (#440): something bigger than a task, that holds tasks and has a stage of its own. It lives as an issue
 // labelled `epic` (stage in an `epic:<stage>` label, tasks as `- [ ] #n` lines, optional `PRD:` and `Decisions:` lines).
 // Plain rules, no I/O: the adapters read the issues and give them here.
-import { citesIn } from "../../factory_cites.ts";
+import { citesIn } from "./cites.ts";
 
 export const EPIC_STAGES = ["investigating", "prd", "decision", "planned", "building", "done", "parked"] as const;
 export type EpicStage = (typeof EPIC_STAGES)[number];
