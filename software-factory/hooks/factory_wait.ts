@@ -17,7 +17,9 @@
 //                                           and no agent went quiet; else exit 3, one line each
 //
 // Waits default to 30 minutes and look every FACTORY_WAIT_START seconds (default 15), growing by half each time up to
-// FACTORY_WAIT_MAX seconds (default 60). Everything goes through the GitHub REST API (`gh api`).
+// FACTORY_WAIT_MAX seconds (default 60). Everything goes through the GitHub REST API (`gh api`), except that with `pr`
+// in messaging.kinds, `ci` and `slot` read the pull request watcher's snapshot over NATS (factory_pr_feed.ts) and wait
+// for its events, and ask GitHub only when the snapshot is older than messaging.pollMinutes.
 import { type Config, load, taskLabels, toFloat } from "./factory_config.ts";
 import { agentIssues, current, stateOf } from "./factory_agents.ts";
 import { type Comment, gh, ghAll, type Issue, lastActivity, names, readyIssues, taskIssues, waitingForSlot } from "./factory_issues.ts";
@@ -27,6 +29,7 @@ import { escalateMinutes, running, waiting } from "./factory_po.ts";
 import { die, Exit, now, runMain, sleepSync } from "./factory_lib.ts";
 import { waitForWake, wakeIsOn, wakesOn } from "./factory_wake.ts";
 import { messagingSettings } from "./core/compose.ts";
+import { freshPrs, prWaker, readyOf } from "./factory_pr_feed.ts";
 
 const DOC = `Token-free waiting. A Claude session that waits by checking again and again pays for every check (each turn
 re-sends the whole context), so every wait is a shell loop here that only returns when there is something to do,
@@ -46,7 +49,8 @@ with one short line. Exit codes: 0 = it happened, 2 = timed out (do other work),
                                           and no agent went quiet; else exit 3, one line each
 
 Waits default to 30 minutes and look every FACTORY_WAIT_START seconds (default 15), growing by half each time up to
-FACTORY_WAIT_MAX seconds (default 60). Everything goes through the GitHub REST API (\`gh api\`).
+FACTORY_WAIT_MAX seconds (default 60). Everything goes through the GitHub REST API (\`gh api\`), except that with \`pr\`
+in messaging.kinds, \`ci\` and \`slot\` read the pull request watcher's snapshot over NATS and wait for its events.
 `;
 
 export const QUESTION = /<!--\s*factory-question\b/; // the old markers: factory_watch.ts still reads them
@@ -135,8 +139,13 @@ function newestRuns(runs: Run[]): Run[] {
  * statuses. */
 export function ciState(sha: string): ["green" | "failed" | "pending", string] {
   const all = gh<{ check_runs?: Run[] }>("GET", `repos/{owner}/{repo}/commits/${sha}/check-runs?per_page=100`)?.check_runs ?? [];
-  const runs = newestRuns(all);
   const st = gh<{ statuses?: Status[] }>("GET", `repos/{owner}/{repo}/commits/${sha}/status?per_page=100`)?.statuses ?? [];
+  return ciStateOf(all, st);
+}
+
+/** ciState() from check runs and commit statuses already read (the pull request watcher's snapshot). */
+export function ciStateOf(all: Run[], st: Status[]): ["green" | "failed" | "pending", string] {
+  const runs = newestRuns(all);
   const bad = [...runs.filter((r) => BAD.has(String(r.conclusion))).map((r) => r.name),
     ...st.filter((s) => s.state === "failure" || s.state === "error").map((s) => s.context)];
   if (bad.length) return ["failed", bad.join(", ")];
@@ -152,13 +161,34 @@ function shownMinutes(m: number | string): string {
   return String(m);
 }
 
-export function waitCi(n: number, minutes: number | string): Outcome {
+/** The PR's state from the pull request watcher's snapshot (`pr` on NATS): its head and CI, or how it ended. Null when
+ * there is no fresh snapshot, or it doesn't know the PR: then GitHub is asked. */
+function fromFeed(cfg: Config | null, n: number): { open: false; merged: boolean } | { open: true; sha: string; ci: ["green" | "failed" | "pending", string] } | null {
+  const s = cfg ? freshPrs(cfg) : null;
+  if (!s) return null;
+  const p = s.prs.find((x) => x.number === n);
+  if (p) return { open: true, sha: p.head, ci: ciStateOf(p.runs as unknown as Run[], p.statuses as unknown as Status[]) };
+  const gone = s.closed.find((x) => x.number === n);
+  return gone ? { open: false, merged: gone.merged } : null;
+}
+
+export function waitCi(n: number, minutes: number | string, cfg: Config | null = null): Outcome {
   let last = "?";
   const check = (): Outcome | null => {
-    const pr = prOf(n);
-    if (pr.state !== "open") return [3, `PR #${n} is ${pr.merged ? "merged" : "closed"}`];
-    const sha = pr.head.sha;
-    const [state, detail] = ciState(sha);
+    const fed = fromFeed(cfg, n);
+    let sha: string;
+    let state: "green" | "failed" | "pending";
+    let detail: string;
+    if (fed && !fed.open) return [3, `PR #${n} is ${fed.merged ? "merged" : "closed"}`];
+    if (fed && fed.open) {
+      sha = fed.sha;
+      [state, detail] = fed.ci;
+    } else {
+      const pr = prOf(n);
+      if (pr.state !== "open") return [3, `PR #${n} is ${pr.merged ? "merged" : "closed"}`];
+      sha = pr.head.sha;
+      [state, detail] = ciState(sha);
+    }
     last = detail;
     if (state === "green") return [0, `PR #${n}: CI green (${detail}) on ${sha.slice(0, 7)}`];
     if (state === "failed") {
@@ -169,7 +199,7 @@ export function waitCi(n: number, minutes: number | string): Outcome {
     }
     return null;
   };
-  return waitUntil(check, Number(minutes)) ?? [2, `PR #${n}: CI still running after ${shownMinutes(minutes)} minutes (${last})`];
+  return waitUntil(check, Number(minutes), cfg ? prWaker(cfg, n) : null) ?? [2, `PR #${n}: CI still running after ${shownMinutes(minutes)} minutes (${last})`];
 }
 
 /** The fold (factory_messages.ts) of the comments on issue or PR n. */
@@ -208,14 +238,20 @@ export function myReadyPrs(): number[] {
     .filter((p) => !p.draft && (p.user ?? {}).login === me).map((p) => p.number).sort((a, b) => a - b);
 }
 
+/** This account's ready pull requests: from the watcher's snapshot while it is fresh (`pr` on NATS), else GitHub. */
+export function readyPrs(cfg: Config): number[] {
+  const s = freshPrs(cfg);
+  return s ? readyOf(s) : myReadyPrs();
+}
+
 export function waitSlot(minutes: number | string, cfg: Config, waker: { wake: Waker; seconds: number } | null = null): Outcome {
   const cap = Math.trunc(Number(cfg.maxOpenPRs ?? 3));
   const check = (): Outcome | null => {
-    const ready = myReadyPrs();
+    const ready = readyPrs(cfg);
     return ready.length < cap ? [0, `a PR slot is free (${ready.length} of ${cap} open)`] : null;
   };
-  return waitUntil(check, Number(minutes), waker) ??
-    [2, `still ${cap} of ${cap} PRs open after ${shownMinutes(minutes)} minutes: ` + myReadyPrs().map((x) => `#${x}`).join(", ")];
+  return waitUntil(check, Number(minutes), prWaker(cfg) ?? waker) ??
+    [2, `still ${cap} of ${cap} PRs open after ${shownMinutes(minutes)} minutes: ` + readyPrs(cfg).map((x) => `#${x}`).join(", ")];
 }
 
 export function waitReady(minutes: number | string, cfg: Config, waker: { wake: Waker; seconds: number } | null = null): Outcome {
@@ -321,7 +357,7 @@ export function main(a: string[]): number {
   let out: Outcome;
   if (cmd === "ci" || cmd === "answer") {
     if (!rest.length || !/^\d+$/.test(rest[0] as string)) die(`usage: factory wait ${cmd} <pr> [minutes]`);
-    out = cmd === "ci" ? waitCi(Number(rest[0]), minutesArg(rest, 1)) : waitAnswer(Number(rest[0]), minutesArg(rest, 1), wakerFor(cfg));
+    out = cmd === "ci" ? waitCi(Number(rest[0]), minutesArg(rest, 1), cfg) : waitAnswer(Number(rest[0]), minutesArg(rest, 1), wakerFor(cfg));
   } else if (cmd === "slot") {
     out = waitSlot(minutesArg(rest, 0), cfg, wakerFor(cfg));
   } else if (cmd === "ready") {

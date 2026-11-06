@@ -41,6 +41,7 @@ import { CoreError } from "./core/domain/error.ts";
 import { dependencies } from "./core/domain/task.ts";
 import { machineId } from "./factory_machine.ts";
 import { holderIsMe, leasesOn } from "./factory_leases.ts";
+import { asPull, freshPrs, readyOf } from "./factory_pr_feed.ts";
 import { die, Exit, GITHUB_BUSY, githubBusy, parseArgs, parseIso, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 
 export const CLAIM = /<!--\s*factory-claim\s+agent=([\w.-]+)(?:\s+machine=([\w-]+))?\s*-->/;
@@ -238,18 +239,27 @@ interface Pull {
  * a short reason; else null. A branch with no commits beyond main is still being built, so it doesn't wait. */
 export function waitingForSlot(cfg: Config, issue: Issue): string | null {
   const n = issue.number;
+  const cap = cfg.maxOpenPRs ?? 3;
+  // With `pr` on NATS (factory_pr_feed.ts), the watcher's snapshot answers: a free slot, or this task's PR already
+  // open, needs no GitHub read at all.
+  const fed = freshPrs(cfg);
+  if (fed) {
+    const ready = readyOf(fed);
+    if (ready.length < Math.trunc(Number(cap))) return null;
+    if (fed.prs.some((p) => p.branch.startsWith(`task/${n}-`) && (p.headRepo || fed.repo) === fed.repo)) return null;
+  }
   const branches = ghAll<Branch>("repos/{owner}/{repo}/branches").map((b) => b.name).filter((b) => b.startsWith(`task/${n}-`));
   if (!branches.length) return null;
-  const prs = ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open");
-  const base = (gh<{ full_name?: string } | null>("GET", "repos/{owner}/{repo}") ?? {}).full_name;
+  const prs: Pull[] = fed ? fed.prs.map(asPull) : ghAll<Pull>("repos/{owner}/{repo}/pulls?state=open");
+  const base = fed ? fed.repo : (gh<{ full_name?: string } | null>("GET", "repos/{owner}/{repo}") ?? {}).full_name;
   if (prs.some((p) => branches.includes(p.head.ref) && ((p.head.repo ?? {}).full_name || base) === base)) {
     return null; // its PR is open: rework and review go their own way
   }
   const main = cfg.mainBranch ?? "main";
   const ahead = branches.filter((b) => ((gh<{ ahead_by?: number } | null>("GET", `repos/{owner}/{repo}/compare/${main}...${b}`) ?? {}).ahead_by ?? 0) > 0);
-  const me = (gh<{ login?: string } | null>("GET", "user") ?? {}).login; // the gate's cap counts this account's ready PRs (--author @me)
+  // the gate's cap counts this account's ready PRs (--author @me)
+  const me = fed ? fed.login : (gh<{ login?: string } | null>("GET", "user") ?? {}).login;
   const ready = prs.filter((p) => !p.draft && (p.user ?? {}).login === me).map((p) => p.number).sort((a, b) => a - b);
-  const cap = cfg.maxOpenPRs ?? 3;
   if (ahead.length && ready.length >= Math.trunc(Number(cap))) {
     return `${ready.length} of ${cap} open: ` + ready.map((x) => `#${x}`).join(", ");
   }
