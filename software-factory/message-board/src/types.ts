@@ -132,7 +132,25 @@ export interface TaskChanges {
   status?: "open" | "in_review" | "deferred";
 }
 
-export type Next = { next: "ready"; reason: string } | { next: "deferred"; reason: string } | { next: "review"; reason: string } | { next: "handoff"; to?: string; reason: string };
+/** The columns a move takes a task to (#503). ready is open; blocked is open with blocking edges, or deferred. */
+export const MOVE_TARGETS = ["ready", "in_progress", "in_review", "done", "deferred", "blocked"] as const;
+export type MoveTarget = (typeof MOVE_TARGETS)[number];
+
+export interface Move {
+  to: MoveTarget;
+  /** Why; needed when the task is held (the claim is taken back), and kept as a blocker note with blocked. */
+  reason?: string;
+  /** With blocked: the tasks it waits on, each linked to it with a `blocks` edge. */
+  blockedBy?: number[];
+  /** With done (default done). */
+  outcome?: Outcome;
+}
+
+export type Next =
+  | { next: "ready"; reason: string }
+  | { next: "deferred"; reason: string }
+  | { next: "review"; reason: string }
+  | { next: "handoff"; to?: string; reason: string };
 
 export interface NewMessage {
   task?: number | null;

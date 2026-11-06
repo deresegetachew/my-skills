@@ -11,7 +11,8 @@ export type ErrorCode =
   | "schema-old" // the database hasn't had this version's migrations
   | "login-exists" // a login with that name is already there
   | "login-used" // a login asked to be removed only if unused has been used
-  | "no-rights"; // the board's user may not do this (making logins needs the board's own user)
+  | "no-rights" // the board's user may not do this (making logins needs the board's own user)
+  | "busy"; // the write crossed another one at the same moment (a deadlock or serialization failure) and was undone
 
 export class BoardError extends Error {
   constructor(readonly code: ErrorCode, message: string, readonly fix: string) {

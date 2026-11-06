@@ -508,3 +508,314 @@ test("requests sent back to back without waiting are answered in order", async (
   expect((thread.structuredContent as { messages: unknown[] }).messages.length).toBe(1);
   expect(await c.end()).toBe(0);
 });
+
+// ---------- owner and manager tools (#503) ----------
+const OWNER_TOOLS = ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment"];
+
+async function toolNames(c: Client): Promise<string[]> {
+  return (((await c.request("tools/list")).result?.tools ?? []) as { name: string }[]).map((t) => t.name).sort();
+}
+
+test("a builder's server (the default) neither lists nor runs the owner's tools; owner and manager servers do", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  for (const args of [["--as", "haile"], ["--as", "haile", "--role", "builder"]]) {
+    const c = new Client(url, args);
+    await c.start();
+    expect(await toolNames(c)).toEqual([...TOOLS].sort());
+    for (const name of OWNER_TOOLS) {
+      const r = await c.request("tools/call", { name, arguments: { task: a.id, body: "x", title: "x", kind: "task", to: "ready" } });
+      expect(r.error?.code, name).toBe(-32602);
+      expect(r.error?.message).toContain(name);
+    }
+    expect(await c.end()).toBe(0);
+  }
+  expect((await po.get(a.id)).status).toBe("open");
+  expect(await po.thread({ task: a.id })).toEqual([]);
+  expect((await po.tasks()).length).toBe(1);
+  for (const role of ["owner", "manager"]) {
+    const c = new Client(url, ["--as", role === "owner" ? "abebe" : "dev-manager", "--role", role]);
+    const init = await c.start();
+    expect(String(init.result?.instructions)).toContain(role);
+    expect(await toolNames(c)).toEqual([...TOOLS, ...OWNER_TOOLS].sort());
+    expect(await c.end()).toBe(0);
+  }
+  await po.end();
+});
+
+test("the owner's tools take no sender and refuse what they don't list", async () => {
+  const c = new Client(await database(), ["--as", "abebe", "--role", "owner"]);
+  await c.start();
+  const tools = ((await c.request("tools/list")).result?.tools ?? []) as { name: string; inputSchema: { properties: Json; required?: string[]; additionalProperties: boolean } }[];
+  const by = Object.fromEntries(tools.map((t) => [t.name, t.inputSchema]));
+  for (const name of OWNER_TOOLS) {
+    const s = by[name];
+    expect(s?.additionalProperties, name).toBe(false);
+    for (const p of Object.keys(s?.properties ?? {})) expect(["as", "actor", "sender", "author", "holder"]).not.toContain(p);
+  }
+  expect(by.board_move?.required?.sort()).toEqual(["task", "to"]);
+  expect(by.board_move?.properties.to).toMatchObject({ enum: ["ready", "in_progress", "in_review", "done", "deferred", "blocked"] });
+  expect(by.board_move?.properties.blockedBy).toMatchObject({ type: "array" });
+  expect(by.board_create?.required?.sort()).toEqual(["kind", "title"]);
+  expect(by.board_create?.properties.kind).toMatchObject({ enum: ["task", "bug", "epic", "note"] });
+  expect(by.board_assign?.required?.sort()).toEqual(["task", "to"]);
+  expect(by.board_link?.required?.sort()).toEqual(["from", "kind", "to"]);
+  expect(by.board_link?.properties.kind).toMatchObject({ enum: ["blocks", "waits_for", "discovered_from", "supersedes", "duplicates", "related"] });
+  expect(by.board_unlink?.required?.sort()).toEqual(["from", "kind", "to"]);
+  expect(by.board_comment?.required?.sort()).toEqual(["body", "task"]);
+  const e = await c.refused("board_comment", { task: 1, body: "hi", from: "dev-manager" });
+  expect(e.code).toBe("bad-input");
+  expect(e.message).toContain("from");
+  expect(await c.end()).toBe(0);
+});
+
+test("board_create makes a task, bug, epic or note with a parent, written as the owner", async () => {
+  const url = await database();
+  const c = new Client(url, ["--as", "abebe", "--role", "owner", "--session", "o-1"]);
+  await c.start();
+  const epic = (await c.ok("board_create", { title: "Run the board", kind: "epic" })).task as Json;
+  expect(epic).toMatchObject({ title: "Run the board", kind: "epic", createdBy: "abebe", status: "open" });
+  const task = (await c.ok("board_create", { title: "Move cards", kind: "task", body: "From chat", parent: epic.id, priority: 1 })).task as Json;
+  expect(task).toMatchObject({ kind: "task", body: "From chat", parentId: epic.id, priority: 1, createdBy: "abebe" });
+  expect((await c.ok("board_create", { title: "It crashes", kind: "bug" })).task).toMatchObject({ kind: "bug", priority: 2 });
+  expect((await c.ok("board_create", { title: "Remember this", kind: "note" })).task).toMatchObject({ kind: "note" });
+
+  for (const [args, word] of [
+    [{ title: "x" }, "kind"],
+    [{ title: "x", kind: "decision" }, "kind"],
+    [{ title: "  ", kind: "task" }, "title"],
+    [{ title: "x".repeat(501), kind: "task" }, "title"],
+    [{ title: "x", kind: "task", priority: -1 }, "priority"],
+    [{ title: "x", kind: "task", parent: "one" }, "parent"],
+  ] as [Json, string][]) {
+    const e = await c.refused("board_create", args);
+    expect(e.code, JSON.stringify(args)).toBe("bad-input");
+    expect(e.message).toContain(word);
+  }
+  expect((await c.refused("board_create", { title: "x", kind: "task", parent: 99_999 })).code).toBe("not-found");
+  const po = await Board.open(url, { as: "po" });
+  expect((await po.tasks()).length).toBe(4);
+  const created = (await po.events(0, 500, { kind: "task.created" }));
+  expect(created.length).toBe(4);
+  expect(created.every((e) => e.actor === "abebe" && e.session === "o-1")).toBe(true);
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("board_move moves a task between columns, each move an event a live listener sees", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  const seen: { kind: string; actor: string; payload: Json }[] = [];
+  const listener = await po.listen((e) => {
+    seen.push({ kind: e.kind, actor: e.actor, payload: e.payload });
+  });
+  const c = new Client(url, ["--as", "dev-manager", "--role", "manager"]);
+  await c.start();
+  const move = async (to: string, extra: Json = {}): Promise<Json> => (await c.ok("board_move", { task: a.id, to, ...extra })).task as Json;
+
+  expect(await move("deferred")).toMatchObject({ status: "deferred" });
+  expect(await move("in_review")).toMatchObject({ status: "in_review" });
+  expect(await move("done")).toMatchObject({ status: "done", outcome: "done" });
+  expect(await move("ready")).toMatchObject({ status: "open", outcome: null });
+  expect(await move("done", { outcome: "wont_do", reason: "not needed" })).toMatchObject({ status: "done", outcome: "wont_do" });
+  expect(await move("ready")).toMatchObject({ status: "open" });
+
+  const deadline = Date.now() + 5_000;
+  while (seen.filter((e) => e.kind === "task.moved").length < 6 && Date.now() < deadline) await Bun.sleep(50);
+  const moves = seen.filter((e) => e.kind === "task.moved");
+  expect(moves.map((e) => e.payload.to)).toEqual(["deferred", "in_review", "done", "ready", "done", "ready"]);
+  expect(moves.every((e) => e.actor === "dev-manager")).toBe(true);
+  expect(moves[4]?.payload).toMatchObject({ from: "open", to: "done", outcome: "wont_do", reason: "not needed" });
+  await listener.close();
+
+  // refusals
+  const refusal = async (args: Json, code: string, word: string): Promise<void> => {
+    const e = await c.refused("board_move", { task: a.id, ...args });
+    expect(e.code, JSON.stringify(args)).toBe(code);
+    expect(e.message.toLowerCase()).toContain(word);
+    expect(e.fix.length).toBeGreaterThan(0);
+  };
+  await refusal({ to: "sideways" }, "bad-input", "to");
+  await refusal({ to: "blocked" }, "bad-input", "blocked");
+  await refusal({ to: "ready", outcome: "done" }, "bad-input", "outcome");
+  await refusal({ to: "ready", blockedBy: [1] }, "bad-input", "blockedby");
+  await refusal({ to: "blocked", blockedBy: [] }, "bad-input", "blockedby");
+  await refusal({ to: "blocked", blockedBy: ["one"] }, "bad-input", "blockedby");
+  await refusal({ to: "in_progress" }, "bad-input", "claim");
+  expect((await c.refused("board_move", { task: 99_999, to: "ready" })).code).toBe("not-found");
+  expect((await po.get(a.id)).status).toBe("open");
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("the owner moving a held task takes the claim back, with an event naming the owner and the reason", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  const b = await po.create({ title: "B" });
+  const agent = await Board.open(url, { as: "haile" });
+  const claimA = await agent.claim(a.id);
+  const claimB = await agent.claim(b.id);
+  const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
+  await c.start();
+
+  const noReason = await c.refused("board_move", { task: a.id, to: "ready" });
+  expect(noReason.code).toBe("bad-input");
+  expect(noReason.message).toContain("haile");
+  expect(noReason.fix).toContain("reason");
+  expect((await po.get(a.id)).holder).toBe("haile");
+
+  const moved = (await c.ok("board_move", { task: a.id, to: "ready", reason: "haile is stuck" })).task as Json;
+  expect(moved).toMatchObject({ status: "open", holder: null });
+  const back = await po.events(0, 500, { kind: "task.taken_back" });
+  expect(back.length).toBe(1);
+  expect(back[0]).toMatchObject({ actor: "abebe", subject: `task:${a.id}`, payload: { holder: "haile", reason: "haile is stuck" } });
+  // the holder's token no longer holds it
+  await expect(agent.heartbeat(a.id, claimA?.token as string)).rejects.toMatchObject({ code: "claim-lost" });
+  expect((await po.ready()).map((t) => t.id)).toContain(a.id);
+
+  // done from held: taken back and closed
+  expect((await c.ok("board_move", { task: b.id, to: "done", reason: "done by hand" })).task).toMatchObject({ status: "done", outcome: "done", holder: null });
+  await expect(agent.close(b.id, { token: claimB?.token as string, outcome: "done" })).rejects.toMatchObject({ code: "claim-lost" });
+  expect((await po.events(0, 500, { kind: "task.taken_back" })).length).toBe(2);
+  await agent.end();
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("blocked with blockedBy adds the blocks edge and the task isn't ready; with a reason only it is deferred with a blocker note", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  const b = await po.create({ title: "B" });
+  const d = await po.create({ title: "D" });
+  const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
+  await c.start();
+
+  const t = (await c.ok("board_move", { task: a.id, to: "blocked", blockedBy: [b.id], reason: "needs B" })).task as Json;
+  expect(t).toMatchObject({ status: "open", blocked: true, blockedBy: [b.id] });
+  expect(await po.edges(a.id)).toEqual([{ from: b.id, to: a.id, kind: "blocks" }]);
+  expect((await po.ready()).map((x) => x.id)).not.toContain(a.id);
+  expect((await po.contextFor(a.id)).map((x) => [x.kind, x.body, x.author])).toEqual([["blocker", "needs B", "abebe"]]);
+
+  // a cycle is refused and nothing changes
+  const cycle = await c.refused("board_move", { task: b.id, to: "blocked", blockedBy: [a.id] });
+  expect(cycle.code).toBe("cycle");
+  expect(await po.edges(b.id)).toEqual([{ from: b.id, to: a.id, kind: "blocks" }]);
+  expect((await po.get(b.id)).status).toBe("open");
+
+  const r = (await c.ok("board_move", { task: d.id, to: "blocked", reason: "waiting on the owner" })).task as Json;
+  expect(r).toMatchObject({ status: "deferred" });
+  expect((await po.contextFor(d.id)).map((x) => x.kind)).toEqual(["blocker"]);
+  expect((await po.ready()).map((x) => x.id)).not.toContain(d.id);
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("board_assign hands a task to one actor: only they may claim it", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  const h = await po.create({ title: "Held" });
+  const haile = await Board.open(url, { as: "haile" });
+  const selam = await Board.open(url, { as: "selam" });
+  const held = await haile.claim(h.id);
+  const c = new Client(url, ["--as", "dev-manager", "--role", "manager"]);
+  await c.start();
+
+  expect((await c.ok("board_assign", { task: a.id, to: "selam" })).task).toMatchObject({ assignee: "selam", status: "open" });
+  await expect(haile.claim(a.id)).rejects.toMatchObject({ code: "not-ready" });
+  expect((await haile.ready({ for: "haile" })).map((t) => t.id)).not.toContain(a.id);
+  expect((await selam.claim(a.id))?.task.holder).toBe("selam");
+  const assigned = await po.events(0, 500, { kind: "task.assigned" });
+  expect(assigned[0]).toMatchObject({ actor: "dev-manager", payload: { to: "selam" } });
+
+  // a held task: refused without a reason, taken back and handed on with one
+  const e = await c.refused("board_assign", { task: h.id, to: "selam" });
+  expect(e.code).toBe("bad-input");
+  expect(e.message).toContain("haile");
+  const moved = (await c.ok("board_assign", { task: h.id, to: "selam", reason: "selam knows the UI" })).task as Json;
+  expect(moved).toMatchObject({ holder: null, assignee: "selam", status: "open" });
+  await expect(haile.heartbeat(h.id, held?.token as string)).rejects.toMatchObject({ code: "claim-lost" });
+  expect((await po.events(0, 500, { kind: "task.taken_back" }))[0]).toMatchObject({ actor: "dev-manager", payload: { holder: "haile", reason: "selam knows the UI" } });
+
+  for (const [args, code] of [
+    [{ task: a.id, to: " " }, "bad-input"],
+    [{ task: a.id }, "bad-input"],
+    [{ task: 99_999, to: "selam" }, "not-found"],
+  ] as [Json, string][]) {
+    expect((await c.refused("board_assign", args)).code, JSON.stringify(args)).toBe(code);
+  }
+  await haile.end();
+  await selam.end();
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("board_link and board_unlink add and remove typed links; a loop is refused", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  const b = await po.create({ title: "B" });
+  const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
+  await c.start();
+  expect(await c.ok("board_link", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ linked: true });
+  expect(await c.ok("board_link", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ linked: false });
+  expect(await c.ok("board_link", { from: a.id, to: b.id, kind: "related" })).toMatchObject({ linked: true });
+  expect((await po.get(b.id)).blockedBy).toEqual([a.id]);
+  const loop = await c.refused("board_link", { from: b.id, to: a.id, kind: "waits_for" });
+  expect(loop.code).toBe("cycle");
+  expect((await c.refused("board_link", { from: a.id, to: a.id, kind: "blocks" })).code).toBe("cycle");
+  expect((await c.refused("board_link", { from: a.id, to: b.id, kind: "parent" })).code).toBe("bad-input");
+  expect((await c.refused("board_link", { from: a.id, to: 99_999, kind: "blocks" })).code).toBe("not-found");
+  expect(await c.ok("board_unlink", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ unlinked: true });
+  expect(await c.ok("board_unlink", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ unlinked: false });
+  expect((await po.get(b.id)).blocked).toBe(false);
+  expect(await po.edges()).toEqual([{ from: a.id, to: b.id, kind: "related" }]);
+  const kinds = (await po.events(0)).filter((e) => e.actor === "abebe").map((e) => e.kind);
+  expect(kinds).toEqual(["edge.linked", "edge.linked", "edge.unlinked"]);
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("board_comment posts a note on the task's thread as the server's actor", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
+  await c.start();
+  const m = (await c.ok("board_comment", { task: a.id, body: "Do the login first." })).message as Json;
+  expect(m).toMatchObject({ from: "abebe", kind: "note", taskId: a.id, body: "Do the login first." });
+  expect((await po.thread({ task: a.id })).map((x) => [x.from, x.body])).toEqual([["abebe", "Do the login first."]]);
+  expect((await c.refused("board_comment", { task: a.id, body: "  " })).code).toBe("bad-input");
+  expect((await c.refused("board_comment", { task: a.id, body: "x".repeat(20_001) })).code).toBe("bad-input");
+  expect((await c.refused("board_comment", { task: 99_999, body: "hi" })).code).toBe("not-found");
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("--role takes owner, manager or builder; mcp --help shows how to add the server to a Claude Code session", () => {
+  const run = (args: string[]): { code: number; stdout: string; stderr: string } => {
+    const p = Bun.spawnSync([process.execPath, "--no-env-file", BIN, "mcp", ...args], { env: env(), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    return { code: p.exitCode ?? 124, stdout: p.stdout.toString(), stderr: p.stderr.toString() };
+  };
+  const bad = run(["--as", "abebe", "--role", "boss"]);
+  expect(bad.code).toBe(1);
+  const err = JSON.parse(bad.stderr.trim().split("\n").at(-1) as string) as { code: string; message: string; fix: string };
+  expect(err.code).toBe("bad-input");
+  expect(err.message).toContain("boss");
+  expect(err.fix).toContain("owner");
+  for (const flag of ["--help", "-h"]) {
+    const h = run([flag]);
+    expect(h.code).toBe(0);
+    expect(h.stdout).toContain("--role owner|manager|builder");
+    expect(h.stdout).toContain("claude mcp add board -- bun ");
+    expect(h.stdout).toContain("message-board/bin.ts mcp --as owner --role owner");
+    expect(h.stdout).toContain("./factory board mcp --as owner --role owner");
+    for (const t of OWNER_TOOLS) expect(h.stdout).toContain(t);
+  }
+  const p = Bun.spawnSync([process.execPath, "--no-env-file", BIN, "help"], { env: env(), stdout: "pipe", stderr: "pipe" });
+  expect(p.stdout.toString()).toContain("factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]");
+});

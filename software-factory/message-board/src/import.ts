@@ -272,8 +272,10 @@ function check(batch: ImportBatch): void {
 export async function applyImport(tx: SQL, batch: ImportBatch, as: string, dryRun: boolean): Promise<{ result: ImportResult; events: NewEvent[] }> {
   check(batch);
   const run = new Run(tx, as, dryRun);
-  for (const t of batch.tasks) await run.task(t);
+  // The graph lock before any row lock, as every write that touches edges or parents takes them (#503), so an import
+  // and an edit can't wait on each other.
   await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
+  for (const t of batch.tasks) await run.task(t);
   for (const t of batch.tasks) await run.parent(t);
   for (const t of batch.tasks) await run.edges(t);
   for (const t of batch.tasks) await run.notes(t);
