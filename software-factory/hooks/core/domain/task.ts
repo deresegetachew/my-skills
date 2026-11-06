@@ -19,6 +19,7 @@ export interface Task {
   todos: Todo[];
   group: string; // the milestone or the plan's phase, "" for none
   tags: string[]; // the tracker's own labels, for commands that print them
+  cites?: string[]; // the decisions and PRD stories its body cites (`decision 0004`, `US-12`), as written
 }
 
 const BOX = /^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/gm;

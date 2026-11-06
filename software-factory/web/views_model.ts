@@ -25,6 +25,7 @@ export interface TaskRow {
   url: string | null;
   pr: { number: number; url: string | null } | null;
   next: boolean;
+  cites?: string[]; // the decisions and PRD stories its body cites
   find: string;
 }
 
@@ -41,6 +42,7 @@ export interface PullRow {
   protected: boolean | null;
   next: { action: string; text: string };
   rework: string | null;
+  cites?: string[]; // the decisions and PRD stories its body cites
   find: string;
 }
 
