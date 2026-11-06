@@ -120,7 +120,7 @@ and prints how many calls it made. What an issue means is the software factory's
 reads again, with a comment saying where the factory defines each.
 
 - **Tasks:** open issues (`--closed`: closed ones too, as done, with GitHub's reason as the outcome), each with the ref
-  `github:<owner>/<repo>#<n>`. Pull requests are left out. Label `epic` makes an epic, `bug` a bug; agent issues and the
+  `github:<owner>/<repo>#<n>` (owner and repo in lower case, as GitHub ignores case). Pull requests are left out. Label `epic` makes an epic, `bug` a bug; agent issues and the
   owner queue are notes (never claimed). The body is kept, with its `PRD:` and `Budget:` lines, and a `Milestone:` line
   is added.
 - **Status:** ready or no label is open; in review is in review; closed is done. **In progress comes in open, with no
@@ -129,6 +129,9 @@ reads again, with a comment saying where the factory defines each.
   (the `**Blocked:**` comment) as a blocker entry: blocked on the board is computed from edges only.
 - **Edges and parents:** `Depends on #n` lines become `blocks` edges (the import's own edges follow the lines on the next
   run; edges made on the board are kept); an epic's `- [ ] #n` lines set the parent.
+- **GitHub is the source of truth for status,** unless the task is held on the board: a task done on the board but
+  open on GitHub is reopened, and one held on the board keeps its status (the run lists it). Title, body and kind follow
+  GitHub too. Comments deleted on GitHub stay on the board; an edited one is updated.
 - **Threads:** each comment is a message keyed by `github:<owner>/<repo>/comments/<id>`. The factory's markers set the kind
   and the tag: `factory-question` and `factory-answer`, owner asks and answers (an answer replies to its ask),
   `factory-po-reply`, `factory-manager-note`, the claim markers (statuses), `factory-approved`, `factory-mustfix` and

@@ -177,6 +177,8 @@ Check
                          the repo's open issues into the board as tasks (--closed: the closed ones too, as done):
                          labels as status, "Depends on #n" as edges, epics as parents, comments as threads with the
                          factory's markers as their own kinds; safe to run twice; --dry-run writes nothing
+                         GitHub wins on status unless the task is held on the board (done here but open there:
+                         reopened); comments deleted on GitHub stay on the board
   doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
                          of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user

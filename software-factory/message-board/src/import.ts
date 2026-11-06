@@ -195,7 +195,8 @@ class Run {
       WHERE external_ref = ${m.ref}`) as Row[];
     const now = r[0];
     if (now) {
-      const reply = parent ? Number(parent.id) : null;
+      // A reply whose target this run couldn't find (on an issue with nothing new, or not on the board) keeps its link.
+      const reply = parent ? Number(parent.id) : now.reply === null ? null : Number(now.reply);
       const same = String(now.kind) === m.kind && (now.tag ?? null) === tag && String(now.sender) === m.from && (now.addressee ?? null) === to &&
         String(now.body) === m.body && (now.reply === null ? null : Number(now.reply)) === reply;
       if (same) {

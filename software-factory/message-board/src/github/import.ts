@@ -117,7 +117,10 @@ export function ghCli(): Gh {
         if (/auth login|401|Bad credentials/i.test(why)) {
           throw new GithubError("gh-signed-out", `gh can't read GitHub: ${why}`, "Run `gh auth login`, then run this again. Nothing was written.");
         }
-        throw new GithubError("gh-failed", `gh api ${path.split("?")[0]} failed: ${why}`, "Check the repo name (--repo owner/name) and that gh can read it, then run this again. Nothing was written.");
+        if (/HTTP (404|410)/.test(why)) {
+          throw new GithubError("gh-not-found", `GitHub has no ${path.split("?")[0]}: ${why}`, "Check the repo name (--repo owner/name) and that gh can read it, then run this again. Nothing was written.");
+        }
+        throw new GithubError("gh-failed", `gh api ${path.split("?")[0]} failed: ${why}`, "Run this again once GitHub answers; check the repo name (--repo owner/name) if it keeps failing. Nothing was written.");
       }
       try {
         return JSON.parse(r.out) as unknown;
@@ -128,13 +131,14 @@ export function ghCli(): Gh {
   };
 }
 
-function pages<T>(gh: Gh, path: string): T[] {
-  const all: T[] = [];
+/** Every page of a list, each item once by its key (a live repo can shift items between pages while they are read). */
+function pages<T>(gh: Gh, path: string, key: (x: T) => number): T[] {
+  const all = new Map<number, T>();
   for (let page = 1; ; page++) {
     const got = gh.get(`${path}&page=${page}`);
     if (!Array.isArray(got)) throw new GithubError("gh-failed", `gh api ${path.split("?")[0]} didn't answer with a list.`, "Check the repo name (--repo owner/name), then run this again.");
-    all.push(...(got as T[]));
-    if (got.length < 100) return all;
+    for (const x of got as T[]) all.set(key(x), x);
+    if (got.length < 100) return [...all.values()];
   }
 }
 
@@ -150,8 +154,9 @@ export function repoName(given: string | undefined, cwd = process.cwd()): string
       return "";
     }
   };
-  const repo = given ?? process.env.GH_REPO ?? fromRemote();
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+  const repo = (given ?? process.env.GH_REPO ?? fromRemote()).toLowerCase(); // GitHub names ignore case: one set of refs
+  const parts = repo.split("/");
+  if (parts.length !== 2 || parts.some((p) => !/^[\w.-]+$/.test(p) || /^\.+$/.test(p))) {
     throw new GithubError("bad-input", repo ? `${JSON.stringify(repo)} isn't a GitHub repo name (owner/name).` : "Which GitHub repo? This folder has no GitHub remote named origin.",
       "Pass --repo owner/name, or run it in a checkout of the repo.");
   }
@@ -393,7 +398,7 @@ export async function importFromGithub(board: Board, opts: { repo: string; close
   const startedAt = new Date();
   const all = await board.tasks({ all: true, limit: 1_000_000 });
   const onBoard = new Map(all.filter((t) => t.ref?.startsWith(prefix)).map((t) => [t.ref as string, t]));
-  const issues = pages<GhIssue>(gh, `repos/${opts.repo}/issues?state=${closed ? "all" : "open"}&per_page=100`);
+  const issues = pages<GhIssue>(gh, `repos/${opts.repo}/issues?state=${closed ? "all" : "open"}&per_page=100`, (i) => i.number);
 
   // Issues the board has open that GitHub no longer lists as open: read each, to close it here too.
   let gone = 0;
@@ -407,7 +412,7 @@ export async function importFromGithub(board: Board, opts: { repo: string; close
         if (i && i.number === n && !i.pull_request) issues.push(i);
         else gone++;
       } catch (e) {
-        if (e instanceof GithubError && e.code === "gh-failed") gone++;
+        if (e instanceof GithubError && e.code === "gh-not-found") gone++; // only 404 and 410 mean gone; anything else stops the run
         else throw e;
       }
     }
@@ -419,7 +424,7 @@ export async function importFromGithub(board: Board, opts: { repo: string; close
   const nothingNew = issues.filter((i) => !i.pull_request).every((i) => onBoard.has(issueRef(opts.repo, i.number)));
   const since = last && Number.isFinite(lastStart) && nothingNew && (!closed || last.options.closed === true)
     ? new Date(lastStart - SINCE_MARGIN_MS).toISOString() : null;
-  const comments = pages<GhComment>(gh, `repos/${opts.repo}/issues/comments?per_page=100${since ? `&since=${since}` : ""}`);
+  const comments = pages<GhComment>(gh, `repos/${opts.repo}/issues/comments?per_page=100${since ? `&since=${since}` : ""}`, (c) => c.id);
 
   const known = since ? await knownComments(board, onBoard, comments, issues, opts.repo, map) : [];
   const built = buildBatch({ repo: opts.repo, closed, issues, comments, known, onBoard: new Set(onBoard.keys()) }, map,

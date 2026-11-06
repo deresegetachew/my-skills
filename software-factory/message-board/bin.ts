@@ -34,6 +34,8 @@ events on Postgres.
                                      bring the repo's open issues in as tasks (--closed: the closed ones too, as done),
                                      their comments as threads; safe to run twice. --dry-run says what it would do and
                                      writes nothing. The repo is the git remote origin unless --repo names it
+                                     GitHub wins on status unless the task is held on the board (a task done on the
+                                     board but open on GitHub is reopened); comments deleted on GitHub stay on the board
 
 The URL lives in ${join("<machine settings folder>", "message-board", "url")} (MB_URL overrides it).`;
 
