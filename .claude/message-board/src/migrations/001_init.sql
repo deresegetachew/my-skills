@@ -1,0 +1,1 @@
+../../../../software-factory/message-board/src/migrations/001_init.sql

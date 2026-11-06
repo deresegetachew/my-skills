@@ -425,10 +425,10 @@ case "$cmd" in
   manage-tick) fh "$hooks/factory_tick" "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
   nats)      fh "$hooks/factory_nats" "${1:-status}" "${@:2}" ;;
-  board)     # The message board (decision 0007) sits beside the hooks folder in my-skills; a project linked to it reaches
-             # it through .claude/hooks.
+  board)     # The message board (decision 0007) sits beside the hooks folder: .claude/message-board, linked in my-skills and
+             # a linked project, copied by a release (#500).
              mb="$hooks/../message-board/bin"
-             [ -f "$mb.ts" ] || { printf '{"code": "board_missing", "message": "This project has no message board: %s.ts is missing.", "fix": "Run it in my-skills or a project linked to it (install.sh --link). Releases ship it with the adapters (decision 0007, build step 3)."}\n' "$mb" >&2; exit 1; }
+             [ -f "$mb.ts" ] || { printf '{"code": "board_missing", "message": "This project has no message board: %s.ts is missing.", "fix": "Run `factory update` to a release that ships it (#500), or install.sh --link again in a linked project."}\n' "$mb" >&2; exit 1; }
              fh "$mb" "${1:-help}" "${@:2}" ;;
   version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)

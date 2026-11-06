@@ -1,0 +1,1 @@
+../../../../software-factory/message-board/src/migrations/003_leases_values.sql
