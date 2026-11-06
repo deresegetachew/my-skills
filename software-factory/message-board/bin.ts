@@ -11,6 +11,7 @@ import {
   boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
   masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
 } from "./src/server.ts";
+import { GithubError, type ImportSummary, importFromGithub, repoName } from "./src/github/import.ts";
 
 const USAGE = `factory board <verb>: the message board (factory-message-board, decision 0007): tasks, claims, threads and
 events on Postgres.
@@ -33,6 +34,12 @@ events on Postgres.
   factory board mcp --as <actor> [--session <id>]
                                      serve the board to one agent as an MCP server over stdio (JSON-RPC, one message a
                                      line); every write is recorded as <actor>, and no tool can name another sender
+  factory board import github [--closed] [--dry-run] [--repo owner/name]
+                                     bring the repo's open issues in as tasks (--closed: the closed ones too, as done),
+                                     their comments as threads; safe to run twice. --dry-run says what it would do and
+                                     writes nothing. The repo is the git remote origin unless --repo names it
+                                     GitHub wins on status unless the task is held on the board (a task done on the
+                                     board but open on GitHub is reopened); comments deleted on GitHub stay on the board
 
 The URL lives in ${join("<machine settings folder>", "message-board", "url")} (MB_URL overrides it).`;
 
@@ -336,7 +343,7 @@ async function show(argv: string[]): Promise<number> {
   }
   if (got.thread.length) {
     print("\nThread");
-    for (const m of got.thread) print(`  ${m.id} ${m.kind} ${m.from}${m.to ? ` -> ${m.to}` : ""} (${m.state}): ${m.body}`);
+    for (const m of got.thread) print(`  ${m.id} ${m.kind}${m.tag ? `/${m.tag}` : ""} ${m.from}${m.to ? ` -> ${m.to}` : ""} (${m.state}): ${m.body}`);
   }
   return 0;
 }
@@ -410,8 +417,60 @@ async function mcp(argv: string[]): Promise<number> {
   return 0;
 }
 
+// ---------- import ----------
+const IMPORT_USAGE = "factory board import github [--closed] [--dry-run] [--repo owner/name]";
+const IMPORTER = "github-import"; // the actor an import writes as: its tasks and edges are created_by it
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+function importReport(s: ImportSummary): void {
+  const r = s.result;
+  const what = `the ${s.closed ? "open and closed" : "open"} issues of ${s.repo}`;
+  print(r.dryRun ? `Dry run: nothing was written. An import of ${what} would bring:` : `Imported ${what} into the message board.`);
+  print(`tasks      ${r.tasks.created} new, ${r.tasks.updated} updated, ${r.tasks.unchanged} unchanged`);
+  print(`edges      ${r.edges.added} added, ${r.edges.removed} removed (from "Depends on #n" lines)`);
+  print(`parents    ${r.parents} set (from epics' "- [ ] #n" lines)`);
+  print(`messages   ${r.messages.created} new, ${r.messages.updated} updated, ${r.messages.unchanged} unchanged`);
+  print(`context    ${r.notes.created} new, ${r.notes.updated} updated, ${r.notes.removed} removed (in progress and blocked on GitHub)`);
+  const k = s.skipped;
+  const skips = [
+    k.prComments ? plural(k.prComments, "comment on a pull request", "comments on pull requests") : "",
+    k.notImported ? plural(k.notImported, "comment on an issue not imported", "comments on issues not imported") : "",
+    k.deps ? plural(k.deps, "dependency on an issue not on the board", "dependencies on issues not on the board") : "",
+    k.gone ? plural(k.gone, "task whose issue GitHub no longer has", "tasks whose issues GitHub no longer has") : "",
+    r.skipped.length ? plural(r.skipped.length, "item left as it was (below)", "items left as they were (below)") : "",
+  ].filter(Boolean);
+  print(`skipped    ${skips.length ? skips.join("; ") : "nothing"}`);
+  for (const x of r.skipped) print(`  ${x.ref}: ${x.why}`);
+  print(`comments   ${s.since ? `changed since ${s.since} (the last import, less 10 minutes)` : "all of them"}`);
+  print(`GitHub calls: ${s.calls}`);
+}
+
+async function importVerb(argv: string[]): Promise<number> {
+  const args = [...argv];
+  const from = args.shift();
+  if (from !== "github") {
+    fail("bad-input", from ? `The board can't import from ${JSON.stringify(from)}; it imports from GitHub.` : "import needs a source.", `Run \`${IMPORT_USAGE}\`.`);
+  }
+  const closed = flag(args, "--closed");
+  const dryRun = flag(args, "--dry-run");
+  const given = option(args, "--repo");
+  leftovers(args, IMPORT_USAGE);
+  const repo = repoName(given);
+  const summary = await withBoard(async (b) => {
+    const info = await b.info();
+    const missing = migrationNames().filter((m) => !info.migrations.includes(m));
+    if (missing.length) {
+      fail("schema-old", `The board's schema is behind: ${missing.join(", ")} not applied yet.`, "Run `factory board migrate`, then run this again. Nothing was read or written.");
+    }
+    return importFromGithub(b, { repo, closed, dryRun });
+  }, IMPORTER);
+  importReport(summary);
+  return 0;
+}
+
 const VERBS: Record<string, (args: string[]) => number | Promise<number>> = {
-  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, mcp,
+  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, import: importVerb, mcp,
 };
 
 async function main(argv: string[]): Promise<number> {
@@ -428,7 +487,7 @@ async function main(argv: string[]): Promise<number> {
 try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (e) {
-  if (isCommandError(e)) {
+  if (isCommandError(e) || e instanceof GithubError) {
     console.error(errorLine({ code: e.code, message: e.message, fix: e.fix }));
     process.exitCode = 1;
   } else {

@@ -49,6 +49,10 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `agents ls` | built | The agents in the sidebar and their channels | |
 | `agents` | built | The agents in the sidebar; sweep stays with the dev manager | |
 | `machine` | planned | Machines (Machines.dc.html); agent names in Choose team (ChooseTeam.dc.html) | #455 |
+| `machine add` | built | Add machine (AddMachine.dc.html): the join code and the one command to run there | #445 |
+| `machine join` | terminal only | Runs on the new machine, before it has a UI; Join hub (JoinHub.dc.html) says what it does | #445 |
+| `machine ls` | built | Machines (Machines.dc.html): each machine added and whether it joined, its code is still waiting, or its code expired (keys removed from the hub) | #445 |
+| `machine remove` | planned | Machines (Machines.dc.html), after a confirm | #455 |
 | `remote` | planned | Add machine (AddMachine.dc.html) | #445 |
 | `nats up` | planned | Add machine (AddMachine.dc.html), Join hub (JoinHub.dc.html); down and status on Machines | #445 |
 | `nats user add` | planned | Team setup (TeamSetup.dc.html), Machines (Machines.dc.html): keys per agent | #445 |
@@ -97,6 +101,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `board show` | planned | Task (Task.dc.html), read from the message board | #472 |
 | `board prime` | agents only | An agent's start of task; the web UI's first read has the same shape | #472 |
 | `board mcp --as` | agents only | An agent's session reaches the message board through it; the owner sees what they wrote on Task (Task.dc.html) and the board | #495 |
+| `board import github` | planned | First launch (decision 0007 step 2): import the issues when a new factory connects GitHub | #457 |
 
 ## Product
 

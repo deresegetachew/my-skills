@@ -113,6 +113,21 @@ pre.log { margin: 0; background: var(--bg-subtle); border-radius: 10px; padding:
 .rows button.link { border: 0; background: none; padding: 0; cursor: pointer; font-weight: 600; }
 .rows button.link:hover { text-decoration: underline; }
 
+/* Add machine (issue 445): a name, the agents it will run, then the one command to run on the new machine */
+.add-machine .card-text { margin: 0 0 14px; }
+.add-machine .card-note { margin: 12px 0 0; font-size: 13px; }
+.add-machine .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.join-form { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.join-form .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-2); border: 0; margin: 0; padding: 0; min-width: 0; }
+.join-form legend { padding: 0; margin-bottom: 2px; }
+.join-form input[type="text"], .join-form input:not([type]) { height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px;
+  background: var(--surface); color: var(--text); font: inherit; min-width: 0; }
+.join-form .lrow { padding: 10px 2px; }
+.join-form .lrow:last-child { border-bottom: 0; }
+.join-form .pick { width: 20px; height: 20px; accent-color: var(--primary); cursor: pointer; }
+.join-cmd { display: block; font: 13px/1.5 var(--mono); background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; margin: 0 0 14px; overflow-wrap: anywhere; word-break: break-all; user-select: all; max-height: 160px; overflow-y: auto; }
+
 .composer { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--border); padding: 12px 44px 16px; max-width: 1188px; width: 100%; }
 
 .placeholder { max-width: 560px; padding: 24px 0; color: var(--text-2); }

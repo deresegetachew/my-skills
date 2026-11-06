@@ -16,6 +16,7 @@ import { BOARD_CSS } from "./board.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
 import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
 import type { DocSection } from "./docs_model.ts";
+import { addMachineAsk, agentArgs, plainProblem } from "./machines_model.ts";
 import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
 import { ARTIFACTS_CSS, ArtifactsPage } from "./artifacts.tsx";
 import { MenuIcon } from "./page_head.tsx";
@@ -278,7 +279,95 @@ function agentActions(agent: Agent | undefined, channel: ChannelView, project: P
     : <button className="btn danger" onClick={() => onAsk({ verb: "stop", project: project.id, agent: channel.name, role, spec: stopAgentAsk(facts) })}>Stop</button>;
 }
 
-function MachinesChannel({ live, project, open }: { live: Live | undefined; project: Project; open: (channel: string) => void }) {
+interface JoinCode { code: string; command: string; expiresAt: number }
+
+type Post = (path: string, body: unknown) => Promise<Record<string, unknown>>;
+
+/** Add machine (#445): a name and the team's agents it will run; after the confirm, the one command (with its join code)
+ * to run on the new machine. That command is the only one the page shows: the owner copies it there. */
+function AddMachine({ project, live, post }: { project: Project; live: Live; post: Post }) {
+  const [openForm, setOpenForm] = useState(false);
+  const [name, setName] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [made, setMade] = useState<(JoinCode & { name: string }) | null>(null);
+  const [problem, setProblem] = useState<{ message: string; fix: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+  const team = live.agents.map((a) => ({ name: a.name, role: a.role }));
+  const chosen = team.filter((a) => picked.includes(a.name));
+  const reset = (): void => {
+    setMade(null); setName(""); setPicked([]); setCopied(false); setProblem(null);
+  };
+  const make = async (): Promise<void> => {
+    setBusy(true);
+    setProblem(null);
+    const r = await post(`/api/projects/${encodeURIComponent(project.id)}/machines`, { confirm: true, name: name.trim(), agents: agentArgs(chosen) });
+    setBusy(false);
+    setAsking(false);
+    const join = r.join as Partial<JoinCode> | undefined;
+    if (r.ok && join && typeof join.command === "string") setMade({ code: String(join.code ?? ""), command: join.command, expiresAt: Number(join.expiresAt ?? 0), name: name.trim() });
+    else setProblem(plainProblem(String(r.message ?? "The hub couldn't make the join code."), String(r.fix ?? "")));
+  };
+  const copy = async (): Promise<void> => {
+    if (!made) return;
+    try {
+      await navigator.clipboard.writeText(made.command);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+  const toggle = (agent: string): void => setPicked((p) => (p.includes(agent) ? p.filter((x) => x !== agent) : [...p, agent]));
+  return (
+    <section className="card add-machine" aria-label="Add machine">
+      <h3>Add machine</h3>
+      {!openForm ? (
+        <>
+          <p className="muted card-text">Join another computer to this hub, so its agents share claims and messages with the team.</p>
+          <div className="actions"><button className="btn primary" onClick={() => setOpenForm(true)}>Add machine</button></div>
+        </>
+      ) : made ? (
+        <div className="join-made" aria-live="polite">
+          <p className="card-text">On <strong>{made.name}</strong>, in the project's folder, run this.{made.expiresAt > 0
+            ? ` It works once, until ${new Date(made.expiresAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` : " It works once."}</p>
+          <output aria-label="The command to run on the new machine" className="join-cmd">{made.command}</output>
+          <div className="actions">
+            <button className="btn primary" onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
+            <button className="btn plain" onClick={() => { reset(); setOpenForm(false); }}>Done</button>
+          </div>
+          <p className="muted card-note">It holds the agents' keys: send it over a private channel.</p>
+        </div>
+      ) : (
+        <form className="join-form" onSubmit={(e) => { e.preventDefault(); setAsking(true); }}>
+          {problem && <Notice tone="bad" title={problem.message}>{problem.fix && <p>{problem.fix}</p>}</Notice>}
+          <label className="field">Machine name
+            <input value={name} maxLength={63} onChange={(e) => setName(e.target.value.toLowerCase())} placeholder="office-pc" autoComplete="off" />
+          </label>
+          <fieldset className="field">
+            <legend>Agents it will run</legend>
+            {team.length ? (
+              <ul className="lrows">
+                {team.map((a) => (
+                  <ListRow key={a.name} avatar={a} title={a.name} sub={ROLE_TITLE[a.role] ?? a.role}
+                    action={<input type="checkbox" className="pick" checked={picked.includes(a.name)} onChange={() => toggle(a.name)} aria-label={`Run ${a.name} there`} />} />
+                ))}
+              </ul>
+            ) : <p className="muted card-text">No agents are named in this project yet.</p>}
+          </fieldset>
+          <div className="actions">
+            <button className="btn primary" type="submit" disabled={!name.trim()}>Make the join code</button>
+            <button className="btn plain" type="button" onClick={() => { reset(); setOpenForm(false); }}>Cancel</button>
+          </div>
+        </form>
+      )}
+      {asking && <ConfirmDialog spec={addMachineAsk(name, chosen, live.machines.map((m) => m.name))} busy={busy} onConfirm={() => void make()}
+        onCancel={() => setAsking(false)} />}
+    </section>
+  );
+}
+
+function MachinesChannel({ live, project, open, post }: { live: Live | undefined; project: Project; open: (channel: string) => void; post: Post }) {
   if (!live) return <div className="body"><p className="empty">Reading {project.name}…</p></div>;
   const runnerTone: Record<string, Tone> = { busy: "good", idle: "quiet", offline: "bad" };
   const runnerText: Record<string, string> = { busy: "running a job", idle: "waiting for a job", offline: "offline" };
@@ -306,6 +395,7 @@ function MachinesChannel({ live, project, open }: { live: Live | undefined; proj
             </ul>
           </section>
         ))}
+        <AddMachine project={project} live={live} post={post} />
         <section className="card" aria-label="CI runners">
           <h3>CI runners</h3>
           {live.runners.length ? (
@@ -757,7 +847,7 @@ function App() {
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
           : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
-          : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} />
+          : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} post={post} />
           : VIEW_CHANNELS[channel.name] ? viewChannel(channel.name)
           : <ComingPage page={page} open={(c) => go(project.id, c)} />}
       </main>

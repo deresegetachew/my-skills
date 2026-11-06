@@ -7,7 +7,7 @@ import { SQL } from "bun";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Board } from "../src/index.ts";
+import { Board, migrationNames } from "../src/index.ts";
 import { freshDatabase, type Server, startServer, withDatabase } from "./pg.ts";
 
 setDefaultTimeout(60_000);
@@ -152,7 +152,7 @@ test("status says the board answers, and never prints the password", () => {
   const r = board(w, ["status"]);
   expect(r.code, r.stderr).toBe(0);
   expect(r.stdout).toContain("answers");
-  expect(r.stdout).toContain("schema    001_init.sql");
+  expect(r.stdout).toContain(`schema    ${migrationNames().at(-1)}`);
   expect(r.stdout + r.stderr).not.toContain(password(url));
 });
 
@@ -223,7 +223,7 @@ test("up writes the compose file on 127.0.0.1 and the Tailscale address only, ke
     expect(log).toContain("pg_isready");
     const check = new SQL(withDatabase((server as Server).url, "board"), { max: 1 });
     try {
-      expect((await check`select count(*)::int as n from mb_migrations`)[0]).toEqual({ n: 1 });
+      expect((await check`select count(*)::int as n from mb_migrations`)[0]).toEqual({ n: migrationNames().length });
     } finally {
       await check.close();
     }
