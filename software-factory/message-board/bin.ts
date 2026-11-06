@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
-import { PROTOCOL_VERSIONS, serveMcp } from "./src/mcp.ts";
+import { PROTOCOL_VERSIONS, type Role, ROLES, serveMcp } from "./src/mcp.ts";
 import {
   boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
   masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
@@ -31,9 +31,11 @@ events on Postgres.
   factory board show <id> [--json]   one task: its fields, edges, context and thread
   factory board prime <actor> [--json]
                                      an actor's start: what it holds, what is ready, what is blocked, recent events
-  factory board mcp --as <actor> [--session <id>]
+  factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]
                                      serve the board to one agent as an MCP server over stdio (JSON-RPC, one message a
-                                     line); every write is recorded as <actor>, and no tool can name another sender
+                                     line); every write is recorded as <actor>, and no tool can name another sender.
+                                     --role owner or manager adds the tools that move, create, assign and link cards
+                                     (default builder); \`factory board mcp --help\` shows how to add it to Claude Code
   factory board import github [--closed] [--dry-run] [--repo owner/name]
                                      bring the repo's open issues in as tasks (--closed: the closed ones too, as done),
                                      their comments as threads; safe to run twice. --dry-run says what it would do and
@@ -378,11 +380,50 @@ async function prime(argv: string[]): Promise<number> {
   return 0;
 }
 
+const MCP_USAGE = "factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]";
+
+const MCP_HELP = `${MCP_USAGE}
+
+Serves the message board to one actor as an MCP server over stdio (JSON-RPC 2.0, one message a line). Every write is
+recorded as --as, with --session on its events; no tool takes a sender.
+
+  --role builder (the default)  an agent's tools: board_prime, board_ready, board_claim, board_heartbeat,
+                                board_release, board_close, board_show, board_post, board_thread, board_note,
+                                board_on_me, board_delegated
+  --role owner | manager        those, and the tools that run the board without the web UI:
+                                board_move     a task to ready, in_review, deferred, done or blocked
+                                               (a held task is taken back from its holder, with a reason)
+                                board_create   a task, bug, epic or note, under a parent
+                                board_assign   hand a task to one actor: only they may claim it
+                                board_link     link two tasks (blocks, waits_for, related ...)
+                                board_unlink   remove a link
+                                board_comment  a note on a task's thread
+
+Add it to your own Claude Code session, from the project's folder:
+
+  claude mcp add board -- ./factory board mcp --as owner --role owner
+
+or with this file's path, which needs no factory script:
+
+  claude mcp add board -- bun ${join(import.meta.dir, "bin.ts")} mcp --as owner --role owner
+
+Use your own name for --as (it is who the board says moved each card), and --role manager for the dev manager.
+The board's URL comes from MB_URL or the machine's url file, as for the other verbs.`;
+
 async function mcp(argv: string[]): Promise<number> {
   const args = [...argv];
+  if (args.includes("--help") || args.includes("-h")) {
+    print(MCP_HELP);
+    return 0;
+  }
   const as = option(args, "--as");
   const session = option(args, "--session");
-  leftovers(args, "factory board mcp --as <actor> [--session <id>]");
+  const roleText = option(args, "--role") ?? "builder";
+  leftovers(args, MCP_USAGE);
+  if (!(ROLES as readonly string[]).includes(roleText)) {
+    fail("bad-input", `--role must be owner, manager or builder, not ${JSON.stringify(roleText)}.`, `Use --role owner, --role manager or --role builder (the default). Usage: ${MCP_USAGE}`);
+  }
+  const role = roleText as Role;
   if (as === undefined || !as.trim()) fail("bad-input", "mcp needs the actor it serves: --as <actor>.", "For example: factory board mcp --as haile");
   const url = boardUrl();
   if (!url) noBoard();
@@ -400,9 +441,9 @@ async function mcp(argv: string[]): Promise<number> {
   process.on("SIGTERM", () => shutdown(143));
   process.on("SIGINT", () => shutdown(130));
   process.stdout.on("error", () => shutdown(0, gone));
-  console.error(`factory board mcp: serving the message board to ${as} over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
+  console.error(`factory board mcp: serving the message board to ${as} (${role}) over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
   try {
-    await serveMcp({ board: b, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
+    await serveMcp({ board: b, role, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
       input: process.stdin,
       // A failed write never resolves: the shutdown under way exits the process.
       write: (line) => new Promise<void>((done) => {
