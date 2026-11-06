@@ -78,6 +78,8 @@ export interface EpicView {
   tasks: { id: string; done: boolean }[];
   prd: string;
   decisions: string[];
+  summary: string;
+  cites: string[];
   url: string | null;
   find: string;
 }
@@ -213,8 +215,9 @@ function epicsView(part: Obj, repo: string): EpicsView {
     const decisions = (Array.isArray(e.decisions) ? e.decisions : []).map(str).filter(Boolean);
     const stage = str(e.stage) || "investigating";
     const url = str(e.url) || (source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null);
+    const summary = str(e.summary).slice(0, 300);
     return { id, title: str(e.title), stage, stageText: stage, done: tasks.filter((t) => t.done).length, all: tasks.length, tasks, prd: str(e.prd),
-      decisions, url, find: [`#${id}`, str(e.title), stage, str(e.prd), ...decisions].join(" ") };
+      decisions, summary, cites: strings(e.cites), url, find: [`#${id}`, str(e.title), stage, str(e.prd), summary, ...decisions].join(" ") };
   });
   return { source, epics, problems: [] };
 }

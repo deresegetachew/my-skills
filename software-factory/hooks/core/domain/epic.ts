@@ -1,6 +1,7 @@
 // An epic (#440): something bigger than a task, that holds tasks and has a stage of its own. It lives as an issue
 // labelled `epic` (stage in an `epic:<stage>` label, tasks as `- [ ] #n` lines, optional `PRD:` and `Decisions:` lines).
 // Plain rules, no I/O: the adapters read the issues and give them here.
+import { citesIn } from "../../factory_cites.ts";
 
 export const EPIC_STAGES = ["investigating", "prd", "decision", "planned", "building", "done", "parked"] as const;
 export type EpicStage = (typeof EPIC_STAGES)[number];
@@ -17,6 +18,10 @@ export interface Epic {
   tasks: EpicTask[];
   prd: string;
   decisions: string[];
+  /** The first plain line of the body (not a task, PRD or Decisions line), at most 300 characters; "" for none. */
+  summary: string;
+  /** The decisions and PRD stories its title and body cite, as written (the rule is factory_cites.ts). */
+  cites: string[];
   url: string | null;
 }
 
@@ -49,7 +54,13 @@ export function parseEpic(input: EpicInput): Epic {
   }
   const prd = /^PRD:[ \t]*(.*)$/m.exec(input.body)?.[1]?.trim() ?? "";
   const decisions = (/^Decisions:[ \t]*(.*)$/m.exec(input.body)?.[1] ?? "").split(",").map((d) => d.trim()).filter(Boolean);
-  return { id: String(input.number), title: input.title, stage: stageOf(input.labels, input.closed), tasks: [...seen.values()], prd, decisions, url: null };
+  return { id: String(input.number), title: input.title, stage: stageOf(input.labels, input.closed), tasks: [...seen.values()], prd, decisions,
+    summary: summaryOf(input.body), cites: citesIn(`${input.title}\n${input.body}`), url: null };
+}
+
+function summaryOf(body: string): string {
+  const line = body.split("\n").map((l) => l.trim()).find((l) => l && !/^[-*]\s+\[[ xX]\]/.test(l) && !/^(PRD|Decisions):/.test(l));
+  return (line ?? "").slice(0, 300);
 }
 
 export function progress(e: Epic): { done: number; all: number } {

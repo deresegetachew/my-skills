@@ -41,6 +41,8 @@ export interface EpicRow {
   tasks: { id: string; done: boolean }[];
   prd: string;
   decisions: string[];
+  summary?: string; // the first plain line of its body
+  cites?: string[]; // the decisions and PRD stories its title and body cite
   url: string | null;
   find: string;
 }

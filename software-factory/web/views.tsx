@@ -5,6 +5,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
 import { Cited, Cites } from "./docs.tsx";
+import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
 import { type ActionRow, checksText, checksTone, epicBar, type EpicRow, epicTone, filterRows, groupByEpic, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
@@ -23,6 +24,10 @@ export interface ViewProps {
   /** The project's doc pages: a decision or a story that a title cites links to it (#438). */
   docs?: DocPage[];
   say: Say;
+  /** The token the chat calls need (the epic page talks to the product owner and the dev manager, #440). */
+  token?: string;
+  /** This project's product owner and dev manager. */
+  talkers?: Talker[];
 }
 
 function Dot({ tone, label }: { tone: Tone; label?: string }) {
@@ -142,16 +147,14 @@ export function TasksChannel(p: ViewProps) {
 
 // --- epics -------------------------------------------------------------------------------------------------------------
 
-const STAGES: Array<[string, string]> = [["investigating", "investigating"], ["prd", "PRD being written"], ["decision", "decision"],
-  ["planned", "planned"], ["building", "building"], ["done", "done"], ["parked", "parked"]];
 
-function EpicCard({ e, open }: { e: EpicRow; open: ViewProps["open"] }) {
+function EpicCard({ e, open, pick, docs }: { e: EpicRow; open: ViewProps["open"]; pick: (id: string) => void; docs?: DocPage[] }) {
   const pct = epicBar(e);
   return (
     <li className="card epic">
       <div className="prhead">
         <span className="vid"><Ext href={e.url}>#{e.id}</Ext></span>
-        <span className="vtitle">{e.title}</span>
+        <span className="vtitle"><button className="link" onClick={() => pick(e.id)}><Cited text={e.title} docs={docs} open={open} /></button></span>
         <span className="vstate"><Dot tone={epicTone(e.stage)} />{e.stageText}</span>
       </div>
       <div className="ebar" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} aria-label={`${e.done} of ${e.all} tasks done`}>
@@ -168,22 +171,71 @@ function EpicCard({ e, open }: { e: EpicRow; open: ViewProps["open"] }) {
   );
 }
 
+/** A column of the epics board: the stages in the order an epic walks them, then parked. */
+const BOARD: Array<[string, string]> = [["investigating", "Investigating"], ["prd", "PRD"], ["decision", "Decision"], ["planned", "Planned"],
+  ["building", "Building"], ["done", "Done"], ["parked", "Parked"]];
+
+function EpicBoard({ epics, open }: { epics: EpicRow[]; open: (id: string) => void }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <div className="eboard" style={{ gridTemplateColumns: `repeat(${BOARD.length}, minmax(160px, 1fr))` }}>
+        {BOARD.map(([s, name]) => {
+          const here = epics.filter((e) => e.stage === s);
+          return (
+            <section key={s} aria-label={name}>
+              <h4><Dot tone={epicTone(s)} />{name} <span className="empty">{here.length}</span></h4>
+              {here.map((e) => (
+                <article key={e.id}>
+                  <button className="link" onClick={() => open(e.id)}>{e.title}</button>
+                  {e.summary && <span className="vsub">{e.summary}</span>}
+                  <span className="vsub">{e.all ? `${e.done} of ${e.all} tasks` : "Not split yet"} · #{e.id}</span>
+                </article>
+              ))}
+              {!here.length && <span className="vsub">None.</span>}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type EpicTab = "board" | "list";
+
 export function EpicsChannel(p: ViewProps) {
   const [typed, setTyped] = useFilter(p.find);
+  const [tab, setTab] = useState<EpicTab>("board");
+  const [adding, setAdding] = useState(false);
+  const wanted = /^#(\d+)$/.exec(p.find.trim())?.[1] ?? null; // a task's epic link opens the epic itself
+  const [chosen, setChosen] = useState<string | null>(wanted);
+  useEffect(() => setChosen(wanted), [wanted]);
   if (!p.views) return <Loading name={p.project.name} />;
   const v = p.views;
   const all = v.epics.epics;
-  const rows = filterRows(all, typed);
+  const rows = filterRows(all, chosen ? "" : typed);
+  const epic = chosen ? all.find((e) => e.id === chosen) : undefined;
+  const talkers = p.talkers ?? [];
+  if (epic) {
+    return <EpicPage epic={epic} tasks={v.tasks.tasks} token={p.token ?? ""} project={p.project.id} talkers={talkers} docs={p.docs} open={p.open}
+      back={() => setChosen(null)} />;
+  }
   return (
     <div className="body">
       <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="epics" />
       <Problems list={[...v.problems, ...v.epics.problems]} />
-      <div className="lanes" aria-label="Epics by stage">
-        {STAGES.map(([s, name]) => <span key={s}><Dot tone={epicTone(s)} />{name} {all.filter((e) => e.stage === s).length}</span>)}
+      <div className="etabs-row">
+        <div role="tablist" aria-label="Epic views" className="etabs">
+          {(["board", "list"] as EpicTab[]).map((x) => (
+            <button key={x} role="tab" aria-selected={tab === x} className={tab === x ? "on" : ""} onClick={() => setTab(x)}>{x === "board" ? "Board" : "List"}</button>
+          ))}
+        </div>
+        <button className="btn primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>New epic</button>
       </div>
-      {!all.length && !v.problems.length && <p className="empty">No epics. An epic is an issue labelled <code>epic</code> with a task list of <code>- [ ] #n</code> lines.</p>}
+      {adding && <NewEpic token={p.token ?? ""} project={p.project.id} talkers={talkers} close={() => setAdding(false)} />}
+      {!all.length && !v.problems.length && <p className="empty">No epics. Tell the product owner what you want with New epic.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
-      {rows.length > 0 && <ul className="vcards" aria-label="Epics">{rows.map((e) => <EpicCard key={e.id} e={e} open={p.open} />)}</ul>}
+      {rows.length > 0 && tab === "board" && <EpicBoard epics={rows} open={setChosen} />}
+      {rows.length > 0 && tab === "list" && <ul className="vcards" aria-label="Epics">{rows.map((e) => <EpicCard key={e.id} e={e} open={p.open} pick={setChosen} docs={p.docs} />)}</ul>}
     </div>
   );
 }
@@ -439,4 +491,5 @@ a.ext { color: inherit; text-decoration: none; }
   .vwho, .vstate { grid-column: 2; }
   .vrunstate { width: auto; }
 }
-`;
+.etabs-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+${EPICS_CSS}`;

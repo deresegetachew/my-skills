@@ -507,7 +507,10 @@ function App() {
   };
   const viewChannel = (name: string) => {
     const View = VIEW_CHANNELS[name] as (typeof VIEW_CHANNELS)[string];
+    const talkers = view.channels.filter((c) => c.kind === "agent" && (c.role === "product-owner" || c.role === "dev-manager"))
+      .map((c) => ({ name: c.name, role: c.role as string })).sort((a, b) => Number(b.role === "product-owner") - Number(a.role === "product-owner"));
     return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast} docs={docPages}
+      token={token} talkers={talkers}
       open={(c, f) => go(project.id, c, f)} />;
   };
 
