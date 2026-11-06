@@ -1,7 +1,7 @@
 // Adding a project from the web UI (#447): bring a GitHub repo (clone one, make a new one, or a folder already on this
 // machine), install the factory in it, save the owner's answers in its .claude/factory.json, make its labels, owner queue
-// and starter PRD (`factory init`), give its agents their NATS keys, open a pull request with the setup, list it in the
-// page and run `factory doctor` there. The page shows each step as it goes; a failed step stops the run, and Retry goes
+// and starter PRD (`factory init`), open a pull request with the setup, list it in the page and run `factory doctor`
+// there. The page shows each step as it goes; a failed step stops the run, and Retry goes
 // on from that step. Each step looks first, so running one again adds nothing twice.
 //
 //   GET  /api/add-project                   the owner's repos (gh repo list), the folder new ones go in, the legends
@@ -15,6 +15,8 @@ import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, statSync, writ
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { addedFile, addedPaths, envFor, factoryScript, type Obj, type Problem, projectAt, readJson, type Ran, spawn,
   type UiProject } from "./factory_ui_data.ts";
+import { messagingSettings } from "./core/compose.ts";
+import type { Config } from "./factory_config.ts";
 
 const HOOKS = import.meta.dir;
 const STEP_TIMEOUT_MS = 10 * 60_000;
@@ -98,20 +100,20 @@ function str(v: unknown): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
-function messagingOf(p: UiProject): "github" | "nats" {
+/** The serving project's messaging transport: board or github (core/compose.ts; unset, board on a machine with a board). */
+function messagingOf(p: UiProject): "github" | "board" {
+  return messagingSettings((p.config ?? {}) as Config).transport === "board" ? "board" : "github";
+}
+
+/** Whether the serving project's file names the board itself (a new project then names it too). */
+function namesBoard(p: UiProject): boolean {
   const m = p.config?.messaging;
-  return typeof m === "object" && m !== null && (m as Obj).transport === "nats" ? "nats" : "github";
+  return typeof m === "object" && m !== null && (m as Obj).transport === "board";
 }
 
 /** The repo's name, the part after the owner. */
 function repoBase(repo: string): string {
   return repo.split("/").pop() ?? repo;
-}
-
-/** The NATS project name of a repo (core/compose.ts messagingProject() from its origin). */
-function natsProject(repo: string, path: string): string {
-  const raw = repo ? repoBase(repo) : basename(path);
-  return raw.toLowerCase().replace(/\.git$/, "").replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64) || "project";
 }
 
 function isDir(p: string): boolean {
@@ -210,7 +212,6 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
 
 /** The steps a request takes, in order, each with what it does in plain words. */
 export function plan(req: AddRequest, host: AddHost): { id: string; title: string; detail: string }[] {
-  const nats = messagingOf(host.serving) === "nats";
   const name = req.repo || basename(req.path);
   return [
     { id: "repo", title: req.source === "clone" ? "Clone the repo" : req.source === "new" ? "Create the repo" : "Check the folder",
@@ -219,7 +220,6 @@ export function plan(req: AddRequest, host: AddHost): { id: string; title: strin
     { id: "kit", title: "Install the factory", detail: "The agents, their rules, the hooks and the templates; a file already there is kept" },
     { id: "answers", title: "Save your answers", detail: "Task source, main branch, commands, protected paths and the team, in the project's settings" },
     { id: "init", title: "Labels, owner queue and PRD", detail: `${req.tasks === "issues" ? "The task labels, " : ""}the owner queue issue, a starter PRD and the role folders` },
-    { id: "keys", title: "Agent keys", detail: nats ? "A NATS key for each agent on this machine's hub" : "Messages go over GitHub here: no keys needed" },
     { id: "commit", title: "Open the setup pull request", detail: `Everything above on the branch ${SETUP_BRANCH}, for you to merge into ${req.mainBranch}` },
     { id: "list", title: "Show it in the sidebar", detail: `${name} joins the projects on the left` },
     { id: "doctor", title: "Check the project", detail: "Each check the factory needs, with what to do for any that fails" },
@@ -333,7 +333,7 @@ function stepAnswers(req: AddRequest, step: AddStep, host: AddHost): Done {
   const roles = objAt(cfg, "roles");
   objAt(roles, "dev-manager").names = [req.team.devManager];
   objAt(roles, "product-owner").names = [req.team.productOwner];
-  if (messagingOf(host.serving) === "nats") objAt(cfg, "messaging").transport = "nats";
+  if (namesBoard(host.serving)) objAt(cfg, "messaging").transport = "board";
   writeJson(file, cfg);
   return { state: "done", output: `Saved in ${file}.` };
 }
@@ -342,18 +342,6 @@ async function stepInit(req: AddRequest, step: AddStep, host: AddHost): Promise<
   const p = newProject(req, host);
   return { state: "done", output: await must(step, ["bash", join(req.path, "factory"), "init"], req.path, envFor(p),
     "Read what it printed (GitHub must be signed in on this machine), fix it, then press Retry.") };
-}
-
-async function stepKeys(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
-  if (messagingOf(host.serving) !== "nats") return { state: "skipped", output: "Messages go over GitHub here: no keys needed." };
-  const project = natsProject(req.repo, req.path);
-  const who: [string, string][] = [[req.team.devManager, "manager"], [req.team.productOwner, "po"], ...req.team.builders.map((b): [string, string] => [b, "builder"])];
-  const outs: string[] = [];
-  for (const [name, role] of who) {
-    outs.push(await must(step, ["bash", factoryScript(host.serving), "nats", "user", "add", name, "--role", role, "--project", project],
-      host.serving.path, envFor(host.serving), "Check that the NATS server runs on this machine (Health shows it), then press Retry."));
-  }
-  return { state: "done", output: outs.filter(Boolean).join("\n") };
 }
 
 async function stepCommit(req: AddRequest, step: AddStep): Promise<Done> {
@@ -522,7 +510,6 @@ export class AddRuns {
       case "kit": return stepKit(req, step);
       case "answers": return stepAnswers(req, step, this.host);
       case "init": return stepInit(req, step, this.host);
-      case "keys": return stepKeys(req, step, this.host);
       case "commit": return stepCommit(req, step);
       case "list": return stepList(req, step, this.host, run);
       default: return stepDoctor(req, step, this.host);

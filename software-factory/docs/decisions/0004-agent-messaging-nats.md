@@ -1,7 +1,10 @@
 # 0004: Plugins for the factory, with messaging over NATS as the first one
 
-Date: 5 Nov 2026. Status: **accepted** (the owner approved it on #293; proposed in #373, merged in #399). Its build tasks are filed
-as issues, starting with #403.
+Date: 5 Nov 2026. Status: **Superseded by 0007 (6 Nov 2026): NATS was removed** (#504). The message board carries
+wake-ups, claims and the pull request feed (#500), `messaging.transport` takes `github` or `board`, and the NATS plugin,
+`factory nats`, the plugin mechanism (point 5) and machine join's NATS keys and leaf users are gone (machines join with
+board logins). This record is kept as history. It was accepted by the owner on #293 (proposed in #373, merged in #399);
+its build tasks were filed as issues, starting with #403.
 **Builds on decision 0003** (#374, approved and merged in PR #375): NATS is the second adapter of 0003's `Messaging`
 port, shipped as a plugin. Where the two differ, 0003 wins. The owner started this on 4 Nov and made it the top
 priority on 5 Nov.

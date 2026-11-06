@@ -128,17 +128,9 @@ request fails until it changes: run `factory update` once more with the new clie
 the workflow in the same pull request. `factory doctor` names any workflow step that calls a hook that is not there; a hook named only in a YAML comment is
 not a step, and neither doctor nor the rewrite looks at comments.
 
-**Plugins (decision 0004, #405).** An adapter that needs npm packages is a plugin: a folder
-`software-factory/plugins/<name>/` with its own `package.json` (pinned), an `index.ts` and its own `tests/` (run by
-`bun tools/run_tests.ts`). `tools/build_release.ts` bundles each one with `bun build` into one file,
-`.claude/hooks/plugins/<name>.js` in a project, so a project installs nothing; the sources are not in the archive. A
-plugin has no version of its own: the bundle's first line records the factory version it was built for, and a bundle
-from another version is refused with `plugin-version` (fix: `factory update`). The setting that needs a plugin turns it
-on (`messaging.transport: "nats"` needs `nats`). A plugin that isn't there stops with `plugin-missing`, one that fails
-with `plugin-load`; a port that may fall back (messaging, to GitHub) says so once on stderr and goes on. `factory doctor`
-checks each installed bundle and each plugin a setting needs, and fails until it loads. In my-skills, with no bundle,
-the source is loaded (run `bun install --frozen-lockfile` in the plugin's folder). `bun tools/check_skills.ts` refuses
-an import of a plugin's packages from outside its folder.
+**No plugins.** A release has no `hooks/plugins/` folder: the plugin mechanism (decision 0004, #405) existed only to ship
+the NATS client, and went with NATS (#504). The only npm packages are build-time ones, bundled into one file (decision
+0002, 0005).
 
 **Cutting a release** (the owner): bump `software-factory/VERSION` in a merged PR, tag that commit `vX.Y.Z` on main and
 push the tag. `.github/workflows/release.yml` checks the tag, runs the tests, builds the archive with

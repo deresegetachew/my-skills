@@ -53,7 +53,7 @@ function hook(d: string, env: Env, name: string, ...args: string[]): { code: num
 
 /** Code run in the project with the factory's settings loaded and its ports composed. */
 function inProject(d: string, env: Env, body: string): { code: number; out: string; stdout: string } {
-  const code = `import { compose, natsFor } from ${JSON.stringify(join(HOOKS, "core", "compose.ts"))};
+  const code = `import { compose, busFor } from ${JSON.stringify(join(HOOKS, "core", "compose.ts"))};
 import { load } from ${JSON.stringify(join(HOOKS, "factory_config.ts"))};
 const cfg = load(); const ports = compose(cfg);
 ${body}`;
@@ -130,7 +130,7 @@ console.log(ports.messaging.read(null).messages.map((m) => m.id).join(","));`);
 test("messaging.transport board: claims, wake-ups and the pull request feed are the board's", () => {
   const p = boardProject({ messaging: { transport: "board", kinds: ["wake", "claim", "pr"], githubCopy: [] } });
   const r = inProject(p.d, p.env, `
-const claims = natsFor(cfg, "claim"); const wakes = natsFor(cfg, "wake"); const prs = natsFor(cfg, "pr");
+const claims = busFor(cfg, "claim"); const wakes = busFor(cfg, "wake"); const prs = busFor(cfg, "pr");
 console.log(JSON.stringify(claims.claim("review.5.abcdef0", "lead", 60)));
 wakes.wake({ from: "lead", to: "haile", ref: "pr#5", why: "look" });
 console.log(JSON.stringify(wakes.waitWake({ names: ["haile", "coding-agent", "all"], since: Date.now() - 5000, seconds: 5 })));
@@ -141,7 +141,7 @@ console.log(String(prs.prs()));`);
   expect(JSON.parse(woke as string)).toMatchObject({ from: "lead", to: "haile", ref: "pr#5", why: "look" });
   expect(snap).toBe("null");
   const off = boardProject({ messaging: { transport: "board", kinds: ["wake"] } });
-  expect(inProject(off.d, off.env, `console.log(String(natsFor(cfg, "claim")));`).stdout).toBe("null"); // claim not moved
+  expect(inProject(off.d, off.env, `console.log(String(busFor(cfg, "claim")));`).stdout).toBe("null"); // claim not moved
 });
 
 test("factory doctor: the board answers, or it says so with the fix", () => {
@@ -156,6 +156,11 @@ test("factory doctor: the board answers, or it says so with the fix", () => {
   expect(fix, bad.stdout).toBeDefined();
   expect(fix).toContain("factory board up");
   expect(bad.stdout).not.toContain(new URL(world.url).password);
+  // with no tasks.source board and no transport set, a machine with a board uses it for messages (#504): checked too
   const plain = doctorProject({}, { agents: ["haile"] });
-  expect(doctor(plain, { ...env, MB_URL: down.toString() }).stdout).not.toContain("message board");
+  expect(lines(doctor(plain, { ...env, MB_URL: down.toString() }), "fix").some((l) => l.includes("message board"))).toBe(true);
+  const github = doctorProject({}, { agents: ["haile"], messaging: { transport: "github" } });
+  expect(doctor(github, { ...env, MB_URL: down.toString() }).stdout).not.toContain("message board");
+  const old = doctorProject({}, { agents: ["haile"], messaging: { transport: "nats" } });
+  expect(lines(doctor(old, env), "fix").find((l) => l.includes("messaging.transport"))).toContain("factory settings set messaging.transport board");
 });

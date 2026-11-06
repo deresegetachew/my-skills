@@ -118,13 +118,14 @@ Look
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
   machine add <name> --agent <agent>[:role] ... [--ttl minutes]
-                         on the hub: make the keys of the agents another machine will run and print one join code
-                         (short-lived, works once; it holds the hub's Tailscale address, the leaf password, the keys)
+                         on the machine that runs the message board: make that machine's own board login (only the
+                         board's rights) and print one join code (short-lived, works once; it holds the board's URL
+                         for that login, at its Tailscale address)
   machine join <code> [--no-tailscale] [--no-doctor]
-                         on the new machine: check Tailscale and Docker, start the leaf (or, without Docker, connect
-                         the agents straight to the hub), write the keys, run factory doctor
-  machine ls [--json]    the machines added and whether their code is still waiting
-  machine remove <name>  forget a machine and take its agents' keys off the hub
+                         on the new machine: check Tailscale, write the board's URL (mode 600), check that it
+                         reaches the board, run factory doctor
+  machine ls [--json]    the machines added and whether they joined, their code is still waiting, or it expired
+  machine remove <name>  forget a machine and drop its board login
   follow [<agent>] [--read|--log] [--on R] [--all]
                          watch and talk to an agent by name, on another machine or in the cloud: without a name,
                          every agent and one-item sub-manager we can find, where it runs and its Remote Control link
@@ -161,12 +162,6 @@ Check
   turbo install [--no-github]
                          start the cache server on this machine (Docker) and give CI the same cache (repo variables
                          and secrets); run it again to update. turbo down [--purge] stops it
-  nats up [--leaf <hub>] | down [--purge] | status
-                         the NATS server agents send messages through (decision 0004), in Docker on this machine: the
-                         hub with JetStream, or with --leaf a leaf server that connects to the hub; on localhost and the
-                         Tailscale address. status: whether it answers. Run up again to change it
-  nats user add <agent> --role builder|manager|po|owner
-                         the agent's key: its seed in messaging.creds (mode 600) and its role's permissions on the server
   board up [--port N]    the message board (factory-message-board, decision 0007): tasks, claims, threads and events
                          on Postgres, in Docker on this machine (127.0.0.1 and the Tailscale address), then migrated
   board down [--purge]   stop it; --purge also removes its data
@@ -192,6 +187,9 @@ Check
                          factory's markers as their own kinds; safe to run twice; --dry-run writes nothing
                          GitHub wins on status unless the task is held on the board (done here but open there:
                          reopened); comments deleted on GitHub stay on the board
+  board login add <name> | ls | remove <name> [--unused]
+                         logins of their own for other machines (factory machine add makes them): a Postgres role
+                         with only the board's rights; ls says when each was first used
   doctor [--sandbox]     check this machine and project (tools, logins, Node, Docker, submodules, secrets setup,
                          agent names) and say how to fix each gap; read-only. --sandbox also checks the sandbox
                          of a bootstrapped machine (no sudo, home network blocked, rootless Docker); run it as that user
@@ -426,7 +424,6 @@ case "$cmd" in
   signoff)   fh "$hooks/factory_signoff" "$@" ;;
   manage-tick) fh "$hooks/factory_tick" "$@" ;;
   turbo)     fh "$hooks/factory_turbo" "$@" ;;
-  nats)      fh "$hooks/factory_nats" "${1:-status}" "${@:2}" ;;
   board)     # The message board (decision 0007) sits beside the hooks folder: .claude/message-board, linked in my-skills and
              # a linked project, copied by a release (#500).
              mb="$hooks/../message-board/bin"

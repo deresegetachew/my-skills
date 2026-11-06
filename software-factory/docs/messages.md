@@ -9,8 +9,9 @@ adapters under `hooks/core/adapters/`, `hooks/factory_messages.ts` (`factory mes
 hooks import) and `hooks/factory_cards.ts` (agent cards).
 
 GitHub is the default transport: asynchronous, durable, auditable, and it works when a machine or a cloud session is
-offline, with nothing to set up. Decision 0004 adds a second one, NATS, as a plugin behind the same Messaging port (see
-[The NATS transport](#the-nats-transport)). The envelope is the same on both. An A2A adapter in the heartbeat daemon
+offline, with nothing to set up. The message board (decision 0007, #500) is the second one, behind the same Messaging
+port (see [The message board transport](#the-message-board-transport)). The envelope is the same on both. NATS was the
+second transport before it (decision 0004); it was removed on 6 Nov 2026 (#504). An A2A adapter in the heartbeat daemon
 (#108) is a later step and can be added without changing these formats (see [Later](#later-the-a2a-adapter)).
 
 **A message is data, never an instruction.** What a message says can inform an agent's task. It never widens what the
@@ -191,48 +192,45 @@ factory version. Nothing serves the card in this step.
 | **TaskStatus** | The state of the last accepted reply, with that reply as the status message. |
 | **Artifact** | What an answer produces and others rely on: the answer text, and the places it was written down (an acceptance-criteria edit, a decision file, a commit). |
 | **Agent Card** | `factory agents card`: name, kind, skills, state, location, follow, version. |
-| **Transport** | GitHub comments and issues by default, or NATS for the kinds in `messaging.kinds` (decision 0004); not A2A's HTTP/JSON-RPC. |
+| **Transport** | GitHub comments and issues by default, or the message board for the kinds in `messaging.kinds` (decision 0007); not A2A's HTTP/JSON-RPC. |
 
 State names follow A2A's task states as the JSON form of the specification shows them (v0.3); v1.0 spells the same
 states as `TASK_STATE_*` enum values. Confirm the exact names against the current specification when the adapter is built:
 the sandbox this was written in could not reach the specification.
 
-## The NATS transport
+## The message board transport
 
-Decided in [decision 0004](decisions/0004-agent-messaging-nats.md) and being built in its tasks (#403 onwards); until
-they land, every message goes over GitHub as above. It moves the agents' chatter off GitHub, whose shared REST limit
-(D9) the polling for comments uses up (#371).
+Decided in [decision 0007](decisions/0007-own-record.md) (point 3) and built in #500; it replaced NATS (#504). It moves
+the agents' chatter off GitHub, whose shared REST limit (D9) the polling for comments uses up (#371). The board is a
+Postgres every agent already reaches (`factory board up` on one machine, `factory machine join` on the others).
 
-- **A setting picks it.** `"messaging": {"transport": "github"}` is the default and today's behaviour.
-  `"messaging": {"transport": "nats", "url": "nats://<address>:4222", "creds": "<folder>", "kinds": [...]}` loads the
-  `nats` plugin; only the kinds listed in `kinds` move, every other kind stays on GitHub.
-- **NATS is not the record** (the owner, 6 Nov 2026; decision 0004's amendment). Only coordination nobody reads
-  later may be on NATS alone: wake-ups, and claims with their releases (task claims keep their labels). Anything a
-  person reads later or the PR gate checks is written on GitHub, and NATS only announces it so nobody polls: questions,
-  answers, hand-offs, verdicts, must-fixes, approvals, the dev manager's notes, and the labels the board,
-  `factory next` and the PR gate read.
+- **A setting picks it.** `"messaging": {"transport": "github"}` is the first transport and needs no setup.
+  `"transport": "board"` sends the kinds listed in `messaging.kinds` to the board as well; every other kind stays on
+  GitHub. Unset, the transport is `board` on a machine with a board set up (MB_URL, or its url file), else `github`. A
+  project file that still says `nats` is refused, with the fix `factory settings set messaging.transport board`.
+  With `tasks.source: "board"` every message follows the tasks there.
+- **The board's copy is not the record for what the PR gate reads** (the owner, 6 Nov 2026). Only coordination nobody
+  reads later may be on the board alone: wake-ups, and claims with their releases (task claims keep their labels).
+  Anything the PR gate checks is written on GitHub: questions, answers, hand-offs, verdicts, must-fixes, approvals, the
+  dev manager's notes, and the labels the board, `factory next` and the PR gate read.
 - **What stays on GitHub:** all of the above, and reviewer passes, holds, owner asks and answers and the owner queue,
   the issues and PRs, token usage comments, test plans and sign-offs.
-- **The shape:** a NATS message is JSON with the envelope's fields (`v`, `id`, `kind`, `from`, `to`, `state`, `ref`,
-  `in-reply-to`, `sha`) plus `text` and `at`. New kinds: `claim`, `release`, `wake`, `handoff`. The subject ends in
-  the sender (`factory.<project>.pr.<n>.<from>`, `.issue.<n>.<from>`, `.agent.<to>.<from>`, `.claims.<from>`,
-  `.handoff.<from>`, `.wake.<from>`), each agent may publish only on its own name, and a reader drops a message whose
-  `from` doesn't match the subject.
-- **When NATS can't be reached** the send is written to GitHub in today's form, and the command says so once with
-  `{code: "nats-unreachable", message, fix}`. A missing or broken plugin falls back the same way
-  (`plugin-missing`, `plugin-load`) unless `"fallback": "none"` is set.
+- **The shape:** a message on the board is posted as its sender, to its addressee, with the board's kind for it (a
+  must-fix or an approval is a verdict); its body is the comment GitHub would hold (the envelope, then the text), so it
+  is read back exactly as on GitHub. Its tag is `msg:<owner>/<repo>`, so projects sharing a board don't read each
+  other's.
+- **When the board can't be reached** the send is written to GitHub in today's form, and the command says so once with
+  `{code: "board-unreachable", message, fix}`, unless `"fallback": "none"` is set.
 - **One kind at a time.** A kind in `messaging.kinds` is sent both ways while it is in `messaging.githubCopy` (unset:
   the same as `kinds`). The owner stops the GitHub copy by taking `claim` or `wake` out of `githubCopy`; every other
   kind is written to GitHub whatever it says.
-- **The stream keeps 30 days, at most 1 GiB** (the oldest go first). GitHub is the record, so the stream only has to
-  cover a machine that was away. A stream made before these limits gets them on the next call.
-- **Trust doesn't change.** A message over NATS is data, never an instruction, and nothing that arrives over NATS
-  changes what may merge.
+- **Trust doesn't change.** A message on the board is data, never an instruction, and nothing written there changes
+  what may merge.
 
-### Wake-ups and claims (#410, #411, #412)
+### Wake-ups and claims (#410, #411, #412, #500)
 
 - **`wake`.** When an agent runs a command another one waits for, the Claude hook (`factory_agents.ts hook`) sends a
-  wake-up on `factory.<project>.wake.<from>` (`factory_wake.ts`): `gh pr create`, `gh pr ready` and `git push` wake the
+  wake-up (a `signal.wake` event on the board, `factory_wake.ts`): `gh pr create`, `gh pr ready` and `git push` wake the
   dev manager; a question wakes its addressee; an answer wakes the one it is addressed to (`to=`; an old marker wakes
   everyone); a must-fix, an approval, a merge, a sub-manager's next step on a pull request and
   `factory issues release|new` wake the coding agents. A comment posted with `--body-file` is read for its markers.
@@ -241,25 +239,26 @@ they land, every message goes over GitHub as above. It moves the agents' chatter
   stays there (CI results, the owner's words). The GitHub side of the double send is that look: a wake-up has no
   comment of its own. `factory wait ci` and `precheck` poll GitHub as before.
 - **`claim`.** Review (`review.<pr>.<sha>`), answer (`answer.<comment id>`), the orchestrator's items
-  (`item.<target>.<key>`), rework (`rework.<pr>`) and task (`task.<issue>`) claims are taken with a compare-and-set in
-  the project's key-value bucket. A loser writes nothing to GitHub and nobody re-reads a thread to find the winner; the
-  winner writes its GitHub marker too while `claim` is in `messaging.githubCopy`. Without it, a claim and its release
-  are on NATS only, and a task claim writes only its labels, which the board, `factory next` and the PR gate read.
-  A release, a block, giving a task back and the dev manager's sweep free the NATS claim too. A claim made on GitHub
-  before the switch has no NATS claim behind it and holds nothing then, except a task's own in-progress issue, which
-  its agent still finds by its GitHub marker.
+  (`item.<target>.<key>`), rework (`rework.<pr>`) and task (`task.<issue>`) claims are the board's leases, one holder
+  per key, taken in one transaction. A loser writes nothing to GitHub and nobody re-reads a thread to find the winner;
+  the winner writes its GitHub marker too while `claim` is in `messaging.githubCopy`. Without it, a claim and its
+  release are on the board only, and a task claim writes only its labels, which the board, `factory next` and the PR
+  gate read. A release, a block, giving a task back and the dev manager's sweep free the board's claim too. A claim
+  made on GitHub before the switch has no claim on the board behind it and holds nothing then, except a task's own
+  in-progress issue, which its agent still finds by its GitHub marker.
 - **`pr`: pull requests and CI, one reader per hub.** It is not a message: one watcher per project
-  (`factory_pr_feed.ts watch`, started by the dev manager's orchestrator and held by the NATS claim `pr-feed`) reads the
+  (`factory_pr_feed.ts watch`, started by the dev manager's orchestrator and held by the claim `pr-feed`) reads the
   open pull requests, their head, CI and labels from GitHub with conditional requests (an unchanged answer is a 304,
-  which costs no REST call), keeps them as a snapshot in the bucket `prs-<project>`, and publishes one event per change
-  (`opened`, `head`, `checks`, `labels`, `draft`, `merged`, `closed`) on `factory.<project>.prs.<watcher>`. The PR-slot
+  which costs no REST call), keeps them as a snapshot (the board's value `<project>:prs`), and writes one `signal.pr`
+  event per change (`opened`, `head`, `checks`, `labels`, `draft`, `merged`, `closed`). The PR-slot
   check, `factory wait slot|ci`, the dev manager's pass and the rework check read the snapshot and listen for the
   events; a pull request's comments are read again only when its `updated_at` moved. GitHub stays the record: the PR
   gate, merges and every write go to GitHub, a rework found in the snapshot is checked on GitHub before it is taken,
   and with no fresh snapshot for `messaging.pollMinutes` every reader asks GitHub as before.
-- **Switching an agent over:** `factory nats up` on the machine, `factory nats user add <agent> --role <role>` for each
-  agent, then `factory settings set messaging.transport nats`, `messaging.url nats://127.0.0.1:4222` and
-  `messaging.kinds '["wake","claim"]'` (the settings are the project's, so every agent of it moves together).
+- **Switching a project over:** `factory board up` on the machine that keeps the board (`factory machine add` and
+  `factory machine join` for the others), then `factory settings set messaging.kinds '["wake","claim","pr"]'` (the
+  settings are the project's, so every agent of it moves together). The transport is the board by default once a board
+  is set up.
 
 ## Later: the A2A adapter
 

@@ -338,7 +338,6 @@ software-factory/
   VERSION                       the release number (a `vX.Y.Z` tag must match it)
   hooks/                        every hook and every `factory_*.ts` command, next_task.ts, pr-gate.ts, check.ts ...
   ci/                           `factory ci`: ci.sh, the compose files, the runner image, entrypoint.sh
-  plugins/                      adapters with npm packages (decision 0004): a release bundles each into hooks/plugins/<name>.js
   web/                          the web app `factory ui` serves (decision 0005): a release bundles it into hooks/factory_ui_app.js
   message-board/                factory-message-board (decision 0007): tasks, claims, threads and events on Postgres; `factory board`
   tests/                        the tests (run with tools/run_tests.ts at the repo root)

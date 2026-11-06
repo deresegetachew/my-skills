@@ -33,8 +33,7 @@
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
-// `ui.pollSeconds` and pushes what changed; with no page open it reads nothing. (NATS comes later through the messaging
-// port.)
+// `ui.pollSeconds` and pushes what changed; with no page open it reads nothing.
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { AddRuns } from "./factory_ui_add.ts";
@@ -263,7 +262,7 @@ export function serve(o: ServeOptions): Running {
         // no body: no confirm
       }
       if (body === null || typeof body !== "object" || body.confirm !== true) {
-        return problem(400, "confirm_needed", "Adding or removing a machine changes the hub's keys, so it needs a confirm.", 'Send {"confirm": true} (the page asks you first).');
+        return problem(400, "confirm_needed", "Adding or removing a machine changes the board's logins, so it needs a confirm.", 'Send {"confirm": true} (the page asks you first).');
       }
       const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim()) : []);
       const flag = (s: string): boolean => s.startsWith("-"); // a value never becomes an option of the command

@@ -53,10 +53,10 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 | D7 | **The dev manager is an orchestrator**: a loop script with no model that starts one-item sub-managers. The long cloud session stops managing and goes back to building my-skills and its factory. Scheduled tasks are paused by the owner and are not part of the design. | #97, #109, #95, #100 |
 | D8 | **Roles are factory commands run in a terminal**, on any machine, several of each, one fresh pass each: `factory coding-agent\|dev-manager\|product-owner [name] loop [-i]`. The role folder is committed in the project at `.claude/factory/roles/`; the PRD, designs and research stay in `docs/` and `design/`. The product owner role is generic, not Remanual-specific. | #95, #102 |
 | D9 | **All roles share one GitHub account.** A marker or claim names the role and name inside its body. `trustedReviewers` cannot tell roles apart. | #95, wiki/roles.md "Roles" |
-| D10 | **GitHub is the record and what the PR gate trusts; agents' messages go through a setting, GitHub by default, NATS as a plugin.** Reviewer passes, `factory-approved`, `factory-mustfix`, holds, owner asks and answers, the issues, PRs and the board's labels stay on GitHub. With `messaging.transport: "nats"`, the kinds listed in `messaging.kinds` (claims, wake-ups, hand-offs, questions between agents) go over NATS, one kind at a time, and a send NATS doesn't confirm falls back to GitHub. Nothing that arrives over NATS changes what may merge. *Being built (decision 0004's tasks, #403 onwards); until then every message goes over GitHub.* It replaces the earlier D10, "GitHub is the state and the transport; nothing opens a port or adds a service". **Changing (decision 0007, accepted 6 Nov 2026):** the factory's own database becomes the record for tasks and conversations; GitHub keeps the code, the pull requests, CI and what the PR gate trusts. Until each kind has moved (0007 point 9), this row holds. | #97, [decisions/0004](decisions/0004-agent-messaging-nats.md) (owner, #293, 5 Nov 2026), [messages.md](messages.md), wiki/agent-loops.md "Messages between agents" |
+| D10 | **The factory's own database, the message board, is the record for tasks and the agents' messages; GitHub holds the code, the pull requests, CI and what the PR gate trusts.** Reviewer passes, `factory-approved`, `factory-mustfix`, holds, the review labels, the issues and PRs stay on GitHub, and nothing written on the board changes what may merge. Messages go through a setting: `messaging.transport` is `board` on a machine with a board (`factory board up`, or `factory machine join` on another machine), else `github`; the kinds in `messaging.kinds` (claims, wake-ups, the pull request feed, questions between agents) go to the board, one kind at a time, and a send the board doesn't take falls back to GitHub. With `tasks.source: board` the tasks and every message are on the board. **NATS was removed** (owner, 6 Nov 2026; #504): it was the second transport (decision 0004) until the board carried wake-ups, claims and the pull request feed (#500). Earlier forms of this row: "GitHub is the record; agents' messages go through a setting, GitHub by default, NATS as a plugin" (decision 0004), and before that "GitHub is the state and the transport; nothing opens a port or adds a service". *Being built: the kinds move one at a time (0007 point 9; the owner queue on the board is #502).* | #97, [decisions/0007](decisions/0007-own-record.md) (owner, 6 Nov 2026), [decisions/0004](decisions/0004-agent-messaging-nats.md) (superseded), [messages.md](messages.md), wiki/agent-loops.md "Messages between agents" |
 | D11 | **Agents run the agreed process and do not change it** (owner's rule, 21 Oct 2026). Agents cannot edit what governs them: the PR gate, the guard, the agents' rules (`.claude/factory/settings.json`), agent definitions, `.claude/factory.json`, `factory` and `factory-loop.sh` are protected. | DEV-MANAGER.md, my-skills `CLAUDE.md`, `.claude/factory.json`, #263 |
 | D12 | **Owner-only actions** (the list below). | #150, #114, `manage-pass` skill, `CLAUDE.md` |
-| D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash; an npm package is used only inside a **plugin** (decision 0004): a folder `software-factory/plugins/<name>/` with its own pinned `package.json`, bundled into one JavaScript file at release (as decision 0002 first did for the cockpit's Ink and React), so a project installs nothing and gets no `node_modules`. Nothing outside a plugin's folder imports its packages, a plugin is turned on by the setting that needs it, and no package is added this way without the owner. *The plugin mechanism is being built (0004's tasks 3 and 4); until it lands the web UI is the one exception, its React and react-dom bundled into the release (decision 0005; Ink went with the cockpit, #425)*; there is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), [decisions/0004](decisions/0004-agent-messaging-nats.md) point 5 (plugins), `CLAUDE.md` |
+| D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash. The one exception is build time: the web UI's React and react-dom are bundled into one JavaScript file at release (decision 0005, as decision 0002 first did for the cockpit's Ink and React), so a project installs nothing and gets no `node_modules`; no package is added this way without the owner. The plugin mechanism of decision 0004 (an npm package inside `software-factory/plugins/<name>/`, bundled at release) existed only for the NATS client and went with it (#504). There is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), decisions 0002 and 0005, `CLAUDE.md` |
 | D14 | **The agents' rules are passed only to the sessions the factory starts.** `factory loop` and `factory agent` start Claude with `--settings`: `.claude/factory/settings.json` and the `permissions.allow` from `.claude/factory.json`, both read from `main` on origin, never from the agent's own folder. A project's own `.claude/settings.json` stays the project's and still applies. The Stop check runs only in a factory run. So the owner's own sessions in a project are not governed by the agents' rules. | #258, #256 (owner, 27 Oct 2026) |
 | D15 | **Token budgets are per task and advisory.** The unit is one task (issue); it counts fresh input (input + cache writes) + output as `factory usage` reports them, never money or cache reads. It is set by a `Budget:` line in the task issue, else `budget.builder` in factory.json. The budget is taken from the issue when the task is claimed, and a coding agent may not change it. Over 80% the checkpoint warns; there is no hard stop, because stopping mid-change leaves broken branches. An overrun is the dev manager's call at review; CI never fails on it. | #183 (owner, 28 Oct 2026) |
 
@@ -464,26 +464,34 @@ web UI section proposed on #293 (US-14 onward) keeps its range. The owner accept
   answers, hand-offs, the PO's proposals, the owner queue, the dev manager's notes, a pull request's back-and-forth) are
   kept in the factory's own database, so agents stop reading GitHub as a database and the shared account's hourly limit
   stops running out. GitHub keeps the code, the pull requests, CI, the dev manager's final verdict and the labels the PR
-  gate and the Factory guard read. *Decided (0007, 6 Nov).* (#472; 0007 point 2)
+  gate and the Factory guard read. *Being built: the framework (#489) and its adapters (#500): with `tasks.source: board`
+  the tasks, claims and messages are on the board, and with `messaging.transport: board` claims, wake-ups and the pull
+  request feed; NATS was removed (#504).* (#472; 0007 point 2)
 - **US-41.** As the owner, setting up a new factory and connecting GitHub, I can import the repo's issues and their
   comments as tasks, from the first-launch screens and from the command line. A dry run says first what it will bring
-  and what it skips. Running it twice updates and never duplicates. *Decided (0007, 6 Nov).* (#472; #457; 0007 point 4)
+  and what it skips. Running it twice updates and never duplicates. *Built from the command line (`factory board import
+  github`, #494); the first-launch screens are #457.* (#472; #457; 0007 point 4)
 - **US-42.** As the owner, I can still follow the work on GitHub: a task's issue is updated when its state changes, one
   way, on by default and off with a setting. Each new owner ask also appears on the owner-queue issue, so GitHub's
   notifications still reach my phone, and my answer there is read back. *Decided (0007, 6 Nov).* (#472; M6; 0007 point 5)
 - **US-43.** As the owner, the web UI shows tasks, threads and the owner queue from the database, updated live, with no
-  GitHub calls for them; `factory status`, `prd`, `next` and `messages` give the same answers. *Decided (0007, 6 Nov).* (#472; 0007
-  point 6)
-- **US-44.** As the owner, the database runs like the NATS hub: on the hub machine in Docker, reached over Tailscale
-  only, with `up`, `down`, `status` and `backup` commands, a nightly backup, and `factory doctor` saying when it can't be
-  reached and the fix. Moving to a hosted Postgres later is a change of address. *Decided (0007, 6 Nov).* (#472; 0007 points 3 and 8)
+  GitHub calls for them; `factory status`, `prd`, `next` and `messages` give the same answers. *Being built: the web UI
+  reads tasks from the board, live (#498); `factory next` and `messages` read it with `tasks.source: board` (#500).*
+  (#472; 0007 point 6)
+- **US-44.** As the owner, the database runs on the hub machine in Docker, reached over Tailscale only, with `up`,
+  `down`, `status` and `backup` commands, a nightly backup, and `factory doctor` saying when it can't be reached and the
+  fix. Another machine joins with a login of its own (`factory machine add` and `join`), which `machine remove` drops.
+  Moving to a hosted Postgres later is a change of address. *Built: `factory board up|down|status|backup` (#489), the
+  doctor's check (#500), and machines joining with board logins (#504); the nightly backup is a job set up on the
+  machine.* (#472; 0007 points 3 and 8)
 - **US-45.** As the owner, the move happens one kind at a time with both copies kept: for a period each moved kind is
   written to the database and to GitHub, misses are counted, and I stop the GitHub copy when nothing was missed.
   *Decided (0007, 6 Nov).* (#472; 0007 point 9)
 - **US-46.** As the author of another agent system, I can use the task and messaging layer without the factory: it has
   a generic model (agents and people, tasks, claims, threads, verdicts), its own docs, tests, settings and run
   commands, and imports nothing from the factory. The factory is one user of it, through its ports. Where it lives and
-  its name are the owner's. *Decided (0007, 6 Nov).* (#472, owner's direction 6 Nov; 0007 point 1)
+  its name are the owner's. *Built: factory-message-board, `software-factory/message-board/` (#489; the owner chose the
+  folder and the name on #481).* (#472, owner's direction 6 Nov; 0007 point 1)
 - **US-47.** As a builder or a manager, a task can hold subtasks to any depth and typed dependencies to tasks at any
   level (blocks, waits-for, discovered-from, supersedes, duplicates); a cycle is refused, and "blocked" and the ready
   list that `factory next` reads are computed from them, never from prose. *Decided (0007, 6 Nov).* (#472, #469; 0007 point 7)
@@ -528,7 +536,7 @@ also gives versions and diffs.
 - **A custom UI other than the web UI** (`factory ui`, decision 0005, which replaced the terminal cockpit, #425): no
   second dashboard or console, no phone queue. (D1; #114, #295)
 - **New dependencies.** The factory is TypeScript on Bun, with Bun and Node built-ins only, and bash. An npm package
-  lives only inside a plugin, bundled at release, and only with the owner's yes. (D13, decision 0004, `CLAUDE.md`)
+  is used only at build time, bundled at release, and only with the owner's yes. (D13, `CLAUDE.md`)
 - **An agent changing the process.** Agents do not edit the gate, the guard, the agents' rules, agent definitions or
   `.claude/factory.json`, do not publish a release, and do not push to `main`. (D11)
 - **A model in the dev manager's idle loop.** (#97, #109)
@@ -620,7 +628,7 @@ PR #39 was a draft PRD, written 22 to 24 Oct, that nobody had reviewed (#114, #1
 | Roles, what exists today | Section 3 and section 4, checked against `main` and updated. |
 | The numbered stories, marked Must/Should/Could | Rewritten as the stories above, marked by status, each naming its issue. Stories for work that is now built say *Built*. |
 | UI options (CLI, TUI, dashboard, mobile inbox) and a recommendation to start with a mobile inbox | **Dropped.** Superseded by D1 (then "no custom UI"; since #295, the terminal cockpit; since decision 0005 and #425, the web UI). |
-| Architecture options (a state store, a local daemon) | **Dropped as options.** D10: GitHub is the record (agents' messages may go over NATS, decision 0004). The per-machine heartbeat daemon exists for liveness (#108). |
+| Architecture options (a state store, a local daemon) | **Dropped, then taken up again.** The message board (decision 0007) is the factory's own state store, on Postgres (D10). The per-machine heartbeat daemon exists for liveness (#108). |
 | 31 numbered pains with evidence from 21 to 24 Oct | Not carried over as a list. The ones that led to built features appear as the issues those features name. |
 | Roadmap of five phases | Dropped. The order is issue #114. |
 | Stories nobody picked up | Listed under "Later / open", section C, as proposals. |

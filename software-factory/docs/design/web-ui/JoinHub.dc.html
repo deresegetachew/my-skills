@@ -103,8 +103,8 @@ class Component extends DCLogic {
     }));
     const items = [
       ['Connect over Tailscale', 'dev-pc answered at 100.99.7.67.', 'done'],
-      ['Start a local NATS leaf', 'Docker is running here, so a leaf server starts on this Mac and links to the hub. With Docker off we connect straight to dev-pc instead.', 'now'],
-      ['Write the keys', 'menelik’s key and the leaf password are saved on this Mac, readable only by you.', 'next'],
+      ['Write the board login', 'This Mac’s own login to the message board is saved here, readable only by you.', 'now'],
+      ['Reach the board', 'Connects to the message board on dev-pc with that login.', 'next'],
       ['Check this Mac', 'Runs the machine check and shows anything left to fix.', 'next']
     ];
     const progress = items.map(([title, detail, s], i) => ({
@@ -118,10 +118,10 @@ class Component extends DCLogic {
       theme: this.props.theme ?? 'light',
       steps,
       holds: [
-        { label: 'Hub', value: 'dev-pc', sub: '100.99.7.67 · NATS JetStream' },
+        { label: 'Hub', value: 'dev-pc', sub: '100.99.7.67 · message board' },
         { label: 'Project', value: 'my-skills', sub: 'deresegetachew/my-skills' },
         { label: 'Agent', value: 'menelik', sub: 'Builder' },
-        { label: 'Leaf password', value: '••••••••••', sub: 'Kept on this Mac only' }
+        { label: 'Board login', value: '••••••••••', sub: 'Kept on this Mac only' }
       ],
       progress
     };

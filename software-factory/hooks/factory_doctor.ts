@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import * as fa from "./factory_artifacts.ts";
 import * as autostart from "./factory_autostart.ts";
-import { boardInfo } from "./core/compose.ts";
+import { boardInfo, messagingSettings } from "./core/compose.ts";
 import { CoreError } from "./core/domain/error.ts";
 import { missingOriginMain } from "./factory_claims.ts";
 import { type Config, load, roleNames, rolesDir, taskSource } from "./factory_config.ts";
@@ -23,8 +23,6 @@ import * as heartbeat from "./factory_heartbeat_service.ts";
 import { Exit, FactoryError, fnmatch, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
 import { machineNames } from "./factory_machine.ts";
 import { ModelsError, resolvedDefault, table, validate } from "./factory_models.ts";
-import { doctor as nats } from "./factory_nats.ts";
-import { factoryVersion, loadPlugin, neededPlugins, pluginPath } from "./factory_plugins.ts";
 import * as fr from "./factory_release.ts";
 import * as roleDefs from "./factory_roles.ts";
 import { run as sandbox } from "./factory_sandbox.ts";
@@ -598,29 +596,6 @@ export function release(r: Reporter): void {
   } else r.ok(`factory ${pin.tag}: the files match the pin and this machine is ready`);
 }
 
-/** The plugins (decision 0004, #405): each bundle a release installed, and each plugin a setting turns on, loads with
- * this factory's version. A setting's plugin that is missing or fails is a fix even when its port falls back to GitHub:
- * the fallback is never silent. */
-export function plugins(r: Reporter, cfg: Config | null): void {
-  const hooks = import.meta.dir;
-  let bundles: string[] = [];
-  try {
-    bundles = readdirSync(join(hooks, "plugins")).filter((f) => f.endsWith(".js")).map((f) => f.slice(0, -3));
-  } catch {
-    // no plugins folder: a release without plugins
-  }
-  for (const name of [...new Set([...bundles, ...neededPlugins(cfg)])].sort()) {
-    const at = pluginPath(name, hooks);
-    try {
-      loadPlugin(name, { hooks });
-      r.ok(`plugin ${name}: ${at?.bundle ? `the bundle for factory ${factoryVersion(hooks)}` : "the source (a checkout of my-skills)"} loads`);
-    } catch (e) {
-      if (!(e instanceof FactoryError)) throw e;
-      r.fix(`plugin ${name}`, `${e.message} ${e.fix}`);
-    }
-  }
-}
-
 export function models(r: Reporter, cfg: Config): void {
   const value = cfg.models ?? {};
   try {
@@ -687,10 +662,15 @@ export function trustedReviewers(r: Reporter, cfg: Config): void {
     "`factory settings set trustedReviewers '[\"<your-login>\"]'`");
 }
 
-/** The message board (#500), when the tasks or the moved message kinds are on it (`tasks.source` or
- * `messaging.transport` "board"): it answers, and has its tables. */
+/** The message board (#500), when the tasks or the moved message kinds are on it (`tasks.source` "board", or
+ * `messaging.transport` "board", set or by default on a machine with a board): it answers, and has its tables. An old
+ * transport "nats" is a fix (#504). */
 export function board(r: Reporter, cfg: Config): void {
-  const transport = isObject(cfg.messaging) ? cfg.messaging.transport : undefined;
+  const transport = messagingSettings(cfg).transport;
+  if (transport === "nats") {
+    r.fix("messaging.transport", "it is nats, but NATS was removed (#504): run `factory settings set messaging.transport board`");
+    return;
+  }
   if (taskSource(cfg) !== "board" && transport !== "board") return;
   let info: ReturnType<typeof boardInfo>;
   try {
@@ -855,12 +835,10 @@ export async function main(argv: string[]): Promise<number> {
     manager(r, cfg);
     trustedReviewers(r, cfg);
     await turbo(r, cfg);
-    await nats(r, cfg);
     board(r, cfg);
     artifacts(r, cfg);
     release(r);
   }
-  plugins(r, cfg);
   if (argv.includes("--sandbox")) {
     console.log();
     console.log("Sandbox (#105)");

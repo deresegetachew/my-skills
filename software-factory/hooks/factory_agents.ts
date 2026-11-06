@@ -441,7 +441,7 @@ function hook(cfg: Cfg): void {
   }
   const agent = process.env.FACTORY_AGENT;
   if (!agent) return;
-  // A pull request opened, a question, an answer, a merge ... wakes whoever waits for it, over NATS (#410).
+  // A pull request opened, a question, an answer, a merge ... wakes whoever waits for it, on the board (#410).
   if (event === "PostToolUse" && command) wakeFromHook(cfg as Config, command);
   if (taskSource(cfg as Config) !== "issues") return; // agent tracking needs issues mode
   if ((event === "PostToolUse" || event === "Stop") && managed(agent)) return;

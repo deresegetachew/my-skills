@@ -1,5 +1,5 @@
 // The Messaging port (decision 0003, #376): how the roles send the factory's messages and read what is new. GitHub
-// comments are one transport (adapters/github), memory another (adapters/memory, for tests); NATS (#373) is next.
+// comments are one transport (adapters/github), memory another (adapters/memory, for tests); the message board a third (adapters/board, #500).
 // Its contract is tests/contracts/messaging.ts, and every adapter passes it.
 import type { Message } from "../domain/message.ts";
 
@@ -27,7 +27,7 @@ export interface Messaging {
 }
 
 // --- leases and wake-ups (decision 0003's leases; decision 0004 points 1 and 6; #410-#412) ---------------------------
-// Only a transport with a real compare-and-set has them (NATS). On GitHub a claim is a comment marker and a wake-up is
+// Only a transport with a real compare-and-set has them (the board). On GitHub a claim is a comment marker and a wake-up is
 // the next poll, so the GitHub adapter has neither: a role that gets none goes on as it always did.
 
 /** What a claim gave: whether the caller holds it now, and who does. */
@@ -62,7 +62,7 @@ export interface WakeWait {
   names: string[];
   since: number;
   seconds: number;
-  /** With `pr` on NATS: a pull request event with one of these changes wakes the waiter too (empty: every change). */
+  /** With `pr` on the board: a pull request event with one of these changes wakes the waiter too (empty: every change). */
   prChanges?: string[];
 }
 
@@ -72,10 +72,10 @@ export interface Wakes {
   waitWake(w: WakeWait): Wake | null;
 }
 
-// --- pull requests and CI over NATS (the `pr` kind) -----------------------------------------------------------------
+// --- pull requests and CI on the board (the `pr` kind) -----------------------------------------------------------------
 // One watcher per project reads GitHub (hooks/factory_pr_feed.ts) and keeps what it saw here: a snapshot of the open
 // pull requests, and one event per change. GitHub stays the record; this only says what changed, so a reader need not
-// ask. Only a transport with a store has it (NATS); on GitHub every reader asks GitHub, as it always did.
+// ask. Only a transport with a store has it (the board); on GitHub every reader asks GitHub, as it always did.
 
 /** An open pull request as the watcher last saw it. `runs` and `statuses` are its head's check runs and commit
  * statuses, cut to the fields the readers judge CI by. */

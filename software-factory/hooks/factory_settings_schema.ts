@@ -32,7 +32,7 @@ export const SECTIONS: [string, string, string][] = [
   ["design", "Design & eval", "the eval and design-check skills and factory_reviews.ts"],
   ["machine", "Machine (local)", "factory_machine.ts, `factory autostart`, `factory resume` and `factory loop`"],
   // After the machine section, so its menu number (10) stays the same.
-  ["messaging", "Messaging", "the composition root (core/compose.ts), which picks the messaging adapter (decision 0004)"],
+  ["messaging", "Messaging", "the composition root (core/compose.ts), which picks the messaging adapter (decision 0007)"],
   ["ui", "Web UI", "`factory ui` (factory_ui.ts), the web board on this machine (decision 0005)"],
 ];
 export const SECTION_TITLE: Record<string, string> = Object.fromEntries(SECTIONS.map(([slug, title]) => [slug, title]));
@@ -247,13 +247,11 @@ export const SETTINGS: Record<string, Setting> = table([
   S("turbo.port", "int", "ci", "The port the cache server listens on.", { default: 3335 }),
   S("turbo.secretsCommand", "str", "ci", "A command that prints TURBO_TOKEN=... (and TURBO_REMOTE_CACHE_SIGNATURE_KEY=...) lines, for example `sops -d --output-type dotenv secrets/factory.yaml`. The token is never stored in factory.json; TURBO_TOKEN in the environment wins.", { default: "" }),
   S("ci.lightLabel", "str", "ci", "The light runner's label (default `<repo>-light`).", { default: "" }),
-  S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or nats (the NATS plugin, for the kinds in messaging.kinds), or board (the message board, for the same kinds).", { options: ["github", "nats", "board"], default: "github" }),
-  S("messaging.url", "str", "messaging", "The NATS server agents connect to, on their own machine: nats://<address>:4222 (or tls://). Needed when transport is nats.", { default: "" }),
-  S("messaging.creds", "str", "messaging", "The folder of the agents' NATS seed files (<name>.nk). Empty: ~/.secrets/nats/<project>/.", { default: "" }),
-  S("messaging.kinds", "list", "messaging", "The message kinds that have moved to NATS (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub.", { default: [] }),
+  S("messaging.transport", "enum", "messaging", "How agents send each other messages: github (comments, markers and labels, as always) or board (the message board, for the kinds in messaging.kinds). Unset: board on a machine with a board set up, else github.", { options: ["github", "board"], default: null }),
+  S("messaging.kinds", "list", "messaging", "The message kinds that have moved to the board (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub.", { default: [] }),
   S("messaging.githubCopy", "list", "messaging", "The moved kinds that are still also written to GitHub. Only claim (with its releases) and wake can leave it; every other kind is always written there. Unset: the same as messaging.kinds.", { default: null }),
-  S("messaging.pollMinutes", "int", "messaging", "With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up over NATS before it looks at GitHub anyway.", { default: 15 }),
-  S("messaging.fallback", "enum", "messaging", "When the NATS plugin is missing or fails to load: github goes on over GitHub and says so; none stops the command.", { options: ["github", "none"], default: "github" }),
+  S("messaging.pollMinutes", "int", "messaging", "With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up on the board before it looks at GitHub anyway.", { default: 15 }),
+  S("messaging.fallback", "enum", "messaging", "When the message board can't be reached: github goes on over GitHub and says so; none stops the command.", { options: ["github", "none"], default: "github" }),
   S("ui.projects", "list", "ui", "Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout.", { default: [] }),
   S("ui.port", "int", "ui", "The port `factory ui` listens on (`--port` wins for one run).", { default: 4747 }),
   S("ui.pollSeconds", "int", "ui", "How often `factory ui` reads the agents and machines again and pushes what changed to the open pages.", { default: 5 }),
@@ -456,18 +454,19 @@ const MORE: Record<string, More> = {
   "design.references": { long: "The folder of design reference screens the design-check skill compares a built " +
     "screen with. Empty: no design check.",
   examples: ["factory settings set design.references design/screens"] },
-  "messaging.transport": { long: "github is today's behaviour and needs no setup. nats loads the NATS plugin and sends " +
-    "the kinds in `messaging.kinds` over it; every other kind, and everything the PR gate or the owner reads, stays on " +
-    "GitHub. A kind that moves is sent both ways for its first week (decision 0004). board does the same on the message " +
-    "board (decision 0007, #500): claims, wake-ups and the pull request feed (`claim`, `wake`, `pr`) and the message kinds " +
-    "listed; it needs no messaging.url (the board is found as `factory board` finds it: MB_URL, else this machine's url " +
-    "file), and `factory board up` starts one.",
-  examples: ["factory settings set messaging.transport nats", "factory settings set messaging.transport board"] },
-  "messaging.fallback": { long: "With github, a command whose NATS plugin is missing or fails to load, or whose NATS " +
-    "server can't be reached, goes on over GitHub and prints the error (`plugin-missing`, `plugin-load` or " +
-    "`nats-unreachable`) once, with the fix. With none, the command stops with that error instead.",
+  "messaging.transport": { long: "github is the factory's first transport and needs no setup. board sends the kinds in " +
+    "`messaging.kinds` to the message board (decision 0007, #500) as well: claims, wake-ups and the pull request feed " +
+    "(`claim`, `wake`, `pr`) and the message kinds listed; every other kind, and everything the PR gate or the owner " +
+    "reads, stays on GitHub. The board is found as `factory board` finds it: MB_URL, else this machine's url file, which " +
+    "`factory board up` (on the machine that runs it) or `factory machine join` (on another) writes. Unset, it is board " +
+    "on a machine with a board set up, else github. nats was removed (#504): a project file that still says nats is " +
+    "refused, with the fix `factory settings set messaging.transport board`.",
+  examples: ["factory settings set messaging.transport board", "factory settings unset messaging.transport"] },
+  "messaging.fallback": { long: "With github, a command whose message board can't be reached goes on over GitHub and " +
+    "prints the error (`board-unreachable`, `board-missing`) once, with the fix. With none, the command stops with that " +
+    "error instead.",
   examples: ["factory settings set messaging.fallback none"] },
-  "messaging.pollMinutes": { long: "A wake-up over NATS ends an idle wait at once (a pull request opened, a question, " +
+  "messaging.pollMinutes": { long: "A wake-up on the board ends an idle wait at once (a pull request opened, a question, " +
     "an answer, a merge). Meanwhile the loop still looks at GitHub this often, for what stays there: CI results, the " +
     "owner's words, a wake-up that was missed. Used only while wake is in messaging.kinds; otherwise the loops wait as " +
     "they always did (waitMinutes, idleMinutes).",
@@ -479,19 +478,19 @@ const MORE: Record<string, More> = {
   "ui.pollSeconds": { long: "Each read runs `factory agents ls --json` for every project shown, which asks GitHub at most " +
     "once per FACTORY_AGENTS_CACHE_SECONDS (45). The server reads only while a page is open.",
   examples: ["factory settings set ui.pollSeconds 10"] },
-  "messaging.kinds": { long: "The kinds of message that have moved to NATS, one at a time. A kind not listed stays on " +
-    "GitHub. Stopping a kind's GitHub copy after its first week is the owner's call. `pr` is not a message: one " +
-    "watcher (started by the dev manager) reads the open pull requests and their CI from GitHub and tells the others " +
-    "over NATS, so the slot check, `factory wait` and the dev manager's pass don't ask GitHub; with no fresh word " +
-    "for `messaging.pollMinutes` they ask GitHub as before.",
-  examples: ["factory settings set messaging.kinds '[\"wake\"]'"] },
-  "messaging.githubCopy": { long: "NATS is not the record (6 Nov 2026, decision 0004). A moved kind listed here is sent " +
-    "over NATS and also written to GitHub, as in its first week. Take a kind out to stop its GitHub copy: only claim " +
-    "(with its releases) and wake can go, because nobody reads them later. Without claim, review, answer, item and rework claims and " +
-    "their releases are on NATS only, and a task claim writes only its labels (factory:in-progress, agent:<name>), no " +
-    "comment. Wake-ups are never written to GitHub. Questions, answers, hand-offs, verdicts, must-fixes, approvals, notes " +
-    "and the labels the board, `factory next` and the PR gate read are always written to GitHub; NATS only announces " +
-    "them. When NATS can't be reached, everything goes to GitHub as before. Unset: the same as messaging.kinds.",
+  "messaging.kinds": { long: "The kinds of message that have moved to the board, one at a time. A kind not listed stays " +
+    "on GitHub. Stopping a kind's GitHub copy is the owner's call. `pr` is not a message: one watcher (started by the " +
+    "dev manager) reads the open pull requests and their CI from GitHub and tells the others on the board, so the slot " +
+    "check, `factory wait` and the dev manager's pass don't ask GitHub; with no fresh word for `messaging.pollMinutes` " +
+    "they ask GitHub as before.",
+  examples: ["factory settings set messaging.kinds '[\"wake\", \"claim\", \"pr\"]'"] },
+  "messaging.githubCopy": { long: "A moved kind listed here is sent to the board and also written to GitHub, as in its " +
+    "first week. Take a kind out to stop its GitHub copy: only claim (with its releases) and wake can go, because nobody " +
+    "reads them later. Without claim, review, answer, item and rework claims and their releases are on the board only, " +
+    "and a task claim writes only its labels (factory:in-progress, agent:<name>), no comment. Wake-ups are never written " +
+    "to GitHub. Questions, answers, hand-offs, verdicts, must-fixes, approvals, notes and the labels the board, `factory " +
+    "next` and the PR gate read are always written to GitHub. When the board can't be reached, everything goes to GitHub " +
+    "as before. Unset: the same as messaging.kinds.",
   examples: ["factory settings set messaging.githubCopy '[]'", "factory settings unset messaging.githubCopy"] },
   "agents@machine": { long: "The names this machine runs for the project, each one an agent in the project's `agents`. " +
     "`FACTORY_AGENTS` (comma-separated) overrides it. Empty: every name in the project's " +
@@ -769,7 +768,7 @@ export function validateAll(data: Record<string, unknown>, root = "."): [string[
       checkValue(s, here);
     } catch (e) {
       if (!(e instanceof SettingError)) throw e;
-      errors.push(`${key}: ${e.message}`);
+      errors.push(`${key}: ${key === "messaging.transport" && here === "nats" ? TRANSPORT_REMOVED : e.message}`);
     }
   }
   for (const key of unknownKeys(data)) {
@@ -786,18 +785,11 @@ export function validateAll(data: Record<string, unknown>, root = "."): [string[
   return [errors, warnings];
 }
 
-// The kinds `messaging.kinds` may move: the envelope's, and the ones decision 0004 (point 6) adds.
+// The kinds `messaging.kinds` may move: the envelope's, and claims, releases, wake-ups, hand-offs and the PR feed.
 export const MESSAGING_KINDS = [...MESSAGE_KINDS,"claim", "release", "wake", "handoff", "pr"];
 
 function messagingErrors(data: Record<string, unknown>): string[] {
   const errors: string[] = [];
-  const url = effective(data, "messaging.url");
-  if (effective(data, "messaging.transport") === "nats" && !url) {
-    errors.push("messaging.url: transport is nats but no server is set. " +
-      "Set it with `factory settings set messaging.url nats://<address>:4222`.");
-  } else if (typeof url === "string" && url && !/^(nats|tls):\/\//.test(url)) {
-    errors.push(`messaging.url: ${url} isn't a NATS address. Use nats://<address>:4222 (or tls://).`);
-  }
   for (const key of ["messaging.kinds", "messaging.githubCopy"]) {
     const kinds = lookup(data, key);
     for (const kind of Array.isArray(kinds) ? kinds : []) {
@@ -808,6 +800,10 @@ function messagingErrors(data: Record<string, unknown>): string[] {
   }
   return errors;
 }
+
+/** NATS was removed (#504): a project file that still names it gets this instead of the plain "takes one of". */
+const TRANSPORT_REMOVED = "nats was removed from the factory (decision 0007, #504); the message board carries wake-ups, " +
+  "claims and the pull request feed. Run `factory settings set messaging.transport board` (or github).";
 
 function portCollisions(data: Record<string, unknown>): string[] {
   const env = lookup(data, "agentEnv");

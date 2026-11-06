@@ -1,55 +1,64 @@
-// `factory machine add|join|ls|remove` (#445, epic #420): a machine joins the hub without copying a password by hand.
+// `factory machine add|join|ls|remove` (#445, #504, epic #420): a machine joins the factory's message board without
+// copying a password by hand.
 //
-//   factory machine add <name> --agent <agent>[:role] ... [--ttl minutes] [--json]    (on the hub)
-//       makes the keys of the agents that machine will run, and prints one join code. The code carries the hub's
-//       Tailscale address, the leaf password and those keys; it expires (15 minutes by default): a machine that hasn't
-//       joined by then has its keys and leaf user taken off the hub.
+//   factory machine add <name> --agent <agent>[:role] ... [--ttl minutes] [--json]    (on the machine that runs the board)
+//       makes the machine's own board login (`factory board login add <name>`: a Postgres role with only the board's
+//       rights) and prints one join code. The code carries the board's URL for that login (the board's Tailscale
+//       address and port) and the agents' names; it expires (15 minutes by default): a machine that hasn't connected by
+//       then has its login dropped.
 //   factory machine join <code> [--no-tailscale] [--no-doctor]                         (on the new machine)
-//       checks Tailscale and Docker, starts the leaf (`factory nats up --leaf`) or, without Docker, connects the
-//       agents straight to the hub, writes the seeds (folder 700, files 600) and runs `factory doctor`.
-//   factory machine ls [--json]       the machines added: joined, waiting for join, or code expired (keys removed)
-//   factory machine remove <name>     forget the machine and take its agents' keys off the hub
+//       checks Tailscale, writes the URL to this machine's settings folder (message-board/url: folder 700, file 600),
+//       checks that the login reaches the board, and runs `factory doctor`. With a board set up, messaging.transport
+//       is board by default.
+//   factory machine ls [--json]       the machines added: joined, waiting for join, or code expired (login dropped)
+//   factory machine remove <name>     forget the machine and drop its board login (its connections are ended)
 //
-// The hub keeps the records in <machine settings folder>/nats/machines.json. The code is the secret: whoever holds a
-// live one can join, so it is shown once and expires. The hub enforces the expiry: `add` and `ls` ask the hub's own
-// NATS monitoring port who is connected (/leafz: a joined leaf names itself after its leaf user; /connz: an agent's
-// public key). A machine seen there is marked joined; one whose code expired and was never seen has its keys and leaf
-// user taken off the hub (marked revoked, kept so `ls` can say so). When the monitoring port doesn't answer nothing
-// is changed. "Works once" is kept where it is redeemed (the machine records the codes it used in machine-joins.json):
-// a copy of the code used elsewhere before it expires reaches the hub with the same keys, so `machine remove` is what
-// takes a joined machine's keys away.
+// The hub keeps the records in <machine settings folder>/machines.json (mode 600). The code is the secret: whoever holds
+// a live one can join, so it is shown once and expires. The hub enforces the expiry: `add` and `ls` ask the board which
+// logins were used (`factory board login ls`: the board notes a login's first connection itself). A machine whose login
+// was used is marked joined; one whose code expired and whose login was never used has it dropped (`login remove
+// --unused`; marked revoked, kept so `ls` can say so). When the board doesn't answer nothing is changed. "Works once" is
+// kept where it is redeemed (the machine records the codes it used in machine-joins.json): a copy of the code used
+// elsewhere before it expires reaches the board with the same login, so `machine remove` is what takes it away.
 // Errors are `{code, message, fix}` on stderr.
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { Board, boardDir, LOGIN_NAME } from "../message-board/src/index.ts";
 import { now } from "./factory_clock.ts";
-import { type Config, load } from "./factory_config.ts";
 import { Exit, pyDumps, run, which } from "./factory_lib.ts";
-import { configDir, machineSettings, refuse, saveMachineSettings } from "./factory_machine.ts";
-import { connectedNow, credsDir, dockerUsable, hubLeafPassword, keyedNames, natsDir, natsState, nkeysOf, projectName, removeUsers, setLeafUser } from "./factory_nats.ts";
-import { NAME, publicKeyOf, type Role, roleOf } from "./factory_nats_keys.ts";
+import { configDir, machineSettings, refuse, saveMachineSettings, writeMachineSettings } from "./factory_machine.ts";
 
 const PREFIX = "FM1-";
+const VERSION = 2; // 1 carried NATS keys (#445); 2 carries a board login (#504)
 const DEFAULT_TTL_MINUTES = 15;
 const ADD_USAGE = "factory machine add <name> --agent <agent>[:role] [--agent ...] [--ttl minutes] [--json]";
-const HERE = dirname(new URL(import.meta.url).pathname);
+const BOARD_BIN = join(import.meta.dir, "..", "message-board", "bin.ts");
+const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const ROLES = ["builder", "manager", "po", "owner"] as const;
+type Role = (typeof ROLES)[number];
+const ROLE_ALIASES: Record<string, Role> = { "coding-agent": "builder", "dev-manager": "manager", "product-owner": "po" };
 
-interface AgentKey { name: string; role: Role }
+interface AgentName { name: string; role: Role }
 interface Payload {
-  v: 1;
+  v: typeof VERSION;
   id: string;
   name: string;
   exp: number;
-  project: string;
-  hub: { address: string; leaf: number; client: number };
-  leafUser: string;
-  leafPassword: string;
-  agents: (AgentKey & { seed: string })[];
+  url: string; // the board for this machine's login, password included
+  agents: AgentName[];
 }
 interface Record_ {
-  name: string; id: string; project: string; createdAt: number; expiresAt: number; agents: AgentKey[];
-  joinedAt?: number; // the hub first saw it connected
-  revokedAt?: number; // its code expired before it joined: its keys and leaf user were taken off the hub
+  name: string; id: string; createdAt: number; expiresAt: number; agents: AgentName[];
+  joinedAt?: number; // the board first saw its login connect
+  revokedAt?: number; // its code expired before it joined: its login was dropped
+}
+interface BoardLogin { name: string; firstSeen: string | null; connected: boolean }
+type Problem = { code: string; message: string; fix: string };
+
+function roleOf(text: string): Role | null {
+  if ((ROLES as readonly string[]).includes(text)) return text as Role;
+  return ROLE_ALIASES[text] ?? null;
 }
 
 // ---------- the code ----------
@@ -57,10 +66,19 @@ export function encodeCode(p: Payload): string {
   return PREFIX + Buffer.from(JSON.stringify(p), "utf8").toString("base64url");
 }
 
-/** The code's content, or a `bad-code` refusal for anything that isn't one. */
+function boardUrlOk(text: unknown): boolean {
+  try {
+    const u = new URL(String(text));
+    return (u.protocol === "postgres:" || u.protocol === "postgresql:") && Boolean(u.hostname && u.username && u.password);
+  } catch {
+    return false;
+  }
+}
+
+/** The code's content, or a `bad-code` refusal for anything that isn't one (a code from before #504 included). */
 export function decodeCode(text: string): Payload {
   const bad = (): never => refuse("bad-code", "That isn't a join code.",
-    "Copy the whole code that `factory machine add <name>` printed on the hub (it starts with FM1-).");
+    "Copy the whole code that `factory machine add <name>` printed on the machine that runs the board (it starts with FM1-).");
   const t = text.trim();
   if (!t.startsWith(PREFIX)) return bad();
   let p: Payload;
@@ -69,23 +87,13 @@ export function decodeCode(text: string): Payload {
   } catch {
     return bad();
   }
-  const ok = p && p.v === 1 && typeof p.id === "string" && NAME.test(String(p.name)) && typeof p.exp === "number" &&
-    typeof p.project === "string" && NAME.test(p.project) && typeof p.leafPassword === "string" && NAME.test(String(p.leafUser)) &&
-    typeof p.hub?.address === "string" && Number.isInteger(p.hub.leaf) && Number.isInteger(p.hub.client) &&
-    Array.isArray(p.agents) && p.agents.length > 0 &&
-    p.agents.every((a) => NAME.test(String(a.name)) && roleOf(String(a.role)) && typeof a.seed === "string");
-  if (!ok) return bad();
-  for (const a of p.agents) {
-    try {
-      publicKeyOf(a.seed);
-    } catch {
-      return bad();
-    }
-  }
-  return p;
+  const ok = p && p.v === VERSION && typeof p.id === "string" && LOGIN_NAME.test(String(p.name)) && typeof p.exp === "number" &&
+    boardUrlOk(p.url) && Array.isArray(p.agents) && p.agents.length > 0 &&
+    p.agents.every((a) => AGENT_NAME.test(String(a.name)) && roleOf(String(a.role)));
+  return ok ? p : bad();
 }
 
-// ---------- small file helpers ----------
+// ---------- small helpers ----------
 function readJson<T>(path: string, fallback: T): T {
   try {
     return JSON.parse(readFileSync(path, "utf8")) as T;
@@ -103,7 +111,7 @@ function writeAtomic(path: string, text: string, mode: number): void {
 }
 
 function machinesFile(): string {
-  return join(natsDir(), "machines.json");
+  return join(configDir(), "machines.json");
 }
 
 function readRecords(): Record_[] {
@@ -113,14 +121,6 @@ function readRecords(): Record_[] {
 
 function saveRecords(rs: Record_[]): void {
   writeAtomic(machinesFile(), pyDumps(rs, { indent: 2 }) + "\n", 0o600);
-}
-
-function loadConfig(): Config | null {
-  try {
-    return load();
-  } catch {
-    return null;
-  }
 }
 
 function takeFlag(args: string[], name: string): boolean {
@@ -144,48 +144,46 @@ function noMore(args: string[], usage: string): void {
   if (args.length) refuse("unknown-option", `${args[0]} isn't an option here.`, `Usage: ${usage}`);
 }
 
-function natsCli(args: string[]) {
-  return run([process.execPath, "--no-env-file", "--config=/dev/null", join(HERE, "factory_nats.ts"), ...args], { timeoutMs: 330_000 });
+/** `factory board <args>` (the board's own command): its stdout, or the {code, message, fix} it refused with. */
+function board(args: string[]): { ok: true; stdout: string } | { ok: false; problem: Problem } {
+  const r = run([process.execPath, "--no-env-file", "--config=/dev/null", BOARD_BIN, ...args], { timeoutMs: 60_000 });
+  if (r.code === 0) return { ok: true, stdout: r.stdout };
+  try {
+    const e = JSON.parse(r.stderr.trim().split("\n").at(-1) ?? "") as Partial<Problem>;
+    if (typeof e.code === "string" && typeof e.message === "string" && typeof e.fix === "string") return { ok: false, problem: e as Problem };
+  } catch {
+    // not one of the board's errors
+  }
+  return { ok: false, problem: { code: "board-failed", message: `\`factory board ${args[0]} ${args[1] ?? ""}\` failed: ${(r.stderr || r.stdout).trim().slice(-300)}`,
+    fix: "Run `factory board status` to see whether the board answers, then run this again." } };
 }
 
-function lastError(stderr: string): { message: string; fix: string } | null {
-  try {
-    const e = JSON.parse(stderr.trim().split("\n").at(-1) ?? "") as { message?: unknown; fix?: unknown };
-    return typeof e.message === "string" && typeof e.fix === "string" ? { message: e.message, fix: e.fix } : null;
-  } catch {
-    return null;
-  }
+function refuseWith(p: Problem): never {
+  return refuse(p.code, p.message, p.fix);
 }
 
 // ---------- the hub enforces the code (sweep) ----------
-const leafUserOf = (r: Record_): string => `m-${r.id}`;
-
-/** Takes a machine's agents' keys and its leaf user off the hub, as `machine remove` does. */
-function revoke(r: Record_): { removed: string[]; reloaded: boolean } {
-  const out = removeUsers(r.project, r.agents.map((a) => a.name));
-  setLeafUser(leafUserOf(r), null);
-  return out;
-}
-
-/** Marks the machines the hub sees connected as joined and revokes those whose code expired unjoined. `checked` is
- * false when the hub's monitoring port didn't answer; then nothing changes. */
-async function sweep(): Promise<{ records: Record_[]; checked: boolean }> {
+/** Marks the machines whose login the board saw connect as joined, and drops the login of those whose code expired
+ * unjoined. `checked` is false when the board didn't answer; then nothing changes. */
+function sweep(): { records: Record_[]; checked: boolean } {
   const records = readRecords();
   const open = records.filter((r) => r.joinedAt === undefined && r.revokedAt === undefined);
   if (!open.length) return { records, checked: true };
-  const seen = await connectedNow();
-  if (!seen) return { records, checked: false };
+  const listed = board(["login", "ls", "--json"]);
+  if (!listed.ok) return { records, checked: false };
+  const logins = new Map((JSON.parse(listed.stdout) as BoardLogin[]).map((l) => [l.name, l]));
   const t = Math.floor(now());
   let changed = false;
   for (const r of open) {
-    const leaf = `-${leafUserOf(r)}`;
-    const keys = nkeysOf(r.project, r.agents.map((a) => a.name));
-    if (seen.leafNames.some((n) => n.endsWith(leaf)) || keys.some((k) => seen.users.includes(k))) {
+    const l = logins.get(r.name);
+    if (l && (l.firstSeen || l.connected)) {
       r.joinedAt = t;
       changed = true;
     } else if (t >= r.expiresAt) {
-      revoke(r);
-      r.revokedAt = t;
+      const gone = l ? board(["login", "remove", r.name, "--unused"]) : { ok: true as const, stdout: "" };
+      if (gone.ok || gone.problem.code === "not-found") r.revokedAt = t;
+      else if (gone.problem.code === "login-used") r.joinedAt = t; // it connected a moment ago
+      else continue; // the board stopped answering: try again next time
       changed = true;
     }
   }
@@ -194,86 +192,60 @@ async function sweep(): Promise<{ records: Record_[]; checked: boolean }> {
 }
 
 // ---------- add ----------
-function parseAgent(text: string): AgentKey {
+function parseAgent(text: string): AgentName {
   const [name = "", roleText = "builder"] = text.split(":");
   const role = roleOf(roleText);
-  if (!NAME.test(name)) refuse("bad-name", `The agent name ${JSON.stringify(name)} must be lowercase letters, digits and dashes.`, `Usage: ${ADD_USAGE}`);
+  if (!AGENT_NAME.test(name)) refuse("bad-name", `The agent name ${JSON.stringify(name)} must be lowercase letters, digits and dashes.`, `Usage: ${ADD_USAGE}`);
   if (!role) refuse("bad-role", `${JSON.stringify(roleText)} isn't a role.`, `Use builder, manager, po or owner: --agent ${name}:builder`);
   return { name, role };
 }
 
-async function cmdAdd(argv: string[]): Promise<number> {
+function cmdAdd(argv: string[]): number {
   const args = [...argv];
   const json = takeFlag(args, "--json");
   const agents = takeOptions(args, "--agent").map(parseAgent);
   const ttlText = takeOptions(args, "--ttl")[0];
   const name = args.shift() ?? "";
   noMore(args, ADD_USAGE);
-  if (!NAME.test(name)) refuse("bad-name", `The machine's name ${JSON.stringify(name)} must be lowercase letters, digits and dashes.`, `Usage: ${ADD_USAGE}`);
-  if (!agents.length) refuse("no-agents", "No agents were named: the code carries the keys of the agents that machine runs.", `Usage: ${ADD_USAGE}`);
+  if (!LOGIN_NAME.test(name)) {
+    refuse("bad-name", `The machine's name ${JSON.stringify(name)} must be lowercase letters, digits and dashes (up to 40), starting with a letter.`, `Usage: ${ADD_USAGE}`);
+  }
+  if (!agents.length) refuse("no-agents", "No agents were named: the code carries the names of the agents that machine runs.", `Usage: ${ADD_USAGE}`);
   const ttl = ttlText === undefined ? DEFAULT_TTL_MINUTES : Number(ttlText);
   if (!Number.isFinite(ttl) || ttl <= 0) refuse("bad-ttl", `--ttl needs minutes above 0, not ${JSON.stringify(ttlText)}.`, `Usage: ${ADD_USAGE}`);
 
-  const hub = natsState();
-  const password = hubLeafPassword();
-  if (!hub || hub.mode !== "hub" || !password) {
-    refuse("hub-not-ready", "This machine isn't running the NATS hub, so there is nothing for another machine to join.",
-      "Start the hub here first: factory nats up");
-  }
-  if (!hub.address) {
-    refuse("hub-no-tailscale", "The hub has no Tailscale address, so another machine can't reach it.",
-      "Start Tailscale (tailscale up), then run `factory nats up` again.");
-  }
-  await sweep(); // expired codes that never joined lose their keys first
-  if (readRecords().some((r) => r.name === name)) {
+  sweep(); // expired codes that never joined lose their logins first
+  const records = readRecords();
+  if (records.some((r) => r.name === name)) {
     refuse("machine-exists", `A machine called ${name} is already added.`, `Remove it first with \`factory machine remove ${name}\`, or choose another name.`);
   }
-  const project = projectName();
-  const cfg = loadConfig();
-  const taken = new Set([...keyedNames(project), ...readRecords().flatMap((r) => r.agents.map((a) => a.name))]);
+  const taken = new Set(records.flatMap((r) => r.agents.map((a) => a.name)));
   const dup = agents.find((a, i) => taken.has(a.name) || agents.findIndex((b) => b.name === a.name) !== i);
   if (dup) {
-    refuse("agent-has-key", `${dup.name} already has a key (an agent here or on another machine), and one name is one agent.`,
+    refuse("agent-taken", `${dup.name} is already named for another machine (or twice here), and one name is one agent.`,
       "Choose a name no other agent uses; `factory machine ls` shows the names machines hold.");
   }
-  const made: Payload["agents"] = [];
-  for (const a of agents) {
-    const r = natsCli(["user", "add", a.name, "--role", a.role, "--project", project]);
-    if (r.code !== 0) {
-      removeUsers(project, made.map((m) => m.name)); // nothing half done: the keys made so far go again
-      const e = lastError(r.stderr);
-      refuse("key-failed", `Couldn't make the key of ${a.name}: ${e?.message ?? (r.stderr || r.stdout).trim().slice(-300)}`, e?.fix ?? "Fix that, then run this again.");
-    }
-    const seed = readFileSync(join(credsDir(cfg, project), `${a.name}.nk`), "utf8").trim();
-    made.push({ ...a, seed });
-  }
-  const id = randomBytes(6).toString("hex");
-  const leafUser = `m-${id}`; // this machine's own way into the hub's leaf port: `machine remove` drops it
-  const leafPassword = randomBytes(24).toString("base64url");
-  try {
-    setLeafUser(leafUser, leafPassword);
-  } catch (e) {
-    removeUsers(project, made.map((m) => m.name));
-    throw e;
-  }
+  const made = board(["login", "add", name, "--json"]);
+  if (!made.ok) refuseWith(made.problem);
+  const { url } = JSON.parse(made.stdout) as { url: string };
   const t = now();
   const expiresAt = Math.floor(t + ttl * 60);
-  const code = encodeCode({ v: 1, id, name, exp: expiresAt, project, hub: { address: hub.address, leaf: hub.ports.leaf, client: hub.ports.tailnet },
-    leafUser, leafPassword, agents: made });
+  const id = randomBytes(6).toString("hex");
   try {
-    saveRecords([...readRecords(), { name, id, project, createdAt: Math.floor(t), expiresAt, agents }]);
+    saveRecords([...readRecords(), { name, id, createdAt: Math.floor(t), expiresAt, agents }]);
   } catch (e) {
-    setLeafUser(leafUser, null); // nothing half done: without its record the hub would never take these away
-    removeUsers(project, made.map((m) => m.name));
-    refuse("record-failed", `Couldn't save the machine's record (${machinesFile()}): ${e instanceof Error ? e.message : String(e)}. Its keys were taken off the hub again.`,
-      `Make ${natsDir()} writable for this user, then run this again.`);
+    board(["login", "remove", name]); // nothing half done: without its record the hub would never take it away
+    refuse("record-failed", `Couldn't save the machine's record (${machinesFile()}): ${e instanceof Error ? e.message : String(e)}. Its board login was dropped again.`,
+      `Make ${configDir()} writable for this user, then run this again.`);
   }
+  const code = encodeCode({ v: VERSION, id, name, exp: expiresAt, url, agents });
   const command = `factory machine join ${code}`;
   if (json) {
     console.log(pyDumps({ name, code, expiresAt, agents, command }));
     return 0;
   }
-  console.log(`Join code for ${name} (works once, expires in ${Math.round(ttl)} min: if ${name} hasn't joined by then, its keys are removed from the hub). It holds the keys of ${agents.map((a) => a.name).join(", ")}: send it over a private channel.`);
+  console.log(`Join code for ${name} (works once, expires in ${Math.round(ttl)} min: if ${name} hasn't connected by then, its board login is removed). ` +
+    `It holds ${name}'s own login to the message board, for ${agents.map((a) => a.name).join(", ")}: send it over a private channel.`);
   console.log(code);
   console.log(`On ${name}, in the project's folder, run:`);
   console.log(command);
@@ -281,89 +253,98 @@ async function cmdAdd(argv: string[]): Promise<number> {
 }
 
 // ---------- join ----------
-interface Made { files: string[]; dirs: string[]; restore: [string, string][] }
-
-function undoAll(m: Made): void {
-  for (const f of m.files) rmSync(f, { force: true });
-  for (const [f, text] of m.restore) writeFileSync(f, text);
-  for (const d of m.dirs.reverse()) rmSync(d, { recursive: true, force: true });
-}
-
 function tailscaleUp(): boolean {
   return Boolean(which("tailscale")) && run(["tailscale", "ip", "-4"], { timeoutMs: 10_000 }).code === 0;
 }
 
-function cmdJoin(argv: string[]): number {
+/** Why `url` doesn't reach the board, or "" when it does. */
+async function reachError(url: string): Promise<string> {
+  try {
+    const b = await Board.open(url, { max: 1 });
+    try {
+      await b.info();
+    } finally {
+      await b.end().catch(() => {});
+    }
+    return "";
+  } catch (e) {
+    return (e instanceof Error ? e.message : String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
+  }
+}
+
+async function cmdJoin(argv: string[]): Promise<number> {
   const args = [...argv];
   const skipTailscale = takeFlag(args, "--no-tailscale");
   const skipDoctor = takeFlag(args, "--no-doctor");
   const text = args.shift() ?? "";
   noMore(args, "factory machine join <code> [--no-tailscale] [--no-doctor]");
-  if (!text) refuse("bad-code", "No join code was given.", "factory machine join <code>  (the code `factory machine add <name>` printed on the hub)");
+  if (!text) refuse("bad-code", "No join code was given.", "factory machine join <code>  (the code `factory machine add <name>` printed on the machine that runs the board)");
   const p = decodeCode(text);
   if (now() >= p.exp) {
-    refuse("code-expired", `The join code for ${p.name} has expired.`, "Ask for a new one: run `factory machine remove " + p.name + "` and `factory machine add " + p.name + " --agent ...` on the hub.");
+    refuse("code-expired", `The join code for ${p.name} has expired.`,
+      `Ask for a new one: run \`factory machine remove ${p.name}\` and \`factory machine add ${p.name} --agent ...\` on the machine that runs the board.`);
   }
   const usedFile = join(configDir(), "machine-joins.json");
   const used = readJson<string[]>(usedFile, []);
   if (used.includes(p.id)) {
-    refuse("code-used", "This join code was already used on this machine.", `Make a new one on the hub: factory machine remove ${p.name}, then factory machine add ${p.name} --agent ...`);
+    refuse("code-used", "This join code was already used on this machine.", `Make a new one on the board's machine: factory machine remove ${p.name}, then factory machine add ${p.name} --agent ...`);
   }
-  if (natsState()?.mode === "hub") {
-    refuse("is-hub", "This machine runs the hub, so it can't join another.", "Run `factory machine join` on the new machine instead.");
+  const dir = boardDir();
+  if (existsSync(join(dir, "state.json"))) {
+    refuse("is-hub", "This machine runs the message board, so it can't join another.", "Run `factory machine join` on the new machine instead.");
   }
+  const where = new URL(p.url);
+  const address = `${where.hostname}:${where.port || "5432"}`;
   if (!skipTailscale && !tailscaleUp()) {
-    refuse("tailscale-missing", `Tailscale isn't installed or isn't up here, and the hub is at ${p.hub.address}.`,
-      "Install and start Tailscale (tailscale up) and run this again; with another route to the hub (a tunnel) add --no-tailscale.");
+    refuse("tailscale-missing", `Tailscale isn't installed or isn't up here, and the board is at ${address}.`,
+      "Install and start Tailscale (tailscale up) and run this again; with another route to the board (a tunnel) add --no-tailscale.");
   }
-  const docker = dockerUsable();
 
-  const m: Made = { files: [], dirs: [], restore: [] };
-  const project = p.project;
-  const creds = credsDir(loadConfig(), project);
+  // Write the URL, then check that it reaches the board; on any failure put back what was there.
+  const file = join(dir, "url");
+  const freshDir = !existsSync(dir);
+  const before = existsSync(file) ? readFileSync(file, "utf8") : null;
+  const undo = (): void => {
+    if (before === null) rmSync(file, { force: true });
+    else writeAtomic(file, before, 0o600);
+    if (freshDir) rmSync(dir, { recursive: true, force: true });
+  };
   try {
-    if (!existsSync(creds)) {
-      mkdirSync(creds, { recursive: true, mode: 0o700 });
-      m.dirs.push(creds);
-    }
-    chmodSync(creds, 0o700);
-    for (const a of p.agents) {
-      const file = join(creds, `${a.name}.nk`);
-      if (existsSync(file)) m.restore.push([file, readFileSync(file, "utf8")]);
-      else m.files.push(file);
-      writeAtomic(file, a.seed + "\n", 0o600);
-    }
-    if (docker) {
-      const dir = natsDir();
-      const pwFile = join(dir, "leaf.password");
-      if (!existsSync(dir)) m.dirs.push(dir);
-      else if (existsSync(pwFile)) m.restore.push([pwFile, readFileSync(pwFile, "utf8")]);
-      else m.files.push(pwFile);
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      writeAtomic(pwFile, p.leafPassword + "\n", 0o600);
-      const r = natsCli(["up", "--leaf", `${p.hub.address}:${p.hub.leaf}`, "--leaf-user", p.leafUser]);
-      if (r.code !== 0) {
-        const e = lastError(r.stderr);
-        refuse("leaf-failed", `The leaf server didn't start: ${e?.message ?? (r.stderr || r.stdout).trim().slice(-300)}`,
-          (e?.fix ?? "Fix that") + ". Nothing was kept; the join code still works.");
-      }
-    }
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
+    writeAtomic(file, p.url + "\n", 0o600);
   } catch (e) {
-    undoAll(m);
+    undo();
     throw e;
   }
-  writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
-  const names = [...new Set([...(Array.isArray(machineSettings().agents) ? (machineSettings().agents as unknown[]).map(String) : []), ...p.agents.map((a) => a.name)])];
-  saveMachineSettings({ agents: names });
+  const why = await reachError(p.url);
+  if (why) {
+    undo();
+    refuse("board-unreachable", `${p.name}'s login doesn't reach the board at ${address}: ${why.slice(0, 300)}`,
+      "Check that Tailscale is up on both machines and that the board runs (`factory board status` on its machine). " +
+      "Nothing was kept. If the code expired or the machine was removed there, make a new one: factory machine add " + p.name + " --agent ...");
+  }
+  const settingsBefore = machineSettings();
+  try {
+    const mine = settingsBefore.agents;
+    const names = [...new Set([...(Array.isArray(mine) ? mine.map(String) : []), ...p.agents.map((a) => a.name)])];
+    writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
+    saveMachineSettings({ agents: names });
+  } catch (e) {
+    undo(); // nothing half done: without its record the code could be used here again
+    try {
+      writeMachineSettings(settingsBefore);
+    } catch {
+      // it was never written
+    }
+    refuse("join-not-saved", `Couldn't record the join in ${configDir()}: ${e instanceof Error ? e.message : String(e)}. Nothing was kept.`,
+      `Make ${configDir()} writable for this user (machine-joins.json must be a file), then run this again; the code still works.`);
+  }
 
-  const url = docker ? "nats://127.0.0.1:4222" : `nats://${p.hub.address}:${p.hub.client}`;
-  console.log(`Joined the hub at ${p.hub.address} as ${p.name}, with ${p.agents.map((a) => `${a.name} (${a.role})`).join(", ")}.`);
-  console.log(docker ? "Docker is running here, so a Docker leaf (factory nats up --leaf) runs a NATS server and the agents talk to it."
-    : "Docker isn't available here, so the agents connect directly to the hub (no leaf server).");
-  console.log(`Keys: ${creds} (folder 700, files 600).`);
-  console.log(`Point the agents at it: factory settings set messaging.transport nats; factory settings set messaging.url ${url}`);
+  console.log(`Joined the message board at ${address} as ${p.name}, with ${p.agents.map((a) => `${a.name} (${a.role})`).join(", ")}.`);
+  console.log(`The board's URL, with ${p.name}'s own login: ${file} (folder 700, file 600). With it, messaging.transport is board by default.`);
   if (skipDoctor) return 0;
-  const d = run([process.execPath, "--no-env-file", "--config=/dev/null", join(HERE, "factory_doctor.ts")], { timeoutMs: 120_000 });
+  const d = run([process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_doctor.ts")], { timeoutMs: 120_000 });
   const out = (d.stdout + d.stderr).trim();
   if (out) console.log(out);
   console.log(`doctor: ${d.code === 0 ? "ok" : `found things to fix (exit ${d.code}); the lines above say what to do`}`);
@@ -384,16 +365,16 @@ function stateText(r: Record_, s: { state: State; minutes: number }): string {
   if (s.state === "joined") return "joined";
   if (s.state === "waiting") return `waiting for join (expires in ${s.minutes} min)`;
   if (s.state === "revoked") {
-    return `code expired; its keys were removed from the hub (add it again: factory machine remove ${r.name}, then factory machine add ${r.name} --agent ...)`;
+    return `code expired; its board login was removed (add it again: factory machine remove ${r.name}, then factory machine add ${r.name} --agent ...)`;
   }
-  return "code expired; not checked: the hub's NATS server doesn't answer (factory nats up)";
+  return "code expired; not checked: the board doesn't answer (factory board status)";
 }
 
-async function cmdLs(argv: string[]): Promise<number> {
+function cmdLs(argv: string[]): number {
   const args = [...argv];
   const json = takeFlag(args, "--json");
   noMore(args, "factory machine ls [--json]");
-  const { records: rows } = await sweep();
+  const { records: rows } = sweep();
   const t = now();
   if (json) {
     console.log(pyDumps(rows.map((r) => ({ name: r.name, agents: r.agents, state: stateOf(r, t).state, expiresAt: r.expiresAt,
@@ -404,10 +385,7 @@ async function cmdLs(argv: string[]): Promise<number> {
     console.log("No machines added yet. Add one: factory machine add <name> --agent <agent>");
     return 0;
   }
-  for (const r of rows) {
-    const s = stateOf(r, t);
-    console.log(`${r.name}  ${r.agents.map((a) => a.name).join(", ")}  ${stateText(r, s)}`);
-  }
+  for (const r of rows) console.log(`${r.name}  ${r.agents.map((a) => a.name).join(", ")}  ${stateText(r, stateOf(r, t))}`);
   return 0;
 }
 
@@ -418,17 +396,19 @@ function cmdRemove(argv: string[]): number {
   const all = readRecords();
   const r = all.find((x) => x.name === name);
   if (!r) refuse("unknown-machine", `There is no machine called ${JSON.stringify(name)}.`, "factory machine ls lists them.");
-  const { removed, reloaded } = revoke(r); // its agents' keys go, and its leaf can no longer connect with the code's password
+  const gone = board(["login", "remove", name]);
+  if (!gone.ok && gone.problem.code !== "not-found") { // not-found: its login was already dropped (its code expired)
+    refuse(gone.problem.code, `${name} was kept: its board login couldn't be dropped. ${gone.problem.message}`, gone.problem.fix);
+  }
   saveRecords(all.filter((x) => x !== r));
-  console.log(`Removed ${name}. Took the keys of ${removed.join(", ") || "no agent"} off the hub` +
-    (reloaded ? " and reloaded the server." : "; the server isn't running, so it takes effect at `factory nats up`."));
+  console.log(`Removed ${name} and its board login; its connections to the board were ended.`);
   return 0;
 }
 
 export async function machineMain(cmd: string, rest: string[]): Promise<number> {
-  if (cmd === "add") return await cmdAdd(rest);
-  if (cmd === "join") return cmdJoin(rest);
-  if (cmd === "ls") return await cmdLs(rest);
+  if (cmd === "add") return cmdAdd(rest);
+  if (cmd === "join") return await cmdJoin(rest);
+  if (cmd === "ls") return cmdLs(rest);
   if (cmd === "remove") return cmdRemove(rest);
   throw new Exit(1);
 }

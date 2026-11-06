@@ -1,5 +1,5 @@
-// The contract of the ports a coordination transport gives (decision 0004; ports/messaging.ts): Leases, Wakes and
-// PrFeed. NATS gave them first; the message board (#500) gives them too (bus_board.test.ts). Not a test file: a test
+// The contract of the ports a coordination transport gives (ports/messaging.ts): Leases, Wakes and
+// PrFeed. The message board (#500) gives them (bus_board.test.ts). Not a test file: a test
 // file calls busContract with a way to make a fresh port for a project of its own.
 import { expect, test } from "bun:test";
 import type { Leases, PrEvent, PrFeed, PrSnapshot, Wakes } from "../../hooks/core/ports/messaging.ts";

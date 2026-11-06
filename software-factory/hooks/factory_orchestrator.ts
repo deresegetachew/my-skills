@@ -17,7 +17,7 @@
 // shown there as readable lines and kept in <item>.out; `tmux attach -r` shows the window read-only.
 // Otherwise it runs with no screen, as before.
 //
-// With `pr` in messaging.kinds (NATS), the cycle starts the project's one pull request watcher (factory_pr_feed.ts) when
+// With `pr` in messaging.kinds (the board), the cycle starts the project's one pull request watcher (factory_pr_feed.ts) when
 // nobody runs it, and reads the open pull requests, their CI and their unchanged comments from its snapshot instead of
 // GitHub. A sub-manager still reads GitHub itself before it acts.
 //
@@ -495,7 +495,7 @@ function lastSubEnded(name: string): number {
   }
 }
 
-/** With `pr` on NATS: the pull request watcher's snapshot for this cycle, starting the watcher when nobody runs it.
+/** With `pr` on the board: the pull request watcher's snapshot for this cycle, starting the watcher when nobody runs it.
  * Null (the cycle reads GitHub, as always) while `pr` is off, the snapshot is older than messaging.pollMinutes, or one
  * of this dev manager's sub-managers ended after it was taken (what it did may not be in it yet). */
 export function prSnapshot(cfg: Config, name: string, dry: boolean, out: Out): PrSnapshot | null {

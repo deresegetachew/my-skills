@@ -42,6 +42,13 @@ events on Postgres.
                                      writes nothing. The repo is the git remote origin unless --repo names it
                                      GitHub wins on status unless the task is held on the board (a task done on the
                                      board but open on GitHub is reopened); comments deleted on GitHub stay on the board
+  factory board login add <name> [--json]
+                                     on the machine that runs the board: a login of its own for another machine, with
+                                     only the board's rights (connect, read and write the board's tables). Prints its URL
+                                     (the board's Tailscale address, and the login's password) once
+  factory board login ls [--json]    each login: when it was first used, or never used, and whether it is connected now
+  factory board login remove <name> [--unused]
+                                     drop the login and end its connections; --unused: only if it was never used
 
 The URL lives in ${join("<machine settings folder>", "message-board", "url")} (MB_URL overrides it).`;
 
@@ -458,6 +465,84 @@ async function mcp(argv: string[]): Promise<number> {
   return 0;
 }
 
+// ---------- logins ----------
+const LOGIN_USAGE = "factory board login add <name> [--json] | ls [--json] | remove <name> [--unused]";
+
+/** A login's URL: the board's address for other machines (its Tailscale address and port), its database, its role. */
+function loginUrl(base: string, s: State, role: string, password: string): string {
+  const u = new URL(base);
+  u.username = encodeURIComponent(role);
+  u.password = encodeURIComponent(password);
+  u.hostname = s.address;
+  u.port = String(s.tailnetPort);
+  return u.toString();
+}
+
+async function loginAdd(args: string[]): Promise<number> {
+  const asJson = flag(args, "--json");
+  const name = args.shift();
+  leftovers(args, "factory board login add <name> [--json]");
+  if (!name) fail("bad-input", "login add needs a name.", "For example: factory board login add laptop");
+  const url = boardUrl();
+  if (!url) noBoard();
+  const s = readState();
+  if (!s) {
+    fail("not-board-host", "This machine doesn't run the board's Postgres, so it can't make logins for it.",
+      "Run it on the machine that ran `factory board up`.");
+  }
+  if (!s.address) {
+    fail("no-tailscale", "The board listens on localhost only (Tailscale wasn't up when it started), so other machines can't reach it.",
+      "Start Tailscale (`tailscale up`), then run `factory board up` again, and this.");
+  }
+  const password = randomBytes(24).toString("base64url");
+  const made = await withBoard((b) => b.addLogin(name, password));
+  const link = loginUrl(url, s, made.role, password);
+  if (asJson) {
+    json({ name: made.name, role: made.role, url: link });
+    return 0;
+  }
+  print(`Made the login ${made.name} (role ${made.role}): it may read and write the board's tables, nothing more.`);
+  print("Its URL, shown once (it holds the password; send it over a private channel):");
+  print(link);
+  return 0;
+}
+
+async function loginLs(args: string[]): Promise<number> {
+  const asJson = flag(args, "--json");
+  leftovers(args, "factory board login ls [--json]");
+  const list = await withBoard((b) => b.logins());
+  if (asJson) {
+    json(list.map((l) => ({ name: l.name, role: l.role, createdAt: l.createdAt.toISOString(), firstSeen: l.firstSeen?.toISOString() ?? null,
+      lastSeen: l.lastSeen?.toISOString() ?? null, connected: l.connected })));
+    return 0;
+  }
+  if (!list.length) print("No logins. Make one for another machine: factory board login add <name>");
+  const at = (d: Date): string => d.toISOString().slice(0, 16).replace("T", " ");
+  for (const l of list) {
+    const used = l.firstSeen ? `used (first ${at(l.firstSeen)}, last ${at(l.lastSeen ?? l.firstSeen)})` : "never used";
+    print(`${l.name.padEnd(16)} ${used}${l.connected ? ", connected now" : ""}`);
+  }
+  return 0;
+}
+
+async function loginRemove(args: string[]): Promise<number> {
+  const unused = flag(args, "--unused");
+  const name = args.shift();
+  leftovers(args, "factory board login remove <name> [--unused]");
+  if (!name) fail("bad-input", "login remove needs a name.", "For example: factory board login remove laptop");
+  await withBoard((b) => b.removeLogin(name, { unused }));
+  print(`Removed the login ${name}; its connections were ended.`);
+  return 0;
+}
+
+async function login(argv: string[]): Promise<number> {
+  const [what, ...rest] = argv;
+  if (what === "add") return loginAdd(rest);
+  if (what === "ls") return loginLs(rest);
+  if (what === "remove") return loginRemove(rest);
+  return fail("bad-input", what ? `\`login ${what}\` isn't a login verb.` : "login needs a verb.", `Usage: ${LOGIN_USAGE}`);
+}
+
 // ---------- import ----------
 const IMPORT_USAGE = "factory board import github [--closed] [--dry-run] [--repo owner/name]";
 const IMPORTER = "github-import"; // the actor an import writes as: its tasks and edges are created_by it
@@ -511,7 +596,7 @@ async function importVerb(argv: string[]): Promise<number> {
 }
 
 const VERBS: Record<string, (args: string[]) => number | Promise<number>> = {
-  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, import: importVerb, mcp,
+  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, import: importVerb, mcp, login,
 };
 
 async function main(argv: string[]): Promise<number> {

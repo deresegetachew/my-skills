@@ -12,7 +12,7 @@ Read these first, then copy their structure exactly:
 "The factory": AI agents build a software project task by task. Roles: the **product owner** (mentewab, keeps the PRD,
 epics, asks the owner), the **dev manager** (fasil, reviews and merges PRs), **builders** (haile, taytu, menelik:
 claim a task, write failing tests first, open a PR). The **owner** (the human user) approves what only a person may:
-merging protected files, product decisions, releases. Messages and claims go over a NATS hub on a machine called
+merging protected files, product decisions, releases. Messages and claims go over the message board (Postgres) on a machine called
 dev-pc (Tailscale 100.99.7.67); other machines (the owner's Mac) join it. Each project is a GitHub repo
 (my-skills, remanual). Tasks are GitHub issues with labels factory:ready / in-progress / in-review / blocked.
 
@@ -79,7 +79,7 @@ card, a stepper on top. Phone screens: fixed root 390×844, no sidebar, a bottom
 Agents: mentewab (Product owner, dev-pc, idle until PR #402 merges), fasil (Dev manager, dev-pc, reviewing #402),
 haile (builder, dev-pc, #437 An avatar for every agent), taytu (builder, dev-pc, #425 Retire the tmux cockpit),
 menelik (builder, the owner's Mac, #438 The PRD and decisions one click away).
-Machines: dev-pc (Linux, Tailscale 100.99.7.67, hub: NATS JetStream, 3 CI runners + light lane, Docker 29),
+Machines: dev-pc (Linux, Tailscale 100.99.7.67, hub: the message board, 3 CI runners + light lane, Docker 29),
 Mac (macOS, joined via tunnel; menelik). Projects: my-skills (active), remanual (paused by the owner).
 Open PRs: #402 Product owner: try what was built (protected .claude/, needs owner), #434 [PLACEHOLDER title].
 Epics: Web UI: the one window #420 (Building, 3 of 14), Epics above tasks #440 (Investigating), Agent messaging
@@ -87,7 +87,7 @@ Epics: Web UI: the one window #420 (Building, 3 of 14), Epics above tasks #440 (
 Ready tasks: #439 board, #441 integrations, #443 network guard, #444 roles separate, #445 machine add/join, #446 UI
 parity, #447 add project. Decisions: 0002 cockpit (replaced), 0003 ports and adapters, 0004 NATS, 0005 web UI.
 Release: factory v[X.Y.Z] installed; remanual pins a release. Settings keys examples: tasks.source, agents,
-messaging.transport, messaging.url, messaging.kinds, messaging.pollMinutes, ci.runners, manager.maxSubManagers,
+messaging.transport, messaging.kinds, messaging.pollMinutes, ci.runners, manager.maxSubManagers,
 views.cacheSeconds, ui.port, ui.projects, waitMinutes, protected (paths), commands.test.
 
 ## Screens (name → what it is → the CLI it replaces). Design each with real content, all its states that matter

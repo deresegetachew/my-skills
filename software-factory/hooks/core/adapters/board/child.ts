@@ -1,6 +1,6 @@
 // The message board from synchronous code (#500, decision 0007 point 10). The ports are synchronous and the board's API
-// is async, so each call runs the board's child (message-board/src/child.ts) with Bun.spawnSync, the way the NATS plugin
-// does: one JSON request on stdin (the URL in it, never on a command line), one JSON answer on stdout. About 100 ms a
+// is async, so each call runs the board's child (message-board/src/child.ts) with Bun.spawnSync, as the
+// factory's other synchronous callers do: one JSON request on stdin (the URL in it, never on a command line), one JSON answer on stdout. About 100 ms a
 // call; no shared state. The child is run by its path; only the board's public entry is imported here, for its types.
 import { existsSync } from "node:fs";
 import { join } from "node:path";

@@ -50,29 +50,7 @@ jobs:
         working-directory: software-factory
         run: bun install --frozen-lockfile
 
-      # Each plugin's own pinned packages (decision 0004): the build bundles them, and the plugins' tests import them.
-      - name: Install the plugins' packages
-        run: |
-          for p in software-factory/plugins/*/; do
-            if [ -f "$p/package.json" ]; then (cd "$p" && bun install --frozen-lockfile); fi
-          done
-
-      # The NATS plugin's tests run against a real, pinned nats-server (#409).
-      - name: Install nats-server
-        env:
-          NATS_VERSION: v2.15.2
-          NATS_SHA256: 67cb8e10bc6f0c4b47f75a728529a20953dbae2a4f9a4a52ae8517d65ae303ff
-        run: |
-          f="nats-server-$NATS_VERSION-linux-amd64"
-          curl -fsSL -o "$RUNNER_TEMP/$f.tar.gz" "https://github.com/nats-io/nats-server/releases/download/$NATS_VERSION/$f.tar.gz"
-          echo "$NATS_SHA256  $RUNNER_TEMP/$f.tar.gz" | sha256sum -c -
-          tar -xzf "$RUNNER_TEMP/$f.tar.gz" -C "$RUNNER_TEMP"
-          mkdir -p "$RUNNER_TEMP/bin" && mv "$RUNNER_TEMP/$f/nats-server" "$RUNNER_TEMP/bin/"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-
       - name: Checks and tests
-        env:
-          FACTORY_REQUIRE_NATS: "1"
         run: |
           git config --global user.email ci@example.com
           git config --global user.name ci

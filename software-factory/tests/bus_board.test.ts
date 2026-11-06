@@ -1,5 +1,5 @@
 // Leases, wake-ups and the pull request feed on the message board (#500, decision 0007 point 10): the board gives
-// everything the factory sent over NATS (messaging.kinds claim, wake and pr), and passes the same contract
+// the claim, wake and pr kinds of messaging.kinds, and passes the same contract
 // (contracts/bus.ts) against a real Postgres. Each fixture is a project of its own on one board.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { type BoardWorld, boardWorld } from "./board_support.ts";

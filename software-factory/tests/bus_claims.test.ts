@@ -1,0 +1,223 @@
+// Claims on the message board (#411 review, answer, item and rework claims; #412 task claims and releases; moved from
+// NATS in #504). With `claim` in messaging.kinds, the board's leases decide who holds a thing: a loser writes nothing to
+// GitHub, a GitHub marker with no board claim behind it holds nothing, and the winner still writes the GitHub marker
+// (and a task's labels): the double send of a kind's first week. Without `claim` in the kinds, the claims stay on
+// GitHub. Against a real Postgres.
+import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { HOOKS, runCode } from "./support.ts";
+import { busOf, calls, DOWN, endBoard, hook, type Project, project, startBoard, state } from "./bus_support.ts";
+
+setDefaultTimeout(90_000);
+beforeAll(startBoard, 600_000);
+afterAll(endBoard, 120_000);
+
+const HEAD = "a".repeat(40);
+const LATER = "2099-01-01T00:00:00Z";
+
+function boardOf(name: string) {
+  return busOf(name);
+}
+
+/** A project with PR #5 (head HEAD) and its comments, issues #1 and #2 ready, and `kinds` on the board. */
+function claimsProject(name: string, kinds: string[], comments: Record<string, unknown[]> = {}): Project {
+  const pr = { number: 5, title: "Fix", state: "open", draft: false, head: { sha: HEAD, ref: "task/1-fix" }, labels: [],
+    user: { login: "me" } };
+  const issue = (n: number) => ({ number: n, title: `Task ${n}`, body: "", state: "open", labels: [{ name: "factory:ready" }] });
+  return project(name, { tasks: { source: "issues" }, agents: ["haile", "abebe"], roles: { "dev-manager": { names: ["dm-1", "dm-2"] } },
+    messaging: { transport: "board", kinds } },
+  { pulls: [pr], issues: [issue(1), issue(2), { ...pr, pull_request: {}, labels: [] }], comments: { 5: [], ...comments } });
+}
+
+const posted = (p: Project, n: number): string[] =>
+  (state(p).posted ?? []).filter((x) => x.kind === "comment" && x.issue === n).map((x) => String(x.body));
+
+test("review: the first manager takes it on the board and writes the GitHub marker; the second loses and writes nothing", () => {
+  const p = claimsProject("Claims1", ["claim"]);
+  let r = hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-1"]);
+  expect(r.code, r.out).toBe(0);
+  expect(boardOf("claims1").holder("review.5.aaaaaaa")).toBe("dm-1");
+  expect(posted(p, 5).filter((b) => b.includes("factory-review-claim manager=dm-1"))).toHaveLength(1);
+  r = hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-2"]);
+  expect(r.code, r.out).toBe(3);
+  expect(r.out).toContain("held by dm-1");
+  expect(posted(p, 5)).toHaveLength(1);
+  r = hook(p, "factory_manager_claims", ["release", "5", "--manager", "dm-1"]);
+  expect(r.code, r.out).toBe(0);
+  expect(boardOf("claims1").holder("review.5.aaaaaaa")).toBe("");
+  expect(posted(p, 5).some((b) => b.includes("factory-claim-release manager=dm-1"))).toBe(true);
+  expect(hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-2"]).code).toBe(0);
+  expect(boardOf("claims1").holder("review.5.aaaaaaa")).toBe("dm-2");
+});
+
+test("review: a GitHub claim marker with no board claim behind it holds nothing", () => {
+  const p = claimsProject("Claims2", ["claim"], { 5: [{ id: 50, body: `<!-- factory-review-claim manager=dm-9 sha=${HEAD} until=${LATER} -->`,
+    created_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), user: { login: "me" } }] });
+  const r = hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-1"]);
+  expect(r.code, r.out).toBe(0);
+  expect(boardOf("claims2").holder("review.5.aaaaaaa")).toBe("dm-1");
+});
+
+test("answer: one manager claims a question on the board; the other loses without a comment", () => {
+  const q = { id: 61, body: "<!-- factory-question -->\nWhich one?", created_at: "2026-11-05T10:00:00Z", user: { login: "me" },
+    issue_url: "https://api.github.com/repos/o/r/issues/6" };
+  const p = claimsProject("Claims3", ["claim"], { 6: [q] });
+  expect(hook(p, "factory_manager_claims", ["answer", "61", "--manager", "dm-1"]).code).toBe(0);
+  expect(boardOf("claims3").holder("answer.61")).toBe("dm-1");
+  const before = posted(p, 6).length;
+  const r = hook(p, "factory_manager_claims", ["answer", "61", "--manager", "dm-2"]);
+  expect(r.code, r.out).toBe(3);
+  expect(posted(p, 6)).toHaveLength(before);
+});
+
+test("the orchestrator's item lease: taken on the board, refused to another without a comment, and released", () => {
+  const p = claimsProject("Claims4", ["claim"]);
+  const code = `import * as lease from ${JSON.stringify(join(HOOKS, "factory_lease.ts"))};
+    const a = lease.acquire(5, "item", "issue-9", "dm-1", 20);
+    const b = lease.acquire(5, "item", "issue-9", "dm-2", 20);
+    console.log(JSON.stringify({ a: a?.holder ?? null, b: b?.holder ?? null, held: lease.holder(5, "item", "issue-9") }));
+    lease.release(a);
+    console.log(JSON.stringify({ after: lease.holder(5, "item", "issue-9"), c: lease.acquire(5, "item", "issue-9", "dm-2", 20)?.holder ?? null }));`;
+  const r = runCode(code, { cwd: p.dir, env: p.env });
+  expect(r.code, r.out).toBe(0);
+  const [first, second] = r.stdout.trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+  expect(first).toEqual({ a: "dm-1", b: null, held: "dm-1" });
+  expect(second).toEqual({ after: null, c: "dm-2" });
+  expect(posted(p, 5).filter((b) => b.includes("factory-item-claim"))).toHaveLength(2); // dm-1's and dm-2's, never the loser's
+  expect(boardOf("claims4").holder("item.5.issue-9")).toBe("dm-2");
+});
+
+test("rework: one agent holds a PR's rework on the board; another is refused without a comment until it is released", () => {
+  const p = claimsProject("Claims5", ["claim"]);
+  const code = `import { claimRework, releaseRework } from ${JSON.stringify(join(HOOKS, "factory_claims.ts"))};
+    import { load } from ${JSON.stringify(join(HOOKS, "factory_config.ts"))};
+    const cfg = load();
+    const out = [claimRework(cfg, 5, "${HEAD}", "haile"), claimRework(cfg, 5, "${HEAD}", "abebe")];
+    out.push(releaseRework(cfg, 5, "haile"), claimRework(cfg, 5, "${HEAD}", "abebe"));
+    console.log(JSON.stringify(out));`;
+  const r = runCode(code, { cwd: p.dir, env: p.env });
+  expect(r.code, r.out).toBe(0);
+  expect(JSON.parse(r.stdout.trim())).toEqual([true, false, true, true]);
+  const bodies = posted(p, 5);
+  expect(bodies.filter((b) => b.includes("factory-rework-claim agent=haile"))).toHaveLength(1);
+  expect(bodies.filter((b) => b.includes("factory-rework-claim agent=abebe"))).toHaveLength(1); // after the release only
+  expect(boardOf("claims5").holder("rework.5")).toMatch(/^abebe/);
+});
+
+test("tasks: a task another agent holds on the board is skipped untouched; the one taken has its labels and claim comment", () => {
+  const p = claimsProject("Claims6", ["claim"]);
+  boardOf("claims6").claim("task.1", "abebe@m2", 600);
+  const r = hook(p, "next_task", ["--claim", "haile", "--pid", String(process.pid)], "haile");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("issue-2");
+  const s = state(p);
+  expect((s.posted ?? []).filter((x) => x.issue === 1)).toHaveLength(0);
+  expect(posted(p, 2).some((b) => b.includes("factory-claim agent=haile"))).toBe(true);
+  expect(boardOf("claims6").holder("task.2")).toMatch(/^haile/);
+  const back = hook(p, "factory_issues", ["release", "2"]);
+  expect(back.code, back.out).toBe(0);
+  expect(boardOf("claims6").holder("task.2")).toBe("");
+});
+
+test("without claim in messaging.kinds the claims stay on GitHub: nothing is written to the board", () => {
+  const p = claimsProject("Claims7", ["wake"]);
+  expect(hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-1"]).code).toBe(0);
+  expect(boardOf("claims7").holder("review.5.aaaaaaa")).toBe("");
+  expect(posted(p, 5).filter((b) => b.includes("factory-review-claim manager=dm-1"))).toHaveLength(1);
+});
+
+test("claim on with the board down: claims go over GitHub and say board-unreachable once", () => {
+  const p = project("Claims8", { messaging: { transport: "board", kinds: ["claim"] } },
+    { pulls: [{ number: 5, title: "Fix", state: "open", draft: false, head: { sha: HEAD, ref: "task/1-fix" }, labels: [] }],
+      issues: [{ number: 5, title: "Fix", state: "open", labels: [], pull_request: {} }], comments: { 5: [] } }, DOWN);
+  const r = hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-1"]);
+  expect(r.code, r.out).toBe(0);
+  expect(r.stderr.split("board-unreachable").length - 1).toBe(1);
+  expect(posted(p, 5).filter((b) => b.includes("factory-review-claim manager=dm-1"))).toHaveLength(1);
+});
+
+// messaging.githubCopy (6 Nov 2026, "the board's copy is not the record"): with claim moved and not in githubCopy, a claim and its
+// release are on the board only. What a person or the PR gate reads (labels) is still written.
+const writes = (p: Project): string[] => calls(p).filter((c) => !c.startsWith("GET "));
+
+test("githubCopy without claim: a dev-manager pass over a PR waiting for the owner makes no GitHub write", () => {
+  const p = claimsProject("Copy1", ["claim", "wake"]);
+  const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+  (cfg.messaging as Record<string, unknown>).githubCopy = [];
+  writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+  // the orchestrator's lease around one sub-manager on PR #5 (it finds the PR waits for the owner and stops), twice
+  const code = `import * as lease from ${JSON.stringify(join(HOOKS, "factory_lease.ts"))};
+    for (let i = 0; i < 2; i++) {
+      const a = lease.acquire(5, "review", "${HEAD}", "dm-1", 20);
+      const b = lease.acquire(5, "review", "${HEAD}", "dm-2", 20);
+      console.log(JSON.stringify({ a: a?.holder ?? null, b: b?.holder ?? null, held: lease.holder(5, "review", "${HEAD}") }));
+      lease.release(a);
+    }`;
+  const r = runCode(code, { cwd: p.dir, env: p.env });
+  expect(r.code, r.out).toBe(0);
+  for (const line of r.stdout.trim().split("\n")) expect(JSON.parse(line)).toEqual({ a: "dm-1", b: null, held: "dm-1" });
+  expect(boardOf("copy1").holder("review.5.aaaaaaa")).toBe("");
+  expect(writes(p)).toEqual([]);
+  // `factory manager-claims review` and `release` by hand: no claim or release comment, only the hold label
+  const q = hook(p, "factory_manager_claims", ["review", "5", "--manager", "dm-1"]);
+  expect(q.code, q.out).toBe(0);
+  expect(posted(p, 5)).toEqual([]);
+  expect(writes(p).filter((w) => !w.includes("/labels"))).toEqual([]); // only the hold label, which the PR gate reads
+  const back = hook(p, "factory_manager_claims", ["release", "5", "--manager", "dm-1"]);
+  expect(back.code, back.out).toBe(0);
+  expect(boardOf("copy1").holder("review.5.aaaaaaa")).toBe("");
+  expect(posted(p, 5)).toEqual([]);
+});
+
+test("githubCopy without claim: the orchestrator's lease writes nothing at all to GitHub", () => {
+  const p = claimsProject("Copy2", ["claim"]);
+  const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+  (cfg.messaging as Record<string, unknown>).githubCopy = [];
+  writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+  const code = `import * as lease from ${JSON.stringify(join(HOOKS, "factory_lease.ts"))};
+    const a = lease.acquire(5, "item", "issue-9", "dm-1", 20);
+    lease.release(a);`;
+  const r = runCode(code, { cwd: p.dir, env: p.env });
+  expect(r.code, r.out).toBe(0);
+  expect(writes(p)).toEqual([]);
+});
+
+test("githubCopy without claim: rework and answer claims post no comment, and a task claim writes only its labels", () => {
+  const qc = { id: 61, body: "<!-- factory-question -->\nWhich one?", created_at: "2026-11-05T10:00:00Z", user: { login: "me" },
+    issue_url: "https://api.github.com/repos/o/r/issues/6" };
+  const p = claimsProject("Copy3", ["claim"], { 6: [qc] });
+  const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+  (cfg.messaging as Record<string, unknown>).githubCopy = ["wake"];
+  writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+  const code = `import { claimRework, releaseRework } from ${JSON.stringify(join(HOOKS, "factory_claims.ts"))};
+    import { load } from ${JSON.stringify(join(HOOKS, "factory_config.ts"))};
+    const cfg = load();
+    console.log(JSON.stringify([claimRework(cfg, 5, "${HEAD}", "haile"), claimRework(cfg, 5, "${HEAD}", "abebe"),
+      releaseRework(cfg, 5, "haile")]));`;
+  const r = runCode(code, { cwd: p.dir, env: p.env });
+  expect(r.code, r.out).toBe(0);
+  expect(JSON.parse(r.stdout.trim())).toEqual([true, false, true]);
+  expect(posted(p, 5)).toEqual([]);
+  expect(hook(p, "factory_manager_claims", ["answer", "61", "--manager", "dm-1"]).code).toBe(0);
+  expect(hook(p, "factory_manager_claims", ["release", "61", "--manager", "dm-1"]).code).toBe(0);
+  expect(posted(p, 6)).toEqual([]);
+  const t = hook(p, "next_task", ["--claim", "haile", "--pid", String(process.pid)], "haile");
+  expect(t.code, t.out).toBe(0);
+  expect(t.stdout).toContain("issue-1");
+  expect(boardOf("copy3").holder("task.1")).toMatch(/^haile/);
+  const s = state(p);
+  expect((s.posted ?? []).filter((x) => x.issue === 1 && x.kind === "comment")).toEqual([]);
+  const labels = (s.posted ?? []).filter((x) => x.issue === 1 && x.kind === "labels").flatMap((x) => x.labels as string[]);
+  expect(labels).toEqual(expect.arrayContaining(["factory:in-progress", "agent:haile"]));
+});
+
+test("githubCopy without wake: a wake-up writes nothing to GitHub", () => {
+  const p = claimsProject("Copy4", ["wake"]);
+  const cfg = JSON.parse(readFileSync(join(p.dir, ".claude", "factory.json"), "utf8")) as Record<string, Record<string, unknown>>;
+  (cfg.messaging as Record<string, unknown>).githubCopy = [];
+  writeFileSync(join(p.dir, ".claude", "factory.json"), JSON.stringify(cfg));
+  const r = hook(p, "factory_wake", ["send", "--to", "dev-manager", "--ref", "pr#5", "--why", "pushed"], "haile");
+  expect(r.code, r.out).toBe(0);
+  expect(calls(p)).toEqual([]);
+});

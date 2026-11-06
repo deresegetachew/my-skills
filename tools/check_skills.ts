@@ -9,8 +9,6 @@
 //   project never installs them.
 // - The factory's core keeps its layers (decision 0003): software-factory/hooks/core/domain/ imports only the domain,
 //   core/ports/ only the domain and the ports, and only core/compose.ts (and tests) import core/adapters/.
-// - A plugin's packages (the names in software-factory/plugins/<name>/package.json) are imported only inside that
-//   plugin's folder (decision 0004): the core imports only types from a plugin, by a relative path.
 // - The message board (software-factory/message-board/, decision 0007) imports only built-ins and its own files, and
 //   the rest of the repo imports from it only its public entry, message-board/src/index.ts.
 // - No compiled .pyc file is tracked by git.
@@ -66,9 +64,6 @@ const WEB_PACKAGES = /^(react|react-dom)(\/|$)/;
 // Decision 0003: the factory's core keeps its layers. The domain imports only the domain (no I/O, no package); a port
 // only the domain and the ports; and only core/compose.ts builds the adapters (other adapters and tests may import them).
 const CORE = "software-factory/hooks/core/";
-// Decision 0004: a plugin's packages (the names in its package.json) are imported only inside that plugin's folder.
-const PLUGINS = "software-factory/plugins/";
-const DEP_FIELDS = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"];
 // Decision 0007: the message board is a framework of its own. It imports only built-ins and its own files; the factory
 // imports only its public entry.
 const BOARD = "software-factory/message-board/";
@@ -85,34 +80,6 @@ function crossesBoard(from: string, spec: string): string | null {
     return builtin ? null : "the message board imports only built-ins and its own files";
   }
   if (target !== null && target.startsWith(BOARD) && target !== BOARD_ENTRY) return "the factory imports only message-board/src/index.ts";
-  return null;
-}
-
-/** [plugin folder, package name] for every package a plugin's package.json lists. */
-function pluginPackages(all: string[]): [string, string][] {
-  const out: [string, string][] = [];
-  for (const f of all) {
-    const m = new RegExp(`^${PLUGINS}([^/]+)/package\\.json$`).exec(relative(root, f));
-    if (!m) continue;
-    let pkg: Record<string, unknown>;
-    try {
-      pkg = JSON.parse(readFileSync(f, "utf8")) as Record<string, unknown>;
-    } catch {
-      continue; // reported below as invalid JSON
-    }
-    for (const field of DEP_FIELDS) {
-      const deps = pkg[field];
-      if (typeof deps === "object" && deps !== null) for (const name of Object.keys(deps)) out.push([`${PLUGINS}${m[1]}/`, name]);
-    }
-  }
-  return out;
-}
-
-/** Why the file at `from` may not import `spec` (a plugin's package from outside that plugin), or null. */
-function crossesPlugin(from: string, spec: string, packages: [string, string][]): string | null {
-  for (const [folder, name] of packages) {
-    if ((spec === name || spec.startsWith(name + "/")) && !from.startsWith(folder)) return `only ${folder} may import its packages`;
-  }
   return null;
 }
 
@@ -134,7 +101,6 @@ function staticImports(text: string): string[] {
   return [...text.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*["']([^"']+)["']/gm)].map((m) => m[1] as string);
 }
 
-const packages = pluginPackages(files);
 const pyFiles: string[] = [];
 for (const f of files) {
   if (f.endsWith(".sh")) {
@@ -163,8 +129,6 @@ for (const f of files) {
       for (const spec of new Set([...imports.map((i) => i.path), ...staticImports(text)])) {
         const why = crossesCore(rel(f), spec);
         if (why) errors.push(`${rel(f)}: imports ${spec}; ${why} (decision 0003)`);
-        const plugin = crossesPlugin(rel(f), spec, packages);
-        if (plugin) errors.push(`${rel(f)}: imports ${spec}; ${plugin} (decision 0004)`);
         const board = crossesBoard(rel(f), spec);
         if (board) errors.push(`${rel(f)}: imports ${spec}; ${board} (decision 0007)`);
       }

@@ -77,6 +77,9 @@ test("the Add machine confirm turns on only for a good, unused name with at leas
   expect(confirmState(addMachineAsk("office-pc", [], []), "").unmet.map((c) => c.title)).toEqual(["At least one agent is picked"]);
   const s = addMachineAsk("office-pc", [haile, taytu], []);
   expect(s.happens).toContain("haile and taytu");
+  expect(s.happens).toContain("login of its own to the message board");
+  expect(s.happens).not.toMatch(/keys|nats/i);
+  expect(confirmState(addMachineAsk("1-pc", [haile], []), "").ready).toBe(false); // a login's name starts with a letter
   const words = [s.title, s.happens, s.doesNot, s.action, ...s.checks.flatMap((c) => [c.title, c.sub ?? ""])].join(" ");
   expect(words).not.toMatch(/factory [a-z]|--[a-z]/);
   expect(agentArgs([haile, taytu])).toEqual(["haile:coding-agent", "taytu:dev-manager"]);

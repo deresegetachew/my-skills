@@ -81,8 +81,8 @@ function rework(cfg: Config, me: string | null): Job[] {
   const trusted = new Set(Array.isArray(cfg.trustedReviewers) ? (cfg.trustedReviewers as unknown[]).map(String) : []);
   const hours = toFloat(cfg.claimStaleHours ?? 6) ?? 6;
   const machine = me ? machineId() : "";
-  const nats = leasesOn(cfg);
-  // With `pr` on NATS, the open pull requests come from the watcher's snapshot, and a pull request's comments are read
+  const bus = leasesOn(cfg);
+  // With `pr` on the board, the open pull requests come from the watcher's snapshot, and a pull request's comments are read
   // again only when its updated_at moved (factory_pr_feed.ts). A rework found that way is checked once on GitHub: the
   // snapshot may not have this agent's last push yet.
   const fed = freshPrs(cfg);
@@ -105,8 +105,8 @@ function rework(cfg: Config, me: string | null): Job[] {
       }
       if (now.code !== 0 || head !== pr.head.sha) continue; // pushed since, or gone: not rework now
     }
-    if (nats) { // claims on NATS (#411): the bucket says who holds the rework
-      const holder = nats.holder(claimKey("rework", pr.number));
+    if (bus) { // claims on the board (#411): the board says who holds the rework
+      const holder = bus.holder(claimKey("rework", pr.number));
       if (holder && !(me && holderIsMe(holder, me, machine))) {
         process.stderr.write(`Skipped #${pr.number}: ${describeHolder(holder)} is reworking it.\n`);
         continue;

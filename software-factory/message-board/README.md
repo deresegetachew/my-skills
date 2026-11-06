@@ -22,6 +22,7 @@ It uses Bun's built-in Postgres client (`SQL` from `bun`). It adds no npm packag
 | `src/child.ts` | One request per process, for synchronous callers (the factory's ports) |
 | `src/mcp.ts` | The MCP server over stdio, for `factory board mcp` |
 | `src/import.ts` | An import, applied in one transaction (`Board.import`) |
+| `src/logins.ts` | Logins for other machines: one Postgres role each, with only the board's rights (`Board.addLogin`, `logins`, `removeLogin`) |
 | `src/github/import.ts` | The GitHub adapter: a repo's issues and comments as an import, read with the `gh` CLI |
 | `bin.ts` | The command: `factory board <verb>` (`factory board help`) |
 | `tests/` | Tests against a real Postgres |
@@ -166,6 +167,37 @@ reads again, with a comment saying where the factory defines each.
 `factory board up` starts Postgres (`postgres:17-alpine`) in Docker on this machine, on `127.0.0.1` and the Tailscale
 address only. It writes the URL to `<machine settings folder>/message-board/url` (mode 600), then migrates.
 `MB_URL` overrides the file. `factory board help` lists the other verbs, and the wiki's commands page describes them.
+
+## Logins for other machines
+
+Another machine reaches the board over Tailscale with a login of its own (#504), so one can be taken away without
+touching the others:
+
+- `factory board login add <name> [--json]`, on the machine that runs the board, makes a Postgres role
+  `<database>_l_<name>` in the group `<database>_logins`. The group may connect to the board's database and read and
+  write its tables (and use their sequences), nothing more: no new tables, no roles, no `mb_logins`, and
+  `mb_migrations` only to read. Tables a later migration adds are granted too (default privileges, and each `add`
+  grants again). It prints the login's URL once: the board's Tailscale address and port from `state.json`, its database,
+  and the password, which the board doesn't keep (Postgres keeps only its hash).
+- The board notes when a login is first used itself: a login event trigger (Postgres 17) stamps `mb_logins.first_seen`
+  and `last_seen` (at most once a minute), and a login connected now (`pg_stat_activity`) counts too.
+  `factory board login ls [--json]` shows it.
+- `factory board login remove <name> [--unused]` drops the role and ends its connections; with `--unused`, only a login
+  that was never used (`login-used` otherwise).
+
+Making logins needs the board's own user (a superuser: the one `factory board up` made), because of the roles and the
+login trigger; a login can't make logins (`no-rights`).
+
+What else `login add` changes on the server, each time (safe to run twice):
+
+- PUBLIC loses CONNECT and TEMPORARY on the board's database, so only the board's user and the logins reach it, and a
+  login can't make temporary tables. PUBLIC also loses CONNECT on `postgres` and `template1`, so a login reaches no
+  other database (`template0` takes no connections anyway). The board's server holds only these databases, and its one
+  user is a superuser, whom none of this limits. On a server shared with other databases, those are left as they are;
+  a non-superuser that needs `postgres` must then be granted CONNECT there by name.
+- The password is in the `CREATE ROLE` statement, so that transaction sets `log_statement = 'none'` and
+  `log_min_error_statement = 'panic'` first (for itself only): neither a logged statement nor a failed one writes it to
+  the server's log. `factory machine add|join|ls|remove` use these verbs.
 
 ## The MCP server
 

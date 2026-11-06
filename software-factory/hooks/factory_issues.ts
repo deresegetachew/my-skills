@@ -201,7 +201,7 @@ export function isMe(claim: ClaimMark | null, agent: string, machine: string): b
 /** Whether this agent on this machine may carry on with in-progress issue `n`: the claim that won it is its own.
  * (The winning claim, not the newest comment: a loser's claim comment is newer and must not hide the winner's issue.) */
 export function ownIssue(n: number, agent: string, machine: string): boolean {
-  const holder = leasesOn()?.holder(`task.${n}`); // claims on NATS (#412); a task claimed before the move has none there
+  const holder = leasesOn()?.holder(`task.${n}`); // claims on the board (#412); a task claimed before the move has none there
   if (holder) return holderIsMe(holder, agent, machine);
   const winner = claimWinner(n);
   return !winner || isMe(winner, agent, machine);
@@ -243,7 +243,7 @@ interface Pull {
 export function waitingForSlot(cfg: Config, issue: Issue): string | null {
   const n = issue.number;
   const cap = cfg.maxOpenPRs ?? 3;
-  // With `pr` on NATS (factory_pr_feed.ts), the watcher's snapshot answers: a free slot, or this task's PR already
+  // With `pr` on the board (factory_pr_feed.ts), the watcher's snapshot answers: a free slot, or this task's PR already
   // open, needs no GitHub read at all.
   const fed = freshPrs(cfg);
   if (fed) {
@@ -278,7 +278,7 @@ export function releaseIssue(cfg: Config, n: number, reason = ""): void {
     if (x.startsWith(L.agentPrefix) || [L.inProgress, L.inReview, L.blocked].includes(x)) removeLabel(n, x);
   }
   addLabels(n, [L.ready]);
-  leasesOn(cfg)?.drop(`task.${n}`); // its claim on NATS too (#412)
+  leasesOn(cfg)?.drop(`task.${n}`); // its claim on the board too (#412)
   const who = agents[0] ?? "none";
   comment(n, `<!-- factory-release agent=${who} -->\nBack to ready` + (reason ? `: ${reason}` : "."));
 }

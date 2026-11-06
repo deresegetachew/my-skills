@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { BoardError, refuse } from "./errors.ts";
 import { GRAPH_LOCK, type NewEvent, reaches, recordEvents } from "./graph.ts";
 import { applyImport } from "./import.ts";
+import { addLogin, listLogins, type Login, removeLogin } from "./logins.ts";
 import { applied, migrate } from "./migrate.ts";
 import { CONTEXT_COLS, EVENT_COLS, MESSAGE_COLS, type Row, TASK_SELECT, toContext, toEvent, toMessage, toTask } from "./rows.ts";
 import {
@@ -55,6 +56,10 @@ function translate(e: unknown): unknown {
   }
   if (state === "23503") return new BoardError("not-found", `That refers to something that isn't on the board: ${msg}`, "Check the id, then try again.");
   if (state === "23505") return new BoardError("bad-input", `That is already on the board: ${msg}`, "Use the one that is there (an external ref is unique).");
+  if (state === "42501") {
+    return new BoardError("no-rights", `The board's user here may not do that: ${msg}`,
+      "Run it on the machine that runs the board (`factory board up`), whose URL has the board's own user.");
+  }
   if (state === "23514" || state === "22P02" || state === "23502") return new BoardError("bad-input", `The board doesn't take that value: ${msg}`, "Check the value against the README's API.");
   if (/^ERR_POSTGRES_(CONNECTION|SOCKET|TLS)|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/.test(`${err.code ?? ""} ${msg}`)) {
     return new BoardError("no-answer", `The board's database doesn't answer: ${msg}`, "Start it (`factory board up`) or check its URL, then try again.");
@@ -125,6 +130,21 @@ export class Board {
   /** Apply the migrations not applied yet; returns their names. */
   async migrate(): Promise<string[]> {
     return this.run(() => migrate(this.sql));
+  }
+
+  /** Makes a login of its own for another machine (logins.ts); the caller shows `password` once and keeps nothing. */
+  async addLogin(name: string, password: string): Promise<{ name: string; role: string }> {
+    return this.run(() => addLogin(this.sql, name, password));
+  }
+
+  /** Every login, with when it was first used and whether it is connected now. */
+  async logins(): Promise<Login[]> {
+    return this.run(() => listLogins(this.sql));
+  }
+
+  /** Drops a login and ends its connections; with `unused`, only one that was never used. */
+  async removeLogin(name: string, options: { unused?: boolean } = {}): Promise<{ name: string; role: string }> {
+    return this.run(() => removeLogin(this.sql, name, options));
   }
 
   /** The server's version, the migrations applied, and how many tasks there are in each status. */

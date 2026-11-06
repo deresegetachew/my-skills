@@ -233,16 +233,16 @@ export function claimReview(cfg: Config, pr: Pull, who: string, now: number = no
   const head = pr.head.sha;
   const comments = commentsOf(n);
   if (reviewed(comments, head)) return [DONE, `PR #${n}: ${head.slice(0, 7)} already has a review marker`];
-  const nats = leasesOn(cfg);
-  if (nats) { // claims on NATS (#411): its compare-and-set decides; the marker below is the GitHub copy
+  const bus = leasesOn(cfg);
+  if (bus) { // claims on the board (#411): its compare-and-set decides; the marker below is the GitHub copy
     const key = claimKey("review", n, shaKey(head));
-    const holder = nats.holder(key);
+    const holder = bus.holder(key);
     if (holder && holder !== who) return [LOST, `PR #${n}: held by ${holder}`];
     if (holder) { // already mine: make sure the hold is on (no write when it is), no second claim
       if (!(pr.labels ?? []).some((x) => x.name === (cfg.holdLabel ?? "factory-hold"))) holdOn(n, cfg);
       return [WON, `PR #${n}: already claimed by ${who}`];
     }
-    const took = nats.claim(key, who, claimMinutes(cfg) * 60);
+    const took = bus.claim(key, who, claimMinutes(cfg) * 60);
     if (!took.held) return [LOST, `PR #${n}: held by ${took.holder}`];
     const until = now + claimMinutes(cfg) * 60;
     if (claimCopy(cfg)) {
@@ -277,13 +277,13 @@ export function claimAnswer(cfg: Config, qid: string | number, who: string, now:
   const n = issueOf(q);
   const comments = commentsOf(n);
   if (!openQuestions(comments).some((c) => String(c.id) === String(qid))) return [DONE, `question ${qid} on #${n}: already answered`];
-  const nats = leasesOn(cfg);
-  if (nats) { // claims on NATS (#411)
+  const bus = leasesOn(cfg);
+  if (bus) { // claims on the board (#411)
     const key = claimKey("answer", String(qid));
-    const holder = nats.holder(key);
+    const holder = bus.holder(key);
     if (holder && holder !== who) return [LOST, `question ${qid} on #${n}: held by ${holder}`];
     if (holder) return [WON, `question ${qid} on #${n}: already claimed by ${who}`];
-    const took = nats.claim(key, who, claimMinutes(cfg) * 60);
+    const took = bus.claim(key, who, claimMinutes(cfg) * 60);
     if (!took.held) return [LOST, `question ${qid} on #${n}: held by ${took.holder}`];
     const until = now + claimMinutes(cfg) * 60;
     if (claimCopy(cfg)) {
@@ -308,15 +308,15 @@ export function claimAnswer(cfg: Config, qid: string | number, who: string, now:
 /** Give a claim up: a PR number (hold off, release marker when it is still unreviewed) or a question comment id. */
 export function release(cfg: Config, target: string, who: string): Outcome {
   const pr = fi.gh<Pull | null>("GET", `repos/{owner}/{repo}/pulls/${target}`, undefined, true);
-  const nats = leasesOn(cfg);
-  if (pr && nats) { // claims on NATS (#411): give it back there, and post the GitHub copy of the release
+  const bus = leasesOn(cfg);
+  if (pr && bus) { // claims on the board (#411): give it back there, and post the GitHub copy of the release
     const n = pr.number;
     const head = pr.head.sha;
     const key = claimKey("review", n, shaKey(head));
-    const holder = nats.holder(key);
+    const holder = bus.holder(key);
     if (holder && holder !== who) return [LOST, `PR #${n}: held by ${holder}, not ${who}; hold left on`];
     if (holder) {
-      nats.release(key, who);
+      bus.release(key, who);
       if (claimCopy(cfg)) {
         post(n, `<!-- factory-claim-release manager=${who} sha=${head} -->\nDev manager ${who} gave up the review of ${head.slice(0, 7)}.`);
       }
@@ -336,9 +336,9 @@ export function release(cfg: Config, target: string, who: string): Outcome {
   const q = fi.gh<Comment | null>("GET", `repos/{owner}/{repo}/issues/comments/${target}`, undefined, true);
   if (!q) die(`factory manager-claims: ${target} is neither an open PR nor a comment. Check the number.`);
   const n = issueOf(q);
-  if (nats) {
+  if (bus) {
     const key = claimKey("answer", target);
-    if (!nats.release(key, who)) return [LOST, `question ${target} on #${n}: no claim by ${who} to release`];
+    if (!bus.release(key, who)) return [LOST, `question ${target} on #${n}: no claim by ${who} to release`];
     if (claimCopy(cfg)) {
       post(n, `<!-- factory-claim-release manager=${who} question=${target} -->\nDev manager ${who} gave up the question (comment ${target}).`);
     }
