@@ -2,16 +2,22 @@
 //
 //   factory machine add <name> --agent <agent>[:role] ... [--ttl minutes] [--json]    (on the hub)
 //       makes the keys of the agents that machine will run, and prints one join code. The code carries the hub's
-//       Tailscale address, the leaf password and those keys; it works once and expires (15 minutes by default).
+//       Tailscale address, the leaf password and those keys; it expires (15 minutes by default): a machine that hasn't
+//       joined by then has its keys and leaf user taken off the hub.
 //   factory machine join <code> [--no-tailscale] [--no-doctor]                         (on the new machine)
 //       checks Tailscale and Docker, starts the leaf (`factory nats up --leaf`) or, without Docker, connects the
 //       agents straight to the hub, writes the seeds (folder 700, files 600) and runs `factory doctor`.
-//   factory machine ls [--json]       the machines added and whether their code is still waiting
+//   factory machine ls [--json]       the machines added: joined, waiting for join, or code expired (keys removed)
 //   factory machine remove <name>     forget the machine and take its agents' keys off the hub
 //
 // The hub keeps the records in <machine settings folder>/nats/machines.json. The code is the secret: whoever holds a
-// live one can join, so it is shown once and expires. "Works once" is kept where it is redeemed (the machine records
-// the codes it used in machine-joins.json); `machine remove` is what takes a machine's keys away from the hub.
+// live one can join, so it is shown once and expires. The hub enforces the expiry: `add` and `ls` ask the hub's own
+// NATS monitoring port who is connected (/leafz: a joined leaf names itself after its leaf user; /connz: an agent's
+// public key). A machine seen there is marked joined; one whose code expired and was never seen has its keys and leaf
+// user taken off the hub (marked revoked, kept so `ls` can say so). When the monitoring port doesn't answer nothing
+// is changed. "Works once" is kept where it is redeemed (the machine records the codes it used in machine-joins.json):
+// a copy of the code used elsewhere before it expires reaches the hub with the same keys, so `machine remove` is what
+// takes a joined machine's keys away.
 // Errors are `{code, message, fix}` on stderr.
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -20,7 +26,7 @@ import { now } from "./factory_clock.ts";
 import { type Config, load } from "./factory_config.ts";
 import { Exit, pyDumps, run, which } from "./factory_lib.ts";
 import { configDir, machineSettings, refuse, saveMachineSettings } from "./factory_machine.ts";
-import { credsDir, dockerUsable, hubLeafPassword, keyedNames, natsDir, natsState, projectName, removeUsers, setLeafUser } from "./factory_nats.ts";
+import { connectedNow, credsDir, dockerUsable, hubLeafPassword, keyedNames, natsDir, natsState, nkeysOf, projectName, removeUsers, setLeafUser } from "./factory_nats.ts";
 import { NAME, publicKeyOf, type Role, roleOf } from "./factory_nats_keys.ts";
 
 const PREFIX = "FM1-";
@@ -40,7 +46,11 @@ interface Payload {
   leafPassword: string;
   agents: (AgentKey & { seed: string })[];
 }
-interface Record_ { name: string; id: string; project: string; createdAt: number; expiresAt: number; agents: AgentKey[] }
+interface Record_ {
+  name: string; id: string; project: string; createdAt: number; expiresAt: number; agents: AgentKey[];
+  joinedAt?: number; // the hub first saw it connected
+  revokedAt?: number; // its code expired before it joined: its keys and leaf user were taken off the hub
+}
 
 // ---------- the code ----------
 export function encodeCode(p: Payload): string {
@@ -147,6 +157,42 @@ function lastError(stderr: string): { message: string; fix: string } | null {
   }
 }
 
+// ---------- the hub enforces the code (sweep) ----------
+const leafUserOf = (r: Record_): string => `m-${r.id}`;
+
+/** Takes a machine's agents' keys and its leaf user off the hub, as `machine remove` does. */
+function revoke(r: Record_): { removed: string[]; reloaded: boolean } {
+  const out = removeUsers(r.project, r.agents.map((a) => a.name));
+  setLeafUser(leafUserOf(r), null);
+  return out;
+}
+
+/** Marks the machines the hub sees connected as joined and revokes those whose code expired unjoined. `checked` is
+ * false when the hub's monitoring port didn't answer; then nothing changes. */
+async function sweep(): Promise<{ records: Record_[]; checked: boolean }> {
+  const records = readRecords();
+  const open = records.filter((r) => r.joinedAt === undefined && r.revokedAt === undefined);
+  if (!open.length) return { records, checked: true };
+  const seen = await connectedNow();
+  if (!seen) return { records, checked: false };
+  const t = Math.floor(now());
+  let changed = false;
+  for (const r of open) {
+    const leaf = `-${leafUserOf(r)}`;
+    const keys = nkeysOf(r.project, r.agents.map((a) => a.name));
+    if (seen.leafNames.some((n) => n.endsWith(leaf)) || keys.some((k) => seen.users.includes(k))) {
+      r.joinedAt = t;
+      changed = true;
+    } else if (t >= r.expiresAt) {
+      revoke(r);
+      r.revokedAt = t;
+      changed = true;
+    }
+  }
+  if (changed) saveRecords(records);
+  return { records, checked: true };
+}
+
 // ---------- add ----------
 function parseAgent(text: string): AgentKey {
   const [name = "", roleText = "builder"] = text.split(":");
@@ -156,7 +202,7 @@ function parseAgent(text: string): AgentKey {
   return { name, role };
 }
 
-function cmdAdd(argv: string[]): number {
+async function cmdAdd(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = takeFlag(args, "--json");
   const agents = takeOptions(args, "--agent").map(parseAgent);
@@ -178,6 +224,7 @@ function cmdAdd(argv: string[]): number {
     refuse("hub-no-tailscale", "The hub has no Tailscale address, so another machine can't reach it.",
       "Start Tailscale (tailscale up), then run `factory nats up` again.");
   }
+  await sweep(); // expired codes that never joined lose their keys first
   if (readRecords().some((r) => r.name === name)) {
     refuse("machine-exists", `A machine called ${name} is already added.`, `Remove it first with \`factory machine remove ${name}\`, or choose another name.`);
   }
@@ -213,13 +260,20 @@ function cmdAdd(argv: string[]): number {
   const expiresAt = Math.floor(t + ttl * 60);
   const code = encodeCode({ v: 1, id, name, exp: expiresAt, project, hub: { address: hub.address, leaf: hub.ports.leaf, client: hub.ports.tailnet },
     leafUser, leafPassword, agents: made });
-  saveRecords([...readRecords(), { name, id, project, createdAt: Math.floor(t), expiresAt, agents }]);
+  try {
+    saveRecords([...readRecords(), { name, id, project, createdAt: Math.floor(t), expiresAt, agents }]);
+  } catch (e) {
+    setLeafUser(leafUser, null); // nothing half done: without its record the hub would never take these away
+    removeUsers(project, made.map((m) => m.name));
+    refuse("record-failed", `Couldn't save the machine's record (${machinesFile()}): ${e instanceof Error ? e.message : String(e)}. Its keys were taken off the hub again.`,
+      `Make ${natsDir()} writable for this user, then run this again.`);
+  }
   const command = `factory machine join ${code}`;
   if (json) {
     console.log(pyDumps({ name, code, expiresAt, agents, command }));
     return 0;
   }
-  console.log(`Join code for ${name} (works once, expires in ${Math.round(ttl)} min). It holds the keys of ${agents.map((a) => a.name).join(", ")}: send it over a private channel.`);
+  console.log(`Join code for ${name} (works once, expires in ${Math.round(ttl)} min: if ${name} hasn't joined by then, its keys are removed from the hub). It holds the keys of ${agents.map((a) => a.name).join(", ")}: send it over a private channel.`);
   console.log(code);
   console.log(`On ${name}, in the project's folder, run:`);
   console.log(command);
@@ -317,19 +371,33 @@ function cmdJoin(argv: string[]): number {
 }
 
 // ---------- ls and remove ----------
-function stateOf(r: Record_, t: number): { state: "waiting" | "expired"; minutes: number } {
+type State = "joined" | "waiting" | "revoked" | "expired-unchecked";
+
+function stateOf(r: Record_, t: number): { state: State; minutes: number } {
+  if (r.revokedAt !== undefined) return { state: "revoked", minutes: 0 };
+  if (r.joinedAt !== undefined) return { state: "joined", minutes: 0 };
   const left = r.expiresAt - t;
-  return left > 0 ? { state: "waiting", minutes: Math.ceil(left / 60) } : { state: "expired", minutes: 0 };
+  return left > 0 ? { state: "waiting", minutes: Math.ceil(left / 60) } : { state: "expired-unchecked", minutes: 0 };
 }
 
-function cmdLs(argv: string[]): number {
+function stateText(r: Record_, s: { state: State; minutes: number }): string {
+  if (s.state === "joined") return "joined";
+  if (s.state === "waiting") return `waiting for join (expires in ${s.minutes} min)`;
+  if (s.state === "revoked") {
+    return `code expired; its keys were removed from the hub (add it again: factory machine remove ${r.name}, then factory machine add ${r.name} --agent ...)`;
+  }
+  return "code expired; not checked: the hub's NATS server doesn't answer (factory nats up)";
+}
+
+async function cmdLs(argv: string[]): Promise<number> {
   const args = [...argv];
   const json = takeFlag(args, "--json");
   noMore(args, "factory machine ls [--json]");
+  const { records: rows } = await sweep();
   const t = now();
-  const rows = readRecords();
   if (json) {
-    console.log(pyDumps(rows.map((r) => ({ name: r.name, agents: r.agents, state: stateOf(r, t).state, expiresAt: r.expiresAt }))));
+    console.log(pyDumps(rows.map((r) => ({ name: r.name, agents: r.agents, state: stateOf(r, t).state, expiresAt: r.expiresAt,
+      joinedAt: r.joinedAt ?? null, revokedAt: r.revokedAt ?? null }))));
     return 0;
   }
   if (!rows.length) {
@@ -338,7 +406,7 @@ function cmdLs(argv: string[]): number {
   }
   for (const r of rows) {
     const s = stateOf(r, t);
-    console.log(`${r.name}  ${r.agents.map((a) => a.name).join(", ")}  ${s.state === "waiting" ? `waiting for join (expires in ${s.minutes} min)` : "code expired"}`);
+    console.log(`${r.name}  ${r.agents.map((a) => a.name).join(", ")}  ${stateText(r, s)}`);
   }
   return 0;
 }
@@ -350,18 +418,17 @@ function cmdRemove(argv: string[]): number {
   const all = readRecords();
   const r = all.find((x) => x.name === name);
   if (!r) refuse("unknown-machine", `There is no machine called ${JSON.stringify(name)}.`, "factory machine ls lists them.");
-  const { removed, reloaded } = removeUsers(r.project, r.agents.map((a) => a.name));
-  setLeafUser(`m-${r.id}`, null); // its leaf can no longer connect with the code's password
+  const { removed, reloaded } = revoke(r); // its agents' keys go, and its leaf can no longer connect with the code's password
   saveRecords(all.filter((x) => x !== r));
   console.log(`Removed ${name}. Took the keys of ${removed.join(", ") || "no agent"} off the hub` +
     (reloaded ? " and reloaded the server." : "; the server isn't running, so it takes effect at `factory nats up`."));
   return 0;
 }
 
-export function machineMain(cmd: string, rest: string[]): number {
-  if (cmd === "add") return cmdAdd(rest);
+export async function machineMain(cmd: string, rest: string[]): Promise<number> {
+  if (cmd === "add") return await cmdAdd(rest);
   if (cmd === "join") return cmdJoin(rest);
-  if (cmd === "ls") return cmdLs(rest);
+  if (cmd === "ls") return await cmdLs(rest);
   if (cmd === "remove") return cmdRemove(rest);
   throw new Exit(1);
 }

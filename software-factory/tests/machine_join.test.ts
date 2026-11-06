@@ -322,7 +322,7 @@ test("ls lists each machine with its agents and whether its code is live or expi
   expect(line).toContain("haile");
   expect(line).toContain("taytu");
   expect(line).toContain("waiting for join (expires in 15 min)");
-  const j = JSON.parse(machine(w, ["ls", "--json"]).stdout) as { name: string; agents: { name: string; role: string }[]; state: string; expiresAt: number }[];
+  const j = JSON.parse(machine(w, ["ls", "--json"]).stdout) as unknown;
   expect(j).toEqual([{ name: "laptop", agents: [{ name: "haile", role: "builder" }, { name: "taytu", role: "manager" }], state: "waiting",
     expiresAt: NOW + 900, joinedAt: null, revokedAt: null }]);
   p = machine(w, ["ls"], { FACTORY_NOW: String(NOW + 16 * 60) });

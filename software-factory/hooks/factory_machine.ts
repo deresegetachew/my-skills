@@ -213,7 +213,7 @@ async function main(argv: string[]): Promise<void> {
     setup(argv[1] as string);
   } else if (["add", "join", "ls", "remove"].includes(cmd)) {
     const { machineMain } = await import("./factory_machine_join.ts"); // loaded here: it imports this file and factory_nats.ts
-    const code = machineMain(cmd, argv.slice(1));
+    const code = await machineMain(cmd, argv.slice(1));
     if (code) throw new Exit(code);
   } else refuse("unknown-command", `unknown command ${pyRepr(cmd)}.`, "Use id, show, setup <names>, add, join, ls or remove.");
 }

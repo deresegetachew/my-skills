@@ -157,9 +157,12 @@ export function composeYaml(s: State): string {
 /** The server's config: JetStream on the hub, the leaf port or the remote, and the agents' keys with their
  * permissions. Without users it takes clients without a key, as a fresh server should. */
 export function serverConf(s: State, users: User[], leafPassword: string, leafUsers: LeafUser[] = readLeafUsers()): string {
+  // A leaf started by `factory machine join` carries its leaf user in its name: the hub's /leafz reports it, which is
+  // how the hub tells that machine joined (#445).
+  const own = s.mode === "leaf" && s.leafUser ? `-${s.leafUser}` : "";
   const lines = [
     "# Written by `factory nats up` and `factory nats user add` (decision 0004). Edits here are overwritten.",
-    `server_name: ${q(`factory-${s.mode}-${hostname().toLowerCase().replace(/[^a-z0-9-]/g, "-")}`)}`,
+    `server_name: ${q(`factory-${s.mode}-${hostname().toLowerCase().replace(/[^a-z0-9-]/g, "-")}${own}`)}`,
     "listen: 0.0.0.0:4222",
     "http: 0.0.0.0:8222",
   ];
@@ -595,6 +598,35 @@ export function setLeafUser(user: string, password: string | null): boolean {
   }
   const r = readState() && which("docker") ? compose(["kill", "-s", "SIGHUP", "nats"]) : null;
   return Boolean(r && r.code === 0);
+}
+
+/** The public nkeys of `names` (in `project`) on this server. */
+export function nkeysOf(project: string, names: string[]): string[] {
+  return readUsers().filter((u) => u.project === project && names.includes(u.name)).map((u) => u.nkey);
+}
+
+/** Who is connected to this machine's server, from its monitoring port: the names the leaf servers give (/leafz) and
+ * the users the clients authorized as (/connz?auth=true; an nkey user shows as its public key in `authorized_user`).
+ * null when the server doesn't answer. */
+export async function connectedNow(): Promise<{ leafNames: string[]; users: string[] } | null> {
+  const s = natsState();
+  if (!s) return null;
+  const base = `http://127.0.0.1:${s.ports.monitor}`;
+  const [leafz, connz] = await Promise.all([httpGet(`${base}/leafz`), httpGet(`${base}/connz?auth=true&limit=100000`)]);
+  if (!leafz.ok || !connz.ok) return null;
+  const list = (body: string, key: string): Record<string, unknown>[] => {
+    try {
+      const v = (JSON.parse(body) as Record<string, unknown>)[key];
+      return Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => typeof x === "object" && x !== null) : [];
+    } catch {
+      return [];
+    }
+  };
+  const text = (v: unknown): string[] => (typeof v === "string" && v ? [v] : []);
+  return {
+    leafNames: list(leafz.body, "leafs").flatMap((l) => text(l.name)),
+    users: list(connz.body, "connections").flatMap((c) => [...text(c.authorized_user), ...text(c.nkey)]),
+  };
 }
 
 /** The names that already have a key on this server in `project`, for `factory machine add` to refuse. */
