@@ -7,7 +7,7 @@ import { claimRecord } from "../../../factory_budget.ts";
 import { citesIn } from "../../../factory_cites.ts";
 import { type Config, taskLabels } from "../../../factory_config.ts";
 import { addLabels, claimSettleSeconds, claimWinner, comment, gh, ghAll, humanComments, type Issue, names, openDependencies,
-  ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
+  isEpic, ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
 import { sleepSync } from "../../../factory_lib.ts";
 import { holderIsMe, holderName, leasesOn } from "../../../factory_leases.ts";
 import { type Claimant, isMe } from "../../domain/claim.ts";
@@ -19,8 +19,6 @@ import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_track
 /** How long a task claim on NATS lasts when nothing releases it (#412): a week. A release, a block, giving it back and
  * the dev manager's sweep of a silent agent end it sooner. */
 const TASK_SECONDS = 7 * 24 * 3600;
-
-const isEpic = (i: Issue): boolean => names(i).has("epic");
 
 export class GithubTaskTracker implements TaskTracker {
   constructor(private readonly cfg: Config) {}
@@ -75,6 +73,7 @@ export class GithubTaskTracker implements TaskTracker {
     const n = number(id);
     const i = gh<Issue | null>("GET", `repos/{owner}/{repo}/issues/${n}`, undefined, true);
     if (!i || i.state !== "open" || "pull_request" in i) throw notFound(id);
+    if (isEpic(i)) throw new CoreError("issue-epic", `#${n} is an epic, not a task.`, "Claim one of the tasks it lists instead, or run `factory next`.");
     const t = this.task(i);
     const [check, open] = checkClaim(t, who.agent, () => ownIssue(n, who.agent, who.machine),
       () => openDependencies(i, new Set(taskIssues().map((x) => x.number)), new Map()).map(String));
