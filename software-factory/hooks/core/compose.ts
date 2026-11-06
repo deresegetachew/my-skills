@@ -20,7 +20,7 @@ import { GithubTaskTracker } from "./adapters/github/task_tracker.ts";
 import { PlanTaskTracker } from "./adapters/plan/task_tracker.ts";
 import { RoutedMessaging } from "./adapters/routed/messaging.ts";
 import { CoreError } from "./domain/error.ts";
-import type { Leases, Messaging, Wakes } from "./ports/messaging.ts";
+import type { Leases, Messaging, PrFeed, Wakes } from "./ports/messaging.ts";
 import type { TaskTracker } from "./ports/task_tracker.ts";
 
 export interface Ports {
@@ -76,16 +76,16 @@ function messagingPort(s: MessagingSettings, warn: (e: CoreError) => void): Mess
   return new RoutedMessaging(new GithubMessaging(), nats, s.kinds, warn);
 }
 
-type NatsPort = Messaging & Leases & Wakes & { check(): void };
+type NatsPort = Messaging & Leases & Wakes & PrFeed & { check(): void };
 type NatsFactory = (o: { url: string; project: string; seed?: string }) => NatsPort;
 
 let bus: { port: NatsPort | null; error: CoreError | null } | null = null; // one per process: the settings don't change
 
-/** NATS's leases and wake-ups for `kind` ("claim" or "wake", decision 0004 point 8), or null while that kind hasn't
- * moved: `messaging.transport` isn't nats or `messaging.kinds` doesn't list it. Then the caller goes on over GitHub as it
- * always did. A plugin or server that can't be had is the same fallback as the messaging port's: null and `warn` is
- * told (fallback "github", the default), or the CoreError is thrown (fallback "none"). */
-export function natsFor(config: Config, kind: "claim" | "wake", warn: (e: CoreError) => void = () => {}): (Leases & Wakes) | null {
+/** NATS's leases, wake-ups and pull request feed for `kind` ("claim", "wake" or "pr", decision 0004 point 8), or null
+ * while that kind hasn't moved: `messaging.transport` isn't nats or `messaging.kinds` doesn't list it. Then the caller
+ * goes on over GitHub as it always did. A plugin or server that can't be had is the same fallback as the messaging
+ * port's: null and `warn` is told (fallback "github", the default), or the CoreError is thrown (fallback "none"). */
+export function natsFor(config: Config, kind: "claim" | "wake" | "pr", warn: (e: CoreError) => void = () => {}): (Leases & Wakes & PrFeed) | null {
   const s = messagingSettings(config);
   if (s.transport !== "nats" || !s.kinds.includes(kind)) return null;
   if (!bus) {
@@ -98,7 +98,8 @@ export function natsFor(config: Config, kind: "claim" | "wake", warn: (e: CoreEr
   if (bus.port) return withCoreErrorsBus(bus.port);
   const { code, message, fix } = bus.error as CoreError;
   if (s.fallback === "none") throw new CoreError(code, message, `${fix} Or set \`factory settings set messaging.transport github\`.`);
-  warn(new CoreError(code, `${message} ${kind === "claim" ? "Claims" : "Wake-ups"} go over GitHub for now (messaging.fallback is github).`,
+  const what = kind === "claim" ? "Claims go" : kind === "wake" ? "Wake-ups go" : "Pull requests and CI are read";
+  warn(new CoreError(code, `${message} ${what} over GitHub for now (messaging.fallback is github).`,
     `${fix} Or set \`factory settings set messaging.transport github\` to stop this notice.`));
   return null;
 }
@@ -176,7 +177,7 @@ function withCoreErrors(port: Messaging): Messaging {
 }
 
 /** The plugin's leases and wake-ups, with what they throw as the core's CoreError. */
-function withCoreErrorsBus(port: NatsPort): Leases & Wakes {
+function withCoreErrorsBus(port: NatsPort): Leases & Wakes & PrFeed {
   const wrap = <T>(f: () => T): T => {
     try {
       return f();
@@ -191,6 +192,9 @@ function withCoreErrorsBus(port: NatsPort): Leases & Wakes {
     drop: (key) => wrap(() => port.drop(key)),
     wake: (w) => wrap(() => port.wake(w)),
     waitWake: (w) => wrap(() => port.waitWake(w)),
+    putPrs: (s, events) => wrap(() => port.putPrs(s, events)),
+    prs: () => wrap(() => port.prs()),
+    prEvents: (w) => wrap(() => port.prEvents(w)),
   };
 }
 

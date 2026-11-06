@@ -127,7 +127,7 @@ export function permissions(project: string, name: string, role: Role): Permissi
   const p = `factory.${project}`;
   const own = [`${p}.claims.${name}`, `${p}.pr.*.${name}`, `${p}.issue.*.${name}`, `${p}.agent.*.${name}`,
     `${p}.wake.${name}`];
-  if (role === "manager") own.push(`${p}.handoff.${name}`);
+  if (role === "manager") own.push(`${p}.handoff.${name}`, `${p}.prs.${name}`); // only a dev manager watches pull requests
   const js = ["$JS.API.>", "$JS.ACK.>", "$JS.FC.>", "$KV.>", "_INBOX.>"];
   const admin = role === "manager" || role === "owner";
   return {
