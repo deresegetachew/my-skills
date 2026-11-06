@@ -16,7 +16,7 @@ export interface Project {
   root: string;
   d: string;
   env: Env;
-  /** This project's state folder ($XDG_STATE_HOME/<repo>-factory): heartbeat.json, cockpit.json. */
+  /** This project's state folder ($XDG_STATE_HOME/<repo>-factory): heartbeat.json, snapshot.json. */
   state: string;
   /** What the fake `factory` script was asked, one line per call. */
   factoryLog: string;

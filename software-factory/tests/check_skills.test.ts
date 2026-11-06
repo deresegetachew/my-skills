@@ -47,17 +47,15 @@ test("a .ts file that does not parse fails, and a good one passes", () => {
   expect(r.stdout).toContain("demo/bad.ts");
 });
 
-test("only the cockpit's UI folder may import Ink or React (decision 0002)", () => {
+test("outside the web app nothing may import Ink or React, the retired cockpit's folder included (decisions 0002, 0005, #425)", () => {
   const d = repo(false);
   mkdirSync(join(d, "software-factory", "cockpit"), { recursive: true });
   mkdirSync(join(d, "software-factory", "hooks"), { recursive: true });
   writeFileSync(join(d, "software-factory", "SKILL.md"), "---\nname: software-factory\ndescription: The factory.\n---\n");
-  writeFileSync(join(d, "software-factory", "cockpit", "app.tsx"),
-    'import { Text } from "ink";\nimport { useState } from "react";\nimport { render } from "ink-testing-library";\n' +
-    "export const App = () => <Text>{String(useState(1)[0])}</Text>;\nexport { render };\n");
   writeFileSync(join(d, "software-factory", "hooks", "fine.ts"), 'const s = "import { render } from \\"ink\\"";\nexport { s };\n');
   expect(run(d).code, run(d).out).toBe(0);
   const outside: [string, string][] = [
+    [join("software-factory", "cockpit", "app.tsx"), 'import { Text } from "ink";\nexport { Text };\n'],
     [join("software-factory", "hooks", "a.ts"), 'import { render } from "ink";\nexport { render };\n'],
     [join("software-factory", "tests", "b.test.tsx"), 'import { jsx } from "react/jsx-runtime";\nexport { jsx };\n'],
     [join("tools", "c.ts"), 'export const load = () => import("ink-testing-library");\n'],
@@ -69,9 +67,8 @@ test("only the cockpit's UI folder may import Ink or React (decision 0002)", () 
   expect(r.code, r.out).toBe(1);
   for (const [path, body] of outside) {
     const pkg = /["'](ink[\w-]*|react[\w/-]*)["']/.exec(body)?.[1] as string;
-    expect(r.stdout).toContain(`${path}: imports ${pkg}; only the cockpit's UI (software-factory/cockpit/) may import Ink or React`);
+    expect(r.stdout).toContain(`${path}: imports ${pkg}; only the web app (software-factory/web/) may import React`);
   }
-  expect(r.stdout).not.toContain("cockpit/app.tsx");
   expect(r.stdout).not.toContain("hooks/fine.ts");
 });
 
@@ -90,7 +87,7 @@ test("the web app's folder may import React and react-dom, not Ink; nothing else
   r = run(d);
   expect(r.code, r.out).toBe(1);
   expect(r.stdout).toContain("software-factory/web/term.tsx: imports ink; the web app (software-factory/web/) may import only React and react-dom");
-  expect(r.stdout).toContain("software-factory/hooks/page.ts: imports react-dom/server; only the cockpit's UI (software-factory/cockpit/) may import Ink or React");
+  expect(r.stdout).toContain("software-factory/hooks/page.ts: imports react-dom/server; only the web app (software-factory/web/) may import React");
   expect(r.stdout).not.toContain("web/app.tsx");
 });
 

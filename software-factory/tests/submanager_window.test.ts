@@ -1,5 +1,5 @@
 // Sub-managers get a screen (#307): each one-item session of the dev manager runs in its own tmux window, started through
-// the shared step of #300, and `factory cockpit watch <item>` shows it read-only. tmux is a fake first on PATH whose
+// the shared step of #300 (`factory cockpit watch` went with the cockpit, #425). tmux is a fake first on PATH whose
 // new-session really runs the command in the background (a real tmux never runs); claude and gh are fakes.
 import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -173,77 +173,12 @@ test("a window still open from an earlier run is left alone: no skip comment, no
   expect(db).not.toContain("review-failed");
 });
 
-// --- factory cockpit watch ---------------------------------------------------------------------------------------------
+// --- watching a sub-manager, after the cockpit (#425) ----------------------------------------------------------------
 
-/** A live sub-manager for `ref` as the orchestrator leaves it: a pid file with a live pid, and optionally its session. */
-function live(work: string, env: Env, ref: string, session: boolean): void {
-  mkdirSync(subDir(work), { recursive: true });
-  writeFileSync(join(subDir(work), `${ref}.pid`), String(process.pid));
-  writeFileSync(join(subDir(work), `${ref}.out`), "working\n");
-  if (session) {
-    mkdirSync(env.FAKE_TMUX as string, { recursive: true });
-    writeFileSync(join(env.FAKE_TMUX as string, `work-lead-${ref}`), String(process.pid));
-  }
-}
-
-test("cockpit watch attaches read-only to the live sub-manager's session and never sends keys", () => {
+test("factory cockpit watch, retired with the cockpit, says it moved and attaches to nothing", () => {
   const [, work, env] = setup();
-  live(work, env, "pr-12", true);
-  const p = factory(work, env, ["cockpit", "watch", "pr-12"]);
-  expect(p.code, p.out).toBe(0);
-  const calls = tmuxLog(env);
-  expect(calls).toContain("attach-session -r -t =work-lead-pr-12");
-  expect(calls.some((l) => l.startsWith("send-keys"))).toBe(false);
-  expect(calls.some((l) => l.startsWith("switch-client") && !l.includes(" -r"))).toBe(false);
-});
-
-test("cockpit watch on a sub-manager that already ended says so and names the out file", () => {
-  const [, work, env] = setup();
-  mkdirSync(subDir(work), { recursive: true });
-  writeFileSync(join(subDir(work), "pr-12.out"), "done\n");
   const p = factory(work, env, ["cockpit", "watch", "pr-12"]);
   expect(p.code).toBe(1);
-  const e = lastJson(p.stderr);
-  expect(e.code).toBe("sub-manager-ended");
-  expect(e.message).toBeTruthy();
-  expect(e.fix).toContain(join(subDir(work), "pr-12.out"));
+  expect(lastJson(p.stderr).code).toBe("cockpit_moved");
   expect(tmuxLog(env).some((l) => l.startsWith("attach-session"))).toBe(false);
-});
-
-test("cockpit watch on an item with no sub-manager is a no-sub-manager error with a fix", () => {
-  const [, work, env] = setup();
-  const p = factory(work, env, ["cockpit", "watch", "pr-99"]);
-  expect(p.code).toBe(1);
-  const e = lastJson(p.stderr);
-  expect(e.code).toBe("no-sub-manager");
-  expect(e.message).toBeTruthy();
-  expect(e.fix).toBeTruthy();
-  expect(tmuxLog(env).some((l) => l.startsWith("attach-session"))).toBe(false);
-});
-
-test("cockpit watch on a live sub-manager that has no window points at its out file", () => {
-  const [, work, env] = setup();
-  live(work, env, "pr-12", false);
-  const p = factory(work, env, ["cockpit", "watch", "pr-12"]);
-  expect(p.code).toBe(1);
-  const e = lastJson(p.stderr);
-  expect(e.code).toBe("no-window");
-  expect(e.fix).toContain(join(subDir(work), "pr-12.out"));
-  expect(tmuxLog(env).some((l) => l.startsWith("attach-session"))).toBe(false);
-});
-
-test("cockpit watch without an item is a usage error as {code, message, fix}", () => {
-  const [, work, env] = setup();
-  const p = factory(work, env, ["cockpit", "watch"]);
-  expect(p.code).toBe(2);
-  const e = lastJson(p.stderr);
-  expect(e.code).toBeTruthy();
-  expect(e.message).toBeTruthy();
-  expect(e.fix).toContain("cockpit watch <item>");
-});
-
-test("factory help lists cockpit watch", () => {
-  const [, work, env] = setup();
-  const p = factory(work, env, ["help"]);
-  expect(p.stdout).toContain("cockpit watch");
 });
