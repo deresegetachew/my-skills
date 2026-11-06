@@ -200,7 +200,8 @@ test("the real checkout builds an archive with the moved folders and no links", 
   const names = new Set(list.map((m) => m.name));
   const top = `software-factory-${version}/`;
   for (const must of ["hooks/factory_config.ts", "hooks/factory_lib.ts", "ci/ci.sh", "ci/entrypoint.sh", "factory",
-    "factory-loop.sh", "install.sh", "kit/.claude/factory/settings.json"]) {
+    "factory-loop.sh", "install.sh", "kit/.claude/factory/settings.json", "message-board/src/child.ts", "message-board/src/index.ts",
+    "message-board/bin.ts", "message-board/README.md"]) {
     expect(names.has(top + must), must).toBe(true);
   }
   expect(member(list, top + "factory").mode).toBe(0o755);
@@ -456,4 +457,30 @@ test("a release's plugin bundle loads through the factory's loader in a project 
   const { loadPlugin } = (await import(join(ROOT, "software-factory", "hooks", "factory_plugins.ts"))) as typeof import("../hooks/factory_plugins.ts");
   const mod = loadPlugin("tiny", { hooks }) as { hello: () => string };
   expect(mod.hello()).toBe("hi from dep");
+});
+
+test("the message board ships with its adapters (#500): its code, command and README under .claude/message-board/, never its tests", () => {
+  const d = repo();
+  const files: Record<string, string> = {
+    "software-factory/message-board/README.md": "board\n", "software-factory/message-board/bin.ts": "console.log(1)\n",
+    "software-factory/message-board/src/index.ts": "export {};\n", "software-factory/message-board/src/child.ts": "export {};\n",
+    "software-factory/message-board/src/migrations/001_init.sql": "select 1;\n",
+    "software-factory/message-board/tests/board_rules.test.ts": "x\n", "software-factory/message-board/tests/pg.ts": "x\n",
+  };
+  for (const [rel, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(d, rel)), { recursive: true });
+    writeFileSync(join(d, rel), body);
+  }
+  git(d, "add", "-A");
+  git(d, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "board");
+  const out = tmp();
+  const p = run(d, out);
+  expect(p.code, p.stderr).toBe(0);
+  const list = members(join(out, "software-factory-1.2.3.tar.gz"));
+  const board = list.map((m) => m.name).filter((n) => n.includes("/message-board/"));
+  expect(board).toEqual(["README.md", "bin.ts", "src/child.ts", "src/index.ts", "src/migrations/001_init.sql"]
+    .map((f) => `software-factory-1.2.3/message-board/${f}`));
+  const manifest = JSON.parse(text(member(list, "software-factory-1.2.3/MANIFEST.json"))) as { files: { path: string; install: unknown }[] };
+  expect(manifest.files.find((f) => f.path === "message-board/src/child.ts")?.install).toEqual({ kind: "engine", to: ".claude/message-board/src/child.ts" });
+  expect(manifest.files.find((f) => f.path === "message-board/bin.ts")?.install).toEqual({ kind: "engine", to: ".claude/message-board/bin.ts" });
 });
