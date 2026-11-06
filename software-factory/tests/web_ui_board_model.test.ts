@@ -1,7 +1,7 @@
 // The task board's rules that aren't drawing (#439): its columns, and its lanes by agent or by epic, from
 // web/board_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { boardOf, cardTag, COLUMNS, columnsOf } from "../web/board_model.ts";
+import { boardOf, cardTag, COLUMNS, columnsOf, epicColour, taskAsk } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
@@ -82,4 +82,20 @@ test("a card's tag: Needs you when its PR waits for the owner, Checks failing wh
   expect(cardTag(withPr("red"), { next: { action: "waiting-for-agent" } })).toEqual({ text: "Checks failing", needsYou: false });
   expect(cardTag(withPr("green"), { next: { action: "dev-manager-reviews" } })).toEqual({ text: "in review", needsYou: false });
   expect(cardTag({ ...task("8", "ready"), stateText: "ready" })).toEqual({ text: "ready", needsYou: false });
+});
+
+test("each epic's chip takes a category colour in the epics' order, violet, pink, green, blue, then round again", () => {
+  expect([0, 1, 2, 3, 4, 5].map(epicColour)).toEqual(["violet", "pink", "green", "blue", "yellow", "violet"]);
+});
+
+test("an action's confirm says what happens and what doesn't, and that a working session isn't stopped", () => {
+  const held = { id: "7", holders: ["haile"] };
+  const free = { id: "8", holders: [] };
+  expect(taskAsk("release", held)).toEqual({ happens: "#7 goes back to Ready and the next free agent takes it. haile's claim comes off.",
+    doesNot: "A session already working on it isn't stopped. Its branch and pull request stay." });
+  expect(taskAsk("release", free)).toEqual({ happens: "#8 goes back to Ready and the next free agent takes it.", doesNot: "Its branch and pull request stay." });
+  expect(taskAsk("block", free)).toEqual({ happens: "#8 moves to Blocked with your reason.", doesNot: "Nothing is deleted: Release puts it back to Ready." });
+  expect(taskAsk("reassign", held, "taytu")).toEqual({ happens: "#7 goes back to Ready, then taytu is told to take it. haile's claim comes off.",
+    doesNot: "A session already working on it isn't stopped. haile's branch stays." });
+  expect(taskAsk("reassign", free).happens).toBe("#8 goes back to Ready, then the agent you pick is told to take it.");
 });

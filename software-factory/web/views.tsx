@@ -9,6 +9,7 @@ import { Board, EpicChips } from "./board.tsx";
 import type { LaneBy } from "./board_model.ts";
 import { Cited, Cites } from "./docs.tsx";
 import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
+import { Tabs } from "./parts.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
 import { type ActionRow, checksText, checksTone, epicBar, type EpicRow, epicTone, filterRows, groupByEpic, minutesText, type ProblemView, protectedText, type PullRow, reviewTone,
@@ -140,16 +141,14 @@ export function TasksChannel(p: ViewProps) {
     <div className="body">
       <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="cards" />
       <Problems list={[...v.problems, ...v.tasks.problems]} />
-      <div role="tablist" aria-label="Group lanes by" className="etabs">
-        {TASK_TABS.map(([x, name]) => (
-          <button key={x} role="tab" aria-selected={tab === x} className={tab === x ? "on" : ""} onClick={() => setTab(x)}>{name}</button>
-        ))}
+      <div className="bfilters">
+        <Tabs label="Group lanes by" value={tab} onChange={setTab} tabs={TASK_TABS.map(([id, label]) => ({ id, label }))} />
+        {withTasks.length > 0 && <EpicChips epics={withTasks} all={epics} chosen={chosen} choose={setEpic} />}
       </div>
-      {withTasks.length > 0 && <EpicChips epics={withTasks} chosen={chosen} choose={setEpic} />}
       {mode === "list" && <div className="lanes" aria-label="Tasks by state">
         {LANES.map(([s, name]) => <span key={s}><Dot tone={taskTone(s)} />{name} {all.filter((t) => t.state === s).length}</span>)}
       </div>}
-      {mode === "list" && <p className="vnote">In the order <code>factory next</code> walks them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>}
+      {mode === "list" && <p className="vnote">In the order the builders take them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>}
       {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
       {rows.length > 0 && tab !== "list" && <Board tasks={rows} all={all} epics={epics} pulls={v.pulls.pulls} by={tab} project={p.project} open={p.open}
@@ -246,11 +245,7 @@ export function EpicsChannel(p: ViewProps) {
       <Toolbar typed={typed} setTyped={setTyped} views={v} project={p.project} post={p.post} say={p.say} what="epics" />
       <Problems list={[...v.problems, ...v.epics.problems]} />
       <div className="etabs-row">
-        <div role="tablist" aria-label="Epic views" className="etabs">
-          {(["board", "list"] as EpicTab[]).map((x) => (
-            <button key={x} role="tab" aria-selected={tab === x} className={tab === x ? "on" : ""} onClick={() => setTab(x)}>{x === "board" ? "Board" : "List"}</button>
-          ))}
-        </div>
+        <Tabs<EpicTab> label="Epic views" value={tab} onChange={setTab} tabs={[{ id: "board", label: "Board" }, { id: "list", label: "List" }]} />
         <button className="btn primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>New epic</button>
       </div>
       {adding && <NewEpic token={p.token ?? ""} project={p.project.id} talkers={talkers} close={() => setAdding(false)} />}
@@ -411,7 +406,7 @@ export function CiChannel(p: ViewProps) {
           <button key={ref} className="link" onClick={() => p.open("view:pull-requests", ref)}>{ref} </button>))}</p>}
       </section>
       <div className="machines runners" aria-label="Runners">
-        {!ci.runners.length && <p className="empty">{ci.mode === "local" ? <>No runner has the label {ci.label}: <code>factory ci install</code> registers this machine's.</>
+        {!ci.runners.length && <p className="empty">{ci.mode === "local" ? <>No runner has the label {ci.label} yet: register this machine's from its terminal.</>
           : "No self-hosted runner: CI runs on GitHub's runners."}</p>}
         {machines.map((m) => (
           <section className="card" key={m} aria-label={m}>
@@ -464,45 +459,42 @@ export async function loadViews(get: (path: string) => Promise<Record<string, un
 
 export const VIEWS_CSS = String.raw`
 .vbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-.vfilter { flex: 1; min-width: 160px; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px;
-  padding: 6px 10px; font: inherit; font-size: 13px; }
-.vage { color: var(--faint); font-size: 12px; white-space: nowrap; }
-.vnote { color: var(--muted); font-size: 13px; margin: 0; }
-.lanes { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--muted); }
+.vfilter { flex: 1; min-width: 160px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 10px;
+  padding: 0 12px; height: 40px; font: inherit; font-size: 13px; }
+.vage { color: var(--text-3); font-size: 12px; white-space: nowrap; }
+.vnote { color: var(--text-2); font-size: 13px; margin: 0; }
+.lanes { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--text-2); }
 .lanes span { display: inline-flex; align-items: center; gap: 6px; }
-.vlist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); }
-.vrow { display: grid; grid-template-columns: 64px 1fr minmax(80px, 160px) 120px; gap: 12px; align-items: center; padding: 10px 14px;
-  border-top: 1px solid var(--line); }
+.vlist { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.vrow { display: grid; grid-template-columns: 64px 1fr minmax(80px, 160px) 120px; gap: 12px; align-items: center; padding: 12px 16px;
+  border-top: 1px solid var(--border); }
 .vrow:first-child { border-top: 0; }
-.vgroup { font-size: 13px; margin: 12px 0 6px; color: var(--muted); }
+.vgroup { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; margin: 16px 0 8px; color: var(--text-3); }
 .vcards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.ebar { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin: 10px 0 6px; }
-.ebar span { display: block; height: 100%; background: var(--accent); }
+.ebar { height: 6px; border-radius: 3px; background: var(--bg-active); overflow: hidden; margin: 10px 0 6px; }
+.ebar span { display: block; height: 100%; background: var(--primary); }
 .etasks { display: flex; flex-wrap: wrap; gap: 4px 10px; }
-button.link.done { color: var(--muted); font-weight: 400; }
-.vrow.next { background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
-.vid { font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; }
+button.link.done { color: var(--text-2); font-weight: 400; }
+.vrow.next { background: var(--bg-subtle); }
+.vid { font-family: var(--mono); font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
 .vmain { min-width: 0; display: flex; flex-direction: column; }
 .vtitle { font-weight: 600; min-width: 0; overflow-wrap: anywhere; display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.vsub { color: var(--muted); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; }
+.vsub { color: var(--text-2); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; }
 .vsub.mono { font-family: var(--mono); margin-top: 10px; }
 .card .vsub { margin-top: 10px; }
 .vsub .mono { font-family: var(--mono); }
 .vwho { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.vstate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.vstate { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); white-space: nowrap; }
 button.link { border: 0; background: none; padding: 0; cursor: pointer; font-weight: 600; color: inherit; }
-button.link:hover, a.ext:hover { color: var(--accent-text); text-decoration: underline; }
+button.link:hover, a.ext:hover { color: var(--text); text-decoration: underline; }
 a.ext { color: inherit; text-decoration: none; }
 .prs { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
 .prhead { display: flex; gap: 10px; align-items: baseline; margin-bottom: 12px; flex-wrap: wrap; }
-.verdict { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 700; padding: 14px 16px; border-radius: var(--radius);
-  border: 1px solid; }
-.verdict.good { border-color: color-mix(in srgb, var(--good) 45%, transparent); background: color-mix(in srgb, var(--good) 9%, var(--bg)); }
-.verdict.warn { border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 9%, var(--bg)); }
-.verdict.bad { border-color: color-mix(in srgb, var(--bad) 45%, transparent); background: color-mix(in srgb, var(--bad) 8%, var(--bg)); }
+.verdict { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; padding: 14px 16px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--surface); }
 .vactions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
-.vcount { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
-.vrunstate { width: 84px; font-size: 13px; color: var(--muted); }
+.vcount { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.vrunstate { width: 84px; font-size: 13px; color: var(--text-2); }
 .btn.small { padding: 2px 10px; font-size: 12px; }
 .machines.runners { grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); }
 .machines.runners .rows span:nth-child(2) { overflow-wrap: anywhere; }

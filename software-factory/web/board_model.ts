@@ -78,3 +78,28 @@ export function boardOf(tasks: TaskRow[], by: LaneBy, epics: { id: string; title
   const last = lanes.get("");
   return last ? [...named, last] : named;
 }
+
+/** The palette's categories an epic's chip dot takes, in the epics' order (the reference design's: violet, pink, green,
+ *  blue), then round again. */
+const EPIC_COLOURS = ["violet", "pink", "green", "blue", "yellow"];
+
+/** The category colour of the epic at `index` in the epics' order. */
+export function epicColour(index: number): string {
+  return EPIC_COLOURS[((index % EPIC_COLOURS.length) + EPIC_COLOURS.length) % EPIC_COLOURS.length] as string;
+}
+
+export type TaskAction = "release" | "block" | "reassign";
+
+/** What a card's action does and doesn't do, in plain words, for its confirm. The commands change the issue's labels
+ *  and claim; they don't stop a session already working on the task, so the confirm says so. `agent` is the one picked
+ *  for reassign ("" before one is). */
+export function taskAsk(action: TaskAction, t: { id: string; holders: string[] }, agent = ""): { happens: string; doesNot: string } {
+  const id = `#${t.id}`;
+  const who = t.holders[0];
+  const claim = who ? ` ${who}'s claim comes off.` : "";
+  const session = who ? "A session already working on it isn't stopped. " : "";
+  if (action === "release") return { happens: `${id} goes back to Ready and the next free agent takes it.${claim}`, doesNot: `${session}Its branch and pull request stay.` };
+  if (action === "block") return { happens: `${id} moves to Blocked with your reason.${claim}`, doesNot: `${session}Nothing is deleted: Release puts it back to Ready.` };
+  return { happens: `${id} goes back to Ready, then ${agent || "the agent you pick"} is told to take it.${claim}`,
+    doesNot: `${session}${who ? `${who}'s branch stays.` : "Nothing is deleted."}` };
+}
