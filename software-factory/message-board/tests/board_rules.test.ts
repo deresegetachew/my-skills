@@ -517,3 +517,37 @@ test("ready without an actor leaves out tasks handed to someone; with one it inc
   expect((await po.ready({ for: "receiver" })).map((x) => x.id)).toContain(t.id);
   expect((await po.ready({ for: "someone-else" })).map((x) => x.id)).not.toContain(t.id);
 });
+
+// ---------- moves (#503) ----------
+test("a move with blockedBy and a parent change on the same task, at once, many rounds: each completes or is refused, never a raw error", async () => {
+  const a = await board("abebe");
+  const b = await board("po");
+  for (let i = 0; i < 40; i++) {
+    const x = await a.create({ title: title("X") });
+    const blocker = await a.create({ title: title("B") });
+    const parent = await a.create({ title: title("P") });
+    const results = await Promise.allSettled([
+      a.move(x.id, { to: "blocked", blockedBy: [blocker.id] }),
+      b.update(x.id, { version: x.version, parentId: parent.id }),
+    ]);
+    for (const r of results) {
+      if (r.status === "fulfilled") continue;
+      expect(r.reason, String(r.reason)).toBeInstanceOf(BoardError);
+      const e = r.reason as BoardError;
+      expect(["busy", "conflict"], `${e.code}: ${e.message}`).toContain(e.code);
+      expect(e.fix.length).toBeGreaterThan(0);
+    }
+  }
+});
+
+test("a move lists each blocking task once, however often it is named", async () => {
+  const a = await board("abebe");
+  const x = await a.create({ title: title("X") });
+  const blocker = await a.create({ title: title("B") });
+  const after = await a.lastSeq();
+  const moved = await a.move(x.id, { to: "blocked", blockedBy: [blocker.id, blocker.id, blocker.id] });
+  expect(moved.blockedBy).toEqual([blocker.id]);
+  expect(await a.edges(x.id)).toEqual([{ from: blocker.id, to: x.id, kind: "blocks" }]);
+  const ev = (await a.events(after)).find((e) => e.kind === "task.moved");
+  expect(ev?.payload.blockedBy).toEqual([blocker.id]);
+});

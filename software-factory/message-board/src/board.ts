@@ -3,13 +3,13 @@
 import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
 import { BoardError, refuse } from "./errors.ts";
-import { GRAPH_LOCK, reaches, recordEvents } from "./graph.ts";
+import { GRAPH_LOCK, type NewEvent, reaches, recordEvents } from "./graph.ts";
 import { applyImport } from "./import.ts";
 import { applied, migrate } from "./migrate.ts";
 import { CONTEXT_COLS, EVENT_COLS, MESSAGE_COLS, type Row, TASK_SELECT, toContext, toEvent, toMessage, toTask } from "./rows.ts";
 import {
   BLOCKING, type BoardEvent, type Claim, CONTEXT_KINDS, type ContextEntry, type ContextKind, type Delegated, type ImportBatch, type ImportResult, EDGE_KINDS, type EdgeKind,
-  type Message, MESSAGE_KINDS, type NewMessage, type NewTask, type Next, type OnMe, type Outcome, OUTCOMES, type Prime, type Task,
+  type Message, MESSAGE_KINDS, type Move, MOVE_TARGETS, type NewMessage, type NewTask, type Next, type OnMe, type Outcome, OUTCOMES, type Prime, type Task,
   TASK_KINDS, type TaskChanges,
 } from "./types.ts";
 
@@ -50,6 +50,9 @@ function translate(e: unknown): unknown {
   const state = err.errno ?? "";
   const msg = (err.message ?? String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
   if (state === "42P01" || state === "42703") return new BoardError("schema-old", `The board's tables are missing or old: ${msg}`, MIGRATE_FIX);
+  if (state === "40P01" || state === "40001") {
+    return new BoardError("busy", "Another write to the same tasks crossed this one, so the board undid it; nothing was changed.", "Try again.");
+  }
   if (state === "23503") return new BoardError("not-found", `That refers to something that isn't on the board: ${msg}`, "Check the id, then try again.");
   if (state === "23505") return new BoardError("bad-input", `That is already on the board: ${msg}`, "Use the one that is there (an external ref is unique).");
   if (state === "23514" || state === "22P02" || state === "23502") return new BoardError("bad-input", `The board doesn't take that value: ${msg}`, "Check the value against the README's API.");
@@ -73,6 +76,11 @@ function wholeNumber(what: string, value: unknown): number {
 
 function named(what: string, value: unknown): string {
   if (typeof value !== "string" || !value.trim() || value.length > 200) refuse("bad-input", `${what} must be a name of 1 to 200 characters.`, `Pass ${what.toLowerCase()} as text.`);
+  return value;
+}
+
+function said(what: string, value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) refuse("bad-input", `${what} can't be empty.`, `Say it in a sentence.`);
   return value;
 }
 
@@ -248,22 +256,28 @@ export class Board {
   async link(from: number, to: number, kind: EdgeKind): Promise<boolean> {
     const k = oneOf("An edge's kind", kind, EDGE_KINDS);
     return this.write(async (tx) => {
-      await this.mustTask(tx, from);
-      await this.mustTask(tx, to);
-      if (from === to) {
-        refuse(BLOCKING.includes(k) ? "cycle" : "bad-input", `A task can't ${k.replace("_", " ")} itself (#${from}).`, "Link two different tasks.");
-      }
-      if (BLOCKING.includes(k)) {
-        await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
-        if (await reaches(tx, to, from)) {
-          refuse("cycle", `#${from} ${k.replace("_", " ")} #${to} would make a loop: #${from} already waits on #${to}, or is under it.`,
-            "Remove the edge that makes the loop first, or link them the other way.");
-        }
-      }
-      const r = rows(await tx`INSERT INTO edges (from_id, to_id, kind, created_by) VALUES (${from}, ${to}, ${k}, ${this.as})
-        ON CONFLICT DO NOTHING RETURNING from_id`);
-      return { result: r.length > 0, event: r.length ? { kind: "edge.linked", subject: `task:${from}`, payload: { from, to, kind: k } } : null };
+      const event = await this.linkIn(tx, from, to, k);
+      return { result: event !== null, event };
     });
+  }
+
+  /** Add one edge inside a transaction, refusing a loop; its event, or null when the edge was already there. */
+  private async linkIn(tx: Tx, from: number, to: number, k: EdgeKind): Promise<NewEvent | null> {
+    await this.mustTask(tx, from);
+    await this.mustTask(tx, to);
+    if (from === to) {
+      refuse(BLOCKING.includes(k) ? "cycle" : "bad-input", `A task can't ${k.replace("_", " ")} itself (#${from}).`, "Link two different tasks.");
+    }
+    if (BLOCKING.includes(k)) {
+      await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
+      if (await reaches(tx, to, from)) {
+        refuse("cycle", `#${from} ${k.replace("_", " ")} #${to} would make a loop: #${from} already waits on #${to}, or is under it.`,
+          "Remove the edge that makes the loop first, or link them the other way.");
+      }
+    }
+    const r = rows(await tx`INSERT INTO edges (from_id, to_id, kind, created_by) VALUES (${from}, ${to}, ${k}, ${this.as})
+      ON CONFLICT DO NOTHING RETURNING from_id`);
+    return r.length ? { kind: "edge.linked", subject: `task:${from}`, payload: { from, to, kind: k } } : null;
   }
 
   async unlink(from: number, to: number, kind: EdgeKind): Promise<boolean> {
@@ -416,6 +430,85 @@ export class Board {
       }
       return { result: task, event: { kind: "task.closed", subject: `task:${id}`, payload: { outcome, reason: options.reason ?? null } } };
     });
+  }
+
+  /** Move a task to a column, as the owner or the dev manager does from the board (#503): ready, in_review, deferred,
+   * done (with an outcome, default done) or blocked (by `blockedBy`, each linked to it with a `blocks` edge, or by a
+   * `reason` alone, which defers it). A reason given with blocked is kept as a `blocker` context entry. A held task is
+   * taken back from its holder, which needs a reason: the holder's token stops working, and a `task.taken_back` event
+   * names the holder and the reason. in_progress is refused unless the task is already held: only a claim puts a task
+   * there. All of it is one transaction, recorded as a `task.moved` event. This is the board's authorised move: it
+   * takes no token, so only a caller acting for the owner or the dev manager uses it (the MCP server offers it only with
+   * --role owner or manager). */
+  async move(id: number, m: Move): Promise<Task> {
+    const to = oneOf("to", m.to, MOVE_TARGETS);
+    const reason = m.reason === undefined ? undefined : said("A reason", m.reason);
+    const blockedBy = [...new Set((m.blockedBy ?? []).map((b) => wholeNumber("A blocking task's id", b)))];
+    if (blockedBy.length && to !== "blocked") refuse("bad-input", "blockedBy goes only with to blocked.", "Leave blockedBy out, or move it to blocked.");
+    if (m.outcome !== undefined && to !== "done") refuse("bad-input", "An outcome goes only with to done.", "Leave outcome out, or move it to done.");
+    const outcome = to === "done" ? oneOf("An outcome", m.outcome ?? "done", OUTCOMES) : null;
+    if (to === "blocked" && !blockedBy.length && reason === undefined) {
+      refuse("bad-input", "A move to blocked says what blocks it: a reason, or the tasks it waits on (blockedBy).", "Pass reason, blockedBy, or both.");
+    }
+    return this.run(() =>
+      this.sql.begin(async (tx) => {
+        // Lock order: the graph lock before the row, as update and link take them, so two writes can't wait on each other.
+        if (blockedBy.length) await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
+        await tx`SELECT id FROM tasks WHERE id = ${wholeNumber("A task id", id)} FOR NO KEY UPDATE`;
+        const before = await this.mustTask(tx, id);
+        if (to === "in_progress") {
+          if (before.holder) return before;
+          refuse("bad-input", `#${id} isn't held: in progress means an agent holds it, and only a claim puts a task there.`,
+            "Hand it to the agent (board_assign) so they claim it, or move it to ready.");
+        }
+        const events: NewEvent[] = [];
+        if (before.holder) events.push(this.takeBackEvent(before, reason, to));
+        for (const b of blockedBy) {
+          const e = await this.linkIn(tx, b, id, "blocks");
+          if (e) events.push(e);
+        }
+        const status = to === "ready" ? "open" : to === "blocked" ? (blockedBy.length ? "open" : "deferred") : to === "in_review" ? "in_review" : to;
+        const keepAssignee = !before.holder && to !== "done";
+        await tx.unsafe(`UPDATE tasks SET status = $2, outcome = $3, holder = NULL, claim_token = NULL, claimed_at = NULL, claim_until = NULL,
+          assignee = CASE WHEN $4 THEN assignee ELSE NULL END, version = version + 1, updated_at = now() WHERE id = $1`, [id, status, outcome, keepAssignee]);
+        if (to === "blocked" && reason !== undefined) events.push((await this.noteIn(tx, id, "blocker", reason)).event);
+        events.push({ kind: "task.moved", subject: `task:${id}`,
+          payload: { from: before.status, to, status, outcome, reason: reason ?? null, blockedBy, holder: before.holder } });
+        await recordEvents(tx, this.as, this.session, events);
+        return (await this.taskIn(tx, id)) as Task;
+      }) as Promise<Task>,
+    );
+  }
+
+  /** Hand a task to one actor (#503): only they may claim it. It keeps its column; a held one is taken back from its
+   * holder first, which needs a reason (a `task.taken_back` event), and goes back to open for them. A done task is
+   * refused: move it to ready first. Like move, it takes no token: for the owner and the dev manager. */
+  async assign(id: number, to: string, options: { reason?: string } = {}): Promise<Task> {
+    const who = named("Who it goes to", to);
+    const reason = options.reason === undefined ? undefined : said("A reason", options.reason);
+    return this.run(() =>
+      this.sql.begin(async (tx) => {
+        await tx`SELECT id FROM tasks WHERE id = ${wholeNumber("A task id", id)} FOR NO KEY UPDATE`;
+        const before = await this.mustTask(tx, id);
+        if (before.status === "done") refuse("bad-input", `#${id} is done; a done task isn't handed on.`, "Move it to ready first (board_move), then assign it.");
+        const events: NewEvent[] = [];
+        if (before.holder) events.push(this.takeBackEvent(before, reason, "assign"));
+        await tx.unsafe(`UPDATE tasks SET assignee = $2, status = CASE WHEN holder IS NULL THEN status ELSE 'open' END, holder = NULL,
+          claim_token = NULL, claimed_at = NULL, claim_until = NULL, version = version + 1, updated_at = now() WHERE id = $1`, [id, who]);
+        events.push({ kind: "task.assigned", subject: `task:${id}`, payload: { to: who, from: before.assignee, reason: reason ?? null } });
+        await recordEvents(tx, this.as, this.session, events);
+        return (await this.taskIn(tx, id)) as Task;
+      }) as Promise<Task>,
+    );
+  }
+
+  /** The event for taking a held task back from its holder; refused without a reason. */
+  private takeBackEvent(t: Task, reason: string | undefined, why: string): NewEvent {
+    if (reason === undefined) {
+      refuse("bad-input", `#${t.id} is held by ${t.holder}; this takes the claim back from them, so it needs a reason.`,
+        "Pass reason: why you take it back (the holder and the board's events show it).");
+    }
+    return { kind: "task.taken_back", subject: `task:${t.id}`, payload: { holder: t.holder, reason, for: why } };
   }
 
   /** Release the claims whose time has passed and whose holder hasn't been heard from for `quietSeconds` (default 30
@@ -575,11 +668,17 @@ export class Board {
     if (typeof entry.body !== "string" || !entry.body.trim()) refuse("bad-input", "A context entry needs a body.", "Pass { body: \"...\" }.");
     return this.write(async (tx) => {
       await this.mustTask(tx, taskId);
-      const r = rows(await tx.unsafe(`INSERT INTO context (task_id, kind, body, author) VALUES ($1, $2, $3, $4) RETURNING ${CONTEXT_COLS}`,
-        [taskId, kind, entry.body, this.as]));
-      const c = toContext(r[0] as Row);
-      return { result: c, event: { kind: "context.noted", subject: `task:${taskId}`, payload: { id: c.id, kind } } };
+      const { entry: c, event } = await this.noteIn(tx, taskId, kind, entry.body);
+      return { result: c, event };
     });
+  }
+
+  /** Insert one context entry inside a transaction; its event. */
+  private async noteIn(tx: Tx, taskId: number, kind: ContextKind, body: string): Promise<{ entry: ContextEntry; event: NewEvent }> {
+    const r = rows(await tx.unsafe(`INSERT INTO context (task_id, kind, body, author) VALUES ($1, $2, $3, $4) RETURNING ${CONTEXT_COLS}`,
+      [taskId, kind, body, this.as]));
+    const c = toContext(r[0] as Row);
+    return { entry: c, event: { kind: "context.noted", subject: `task:${taskId}`, payload: { id: c.id, kind } } };
   }
 
   /** A task's own context entries and those of every task linked to it by an edge (either way), oldest first. */
