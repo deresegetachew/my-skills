@@ -27,10 +27,8 @@ export function Avatar({ name, role, size = 24, tone, image }: { name: string; r
 
 export const AVATAR_CSS = String.raw`
 .avatar { position: relative; display: inline-block; flex: none; vertical-align: middle; }
-.avatar img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: var(--bg-soft); }
-.avatar .dot { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border: 2px solid var(--side); box-sizing: content-box; }
-.avatar .dot.good { box-shadow: none; }
-.avatar .dot.quiet { background: var(--side); box-shadow: inset 0 0 0 1.5px var(--quiet); }
+.avatar img { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: var(--bg-subtle); }
+.avatar .dot { position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border: 2px solid var(--bg); box-sizing: content-box; }
 .agent-link { display: inline-flex; align-items: center; gap: 6px; }
 .msg-head .avatar { align-self: center; }
 `;

@@ -7,13 +7,11 @@ import { type Chat, useChat } from "./chat.tsx";
 import { itemLabel } from "./chat_model.ts";
 import { Cited } from "./docs.tsx";
 import type { DocPage } from "./docs_model.ts";
-import { epicThread, stageSteps, talkText, writtenDown } from "./epics_model.ts";
+import { epicThread, stageSteps, writtenDown } from "./epics_model.ts";
+import { StatusDot, type Talker, Tabs, TalkBox } from "./parts.tsx";
 import type { EpicRow, TaskRow } from "./views_model.ts";
 
-export interface Talker {
-  name: string;
-  role: string;
-}
+export type { Talker };
 
 interface Common {
   token: string;
@@ -24,17 +22,11 @@ interface Common {
   open: (channel: string, find?: string) => void;
 }
 
-const ROLE_WORDS: Record<string, string> = { "product-owner": "product owner", "dev-manager": "dev manager" };
-
-function Dot({ tone }: { tone: string }) {
-  return <span className={`dot ${tone}`} aria-hidden />;
-}
-
 /** What a task of the epic shows: its title and state from the open tasks, or "done" when it is no longer open. */
-function taskLine(t: { id: string; done: boolean }, tasks: TaskRow[]): { title: string; state: string; tone: string; holder: string | null } {
+function taskLine(t: { id: string; done: boolean }, tasks: TaskRow[]): { title: string; state: string; dot: "working" | "waiting" | "idle"; holder: string | null } {
   const row = tasks.find((x) => x.id === t.id);
-  if (row) return { title: row.title, state: row.stateText, tone: row.state === "ready" ? "warn" : "good", holder: row.holders[0] ?? null };
-  return { title: "", state: t.done ? "Done" : "Not an open task", tone: "quiet", holder: null };
+  if (row) return { title: row.title, state: row.stateText, dot: row.state === "ready" ? "waiting" : "working", holder: row.holders[0] ?? null };
+  return { title: "", state: t.done ? "Done" : "Not an open task", dot: "idle", holder: null };
 }
 
 function Thread({ chat, epic }: { chat: Chat; epic: EpicRow }) {
@@ -57,45 +49,6 @@ function Thread({ chat, epic }: { chat: Chat; epic: EpicRow }) {
   );
 }
 
-/** The "Talk about this" box: To the product owner or the dev manager, one line, Send. */
-function TalkBox({ epic, to, setTo, chat, talkers }: { epic: EpicRow; to: string; setTo: (n: string) => void; chat: Chat; talkers: Talker[] }) {
-  const [text, setText] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
-    if (!text.trim() || busy || chat.pending) return;
-    setBusy(true);
-    setProblem(null);
-    const p = await chat.send(talkText(epic, text));
-    setBusy(false);
-    if (p) setProblem(`${p.message} ${p.fix}`);
-    else setText("");
-  };
-  return (
-    <form className="etalk" aria-labelledby="talk-h" onSubmit={(e) => void submit(e)}>
-      <h3 id="talk-h">Talk about this</h3>
-      <fieldset>
-        <legend>To</legend>
-        {talkers.map((t) => (
-          <label key={t.name} className={t.name === to ? "pick on" : "pick"}>
-            <input type="radio" name="to" value={t.name} checked={t.name === to} onChange={() => setTo(t.name)} />
-            <Avatar name={t.name} role={t.role} size={24} />
-            <span><strong>{t.name}</strong> <span className="empty">({ROLE_WORDS[t.role] ?? t.role})</span></span>
-          </label>
-        ))}
-      </fieldset>
-      {problem && <p className="send-problem" role="alert">{problem}</p>}
-      <span className="send-row">
-        <input type="text" aria-label="Message" placeholder="Ask or tell them something" maxLength={1500} value={text}
-          onChange={(e) => setText(e.target.value)} disabled={busy || chat.pending} />
-        <button className="btn primary" type="submit" disabled={busy || chat.pending || !text.trim()}>{busy ? "Sending…" : "Send"}</button>
-      </span>
-      <span className="send-hint">Your message goes on this item's thread; the answer appears here and in your Inbox.</span>
-    </form>
-  );
-}
-
 type Tab = "overview" | "tasks" | "thread";
 
 export function EpicPage({ epic, tasks, token, project, talkers, docs, open, back }: Common & { epic: EpicRow; tasks: TaskRow[]; back: () => void }) {
@@ -107,7 +60,6 @@ export function EpicPage({ epic, tasks, token, project, talkers, docs, open, bac
   const lines = epic.tasks.map((t) => ({ t, ...taskLine(t, tasks) }));
   const list = tab === "tasks" ? lines : lines.slice(0, 8);
   const links = writtenDown(epic, docs ?? []);
-  const talk = talkers.length > 0;
   const latest = epicThread(chat.items, epic.id).filter((x) => x.kind !== "owner").at(-1);
   return (
     <div className="body epage">
@@ -117,16 +69,12 @@ export function EpicPage({ epic, tasks, token, project, talkers, docs, open, bac
           <span className="empty">Epic #{epic.id}</span>
           <h2><Cited text={epic.title} docs={docs} open={open} /></h2>
           {epic.summary && <p>{epic.summary}</p>}
-          <span className="vstate"><Dot tone={epic.stage === "building" ? "good" : "quiet"} />{epic.stageText.charAt(0).toUpperCase() + epic.stageText.slice(1)} · {progress}</span>
+          <span className="vstate"><StatusDot state={epic.stage === "building" ? "working" : "idle"} />{epic.stageText.charAt(0).toUpperCase() + epic.stageText.slice(1)} · {progress}</span>
         </header>
-        {talk ? <TalkBox epic={epic} to={to} setTo={setTo} chat={chat} talkers={talkers} />
-          : <p className="empty">This project has no product owner or dev manager to talk to yet.</p>}
+        <TalkBox item={{ kind: "epic", id: epic.id, title: epic.title }} to={to} setTo={setTo} chat={chat} talkers={talkers} />
       </div>
-      <div role="tablist" aria-label="Epic views" className="etabs">
-        {(["overview", "tasks", "thread"] as Tab[]).map((x) => (
-          <button key={x} role="tab" aria-selected={tab === x} className={tab === x ? "on" : ""} onClick={() => setTab(x)}>{x[0]?.toUpperCase()}{x.slice(1)}</button>
-        ))}
-      </div>
+      <Tabs label="Epic views" value={tab} onChange={setTab}
+        tabs={[{ id: "overview", label: "Overview" }, { id: "tasks", label: "Tasks" }, { id: "thread", label: "Thread" }]} />
       <ol aria-label="Stage" className="estages">
         {steps.map((s) => (
           <li key={s.stage} aria-current={s.state === "now" ? "step" : undefined} className={s.state}>
@@ -145,7 +93,7 @@ export function EpicPage({ epic, tasks, token, project, talkers, docs, open, bac
                   <li key={l.t.id}>
                     <span className="who">{l.holder ? <Avatar name={l.holder} size={28} /> : null}</span>
                     <button className="link" onClick={() => open("view:tasks", `#${l.t.id}`)}>{l.title || "Task"} <span className="empty">#{l.t.id}</span></button>
-                    <span className="vstate"><Dot tone={l.tone} />{l.state}</span>
+                    <span className="vstate"><StatusDot state={l.dot} />{l.state}</span>
                   </li>
                 ))}
               </ul>
@@ -212,27 +160,17 @@ export const EPICS_CSS = String.raw`
 .ehead { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; justify-content: space-between; }
 .ehead header { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .ehead h2 { margin: 0; font-size: 22px; }
-.ehead p { margin: 0; color: var(--muted); line-height: 1.5; }
-.etalk, .enew { flex: 0 1 340px; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
-.enew { flex: none; max-width: 640px; border: 0; padding: 8px 0; }
+.ehead p { margin: 0; color: var(--text-2); line-height: 1.5; }
+.enew { max-width: 640px; padding: 8px 0; display: flex; flex-direction: column; gap: 10px; }
 .enew label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
-.enew input, .enew textarea, .etalk input[type=text] { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 8px; padding: 8px 10px; font: inherit; font-weight: 400; }
-.etalk h3, .enew h3 { margin: 0; font-size: 15px; }
-.etalk fieldset { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px; }
-.etalk legend { font-size: 13px; color: var(--muted); padding: 0; margin-bottom: 6px; }
-.pick { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; }
-.pick.on { border-color: var(--text); }
-.etalk .send-row { display: flex; gap: 8px; }
-.etalk .send-row input { flex: 1; min-width: 0; }
+.enew input, .enew textarea { border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); border-radius: 10px; padding: 10px 12px; font: inherit; font-weight: 400; }
+.enew h3 { margin: 0; font-size: 15px; }
 .ehead-row { display: flex; align-items: center; gap: 12px; }
-.etabs { display: flex; gap: 28px; border-bottom: 1px solid var(--line); }
-.etabs button { background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 0; font: inherit; color: var(--muted); cursor: pointer; }
-.etabs button.on { border-bottom-color: var(--text); color: var(--text); font-weight: 600; }
 .estages { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
-.estages li { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--faint); }
-.estages .bar { height: 3px; border-radius: 999px; background: var(--line); }
-.estages li.done .bar { background: var(--faint); }
-.estages li.done { color: var(--muted); }
+.estages li { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-3); }
+.estages .bar { height: 3px; border-radius: 999px; background: var(--border); }
+.estages li.done .bar { background: var(--text-3); }
+.estages li.done { color: var(--text-2); }
 .estages li.now .bar { background: var(--text); }
 .estages li.now { color: var(--text); font-weight: 700; }
 .ecols { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; }
@@ -240,17 +178,17 @@ export const EPICS_CSS = String.raw`
 .ecols > aside { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 24px; }
 .ecols h3 { margin: 0 0 6px; font-size: 15px; }
 .etasklist { list-style: none; margin: 0; padding: 0; }
-.etasklist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.etasklist li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .etasklist .who { width: 28px; flex-shrink: 0; display: flex; }
 .etasklist .link { flex: 1; text-align: left; min-width: 0; }
-.elink { display: flex; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; align-items: center; background: none; border: 0; border-bottom: 1px solid var(--line); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
+.elink { display: flex; justify-content: space-between; gap: 8px; width: 100%; min-height: 44px; align-items: center; background: none; border: 0; border-bottom: 1px solid var(--border); color: inherit; font: inherit; font-size: 13px; cursor: pointer; }
 .ethread { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .ethread li { display: flex; gap: 10px; align-items: flex-start; }
 .ethread p { margin: 0; line-height: 1.5; }
-.ethread .you { width: 28px; height: 28px; border-radius: 50%; background: var(--line); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
+.ethread .you { width: 28px; height: 28px; border-radius: 50%; background: var(--bg-active); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; }
 .eboard { display: grid; grid-template-columns: repeat(6, minmax(160px, 1fr)); gap: 16px; min-width: 1000px; align-items: start; }
-.eboard h4 { margin: 0 0 10px; font-size: 13px; padding-bottom: 8px; border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: center; }
-.eboard article { background: var(--card, var(--bg)); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
+.eboard h4 { margin: 0 0 10px; font-size: 13px; padding-bottom: 8px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+.eboard article { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 8px; }
 .eboard article .link { text-align: left; }
 @media (max-width: 760px) { .estages { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 `;
