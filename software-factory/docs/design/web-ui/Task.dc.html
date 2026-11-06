@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Task #439</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="board" height="1200" hint-size="312px,1200px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px;">
+
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 32px;">
+<header style="display: flex; flex-direction: column; gap: 10px; min-width: 0; flex: 1 1 420px;">
+<nav aria-label="Breadcrumb" style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--text-3);">
+<a href="Board.dc.html" style="color: var(--text-2); text-decoration: none;">Board</a><span aria-hidden="true">/</span>
+<a href="Epic.dc.html" style="color: var(--text-2); text-decoration: none;">Web UI: the one window #420</a><span aria-hidden="true">/</span>
+<span style="color: var(--text);">#439</span>
+</nav>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700; line-height: 1.15;">#439 A task board with swim lanes</h1>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2);"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--idle);"></span>Ready · second in line, after #444</span>
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">Opened by mentewab on 4 Nov · <a href="https://github.com/deresegetachew/my-skills/issues/439" style="color: var(--text-2);">Open on GitHub</a></p>
+</header>
+
+<section aria-labelledby="talk-h" style="flex: 0 1 360px; min-width: 280px; border: 1px solid var(--border); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
+<h2 id="talk-h" style="margin: 0; font-size: 15px;">Talk about this</h2>
+<div role="radiogroup" aria-label="To" style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-size: 13px; color: var(--text-3);">To</span>
+<sc-for list="{{talkTo}}" as="p" hint-placeholder-count="2">
+<button role="radio" aria-checked="{{p.checked}}" style="min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 4px 10px; border-radius: 10px; border: {{p.border}}; background: {{p.bg}}; color: var(--text); font: inherit; text-align: left; cursor: pointer;"><dc-import name="Avatar" agent="{{p.id}}" size="28" hint-size="28px,28px"></dc-import><span><span style="font-weight: 600;">{{p.id}}</span> <span style="color: var(--text-2);">({{p.role}})</span></span></button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 8px;">
+<input type="text" placeholder="Ask or tell them something" aria-label="Your message about #439" style="flex: 1; min-width: 0; height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; font: inherit; background: var(--surface); color: var(--text); box-sizing: border-box;">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Send</button>
+</div>
+<span style="font-size: 13px; color: var(--text-3); line-height: 1.5;">Your message goes on this task's thread; their answer appears here and in your Inbox.</span>
+</section>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+<div style="flex: 2 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 32px;">
+
+<section aria-labelledby="desc-h" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 id="desc-h" style="margin: 0; font-size: 15px;">What it is</h2>
+<p style="margin: 0; line-height: 1.6;">The board shows every task as a card in its lane: Ready, In progress, In review, Blocked and Done today. Swim lanes group the cards by epic or by agent. A card shows who holds it, its pull request and whether it needs you.</p>
+<p style="margin: 0; line-height: 1.6; color: var(--text-2);">It reads from the cache, so it opens without waiting on GitHub, and says how old its data is.</p>
+</section>
+
+<section aria-labelledby="done-h" style="display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
+<h2 id="done-h" style="margin: 0; font-size: 15px;">Done when</h2>
+<span style="font-size: 13px; color: var(--text-3);">0 of 5 · the reviewer ticks them</span>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{doneWhen}}" as="d" hint-placeholder-count="5">
+<li style="display: flex; gap: 12px; align-items: flex-start; padding: 10px 4px; border-bottom: 1px solid var(--border);">
+<input type="checkbox" id="{{d.id}}" disabled style="width: 18px; height: 18px; margin: 1px 0 0;">
+<label for="{{d.id}}" style="line-height: 1.5;">{{d.text}}</label>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-labelledby="msg-h" style="display: flex; flex-direction: column; gap: 6px;">
+<h2 id="msg-h" style="margin: 0 0 6px; font-size: 15px;">Conversation</h2>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{messages}}" as="m" hint-placeholder-count="6">
+<li style="display: flex; gap: 12px; align-items: flex-start; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<sc-if value="{{m.isAgent}}" hint-placeholder-val="{{ true }}"><dc-import name="Avatar" agent="{{m.who}}" size="32" hint-size="32px,32px"></dc-import></sc-if>
+<sc-if value="{{m.isYou}}" hint-placeholder-val="{{ false }}"><span style="width: 32px; height: 32px; border-radius: 50%; background: var(--bg-active); color: var(--text-2); font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">You</span></sc-if>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-size: 13px; color: var(--text-3);"><span style="color: var(--text); font-weight: 600;">{{m.name}}</span> {{m.to}} · {{m.when}}</span>
+<p style="margin: 0; line-height: 1.55;">{{m.text}}</p>
+</div>
+</li>
+</sc-for>
+</ol>
+</section>
+</div>
+
+<aside aria-labelledby="det-h" style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="det-h" style="margin: 0; font-size: 15px;">Details</h2>
+<dl style="margin: 0; display: flex; flex-direction: column;">
+<sc-for list="{{details}}" as="d" hint-placeholder-count="5">
+<div style="display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px;">
+<dt style="color: var(--text-3);">{{d.k}}</dt>
+<dd style="margin: 0; text-align: right;">{{d.v}}</dd>
+</div>
+</sc-for>
+</dl>
+
+<div style="display: flex; flex-direction: column; gap: 6px; margin-top: 12px;">
+<label for="assign" style="font-size: 13px; color: var(--text-2);">Give it to a builder now</label>
+<div style="display: flex; gap: 8px;">
+<select id="assign" style="flex: 1; min-width: 0; height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 10px; font: inherit; background: var(--surface); color: var(--text);"><option>haile · dev-pc</option><option>taytu · dev-pc</option><option>menelik · Mac</option></select>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Assign</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
+<span style="font-size: 13px; color: var(--text-2); line-height: 1.5;">Block #439? It leaves the queue until you unblock it. Your reason is posted on the issue.</span>
+<button type="button" style="align-self: flex-start; height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Block</button>
+</div>
+<span style="font-size: 13px; color: var(--text-3); line-height: 1.5; margin-top: 12px;">If the repository has no Blocked label yet, Block says so and offers Set up the labels.</span>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pick = (id, role, checked) => ({ id, role, checked: checked ? 'true' : 'false',
+      border: checked ? '1px solid var(--text)' : '1px solid var(--border-strong)', bg: checked ? 'var(--bg-active)' : 'var(--surface)' });
+    const msg = (who, to, when, text) => ({ who, to, when, text, isYou: who === 'you', isAgent: who !== 'you', name: who === 'you' ? 'You' : who });
+    return {
+      theme: this.props.theme ?? 'light',
+      talkTo: [pick('fasil', 'dev manager', false), pick('mentewab', 'product owner', true)],
+      doneWhen: [
+        { id: 'dw1', text: 'Lanes group by epic or by agent, switched with one control.' },
+        { id: 'dw2', text: 'Each card shows its holder, its pull request and that PR’s checks.' },
+        { id: 'dw3', text: 'A card that needs the owner is marked so.' },
+        { id: 'dw4', text: 'The board opens from the cache and says how old its data is.' },
+        { id: 'dw5', text: 'A test checks the lanes against a fake GitHub: one card per open issue, in the right lane.' }
+      ],
+      messages: [
+        msg('you', 'to mentewab', 'today 02:05', 'When you try the board, should you also check it at phone sizes?'),
+        msg('mentewab', 'to you', 'today 02:07', 'Yes. I will try it at 390 px wide as well as on the desktop, and add that to the done-when list.'),
+        msg('menelik', 'to mentewab', '3 Nov 16:20', 'Should Done today reset at midnight on dev-pc or in the owner’s time zone?'),
+        msg('mentewab', 'to menelik', '3 Nov 16:31', 'In the owner’s time zone. The board is read in his browser, so use the browser’s clock.'),
+        msg('haile', 'to fasil', '5 Nov 09:12', '#437 adds the Avatar component. Should the board wait for it, or use initials until it lands?'),
+        msg('fasil', 'to haile', '5 Nov 09:20', 'Wait for #437. #439 goes second in the queue so the cards get the avatars the first time.')
+      ],
+      details: [
+        { k: 'Held by', v: 'Nobody yet' },
+        { k: 'Epic', v: '#420 Web UI: the one window' },
+        { k: 'PRD story', v: 'US-13' },
+        { k: 'Pull request', v: 'None yet' },
+        { k: 'Waiting for', v: '#437 the avatars' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

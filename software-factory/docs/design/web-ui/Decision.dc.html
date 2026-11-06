@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Decision 0004</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="docs" height="1200" hint-size="312px,1200px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1100px;">
+
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-3);">
+<a href="Docs.dc.html" style="color: var(--text-2); text-decoration: none;">PRD and decisions</a><span aria-hidden="true">/</span>
+<a href="Docs.dc.html" style="color: var(--text-2); text-decoration: none;">Decisions</a><span aria-hidden="true">/</span>
+<span style="color: var(--text);">0004</span>
+</nav>
+
+<div style="display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; justify-content: space-between;">
+<header style="flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>Accepted 6 Nov · building, 9 of 12 tasks done</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700; line-height: 1.15;">0004 Agent messaging over NATS</h1>
+<p style="margin: 0; color: var(--text-2); line-height: 1.55;">Move the agents' chatter off GitHub to a NATS hub; keep on GitHub what the PR gate or the owner must see.</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px;">
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Propose a new decision</button>
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Supersede</button>
+</div>
+</header>
+
+<form aria-labelledby="talk-h" style="flex: 0 1 340px; min-width: 0; border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+<h2 id="talk-h" style="margin: 0; font-size: 15px; font-weight: 600;">Talk about this</h2>
+<fieldset style="margin: 0; padding: 0; border: none; display: flex; flex-direction: column; gap: 6px;">
+<legend style="font-size: 13px; color: var(--text-2); padding: 0; margin-bottom: 6px;">To</legend>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border-strong); cursor: pointer;"><input type="radio" name="to" value="mentewab" style="margin: 0;"><dc-import name="Avatar" agent="mentewab" size="24" hint-size="24px,24px"></dc-import><span><span style="font-weight: 600;">mentewab</span> <span style="color: var(--text-2);">(product owner)</span></span></label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--text); cursor: pointer;"><input type="radio" name="to" value="fasil" checked style="margin: 0;"><dc-import name="Avatar" agent="fasil" size="24" hint-size="24px,24px"></dc-import><span><span style="font-weight: 600;">fasil</span> <span style="color: var(--text-2);">(dev manager)</span></span></label>
+</fieldset>
+<div style="display: flex; gap: 8px;">
+<input type="text" placeholder="Ask or tell them something" aria-label="Message" style="flex: 1; min-width: 0; height: 44px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; padding: 0 12px; box-sizing: border-box;">
+<button type="submit" style="height: 44px; padding: 0 16px; border: none; border-radius: 10px; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Send</button>
+</div>
+<span style="font-size: 12px; color: var(--text-3); line-height: 1.45;">Your message goes on this item's thread; the answer appears here and in your Inbox.</span>
+</form>
+</div>
+
+<div role="tablist" aria-label="Documents" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<a role="tab" aria-selected="false" href="Docs.dc.html" style="padding: 10px 0; color: var(--text-2); text-decoration: none;">PRD</a>
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Decisions <span style="color: var(--text-3); font-weight: 400;">5</span></button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Wiki</button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+
+<article style="flex: 2 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 32px; max-width: 700px;">
+
+<section aria-labelledby="ctx-h" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 id="ctx-h" style="margin: 0; font-size: 20px; font-weight: 600;">Context</h2>
+<p style="margin: 0; line-height: 1.65;">All roles share one GitHub account, and its 5,000 REST calls an hour run out in minutes: on 31 Oct nine loops used about 2,300 calls in the first 9 minutes after the reset, then sat idle (#371). Most of those calls are agents talking to each other through comments and labels.</p>
+<p style="margin: 0; line-height: 1.65; color: var(--text-2);">The owner's direction (31 Oct): move the agents' chatter off GitHub to NATS, and keep on GitHub what the PR gate or the owner must see.</p>
+</section>
+
+<section aria-labelledby="dec-h" style="display: flex; flex-direction: column; gap: 14px;">
+<h2 id="dec-h" style="margin: 0; font-size: 20px; font-weight: 600;">Decision</h2>
+<ol style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.6;">
+<li><strong>Messaging is a setting</strong>, behind decision 0003's messaging port: agents send messages through GitHub (the default) or through NATS.</li>
+<li><strong>One hub, a leaf server on each machine</strong>, in Docker. dev-pc runs the hub with JetStream; the Mac runs a leaf that connects over Tailscale.</li>
+<li><strong>One credential per agent.</strong> An agent may publish only as itself.</li>
+<li><strong>When the hub can't be reached, fall back to GitHub</strong>; don't wait.</li>
+</ol>
+<div style="overflow-x: auto;">
+<table style="width: 100%; min-width: 520px; border-collapse: collapse; font-size: 13px;">
+<thead><tr style="text-align: left;">
+<th scope="col" style="padding: 10px 12px 10px 0; color: var(--text-2); font-weight: 600; width: 50%; border-bottom: 1px solid var(--border-strong);">Moves to NATS</th>
+<th scope="col" style="padding: 10px 0; color: var(--text-2); font-weight: 600; border-bottom: 1px solid var(--border-strong);">Stays on GitHub</th>
+</tr></thead>
+<tbody>
+<sc-for list="{{moves}}" as="m" hint-placeholder-count="4">
+<tr><td style="padding: 10px 12px 10px 0; border-bottom: 1px solid var(--border); vertical-align: top;">{{m.a}}</td><td style="padding: 10px 0; border-bottom: 1px solid var(--border); vertical-align: top;">{{m.b}}</td></tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+
+<section aria-labelledby="con-h" style="display: flex; flex-direction: column; gap: 10px;">
+<h2 id="con-h" style="margin: 0; font-size: 20px; font-weight: 600;">Consequences</h2>
+<ul style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; line-height: 1.6;">
+<li>Agents stop re-reading every comment to find claims and wake-ups; GitHub calls go to what the gate and the owner need.</li>
+<li>Nothing that arrives over NATS changes what may merge. The PR gate reads only GitHub.</li>
+<li>Each machine needs Docker. The health check confirms the server answers and that publishing as another agent is refused.</li>
+<li>Said plainly: agents on one machine share one OS user, so per-agent keys stop mistakes, not a hostile agent on that user.</li>
+<li>Amends PRD D10 ("GitHub is the state and the transport") and D13.</li>
+</ul>
+</section>
+
+<section aria-labelledby="bt-h" style="display: flex; flex-direction: column; gap: 6px;">
+<h2 id="bt-h" style="margin: 0 0 4px; font-size: 20px; font-weight: 600;">Build tasks</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{tasks}}" as="t" hint-placeholder-count="4">
+<li><a href="Task.dc.html" style="display: flex; align-items: center; gap: 14px; min-height: 52px; border-bottom: 1px solid var(--border); color: var(--text); text-decoration: none;">
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600;">{{t.title}} <span style="color: var(--text-3); font-weight: 400;">#{{t.n}}</span></span><span style="font-size: 13px; color: var(--text-2);">{{t.note}}</span></span>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 90px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{t.dot}};"></span>{{t.state}}</span>
+</a></li>
+</sc-for>
+</ul>
+<a href="Board.dc.html" style="align-self: flex-start; color: var(--text); font-weight: 600; text-decoration: none; padding-top: 8px;">8 more on the board ›</a>
+</section>
+</article>
+
+<aside style="flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 32px;">
+<section aria-labelledby="who-h" style="display: flex; flex-direction: column; gap: 12px;">
+<h2 id="who-h" style="margin: 0; font-size: 15px; font-weight: 600;">About this decision</h2>
+<span style="font-size: 13px; color: var(--text-2);">Decided by the owner on #293, 6 Nov. Proposed in #373, merged in #399.</span>
+<div style="display: flex; align-items: center; gap: 10px;"><dc-import name="Avatar" agent="fasil" size="28" hint-size="28px,28px"></dc-import><span>fasil <span style="color: var(--text-3); font-size: 13px;">dev manager</span></span></div>
+<div style="display: flex; align-items: center; gap: 10px;"><dc-import name="Avatar" agent="mentewab" size="28" hint-size="28px,28px"></dc-import><span>mentewab <span style="color: var(--text-3); font-size: 13px;">product owner</span></span></div>
+</section>
+
+<section aria-labelledby="rel-h" style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="rel-h" style="margin: 0 0 6px; font-size: 15px; font-weight: 600;">Related decisions</h2>
+<sc-for list="{{related}}" as="r" hint-placeholder-count="3">
+<a href="Decision.dc.html" style="display: flex; flex-direction: column; gap: 2px; padding: 10px 0; border-bottom: 1px solid var(--border); color: var(--text); text-decoration: none;">
+<span style="font-weight: 600; font-size: 13px;">{{r.n}} {{r.title}}</span>
+<span style="font-size: 12px; color: var(--text-3);">{{r.how}} · {{r.note}}</span>
+</a>
+</sc-for>
+</section>
+</aside>
+</div>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">Supersede asks first: "Supersede 0004? This opens a pull request for 0006 that replaces it; nothing changes until you accept it." A proposed decision shows Accept and Send back. If the PR can't be opened: "A branch named decision-0006 already exists. Open its PR, or delete the branch and try again."</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const state = {
+      done: { state: 'Done', dot: 'var(--grey-dot)' },
+      blocked: { state: 'Blocked', dot: 'var(--down)' },
+      ready: { state: 'Ready', dot: 'var(--idle)' }
+    };
+    return {
+      theme: this.props.theme ?? 'light',
+      moves: [
+        { a: 'Task claims and releases (the lock)', b: 'Reviewer passes, approvals and holds: the PR gate trusts only these' },
+        { a: 'Review, answer, item and rework claims', b: 'Owner asks and owner answers, and the owner queue' },
+        { a: 'Wake-ups: new PR, pushed, CI finished, question waiting', b: 'The issue and PR themselves, and the labels the board shows' },
+        { a: 'Questions and answers between agents', b: 'One summary comment when a conversation ends' }
+      ],
+      tasks: [
+        { n: 443, title: 'Network guard lets replies out', note: 'Needs sudo on dev-pc', ...state.blocked },
+        { n: 445, title: 'Add a machine and let it join', note: 'Next in line', ...state.ready },
+        { n: 436, title: 'my-skills on NATS: wake-ups and claims', note: 'Merged by fasil', ...state.done },
+        { n: 431, title: 'Wake-ups and claims over NATS', note: 'Built by menelik', ...state.done }
+      ],
+      related: [
+        { n: '0003', title: 'Ports and adapters', how: 'Builds on', note: 'NATS is the second adapter of its messaging port.' },
+        { n: '0005', title: 'The web UI', how: 'Related', note: 'The UI shows messages and claims live.' },
+        { n: '0002', title: 'The cockpit on Ink', how: 'Widened', note: 'Its bundling rule now covers plugins too.' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

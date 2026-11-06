@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone home</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="width: 390px; height: 844px; overflow: hidden; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; box-sizing: border-box;">
+
+<div style="flex: 1; min-height: 0; overflow-y: auto; padding: 16px 16px 24px; display: flex; flex-direction: column; gap: 24px;">
+
+<header style="display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; padding-top: 8px;">
+<div style="display: flex; flex-direction: column; gap: 2px;">
+<span style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-3);"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--working);"></span>my-skills · live, hub on dev-pc</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 28px; font-weight: 700;">Your team</h1>
+<span style="font-size: 14px; color: var(--text-2);">3 open PRs · 7 tasks ready · Web UI 3 of 14</span>
+</div>
+<button aria-label="Switch project" style="width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; flex-shrink: 0;">MS</button>
+</header>
+
+<a href="PhoneInbox.dc.html" style="display: flex; align-items: center; gap: 12px; border: 1px solid var(--border); border-radius: 14px; padding: 14px 16px; text-decoration: none; color: var(--text); min-height: 60px; box-sizing: border-box;">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot); flex: 0 0 auto;"></span>
+<span style="flex: 1; display: flex; flex-direction: column; gap: 2px;"><span style="font-weight: 600;">2 need you</span><span style="font-size: 13px; color: var(--text-2);">Merge PR #402 · answer mentewab</span></span>
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="color: var(--text-3);"><path d="M9 6l6 6-6 6"></path></svg>
+</a>
+
+<section aria-labelledby="ag-h" style="display: flex; flex-direction: column;">
+<h2 id="ag-h" style="margin: 0 0 4px; font-size: 15px; font-weight: 600;">Agents</h2>
+<sc-for list="{{agents}}" as="a" hint-placeholder-count="5">
+<a href="{{a.href}}" style="display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text); min-height: 64px; box-sizing: border-box;">
+<dc-import name="Avatar" agent="{{a.id}}" size="40" hint-size="40px,40px"></dc-import>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
+<span style="font-weight: 600;">{{a.id}} <span style="font-weight: 400; font-size: 13px; color: var(--text-3);">{{a.role}}</span></span>
+<span style="font-size: 13px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{a.doing}}</span>
+</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); flex: 0 0 auto;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{a.dot}};"></span>{{a.state}}</span>
+</a>
+</sc-for>
+</section>
+
+</div>
+
+<nav aria-label="Main" style="flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--border); background: var(--surface); padding: 6px 8px 24px;">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+<a href="{{t.href}}" aria-current="{{t.current}}" style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 52px; text-decoration: none; color: {{t.color}}; font-size: 11px; font-weight: {{t.weight}};">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{t.icon}}"></path></svg>
+<span>{{t.label}}</span>
+<sc-if value="{{t.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="position: absolute; top: 4px; left: 54%; min-width: 18px; height: 18px; border-radius: 999px; background: var(--badge); color: #FFFFFF; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; box-sizing: border-box;">{{t.badge}}</span></sc-if>
+</a>
+</sc-for>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const active = 'home';
+    const tab = (id, label, href, icon, badge) => ({
+      label, href, icon, hasBadge: !!badge, badge: badge || '',
+      color: id === active ? 'var(--text)' : 'var(--text-3)', weight: id === active ? 700 : 500, current: id === active ? 'page' : 'false'
+    });
+    const roles = { product: 'Product owner', manager: 'Dev manager', builder: 'Builder' };
+    const state = {
+      working: { state: 'Working', dot: 'var(--working)' },
+      waiting: { state: 'Waiting', dot: 'var(--waiting)' },
+      idle: { state: 'Idle', dot: 'var(--idle)' }
+    };
+    const agent = (id, r, s, doing, href) => ({ id, role: roles[r], ...state[s], doing, href });
+    return {
+      theme: this.props.theme ?? 'light',
+      agents: [
+        agent('mentewab', 'product', 'idle', 'Idle until PR #402 merges', 'Chat.dc.html'),
+        agent('fasil', 'manager', 'working', 'Reviewing PR #402', 'Chat.dc.html'),
+        agent('haile', 'builder', 'working', '#437 An avatar for every agent', 'Agent.dc.html'),
+        agent('taytu', 'builder', 'working', '#425 Retire the tmux cockpit', 'Agent.dc.html'),
+        agent('menelik', 'builder', 'waiting', '#438 The PRD and decisions one click away · Mac', 'Agent.dc.html')
+      ],
+      tabs: [
+        tab('home', 'Home', 'PhoneHome.dc.html', 'M3 11l9-7 9 7M5 10v10h14V10'),
+        tab('inbox', 'Inbox', 'PhoneInbox.dc.html', 'M3 13h5l2 3h4l2-3h5M5 5h14l2 8v6H3v-6z', '2'),
+        tab('board', 'Board', 'Board.dc.html', 'M4 4h5v16H4zM10 4h5v10h-5zM16 4h4v13h-4z'),
+        tab('team', 'Team', 'PhoneHome.dc.html', 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21c0-4 3-6 7-6s7 2 7 6M16 3.5a4 4 0 0 1 0 7.5M18 15c2.5.5 4 2.5 4 6')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

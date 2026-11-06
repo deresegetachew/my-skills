@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PR #402</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1300px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="prs" height="1300" hint-size="312px,1300px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px;">
+
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 32px;">
+<header style="display: flex; flex-direction: column; gap: 10px; flex: 1 1 420px; min-width: 0;">
+<nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-3);">
+<a href="PRs.dc.html" style="color: var(--text-2); text-decoration: none;">Pull requests</a><span aria-hidden="true">/</span><span style="color: var(--text);">#402</span>
+</nav>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700; line-height: 1.15;">#402 Product owner: try what was built</h1>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--text-2);">
+<dc-import name="Avatar" agent="mentewab" size="24" hint-size="24px,24px"></dc-import>
+<span>mentewab · changes protected files · fasil reviewed it</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2);"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot);"></span>Approved, waiting for you</span>
+</header>
+
+<section aria-labelledby="talk-h" style="flex: 0 1 360px; min-width: 280px; border: 1px solid var(--border); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box;">
+<h2 id="talk-h" style="margin: 0; font-size: 15px;">Talk about this</h2>
+<div role="radiogroup" aria-label="To" style="display: flex; flex-direction: column; gap: 6px;">
+<span style="font-size: 13px; color: var(--text-3);">To</span>
+<sc-for list="{{talkTo}}" as="p" hint-placeholder-count="2">
+<button role="radio" aria-checked="{{p.checked}}" style="min-height: 44px; display: flex; align-items: center; gap: 10px; padding: 4px 10px; border-radius: 10px; border: {{p.border}}; background: {{p.bg}}; color: var(--text); font: inherit; text-align: left; cursor: pointer;"><dc-import name="Avatar" agent="{{p.id}}" size="28" hint-size="28px,28px"></dc-import><span><span style="font-weight: 600;">{{p.id}}</span> <span style="color: var(--text-2);">({{p.role}})</span></span></button>
+</sc-for>
+</div>
+<div style="display: flex; gap: 8px;">
+<input type="text" placeholder="Ask or tell them something" aria-label="Your message about PR #402" style="flex: 1; min-width: 0; height: 44px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; font: inherit; background: var(--surface); color: var(--text); box-sizing: border-box;">
+<button type="button" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-weight: 600; cursor: pointer;">Send</button>
+</div>
+<span style="font-size: 13px; color: var(--text-3); line-height: 1.5;">Your message goes on this PR's thread; their answer appears here and in your Inbox.</span>
+</section>
+</div>
+
+<div role="tablist" aria-label="Pull request views" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border); flex-wrap: wrap;">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">Overview</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Checks 2</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Files 6</button>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Conversation 4</button>
+</div>
+
+<section role="dialog" aria-modal="false" aria-labelledby="mg-h" style="background: var(--bg-subtle); border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 10px;">
+<h2 id="mg-h" style="margin: 0; font-size: 18px;">Merge #402?</h2>
+<p style="margin: 0; line-height: 1.6; color: var(--text-2);">Only you can merge it: it changes how the product owner works, and the agent that wrote it may not merge that. Checks pass and fasil approved, both on the latest commit. If a new commit lands first, nothing is merged and you are asked again.</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<button type="button" style="height: 44px; padding: 0 20px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Merge #402</button>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Not yet</button>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+<div style="flex: 3 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 32px;">
+
+<section aria-labelledby="cv-h" style="display: flex; flex-direction: column; gap: 6px;">
+<h2 id="cv-h" style="margin: 0 0 6px; font-size: 15px;">Conversation</h2>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{messages}}" as="m" hint-placeholder-count="4">
+<li style="display: flex; gap: 12px; align-items: flex-start; padding: 14px 4px; border-bottom: 1px solid var(--border);">
+<sc-if value="{{m.isAgent}}" hint-placeholder-val="{{ true }}"><dc-import name="Avatar" agent="{{m.who}}" size="32" hint-size="32px,32px"></dc-import></sc-if>
+<sc-if value="{{m.isYou}}" hint-placeholder-val="{{ false }}"><span style="width: 32px; height: 32px; border-radius: 50%; background: var(--bg-active); color: var(--text-2); font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">You</span></sc-if>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-size: 13px; color: var(--text-3);"><span style="color: var(--text); font-weight: 600;">{{m.name}}</span> {{m.to}} · {{m.when}}</span>
+<p style="margin: 0; line-height: 1.55;">{{m.text}}</p>
+</div>
+</li>
+</sc-for>
+</ol>
+</section>
+
+<section aria-labelledby="ck-h" style="display: flex; flex-direction: column; gap: 6px;">
+<h2 id="ck-h" style="margin: 0 0 6px; font-size: 15px;">Checks and reviews</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{checks}}" as="c" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 16px; padding: 12px 4px; border-bottom: 1px solid var(--border);">
+<span style="flex: 1; min-width: 0;">{{c.name}}</span>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 150px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{c.dot}}; flex-shrink: 0;"></span>{{c.state}}</span>
+</li>
+</sc-for>
+</ul>
+<span style="font-size: 13px; color: var(--text-3); line-height: 1.5; margin-top: 6px;">Round 1 found one must-fix (the try-out note dropped the PR number); the latest commit fixes it and fasil approved it.</span>
+</section>
+</div>
+
+<aside aria-labelledby="pp-h" style="flex: 2 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 10px;">
+<h2 id="pp-h" style="margin: 0; font-size: 15px;">Protected files it changes</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<li style="padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere;">The product owner's skill</li>
+<li style="padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; overflow-wrap: anywhere;">The product owner's definition</li>
+</ul>
+<span style="font-size: 13px; color: var(--text-3); line-height: 1.5;">These shape how an agent works, so you merge them, not the agent.</span>
+<a href="CI.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none; font-size: 13px; margin-top: 8px;">Full check log ›</a>
+<span style="font-size: 13px; color: var(--text-3); line-height: 1.5; margin-top: 16px;">After Merge, mentewab is told and the task closes.</span>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pick = (id, role, checked) => ({ id, role, checked: checked ? 'true' : 'false',
+      border: checked ? '1px solid var(--text)' : '1px solid var(--border-strong)', bg: checked ? 'var(--bg-active)' : 'var(--surface)' });
+    const msg = (who, to, when, text) => ({ who, to, when, text, isYou: who === 'you', isAgent: who !== 'you', name: who === 'you' ? 'You' : who });
+    return {
+      theme: this.props.theme ?? 'light',
+      talkTo: [pick('fasil', 'dev manager', false), pick('mentewab', 'product owner', true)],
+      messages: [
+        msg('you', 'to mentewab', '14:31', 'When you try what was built, should you also check it at phone sizes?'),
+        msg('mentewab', 'to you', '14:34', 'Yes. I will try every screen at 390 px wide too, and write what I saw on the PR.'),
+        msg('fasil', 'to mentewab', '13:58', "Does the try-out note go on the PR or on the task's issue?"),
+        msg('mentewab', 'to fasil', '14:05', 'On the PR. The issue gets the one summary comment when the task closes.')
+      ],
+      checks: [
+        { name: 'Factory guard', state: 'Passed', dot: 'var(--working)' },
+        { name: 'Typecheck, lint, test, build', state: 'Passed', dot: 'var(--working)' },
+        { name: 'Reviewer pass', state: 'Recorded', dot: 'var(--working)' },
+        { name: 'Architecture pass', state: 'Recorded', dot: 'var(--working)' },
+        { name: 'Security review', state: 'Not needed', dot: 'var(--idle)' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

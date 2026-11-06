@@ -4,6 +4,7 @@
 // release wins. The calls are the ones `factory issues` always made, moved here from factory_issues.ts; the helpers other
 // commands still share (readyIssues, releaseIssue, the gh calls) stay there until their own step.
 import { claimRecord } from "../../../factory_budget.ts";
+import { citesIn } from "../../../factory_cites.ts";
 import { type Config, taskLabels } from "../../../factory_config.ts";
 import { addLabels, claimSettleSeconds, claimWinner, comment, gh, ghAll, humanComments, type Issue, names, openDependencies,
   ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
@@ -180,7 +181,7 @@ export class GithubTaskTracker implements TaskTracker {
     const body = i.body ?? "";
     return { id: String(i.number), title: i.title, state, holders: [...have].filter((x) => x.startsWith(L.agentPrefix))
       .map((x) => x.slice(L.agentPrefix.length)), dependsOn: dependencies(body, "issue"), todos: todos(body),
-    group: i.milestone?.title ?? "", tags: [...have] };
+    group: i.milestone?.title ?? "", tags: [...have], cites: citesIn(body) };
   }
 }
 

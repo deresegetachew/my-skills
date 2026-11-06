@@ -27,6 +27,7 @@ export interface TaskRow {
   next: boolean;
   /** The id of the first epic that names this task (#440), or null. */
   epic: string | null;
+  cites?: string[]; // the decisions and PRD stories its body cites
   find: string;
 }
 
@@ -77,6 +78,7 @@ export interface PullRow {
   protected: boolean | null;
   next: { action: string; text: string };
   rework: string | null;
+  cites?: string[]; // the decisions and PRD stories its body cites
   find: string;
 }
 

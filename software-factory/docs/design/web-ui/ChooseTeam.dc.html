@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Choose your team</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; background: var(--bg-subtle); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px; display: flex; justify-content: center; padding: 40px 24px; box-sizing: border-box;">
+<div style="width: 100%; max-width: 1100px; display: flex; flex-direction: column; gap: 24px;">
+
+<nav aria-label="Setup steps" style="display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: 13px; flex-wrap: wrap;">
+<span style="color: var(--text-2);">Welcome</span><span aria-hidden="true">›</span>
+<span style="color: var(--text-2);">Check this machine</span><span aria-hidden="true">›</span>
+<span style="color: var(--text-2);">Add a project</span><span aria-hidden="true">›</span>
+<span aria-current="step" style="color: var(--text); font-weight: 600;">Choose your team</span><span aria-hidden="true">›</span>
+<span>Kick off</span>
+</nav>
+
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 40px 48px; display: flex; flex-direction: column; gap: 36px;">
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px;">Choose your team</h1>
+<p style="margin: 0; color: var(--text-2); max-width: 720px; line-height: 1.5;">Pick how many agents work on this project and who they are. Start small: you can add or rename agents later.</p>
+</header>
+
+<div role="group" aria-label="Team size" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;">
+<sc-for list="{{presets}}" as="p" hint-placeholder-count="4">
+<button onClick="{{p.pick}}" aria-pressed="{{p.pressed}}" style="text-align: left; padding: 16px; border-radius: 12px; border: {{p.border}}; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 6px;">
+<span style="font-weight: 600; font-size: 15px;">{{p.name}}</span>
+<span style="color: var(--text-2); font-size: 13px; line-height: 1.4;">{{p.what}}</span>
+<span style="font-size: 12px; color: var(--text-3);">{{p.count}}</span>
+</button>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+<div style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline;">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600;">The legends</h2>
+<span style="color: var(--text-3); font-size: 13px;">Tap to add or remove</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px;">
+<sc-for list="{{legends}}" as="l" hint-placeholder-count="12">
+<button onClick="{{l.toggle}}" aria-pressed="{{l.pressed}}" style="position: relative; padding: 16px 10px 14px; border-radius: 12px; border: {{l.border}}; background: var(--surface); color: var(--text); font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+<dc-import name="Avatar" agent="{{l.id}}" size="64" hint-size="64px,64px"></dc-import>
+<span style="font-weight: 600;">{{l.id}}</span>
+<span style="font-size: 12px; color: var(--text-3); text-align: center; line-height: 1.3;">{{l.who}}</span>
+<sc-if value="{{l.on}}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary); color: var(--on-primary); display: flex; align-items: center; justify-content: center;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"></path></svg></span></sc-if>
+</button>
+</sc-for>
+<button style="padding: 16px 10px; border-radius: 12px; border: 1px dashed var(--border-strong); background: var(--surface); color: var(--text-2); font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 140px;">
+<span style="width: 64px; height: 64px; border-radius: 50%; background: var(--bg-subtle); display: flex; align-items: center; justify-content: center; color: var(--text-2);"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg></span>
+<span style="font-weight: 600; color: var(--text);">Your own</span>
+<span style="font-size: 12px; color: var(--text-3);">Any name, your picture</span>
+</button>
+</div>
+</div>
+
+<aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0 0 8px; font-size: 15px; font-weight: 600;">Your team ({{chosenCount}})</h2>
+<sc-for list="{{chosen}}" as="c" hint-placeholder-count="5">
+<div style="display: flex; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{c.id}}" size="36" hint-size="36px,36px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+<input value="{{c.id}}" aria-label="Name for {{c.roleName}}" style="font: inherit; font-weight: 600; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 4px 6px; margin-left: -6px; min-width: 0;">
+<span style="font-size: 12px; color: var(--text-3);">{{c.roleName}}</span>
+</div>
+<button aria-label="Change picture for {{c.id}}" style="height: 36px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; font-size: 12px; cursor: pointer;">Picture</button>
+</div>
+</sc-for>
+<p style="margin: 8px 0 0; font-size: 13px; color: var(--text-3); line-height: 1.5;">The first one plans the product, the next reviews and merges, the rest build. Solo: you review and merge yourself.</p>
+</aside>
+</div>
+
+<footer style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border-top: 1px solid var(--border); padding-top: 20px;">
+<a href="AddProject.dc.html" style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center;">Back</a>
+<span style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+<span style="color: var(--text-3); font-size: 13px;">Each agent gets its own key and folder.</span>
+<a href="Kickoff.dc.html" style="height: 44px; padding: 0 20px; border-radius: 10px; background: var(--primary); color: var(--on-primary); text-decoration: none; display: inline-flex; align-items: center; font-weight: 600;">Continue with {{chosenCount}} agents</a>
+</span>
+</footer>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  constructor(props) { super(props); this.state = { preset: 'full', picked: ['mentewab', 'fasil', 'haile', 'taytu', 'menelik'] }; }
+  renderVals() {
+    const who = {
+      mentewab: 'Empress Mentewab', fasil: 'Emperor Fasilides', menelik: 'Menelik II', taytu: 'Empress Taytu',
+      haile: 'Haile Selassie', tewodros: 'Tewodros II', yohannes: 'Yohannes IV', zewditu: 'Empress Zewditu',
+      lalibela: 'King Lalibela', ezana: 'King Ezana of Aksum', alula: 'Ras Alula', abebe: 'Abebe Bikila'
+    };
+    const ids = Object.keys(who);
+    const sets = {
+      solo: ['haile'], small: ['mentewab', 'fasil', 'haile'],
+      full: ['mentewab', 'fasil', 'haile', 'taytu', 'menelik'], custom: this.state.picked
+    };
+    const picked = this.state.picked;
+    const roleOf = (i, n) => {
+      if (n === 1) return 'Builder';
+      if (i === 0) return 'Product owner';
+      if (i === 1) return 'Dev manager';
+      return 'Builder';
+    };
+    const preset = (id, name, what) => {
+      const on = this.state.preset === id;
+      const n = id === 'custom' ? picked.length : sets[id].length;
+      return { id, name, what, count: n + (n === 1 ? ' agent' : ' agents'), pressed: on ? 'true' : 'false',
+        border: on ? '2px solid var(--text)' : '1px solid var(--border-strong)',
+        pick: () => this.setState({ preset: id, picked: id === 'custom' ? picked : sets[id].slice() }) };
+    };
+    return {
+      theme: this.props.theme ?? 'light',
+      presets: [
+        preset('solo', 'Just a builder', 'One agent builds; you plan, review and merge.'),
+        preset('small', 'A small team', 'A product owner, a dev manager and one builder.'),
+        preset('full', 'The full team', 'A product owner, a dev manager and three builders.'),
+        preset('custom', 'Your own mix', 'Pick any legends below, or add your own.')
+      ],
+      legends: ids.map((id) => {
+        const on = picked.indexOf(id) !== -1;
+        return { id, who: who[id], on, pressed: on ? 'true' : 'false',
+          border: on ? '2px solid var(--text)' : '1px solid var(--border)',
+          toggle: () => this.setState({ preset: 'custom', picked: on ? picked.filter((x) => x !== id) : picked.concat([id]) }) };
+      }),
+      chosen: picked.map((id, i) => ({ id, roleName: roleOf(i, picked.length) })),
+      chosenCount: picked.length
+    };
+  }
+}
+</script>
+</body>
+</html>

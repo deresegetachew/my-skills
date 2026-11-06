@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Every command, and its screen</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="width: 1440px; box-sizing: border-box; padding: 48px; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 13px; display: flex; flex-direction: column; gap: 24px;">
+<header style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px;">Every command, and its screen</h1>
+<p style="margin: 0; color: var(--text-2);">The UI comes first: each `factory` command has a home here. A command marked "agents only" stays a terminal tool the agents run; the owner sees its result.</p>
+</header>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start;">
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="9">
+<section style="border: 1px solid var(--border); border-radius: 14px; overflow: hidden;">
+<h2 style="margin: 0; padding: 12px 14px; font-size: 14px; background: var(--{{g.color}}-fill); color: var(--{{g.color}}-ink);">{{g.name}}</h2>
+<table style="width: 100%; border-collapse: collapse;">
+<tbody>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="5">
+<tr>
+<td style="padding: 7px 14px; border-top: 1px solid var(--border); font-family: ui-monospace, Menlo, monospace; font-size: 12px; vertical-align: top; width: 52%;">{{r.cmd}}</td>
+<td style="padding: 7px 14px 7px 0; border-top: 1px solid var(--border); vertical-align: top;"><a href="{{r.href}}" style="color: var(--blue-ink); text-decoration: none; font-weight: 600;">{{r.screen}}</a></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+</sc-for>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const r = (cmd, screen, file) => ({ cmd, screen, href: file + '.dc.html' });
+    return {
+      theme: this.props.theme ?? 'light',
+      groups: [
+        { name: 'First launch and setup', color: 'blue', rows: [
+          r('install-shim, ui', 'Welcome', 'Welcome'), r('doctor [--sandbox]', 'Machine check, Health', 'MachineCheck'),
+          r('bootstrap machine|project|all|status', 'Machine check', 'MachineCheck'), r('machine join (new, #445)', 'Join hub', 'JoinHub'),
+          r('init, init-roles, issues setup', 'Project wizard', 'ProjectWizard'), r('prd --stage', 'Kickoff', 'Kickoff'),
+          r('update --tasks, --release (first install)', 'Project wizard', 'ProjectWizard') ] },
+        { name: 'Team and machines', color: 'green', rows: [
+          r('coding-agent / dev-manager / product-owner loop', 'Agent, Team setup', 'Agent'), r('owner start / owner stop', 'Agent', 'Agent'),
+          r('loop [-i], agent <name>', 'Agent: open its session', 'Agent'), r('nats user add', 'Team setup, Machines', 'TeamSetup'),
+          r('machine show|setup', 'Machines, Team setup', 'Machines'), r('machine add (new, #445)', 'Add machine', 'AddMachine'),
+          r('nats up|down|status', 'Machines', 'Machines'), r('heartbeat …', 'Machines', 'Machines'),
+          r('autostart …, resume', 'Machines, Team setup', 'Machines'), r('remote add|cloud|list|remove', 'Add machine', 'AddMachine'),
+          r('worktree, env', 'Agent', 'Agent'), r('agents ls|list|card|sweep', 'Home, Machines', 'Main') ] },
+        { name: 'Every day', color: 'violet', rows: [
+          r('status, cockpit --json', 'Home', 'Main'), r('cockpit --needs, owner answer', 'Inbox', 'Inbox'),
+          r('alerts check|watch', 'Inbox: notify me', 'Inbox'), r('cockpit --tasks, issues list|show', 'Board, Task', 'Board'),
+          r('next', 'Task: next in line', 'Task'), r('say', 'Chat, Agent', 'Chat'), r('follow', 'Agent, Activity', 'Activity'),
+          r('messages ls|new|tail', 'Activity', 'Activity'), r('cockpit (search, #392)', 'Search', 'Search') ] },
+        { name: 'Tasks and pull requests', color: 'pink', rows: [
+          r('prs, cockpit --prs', 'Pull requests', 'PRs'), r('owner merge --head', 'PR, Inbox', 'PR'),
+          r('owner label', 'Task, PR', 'Task'), r('reviews, review-pass', 'PR', 'PR'), r('rereview', 'PR', 'PR'),
+          r('ci log', 'PR, CI', 'PR'), r('release <agent>', 'Task, Maintenance', 'Task'), r('claims', 'Maintenance, Agent', 'Maintenance') ] },
+        { name: 'Product', color: 'yellow', rows: [
+          r('prd [--story N]', 'PRD and decisions', 'Docs'), r('decisions (docs/decisions)', 'Decision', 'Decision'),
+          r('signoff ls|add|plan|confirm|result', 'Sign-off and testing', 'Signoff'), r('artifacts pull|status|list', 'Artifacts', 'Artifacts'),
+          r('epics (new, #440)', 'Epics, Epic', 'Epics') ] },
+        { name: 'CI', color: 'blue', rows: [
+          r('ci status, cockpit --ci', 'CI', 'CI'), r('ci use local|github', 'CI', 'CI'), r('ci install|uninstall|runners <n>', 'CI', 'CI'),
+          r('ci start|stop|logs', 'CI', 'CI'), r('ci clean|stale|check', 'CI', 'CI'), r('turbo status|install|down', 'CI, Integrations', 'CI') ] },
+        { name: 'Health and measure', color: 'red', rows: [
+          r('cockpit --health, version', 'Health, Releases', 'Health'), r('reset-run', 'Health, Maintenance', 'Health'),
+          r('usage, usage --task --budget', 'Usage and cost', 'Usage'), r('report', 'Usage and cost', 'Usage'),
+          r('lessons show|check|suggest|add|prune', 'Maintenance, Usage', 'Maintenance') ] },
+        { name: 'Maintain and release', color: 'grey', rows: [
+          r('releases, version', 'Releases', 'Releases'), r('update [version], --archive', 'Releases', 'Releases'),
+          r('rollback, migrate-to-release', 'Releases', 'Releases'), r('owner release X.Y.Z', 'Releases', 'Releases'),
+          r('clean', 'Maintenance', 'Maintenance'), r('handover snapshot', 'Maintenance', 'Maintenance'),
+          r('manager-claims list', 'Maintenance', 'Maintenance'), r('wait …', 'Maintenance', 'Maintenance') ] },
+        { name: 'Settings and integrations', color: 'violet', rows: [
+          r('settings list|help|show|get', 'Settings', 'Settings'), r('settings set|unset --stage, diff --staged', 'Settings', 'Settings'),
+          r('settings pr', 'Settings: propose as a PR', 'Settings'), r('settings --local', 'Settings: this machine', 'Settings'),
+          r('settings validate|docs', 'Settings', 'Settings'), r('plugins, MCP, accounts (new, #441)', 'Integrations', 'Integrations') ] },
+        { name: 'Agents only (results shown in the UI)', color: 'grey', rows: [
+          r('verify, fix, check, guard, run-check', 'PR: checks', 'PR'), r('precheck, watch, manage-tick', 'Home: what the manager sees', 'Main'),
+          r('cockpit watch <item>', 'Activity', 'Activity'), r('manager-claims next|review|answer|merge|ask', 'PR: review claim', 'PR') ] }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

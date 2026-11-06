@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PRD and decisions</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1200px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="docs" height="1200" hint-size="312px,1200px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 28px; max-width: 1100px;">
+
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-size: 34px; font-weight: 700;">PRD and decisions</h1>
+<p style="margin: 0; color: var(--text-2);">What the factory is for, what is decided, and how far each user story has got.</p>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap;">
+<a href="https://github.com/deresegetachew/my-skills/blob/main/software-factory/docs/PRD.md" style="height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; box-sizing: border-box;">Open on GitHub</a>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 10px; border: none; background: var(--primary); color: var(--on-primary); font: inherit; font-weight: 600; cursor: pointer;">Propose a change</button>
+</div>
+</header>
+
+<div role="tablist" aria-label="Documents" style="display: flex; gap: 28px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="background: none; border: none; border-bottom: 2px solid var(--text); padding: 10px 0; font: inherit; font-weight: 600; color: var(--text); cursor: pointer;">PRD</button>
+<a role="tab" aria-selected="false" href="Decision.dc.html" style="padding: 10px 0; color: var(--text-2); text-decoration: none;">Decisions <span style="color: var(--text-3);">5</span></a>
+<button role="tab" aria-selected="false" style="background: none; border: none; padding: 10px 0; font: inherit; color: var(--text-2); cursor: pointer;">Wiki</button>
+</div>
+
+<section aria-labelledby="pg-h" style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;">
+<h2 id="pg-h" style="margin: 0; font-size: 15px; font-weight: 600;">Progress by user story</h2>
+<span style="font-size: 13px; color: var(--text-2);">5 of 13 done · 1 has no task</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 24px;">
+<sc-for list="{{stories}}" as="s" hint-placeholder-count="13">
+<a href="#{{s.id}}" style="display: flex; align-items: center; gap: 8px; min-height: 44px; border-bottom: 1px solid var(--border); text-decoration: none; color: var(--text); font-size: 13px;">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: {{s.dot}}; flex-shrink: 0;"></span>
+<span style="font-weight: 600;">{{s.id}}</span>
+<span style="margin-left: auto; color: var(--text-3);">{{s.count}}</span>
+</a>
+</sc-for>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px; align-items: flex-start;">
+
+<nav aria-label="PRD outline" style="flex: 0 1 210px; min-width: 190px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px;">
+<sc-for list="{{outline}}" as="o" hint-placeholder-count="12">
+<a href="#{{o.anchor}}" style="padding: 7px 10px; padding-left: {{o.pad}}; border-radius: 8px; color: {{o.ink}}; text-decoration: none; font-size: 13px; background: {{o.bg}}; font-weight: {{o.weight}};">{{o.label}}</a>
+</sc-for>
+</nav>
+
+<article style="flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 16px; max-width: 720px;">
+<span style="font-size: 13px; color: var(--text-3);">Kept by mentewab · last changed in #399</span>
+<h2 id="s4-10" style="margin: 0; font-size: 22px; font-weight: 600;">4.10 The cockpit and the core it needs</h2>
+<p style="margin: 0; line-height: 1.65; color: var(--text-2);">From #295 (owner, 28 Oct 2026). Each task names its story, so this page shows their progress. The core first: every screen needs it.</p>
+
+<sc-for list="{{text}}" as="t" hint-placeholder-count="5">
+<section id="{{t.id}}" style="display: flex; flex-direction: column; gap: 10px; padding: 20px 0; border-top: 1px solid var(--border);">
+<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+<span style="font-weight: 700;">{{t.id}}</span>
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2);"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{t.dot}};"></span>{{t.status}}</span>
+</div>
+<p style="margin: 0; line-height: 1.65;">{{t.body}}</p>
+<sc-if value="{{t.hasTasks}}" hint-placeholder-val="{{ true }}"><span style="font-size: 13px; color: var(--text-2);">Tasks: {{t.taskLine}}</span></sc-if>
+<sc-if value="{{t.noTask}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+<span style="font-size: 13px; color: var(--text-2);">No task yet.</span>
+<a href="Chat.dc.html" style="display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); font-size: 13px; text-decoration: none;">Ask mentewab to file one</a>
+</div>
+</sc-if>
+</section>
+</sc-for>
+</article>
+
+<aside style="flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0 0 6px; font-size: 15px; font-weight: 600;">Recent decisions</h2>
+<sc-for list="{{decisions}}" as="d" hint-placeholder-count="4">
+<a href="Decision.dc.html" style="display: flex; flex-direction: column; justify-content: center; gap: 2px; min-height: 52px; border-bottom: 1px solid var(--border); color: var(--text); text-decoration: none;">
+<span style="font-size: 13px; font-weight: 600;">{{d.n}} {{d.title}}</span>
+<span style="font-size: 12px; color: var(--text-3);">{{d.status}}</span>
+</a>
+</sc-for>
+</aside>
+</div>
+
+<p style="margin: 0; color: var(--text-3); font-size: 13px;">While loading: "Reading the PRD and the task issues…". If the issues don't load: "Progress could not be counted: dev-pc is not signed in to GitHub. Open Machines, sign it in, then reload."</p>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const story = (id, short, done, total) => {
+      const none = total === 0;
+      const full = !none && done === total;
+      return {
+        id, short,
+        count: none ? 'No task' : done + ' of ' + total,
+        dot: none ? 'var(--red-dot)' : full ? 'var(--grey-dot)' : done > 0 ? 'var(--working)' : 'var(--idle)'
+      };
+    };
+    const st = {
+      decided: { status: 'Decided', dot: 'var(--idle)' },
+      built: { status: 'Built', dot: 'var(--grey-dot)' }
+    };
+    const body = (id, s, tasks, text) => ({
+      id, ...s, body: text, taskLine: tasks.join(', '), hasTasks: tasks.length > 0, noTask: tasks.length === 0
+    });
+    const outline = [
+      ['1. What the factory is', 's1', 0], ['2. Decisions taken', 's2', 0], ['3. Roles', 's3', 0], ['4. User stories', 's4', 0],
+      ['4.1 Builder', 's4-1', 1], ['4.2 Dev manager', 's4-2', 1], ['4.3 Product owner', 's4-3', 1], ['4.5 The owner', 's4-5', 1],
+      ['4.9 Liveness, messages, cost', 's4-9', 1], ['4.10 The cockpit and the core', 's4-10', 1, true],
+      ['5. Out of scope', 's5', 0], ['6. Later and open', 's6', 0]
+    ].map(([label, anchor, sub, on]) => ({ label, anchor, pad: sub ? '22px' : '10px', bg: on ? 'var(--bg-active)' : 'transparent', weight: on ? 600 : 400, ink: on ? 'var(--text)' : 'var(--text-2)' }));
+    return {
+      theme: this.props.theme ?? 'light',
+      stories: [
+        story('US-1', 'The factory as data', 2, 3), story('US-2', 'Heartbeat for every role', 1, 2),
+        story('US-3', 'Each session in its own window', 0, 1), story('US-4', 'See a sub-manager work', 0, 1),
+        story('US-5', 'Follow finds local sessions', 0, 0), story('US-6', 'Owner actions in one place', 3, 4),
+        story('US-7', 'Alerts when I am needed', 1, 1), story('US-8', 'Views from one cache', 1, 2),
+        story('US-9', 'Settings as one PR', 1, 1), story('US-10', 'One cockpit window', 1, 1),
+        story('US-11', 'Act from the cockpit', 1, 1), story('US-12', 'Alerts in the cockpit', 1, 1),
+        story('US-13', 'Views like the canvas', 3, 14)
+      ],
+      outline,
+      text: [
+        body('US-1', st.decided, ['#428', '#430', '#446'],
+          'As the owner, I get the whole factory as data in one snapshot: sessions and their states across machines, the items that need me, pull requests, CI, the version and the health summary.'),
+        body('US-5', st.decided, [],
+          'As the owner, following an agent finds its session on this machine directly, not only through a remote machine.'),
+        body('US-6', st.decided, ['#402'],
+          'As the owner, what I do by hand works the same wherever I do it: merge, label, answer and release. Merge says when a pull request touches protected paths.'),
+        body('US-11', st.built, ['#309'],
+          'As the owner, I act from the cockpit: merge, label, release, answer, start and stop an agent. Each asks me first when it changes GitHub or the machine.'),
+        body('US-13', st.decided, ['#437', '#438', '#439', '11 more in epic #420'],
+          'As the owner, the views move towards the canvas boards: pull request detail, CI cards, the settings table, usage bars.')
+      ],
+      decisions: [
+        { n: '0005', title: 'The web UI', status: 'Accepted' },
+        { n: '0004', title: 'Agent messaging over NATS', status: 'Accepted' },
+        { n: '0003', title: 'Ports and adapters', status: 'Accepted' },
+        { n: '0002', title: 'The cockpit on Ink', status: 'Replaced' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

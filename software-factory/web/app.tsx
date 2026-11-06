@@ -12,6 +12,8 @@ import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHa
   type Tone } from "./model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
+import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChannel } from "./docs.tsx";
+import type { DocSection } from "./docs_model.ts";
 import { CSS } from "./style.ts";
 import { CiChannel, EpicsChannel, loadViews, PullsChannel, TasksChannel, VIEWS_CSS } from "./views.tsx";
 import { searchRows, type ViewsData } from "./views_model.ts";
@@ -308,6 +310,8 @@ function App() {
   const [channelsBy, setChannelsBy] = useState<Record<string, ChannelView[]>>({});
   const [liveBy, setLiveBy] = useState<Record<string, Live>>({});
   const [viewsBy, setViewsBy] = useState<Record<string, ViewsData>>({}); // tasks, pull requests, CI (#424)
+  const [docsBy, setDocsBy] = useState<Record<string, DocSection[]>>({}); // the PRD, the decisions and the wiki (#438)
+  const [docHits, setDocHits] = useState<{ project: string; projectName: string; hit: DocHit }[]>([]);
   const [find, setFind] = useState(""); // the filter a view channel opens with (the search's row, #392)
   const [conn, setConn] = useState<Conn>("connecting");
   const [route, setRoute] = useState(() => parseHash(location.hash));
@@ -337,6 +341,8 @@ function App() {
         setProjects(list);
         const all = await Promise.all(list.map((p) => call<{ channels: ChannelView[] }>(token, `/api/projects/${encodeURIComponent(p.id)}/channels`)));
         if (!gone) setChannelsBy(Object.fromEntries(list.map((p, i) => [p.id, all[i]?.channels ?? []])));
+        const docs = await Promise.all(list.map((p) => call<{ sections?: DocSection[] }>(token, `/api/projects/${encodeURIComponent(p.id)}/docs`).catch(() => ({}))));
+        if (!gone) setDocsBy(Object.fromEntries(list.map((p, i) => [p.id, (docs[i] as { sections?: DocSection[] }).sections ?? []])));
       } catch (e) {
         signedOut(e);
       }
@@ -395,6 +401,25 @@ function App() {
       .catch(signedOut);
   }, [token, viewProject, haveViews, signedOut]);
 
+  // the shell's search also reads the docs of every project (the server does the matching)
+  useEffect(() => {
+    const words = query.trim();
+    if (!token || !projects || !words) {
+      setDocHits([]);
+      return;
+    }
+    let gone = false;
+    const timer = setTimeout(() => {
+      Promise.all(projects.map((p) => call<{ hits?: DocHit[] }>(token, `/api/projects/${encodeURIComponent(p.id)}/docs/search?q=${encodeURIComponent(words)}`)
+        .then((r) => (r.hits ?? []).map((hit) => ({ project: p.id, projectName: p.name, hit }))).catch(() => [])))
+        .then((all) => { if (!gone) setDocHits(all.flat().slice(0, 30)); });
+    }, 200);
+    return () => {
+      gone = true;
+      clearTimeout(timer);
+    };
+  }, [token, projects, query]);
+
   useEffect(() => {
     const onHash = (): void => setRoute(parseHash(location.hash));
     addEventListener("hashchange", onHash);
@@ -432,11 +457,19 @@ function App() {
   const hits = useMemo(() => searchChannels(views, query, liveWords), [views, query, liveWords]);
   const rowHits = useMemo(() => searchRows(projects ?? [], viewsBy, query), [projects, viewsBy, query]);
 
+  const get = useCallback(<T,>(path: string) => call<T>(token, path).catch((e: unknown) => {
+    signedOut(e);
+    throw e;
+  }), [token, signedOut]);
+
   if (!token) return <Gate wrong={wrong} onToken={(t) => { keepToken(t); setWrong(false); setToken(t); }} />;
   if (!projects) return <main className="gate"><p>Loading…</p></main>;
 
   const project = projects.find((p) => p.id === route?.project) ?? projects[0] as Project;
   const view = views.find((v) => v.id === project.id) ?? { id: project.id, name: project.name, channels: [] };
+  const docRoute = route ? parseDocChannel(route.channel) : null;
+  const docPages = pagesOf(docsBy[project.id]);
+  const docPage = docRoute ? docPages.find((d) => d.id === docRoute.id) : undefined;
   const channel = view.channels.find((c) => c.id === route?.channel) ?? view.channels[0];
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
@@ -474,7 +507,7 @@ function App() {
   };
   const viewChannel = (name: string) => {
     const View = VIEW_CHANNELS[name] as (typeof VIEW_CHANNELS)[string];
-    return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast}
+    return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast} docs={docPages}
       open={(c, f) => go(project.id, c, f)} />;
   };
 
@@ -524,6 +557,7 @@ function App() {
               const row = rowHits[0];
               if (e.key === "Enter" && first) go(first.project, first.channel.id);
               else if (e.key === "Enter" && row) go(row.project, row.channel, row.find);
+              else if (e.key === "Enter" && docHits[0]) go(docHits[0].project, docChannel(docHits[0].hit.id));
               if (e.key === "Escape") setQuery("");
             }} />
           {!query && <kbd>/</kbd>}
@@ -531,7 +565,7 @@ function App() {
         <div className="channels">
           {query ? (
             <div className="section">
-              <h2>{hits.length + rowHits.length ? `${hits.length + rowHits.length} match${hits.length + rowHits.length > 1 ? "es" : ""}` : `No match for "${query}"`}</h2>
+              <h2>{hits.length + rowHits.length + docHits.length ? `${hits.length + rowHits.length + docHits.length} match${hits.length + rowHits.length + docHits.length > 1 ? "es" : ""}` : `No match for "${query}"`}</h2>
               {hits.map((h) => (
                 <button key={`${h.project}/${h.channel.id}`} className="chan" onClick={() => go(h.project, h.channel.id)}>
                   {h.channel.kind === "agent" ? <Avatar name={h.channel.name} role={h.channel.role} image={h.channel.avatar} size={20} /> : <span className="hash">#</span>}
@@ -543,6 +577,13 @@ function App() {
                 <button key={`${h.project}/${h.channel}/${h.find}/${i}`} className="chan" onClick={() => go(h.project, h.channel, h.find)}>
                   <span className="hash">›</span>
                   <span className="name">{h.title}<span className="sub">{h.view} · {h.projectName}{h.detail ? ` · ${h.detail}` : ""}</span></span>
+                </button>
+              ))}
+              {docHits.length > 0 && <h2>In the docs</h2>}
+              {docHits.map((h, i) => (
+                <button key={`${h.project}/${h.hit.id}/${h.hit.line}/${i}`} className="chan" onClick={() => go(h.project, docChannel(h.hit.id))}>
+                  <span className="hash">§</span>
+                  <span className="name">{h.hit.text}<span className="sub">{h.hit.title} · line {h.hit.line} · {h.projectName}</span></span>
                 </button>
               ))}
             </div>
@@ -560,6 +601,24 @@ function App() {
                   </button>
                 ))}
               </div>
+              <div className="section">
+                <h2>Docs</h2>
+                {(docsBy[project.id] ?? []).map((s) => s.id === "prd" ? s.pages.map((d) => (
+                  <button key={d.id} className="chan" aria-current={docRoute?.id === d.id} onClick={() => go(project.id, docChannel(d.id))}>
+                    <span className="hash">§</span><span className="name">PRD</span>
+                  </button>
+                )) : (
+                  <details key={s.id} className="docs-sec" open={docRoute !== null && s.pages.some((d) => d.id === docRoute.id)}>
+                    <summary>{s.title} <span className="meta">{s.pages.length}</span></summary>
+                    {s.pages.map((d) => (
+                      <button key={d.id} className="chan" aria-current={docRoute?.id === d.id} title={d.title} onClick={() => go(project.id, docChannel(d.id))}>
+                        <span className="hash">§</span><span className="name">{d.title}</span>
+                      </button>
+                    ))}
+                  </details>
+                ))}
+                {(docsBy[project.id] ?? []).filter((s) => s.problem).map((s) => <p key={s.id} className="sub docs-problem" title={s.problem?.fix}>{s.title}: {s.problem?.message}</p>)}
+              </div>
             </>
           )}
         </div>
@@ -572,12 +631,16 @@ function App() {
         <header className="main-head">
           <button className="menu" aria-label="Projects and channels" onClick={() => setMenu(true)}><MenuIcon /></button>
           <div className="grow">
-            <h2>{channel?.kind === "agent" ? <Avatar name={channel.name} role={channel.role} size={26} /> : <span className="hash">#</span>}{channel?.title ?? "—"}</h2>
-            <div className="subtitle">{subtitle}</div>
+            <h2>{docRoute ? <span className="hash">§</span>
+              : channel?.kind === "agent" ? <Avatar name={channel.name} role={channel.role} size={26} /> : <span className="hash">#</span>}
+              {docRoute ? docPage?.title ?? docRoute.id : channel?.title ?? "—"}</h2>
+            <div className="subtitle">{docRoute ? `Docs · ${project.name}` : subtitle}</div>
           </div>
-          {channel?.kind === "agent" && live && !project.problem && agentActions(agent, channel, project, setAsk)}
+          {!docRoute && channel?.kind === "agent" && live && !project.problem && agentActions(agent, channel, project, setAsk)}
         </header>
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
+          : docRoute ? <DocPageView key={`${project.id}/${docRoute.id}`} project={project.id} id={docRoute.id} anchor={docRoute.anchor} get={get} pages={docPages}
+            open={(c) => go(project.id, c)} />
           : !channel ? <div className="body"><p className="empty">This project has no channels.</p></div>
           : channel.kind === "agent" ? <AgentChannel key={`${project.id}/${channel.name}`} agent={agent} channel={channel} live={live} project={project} token={token} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
@@ -613,6 +676,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = CSS + VIEWS_CSS + AVATAR_CSS;
+style.textContent = CSS + VIEWS_CSS + DOCS_CSS + AVATAR_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

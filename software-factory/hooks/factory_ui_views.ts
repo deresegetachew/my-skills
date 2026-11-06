@@ -39,6 +39,11 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
 }
 
+/** The strings of a list, at most 20 of 80 characters (a body's cites, from the cache). */
+function strings(v: unknown): string[] {
+  return (Array.isArray(v) ? v : []).filter((x): x is string => typeof x === "string" && x !== "").slice(0, 20).map((x) => x.slice(0, 80));
+}
+
 function num(v: unknown): number {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
@@ -59,6 +64,7 @@ export interface TaskRow {
   next: boolean;
   /** The id of the first epic that names this task (#440), or null. */
   epic: string | null;
+  cites: string[];
   find: string;
 }
 
@@ -102,6 +108,7 @@ export interface PullView {
   protected: boolean | null;
   next: { action: string; text: string };
   rework: string | null;
+  cites: string[];
   find: string;
 }
 
@@ -239,7 +246,7 @@ function tasksView(p: UiProject, cache: Obj, repo: string, pulls: PullView[]): T
     return { id, title: str(t.title), state: str(t.state), stateText: taskStateText(str(t.state)), holders, group: str(t.group),
       todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
-      pr: pr ? { number: pr.number, url: pr.url } : null, next: isNext, epic: epicOf.get(id) ?? null, find: taskText(t) };
+      pr: pr ? { number: pr.number, url: pr.url } : null, next: isNext, epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
   });
   return { source, tasks, next, problems };
 }
@@ -265,7 +272,7 @@ function pullsView(cache: Obj): PullsView {
         failing: list(x.notGreen).filter((j) => str(j.state) === "red").map((j) => str(j.name)) },
       review: reviewOf(x), protected: typeof x.protected === "boolean" ? x.protected : null,
       next: { action: str(x.next) || "none", text: str(x.nextText) || str(x.next) || "none" }, rework: str(x.rework) || null,
-      find: prText(x) };
+      cites: strings(x.cites), find: prText(x) };
   });
   return { pulls, problems };
 }

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Team home</title>
+<script src="./support.js"></script>
+<link rel="stylesheet" href="theme.css">
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Space+Grotesk:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>body{margin:0}</style>
+</helmet>
+<div data-theme="{{theme}}" style="min-height: 1800px; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--text); font-family: Inter, system-ui, sans-serif; font-size: 14px;">
+<dc-import name="Sidebar" active="home" height="1800" hint-size="312px,1800px"></dc-import>
+<main style="flex: 999 1 560px; min-width: 0; max-width: 1100px; padding: 32px 44px; box-sizing: border-box; display: flex; flex-direction: column; gap: 40px;">
+
+<div role="status" style="display: flex; align-items: center; gap: 10px; margin-bottom: -16px; color: var(--text-2); font-size: 13px;">
+<span style="width: 8px; height: 8px; border-radius: 50%; background: var(--blue-dot); flex-shrink: 0;"></span>
+<span style="flex: 1; min-width: 0;">A new version of the factory is ready (v[X.Y.Z]). <a href="Releases.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none;">See what changed ›</a></span>
+<button aria-label="Dismiss this notice" style="width: 44px; height: 44px; border: none; background: none; color: var(--text-3); font: inherit; font-size: 18px; cursor: pointer;">×</button>
+</div>
+
+<header style="display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span style="color: var(--text-3); font-size: 13px;">Thursday, 6 November</span>
+<h1 style="margin: 0; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 34px; line-height: 1.15;">Your team is building the one window</h1>
+<p style="margin: 0; color: var(--text-2);">3 builders working, 1 review in progress, 2 things need you.</p>
+</div>
+<button style="height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Add an agent</button>
+</header>
+
+<section aria-labelledby="needs-you" style="display: flex; flex-direction: column; gap: 4px;">
+<h2 id="needs-you" style="margin: 0 0 6px; font-size: 15px; display: flex; align-items: center; gap: 8px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot);"></span>Needs you</h2>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{asks}}" as="a" hint-placeholder-count="2">
+<li style="display: flex; align-items: center; gap: 16px; padding: 18px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{a.who}}" size="36" hint-size="36px,36px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<span style="font-weight: 600; font-size: 15px;">{{a.title}}</span>
+<span style="color: var(--text-2); font-size: 13px;">{{a.sub}}</span>
+</div>
+<div style="width: 170px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<sc-if value="{{a.primary}}" hint-placeholder-val="{{ true }}"><a href="{{a.href}}" style="height: 40px; padding: 0 16px; border-radius: 10px; background: var(--primary); color: var(--on-primary); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">{{a.action}}</a></sc-if>
+<sc-if value="{{a.secondary}}" hint-placeholder-val="{{ false }}"><a href="{{a.href}}" style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">{{a.action}}</a></sc-if>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-labelledby="team" style="display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
+<h2 id="team" style="margin: 0; font-size: 15px;">The team</h2>
+<a href="Board.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none;">Open the board ›</a>
+</div>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{team}}" as="t" hint-placeholder-count="5">
+<li style="display: flex; align-items: center; gap: 16px; padding: 16px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{t.id}}" size="36" hint-size="36px,36px"></dc-import>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+<a href="Agent.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none; font-size: 15px;">{{t.id}}</a>
+<span style="color: var(--text-2); font-size: 13px;">{{t.sub}}</span>
+</div>
+<span style="display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px; width: 190px; flex-shrink: 0;"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{t.dot}}; flex-shrink: 0;"></span>{{t.state}}</span>
+<div style="width: 170px; flex-shrink: 0; display: flex; justify-content: flex-end;">
+<a href="Chat.dc.html" style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); color: var(--text); text-decoration: none; display: inline-flex; align-items: center; white-space: nowrap;">Talk</a>
+</div>
+</li>
+</sc-for>
+</ul>
+</section>
+
+<section aria-labelledby="today" style="display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px;">
+<h2 id="today" style="margin: 0; font-size: 15px;">Today</h2>
+<a href="Activity.dc.html" style="color: var(--text); font-weight: 600; text-decoration: none;">All activity ›</a>
+</div>
+<ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+<sc-for list="{{today}}" as="e" hint-placeholder-count="3">
+<li style="display: flex; gap: 12px; align-items: center; padding: 12px 4px; border-bottom: 1px solid var(--border);">
+<dc-import name="Avatar" agent="{{e.agent}}" size="28" hint-size="28px,28px"></dc-import>
+<span style="flex: 1; min-width: 0; color: var(--text-2);"><span style="color: var(--text); font-weight: 600;">{{e.agent}}</span> {{e.what}}</span>
+<span style="font-size: 13px; color: var(--text-3);">{{e.at}}</span>
+</li>
+</sc-for>
+</ol>
+</section>
+
+<dc-import name="HowItRuns" theme="{{theme}}" hint-size="100%,660px"></dc-import>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const ask = (o) => ({ ...o, secondary: !o.primary });
+    return {
+      theme: this.props.theme ?? 'light',
+      asks: [
+        ask({ who: 'fasil', title: 'Merge PR #402?', sub: 'Changes protected files, so only you can merge it. Tests pass.',
+          action: 'Review and merge', href: 'PR.dc.html', primary: true }),
+        ask({ who: 'mentewab', title: 'Where should epics live?', sub: 'GitHub issues with an epic label, or files next to the PRD.',
+          action: 'Answer', href: 'Decision.dc.html', primary: false })
+      ],
+      team: [
+        { id: 'mentewab', sub: 'Product owner · idle until PR #402 merges', state: 'Idle', dot: 'var(--idle)' },
+        { id: 'fasil', sub: 'Dev manager · reviewing PR #402', state: 'Reviewing', dot: 'var(--working)' },
+        { id: 'haile', sub: 'Builder on dev-pc · #437 An avatar for every agent', state: 'Writing failing tests', dot: 'var(--working)' },
+        { id: 'taytu', sub: 'Builder on dev-pc · #425 Retire the tmux cockpit', state: 'Working', dot: 'var(--working)' },
+        { id: 'menelik', sub: "Builder on the owner's Mac · #438 The PRD and decisions one click away", state: 'Reading the docs', dot: 'var(--working)' }
+      ],
+      today: [
+        { agent: 'fasil', what: 'merged #436: messaging over NATS', at: '01:40' },
+        { agent: 'haile', what: 'claimed #437', at: '01:50' },
+        { agent: 'menelik', what: 'joined from the Mac', at: '01:58' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
