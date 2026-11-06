@@ -27,8 +27,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `bootstrap uninstall` | terminal only | Needs sudo; removes the sandbox user and its guard | |
 | `bootstrap project` | planned | Machine check (MachineCheck.dc.html) | #457 |
 | `bootstrap status` | planned | Machine check (MachineCheck.dc.html) | #457 |
-| `init` | planned | Project wizard (ProjectWizard.dc.html), Add project (AddProject.dc.html) | #447 |
-| `init-roles` | planned | Project wizard (ProjectWizard.dc.html) | #447 |
+| `init` | built | Project wizard (ProjectWizard.dc.html), Add project (AddProject.dc.html) | #447 |
+| `init-roles` | built | Project wizard (ProjectWizard.dc.html): `factory init` makes the role folders | #447 |
 | `prd` | planned | Kickoff (Kickoff.dc.html) for the stage; the PRD itself is in Docs (Docs.dc.html, built) | #457 |
 
 ## Team and machines
