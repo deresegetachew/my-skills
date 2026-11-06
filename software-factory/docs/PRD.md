@@ -458,7 +458,7 @@ guard, rereview record and reply, the `manager-claims` actions). (#295)
 ### 4.11 The factory's own record (decision 0007)
 
 From #472 (owner, 6 Nov 2026) and [decisions/0007](decisions/0007-own-record.md). The numbers start at US-40, so the
-web UI section proposed on #293 (US-14 onward) keeps its range. Until the owner accepts 0007, these are proposals.
+web UI section proposed on #293 (US-14 onward) keeps its range. The owner accepted 0007 on 6 Nov 2026.
 
 - **US-40.** As the owner, the factory's tasks, epics, dependencies, claims and every conversation about them (questions,
   answers, hand-offs, the PO's proposals, the owner queue, the dev manager's notes, a pull request's back-and-forth) are
@@ -489,6 +489,39 @@ web UI section proposed on #293 (US-14 onward) keeps its range. Until the owner 
   list that `factory next` reads are computed from them, never from prose. *Decided (0007, 6 Nov).* (#472, #469; 0007 point 7)
 - **US-48.** As a builder, when I take a task I see the discoveries, blockers and decisions other agents recorded on the
   tasks linked to it, without searching for them. *Decided (0007, 6 Nov).* (#469, plandb's context entries; 0007 point 7)
+
+### 4.12 Agents' prompts, skills and workflows
+
+From #477 (owner, 6 Nov 2026, on the web UI design canvas): "An agent has two important parts. The first is its
+prompt ... The second is its skills and context ... The other aspect of an agent is its workflow." The numbers start at
+US-60, so the web UI section proposed on #293 (US-14 onward) and decision 0007's section (US-40 onward, PR #481) keep
+their ranges. One rule shapes every story here: agents cannot change what governs them (D11), and a change under
+`.claude/` is merged by the owner (#247). So nothing is written live: an edit in the web UI opens a pull request, which
+also gives versions and diffs.
+
+- **US-60.** As the owner, I see each agent's profile in the web UI: its prompt in five parts (role, context, examples,
+  constraints, return values), the skills it loads, its workflows, and its history. It is read from the files on
+  `main`, and each part says which file it comes from. *Decided (owner, 6 Nov).* (#477)
+- **US-61.** As the owner, an agent's rule files are written in those five parts, so the profile shows what the files
+  say rather than a guess at it. Today `DEV-MANAGER.md`, the product owner's rules and `kit/.claude/agents/*.md` are not
+  split that way. *Decided (owner, 6 Nov).* The files are rewritten in five headed parts (not guessed from today's prose). (#477)
+- **US-62.** As the owner, I edit a prompt part, a skill or a workflow in the web UI and it becomes a pull request: I see
+  the diff before it is opened, and it is merged like any change under `.claude/`, by me. An agent may propose such a
+  change as a pull request but never merges it. *Decided (owner, 6 Nov).* (#477; D11, #247)
+- **US-63.** As the owner, I add a skill to an agent, from the skills in my-skills or the project's own, as a pull request.
+  *Decided (owner, 6 Nov).* (#477)
+- **US-64.** As the owner, a project tunes an agent without forking it: the project's additions (today
+  `.claude/factory/notes/<agent>.md`) are shown as a layer over the shared rules, each line marked shared or project. A
+  project layer only adds rules; it never removes one. *Decided (owner, 6 Nov).* (#477; U6)
+- **US-65.** As the owner, I save an agent's prompt, skills and workflows as a template and apply it to another agent or
+  project, which opens a pull request there. *Decided (owner, 6 Nov).* Shared templates live in my-skills and ship with a release; a project's own live in its role folder. (#477)
+- **US-66.** As the owner, a workflow (for example the dev manager's "review a pull request", "review a PRD and give the
+  PO feedback", "break work items into tasks") is data: its steps, the choices between them, and what each step runs. The
+  web UI draws it, I edit it as a pull request, and the pass skill runs from it. Today's pass skills (`manage-pass`,
+  `product-pass`, `next-task`) keep working until each is converted, one at a time. *Decided (owner, 6 Nov).* The editor starts as a list of steps in a form; a drag-and-drop canvas comes later. The owner isn't sure a list will be enough ("try it"), so the first version is checked with him before more is built on it. (#477)
+- **US-67.** As the owner, every run records which version (the commit) of the prompt, skills and workflow it ran with,
+  and the agent's history shows it. So I can compare runs before and after a change, with numbers read from `factory
+  usage` and `factory report`. *Decided (owner, 6 Nov).* (#477; T1)
 
 ## 5. Out of scope
 

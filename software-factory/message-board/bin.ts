@@ -6,6 +6,7 @@ import { randomBytes } from "node:crypto";
 import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
+import { PROTOCOL_VERSIONS, serveMcp } from "./src/mcp.ts";
 import {
   boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
   masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
@@ -30,6 +31,9 @@ events on Postgres.
   factory board show <id> [--json]   one task: its fields, edges, context and thread
   factory board prime <actor> [--json]
                                      an actor's start: what it holds, what is ready, what is blocked, recent events
+  factory board mcp --as <actor> [--session <id>]
+                                     serve the board to one agent as an MCP server over stdio (JSON-RPC, one message a
+                                     line); every write is recorded as <actor>, and no tool can name another sender
   factory board import github [--closed] [--dry-run] [--repo owner/name]
                                      bring the repo's open issues in as tasks (--closed: the closed ones too, as done),
                                      their comments as threads; safe to run twice. --dry-run says what it would do and
@@ -374,6 +378,45 @@ async function prime(argv: string[]): Promise<number> {
   return 0;
 }
 
+async function mcp(argv: string[]): Promise<number> {
+  const args = [...argv];
+  const as = option(args, "--as");
+  const session = option(args, "--session");
+  leftovers(args, "factory board mcp --as <actor> [--session <id>]");
+  if (as === undefined || !as.trim()) fail("bad-input", "mcp needs the actor it serves: --as <actor>.", "For example: factory board mcp --as haile");
+  const url = boardUrl();
+  if (!url) noBoard();
+  const b = await Board.open(url, { as, session, max: 2 });
+  // A signal, or a client that stopped reading stdout (EPIPE), ends the server: the board's connections are closed
+  // first, and nothing more is written to stdout.
+  let stopping = false;
+  const shutdown = (code: number, why?: string): void => {
+    if (stopping) return;
+    stopping = true;
+    if (why) console.error(`factory board mcp: ${why}`);
+    void b.end().catch(() => {}).finally(() => process.exit(code));
+  };
+  const gone = "the client stopped reading stdout; closed the board and stopped.";
+  process.on("SIGTERM", () => shutdown(143));
+  process.on("SIGINT", () => shutdown(130));
+  process.stdout.on("error", () => shutdown(0, gone));
+  console.error(`factory board mcp: serving the message board to ${as} over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
+  try {
+    await serveMcp({ board: b, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
+      input: process.stdin,
+      // A failed write never resolves: the shutdown under way exits the process.
+      write: (line) => new Promise<void>((done) => {
+        if (stopping) return;
+        process.stdout.write(line + "\n", (e) => (e ? shutdown(0, gone) : done()));
+      }),
+      log: (line) => console.error(line),
+    });
+  } finally {
+    await b.end().catch(() => {});
+  }
+  return 0;
+}
+
 // ---------- import ----------
 const IMPORT_USAGE = "factory board import github [--closed] [--dry-run] [--repo owner/name]";
 const IMPORTER = "github-import"; // the actor an import writes as: its tasks and edges are created_by it
@@ -427,7 +470,7 @@ async function importVerb(argv: string[]): Promise<number> {
 }
 
 const VERBS: Record<string, (args: string[]) => number | Promise<number>> = {
-  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, import: importVerb,
+  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, import: importVerb, mcp,
 };
 
 async function main(argv: string[]): Promise<number> {

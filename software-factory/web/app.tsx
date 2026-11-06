@@ -11,6 +11,8 @@ import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, us
 import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
   type Tone } from "./model.ts";
+import { ADD_CSS, AddProjectPage } from "./add_project.tsx";
+import type { Run as AddRun } from "./add_project_model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
 import { BOARD_CSS } from "./board.tsx";
 import { ChatLog, Composer, dispatchLive, OwnerQueueChannel, useChat } from "./chat.tsx";
@@ -84,6 +86,7 @@ class Unauthorized extends Error {}
 const UNREACHABLE_FIX = "Check that the web UI still runs on the machine that serves this page, start it again there, then reload.";
 
 const TOKEN_KEY = "factory-ui-token";
+const ADD_HASH = "#/add-project";
 
 function storedToken(): string {
   try {
@@ -508,6 +511,9 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<{ title: string; text: string; tone: Tone } | null>(null);
   const [menu, setMenu] = useState(false);
+  const [adding, setAdding] = useState(() => location.hash === ADD_HASH); // Add a project (#447)
+  const [addRun, setAddRun] = useState<AddRun | null>(null);
+  const [listed, setListed] = useState(0); // goes up when the server's project list changes
   const search = useRef<HTMLInputElement>(null);
 
   const signedOut = useCallback((e: unknown) => {
@@ -538,7 +544,7 @@ function App() {
     return () => {
       gone = true;
     };
-  }, [token, signedOut]);
+  }, [token, signedOut, listed]);
 
   // live: the WebSocket, opened again after it drops
   useEffect(() => {
@@ -562,7 +568,9 @@ function App() {
         } else if (m.type === "views" && m.project) {
           const { type: _t, project, ...data } = m as unknown as { type: string; project: string } & ViewsData;
           setViewsBy((before) => ({ ...before, [project]: data }));
-        } else dispatchLive(m);
+        } else if (m.type === "add-project") setAddRun((m as unknown as { run: AddRun }).run);
+        else if (m.type === "projects") setListed((n) => n + 1);
+        else dispatchLive(m);
       };
       ws.onclose = () => {
         if (stopped) return;
@@ -609,7 +617,10 @@ function App() {
   }, [token, projects, query]);
 
   useEffect(() => {
-    const onHash = (): void => setRoute(routeOf(location.hash));
+    const onHash = (): void => {
+      setRoute(routeOf(location.hash));
+      setAdding(location.hash === ADD_HASH);
+    };
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
   }, []);
@@ -650,8 +661,20 @@ function App() {
     throw e;
   }), [token, signedOut]);
 
+  // a POST whose function stays the same between renders (Add a project's Review asks again when it changes)
+  const postStable = useCallback((path: string, body: unknown) => call<Record<string, unknown>>(token, path, { method: "POST", body })
+    .catch((e: unknown): Record<string, unknown> => {
+      signedOut(e);
+      return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: "Check that the web UI still runs on this machine." };
+    }), [token, signedOut]);
+
   if (!token) return <Gate wrong={wrong} onToken={(t) => { keepToken(t); setWrong(false); setToken(t); }} />;
   if (!projects) return <main className="gate"><p>Loading…</p></main>;
+  if (adding) {
+    return <AddProjectPage get={get} post={postStable} run={addRun} setRun={setAddRun} live={conn === "live"}
+      close={() => { location.hash = ""; setAdding(false); }}
+      open={(p) => { setAdding(false); location.hash = channelHash(p, "page:home"); }} />;
+  }
 
   const project = projects.find((p) => p.id === route?.project) ?? projects[0] as Project;
   const view = views.find((v) => v.id === project.id) ?? { id: project.id, name: project.name, channels: [] };
@@ -740,6 +763,9 @@ function App() {
             </button>
           );
         })}
+        <button className="icon add" title="Add a project" aria-label="Add a project" onClick={() => { location.hash = ADD_HASH; }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
         <span className="grow" />
         <button className="icon" onClick={theme.flip} aria-label={`${themeLabel(theme.choice)}. Change it`} title={themeLabel(theme.choice)}>
           <ThemeIcon choice={theme.choice ?? "system"} />
@@ -865,6 +891,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

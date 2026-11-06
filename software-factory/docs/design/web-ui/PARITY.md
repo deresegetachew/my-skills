@@ -27,8 +27,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `bootstrap uninstall` | terminal only | Needs sudo; removes the sandbox user and its guard | |
 | `bootstrap project` | planned | Machine check (MachineCheck.dc.html) | #457 |
 | `bootstrap status` | planned | Machine check (MachineCheck.dc.html) | #457 |
-| `init` | planned | Project wizard (ProjectWizard.dc.html), Add project (AddProject.dc.html) | #447 |
-| `init-roles` | planned | Project wizard (ProjectWizard.dc.html) | #447 |
+| `init` | built | Project wizard (ProjectWizard.dc.html), Add project (AddProject.dc.html) | #447 |
+| `init-roles` | built | Project wizard (ProjectWizard.dc.html): `factory init` makes the role folders | #447 |
 | `prd` | planned | Kickoff (Kickoff.dc.html) for the stage; the PRD itself is in Docs (Docs.dc.html, built) | #457 |
 
 ## Team and machines
@@ -100,6 +100,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `board ready` | planned | Tasks read from the message board: the ready queue | #472 |
 | `board show` | planned | Task (Task.dc.html), read from the message board | #472 |
 | `board prime` | agents only | An agent's start of task; the web UI's first read has the same shape | #472 |
+| `board mcp --as` | agents only | An agent's session reaches the message board through it; the owner sees what they wrote on Task (Task.dc.html) and the board | #495 |
 | `board import github` | planned | First launch (decision 0007 step 2): import the issues when a new factory connects GitHub | #457 |
 
 ## Product
