@@ -1,6 +1,7 @@
 // The web UI's task board (#439): each task row's actions by state and its PR's checks, the actions' POST (release,
 // block, reassign) running `factory issues release|block` and `factory say` through a fake `factory` that logs what it
-// was asked, their refusals (each with code, message and fix), the token, and the board's channel.
+// was asked, their refusals (each with code, message and fix), and the token. The board is a way of drawing the tasks
+// channel, so the channels stay as web_ui.test.ts has them.
 import { afterAll, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -111,12 +112,6 @@ test("with tasks.source plan no row offers an action", async () => {
   const tasks = r.json.tasks as Row[];
   expect(tasks.length).toBeGreaterThan(0);
   for (const t of tasks) expect(t.actions, String(t.id)).toEqual([]);
-}, T);
-
-test("the channels include the board view", async () => {
-  const { ui } = await started();
-  const r = await api(ui, "/api/projects/work/channels");
-  expect(r.json.channels as Row[]).toContainEqual({ id: "view:board", kind: "view", name: "board", title: "Board" });
 }, T);
 
 // --- refusals ------------------------------------------------------------------------------------------------------------
