@@ -63,7 +63,7 @@
 <sc-for list="{{lane.cols}}" as="col" hint-placeholder-count="5">
 <div style="display: flex; flex-direction: column; gap: 8px; min-height: 40px;">
 <sc-for list="{{col.cards}}" as="card" hint-placeholder-count="1">
-<article style="background: {{card.fill}}; border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+<article style="background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
 <span style="font-weight: 600; font-size: 13px; line-height: 1.35;">#{{card.n}} {{card.title}}</span>
 <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2);">
 <sc-if value="{{card.hasAgent}}" hint-placeholder-val="{{ true }}"><dc-import name="Avatar" agent="{{card.agent}}" size="20" hint-size="20px,20px"></dc-import></sc-if>
