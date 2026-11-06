@@ -6,7 +6,7 @@ import { mkdirSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { gitRepo, HOOKS, read, SF, sh, WIKI } from "./support.ts";
 
-const VERBS = ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "ready", "show", "prime"];
+const VERBS = ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "ready", "show", "prime", "mcp"];
 
 test("factory help lists every board verb", () => {
   const p = sh(["bash", join(SF, "factory"), "help"], { cwd: SF });
@@ -16,6 +16,7 @@ test("factory help lists every board verb", () => {
   for (const verb of VERBS) expect(listed).toMatch(new RegExp(`\\b${verb}\\b`));
   expect(p.stdout).toMatch(/^ {2}board up \[--port N\]/m);
   expect(p.stdout).toMatch(/^ {2}board prime <actor>/m);
+  expect(p.stdout).toMatch(/^ {2}board mcp --as <actor> \[--session <id>\]/m);
 });
 
 test("the wiki's commands page has a row for each board verb", () => {
