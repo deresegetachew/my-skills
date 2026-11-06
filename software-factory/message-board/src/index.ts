@@ -3,3 +3,4 @@ export { Board, CLAIM_SECONDS, type Listener, type OpenOptions, QUIET_SECONDS } 
 export { BoardError, type ErrorCode } from "./errors.ts";
 export { migrationNames } from "./migrate.ts";
 export * from "./types.ts";
+export { FACTORY_MAPPING, type GithubMapping, GithubError, type ImportSummary, importFromGithub } from "./github/import.ts";
