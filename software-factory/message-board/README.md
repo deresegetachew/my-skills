@@ -75,7 +75,9 @@ each.
 
 **Leases:** `lease(key, holder, ttlSeconds)` holds a named claim on anything that isn't a task (one holder until its time runs out; the holder taking it again moves the time on) and says `{ held, holder }`. `unlease(key, holder)`, `leaseHolder(key)` (`""` for nobody) and `dropLease(key)`.
 
-**From synchronous code:** `src/child.ts` reads one JSON request on stdin (`{ url, as, session?, calls: [{ op, args }] }`), makes the calls as that actor, prints `{ ok, results }` or `{ ok: false, code, message, fix }` on one line and exits. Run it with `Bun.spawnSync`. Besides the methods above it has `wait`: the first event of a kind since a time whose payload matches, waiting up to a number of seconds.
+**Values:** `setValue(key, value, signals?)` keeps a JSON value by name, replacing what was there, and records the signals with it in one transaction (a watcher's snapshot and the changes it saw); `value(key)` reads it (null for none).
+
+**From synchronous code:** `src/child.ts` reads one JSON request on stdin (`{ url, as, session?, calls: [{ op, args }] }`), makes the calls as that actor, prints `{ ok, results }` or `{ ok: false, code, message, fix }` on one line and exits. Run it with `Bun.spawnSync`. Besides the methods above it has `find`, the events of a kind since a time whose payload matches, and `wait`, the first such event, waiting up to a number of seconds (`or` lists other kinds and matches that also end it).
 
 **Import:** `import(batch, { dryRun? })` brings in tasks, parents, `blocks` edges, context entries and messages, each
 keyed by an outside id (`ref`), in one transaction: a second run updates what changed and adds what is new, never a

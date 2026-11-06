@@ -9,8 +9,9 @@
 //
 // The URL comes on stdin so its password is never on a command line; without one, the child finds the board as
 // `factory board` does (MB_URL, else the url file in this machine's settings folder).
-// The ops are the Board's own methods (the list in OPS), plus `wait`: the first event of a kind, recorded since a time,
-// whose payload matches, waiting up to a number of seconds for it (null when none came). Dates go over as ISO strings; `events`' `since` is one.
+// The ops are the Board's own methods (the list in OPS), plus `find`, the events of a kind recorded since a time whose
+// payload matches, and `wait`: the first such event, waiting up to a number of seconds for it (null when none came).
+// Dates go over as ISO strings; `events`' `since` is one.
 import { Board } from "./board.ts";
 import type { BoardEvent } from "./types.ts";
 import { BoardError } from "./errors.ts";
@@ -30,57 +31,92 @@ export interface Request {
 
 export type Answer = { ok: true; results: unknown[] } | { ok: false; code: string; message: string; fix: string };
 
-/** What a `wait` looks for: an event of `kind` recorded at or after `since` (ms since the epoch) whose payload has, for
- * each key of `match`, one of the listed values, and for each key of `not`, none of them. */
-export interface WaitFor {
+/** One kind of event a `wait` or a `find` looks for: an event of `kind` whose payload has, for each key of `match`, one
+ * of the listed values, and for each key of `not`, none of them. */
+export interface EventRule {
   kind: string;
-  since: number;
-  seconds: number;
   match?: Record<string, string[]>;
   not?: Record<string, string[]>;
+}
+
+/** What a `wait` looks for: an event recorded at or after `since` (ms since the epoch) that the rule (`kind`, `match`,
+ * `not`) or one of `or` takes. `seconds` is how long it waits for one. A `find` takes the same, without waiting. */
+export interface WaitFor extends Partial<EventRule> {
+  since: number;
+  seconds?: number;
+  or?: EventRule[];
 }
 
 const OPS = new Set([
   "info", "migrate", "tasks", "get", "create", "update", "link", "unlink", "edges", "ready", "claim", "heartbeat", "release",
   "close", "note", "contextFor", "post", "thread", "messages", "lease", "unlease", "leaseHolder", "dropLease", "signal",
-  "events", "lastSeq", "prime", "onMe", "delegated", "actor",
+  "setValue", "value", "events", "lastSeq", "prime", "onMe", "delegated", "actor",
 ]);
 
 function bad(message: string): never {
   throw new BoardError("bad-input", message, "Send one JSON object: {url, as, calls: [{op, args}]} (see message-board/src/child.ts).");
 }
 
-function matches(e: BoardEvent, w: WaitFor): boolean {
+function rulesOf(w: WaitFor, op: string): EventRule[] {
+  if (!w || typeof w.since !== "number") bad(`${op} takes {since, kind, match?, not?, or?}.`);
+  const rules = [...(typeof w.kind === "string" ? [{ kind: w.kind, match: w.match, not: w.not }] : []), ...(Array.isArray(w.or) ? w.or : [])];
+  if (!rules.length || rules.some((r) => typeof r?.kind !== "string")) bad(`${op} needs a kind to look for.`);
+  return rules;
+}
+
+function takes(e: BoardEvent, rules: EventRule[]): boolean {
   const field = (k: string): string => String(e.payload[k] ?? "");
-  for (const [k, vs] of Object.entries(w.match ?? {})) if (!vs.includes(field(k))) return false;
-  for (const [k, vs] of Object.entries(w.not ?? {})) if (vs.includes(field(k))) return false;
-  return true;
+  return rules.some((r) => e.kind === r.kind && Object.entries(r.match ?? {}).every(([k, vs]) => vs.includes(field(k))) &&
+    !Object.entries(r.not ?? {}).some(([k, vs]) => vs.includes(field(k))));
+}
+
+/** The events recorded since `w.since`, up to seq `top`, that the rules take, oldest first (`first`: the first only). */
+async function history(board: Board, w: WaitFor, rules: EventRule[], top: number, first: boolean): Promise<BoardEvent[]> {
+  const out: BoardEvent[] = [];
+  const kinds = [...new Set(rules.map((r) => r.kind))];
+  for (let after = 0; ;) {
+    const page = await board.events(after, 500, { since: new Date(w.since), ...(kinds.length === 1 ? { kind: kinds[0] } : {}) });
+    for (const e of page) {
+      if (e.seq > top || !takes(e, rules)) continue;
+      out.push(e);
+      if (first) return out;
+    }
+    if (page.length < 500 || (page.at(-1) as BoardEvent).seq >= top) return out;
+    after = (page.at(-1) as BoardEvent).seq;
+  }
+}
+
+/** Every matching event recorded since `since`, oldest first. */
+async function find(board: Board, w: WaitFor): Promise<BoardEvent[]> {
+  return history(board, w, rulesOf(w, "find"), await board.lastSeq(), false);
 }
 
 /** The first matching event: one already recorded since `since`, else the first new one, else null after `seconds`. */
 async function wait(board: Board, w: WaitFor): Promise<BoardEvent | null> {
-  if (typeof w?.kind !== "string" || typeof w.since !== "number" || typeof w.seconds !== "number") bad("wait takes {kind, since, seconds}.");
+  const rules = rulesOf(w, "wait");
+  if (typeof w.seconds !== "number") bad("wait takes {since, seconds, kind, ...}.");
   const top = await board.lastSeq();
-  for (let after = 0; ;) {
-    const page = await board.events(after, 500, { since: new Date(w.since), kind: w.kind });
-    const hit = page.find((e) => e.seq <= top && matches(e, w));
-    if (hit) return hit;
-    if (page.length < 500 || (page.at(-1) as BoardEvent).seq >= top) break;
-    after = (page.at(-1) as BoardEvent).seq;
-  }
+  const [hit] = await history(board, w, rules, top, true);
+  if (hit) return hit;
   return new Promise((resolve, reject) => {
     let done = false;
+    const fail = (e: unknown): void => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      reject(e);
+    };
     const finish = (e: BoardEvent | null): void => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       listening.then((l) => l.close()).catch(() => {}).finally(() => resolve(e));
     };
-    const timer = setTimeout(() => finish(null), Math.max(0, w.seconds) * 1000);
+    const timer = setTimeout(() => finish(null), Math.max(0, w.seconds as number) * 1000);
     const listening = board.listen((e) => {
-      if (e.kind === w.kind && matches(e, w)) finish(e);
-    }, { after: top, onError: (e) => { if (!done) { done = true; clearTimeout(timer); reject(e); } } });
-    listening.catch((e: unknown) => { if (!done) { done = true; clearTimeout(timer); reject(e); } });
+      if (takes(e, rules)) finish(e);
+    }, { after: top, onError: fail });
+    listening.catch(fail);
   });
 }
 
@@ -88,6 +124,7 @@ async function one(board: Board, call: Call): Promise<unknown> {
   if (!call || typeof call.op !== "string") bad("A call needs an op.");
   const args = Array.isArray(call.args) ? [...call.args] : [];
   if (call.op === "wait") return wait(board, args[0] as WaitFor);
+  if (call.op === "find") return find(board, args[0] as WaitFor);
   if (!OPS.has(call.op)) bad(`${call.op} isn't an op the child runs.`);
   if (call.op === "events" && args[2] && typeof args[2] === "object") {
     const o = args[2] as { since?: unknown };

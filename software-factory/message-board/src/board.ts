@@ -76,6 +76,13 @@ function named(what: string, value: unknown): string {
   return value;
 }
 
+function signalName(name: unknown): string {
+  if (typeof name !== "string" || !/^[a-z][a-z0-9_-]{0,39}$/.test(name)) {
+    refuse("bad-input", `A signal's name is lowercase letters, digits, - and _, not ${JSON.stringify(name)}.`, "Name it like wake.");
+  }
+  return name;
+}
+
 function seconds(value: number | undefined, fallback: number): number {
   if (value === undefined) return fallback;
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) refuse("bad-input", `A time in seconds must be 0 or more, not ${value}.`, "Pass a number of seconds.");
@@ -526,11 +533,37 @@ export class Board {
     });
   }
 
+  // ---------- values ----------
+  /** Keep `value` under `key`, replacing what was there, and record `signals` (each `signal.<name>`) in the same
+   * transaction: a watcher's snapshot and the changes it saw land together or not at all. */
+  async setValue(key: string, value: unknown, signals: { name: string; payload: Record<string, unknown> }[] = []): Promise<void> {
+    named("A value's key", key);
+    if (value === undefined) refuse("bad-input", "A value can't be undefined.", "Pass any JSON value (null included).");
+    for (const s of signals) signalName(s.name);
+    return this.run(() =>
+      this.sql.begin(async (tx) => {
+        await tx`INSERT INTO "values" (key, value, updated_by) VALUES (${key}, ${value as object}, ${this.as})
+          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_by = EXCLUDED.updated_by, updated_at = now()`;
+        await recordEvents(tx, this.as, this.session, [{ kind: "value.set", subject: `value:${key}`, payload: {} },
+          ...signals.map((s) => ({ kind: `signal.${s.name}`, subject: `signal:${s.name}`, payload: s.payload }))]);
+      }) as Promise<void>,
+    );
+  }
+
+  /** The value kept under `key`, or null when there is none. */
+  async value(key: string): Promise<unknown> {
+    return this.run(async () => {
+      const r = rows(await this.sql`SELECT value FROM "values" WHERE key = ${key}`);
+      if (!r[0]) return null;
+      const v = r[0].value;
+      return typeof v === "string" ? (JSON.parse(v) as unknown) : v;
+    });
+  }
+
   // ---------- signals ----------
   /** Record a signal: an event and nothing else (kind `signal.<name>`), for listeners such as a waiting agent. */
   async signal(name: string, payload: Record<string, unknown> = {}): Promise<void> {
-    named("A signal's name", name);
-    if (!/^[a-z][a-z0-9_-]{0,39}$/.test(name)) refuse("bad-input", `A signal's name is lowercase letters, digits, - and _, not ${JSON.stringify(name)}.`, "Name it like wake.");
+    signalName(name);
     return this.write(async () => ({ result: undefined, event: { kind: `signal.${name}`, subject: `signal:${name}`, payload } }));
   }
 

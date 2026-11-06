@@ -151,3 +151,35 @@ test("a wait hears a matching signal said since its time, or one said while it w
     await b.end();
   }
 });
+
+test("a value is kept whole by key, replaced by the next write, and its signals land with it", async () => {
+  const since = Date.now();
+  const b = await Board.open(url(), { as: "lead" });
+  try {
+    const key = `prs.${Date.now()}`;
+    expect(await b.value(key)).toBeNull();
+    await b.setValue(key, { v: 1, prs: [5, 6] }, [{ name: "pr", payload: { pr: 5, change: "head" } }]);
+    await b.setValue(key, { v: 1, prs: [5] }, [{ name: "pr", payload: { pr: 6, change: "closed" } }]);
+    expect(await b.value(key)).toEqual({ v: 1, prs: [5] });
+    const found = results(child({ url: url(), calls: [{ op: "find", args: [{ kind: "signal.pr", since }] }] }).answer)[0] as { actor: string; payload: { pr: number } }[];
+    expect(found.map((e) => [e.actor, e.payload.pr])).toEqual([["lead", 5], ["lead", 6]]);
+    await expect(b.setValue(key, { v: 2 }, [{ name: "Not A Name", payload: {} }])).rejects.toMatchObject({ code: "bad-input" });
+    expect(await b.value(key)).toEqual({ v: 1, prs: [5] });
+  } finally {
+    await b.end();
+  }
+});
+
+test("a wait with alternatives ends on the first event any of them takes", async () => {
+  const since = Date.now();
+  const b = await Board.open(url(), { as: "lead" });
+  try {
+    await b.signal("pr", { pr: 9, change: "labels" });
+    await b.signal("pr", { pr: 9, change: "merged" });
+    const wait = { since, seconds: 3, kind: "signal.wake", match: { to: ["nobody"] }, or: [{ kind: "signal.pr", match: { change: ["merged", "closed"] } }] };
+    const [got] = results(child({ url: url(), calls: [{ op: "wait", args: [wait] }] }).answer) as [{ payload: { change: string } }];
+    expect(got.payload.change).toBe("merged");
+  } finally {
+    await b.end();
+  }
+});

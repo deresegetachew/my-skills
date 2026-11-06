@@ -7,4 +7,4 @@ export { FACTORY_MAPPING, type GithubMapping, GithubError, type ImportSummary, i
 /** Where a user of the board finds it on this machine: MB_URL, else <machine settings folder>/message-board/url. */
 export { boardUrl } from "./server.ts";
 /** The child a synchronous caller runs with Bun.spawnSync (src/child.ts): one JSON request in, one JSON answer out. */
-export type { Answer as ChildAnswer, Call as ChildCall, Request as ChildRequest, WaitFor } from "./child.ts";
+export type { Answer as ChildAnswer, Call as ChildCall, EventRule, Request as ChildRequest, WaitFor } from "./child.ts";
