@@ -7,7 +7,8 @@
 //                                              per view
 //   GET  /api/projects/:p/agents[/:name]       the agents live (factory_ui_data.ts live()), limit, githubCalls (the last hour)
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
-//   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
+//   POST /api/projects/:p/machines/add         {name, agents?, confirm: true}: factory machine add (#445): the join code and its command
+//   POST /api/projects/:p/agents/:name/start  {confirm: true}: factory owner start <role> <name>
 //   POST /api/projects/:p/agents/:name/stop    {confirm: true}: factory owner stop <name>
 //   GET|POST /api/projects/:p/agents/:name/chat, GET /api/projects/:p/owner-queue, POST .../owner-queue/:id/answer
 //                                              the chat with each agent and the owner queue (factory_ui_chat.ts, #423)
@@ -24,7 +25,7 @@
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { ChatHub } from "./factory_ui_chat.ts";
-import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, channels, live, type Live, machineAdd, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { ciAction, Refresher, viewsOf } from "./factory_ui_views.ts";
 
@@ -74,6 +75,10 @@ const HEADERS = {
   "content-security-policy": "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };
+
+function obj(v: unknown): Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
 
 function json(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...HEADERS, "content-type": "application/json; charset=utf-8",
@@ -201,6 +206,21 @@ export function serve(o: ServeOptions): Running {
     if (rest.length === 1 && rest[0] === "machines" && req.method === "GET") {
       const s = await state(p, ttl);
       return json(200, { project: p.id, machines: s.data.machines, runners: s.data.runners, problems: s.data.problems });
+    }
+    if (rest.length === 2 && rest[0] === "machines" && rest[1] === "add") {
+      if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, 'Use POST with {"name": "office-pc", "confirm": true}.');
+      const body = obj(await req.json().catch(() => null));
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) {
+        return problem(400, "ui_machine_name", "A machine's name is lowercase letters, digits and dashes.", 'Send {"name": "office-pc", "confirm": true}.');
+      }
+      if (body.confirm !== true) {
+        return problem(400, "confirm_needed", `Adding ${name} makes a join code with the hub's leaf password and keys in it, so it needs a confirm.`,
+          'Send {"confirm": true} (the page asks you first).');
+      }
+      const agents = Array.isArray(body.agents) ? body.agents.filter((a): a is string => typeof a === "string" && /^[a-z0-9][a-z0-9-]*(:[a-z]+)?$/.test(a)) : [];
+      const r = await machineAdd(p, [name, ...(agents.length ? ["--agents", agents.join(",")] : [])]);
+      return json(r.status, r.body);
     }
     if (rest[0] === "agents" && rest.length === 2 && req.method === "GET") {
       const s = await state(p, ttl);

@@ -145,6 +145,10 @@ Look
   env [name|N]           the ports and database of this folder (or of that agent)
   worktree <name|N>      print that agent's folder (created the first time): cd "$(factory worktree taytu)"
   machine [show|setup N] this machine's id and agent names; setup haile,tewodros writes the names file
+  machine add|join|ls|remove
+                         put another computer on the hub: add <name> [--agents haile,tewodros] prints one join
+                         code (15 minutes; the hub's address, the leaf password and those agents' keys); join <code>
+                         on the new machine starts the leaf, writes the keys and runs doctor
   follow [<agent>] [--read|--log] [--on R] [--all]
                          watch and talk to an agent by name, on another machine or in the cloud: without a name,
                          every agent and one-item sub-manager we can find, where it runs and its Remote Control link
@@ -370,7 +374,10 @@ case "$cmd" in
     exec claude "$@" ;;
   worktree)  fh "$hooks/factory_claims" worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    fh "$hooks/factory_issues" "${1:-list}" "${@:2}" ;;
-  machine)   fh "$hooks/factory_machine" "${1:-show}" "${@:2}" ;;
+  machine)   case "${1:-}" in
+               add|join|ls|remove) fh "$hooks/factory_machine_join" "$@" ;;
+               *) fh "$hooks/factory_machine" "${1:-show}" "${@:2}" ;;
+             esac ;;
   follow|say|remote)  fh "$hooks/factory_follow" "$cmd" "$@" ;;
   agents)    fh "$hooks/factory_agents" "${1:-list}" "${@:2}" ;;
   messages)  fh "$hooks/factory_messages" "${1:-ls}" "${@:2}" ;;

@@ -415,6 +415,20 @@ export async function owner(p: UiProject, args: string[]): Promise<ActionResult>
   return resultOf(p, command, r, (r.stdout + r.stderr).trim());
 }
 
+/** Runs `factory machine add <args> --json` in project `p`: 200 with the join code and the command to run on the new
+ * machine (`output` is that JSON), or 500 with its error. */
+export async function machineAdd(p: UiProject, args: string[]): Promise<ActionResult> {
+  const command = `factory machine add ${args.join(" ")}`;
+  const r = await spawn(["bash", factoryScript(p), "machine", "add", ...args, "--json"], p.path, envFor(p), ACTION_TIMEOUT_MS);
+  const done = resultOf(p, command, r, r.stdout.trim());
+  if (done.status !== 200) return done;
+  try {
+    return { status: 200, body: { ...done.body, join: JSON.parse(r.stdout) as unknown } };
+  } catch {
+    return done;
+  }
+}
+
 /** How `command` (run in project `p`, giving `r`) went: 200 with `output`, or 500 with its own {code, message, fix} when
  * its last line on stderr is one, else one that says how to see the whole error. */
 export function resultOf(p: UiProject, command: string, r: Ran, output: string): ActionResult {

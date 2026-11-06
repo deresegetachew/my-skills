@@ -49,6 +49,10 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `agents ls` | built | The agents in the sidebar and their channels | |
 | `agents` | built | The agents in the sidebar; sweep stays with the dev manager | |
 | `machine` | planned | Machines (Machines.dc.html); agent names in Choose team (ChooseTeam.dc.html) | #455 |
+| `machine add` | built | Add machine (AddMachine.dc.html): `POST /api/projects/:p/machines/add` returns the join code and its command; the Machines screen's button is #455 | #455 |
+| `machine join` | planned | Join hub (JoinHub.dc.html), on the new machine | #445 |
+| `machine ls` | planned | Machines (Machines.dc.html): the codes waiting | #455 |
+| `machine remove` | planned | Machines (Machines.dc.html) | #455 |
 | `remote` | planned | Add machine (AddMachine.dc.html) | #445 |
 | `nats up` | planned | Add machine (AddMachine.dc.html), Join hub (JoinHub.dc.html); down and status on Machines | #445 |
 | `nats user add` | planned | Team setup (TeamSetup.dc.html), Machines (Machines.dc.html): keys per agent | #445 |

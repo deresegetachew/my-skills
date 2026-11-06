@@ -36,14 +36,14 @@ const PORTS = { client: 4222, tailnet: 4223, monitor: 8222, leaf: 7422 };
 const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
 
 type Mode = "hub" | "leaf";
-interface State {
+export interface State {
   mode: Mode;
   hub: string; // a leaf's hub, nats-leaf://<host>:<port>, without the password
   address: string; // this machine's Tailscale address, or "" for localhost only
   ports: { client: number; tailnet: number; monitor: number; leaf: number };
   image: string;
 }
-interface User { project: string; name: string; role: Role; nkey: string }
+export interface User { project: string; name: string; role: Role; nkey: string }
 
 export class NatsError extends Error {
   constructor(readonly code: string, message: string, readonly fix: string) {
@@ -67,11 +67,11 @@ function readJson<T>(path: string): T | null {
   }
 }
 
-function readState(): State | null {
+export function readState(): State | null {
   return readJson<State>(join(natsDir(), "state.json"));
 }
 
-function readUsers(): User[] {
+export function readUsers(): User[] {
   const u = readJson<User[]>(join(natsDir(), "users.json"));
   return Array.isArray(u) ? u : [];
 }
@@ -304,7 +304,7 @@ function leftovers(args: string[], usage: string): void {
 
 const UP_USAGE = "factory nats up [--leaf <hub>] [--hub] [--port N] [--monitor-port N] [--leaf-port N] [--leaf-password-file F]";
 
-async function cmdUp(argv: string[]): Promise<number> {
+export async function cmdUp(argv: string[]): Promise<number> {
   const args = [...argv];
   const leaf = option(args, "--leaf");
   const hub = flag(args, "--hub");
@@ -454,7 +454,7 @@ function loadConfig(): Config | null {
 
 const USER_USAGE = "factory nats user add <agent> --role builder|manager|po|owner [--project P]";
 
-function cmdUser(argv: string[]): number {
+export function cmdUser(argv: string[]): number {
   const args = [...argv];
   if (args.shift() !== "add") refuse("unknown-command", "factory nats user has one command: add.", `Usage: ${USER_USAGE}`);
   const roleText = option(args, "--role");
