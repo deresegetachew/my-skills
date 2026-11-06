@@ -167,6 +167,29 @@ test("reassign needs one of the project's agents: none, a stranger and a path ar
   expect(factoryCalls(p)).toEqual([]);
 }, T);
 
+test("a reason is never read as an option: every leading dash and space goes, and dashes alone are no reason", async () => {
+  const { ui, p } = await started();
+  for (const reason of ["- -x", " --x", "\t-- x"]) {
+    const r = await act(ui, "10", "block", { confirm: true, reason });
+    expect(r.status, `${JSON.stringify(reason)}: ${JSON.stringify(r.json)}`).toBe(200);
+  }
+  expect(calls(p)).toEqual(["issues block 10 x", "issues block 10 x", "issues block 10 x"]);
+  expectRefusal(await act(ui, "10", "block", { confirm: true, reason: "- --" }), 400, "ui_reason_needed");
+}, T);
+
+test("a bad agent name in factory.json is left out of reassign and doesn't stop the server", async () => {
+  const p = project({ ...CONFIG, agents: ["Bad_Name", "taytu", "menelik"] });
+  roots.push(p.root);
+  cache(p, "issues");
+  const ui = await startUi(p, ["--port", "0"]);
+  running.push(ui);
+  expectRefusal(await act(ui, "7", "reassign", { confirm: true, agent: "Bad_Name" }), 400, "ui_agent_unknown");
+  expect((await api(ui, "/api/projects/work/tasks")).status).toBe(200);
+  const r = await act(ui, "7", "reassign", { confirm: true, agent: "taytu" });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(calls(p)).toEqual(["issues release 7 reassigned to taytu from the web UI", "say taytu /next-task issue-7"]);
+}, T);
+
 test("an action needs the token, and nothing runs without it", async () => {
   const { ui, p } = await started();
   expect((await act(ui, "7", "release", { confirm: true }, null)).status).toBe(401);
