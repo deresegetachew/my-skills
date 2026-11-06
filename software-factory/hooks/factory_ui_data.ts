@@ -7,7 +7,7 @@
 // title, the CI runners and GitHub's limit come from that project's state folder (the cockpit's cache and the limit file),
 // so a read here never calls GitHub itself. Start and stop run that project's `factory owner start|stop`, the commands
 // the cockpit and the command line run.
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type Config, DEFAULTS, roleNames } from "./factory_config.ts";
@@ -42,6 +42,8 @@ export interface Channel {
   name: string;
   title: string;
   role?: string;
+  /** The owner's image for this agent (#437), as a data address; without one the page draws the agent's own. */
+  avatar?: string;
 }
 
 export interface Agent {
@@ -198,9 +200,44 @@ export function channels(p: UiProject, seen: Agent[] = []): Channel[] {
     for (const name of roleNames(cfg, "coding-agent")) if (name && !agents.has(name)) agents.set(name, "coding-agent");
   }
   for (const a of seen) if (!agents.has(a.name)) agents.set(a.name, a.role);
-  const list: Channel[] = [...agents].map(([name, role]) => ({ id: `agent:${name}`, kind: "agent", name, title: name, role }));
+  const list: Channel[] = [...agents].map(([name, role]) => {
+    const avatar = ownAvatar(p, name);
+    return { id: `agent:${name}`, kind: "agent", name, title: name, role, ...(avatar ? { avatar } : {}) };
+  });
   list.sort((a, b) => ROLE_ORDER.indexOf(a.role ?? "") - ROLE_ORDER.indexOf(b.role ?? "") || a.name.localeCompare(b.name));
   return [...list, ...VIEWS];
+}
+
+/** The image types an owner's avatar can be, by extension (any case). */
+const AVATAR_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", gif: "image/gif",
+  svg: "image/svg+xml" };
+const AVATAR_MAX_BYTES = 256 * 1024;
+
+/** The owner's image for agent `name` (#437): the first .claude/factory/avatars/<name>.<png|jpg|jpeg|webp|gif|svg> of at
+ * most 256 KB, as a data address; null without one. A name that isn't a plain file name (a heartbeat can report any) is
+ * never read. The page shows an image only in an <img>, so an SVG's scripts never run. */
+function ownAvatar(p: UiProject, name: string): string | null {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) return null;
+  const dir = join(p.path, ".claude", "factory", "avatars");
+  let files: string[];
+  try {
+    files = readdirSync(dir).sort();
+  } catch {
+    return null;
+  }
+  for (const f of files) {
+    const dot = f.lastIndexOf(".");
+    const type = AVATAR_TYPES[f.slice(dot + 1).toLowerCase()];
+    if (dot <= 0 || f.slice(0, dot) !== name || !type) continue;
+    try {
+      const path = join(dir, f);
+      if (!statSync(path).isFile() || statSync(path).size > AVATAR_MAX_BYTES) continue;
+      return `data:${type};base64,${readFileSync(path).toString("base64")}`;
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 /** The role of `name` in project `p`: its channel's, else null when it isn't one of the project's agents. */

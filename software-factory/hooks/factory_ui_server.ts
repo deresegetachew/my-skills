@@ -3,7 +3,8 @@
 //
 //   GET  /  /app.js                            the page and the app (no data in them, so no token)
 //   GET  /api/projects                         this project and those in ui.projects
-//   GET  /api/projects/:p/channels             one per agent, one per view
+//   GET  /api/projects/:p/channels             one per agent (with `avatar`, the owner's image, when there is one), one
+//                                              per view
 //   GET  /api/projects/:p/agents[/:name]       the agents live (factory_ui_data.ts live())
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
 //   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
