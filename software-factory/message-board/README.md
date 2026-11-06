@@ -56,6 +56,14 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
 - `release(id, token, { next: "ready" | "deferred" | "review" | "handoff", to?, reason })`: `review` ends the claim and
   leaves the task in review, held by nobody, so anyone may close it.
 - `close(id, { outcome, token?, reason? })`: outcome is `done`, `wont_do`, `duplicate` or `superseded`.
+- `move(id, { to, reason?, blockedBy?, outcome? })` (#503): to is `ready`, `in_progress`, `in_review`, `done`,
+  `deferred` or `blocked`. It is the board's authorised move, for the owner and the dev manager: it takes no token. A
+  held task is taken back from its holder, which needs a reason (see the rules). `blocked` needs `blockedBy` (each
+  task gets a `blocks` edge to it, and it stays open, so it shows as blocked) or a reason alone (it is deferred); a
+  reason with blocked is kept as a `blocker` context entry. `done` takes an outcome (default `done`). `in_progress`
+  is refused unless the task is held: only a claim puts a task there. One transaction, one `task.moved` event.
+- `assign(id, to, { reason? })` (#503): hand a task to one actor, so only they may claim it. It keeps its column; a
+  held task is taken back first (with a reason) and goes back to open. A done task is refused. Event `task.assigned`.
 - `sweep({ quietSeconds? })`.
 
 **Threads:** `post({ task?, kind, tag?, to?, body, inReplyTo? })` and `thread({ thread } | { task })`, and `messages({ after? })`: every message, or those posted after a cursor it gave, with the next cursor. Kind is `question`,
@@ -114,6 +122,9 @@ and the counts, `end()` closes the connections.
 - **No loops.** A `blocks` or `waits_for` edge that would make a task wait on itself is refused (`cycle`). That
   includes loops through parents, since a block on a task also blocks its children. A parent that would make a loop
   is refused too.
+- **Taking a claim back is recorded.** `move` and `assign` on a held task need a reason. They clear the claim, so the
+  holder's token stops working (its next heartbeat, release or close is `claim-lost`), and record a
+  `task.taken_back` event whose actor is who took it and whose payload names the holder and the reason.
 - **Every write records an event in the same transaction**, then sends `NOTIFY mb_events, '<seq>'`. Event inserts take
   a lock until commit, so the order of the sequence numbers is the order of the commits, and a reader's cursor never
   skips one. A refused write records nothing.
@@ -155,7 +166,7 @@ address only. It writes the URL to `<machine settings folder>/message-board/url`
 
 ## The MCP server
 
-`factory board mcp --as <actor> [--session <id>]` serves the board to one agent as an MCP server over stdio (#495). It
+`factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]` serves the board to one agent as an MCP server over stdio (#495). It
 speaks JSON-RPC 2.0, one message a line, to the handshake revisions of the Model Context Protocol up to
 [2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25) (`initialize` answers with the version asked for
 when it has it, else 2025-11-25). It is written with Bun and Node built-ins only: no SDK, no package. It logs to stderr
@@ -185,6 +196,40 @@ point 8).
 A result is one text block with the JSON, and the same object as `structuredContent`. A refusal is a result with
 `isError: true`, the text `<code>: <message> Fix: <fix>` and `structuredContent: { error: { code, message, fix } }`.
 
+### Owner and manager tools
+
+Started with `--role owner` or `--role manager` (#503), the server also offers the tools a person, or the person's own
+Claude Code session, uses to run the board without the web UI. The default role is `builder`: a builder's server
+neither lists these tools nor runs them (a call to one is an unknown tool, `-32602`). The actor stays fixed by `--as`.
+
+| Tool | Inputs | What it does |
+|---|---|---|
+| `board_move` | `task`, `to`, `reason?`, `blockedBy?`, `outcome?` | A task to `ready`, `in_review`, `deferred`, `done` (outcome, default `done`) or `blocked` (by `blockedBy`, a list of task ids each given a `blocks` edge, or by a reason alone, which defers it). A held task is taken back from its holder: give the reason. `in_progress` comes only from a claim |
+| `board_create` | `title`, `kind`, `body?`, `parent?`, `priority?` | A `task`, `bug`, `epic` or `note`, under a parent |
+| `board_assign` | `task`, `to`, `reason?` | Hand a task to one actor: only they may claim it. A held task is taken back first (with the reason) |
+| `board_link` | `from`, `to`, `kind` | "from blocks to" and the other edge kinds; a loop is refused with `cycle`; `{ linked }` |
+| `board_unlink` | `from`, `to`, `kind` | Remove a link; `{ unlinked }` |
+| `board_comment` | `task`, `body` | A note on the task's thread, as you |
+
+Each move is a board event (`task.moved`, and `task.taken_back` for a held task), so the board's listeners, the web UI
+among them, see it at once. The same input checks hold as for the other tools: no field a tool doesn't list, and the
+same sizes.
+
+**In your own Claude Code session**, from the project's folder:
+
+```sh
+claude mcp add board -- ./factory board mcp --as owner --role owner
+```
+
+or with the path to this folder, which needs no factory script:
+
+```sh
+claude mcp add board -- bun <path>/message-board/bin.ts mcp --as owner --role owner
+```
+
+Put your own name after `--as`: it is who the board says moved each card. The dev manager's session uses
+`--role manager`. `factory board mcp --help` prints the same lines, with this folder's path filled in.
+
 **From a Claude Code session.** Add it for one agent:
 
 ```sh
@@ -210,8 +255,7 @@ reads from the board.
 
 ## Tests
 
-`bun tools/run_tests.ts board_rules board_cli board_mcp`. The tests need a real Postgres:
-`bun tools/run_tests.ts board_rules board_cli board_import`. The import's tests put a fake `gh` on PATH that serves JSON
+`bun tools/run_tests.ts board_rules board_cli board_mcp board_import`. The import's tests put a fake `gh` on PATH that serves JSON
 fixtures. The tests need a real Postgres:
 
 - `MB_TEST_URL` is a server they may create databases on (CI sets it to its `postgres` service).
