@@ -13,6 +13,7 @@
 //   GET  /api/ws?token=...                     a WebSocket: {type: "hello"}, then {type: "state", project, ...live} for
 //                                              each project, and again whenever one changes; likewise {type: "views",
 //                                              project, ...} for the tasks, pull requests and CI channels
+//   GET  /api/projects/:p/docs, .../docs/page?id=, .../docs/search?q=: the PRD, the decisions and the wiki (factory_ui_docs.ts, #438)
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
@@ -23,6 +24,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { ciAction, Refresher, viewsOf } from "./factory_ui_views.ts";
 
 export interface ServeOptions {
@@ -181,6 +183,15 @@ export function serve(o: ServeOptions): Running {
     const talked = await chat.api(req, p, rest, seen(p));
     if (talked) return json(talked.status, talked.body);
     const ttl = o.pollSeconds * 1000;
+    if (rest[0] === "docs" && rest.length <= 2) { // the PRD, the decisions and the wiki (#438)
+      if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
+      if (rest.length === 1) return json(200, { project: p.id, sections: docsOf(p) });
+      if (rest[1] === "page") {
+        const r = pageById(p, url.searchParams.get("id") ?? "");
+        return json(r.status, r.status === 200 ? { project: p.id, ...r.body } : r.body);
+      }
+      if (rest[1] === "search") return json(200, { project: p.id, q: url.searchParams.get("q") ?? "", hits: searchDocs(p, url.searchParams.get("q") ?? "") });
+    }
     if (rest.length === 1 && rest[0] === "channels" && req.method === "GET") return json(200, { project: p.id, channels: channels(p, seen(p)) });
     if (rest.length === 1 && rest[0] === "agents" && req.method === "GET") {
       const s = await state(p, ttl);
