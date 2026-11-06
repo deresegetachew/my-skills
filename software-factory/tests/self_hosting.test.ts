@@ -88,6 +88,24 @@ test("every hook and ci file in software factory has its link in the repo's clau
   }
 });
 
+// The same for the files in the hooks' subfolders (hooks/core, decision 0003): core/domain/epic.ts came without its link
+// (#460), and every agent's PR-gate hook failed on the missing import (6 Nov).
+test("every file in the hooks' subfolders has its link in the repo's claude folder", () => {
+  const walk = (rel: string): string[] =>
+    readdirSync(join(SF, "hooks", rel)).flatMap((name) => {
+      const sub = join(rel, name);
+      if (statSync(join(SF, "hooks", sub)).isDirectory()) return walk(sub);
+      return rel ? [sub] : [];
+    });
+  const nested = walk("");
+  expect(nested.length).toBeGreaterThan(0);
+  for (const sub of nested) {
+    const link = join(REPO, ".claude", "hooks", sub);
+    expect(existsSync(link), `.claude/hooks/${sub} is missing: run bash software-factory/install.sh . --link`).toBe(true);
+    expect(realpathSync(link), `.claude/hooks/${sub}`).toBe(realpathSync(join(SF, "hooks", sub)));
+  }
+});
+
 test("the repos own factory command runs from its root", () => {
   const p = sh(["bash", join(REPO, "factory"), "help"], { cwd: REPO });
   expect(p.code === 0 && p.stdout.includes("update"), p.stderr).toBe(true);
