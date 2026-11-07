@@ -572,8 +572,23 @@ test("a remove that waits on a redeem in progress drops the fresh role the redee
   tx.release();
   const code = await remove.exited;
   expect(code, await new Response(remove.stderr).text()).toBe(0);
-  await copy.close().catch(() => {});
   expect(await rolesOf(w, made.role)).toEqual([]);
+  const admin = new SQL(w.url, { max: 1 });
+  try { // no session of a dropped role is left on this database (the copy's included)
+    const [left] = (await admin`select count(*)::int as n from pg_stat_activity where datname = current_database()
+      and usesysid is not null and usesysid not in (select oid from pg_roles)`) as { n: number }[];
+    expect(left?.n).toBe(0);
+  } finally {
+    await admin.close();
+  }
+  let ended = false;
+  try {
+    await copy`select 1`;
+  } catch {
+    ended = true;
+  }
+  await copy.close().catch(() => {});
+  expect(ended).toBe(true);
   expect(ls(w)).toEqual([]);
 });
 

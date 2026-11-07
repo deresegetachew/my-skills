@@ -100,7 +100,7 @@ async function addRedeemed(tx: SQL): Promise<void> {
 // login's row is touched, and only its role and the fresh one; the code role's name comes from mb_logins (which the
 // logins can't write), the fresh one is that plus random hex, and both go into the statements through format's %I and
 // %L. The search_path is pinned, pg_catalog first, so no object a caller could make stands in for a built-in. The
-// SQLSTATEs MB001 to MB003 are its refusals (redeemLogin turns them into errors).
+// SQLSTATEs MB001 to MB004 are its refusals (MB004: the code's role can't log in any more, as a remove is under way) (redeemLogin turns them into errors).
 const REDEEM = `CREATE FUNCTION mb_redeem_login(OUT login_role text, OUT login_password text) LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public, pg_temp AS $f$
   DECLARE
@@ -113,6 +113,9 @@ const REDEEM = `CREATE FUNCTION mb_redeem_login(OUT login_role text, OUT login_p
     IF NOT FOUND THEN RAISE EXCEPTION 'the user % is not a board login', session_user USING ERRCODE = 'MB003'; END IF;
     IF login.redeemed_at IS NOT NULL THEN
       RAISE EXCEPTION 'the login % was already redeemed', login.name USING ERRCODE = 'MB001';
+    END IF;
+    IF NOT coalesce((SELECT rolcanlogin FROM pg_roles WHERE rolname = login.role), false) THEN
+      RAISE EXCEPTION 'the login % can''t log in any more (it is being removed)', login.name USING ERRCODE = 'MB004';
     END IF;
     SELECT rolvaliduntil INTO valid_to FROM pg_roles WHERE rolname = login.role;
     IF valid_to IS NOT NULL AND valid_to <= now() THEN
@@ -225,17 +228,18 @@ export async function removeLogin(sql: SQL, name: string, options: { unused?: bo
   roleOf(await database(sql), name); // checks the name
   if (!(await tableExists(sql, "mb_logins"))) refuse("not-found", `There is no login called ${name}.`, "`factory board login ls` lists them.");
   await upgrade(sql);
-  // the login's role now (a redeemed login has a fresh one) and the spent code role, if not dropped yet; their oids,
-  // as pg_stat_activity names them by oid once they are dropped
-  const row = ((await sql`SELECT role, code_role FROM mb_logins WHERE name = ${name}`) as Row[])[0];
-  const roles = [row?.role, row?.code_role].filter((r): r is string => typeof r === "string" && r !== "");
-  const oids: unknown[] = [];
-  for (const r of roles) oids.push(...((await sql`SELECT oid FROM pg_roles WHERE rolname = ${r}`) as Row[]).map((x) => x.oid));
-  const role = String(row?.role ?? "");
+  // Every role the login has had: read under the row's lock, as a redeem may have given it a fresh one meanwhile (one
+  // waiting on that lock sees the redeem's row once it commits), and read again under the lock before the drop.
+  const roles = new Set<string>();
+  const add = (r: unknown): void => {
+    if (typeof r === "string" && r) roles.add(r);
+  };
+  let role = "";
   await sql.begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
     const found = (await tx`SELECT first_seen, redeemed_at, role, code_role FROM mb_logins WHERE name = ${name} FOR UPDATE`) as Row[];
     if (!found.length) refuse("not-found", `There is no login called ${name}.`, "`factory board login ls` lists them.");
+    role = String(found[0]?.role ?? "");
     if (options.unused) {
       const live = ((await tx`SELECT 1 FROM pg_stat_activity WHERE usename = ${role}`) as Row[]).length > 0;
       if (found[0]?.first_seen || live) {
@@ -245,19 +249,33 @@ export async function removeLogin(sql: SQL, name: string, options: { unused?: bo
     if (options.unredeemed && found[0]?.redeemed_at) {
       refuse("login-redeemed", `The login ${name} was redeemed (its machine joined), so it was kept.`, `Remove it anyway with \`factory board login remove ${name}\`.`);
     }
-    for (const r of roles) await disable(tx, r); // committed first, so an ended session can't log in again
+    add(found[0]?.role);
+    add(found[0]?.code_role);
+    for (const r of roles) await disable(tx, r); // committed first, so an ended session can't log in again (nor redeem)
   });
+  const oids = new Set<unknown>(await oidsOf(sql, roles)); // pg_stat_activity names a role by oid once it is dropped
   try {
-    await endSessions(sql, oids);
+    await endSessions(sql, [...oids]);
     await sql.begin(async (tx) => {
       await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
+      const now = (await tx`SELECT role, code_role FROM mb_logins WHERE name = ${name} FOR UPDATE`) as Row[];
+      add(now[0]?.role);
+      add(now[0]?.code_role);
+      for (const oid of await oidsOf(tx, roles)) oids.add(oid);
+      for (const r of roles) await disable(tx, r);
       for (const r of roles) await disown(tx, r);
       await tx`DELETE FROM mb_logins WHERE name = ${name}`;
     });
   } finally {
-    await endSessions(sql, oids); // even when the drop failed: the role can't log in, and nothing of it stays connected
+    await endSessions(sql, [...oids]); // even when the drop failed: the roles can't log in, and nothing of them stays connected
   }
   return { name, role };
+}
+
+async function oidsOf(sql: SQL, roles: Iterable<string>): Promise<unknown[]> {
+  const out: unknown[] = [];
+  for (const r of roles) out.push(...((await sql`SELECT oid FROM pg_roles WHERE rolname = ${r}`) as Row[]).map((x) => x.oid));
+  return out;
 }
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
@@ -335,6 +353,7 @@ export async function redeemLogin(sql: SQL, url: string, keep: (login: { role: s
       const state = (e as { errno?: string }).errno ?? "";
       const msg = (e as { message?: string }).message ?? String(e);
       if (state === "MB001") refuse("login-redeemed", `This join code was already used: ${msg}.`, "Ask the machine that runs the board for a new code (`factory machine add`).");
+      if (state === "MB004") refuse("login-expired", `This join code's login was taken away: ${msg}.`, "Ask the machine that runs the board for a new code (`factory machine add`).");
       if (state === "MB002") refuse("login-expired", `This join code expired: ${msg}.`, "Ask the machine that runs the board for a new code (`factory machine add`).");
       if (state === "MB003") refuse("not-found", `Only a login made by \`factory board login add\` is redeemed: ${msg}.`, "Redeem with the URL from the join code.");
       if (state === "42883") refuse("schema-old", "The board can't redeem a join code yet (it has no mb_redeem_login).", "On the machine that runs the board, update the factory and make a new code with `factory machine add`.");
