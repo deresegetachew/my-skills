@@ -106,7 +106,7 @@ test("pull requests: each with its checks, review state, protected files, agent 
   expect(pulls[0]).toMatchObject({ number: 21, agent: "menelik", task: "7", checks: { state: "red", failing: ["test"] },
     review: { state: "changes-asked" }, protected: null, next: { action: "waiting-for-agent", text: "waiting for agent" } });
   expect(pulls[1]).toMatchObject({ number: 22, agent: "taytu", task: "8", checks: { state: "green", failing: [] },
-    review: { state: "approved", claim: "fasil" }, protected: true, next: { action: "owner-merges", text: "owner merges (protected)" } });
+    review: { state: "approved", claim: "fasil" }, protected: true, next: { action: "owner-merges", text: "waiting for you" }, needsYou: true }); // #453
   expect(pulls[2]).toMatchObject({ number: 23, draft: true, agent: null, task: null, review: { state: "none" } });
   expect(String(pulls[0]?.find)).toBe("#21 Add the login page task/7-login menelik");
 }, T);

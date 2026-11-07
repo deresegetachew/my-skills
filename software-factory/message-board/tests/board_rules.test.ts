@@ -175,14 +175,77 @@ test("release says what happens next: ready, deferred, or a hand-off only the na
 test("a cycle of blocking edges is refused and nothing is written", async () => {
   const po = await board("po");
   const [a, b, c] = [await po.create({ title: title("A") }), await po.create({ title: title("B") }), await po.create({ title: title("C") })];
+  // a before b, and c waits for b: a three-step loop through both kinds closes when a waits for c (or c blocks a)
   await po.link(a.id, b.id, "blocks");
-  await po.link(b.id, c.id, "waits_for");
+  await po.link(c.id, b.id, "waits_for");
   const before = (await po.events(0)).at(-1)?.seq ?? 0;
+  expect((await refusal(po.link(a.id, c.id, "waits_for"))).code).toBe("cycle");
   expect((await refusal(po.link(c.id, a.id, "blocks"))).code).toBe("cycle");
   expect((await refusal(po.link(a.id, a.id, "blocks"))).code).toBe("cycle");
   expect(await po.events(before)).toEqual([]);
   // a non-blocking edge may point back
   await po.link(c.id, a.id, "related");
+});
+
+test("waits_for: from waits for to, so to is ready and from isn't until to is done", async () => {
+  const po = await board("po");
+  const [a, b] = [await po.create({ title: title("waiter A") }), await po.create({ title: title("first B") })];
+  await po.link(a.id, b.id, "waits_for");
+  expect(await po.get(a.id)).toMatchObject({ blocked: true, blockedBy: [b.id] });
+  expect(await po.get(b.id)).toMatchObject({ blocked: false, blockedBy: [] });
+  const ready = (await po.ready()).map((t) => t.id);
+  expect(ready).toContain(b.id);
+  expect(ready).not.toContain(a.id);
+  expect((await refusal((await board("haile")).claim(a.id))).code).toBe("not-ready");
+  await po.close(b.id, { outcome: "done" });
+  expect((await po.get(a.id)).blocked).toBe(false);
+  expect((await po.ready()).map((t) => t.id)).toContain(a.id);
+});
+
+test("blocks: from blocks to, so to isn't ready until from is done", async () => {
+  const po = await board("po");
+  const [a, b] = [await po.create({ title: title("blocker A") }), await po.create({ title: title("blocked B") })];
+  await po.link(a.id, b.id, "blocks");
+  expect(await po.get(b.id)).toMatchObject({ blocked: true, blockedBy: [a.id] });
+  expect(await po.get(a.id)).toMatchObject({ blocked: false, blockedBy: [] });
+  expect((await po.ready()).map((t) => t.id)).not.toContain(b.id);
+  await po.close(a.id, { outcome: "done" });
+  expect((await po.ready()).map((t) => t.id)).toContain(b.id);
+});
+
+test("a waits_for chain is worked in order, and a claim never takes a task before its prerequisite is done", async () => {
+  const po = await board("po");
+  const [b11, b12, b13] = [await po.create({ title: title("b11") }), await po.create({ title: title("b12") }), await po.create({ title: title("b13") })];
+  await po.link(b12.id, b11.id, "waits_for");
+  await po.link(b13.id, b12.id, "waits_for");
+  const chain = [b11.id, b12.id, b13.id];
+  const readyOf = async (): Promise<number[]> => (await po.ready()).map((t) => t.id).filter((id) => chain.includes(id));
+  expect(await readyOf()).toEqual([b11.id]);
+  expect((await po.get(b12.id)).blockedBy).toEqual([b11.id]);
+  expect((await po.get(b13.id)).blockedBy).toEqual([b12.id]);
+  const agent = await board("haile");
+  for (const [i, id] of chain.entries()) {
+    expect(await readyOf()).toEqual([id]);
+    for (const later of chain.slice(i + 1)) expect((await refusal(agent.claim(later))).code).toBe("not-ready");
+    const claim = await agent.claim(id);
+    expect(claim?.task.id).toBe(id);
+    await agent.close(id, { outcome: "done", token: claim?.token ?? "" });
+  }
+  expect(await readyOf()).toEqual([]);
+});
+
+test("loops in the right meaning are refused: A blocks B with A waits_for B, and A waits_for B with B waits_for A", async () => {
+  const po = await board("po");
+  const [a, b] = [await po.create({ title: title("loop A") }), await po.create({ title: title("loop B") })];
+  await po.link(a.id, b.id, "blocks");
+  expect((await refusal(po.link(a.id, b.id, "waits_for"))).code).toBe("cycle");
+  // the same order said the other way round is no loop
+  expect(await po.link(b.id, a.id, "waits_for")).toBe(true);
+  const [c, d] = [await po.create({ title: title("loop C") }), await po.create({ title: title("loop D") })];
+  await po.link(c.id, d.id, "waits_for");
+  expect((await refusal(po.link(d.id, c.id, "waits_for"))).code).toBe("cycle");
+  expect((await refusal(po.link(c.id, d.id, "blocks"))).code).toBe("cycle");
+  expect(await po.link(d.id, c.id, "blocks")).toBe(true);
 });
 
 test("a task is blocked by its parent's blocker, and ready once the blocker is done", async () => {
@@ -420,7 +483,7 @@ test("two links that together close a loop, sent at once: exactly one wins, the 
     const po = await board("po");
     const [a, b] = [await po.create({ title: title("race A") }), await po.create({ title: title("race B") })];
     const [x, y] = [await board("x"), await board("y")];
-    const results = await Promise.all([x.link(a.id, b.id, "blocks").catch((e: unknown) => e), y.link(b.id, a.id, "waits_for").catch((e: unknown) => e)]);
+    const results = await Promise.all([x.link(a.id, b.id, "blocks").catch((e: unknown) => e), y.link(a.id, b.id, "waits_for").catch((e: unknown) => e)]);
     expect(results.filter((r) => r === true).length).toBe(1);
     expect(results.filter((r) => r instanceof BoardError && r.code === "cycle").length).toBe(1);
   }

@@ -6,7 +6,7 @@
 // whose answer arrives later. The owner queue shows each ask as a card with its options as buttons; a tap asks first,
 // then runs `factory owner answer`.
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { type AskView, type ChatItemView, itemLabel, mergeItems, orderAsks, type ProblemView, type QueueView } from "./chat_model.ts";
+import { askedBy, type AskView, type ChatItemView, emptyQueueText, itemLabel, mergeItems, orderAsks, type ProblemView, type QueueView } from "./chat_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
 
@@ -261,19 +261,21 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
 
   const asks = queue ? orderAsks(queue.asks) : [];
   const open = asks.filter((a) => a.state === "open");
+  // with the board as the record nothing asked is the empty state; on GitHub, no owner-queue issue yet
+  const empty = queue !== null && !queue.problem && (queue.source === "board" ? asks.length === 0 : queue.issue === null);
   return (
     <div className="body">
       {problem && <div className="notice bad" role="alert"><span className="dot bad" aria-hidden="true" /><div><strong>{problem.message}</strong><p>{problem.fix}</p></div></div>}
       {queue?.problem && <div className="notice bad" role="alert"><span className="dot bad" aria-hidden="true" /><div><strong>{queue.problem.message}</strong><p>{queue.problem.fix}</p></div></div>}
-      {done && <div className="notice good" role="status"><span className="dot good" aria-hidden="true" /><div><strong>{done}</strong><p>Posted on the owner queue; the dev manager reads it on its next pass.</p></div></div>}
+      {done && <div className="notice good" role="status"><span className="dot good" aria-hidden="true" /><div><strong>{done}</strong><p>{queue?.source === "board"
+        ? "Written on the message board; whoever asked reads it there."
+        : "Posted on the owner queue; the dev manager reads it on its next pass."}</p></div></div>}
       {!queue && !problem && <p className="empty">Reading the owner queue…</p>}
-      {queue && queue.issue === null && !queue.problem && (
-        <p className="empty">There is no owner queue yet: the dev manager opens the issue “Dev manager: needs the owner” with its first ask.</p>
-      )}
-      {queue && queue.issue !== null && (
+      {empty && queue && <p className="empty">{emptyQueueText(queue)}</p>}
+      {queue && !empty && (queue.issue !== null || asks.length > 0) && (
         <p className="queue-head">
-          {open.length ? `${open.length} ask${open.length > 1 ? "s" : ""} wait${open.length > 1 ? "" : "s"} for you` : "Nothing waits for you"} on
-          {" "}{queue.url ? <a href={queue.url} target="_blank" rel="noreferrer">#{queue.issue}</a> : `#${queue.issue}`}.
+          {open.length ? `${open.length} ask${open.length > 1 ? "s" : ""} wait${open.length > 1 ? "" : "s"} for you` : "Nothing waits for you"}
+          {queue.issue !== null && <>{" "}on{" "}{queue.url ? <a href={queue.url} target="_blank" rel="noreferrer">#{queue.issue}</a> : `#${queue.issue}`}</>}.
         </p>
       )}
       {asks.map((a) => (
@@ -283,6 +285,7 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
             <code>{a.id}</code>
             {a.state === "open" ? <span className="tag">waiting for you</span> : <span className="tag quiet">answered</span>}
             {a.forProduct && <span className="tag quiet">product</span>}
+            {askedBy(a) && <span className="ask-age">{askedBy(a)}</span>}
             {a.created && <span className="ask-age">{ago(a.created)}</span>}
             {a.url && <a className="ask-link" href={a.url} target="_blank" rel="noreferrer">on GitHub</a>}
           </h3>
@@ -308,7 +311,9 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
           <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="answer-title">
             <h3 id="answer-title">Answer {confirm.ask.id}?</h3>
             <p>“{confirm.answer}”</p>
-            <p>This runs <code>factory owner answer {confirm.ask.id} …</code> and posts it on the owner queue (#{confirm.ask.issue}) as you.</p>
+            <p>This runs <code>factory owner answer {confirm.ask.id} …</code> and {confirm.ask.issue
+              ? <>posts it on the owner queue (#{confirm.ask.issue}) as you.</>
+              : <>writes it on the message board as you, to {confirm.ask.from || "whoever asked"}.</>}</p>
             <div className="actions">
               <button className="btn" onClick={() => setConfirm(null)} disabled={busy} autoFocus>Cancel</button>
               <button className="btn primary" onClick={() => void answer()} disabled={busy}>{busy ? "Answering…" : "Answer"}</button>

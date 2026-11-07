@@ -19,6 +19,8 @@ export interface TaskRow {
   state: string;
   stateText: string;
   holders: string[];
+  /** Who it was handed to (Reassign) while nobody holds it, from the message board (#545); missing or null with nobody. */
+  assignee?: string | null;
   group: string;
   todos: { done: number; all: number };
   dependsOn: string[];
@@ -78,11 +80,17 @@ export interface PullRow {
   branch: string;
   draft: boolean;
   agent: string | null;
+  /** Who opened it (#453): an agent, the product owner, the dev manager or a person. */
+  author?: { name: string | null; role: string; text: string };
+  /** Its head commit, when the snapshot has it. */
+  head?: string | null;
   task: string | null;
   checks: { state: string; failing: string[] };
   review: { state: "approved" | "changes-asked" | "watching" | "none"; text: string; claim: string | null };
   protected: boolean | null;
   next: { action: string; text: string };
+  /** It waits for the owner (#453); Home's "Needs you" reads it. */
+  needsYou?: boolean;
   rework: string | null;
   cites?: string[]; // the decisions and PRD stories its body cites
   find: string;
@@ -123,7 +131,8 @@ export interface ViewsData {
   age: number | null;
   refreshing: boolean;
   problems: ProblemView[];
-  tasks: { source: string; tasks: TaskRow[]; next: string | null; problems: ProblemView[] } & Origin;
+  /** `done`: the tasks finished in the last days (the message board's, #545), for the Done column. */
+  tasks: { source: string; tasks: TaskRow[]; done?: TaskRow[]; next: string | null; problems: ProblemView[] } & Origin;
   epics: { source: string; epics: EpicRow[]; problems: ProblemView[] } & Origin;
   pulls: { pulls: PullRow[]; problems: ProblemView[] };
   ci: {

@@ -642,11 +642,18 @@ What is planned:
   place, and "merged" told apart from "closed" (the snapshot sees only that a PR left the open list).*
 - **US-35.** As the owner, an epic has a page of its own, as in the design's `Epic.dc.html`. *Proposal; no issue yet.*
 - **US-36.** As the owner, Factory settings has tabs: the settings (project changes staged into a pull request, this
-  machine's saved at once), Releases and updates (no publish there) and Maintenance. *Decided (#456).*
+  machine's saved at once), Releases and updates (no publish there) and Maintenance. *Built (#456): Your team (add a
+  coding agent from the free legend names or a typed one; remove one after it is stopped and holds no task), every
+  project setting from the settings schema with its plain name, help and where its value comes from, staged and
+  proposed as one pull request the owner merges, this machine's settings saved at once (which agents run here, and only
+  whether a message board is set), the version and Update, and the clean-ups (`clean`, `ci clean`, `reset-run`), each
+  saying what it will and won't touch. Integrations is #441; Roll back and the release notes are not on the page yet.*
 - **US-37.** As the owner, an Integrations tab lists what the factory connects to and what each agent may use, and a
   change to what governs an agent is proposed as a pull request I merge. *Proposal (#441).*
 - **US-38.** As the owner, a task, a pull request and an agent each have a page of their own, and search covers
-  everything. *Decided (#452, #453).*
+  everything. *Decided (#452, #453). A pull request's page is built (#453): its description, who opened it, its tasks,
+  checks, reviews, protected files and diff (a Markdown file read as a page), and Merge, Mark ready, Ask for changes,
+  Comment and Close, each asked first; the task and agent pages and search across everything are still to come.*
 - **US-39.** As the owner, the web UI works on a phone: a bottom tab bar and big buttons for approvals, and every page
   fits at phone width. *Decided (#458).*
 

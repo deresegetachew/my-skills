@@ -5,8 +5,8 @@
 // serves the page.
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
-import { Board, EpicChips } from "./board.tsx";
-import type { LaneBy } from "./board_model.ts";
+import { Board, EpicChips, TaskPage } from "./board.tsx";
+import { type LaneBy, taskLabel } from "./board_model.ts";
 import { Cited, Cites } from "./docs.tsx";
 import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
 import { Tabs } from "./parts.tsx";
@@ -32,6 +32,10 @@ export interface ViewProps {
   token?: string;
   /** This project's product owner and dev manager. */
   talkers?: Talker[];
+  /** The task open on the Board page (its address names it, #543), or null. */
+  task?: string | null;
+  /** Opens task `id` on its own address, or closes it (null). */
+  openTask?: (id: string | null) => void;
 }
 
 function Dot({ tone, label }: { tone: Tone; label?: string }) {
@@ -65,7 +69,8 @@ function ageText(v: ViewsData): string {
 function Toolbar({ typed, setTyped, views, project, post, say, what, origin }: { typed: string; setTyped: (s: string) => void;
   views: ViewsData; project: { id: string }; post: Post; say: Say; what: string; origin?: Origin }) {
   const from = origin ? originText(origin) : "";
-  const age = origin?.from === "board" ? from : [from, ageText(views)].filter(Boolean).join(" · ");
+  const live = origin?.from === "board"; // the board pushes every change, so there is nothing to read again (#543)
+  const age = live ? from : [from, ageText(views)].filter(Boolean).join(" · ");
   const again = async (): Promise<void> => {
     const r = await post(`/api/projects/${encodeURIComponent(project.id)}/refresh`, {});
     if (r.ok !== true) say({ title: String(r.message ?? "It didn't start."), text: String(r.fix ?? ""), tone: "bad" });
@@ -75,7 +80,7 @@ function Toolbar({ typed, setTyped, views, project, post, say, what, origin }: {
       <input type="search" className="vfilter" placeholder={`Filter ${what}`} aria-label={`Filter ${what}`} value={typed}
         onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === "Escape") setTyped(""); }} />
       <span className="vage" title={views.generatedAt ?? ""}>{age}</span>
-      <button className="btn" onClick={() => void again()} disabled={views.refreshing}>Read again</button>
+      {!live && <button className="btn" onClick={() => void again()} disabled={views.refreshing}>Read again</button>}
     </div>
   );
 }
@@ -103,12 +108,12 @@ function AgentLink({ name, open }: { name: string; open: ViewProps["open"] }) {
 const LANES: Array<[string, string]> = [["in-progress", "in progress"], ["in-review", "in review"], ["ready", "ready"], ["blocked", "blocked"],
   ["new", "not ready"]];
 
-function TaskLine({ t, open, docs }: { t: TaskRow; open: ViewProps["open"]; docs?: DocPage[] }) {
+function TaskLine({ t, open, docs, openTask }: { t: TaskRow; open: ViewProps["open"]; docs?: DocPage[]; openTask?: (id: string) => void }) {
   return (
     <li className={t.next ? "vrow next" : "vrow"}>
-      <span className="vid"><Ext href={t.url}>#{t.id}</Ext></span>
+      <span className="vid"><Ext href={t.url}>{taskLabel(t.id)}</Ext></span>
       <span className="vmain">
-        <span className="vtitle"><Cited text={t.title} docs={docs} open={open} />{t.next && <span className="tag">next</span>}</span>
+        <span className="vtitle">{openTask ? <button className="link" onClick={() => openTask(t.id)}>{t.title}</button> : <Cited text={t.title} docs={docs} open={open} />}{t.next && <span className="tag">next</span>}</span>
         <span className="vsub">
           {t.group && <span>{t.group}</span>}
           {t.todos.all > 0 && <span>{t.todos.done} of {t.todos.all} todos done</span>}
@@ -135,7 +140,7 @@ export function TasksChannel(p: ViewProps) {
   const v = p.views;
   const epics = v.epics.epics;
   const tab: TaskTab = picked ?? (epics.length ? "epic" : "agent"); // the design opens by epic; with no epics, by agent
-  const all = v.tasks.tasks;
+  const all = [...v.tasks.tasks, ...(v.tasks.done ?? [])]; // the open work, then what was done this week (#545)
   const withTasks = epics.filter((e) => all.some((t) => t.epic === e.id));
   const chosen = epic && withTasks.some((e) => e.id === epic) ? epic : null;
   const rows = filterRows(all, typed).filter((t) => chosen === null || t.epic === chosen);
@@ -155,14 +160,16 @@ export function TasksChannel(p: ViewProps) {
       {!all.length && !v.problems.length && v.tasks.from !== "unknown" && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
       {rows.length > 0 && tab !== "list" && <Board tasks={rows} all={all} epics={epics} pulls={v.pulls.pulls} by={tab} project={p.project} open={p.open}
-        post={p.post} say={p.say} token={v.tasks.from === "board" ? p.token : undefined} />}
-      {rows.length > 0 && mode === "list" && v.epics.epics.length === 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>}
+        post={p.post} say={p.say} openTask={v.tasks.from === "board" ? p.openTask : undefined} />}
+      {p.task && v.tasks.from === "board" && p.token && <TaskPage id={p.task} t={all.find((t) => t.id === p.task) ?? null} project={p.project}
+        token={p.token} open={p.open} post={p.post} say={p.say} close={() => p.openTask?.(null)} />}
+      {rows.length > 0 && mode === "list" && v.epics.epics.length === 0 && <ul className="vlist" aria-label="Tasks">{rows.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} openTask={v.tasks.from === "board" && p.openTask ? (id) => p.openTask?.(id) : undefined} />)}</ul>}
       {rows.length > 0 && mode === "list" && v.epics.epics.length > 0 && groupByEpic(rows, v.epics.epics).map((g) => (
         <section key={g.epic?.id ?? "none"} aria-label={g.epic ? `Tasks in epic ${g.epic.title}` : "Tasks in no epic"}>
           <h3 className="vgroup">{g.epic
             ? <button className="link" onClick={() => p.open("view:epics", `#${g.epic?.id}`)}>Epic #{g.epic.id} {g.epic.title}</button>
             : "In no epic"}</h3>
-          <ul className="vlist">{g.tasks.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} />)}</ul>
+          <ul className="vlist">{g.tasks.map((t) => <TaskLine key={t.id} t={t} open={p.open} docs={p.docs} openTask={v.tasks.from === "board" && p.openTask ? (id) => p.openTask?.(id) : undefined} />)}</ul>
         </section>
       ))}
     </div>
@@ -267,16 +274,16 @@ function PullCard({ pr, open, docs }: { pr: PullRow; open: ViewProps["open"]; do
     <li className="card pr">
       <div className="prhead">
         <span className="vid"><Ext href={pr.url}>#{pr.number}</Ext></span>
-        <span className="vtitle"><Cited text={pr.title} docs={docs} open={open} /></span>
+        <span className="vtitle"><button className="link" onClick={() => open(`pr:${pr.number}`)} aria-label={`Open #${pr.number}: ${pr.title}`}>{pr.title}</button></span>
         {pr.draft && <span className="tag quiet">draft</span>}
       </div>
       <dl className="facts">
         <div><dt>Checks</dt><dd><Dot tone={checksTone(pr.checks.state)} />{checksText(pr.checks)}</dd></div>
         <div><dt>Review</dt><dd><Dot tone={reviewTone(pr.review.state)} />{pr.review.text}{pr.review.claim && pr.review.state !== "none" ? ` · ${pr.review.claim} holds it` : ""}</dd></div>
         <div><dt>Protected files</dt><dd><Dot tone={pr.protected ? "warn" : pr.protected === false ? "good" : "quiet"} />{protectedText(pr.protected)}</dd></div>
-        <div><dt>Agent</dt><dd>{pr.agent ? <AgentLink name={pr.agent} open={open} /> : <span className="empty">a person</span>}{pr.rework && <span className="tag">{pr.rework} reworking</span>}</dd></div>
+        <div><dt>Opened by</dt><dd>{pr.author?.name ? <AgentLink name={pr.author.name} open={open} /> : <span className="empty">{pr.author?.text ?? pr.agent ?? "a person"}</span>}{pr.rework && <span className="tag">{pr.rework} reworking</span>}</dd></div>
         <div><dt>Task</dt><dd>{pr.task ? <button className="link" onClick={() => open("view:tasks", `#${pr.task}`)}>#{pr.task}</button> : <span className="empty">—</span>}</dd></div>
-        <div><dt>Next</dt><dd>{pr.next.text}</dd></div>
+        <div><dt>Next</dt><dd>{pr.needsYou && <Dot tone="bad" />}{pr.next.text}</dd></div>
       </dl>
       <p className="vsub"><span className="mono">{pr.branch}</span><Cites cites={pr.cites} title={pr.title} docs={docs} open={open} /></p>
     </li>

@@ -91,6 +91,12 @@ function BlockView({ b, from, pages, open }: { b: Block; from: string; pages: Do
   }
 }
 
+/** Markdown read as a page (a pull request's body, or a Markdown file it changes, #453). */
+export function MarkdownView({ markdown, from, pages, open, label }: { markdown: string; from: string; pages: DocPage[]; open: Open; label: string }) {
+  const blocks = parseMarkdown(markdown);
+  return <article className="doc" aria-label={label}>{blocks.map((b, i) => <BlockView key={i} b={b} from={from} pages={pages} open={open} />)}</article>;
+}
+
 interface PageData {
   id: string;
   title: string;

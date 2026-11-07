@@ -55,13 +55,34 @@ function epicKey(t: TaskRow, known: Map<string, string>): [string, string] {
   return [t.group, t.group];
 }
 
-/** The swim lanes for `tasks`. By agent: one per first holder, by name, then Nobody. By epic: one per epic in `epics`'
+/** An agent lane's grey line (#545): how many tasks it has, then its state as the sidebar says it ("1 task · idle"), so
+ *  the lane never looks busy for an agent that is down. */
+export function agentLaneSub(count: number, state: string | undefined): string {
+  return [`${count} ${count === 1 ? "task" : "tasks"}`, state ?? ""].filter(Boolean).join(" · ");
+}
+
+/** How a task is named on screen: `#7` for an issue, `b3` for a task made on the message board (#545). */
+export function taskLabel(id: string): string {
+  return /^\d+$/.test(id) ? `#${id}` : id;
+}
+
+/** Who a card belongs to: the agent that holds it, else the one it was handed to (Reassign), else nobody (""). */
+export function ownerOf(t: { holders: string[]; assignee?: string | null }): string {
+  return t.holders[0] ?? t.assignee ?? "";
+}
+
+/** The words on a card for who has it when nobody holds it: "For taytu" when it was handed to taytu, else "Unassigned". */
+export function unheldText(t: { assignee?: string | null }): string {
+  return t.assignee ? `For ${t.assignee}` : "Unassigned";
+}
+
+/** The swim lanes for `tasks`. By agent: one per first holder (or the agent it was handed to), by name, then Nobody. By epic: one per epic in `epics`'
  *  order, then one per group in the order they first come (build order), then No epic. A lane with no task isn't there. */
 export function boardOf(tasks: TaskRow[], by: LaneBy, epics: { id: string; title: string }[] = []): Lane[] {
   const known = new Map(epics.map((e) => [e.id, `#${e.id} ${e.title}`]));
   const lanes = new Map<string, Lane>();
   for (const t of tasks) {
-    const [key, title] = by === "agent" ? [t.holders[0] ?? "", t.holders[0] ?? ""] : epicKey(t, known);
+    const [key, title] = by === "agent" ? [ownerOf(t), ownerOf(t)] : epicKey(t, known);
     let lane = lanes.get(key);
     if (!lane) {
       lane = { key, title: title || (by === "agent" ? "Nobody" : "No epic"), count: 0, cells: emptyCells() };
@@ -130,7 +151,7 @@ export type TaskAction = "release" | "block" | "reassign";
  *  and claim; they don't stop a session already working on the task, so the confirm says so. `agent` is the one picked
  *  for reassign ("" before one is). */
 export function taskAsk(action: TaskAction, t: { id: string; holders: string[] }, agent = ""): { happens: string; doesNot: string } {
-  const id = `#${t.id}`;
+  const id = taskLabel(t.id);
   const who = t.holders[0];
   const claim = who ? ` ${who}'s claim comes off.` : "";
   const session = who ? "A session already working on it isn't stopped. " : "";

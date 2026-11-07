@@ -181,7 +181,8 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
 - `update(id, { version, title?, body?, kind?, priority?, parentId?, ref?, status? })`: `version` is the one you read.
   `status` may be `open`, `in_review` or `deferred`; open and deferred clear the outcome (a reopened task).
 - `link(from, to, kind)` and `unlink(from, to, kind)`: kind is `blocks`, `waits_for`, `discovered_from`, `supersedes`,
-  `duplicates` or `related`. "from blocks to".
+  `duplicates` or `related`. `blocks`: from must be done before to can start. `waits_for`: from can't start until to
+  is done (the same order as "to blocks from").
 - `claim(id?, { ttlSeconds? })`: returns `{ task, token }`.
 - `heartbeat(id, token, { ttlSeconds? })`.
 - `release(id, token, { next: "ready" | "deferred" | "review" | "handoff", to?, reason })`: `review` ends the claim and
@@ -240,8 +241,9 @@ and the counts, `end()` closes the connections.
 
 ## The rules
 
-- **Ready and blocked are computed when read** (the `task_blockers` and `ready` views). A task is blocked while a
-  `blocks` or `waits_for` edge points to it, or to one of its parents at any depth, from a task that isn't done. Ready
+- **Ready and blocked are computed when read** (the `task_blockers` and `ready` views). A task is blocked while it,
+  or one of its parents at any depth, has a blocker that isn't done: the from of a `blocks` edge into it, or the to of
+  a `waits_for` edge out of it. Ready
   means a task or a bug that is open, not blocked, and held by nobody. Epics, notes and decisions are never ready
   and never claimed: they aren't work items. Nothing is stored that a write could forget to refresh.
 - **A claim is atomic.** One `UPDATE` takes the first ready task with `FOR UPDATE SKIP LOCKED`, so two claimers never
@@ -259,7 +261,8 @@ and the counts, `end()` closes the connections.
   `task.swept` event as `system`.
 - **Edits carry the version they read.** Every write raises a task's version. A mismatch is a `conflict`, and nothing
   changes.
-- **No loops.** A `blocks` or `waits_for` edge that would make a task wait on itself is refused (`cycle`). That
+- **No loops.** A `blocks` or `waits_for` edge that would make a task wait on itself is refused (`cycle`), whichever
+  kinds the loop goes through (a blocks b and a waits_for b is a loop). That
   includes loops through parents, since a block on a task also blocks its children. A parent that would make a loop
   is refused too.
 - **Taking a claim back is recorded.** `move` and `assign` on a held task need a reason. They clear the claim, so the
@@ -408,6 +411,7 @@ neither lists these tools nor runs them (a call to one is an unknown tool, `-326
 | `board_link` | `from`, `to`, `kind` | "from blocks to" and the other edge kinds; a loop is refused with `cycle`; `{ linked }` |
 | `board_unlink` | `from`, `to`, `kind` | Remove a link; `{ unlinked }` |
 | `board_comment` | `task`, `body` | A note on the task's thread, as you |
+| `board_signoff_add` | `id`, `task`, `check` | Put what only a person can check for a task on the project's sign-off and testing queue (the factory's `factory signoff`, #552); `conflict` when the id is taken |
 
 Each move is a board event (`task.moved`, and `task.taken_back` for a held task), so the board's listeners, the web UI
 among them, see it at once. The same input checks hold as for the other tools: no field a tool doesn't list, and the

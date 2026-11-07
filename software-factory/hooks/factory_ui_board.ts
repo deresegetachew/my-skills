@@ -32,7 +32,8 @@ import type { Obj, Problem, UiProject } from "./factory_ui_data.ts";
 import type { ActivityItem, ActivityKind } from "./factory_ui_ops.ts";
 
 /** The actor the web UI reads and writes as. It writes only a card's Release, Block and Reassign, and only for a project
- *  whose tasks.source is board (#502); otherwise those go through GitHub (0007 point 9). */
+ *  whose tasks.source is board (#502); otherwise those go through GitHub (0007 point 9). It also posts the owner's
+ *  "request changes" on a pull request to its author, as a verdict message (#453). */
 export const ACTOR = "web-ui";
 const RETRY_MS = 5_000;
 const CHECK_MS = 5_000;
@@ -113,8 +114,18 @@ function stateOf(t: Task): string {
 
 const WORK = new Set(["task", "bug"]);
 
-/** Project `repo`'s tasks part from all the board's tasks, or null when none of them is the project's. */
-export function partOf(all: Task[], repo: string): Obj | null {
+/** How a task is named in an answer (#546): `#7` for an issue, `b3` for a task made on the message board. */
+function taskName(id: string): string {
+  return /^\d+$/.test(id) ? `#${id}` : id;
+}
+
+/** How long a done task stays on the Board page's Done column (#545: finished work mustn't vanish at once). */
+export const DONE_DAYS = 7;
+
+/** Project `repo`'s tasks part from all the board's tasks, or null when none of them is the project's: its open tasks
+ *  (`tasks`) and, apart, those done in the last DONE_DAYS (`done`, newest first), each with who holds it and who it was
+ *  handed to. */
+export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj | null {
   const prefix = prefixOf(repo);
   const ids = new Map<number, string>();
   for (const t of all) {
@@ -135,13 +146,18 @@ export function partOf(all: Task[], repo: string): Obj | null {
   const named = (id: number): string => ids.get(id) ?? byId.get(id)?.ref ?? `board task ${id}`;
   const mine = all.filter((t) => ids.has(t.id));
   const work = mine.filter((t) => WORK.has(t.kind));
-  const tasks = work.filter((t) => t.status !== "done").map((t) => {
+  const since = now - DONE_DAYS * 86_400_000;
+  const doneAt = (t: Task): number => new Date(t.updatedAt).getTime();
+  const recent = work.filter((t) => t.status === "done" && doneAt(t) >= since).sort((a, b) => doneAt(b) - doneAt(a));
+  const rowOf = (t: Task): Obj => {
     const epic = epicOf(t);
-    const blockedBy = t.blockedBy.map(named);
-    return { id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [],
+    const blockedBy = t.status === "done" ? [] : t.blockedBy.map(named);
+    return { id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [], assignee: t.assignee ?? null,
       group: /^Milestone:[ \t]*(.+)$/m.exec(t.body)?.[1]?.trim() ?? "", todos: todos(t.body).map((d) => ({ done: d.done })),
       dependsOn: blockedBy, blockedBy, cites: citesIn(t.body), epic: epic ? ids.get(epic.id) : null };
-  });
+  };
+  const tasks = work.filter((t) => t.status !== "done").map(rowOf);
+  const done = recent.map(rowOf);
   const epics = mine.filter((t) => t.kind === "epic").map((e) => {
     const id = ids.get(e.id) as string;
     const parsed = parseEpic({ number: Number(id), title: e.title, body: e.body, labels: [], closed: e.status === "done", openIds: new Set() });
@@ -150,7 +166,7 @@ export function partOf(all: Task[], repo: string): Obj | null {
     const stage = e.status === "done" ? "done" : e.status === "deferred" ? "parked" : "";
     return { id, title: e.title, stage, prd: parsed.prd, decisions: parsed.decisions, summary: parsed.summary, cites: parsed.cites, tasks: children, url: null };
   });
-  return { source: "issues", from: "board", tasks, epics };
+  return { source: "issues", from: "board", tasks, done, epics };
 }
 
 /** The one connection to the board, its listen(), and the tasks part of each project, read again on every event. */
@@ -271,7 +287,7 @@ export class BoardFeed {
     const task = this.board && this.live(p) ? this.all.find((t) => numberOf(t, prefix) === id) : undefined;
     if (!this.board || !task) {
       return { status: 404, body: this.live(p)
-        ? { code: "ui_task_unknown", message: `#${id} isn't one of ${p.name}'s tasks on the message board.`, fix: "Pick a task the board shows." }
+        ? { code: "ui_task_unknown", message: `${taskName(id)} isn't one of ${p.name}'s tasks on the message board.`, fix: "Pick a task the board shows." }
         : { code: "ui_board_absent", message: `${p.name}'s tasks aren't read from a message board, so a task's thread isn't shown here.`,
           fix: "Bring the project's issues into the message board on the machine that keeps it; its threads then show here." } };
     }
@@ -279,7 +295,9 @@ export class BoardFeed {
       const [thread, context] = await Promise.all([this.board.thread({ task: task.id }), this.board.contextFor(task.id)]);
       const view = JSON.parse(this.parts.get(p.id) ?? "{}") as Obj;
       const row = (Array.isArray(view.tasks) ? (view.tasks as Obj[]) : []).find((t) => t.id === id) ?? { id, title: task.title, state: stateOf(task) };
-      return { status: 200, body: { project: p.id, from: "board", task: row, thread: thread.map(messageOf), context: context.map(contextOf) } };
+      // the task's own words (#543: a card opens the task), when it was made and last changed
+      return { status: 200, body: { project: p.id, from: "board", task: row, body: task.body, createdAt: new Date(task.createdAt).toISOString(),
+        updatedAt: new Date(task.updatedAt).toISOString(), thread: thread.map(messageOf), context: context.map(contextOf) } };
     } catch (e) {
       await this.fail(e);
       return { status: 503, body: { ...(this.down ?? unreachable(String(e))) } };
@@ -293,7 +311,7 @@ export class BoardFeed {
     const board = this.board;
     if (!board || !this.live(p)) throw this.down ?? unreachable("it isn't open on this server");
     const task = this.all.find((t) => numberOf(t, prefix) === id);
-    if (!task) throw { code: "ui_task_unknown", message: `#${id} isn't one of ${p.name}'s tasks on the message board.`, fix: "Read the board again, then pick a task it shows." };
+    if (!task) throw { code: "ui_task_unknown", message: `${taskName(id)} isn't one of ${p.name}'s tasks on the message board.`, fix: "Read the board again, then pick a task it shows." };
     if (action === "reassign") return board.assign(task.id, to, { reason });
     return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
   }
@@ -318,6 +336,17 @@ export class BoardFeed {
       await this.fail(e);
       return null;
     }
+  }
+
+  /** "Request changes" on a pull request (#453): a verdict message to `to` on task `id`'s thread (an issue number or
+   *  b<id>), as the dev manager's verdicts reach a builder. Null when this project's tasks aren't on the board. */
+  async verdict(p: UiProject, id: string | null, to: string, body: string): Promise<string | null> {
+    const board = this.board;
+    if (!board || !this.live(p)) return null;
+    const prefix = prefixOf(this.o.repoOf(p));
+    const task = id ? this.all.find((t) => numberOf(t, prefix) === id) : undefined;
+    await board.post({ task: task?.id ?? null, kind: "verdict", to, body });
+    return task ? `Told ${to} on the message board, on #${id}'s thread.` : `Told ${to} on the message board.`;
   }
 
   stop(): void {

@@ -25,9 +25,15 @@ use the commands below and nothing changes.
 - **Start** with `board_prime`, then `board_on_me` for the product questions addressed to you.
 - **Questions and proposals:** read the thread with `board_thread`; reply with `board_post` on that thread.
 - **What was decided** for a task (the owner's yes, a changed "Done when") goes on it with `board_note`.
-- **Tasks:** `board_create` files a task under its epic, and `board_link` records what it waits for. A task the owner
+- **Tasks:** `board_create` files a task under its epic, and `board_link` records what it waits for
+  (`{from: <the task>, to: <what it waits for>, kind: "waits_for"}`: from can't start until to is done). A task the owner
   dropped is moved to done as not planned (`board_move` with outcome `wont_do`). You never build, so you have no claim tools.
   Scope and order are still the owner's: file only what the owner agreed to.
+- **Sign-off and testing:** with `tasks.source` board the queue is on the board, not in a GitHub issue. Add what only a
+  person can check with `board_signoff_add` (`id`, `task` as the board names it, `b12` or `12`, and `check`); plans,
+  confirmations and results stay `factory signoff plan|confirm|result`, which write to the same queue. When the owner
+  fails an item and asks you to make it a task, `board_create` the task and `board_link` it to the original with
+  `discovered_from` (`from` the new task, `to` the original), so the board shows where it came from.
 
 ## Discovery: from an idea to a first milestone (`/product-pass discover`)
 
@@ -119,7 +125,8 @@ no story used twice and no task naming a missing story.
 5. **Progress.** When the owner asks "where are we", run `factory prd` (add `--open` or `--story N`) and say it in plain words.
    Never write a number you did not just read from it; never estimate dates.
 6. **Sign-off and testing queue** (`factory signoff`). Items only a person can check wait there with how to check them.
-   - A task's "Done when" that needs a person: `factory signoff add <id> --task N --check "<how>"`.
+   - A task's "Done when" that needs a person: `factory signoff add <id> --task N --check "<how>"` (N is the task's
+     number as people see it: `12` for issue 12, `b12` for a task made on the board; on the board, `board_signoff_add`).
    - **Testing the running app.** Someone else sets the app up. You write a test plan from the PRD story and its "Done when":
      numbered steps, what a builder sees and taps, the expected result, one behaviour per plan. `factory signoff plan <id>
      --task N --file plan.md`. The plan is *proposed*. **Only the owner confirms what is tested** (`factory signoff confirm
