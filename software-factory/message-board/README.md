@@ -278,7 +278,9 @@ and the counts, `end()` closes the connections.
 
 `factory board import github [--closed] [--dry-run] [--repo owner/name]` (`src/github/import.ts`) reads a repo's issues
 with the `gh` CLI (`gh api`, 100 a page; the repo's comments in bulk, `since` the last run when no new issue came in)
-and prints how many calls it made. What an issue means is the software factory's convention, given as
+and prints how many calls it made. With `MB_GH_CALLS_FILE` set, it also appends each call's `gh` arguments to that file
+(one JSON list a line), so a caller can count them: `factory board import` puts them in the factory's hourly GitHub call log
+(#520), as `factory board mirror` does with its own calls. What an issue means is the software factory's convention, given as
 `FACTORY_MAPPING` (a caller may pass its own); the adapter imports nothing from the factory and writes the few markers it
 reads again, with a comment saying where the factory defines each.
 

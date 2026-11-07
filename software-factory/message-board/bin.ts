@@ -3,7 +3,7 @@
 // The board's URL comes from MB_URL or <machine settings folder>/message-board/url (mode 600); it is never printed
 // with its password.
 import { randomBytes } from "node:crypto";
-import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
 import { PROTOCOL_VERSIONS, type Role, ROLES, serveMcp } from "./src/mcp.ts";
@@ -12,7 +12,7 @@ import {
   boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
   masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
 } from "./src/server.ts";
-import { GithubError, type ImportSummary, importFromGithub, repoName } from "./src/github/import.ts";
+import { ghCli, GithubError, type ImportSummary, importFromGithub, repoName } from "./src/github/import.ts";
 
 const USAGE = `factory board <verb>: the message board (factory-message-board, decision 0007): tasks, claims, threads and
 events on Postgres.
@@ -730,7 +730,11 @@ async function importVerb(argv: string[]): Promise<number> {
     if (missing.length) {
       fail("schema-old", `The board's schema is behind: ${missing.join(", ")} not applied yet.`, "Run `factory board migrate`, then run this again. Nothing was read or written.");
     }
-    return importFromGithub(b, { repo, closed, dryRun, boardIsRecord });
+    // MB_GH_CALLS_FILE: each `gh` call's arguments, one JSON list a line, for a caller that counts GitHub calls (the
+    // factory's hourly call log, #520); the board itself keeps no log
+    const file = process.env.MB_GH_CALLS_FILE;
+    const gh = file ? ghCli({ onCall: (a) => appendFileSync(file, JSON.stringify(a) + "\n", { mode: 0o600 }) }) : undefined;
+    return importFromGithub(b, { repo, closed, dryRun, boardIsRecord, gh });
   }, IMPORTER);
   importReport(summary);
   return 0;

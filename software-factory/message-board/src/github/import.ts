@@ -103,11 +103,17 @@ function spawn(args: string[], input?: string): { code: number; out: string; err
   }
 }
 
-/** The `gh` CLI, counting each `gh api` call. */
-export function ghCli(): Gh {
+/** The `gh` CLI, counting each `gh api` call. `onCall` hears each call's arguments before it runs (the factory logs them
+ * in its hourly GitHub call log, #520); a failing listener never stops the call. */
+export function ghCli(o: { onCall?: (args: string[]) => void } = {}): Gh {
   let calls = 0;
   const api = (args: string[], path: string, input?: string): unknown => {
     calls++;
+    try {
+      o.onCall?.(args);
+    } catch {
+      // a measurement only
+    }
     const r = spawn(args, input);
     if (r.code !== 0) {
       const why = (r.err || r.out).trim().slice(-300);
