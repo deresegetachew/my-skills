@@ -1,7 +1,7 @@
 // The task board's rules that aren't drawing (#439): its columns, and its lanes by agent or by epic, from
 // web/board_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { blockersText, boardOf, cardEdge, cardTag, COLUMNS, columnsOf, epicColour, laneColours, ownerOf, taskAsk, taskLabel, unheldText } from "../web/board_model.ts";
+import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, COLUMNS, columnsOf, epicColour, laneColours, ownerOf, taskAsk, taskLabel, unheldText } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
@@ -167,4 +167,10 @@ test("done tasks are on the board, in the Done column of their lane", () => {
   const lanes = boardOf([task("b1", "done", [], "", "Slugify"), task("b2", "ready")], "agent");
   expect(lanes[0]?.cells.done?.map((t) => t.id)).toEqual(["b1"]);
   expect(lanes[0]?.cells.ready?.map((t) => t.id)).toEqual(["b2"]);
+});
+
+test("an agent lane's grey line has its task count and its state as the sidebar says it, so a down agent never looks busy (#545)", () => {
+  expect(agentLaneSub(1, "down")).toBe("1 task · down");
+  expect(agentLaneSub(3, "working on b19")).toBe("3 tasks · working on b19");
+  expect(agentLaneSub(2, undefined)).toBe("2 tasks");
 });

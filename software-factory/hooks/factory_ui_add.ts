@@ -179,6 +179,14 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
   // the same folder by another name (a symlink, or macOS's /var and /private/var) is the same project
   const known = host.projects().find((p) => samePath(p.path, path));
   if (known) return problem("ui_add_known", `${path} is already in this factory, as ${known.name}.`, `Open ${known.name} on the left instead.`);
+  if (source === "folder") {
+    // the setup fetches main from origin and opens its pull request there, so a folder with no origin would stop half way (#546)
+    const origin = await git(path, ["remote", "get-url", "origin"]);
+    if (origin.code !== 0 || !origin.stdout.trim()) {
+      return problem("ui_add_no_remote", `${path} has no remote called origin, so its setup pull request would have nowhere to go.`,
+        `Add the project's GitHub repo as its origin (in that folder: git remote add origin https://github.com/<owner>/<name>.git, then git push -u origin main), or pick Create a new repo instead.`);
+    }
+  }
   const tasks = b.tasks;
   if (tasks !== "issues" && tasks !== "plan") return problem("ui_add_tasks", "Say where tasks come from.", "Pick GitHub issues or A build plan file.");
   const mainBranch = str(b.mainBranch);
