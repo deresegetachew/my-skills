@@ -55,6 +55,12 @@ function epicKey(t: TaskRow, known: Map<string, string>): [string, string] {
   return [t.group, t.group];
 }
 
+/** An agent lane's grey line (#545): how many tasks it has, then its state as the sidebar says it ("1 task · idle"), so
+ *  the lane never looks busy for an agent that is down. */
+export function agentLaneSub(count: number, state: string | undefined): string {
+  return [`${count} ${count === 1 ? "task" : "tasks"}`, state ?? ""].filter(Boolean).join(" · ");
+}
+
 /** How a task is named on screen: `#7` for an issue, `b3` for a task made on the message board (#545). */
 export function taskLabel(id: string): string {
   return /^\d+$/.test(id) ? `#${id}` : id;
