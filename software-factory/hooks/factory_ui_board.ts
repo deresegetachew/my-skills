@@ -189,14 +189,23 @@ export class BoardFeed {
       (this.check as { unref?: () => void }).unref?.();
     }
     try {
+      // the board counts as live (this.board) only once its tasks are read and the listen is on (#523): before that a
+      // page would show an empty board "from the board", and an action sent then would be refused
       const board = await this.api.Board.open(this.url, { as: ACTOR, session: `ui-${process.pid}`, max: 2 });
-      if (this.stopped) {
-        await board.end();
-        return;
+      let listener: Listener | null = null;
+      try {
+        const all = await board.tasks({ all: true, limit: MOST });
+        listener = await board.listen((_e: BoardEvent) => this.schedule(), { onError: (e) => void this.fail(e) });
+        if (this.stopped) throw new Error("stopped");
+        this.all = all;
+      } catch (e) {
+        await listener?.close().catch(() => {});
+        await board.end().catch(() => {});
+        if (this.stopped) return;
+        throw e;
       }
       this.board = board;
-      this.all = await board.tasks({ all: true, limit: MOST });
-      this.listener = await board.listen((_e: BoardEvent) => this.schedule(), { onError: (e) => void this.fail(e) });
+      this.listener = listener;
       if (this.down) this.o.log?.("message board: reconnected; tasks come from it again, live.");
       this.down = null;
       this.publish(true);

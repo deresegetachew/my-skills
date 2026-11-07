@@ -5,6 +5,7 @@
 // GitHub path is as before; a board that can't be reached shows a notice and that project falls back to GitHub.
 // A real Postgres (board_pg.ts), the real server (startUi), a fake gh and a fake `factory` that logs what it was asked.
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
+import { SQL } from "bun";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
@@ -478,6 +479,42 @@ test("with tasks.source board and a board with none of the project's tasks yet, 
   await finish(ui);
 }, T);
 
+// #523: the board answered but its tasks weren't read yet (slow under load), and the page said "from the board" with an
+// empty board, so an action sent then was refused with 503. Here the first read is held back by a lock on the tasks table.
+test("with tasks.source board, the board isn't shown as live until its tasks are read; then an action is taken", async () => {
+  const url = await boardUrl();
+  await seeded(url);
+  const locker = new SQL(url, { max: 1 });
+  let unlock = (): void => {};
+  const held = new Promise<void>((resolve) => (unlock = resolve));
+  let locked = (): void => {};
+  const lockTaken = new Promise<void>((resolve) => (locked = resolve));
+  const tx = locker.begin(async (t) => {
+    await t`LOCK TABLE tasks IN ACCESS EXCLUSIVE MODE`;
+    locked();
+    await held;
+  });
+  try {
+    await lockTaken;
+    const ui = await started(workProject(0, BOARD_CONFIG), url);
+    await Bun.sleep(1_500); // the server has opened the board and waits on the tasks table
+    const opening = (await api(ui, "/api/projects/work/tasks")).json;
+    expect(opening.from).toBe("unknown"); // not "board" with no tasks: they aren't read yet
+    expect(rowsOf(opening)).toEqual([]);
+    expect(problemsOf(opening)).toEqual([]); // opening, not down
+    unlock();
+    await tx;
+    await tasksUntil(ui, (j) => j.from === "board", 15_000);
+    const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    await finish(ui);
+  } finally {
+    unlock();
+    await tx.catch(() => {});
+    await locker.close();
+  }
+}, T);
+
 test("tasks from a healthy board show no 'no snapshot yet' banner; the pull requests, still from the snapshot, do", async () => {
   const url = await boardUrl();
   await seeded(url);
@@ -511,8 +548,7 @@ test("the server logs that the board can't be read, and that it reconnected once
   };
   try {
     expect(await until("can't be read", 15_000), out).toBe(true);
-    const { SQL } = await import("bun");
-    const admin = new SQL(pg.url, { max: 1 });
+      const admin = new SQL(pg.url, { max: 1 });
     try {
       await admin.unsafe(`create database ${name}`);
     } finally {
