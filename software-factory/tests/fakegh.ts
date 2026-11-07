@@ -9,7 +9,7 @@
 // to LOOP_LOG as `gh <args>`, and every write also to `posted` in the file, so a test can say "nothing was written".
 // With `repo` set in the file (owner/name), paths that name that repo (`repos/owner/name/...`) are served too, `gh auth
 // token` says it is signed in, and `PATCH issues/N` sets an issue's labels and state. FAKE_GH_FAIL=1 makes every `gh api`
-// call fail (HTTP 502), as GitHub does when it is down. A posted comment's id is the one the listing gives it.
+// call fail (HTTP 502), as GitHub does when it is down, and FAKE_GH_FAIL_WRITES=1 only the writes. A posted comment's id is the one the listing gives it.
 //
 //     installFakeGh(dir)  // writes <dir>/bin/gh, executable
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
@@ -25,6 +25,9 @@ appendFileSync(process.env.LOOP_LOG || "/dev/null", "gh " + a.join(" ") + "\n");
 if (a[0] === "auth" && a[1] === "token" && db.repo) { console.log("gho_fake"); process.exit(0); }
 if (a[0] !== "api") process.exit(1);
 if (process.env.FAKE_GH_FAIL === "1") { console.error("gh: Bad Gateway (HTTP 502)"); process.exit(1); }
+if (process.env.FAKE_GH_FAIL_WRITES === "1" && a.some((x, i) => (x === "-X" || x === "--method") && a[i + 1] !== "GET")) {
+  console.error("gh: Bad Gateway (HTTP 502)"); process.exit(1);
+}
 let method = "GET";
 a.forEach((x, i) => { if (x === "-X" || x === "--method") method = a[i + 1] as string; });
 const skip = new Set(["GET", "PATCH", "POST", "PUT", "DELETE", "application/vnd.github+json", "-"]);

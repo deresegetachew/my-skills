@@ -115,6 +115,11 @@ function idOf(w: World, c: Row | undefined): number {
   return 1000 * Number(c?.issue) + list.findIndex((b) => b === c?.body) + 1;
 }
 
+/** Run TypeScript `code` in the project, as a hook would run. */
+function runCodeIn(w: World, code: string, extra: Record<string, string> = {}): Proc {
+  return sh([process.execPath, "--no-env-file", "-e", code], { cwd: w.d, env: { ...w.env, ...extra }, timeoutMs: 120_000 });
+}
+
 function err(p: Proc): { code: string; message: string; fix: string } {
   return JSON.parse(p.stderr.trim().split("\n").at(-1) as string) as { code: string; message: string; fix: string };
 }
@@ -125,7 +130,7 @@ async function task(w: World, n: number): Promise<Task> {
 
 // --- the task mirror -----------------------------------------------------------------------------------------------------
 
-test("a state change on the board is mirrored with one label call and one short line; a second run sends nothing", async () => {
+test("a state change on the board is mirrored with one read of the issue, one label call and one short line; a second run sends nothing", async () => {
   const w = await world();
   const t = await w.board.create({ title: "Add login", ref: ref(101) });
   await w.board.create({ title: "Pay by card", ref: ref(102) });
@@ -235,6 +240,75 @@ test("--watch sends a change soon after it lands on the board, without being run
     p.kill();
     await p.exited;
   }
+});
+
+test("the first pass sends only to issues whose labels differ from the board; the rest are taken as they are", async () => {
+  const w = await world({ tasks: { source: "board" } }, [issue(101, "Add login", ["factory:ready"]), issue(102, "Pay by card", ["factory:ready"]),
+    issue(105, "Sign out", ["factory:in-review"])]);
+  await w.board.create({ title: "Add login", ref: ref(101) }); // ready on both
+  const t102 = await w.board.create({ title: "Pay by card", ref: ref(102) });
+  await w.board.move(t102.id, { to: "blocked", reason: "needs the Stripe keys" }); // differs
+  const t105 = await w.board.create({ title: "Sign out", ref: ref(105) });
+  await w.board.move(t105.id, { to: "in_review" }); // the same on both
+
+  const r = mirror(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect(posted(w).map((p) => [p.kind, p.issue])).toEqual([["patch", 102], ["comment", 102]]);
+  expect(String(posted(w)[1]?.body)).toContain("**Blocked:** needs the Stripe keys");
+  clearLog(w);
+  expect(mirror(w).code).toBe(0);
+  expect(calls(w).writes).toEqual([]);
+});
+
+test("two passes started at the same moment send an ask once", async () => {
+  const w = await world({ tasks: { source: "board" } }, [issue(103, QUEUE, [])]);
+  const q = await w.board.create({ title: QUEUE, kind: "note", ref: ref(103) });
+  await w.board.post({ task: q.id, kind: "ask", tag: "owner-ask", to: "owner", body: "<!-- factory-owner-ask id=palette -->\nWhich colour?" });
+  const start = (): ReturnType<typeof Bun.spawn> => Bun.spawn([process.execPath, "--no-env-file", join(HOOKS, "factory_board.ts"), "mirror"],
+    { cwd: w.d, env: w.env, stdout: "pipe", stderr: "pipe" });
+  const [a, b] = [start(), start()];
+  const codes = await Promise.all([a.exited, b.exited]);
+  expect(codes).toEqual([0, 0]);
+  expect(posted(w).filter((p) => p.kind === "comment")).toHaveLength(1);
+  expect((await asks(w))[0]?.ref).toMatch(new RegExp(`^github:${REPO}/comments/\\d+$`));
+});
+
+test("a pass that dies after posting a comment and before linking it: the next pass links that comment and posts none", async () => {
+  const w = await world({ tasks: { source: "board" } }, [issue(103, QUEUE, []), issue(101, "Add login", ["factory:ready"])]);
+  const q = await w.board.create({ title: QUEUE, kind: "note", ref: ref(103) });
+  const other = await w.board.create({ title: "Add login", ref: ref(101) });
+  const ask = await w.board.post({ task: q.id, kind: "ask", tag: "owner-ask", to: "owner", body: "<!-- factory-owner-ask id=palette -->\nWhich colour?" });
+  // the first comment on #103 will be 103001: a message already holding that ref makes the link fail once, after the post
+  const blocker = await w.board.post({ task: other.id, kind: "note", body: "in the way" });
+  await w.board.linkMessage(blocker.id, `github:${REPO}/comments/103001`);
+  const failed = mirror(w);
+  expect(failed.code).toBe(1);
+  expect(posted(w).filter((p) => p.kind === "comment")).toHaveLength(1);
+  const { SQL } = await import("bun");
+  const sql = new SQL(w.url, { max: 1 });
+  await sql`UPDATE messages SET external_ref = NULL WHERE id = ${blocker.id}`;
+  await sql.close();
+
+  const r = mirror(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect(posted(w).filter((p) => p.kind === "comment")).toHaveLength(1);
+  expect((await w.board.message(ask.id)).ref).toBe(`github:${REPO}/comments/103001`);
+});
+
+test("an ask whose mirror fails after it is on the board is never posted twice: only a board that can't take it falls back", async () => {
+  const w = await world();
+  const code = (extra: Record<string, string>): Proc => runCodeIn(w, `
+    const { askOnBoard } = await import(${JSON.stringify(join(HOOKS, "factory_orchestrator.ts"))});
+    console.log("result=" + askOnBoard("palette", "<!-- factory-owner-ask id=palette -->\\nWhich colour?"));`, extra);
+  const down = code({ MB_URL: "postgres://nobody:pw@127.0.0.1:1/none" });
+  expect(down.stdout, down.stderr).toContain("result=unavailable");
+
+  const writesFail = code({ FAKE_GH_FAIL_WRITES: "1" });
+  expect(writesFail.stdout, writesFail.stderr).toContain("result=board");
+  expect(posted(w).filter((p) => p.kind === "comment")).toEqual([]); // the mirror failed; it waits on the board
+  expect(await asks(w)).toHaveLength(1);
+  expect(mirror(w).code).toBe(0);
+  expect(posted(w).filter((p) => p.kind === "comment")).toHaveLength(1);
 });
 
 // --- the owner queue -----------------------------------------------------------------------------------------------------
