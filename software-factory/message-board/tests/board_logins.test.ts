@@ -546,3 +546,57 @@ test("the sweep drops a poisoned expired login and ends its held session", async
   await held.close().catch(() => {});
   expect(ended).toBe(true);
 });
+
+// ---------- a remove that crosses a redeem (#514 review 4) ----------
+/** Every role of the login made from \`codeRole\` (the code's and any fresh one): their names. */
+async function rolesOf(w: World, codeRole: string): Promise<string[]> {
+  const sql = new SQL(w.url, { max: 1 });
+  try {
+    return ((await sql`select rolname from pg_roles where rolname = ${codeRole} or rolname like ${`${codeRole}\\_%`}`) as { rolname: string }[])
+      .map((r) => r.rolname);
+  } finally {
+    await sql.close();
+  }
+}
+
+test("a remove that waits on a redeem in progress drops the fresh role the redeem made too", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  const copy = new SQL(made.url, { max: 1 });
+  const tx = await copy.reserve();
+  await tx`begin`;
+  await tx`select * from mb_redeem_login()`; // holds the login's row
+  const remove = Bun.spawn([process.execPath, "--no-env-file", BIN, "login", "remove", "laptop"], { env: w.env, stdout: "pipe", stderr: "pipe" });
+  await Bun.sleep(1500); // the remove reads the row and waits for it
+  await tx`commit`;
+  tx.release();
+  const code = await remove.exited;
+  expect(code, await new Response(remove.stderr).text()).toBe(0);
+  await copy.close().catch(() => {});
+  expect(await rolesOf(w, made.role)).toEqual([]);
+  expect(ls(w)).toEqual([]);
+});
+
+test("a session of the code's role that predates its NOLOGIN can't redeem", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  const b = await Board.open(made.url, { max: 1 });
+  try {
+    const admin = new SQL(w.url, { max: 1 });
+    try {
+      await admin.unsafe(`alter role "${made.role}" nologin`); // as a remove's first step does
+    } finally {
+      await admin.close();
+    }
+    let code = "";
+    try {
+      await b.redeemLogin(() => {});
+    } catch (e) {
+      code = (e as { code: string }).code;
+    }
+    expect(code).toBe("login-expired");
+  } finally {
+    await b.end().catch(() => {});
+  }
+  expect(await rolesOf(w, made.role)).toEqual([made.role]); // no fresh role was made
+});
