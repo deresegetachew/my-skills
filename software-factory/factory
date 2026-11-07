@@ -123,7 +123,8 @@ Look
                          for that login, at its Tailscale address)
   machine join <code> [--no-tailscale] [--no-doctor]
                          on the new machine: check Tailscale, redeem the code on the board (once: its login gets a
-                         new password only this machine has), write the board's URL (mode 600), run factory doctor
+                         fresh role and password only this machine has), write the board's URL (mode 600),
+                         run factory doctor
   machine leave          on a machine that joined: stop using the board here (removes its URL file and the agent
                          names the join added); the hub still drops its login with machine remove
   machine ls [--json]    the machines added and whether they joined, their code is still waiting, or it expired

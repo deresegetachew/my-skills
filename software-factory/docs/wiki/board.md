@@ -58,14 +58,17 @@ factory machine join <code>                                 # on dev-pc: redeems
 ```
 
 The board enforces the code (#514). Its login expires with it (Postgres's `VALID UNTIL`), so after 15 minutes Postgres
-itself refuses the code's password. `machine join` redeems it once: the login's expiry is lifted and it gets a new
-password that only that machine has. The code's own password stops working, so a second machine with a copy of the code
-is refused (`code-refused`). Once the redeem is committed, the join ends every other session of that login (one a
-copy of the code may have opened just before) and connects with the new password; if that fails, the code may have been
-copied: the join keeps nothing and says to run `factory machine remove <name>` on the hub and make a new code
+itself refuses the code's password. `machine join` redeems it once: the machine gets a fresh role for its login
+(`<code role>_<random>`, no expiry) with a password that only it has, and the code's role is made `NOLOGIN`. So a
+second machine with a copy of the code is refused (`code-refused`), even one that started logging in before the
+redeem and finished after (Postgres checks `NOLOGIN` after the password), and the code's role, which can only change
+its own password, can't touch the fresh one. Once the redeem is committed, the join ends every other session of the
+code's role (one a copy may have opened just before; each must end within 5 s) and connects as the fresh role; if either
+fails, the code may have been copied: the join keeps nothing and says to run `factory machine remove <name>` on the hub and make a new code
 (`code-compromised`). Postgres checks `VALID UNTIL` only when a session connects, so a session opened with an
 unredeemed code before it expired may stay open until `factory board sweep` runs on the hub: the sweep drops each
-login whose code expired unredeemed and ends its sessions (as `machine ls` and `machine add` drop it too). `factory machine ls` shows who joined (a machine joins when its code is redeemed, not
+login whose code expired unredeemed and ends its sessions (as `machine ls` and `machine add` drop it too). The spent code role is dropped by the next sweep, `machine ls`
+or `machine add` on the hub. `factory machine ls` shows who joined (a machine joins when its code is redeemed, not
 when something connects with it); `factory machine remove <name>` drops a machine's login.
 
 When the hub removes a machine's login, or it expired, that machine's `factory board status`, `factory next` and

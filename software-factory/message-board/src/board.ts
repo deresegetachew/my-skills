@@ -143,9 +143,9 @@ export class Board {
     return this.run(() => addLogin(this.sql, name, password, options));
   }
 
-  /** Redeems this connection's own join-code login once (logins.ts): `keep` gets its new password before the commit, and
+  /** Redeems this connection's own join-code login once (logins.ts): `keep` gets its fresh role and password before the commit, and
    * a `keep` that throws undoes the redeem. */
-  async redeemLogin(keep: (password: string) => Promise<void> | void): Promise<void> {
+  async redeemLogin(keep: (login: { role: string; password: string }) => Promise<void> | void): Promise<void> {
     return this.run(() => redeemLogin(this.sql, this.url, keep));
   }
 

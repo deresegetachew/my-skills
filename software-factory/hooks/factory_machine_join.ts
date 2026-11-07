@@ -7,7 +7,7 @@
 //       address and port) and the agents' names; it works once and expires (15 minutes by default): a machine that hasn't
 //       joined by then has its login dropped.
 //   factory machine join <code> [--no-tailscale] [--no-doctor]                         (on the new machine)
-//       checks Tailscale, redeems the code on the board (its login gets a new password, which only this machine has),
+//       checks Tailscale, redeems the code on the board (its login gets a fresh role and password only this machine has),
 //       writes the board's URL with it to this machine's settings folder (message-board/url: folder 700, file 600), and
 //       runs `factory doctor`. With a board set up, messaging.transport is board by default.
 //   factory machine leave             (on a machine that joined) stop using the board here: its URL file goes, and the
@@ -18,9 +18,9 @@
 // The hub keeps the records in <machine settings folder>/machines.json (mode 600). The code is the secret: whoever holds
 // a live one can join, so it is shown once, and the board enforces both its expiry and its one use (#514). Its login
 // is made with VALID UNTIL the code's expiry (`factory board login add --valid-for`), so Postgres itself refuses the
-// code's password after that. `join` redeems it (mb_redeem_login on the board): the login's expiry is lifted and it gets
-// a new random password, written only here; the code's own password stops working there, so a second machine with a
-// copy of the code is refused. The redeem is committed only once this machine has written what it keeps, so a join that
+// code's password after that. `join` redeems it (mb_redeem_login on the board): the login gets a fresh role with no expiry
+// and a new random password, written only here; the code's role can't log in any more, so a second machine with a copy
+// of the code is refused, even one that started logging in before the redeem. The redeem is committed only once this machine has written what it keeps, so a join that
 // fails here spends nothing. `add` and `ls` ask the board which logins were redeemed (`factory board login ls`): a
 // machine whose login was redeemed is marked joined; one whose code expired unredeemed has its login dropped (`login
 // remove --unredeemed`; marked revoked, kept so `ls` can say so). When the board doesn't answer nothing is changed.
@@ -268,9 +268,10 @@ function masked(e: unknown): string {
   return (e instanceof Error ? e.message : String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
 }
 
-/** `url` with `password` in place of its own. */
-function withPassword(url: string, password: string): string {
+/** `url` as the login `role` with `password`. */
+function withLogin(url: string, role: string, password: string): string {
   const u = new URL(url);
+  u.username = encodeURIComponent(role);
   u.password = encodeURIComponent(password);
   return u.toString();
 }
@@ -347,14 +348,14 @@ async function cmdJoin(argv: string[]): Promise<number> {
   }
   let saving = false;
   try {
-    await b.redeemLogin((password) => {
+    await b.redeemLogin((login) => {
       saving = true;
       const mine = settingsBefore.agents;
       const had = Array.isArray(mine) ? mine.map(String) : [];
       const added = p.agents.map((a) => a.name).filter((n) => !had.includes(n));
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       chmodSync(dir, 0o700);
-      writeAtomic(file, withPassword(p.url, password) + "\n", 0o600);
+      writeAtomic(file, withLogin(p.url, login.role, login.password) + "\n", 0o600);
       writeAtomic(joinedFile, pyDumps({ name: p.name, agents: added } satisfies Joined) + "\n", 0o600);
       writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
       wroteUsed = true; // only once it is written: a failed write changed nothing

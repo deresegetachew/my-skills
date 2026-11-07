@@ -9,15 +9,18 @@
 // its password is shown once, when it is made, and Postgres keeps only its hash.
 //
 // A join code's login (#514) is made to expire (`validFor`: the role's VALID UNTIL, so Postgres itself refuses its
-// password after that) and is redeemed once: mb_redeem_login(), a SECURITY DEFINER function the logins may call, marks
-// the caller's own login redeemed, lifts its expiry and gives it a new random password, which it returns. The code's
-// password stops working there, so a copy of the code joins nothing else. The redeem runs in the caller's transaction:
-// `redeemLogin` keeps the new password (the caller writes it) before the commit, so nothing is spent when that fails.
-// Until the commit the code's password still works, so a copy of the code could connect in that window, stay connected
-// and change the login's password (any role may change its own). So after the commit `redeemLogin` ends every other
-// session of the login and connects anew with the new password: if that fails, the code may have been copied
-// (`login-compromised`). A session opened before VALID UNTIL outlives it (Postgres checks it only when connecting):
-// `dropExpiredLogins` (`factory board sweep`) drops an expired, unredeemed login and ends its sessions.
+// password after that) and is redeemed once: mb_redeem_login(), a SECURITY DEFINER function the logins may call, makes
+// a fresh role for the caller's login (<code role>_<random>, a new random password, no expiry, in the logins group),
+// points mb_logins at it (the login keeps its name), makes the code's role NOLOGIN and returns the new role and
+// password. A copy of the code can then do nothing: the code's role can't log in, and it can only ever change its own
+// password, never the fresh role's. Postgres checks NOLOGIN after the password, so a copy that started its login
+// handshake before the redeem and finishes it afterwards is refused too ("not permitted to log in"). The redeem runs in
+// the caller's transaction: `redeemLogin` hands the new role and password to `keep` (the caller writes them) before
+// the commit, so nothing is spent when that fails. After the commit it ends the code role's other sessions (waiting up
+// to 5 s for each) and connects as the fresh role: if either fails, the code may have been copied
+// (`login-compromised`). The spent code role is dropped by the board's own user at the next `login ls`, `login
+// remove` or `factory board sweep`. A session opened before VALID UNTIL outlives it (Postgres checks it only when
+// connecting): `dropExpiredLogins` (the sweep) drops an expired, unredeemed login and ends its sessions.
 //
 // Roles belong to the whole server, so the names carry the database's: <db>_logins (the group) and <db>_l_<name>.
 import { SQL } from "bun";
@@ -66,8 +69,8 @@ async function tableExists(sql: SQL, name: string): Promise<boolean> {
   return Boolean(((await sql`SELECT to_regclass(${name}) IS NOT NULL AS ok`) as Row[])[0]?.ok);
 }
 
-/** mb_logins.redeemed_at (#514), added to a table made before it. A login used before then counts as redeemed: it
- * joined the old way. */
+/** mb_logins.redeemed_at and code_role (#514), added to a table made before them. A login used before then counts as
+ * redeemed: it joined the old way. */
 async function upgrade(sql: SQL): Promise<void> {
   if (await hasRedeemed(sql)) return;
   await sql.begin(async (tx) => {
@@ -78,25 +81,32 @@ async function upgrade(sql: SQL): Promise<void> {
 
 async function hasRedeemed(sql: SQL): Promise<boolean> {
   return ((await sql`SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
-    AND table_name = 'mb_logins' AND column_name = 'redeemed_at'`) as Row[]).length > 0;
+    AND table_name = 'mb_logins' AND column_name IN ('redeemed_at', 'code_role')`) as Row[]).length === 2;
 }
 
 /** Inside a transaction that holds the lock. */
 async function addRedeemed(tx: SQL): Promise<void> {
   if (await hasRedeemed(tx)) return;
-  await tx.unsafe("ALTER TABLE mb_logins ADD COLUMN redeemed_at timestamptz");
-  await tx.unsafe("UPDATE mb_logins SET redeemed_at = first_seen WHERE first_seen IS NOT NULL");
+  const had = ((await tx`SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+    AND table_name = 'mb_logins' AND column_name = 'redeemed_at'`) as Row[]).length > 0;
+  if (!had) {
+    await tx.unsafe("ALTER TABLE mb_logins ADD COLUMN redeemed_at timestamptz");
+    await tx.unsafe("UPDATE mb_logins SET redeemed_at = first_seen WHERE first_seen IS NOT NULL");
+  }
+  await tx.unsafe("ALTER TABLE mb_logins ADD COLUMN IF NOT EXISTS code_role text");
 }
 
 // The redeem. It runs as its owner (the board's user, a superuser) for the login that called it (session_user): only that
-// login's row and role are touched, the role's name comes from mb_logins (which the logins can't write) and goes into
-// the statement through format's %I and %L. The search_path is pinned, pg_catalog first, so no object a caller could
-// make stands in for a built-in. The SQLSTATEs MB001 to MB003 are its refusals (redeemLogin turns them into errors).
-const REDEEM = `CREATE OR REPLACE FUNCTION mb_redeem_login() RETURNS text LANGUAGE plpgsql SECURITY DEFINER
+// login's row is touched, and only its role and the fresh one; the code role's name comes from mb_logins (which the
+// logins can't write), the fresh one is that plus random hex, and both go into the statements through format's %I and
+// %L. The search_path is pinned, pg_catalog first, so no object a caller could make stands in for a built-in. The
+// SQLSTATEs MB001 to MB003 are its refusals (redeemLogin turns them into errors).
+const REDEEM = `CREATE FUNCTION mb_redeem_login(OUT login_role text, OUT login_password text) LANGUAGE plpgsql SECURITY DEFINER
   SET search_path = pg_catalog, public, pg_temp AS $f$
   DECLARE
     login public.mb_logins%ROWTYPE;
     valid_to timestamptz;
+    fresh text;
     pw text;
   BEGIN
     SELECT * INTO login FROM public.mb_logins WHERE role = session_user FOR UPDATE;
@@ -109,10 +119,15 @@ const REDEEM = `CREATE OR REPLACE FUNCTION mb_redeem_login() RETURNS text LANGUA
       RAISE EXCEPTION 'the login % expired', login.name USING ERRCODE = 'MB002';
     END IF;
     pw := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
-    EXECUTE format('ALTER ROLE %I PASSWORD %L VALID UNTIL %L', login.role, pw, 'infinity');
-    UPDATE public.mb_logins SET redeemed_at = now(), first_seen = coalesce(first_seen, now()), last_seen = now()
+    fresh := left(login.role, 54) || '_' || left(replace(gen_random_uuid()::text, '-', ''), 8);
+    EXECUTE format('CREATE ROLE %I LOGIN INHERIT PASSWORD %L VALID UNTIL %L IN ROLE %I', fresh, pw, 'infinity',
+      current_database() || '_logins');
+    EXECUTE format('ALTER ROLE %I NOLOGIN', login.role);
+    UPDATE public.mb_logins SET role = fresh, code_role = login.role, redeemed_at = now(),
+      first_seen = coalesce(first_seen, now()), last_seen = now()
      WHERE name = login.name;
-    RETURN pw;
+    login_role := fresh;
+    login_password := pw;
   END $f$`;
 
 /** The logins table, the group with the board's rights, and the trigger that notes a login's first use. Safe to run
@@ -121,7 +136,7 @@ async function ensure(tx: SQL, db: string): Promise<void> {
   const group = groupOf(db);
   await tx.unsafe(`CREATE TABLE IF NOT EXISTS mb_logins (
     name text PRIMARY KEY, role text NOT NULL UNIQUE, created_at timestamptz NOT NULL DEFAULT now(),
-    first_seen timestamptz, last_seen timestamptz, redeemed_at timestamptz)`);
+    first_seen timestamptz, last_seen timestamptz, redeemed_at timestamptz, code_role text)`);
   await addRedeemed(tx);
   const exists = ((await tx`SELECT 1 FROM pg_roles WHERE rolname = ${group}`) as Row[]).length > 0;
   if (!exists) await tx.unsafe(`CREATE ROLE ${ident(group)} NOLOGIN`);
@@ -155,6 +170,7 @@ async function ensure(tx: SQL, db: string): Promise<void> {
     END $f$`);
   const trigger = ((await tx`SELECT 1 FROM pg_event_trigger WHERE evtname = 'mb_login_seen'`) as Row[]).length > 0;
   if (!trigger) await tx.unsafe("CREATE EVENT TRIGGER mb_login_seen ON login EXECUTE FUNCTION mb_login_seen()");
+  await tx.unsafe("DROP FUNCTION IF EXISTS mb_redeem_login()"); // its result changed (#514): CREATE OR REPLACE can't
   await tx.unsafe(REDEEM);
   await tx.unsafe("REVOKE ALL ON FUNCTION mb_redeem_login() FROM PUBLIC");
   await tx.unsafe(`GRANT EXECUTE ON FUNCTION mb_redeem_login() TO ${ident(group)}`);
@@ -190,6 +206,7 @@ export async function addLogin(sql: SQL, name: string, password: string, options
 export async function listLogins(sql: SQL): Promise<Login[]> {
   if (!(await tableExists(sql, "mb_logins"))) return [];
   await upgrade(sql);
+  await dropSpentRoles(sql);
   await sql`UPDATE mb_logins SET first_seen = now(), last_seen = now()
     WHERE first_seen IS NULL AND role IN (SELECT usename FROM pg_stat_activity WHERE usename IS NOT NULL)`;
   const rows = (await sql`SELECT l.name, l.role, l.created_at, l.first_seen, l.last_seen, l.redeemed_at,
@@ -206,14 +223,19 @@ export async function listLogins(sql: SQL): Promise<Login[]> {
  * otherwise); with `unredeemed`, only one whose join code wasn't redeemed (`login-redeemed` otherwise). Refuses
  * `not-found` for a name that isn't a login. */
 export async function removeLogin(sql: SQL, name: string, options: { unused?: boolean; unredeemed?: boolean } = {}): Promise<{ name: string; role: string }> {
-  const db = await database(sql);
-  const role = roleOf(db, name);
+  roleOf(await database(sql), name); // checks the name
   if (!(await tableExists(sql, "mb_logins"))) refuse("not-found", `There is no login called ${name}.`, "`factory board login ls` lists them.");
   await upgrade(sql);
-  const oid = ((await sql`SELECT oid FROM pg_roles WHERE rolname = ${role}`) as Row[])[0]?.oid ?? null; // pg_stat_activity names it by oid once it is dropped
+  // the login's role now (a redeemed login has a fresh one) and the spent code role, if not dropped yet; their oids,
+  // as pg_stat_activity names them by oid once they are dropped
+  const row = ((await sql`SELECT role, code_role FROM mb_logins WHERE name = ${name}`) as Row[])[0];
+  const roles = [row?.role, row?.code_role].filter((r): r is string => typeof r === "string" && r !== "");
+  const oids: unknown[] = [];
+  for (const r of roles) oids.push(...((await sql`SELECT oid FROM pg_roles WHERE rolname = ${r}`) as Row[]).map((x) => x.oid));
+  const role = String(row?.role ?? "");
   await sql.begin(async (tx) => {
     await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
-    const found = (await tx`SELECT first_seen, redeemed_at FROM mb_logins WHERE name = ${name} FOR UPDATE`) as Row[];
+    const found = (await tx`SELECT first_seen, redeemed_at, role, code_role FROM mb_logins WHERE name = ${name} FOR UPDATE`) as Row[];
     if (!found.length) refuse("not-found", `There is no login called ${name}.`, "`factory board login ls` lists them.");
     if (options.unused) {
       const live = ((await tx`SELECT 1 FROM pg_stat_activity WHERE usename = ${role}`) as Row[]).length > 0;
@@ -225,20 +247,42 @@ export async function removeLogin(sql: SQL, name: string, options: { unused?: bo
       refuse("login-redeemed", `The login ${name} was redeemed (its machine joined), so it was kept.`, `Remove it anyway with \`factory board login remove ${name}\`.`);
     }
     await tx`DELETE FROM mb_logins WHERE name = ${name}`;
-    await tx.unsafe(`DROP ROLE IF EXISTS ${ident(role)}`);
+    for (const r of [found[0]?.role, found[0]?.code_role]) if (typeof r === "string" && r) await tx.unsafe(`DROP ROLE IF EXISTS ${ident(r)}`);
   });
-  if (oid !== null) await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usesysid = ${oid}`;
+  for (const oid of oids) await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usesysid = ${oid}`;
   return { name, role };
 }
 
-/** Redeems the join code of the login this connection is (mb_redeem_login): `keep` gets the login's new password inside
- * the transaction, and the redeem is committed only when it returns. Refuses `login-redeemed` (already redeemed),
+/** Drops the code roles of redeemed logins (NOLOGIN since the redeem) and ends any session they still have. Only the
+ * board's own user can; for anyone else it does nothing. */
+async function dropSpentRoles(sql: SQL): Promise<void> {
+  if (!(await superuser(sql))) return;
+  const spent = (await sql`SELECT l.name, l.code_role, r.oid FROM mb_logins l LEFT JOIN pg_roles r ON r.rolname = l.code_role
+    WHERE l.code_role IS NOT NULL`) as Row[];
+  for (const s of spent) {
+    if (s.oid !== null && s.oid !== undefined) {
+      await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usesysid = ${s.oid}`;
+      await sql.unsafe(`DROP ROLE IF EXISTS ${ident(String(s.code_role))}`);
+    }
+    await sql`UPDATE mb_logins SET code_role = NULL WHERE name = ${s.name} AND code_role = ${s.code_role}`;
+  }
+}
+
+async function superuser(sql: SQL): Promise<boolean> {
+  return Boolean(((await sql`SELECT rolsuper FROM pg_roles WHERE rolname = current_user`) as Row[])[0]?.rolsuper);
+}
+
+/** Redeems the join code of the login this connection is (mb_redeem_login): `keep` gets the login's fresh role and
+ * its password inside the transaction, and the redeem is committed only when it returns. Refuses `login-redeemed` (already redeemed),
  * `login-expired`, `not-found` (the connection isn't a login's) and `schema-old` (the board has no redeem yet). */
-export async function redeemLogin(sql: SQL, url: string, keep: (password: string) => Promise<void> | void): Promise<void> {
+export async function redeemLogin(sql: SQL, url: string, keep: (login: { role: string; password: string }) => Promise<void> | void): Promise<void> {
+  let role = "";
   let password = "";
   await sql.begin(async (tx) => {
     try {
-      password = String(((await tx`SELECT mb_redeem_login() AS pw`) as Row[])[0]?.pw ?? "");
+      const got = ((await tx`SELECT login_role, login_password FROM mb_redeem_login()`) as Row[])[0];
+      role = String(got?.login_role ?? "");
+      password = String(got?.login_password ?? "");
     } catch (e) {
       const state = (e as { errno?: string }).errno ?? "";
       const msg = (e as { message?: string }).message ?? String(e);
@@ -248,20 +292,25 @@ export async function redeemLogin(sql: SQL, url: string, keep: (password: string
       if (state === "42883") refuse("schema-old", "The board can't redeem a join code yet (it has no mb_redeem_login).", "On the machine that runs the board, update the factory and make a new code with `factory machine add`.");
       throw e;
     }
-    if (!password) refuse("bad-input", "The board's redeem gave no password.", "Make a new code with `factory machine add` and try again.");
-    await keep(password);
+    if (!password || !role) refuse("bad-input", "The board's redeem gave no login.", "Make a new code with `factory machine add` and try again.");
+    await keep({ role, password });
   });
-  // Committed: the code's password no longer connects. End the sessions a copy may have opened before the commit, then
-  // check that the new password is still the login's.
+  // Committed: the code's role can't log in any more. End the sessions a copy may have opened before the commit (each
+  // must be gone within 5 s), then check that the fresh role connects with its password.
   const copied = (why: string): never => refuse("login-compromised",
     `The join code's login didn't hold after the redeem (${why.replace(/\/\/[^@\s]*@/g, "//***@").slice(0, 200)}): this code may have been copied.`,
     "Run `factory machine remove <name>` on the hub and make a new code (`factory machine add <name> --agent ...`).");
+  let ended = true;
   try {
-    await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = current_user AND pid <> pg_backend_pid()`;
+    const rows = (await sql`SELECT pg_terminate_backend(pid, 5000) AS ok FROM pg_stat_activity
+      WHERE usesysid = (SELECT oid FROM pg_roles WHERE rolname = session_user) AND pid <> pg_backend_pid()`) as Row[];
+    ended = rows.every((r) => r.ok === true);
   } catch (e) {
     copied(e instanceof Error ? e.message : String(e));
   }
+  if (!ended) copied("a session of the code's login didn't end");
   const u = new URL(url);
+  u.username = encodeURIComponent(role);
   u.password = encodeURIComponent(password);
   const check = new SQL(u.toString(), { max: 1, connectionTimeout: 10 });
   try {
@@ -277,9 +326,9 @@ export async function redeemLogin(sql: SQL, url: string, keep: (password: string
  * names dropped. Only the board's own user (a superuser) can: for anyone else it does nothing. */
 export async function dropExpiredLogins(sql: SQL): Promise<string[]> {
   if (!(await tableExists(sql, "mb_logins"))) return [];
-  const su = Boolean(((await sql`SELECT rolsuper FROM pg_roles WHERE rolname = current_user`) as Row[])[0]?.rolsuper);
-  if (!su) return [];
+  if (!(await superuser(sql))) return [];
   await upgrade(sql);
+  await dropSpentRoles(sql);
   const due = (await sql`SELECT l.name FROM mb_logins l JOIN pg_roles r ON r.rolname = l.role
     WHERE l.redeemed_at IS NULL AND r.rolvaliduntil IS NOT NULL AND r.rolvaliduntil <= now() ORDER BY l.name`) as Row[];
   const dropped: string[] = [];

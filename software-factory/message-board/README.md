@@ -75,15 +75,20 @@ touching the others:
   redeemed (`login-redeemed` otherwise).
 - **Join codes (#514).** `login add --valid-for <seconds>` makes the role with `VALID UNTIL` that long from now by the
   server's clock, so Postgres itself refuses its password afterwards. `mb_redeem_login()` redeems it once
-  (`Board.redeemLogin(keep)`): called by the login itself, it marks `mb_logins.redeemed_at`, sets `VALID UNTIL
-  'infinity'`, gives the role a new random password (two `gen_random_uuid()`, 64 hex characters) and returns it. It refuses a login already redeemed (`login-redeemed`), one that expired
+  (`Board.redeemLogin(keep)`): called by the login itself, it makes a fresh role for it (`<code role>_<8 hex>`, `VALID UNTIL
+  'infinity'`, a new random password of two `gen_random_uuid()`, 64 hex characters, in the logins group), points
+  `mb_logins` at it (`role`; the spent one in `code_role`, and `redeemed_at`), makes the code's role `NOLOGIN` and
+  returns the fresh role and its password. Postgres checks `NOLOGIN` after the password, so a copy of the code that
+  started its handshake before the redeem and finishes after is refused, and the code's role can only change its own
+  password, never the fresh role's. The spent code role is dropped (its sessions ended) by the board's own user at the
+  next `login ls`, `login remove` or sweep. It refuses a login already redeemed (`login-redeemed`), one that expired
   (`login-expired`), and a user that isn't a login (`not-found`). The redeem runs in the caller's transaction and
-  `keep` gets the password before the commit: a `keep` that throws undoes it, so the code still works. The function
+  `keep` gets the fresh role and password before the commit: a `keep` that throws undoes it, so the code still works. The function
   is `SECURITY DEFINER`, owned by the board's user, with `search_path` pinned to `pg_catalog, public, pg_temp`; it
-  touches only the row and role of `session_user`, takes the role's name from `mb_logins` (which logins can't write)
-  and builds its one dynamic statement with `format('%I', '%L')`. Only the logins group may execute it (PUBLIC can't).
-  After the commit `redeemLogin` ends the login's other sessions (a copy of the code may have connected while the old
-  password still worked) and connects anew with the new password; if that fails it refuses `login-compromised` (the
+  touches only the row of `session_user`, its role and the fresh one, takes the role's name from `mb_logins`
+  (which logins can't write) and builds its dynamic statements with `format('%I', '%L')`. Only the logins group may execute it (PUBLIC can't).
+  After the commit `redeemLogin` ends the code role's other sessions (`pg_terminate_backend(pid, 5000)`: a copy may
+  have connected before the commit) and connects as the fresh role; if a session doesn't end or that fails it refuses `login-compromised` (the
   code may have been copied). `VALID UNTIL` stops only new sessions: `Board.dropExpiredLogins`, run by `factory board
   sweep` as the board's own user, drops each login whose code expired unredeemed and ends its sessions.
   `factory machine add` makes its login with `--valid-for` (the code's time), `factory machine join` redeems it.
