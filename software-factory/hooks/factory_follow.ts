@@ -27,7 +27,9 @@ agent by its name, wherever it runs: on this machine (its own tmux, no remote ne
   factory follow <agent> --messages         the messages from and to that agent as they are said, wherever it runs
                          [--polls N]        (\`factory messages tail\` kept to it; Ctrl-C stops)
   factory follow --all [--on R]             one read-only pane per session (tiled), in a local tmux
-  factory say <agent> "message" [--on R]    send one message, as if typed; the use is logged on that machine (no text)
+  factory say <agent> "message" [--on R]    send one message, as if typed; the use is logged on that machine (no text).
+                                            A busy session is waited for (20 s at most), and Enter is pressed again
+                                            while the text still sits in its prompt box (\`say-unsent\` if it stays)
   --on R                                    only remote R; --on local is this machine (the name local is kept for it)
   factory agent <name> --detach             start that agent in a detached tmux session (what the commands above find)
 
@@ -286,6 +288,48 @@ function cmdFollowAll(args: FollowArgs): number {
   return exec(["tmux", "attach", "-t", session], env);
 }
 
+/** [seconds to wait for a busy session, Enters to send again]: FACTORY_SAY_WAIT_SECONDS (20) and FACTORY_SAY_ENTERS (3). */
+function sayLimits(): [number, number] {
+  const num = (v: string | undefined, d: number, max: number) => {
+    const n = Number(v);
+    return v !== undefined && v !== "" && Number.isFinite(n) && n >= 0 ? Math.min(Math.floor(n), max) : d;
+  };
+  return [num(process.env.FACTORY_SAY_WAIT_SECONDS, 20, 300), num(process.env.FACTORY_SAY_ENTERS, 3, 10)];
+}
+
+/** The bash script `factory say` runs where the session is (here or over ssh), the message on stdin. A Claude session
+ *  that is busy (its pane shows "esc to interrupt") can drop an Enter, leaving the text typed in its prompt box, so it
+ *  waits (up to `busy` seconds in all) for the session to be idle, types the text, presses Enter, and looks again: while
+ *  the prompt line (the last `❯` line) still holds the text, it waits for idle again and presses Enter again, up to
+ *  `enters` more times. Claude Code's "How is Claude doing this session?" survey, which swallows what is typed under it,
+ *  is dismissed (`0`) before it types or presses Enter. Then the text is still unsent: it prints UNSENT and exits 5. No session: NOSESSION, exit 3; tmux
+ *  failing: exit 4. The use is logged there (who, when, which session), never the text. */
+export function sayScript(session: string, who: string, busy: number, enters: number): string {
+  return [
+    `S=${shQuote(session)}; T="=$S:"`,
+    'tmux has-session -t "=$S" 2>/dev/null || { echo NOSESSION; exit 3; }',
+    'msg=$(cat); head="${msg:0:40}"',
+    'pause() { sleep "$1" 2>/dev/null || true; }',
+    'pane() { tmux capture-pane -p -J -t "$T" 2>/dev/null; }',
+    'busy() { pane | tail -n 15 | grep -q "esc to interrupt"; }',
+    "unsent() { pane | grep '❯' | tail -n 1 | grep -qF -- \"$head\"; }",
+    // Claude Code's "How is Claude doing this session?" survey takes the keys typed under it: dismiss it (0) first
+    'survey() { pane | tail -n 15 | grep -q "How is Claude doing"; }',
+    `deadline=$((SECONDS + ${busy}))`,
+    'idle() { while busy && [ "$SECONDS" -lt "$deadline" ]; do pause 0.5; done; n=0; ' +
+      'while survey && [ "$n" -lt 3 ]; do tmux send-keys -t "$T" 0 || exit 4; n=$((n + 1)); pause 0.5; done; }',
+    'idle',
+    'tmux send-keys -t "$T" -l -- "$msg" && tmux send-keys -t "$T" Enter || exit 4',
+    'd="${XDG_STATE_HOME:-$HOME/.local/state}/software-factory"; mkdir -p "$d"',
+    `printf '%s from=%s via=%s agent=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ${shQuote(who)} "\${SSH_CLIENT%% *}" "$S" >>"$d/say.log"`,
+    `k=0; pause 0.3`,
+    'while unsent; do',
+    `  [ "$k" -lt ${enters} ] || { echo UNSENT; exit 5; }`,
+    '  idle; tmux send-keys -t "$T" Enter || exit 4; k=$((k + 1)); pause 0.5',
+    'done',
+  ].join("\n");
+}
+
 function cmdSay(agent: string, message: string, on: string | null): number {
   agentsMayNot("send messages to other sessions (`factory say`)");
   if (!message.trim() || message.length > 2000 || /[\x00-\x1f\x7f]/.test(message)) {
@@ -300,13 +344,15 @@ function cmdSay(agent: string, message: string, on: string | null): number {
   }
   if (target) R.ensureSandboxTarget(target);
   const who = `${process.env.USER || process.env.LOGNAME || "unknown"}@${hostname()}`;
-  const s = shQuote(session);
-  const script = `S=${s}; tmux has-session -t "=$S" 2>/dev/null || { echo NOSESSION; exit 3; }; msg=$(cat); ` +
-    `tmux send-keys -t "=$S:" -l -- "$msg" && tmux send-keys -t "=$S:" Enter || exit 4; ` +
-    `d="\${XDG_STATE_HOME:-$HOME/.local/state}/software-factory"; mkdir -p "$d"; ` +
-    `printf '%s from=%s via=%s agent=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ${shQuote(who)} "\${SSH_CLIENT%% *}" "$S" >>"$d/say.log"`;
-  const [rc, out, err] = R.runOn(target, script, message);
+  const [busy, enters] = sayLimits();
+  const script = sayScript(session, who, busy, enters);
+  const [rc, out, err] = R.runOn(target, script, message, busy + enters * 2 + 30);
   if (rc === 3 || out.includes("NOSESSION")) return refuse(gone(session, remote));
+  if (rc === 5 || out.includes("UNSENT")) {
+    return refuse(new RemoteError("say-unsent", `The message is typed in ${agent}'s prompt box on ${remote}, but its session ` +
+      "hasn't taken it (it stayed busy).", `Press Enter in it: \`factory follow ${agent}\`, then Enter. Don't send it again, ` +
+      "or it is typed twice."));
+  }
   if (rc !== 0) {
     const lines = splitLines(err.trim());
     return refuse(new RemoteError("say-failed", `Could not send the message to ${session} on ${remote}.`,

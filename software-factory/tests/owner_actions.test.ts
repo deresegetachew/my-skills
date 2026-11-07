@@ -194,6 +194,7 @@ test("owner start starts the role's loop in its own tmux session and window, say
   expect(command).toContain("factory loop -i");
   expect(command).toContain("FACTORY_ROLE=coding-agent");
   expect(command).toContain("FACTORY_NAME=taytu");
+  expect(command).toContain("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1"); // the survey would swallow `factory say` (#558)
   expect(tmuxCalled(p, "attach-session")).toEqual([]);
   expect(tmuxCalled(p, "switch-client")).toEqual([]);
 });
@@ -208,12 +209,74 @@ test("owner start works for the dev manager and product owner roles too", () => 
   }
 });
 
-test("owner start of a session that is already running says so and starts nothing", () => {
+test("owner start of a session that is already running is refused with already_running and starts nothing", () => {
   const p = setup({ has: true });
   const r = owner(p, OWNER, "start", "coding-agent", "taytu");
-  expect(r.code, r.out).toBe(0);
-  expect(r.stdout.toLowerCase()).toContain("already running");
+  refused(r, "already_running");
+  expect(err(r).message.toLowerCase()).toContain("already running");
+  expect(err(r).message).toContain("work-taytu");
+  expect(err(r).fix).toContain("factory owner stop taytu");
   expect(tmuxCalled(p, "new-session")).toEqual([]);
+});
+
+// systemctl and loginctl fakes: every call logged, an enabled unit is a file (as in autostart_support.ts)
+const FAKE_SYSTEMCTL = `#!/usr/bin/env bash
+echo "$*" >>"$FAKE_TMUX_DIR/systemctl.log"
+d="$FAKE_TMUX_DIR/systemd"; mkdir -p "$d"
+[ "$1" = "--user" ] || exit 1
+shift
+case "$1" in
+  enable) u="$2"; [ "$2" = "--now" ] && u="$3"; echo 1 >"$d/$u" ;;
+  is-enabled) [ -f "$d/\${3:-$2}" ] ;;
+esac
+`;
+
+function withServices(p: Proj): Env {
+  write(join(p.root, "bin", "systemctl"), FAKE_SYSTEMCTL, 0o755);
+  write(join(p.root, "bin", "loginctl"), '#!/bin/sh\n[ "$1" = show-user ] && echo yes\nexit 0\n', 0o755);
+  return { FACTORY_SETUP_HEARTBEAT: undefined, FACTORY_AUTOSTART_PLATFORM: "linux" };
+}
+
+function systemctlCalls(p: Proj): string[] {
+  const f = join(p.tmuxDir, "systemctl.log");
+  return existsSync(f) ? readFileSync(f, "utf8").split("\n").filter(Boolean) : [];
+}
+
+test("owner start installs and starts the heartbeat daemon first, and a second start does not install it again", () => {
+  const p = setup();
+  const env = withServices(p);
+  const r = owner(p, { ...OWNER, ...env }, "start", "coding-agent", "taytu");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("heartbeat: Installed");
+  expect(systemctlCalls(p)).toContain("--user enable --now work-factory-heartbeat.service");
+  const unit = read(join(p.root, "config", "systemd", "user", "work-factory-heartbeat.service"));
+  expect(unit).toContain("heartbeat run");
+  // installed, its daemon not running yet (no state file): the second start starts it, and writes nothing again
+  rmSync(join(p.tmuxDir, "up")); // the fake tmux has one session at a time: taytu's has ended
+  const again = owner(p, { ...OWNER, ...env }, "start", "coding-agent", "menelik");
+  expect(again.code, again.out).toBe(0);
+  expect(systemctlCalls(p).filter((l) => l.startsWith("--user enable "))).toHaveLength(1);
+  expect(systemctlCalls(p)).toContain("--user start work-factory-heartbeat.service");
+});
+
+test("owner start of a running session refuses before it touches the heartbeat service", () => {
+  const p = setup({ has: true });
+  const env = withServices(p);
+  refused(owner(p, { ...OWNER, ...env }, "start", "coding-agent", "taytu"), "already_running");
+  expect(systemctlCalls(p)).toEqual([]);
+});
+
+test("owner start says why the heartbeat daemon can't run, with the fix, and still starts the session", () => {
+  const p = setup();
+  const env = withServices(p);
+  // systemd's user manager can't be reached (a user switched to with su, no login session)
+  write(join(p.root, "bin", "systemctl"), '#!/bin/sh\necho "$*" >>"$FAKE_TMUX_DIR/systemctl.log"\necho "Failed to connect to bus" >&2\nexit 1\n', 0o755);
+  const r = owner(p, { ...OWNER, ...env }, "start", "coding-agent", "taytu");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("heartbeat: NOT running (no-user-manager)");
+  expect(r.stdout).toContain("Fix:");
+  expect(systemctlCalls(p).filter((l) => l.startsWith("--user enable "))).toEqual([]);
+  expect(tmuxCalled(p, "new-session")).toHaveLength(1);
 });
 
 test("owner start refuses a role that is not one of the three, and asks nothing of tmux", () => {

@@ -9,13 +9,15 @@
 // queue ("Dev manager: needs the owner") marked `factory-cockpit-chat` (the marker the readers know, factory_prs.ts),
 // which no reader takes as the owner's answer to an ask, so the next pass sees it as context. `summary.posted` is false
 // when there is no queue or GitHub refused. A session that fails is `chat_failed` and posts nothing. It is the owner's:
-// it refuses in an agent session.
+// it refuses in an agent session. While the session runs, a file in this machine's state folder (factory_talks.ts) says
+// so, and `factory agents ls` shows the role as working, "talking with the owner", rather than down.
 import { load, roleNames, toFloat } from "./factory_config.ts";
 import { gh } from "./factory_issues.ts";
 import { run, runMain } from "./factory_lib.ts";
 import { refuse } from "./factory_machine.ts";
 import { ownerQueue } from "./factory_orchestrator.ts";
 import { contextLine, MARK, need, permissionFlags, sessionFlags } from "./factory_roles.ts";
+import { talkBegin, talkEnd } from "./factory_talks.ts";
 
 type Obj = { [key: string]: unknown };
 
@@ -115,8 +117,14 @@ export function main(args: string[]): number {
   // the web UI waits 20 minutes for an answer (factory_ui_chat.ts): a session never runs past it, so none posts after
   const minutes = Math.min(Math.max(toFloat(process.env.FACTORY_CHAT_MINUTES) ?? MINUTES, 1), MAX_MINUTES);
   const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: role, FACTORY_LOOP: "1" };
-  const p = run(["claude", ...sessionFlags(cfg, role, name), ...permissionFlags(cfg), "-p", prompt(role, name, text, history)],
-    { env, timeoutMs: minutes * 60_000 });
+  const mark = talkBegin(role, name); // while it runs, `factory agents ls` shows the role as working, talking with the owner
+  let p: ReturnType<typeof run>;
+  try {
+    p = run(["claude", ...sessionFlags(cfg, role, name), ...permissionFlags(cfg), "-p", prompt(role, name, text, history)],
+      { env, timeoutMs: minutes * 60_000 });
+  } finally {
+    talkEnd(mark);
+  }
   const answer = p.stdout.trim().slice(0, ANSWER_MAX);
   if (p.code !== 0 || !answer) {
     const why = p.code === 0 ? "it gave no answer" : p.stderr.trim().split("\n").filter(Boolean).pop() || `it exited ${p.code}`;

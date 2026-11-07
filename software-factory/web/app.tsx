@@ -9,8 +9,8 @@
 // tested on their own. Nothing on screen names a command.
 import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
-  type Tone } from "./model.ts";
+import { agentState, ago, channelHash, type ChannelView, type LimitView, parseHash, pickProject, type ProjectView, ROLE_TITLE,
+  searchChannels, splitTask, taskChannel, type Tone } from "./model.ts";
 import { ADD_CSS, AddProjectPage } from "./add_project.tsx";
 import type { Run as AddRun } from "./add_project_model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
@@ -21,10 +21,13 @@ import type { DocSection } from "./docs_model.ts";
 import { addMachineAsk, agentArgs, plainProblem } from "./machines_model.ts";
 import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
 import { ARTIFACTS_CSS, ArtifactsPage } from "./artifacts.tsx";
+import { ActivityPage, HealthPage, HomePage, OPS_CSS, type OpsProps, UsagePage } from "./ops.tsx";
 import { MenuIcon } from "./page_head.tsx";
 import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx";
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
+import { MaintenancePage, ReleasesPage, SETTINGS_CSS, SettingsPage } from "./settings.tsx";
 import { SIGNOFF_CSS, SignoffPage } from "./signoff.tsx";
+import { PR_CSS, PrPage } from "./pr.tsx";
 import { CSS } from "./style.ts";
 import { THEME_CSS } from "./theme.ts";
 import { nextTheme, THEME_KEY, themeLabel, themeOf } from "./theme_model.ts";
@@ -86,7 +89,28 @@ class Unauthorized extends Error {}
 const UNREACHABLE_FIX = "Check that the web UI still runs on the machine that serves this page, start it again there, then reload.";
 
 const TOKEN_KEY = "factory-ui-token";
+const PROJECT_KEY = "factory-ui-project"; // the project last opened on this browser (#545)
+
+function storedProject(): string | null {
+  try {
+    return localStorage.getItem(PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function keepProject(id: string): void {
+  try {
+    localStorage.setItem(PROJECT_KEY, id);
+  } catch {
+    // a private window: the next visit opens the first project
+  }
+}
 const ADD_HASH = "#/add-project";
+
+/** The pages built from the server's own reads (#455, #451), and the WebSocket messages that make them read again. */
+const OPS_PAGES: Record<string, (p: OpsProps) => ReactNode> = { home: HomePage, activity: ActivityPage, health: HealthPage, usage: UsagePage };
+const OPS_PULSE = ["state", "views", "health", "activity", "owner-queue"];
 
 function storedToken(): string {
   try {
@@ -416,14 +440,7 @@ function MachinesChannel({ live, project, open, post }: { live: Live | undefined
 
 /** A page of the design not built yet: what it will hold, and the pages that already have some of it. */
 const COMING: Record<string, { what: string; see: string[] }> = {
-  home: { what: "Home will show what the team is doing now and what needs you, on one page.", see: ["inbox", "board", "prs"] },
-  activity: { what: "Activity will show everything that happened, newest first.", see: ["prs", "ci"] },
-  health: { what: "Health will check every part of the factory and give a fix for what doesn't work.", see: ["machines", "ci"] },
-  usage: { what: "Usage and cost will show what each agent and task used, against its budget.", see: ["board"] },
-  settings: { what: "The settings of this project and this machine will be set here.", see: [] },
   integrations: { what: "The services the agents use will be listed here, with whether each one works.", see: [] },
-  releases: { what: "The version this project runs, and the newer ones, will be shown here.", see: [] },
-  maintenance: { what: "Clean-ups and repairs will be here, each saying what it will and won't touch.", see: [] },
 };
 
 function ComingPage({ page, open }: { page: string; open: (channel: string) => void }) {
@@ -467,15 +484,26 @@ function DocsIndex({ sections, open }: { sections: DocSection[] | undefined; ope
   );
 }
 
+/** Factory settings' own pages (#456, web/settings.tsx); Integrations is still to come (#441). */
+const SETTINGS_PAGES: Record<string, typeof SettingsPage> = { settings: SettingsPage, releases: ReleasesPage, maintenance: MaintenancePage };
+
 /** The views that are channels of their own (#424, web/views.tsx). */
 const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel, epics: EpicsChannel, "pull-requests": PullsChannel, ci: CiChannel };
 
 // --- the app -----------------------------------------------------------------------------------------------------------
 
+/** What the list knows of pull request `n` that changes its page: a new head, new checks, a draft made ready (#453). */
+function prRowKey(v: ViewsData | undefined, n: string): string {
+  const r = v?.pulls.pulls.find((x) => String(x.number) === n);
+  return r ? `${r.head ?? ""}|${r.checks.state}|${r.draft}|${r.next.action}` : "";
+}
+
 /** The page the address bar names; a page's own name (`page:board`) is read as the address it opens. */
-function routeOf(hash: string): { project: string; channel: string } | null {
+function routeOf(hash: string): { project: string; channel: string; task: string | null } | null {
   const r = parseHash(hash);
-  return r ? { ...r, channel: addressOf(r.channel) } : null;
+  if (!r) return null;
+  const s = splitTask(r.channel); // a task opened on the board (#543): view:tasks/task:b3
+  return { project: r.project, channel: addressOf(s.channel), task: s.task };
 }
 
 function Gate({ onToken, wrong }: { onToken: (t: string) => void; wrong: boolean }) {
@@ -514,6 +542,7 @@ function App() {
   const [adding, setAdding] = useState(() => location.hash === ADD_HASH); // Add a project (#447)
   const [addRun, setAddRun] = useState<AddRun | null>(null);
   const [listed, setListed] = useState(0); // goes up when the server's project list changes
+  const [pulseBy, setPulseBy] = useState<Record<string, number>>({}); // Home, Activity, Health read again (#455)
   const search = useRef<HTMLInputElement>(null);
 
   const signedOut = useCallback((e: unknown) => {
@@ -562,6 +591,7 @@ function App() {
       };
       ws.onmessage = (e) => {
         const m = JSON.parse(String(e.data)) as { type: string; project?: string } & Live;
+        if (m.project && OPS_PULSE.includes(m.type)) setPulseBy((before) => ({ ...before, [m.project as string]: (before[m.project as string] ?? 0) + 1 }));
         if (m.type === "state" && m.project) {
           const { type: _t, project, ...data } = m;
           setLiveBy((before) => ({ ...before, [project as string]: data }));
@@ -676,17 +706,20 @@ function App() {
       open={(p) => { setAdding(false); location.hash = channelHash(p, "page:home"); }} />;
   }
 
-  const project = projects.find((p) => p.id === route?.project) ?? projects[0] as Project;
+  const project = pickProject(projects, route?.project, storedProject()) as Project;
+  if (route?.project === project.id) keepProject(project.id);
   const view = views.find((v) => v.id === project.id) ?? { id: project.id, name: project.name, channels: [] };
   const docRoute = route ? parseDocChannel(route.channel) : null;
   const docPages = pagesOf(docsBy[project.id]);
   const docPage = docRoute ? docPages.find((d) => d.id === docRoute.id) : undefined;
   const channel = view.channels.find((c) => c.id === route?.channel);
-  const pageRoute = route?.channel?.startsWith("page:") || route?.channel?.startsWith("signoff:");
+  const pageRoute = route?.channel?.startsWith("page:") || route?.channel?.startsWith("signoff:") || route?.channel?.startsWith("pr:");
   const page = channel || docRoute ? pageOf(route?.channel ?? "") : pageOf(pageRoute ? route?.channel ?? "" : "page:home");
   const signoffId = route?.channel?.startsWith("signoff:") ? route.channel.slice("signoff:".length) : null;
+  const prNumber = route?.channel?.startsWith("pr:") ? route.channel.slice("pr:".length) : null; // a pull request's page (#453)
   // the pages that write their own header from their data (#454)
-  const ownHead = !project.problem && !docRoute && !channel && (page === "signoff" || page === "artifacts");
+  const ownHead = !project.problem && !docRoute && !channel && (page === "signoff" || page === "artifacts" || prNumber !== null || page in OPS_PAGES);
+  const OpsPage = OPS_PAGES[page];
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
   const go = (p: string, c: string, f = ""): void => {
@@ -726,7 +759,9 @@ function App() {
     const talkers = talkTargets(view.channels.filter((c) => c.kind === "agent"));
     return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast} docs={docPages}
       token={token} talkers={talkers}
-      open={(c, f) => go(project.id, c, f)} />;
+      open={(c, f) => go(project.id, c, f)}
+      task={route?.task ?? null}
+      openTask={(id) => { location.hash = channelHash(project.id, id ? taskChannel(`view:${name}`, id) : `view:${name}`); }} />;
   };
 
   const agentChannels = view.channels.filter((c) => c.kind === "agent");
@@ -746,7 +781,10 @@ function App() {
     : channel?.kind === "agent" ? { title: channel.name, purpose: [role, agentState(agent, live?.limit ?? null).text].filter(Boolean).join(" · ") }
     : pageHead(page);
 
-  const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => [c.name, { role: c.role, avatar: c.avatar }]));
+  const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => {
+    const s = agentState(agentOf(c.name), live?.limit ?? null); // the same words and tone as the sidebar (#545)
+    return [c.name, { role: c.role, avatar: c.avatar, tone: s.tone, state: s.text }];
+  }));
 
   return (
     <AgentsContext.Provider value={agentsHere}>
@@ -869,8 +907,17 @@ function App() {
           : page === "docs" ? <DocsIndex key={project.id} sections={docsBy[project.id]} open={(c) => go(project.id, c)} />
           : ownHead && page === "signoff" ? <SignoffPage key={project.id} project={project} id={signoffId} token={token} get={get} post={post} say={setToast}
             talkers={talkTargets(view.channels.filter((c) => c.kind === "agent"))} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} />
+          : ownHead && prNumber !== null ? <PrPage key={`${project.id}/${prNumber}`} project={project} number={prNumber} docs={docPages} get={get} post={post}
+            say={setToast} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} rowKey={prRowKey(viewsBy[project.id], prNumber)} />
           : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
+          : ownHead && OpsPage ? <OpsPage key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} pulse={pulseBy[project.id] ?? 0}
+            open={(c, f) => go(project.id, addressOf(c), f)} onMenu={() => setMenu(true)} />
+          : !channel && SETTINGS_PAGES[page] ? (() => {
+            const Page = SETTINGS_PAGES[page] as typeof SettingsPage;
+            return <Page key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} open={(c) => go(project.id, c)}
+              agents={live?.agents ?? []} />;
+          })()
           : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} post={post} />
@@ -891,6 +938,7 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS
+  + OPS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

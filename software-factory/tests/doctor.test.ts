@@ -3,8 +3,8 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
-import { doctor, hookLine, lines, machine, project } from "./doctor_support.ts";
+import { basename, join } from "node:path";
+import { doctor, hookLine, lines, machine, project, stub } from "./doctor_support.ts";
 import { HOOKS, readmeAndWiki, runBun, SF, tmp, write } from "./support.ts";
 
 test("a good machine is all ok", () => {
@@ -293,4 +293,20 @@ test("the machine's names that aren't agents are named with the right grammar", 
   expect(one).toContain("probe-agent isn't in `agents` in .claude/factory.json");
   const two = lines(doctor(d, { ...machine(), FACTORY_AGENTS: "probe-a,probe-b" }), "fix").find((l) => l.includes("probe-a"));
   expect(two).toContain("probe-a, probe-b aren't in `agents` in .claude/factory.json");
+});
+
+test("with the message board, a missing heartbeat service is flagged with its name and the exact fix; an installed one is ok", () => {
+  const d = project({}, { agents: ["menelik", "taytu"], tasks: { source: "board" } });
+  const env = { ...machine(), FACTORY_AGENTS: "taytu", FACTORY_AUTOSTART_PLATFORM: "linux" };
+  // systemd's user manager answers, and the unit is not enabled
+  stub(env.PATH, "systemctl", '[ "$2" = is-enabled ] && exit 1; exit 0');
+  let p = doctor(d, env);
+  const name = `${basename(d)}-factory-heartbeat.service`;
+  const note = lines(p, "note").find((l) => l.includes("heartbeat"));
+  expect(note, p.stdout).toBeDefined();
+  expect(note).toContain(`${name} is not installed`);
+  expect(note).toContain("Fix: run `factory heartbeat install`");
+  stub(env.PATH, "systemctl", "exit 0");
+  p = doctor(d, env);
+  expect(lines(p, "ok").some((l) => l.includes("heartbeat daemon") && l.includes(name)), p.stdout).toBe(true);
 });

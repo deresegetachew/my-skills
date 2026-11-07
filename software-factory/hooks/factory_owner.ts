@@ -8,13 +8,16 @@
 //                                            that commit (the one a screen showed, #309), else `pr_changed`
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
-//   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`; with the
+//   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`; m<n> is
+//                                            board message n, a question an agent asked the owner (#549); with the
 //                                            owner queue on the message board (#502) it is written there first, then mirrored
 //                                            to the owner-queue issue (factory_board.ts)
 //   factory owner release <X.Y.Z>            tags main's commit vX.Y.Z and pushes the tag, when software-factory/VERSION
 //                                            on main says X.Y.Z (the release workflow then publishes it)
 //   factory owner start <role> [name]        starts `factory loop -i` as that role in its own tmux window on this machine,
-//                                            the step `factory loop -i` uses (factory_window.ts), without attaching (#309)
+//                                            the step `factory loop -i` uses (factory_window.ts), without attaching (#309).
+//                                            A name already running here is refused (`already_running`). It makes sure
+//                                            the heartbeat daemon runs (`factory heartbeat ensure`) before it starts one
 //   factory owner stop <name>                ends that session's tmux session on this machine; one already ended is said so.
 //                                            A loop outside tmux (nohup, #395) is ended by its checkout claim's pid
 //
@@ -29,7 +32,7 @@ import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { alive as claimAlive, type Claims, HOST, isLoop, stateDir as claimsDir } from "./factory_claims.ts";
 import { ownerQueueOnBoard } from "./core/compose.ts";
 import { type Config, load, loadFromMain, toFloat } from "./factory_config.ts";
-import { processes } from "./factory_heartbeat.ts";
+import { ensureDaemon, processes } from "./factory_heartbeat.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
 import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 import { breakMarkers, OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
@@ -47,7 +50,7 @@ const USAGE = `factory owner <command>
   answer <ask-id> <text>      answer an ask in the owner queue ("Dev manager: needs the owner")
   release <X.Y.Z>             tag main vX.Y.Z and push the tag, when ${VERSION_FILE} on main says X.Y.Z
   start <role> [name]         start a coding-agent, dev-manager or product-owner session (factory loop -i) in its own tmux
-                              window on this machine, without attaching
+                              window on this machine, without attaching (one already running is refused)
   stop <name>                 end that session's tmux session on this machine (one already ended: nothing to stop)
 
 The owner runs these; the dev manager may merge and label, under the manager gate. Coding agents can't.`;
@@ -222,7 +225,12 @@ async function answer(id: string | undefined, text: string): Promise<void> {
   if (ownerQueueOnBoard(cfg)) {
     // the board first (decision 0007 point 5); an ask the board doesn't have is answered on GitHub, as before
     const { answerOnBoard } = await import("./factory_board.ts");
-    if ((await answerOnBoard(cfg, id, text)) !== "absent") return;
+    const done = await answerOnBoard(cfg, id, text);
+    if (done === "no-question") {
+      refuse("no_such_question", `There is no ask \`${id}\` and no question ${id.slice(1)} to the owner on the message board.`,
+        "`factory board queue` lists what waits for you, with each one's id.");
+    }
+    if (done !== "absent") return;
   }
   const queue = apiAll<Issue & Row>(`${REPO}/issues?state=open`)
     .find((i) => str(i.title).startsWith(OWNER_QUEUE_TITLE) && !("pull_request" in i && i.pull_request));
@@ -326,7 +334,18 @@ function start(role: string | undefined, name: string | undefined): void {
       "factory owner start coding-agent taytu");
   }
   delete process.env.TMUX;
-  startLoop(role, name === undefined ? "" : agentName(name, `factory owner start ${role} taytu`), ["-i"]);
+  const who = name === undefined ? "" : agentName(name, `factory owner start ${role} taytu`);
+  if (who && running(sessionName(who))) {
+    refuse("already_running", `${who} is already running in tmux session ${sessionName(who)}; nothing was started.`,
+      `Watch it with \`factory follow ${who}\`, or stop it first with \`factory owner stop ${who}\`.`);
+  }
+  const pid = who ? loopPid(who) : null;
+  if (pid !== null) {
+    refuse("already_running", `${who} is already running on this machine (pid ${pid}, outside tmux); nothing was started.`,
+      `Stop it first with \`factory owner stop ${who}\`.`);
+  }
+  for (const line of ensureDaemon()) console.log(line); // so the agent's state shows as it runs, from its first minute
+  startLoop(role, who, ["-i"]);
   console.log("`factory follow <name>` shows it, or its channel in `factory ui`.");
 }
 

@@ -11,6 +11,10 @@ export const KIT = join(SF, "kit");
 export const WIKI = join(SF, "docs", "wiki");
 export const TOOLS = join(ROOT, "tools");
 
+// `factory init` and `factory owner start` make sure the heartbeat service runs (a systemd user unit or a LaunchAgent): a
+// test never touches this machine's real one, also when run with `bun test` alone. A test of it sets "on" with fakes.
+process.env.FACTORY_SETUP_HEARTBEAT ??= "off";
+
 /** Copy the hooks' folders (hooks/core/, decision 0003) into a test project's hooks folder `dest`, beside the
  * top-level hooks the test copied there itself: those import them. */
 export function copyHookFolders(dest: string): void {

@@ -11,15 +11,18 @@ export interface NewEvent {
   payload: Record<string, unknown>;
 }
 
-/** Whether `target` is reachable from `start` by blocking edges and parent-to-child steps (a block on a task also
- * blocks its children). An edge or parent that adds a step back from `target` to `start` would close a loop. */
+/** Whether `target` is reachable from `start` by "comes before" steps: a blocks edge from→to, a waits_for edge to→from
+ * (from waits for to), and parent to child (a block on a task also blocks its children). An edge or parent that adds a
+ * step back from `target` to `start` would close a loop. */
 export async function reaches(tx: SQL, start: number, target: number): Promise<boolean> {
   const r = (await tx.unsafe(`
     WITH RECURSIVE reach (id) AS (
       SELECT $1::bigint
       UNION
       SELECT n.id FROM reach r CROSS JOIN LATERAL (
-        SELECT e.to_id AS id FROM edges e WHERE e.from_id = r.id AND e.kind IN ('blocks', 'waits_for')
+        SELECT e.to_id AS id FROM edges e WHERE e.from_id = r.id AND e.kind = 'blocks'
+        UNION ALL
+        SELECT e.from_id AS id FROM edges e WHERE e.to_id = r.id AND e.kind = 'waits_for'
         UNION ALL
         SELECT c.id FROM tasks c WHERE c.parent_id = r.id
       ) n

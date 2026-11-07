@@ -80,6 +80,7 @@ export function pageOf(channel: string): string {
   if (channel.startsWith("agent:")) return channel.slice("agent:".length);
   if (channel.startsWith("doc:")) return "docs";
   if (channel.startsWith("signoff:")) return "signoff"; // an item's page (#454)
+  if (channel.startsWith("pr:")) return "prs"; // a pull request's page (#453)
   for (const [page, p] of Object.entries(PAGES)) if (p.channel === channel) return page;
   return "home";
 }

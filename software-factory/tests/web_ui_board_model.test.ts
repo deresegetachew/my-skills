@@ -1,7 +1,7 @@
 // The task board's rules that aren't drawing (#439): its columns, and its lanes by agent or by epic, from
 // web/board_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { blockersText, boardOf, cardEdge, cardTag, COLUMNS, columnsOf, epicColour, laneColours, taskAsk } from "../web/board_model.ts";
+import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, COLUMNS, columnsOf, epicColour, laneColours, ownerOf, taskAsk, taskLabel, unheldText } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
@@ -142,4 +142,35 @@ test("a card's left edge: by epic its lane's colour; by agent its epic's colour 
   expect(cardEdge({ epic: "11" }, "agent", "manager", epics)).toBe("pink");
   expect(cardEdge({ epic: null }, "agent", "builder", epics)).toBe("grey");
   expect(cardEdge({ epic: "99" }, "agent", "builder", epics)).toBe("grey");
+});
+
+// --- #543, #545: what a card says and where it goes ------------------------------------------------------------------
+
+test("a task is named #7 when it is an issue and b3 when it was made on the message board, also in its confirm", () => {
+  expect(taskLabel("7")).toBe("#7");
+  expect(taskLabel("b3")).toBe("b3");
+  expect(taskAsk("release", { id: "b3", holders: [] }).happens).toStartWith("b3 goes back to Ready");
+  expect(taskAsk("block", { id: "7", holders: [] }).happens).toStartWith("#7 moves to Blocked");
+});
+
+test("a task handed to an agent that nobody holds yet says so, and sits in that agent's lane", () => {
+  const handed = { ...task("b5", "ready"), assignee: "taytu" };
+  expect(unheldText(handed)).toBe("For taytu");
+  expect(unheldText(task("b6", "ready"))).toBe("Unassigned");
+  expect(ownerOf(handed)).toBe("taytu");
+  expect(ownerOf({ ...task("b7", "in-progress", ["menelik"]), assignee: "taytu" })).toBe("menelik"); // who holds it wins
+  const lanes = boardOf([handed, task("b6", "ready")], "agent");
+  expect(lanes.map((l) => [l.key, l.title, l.count])).toEqual([["taytu", "taytu", 1], ["", "Nobody", 1]]);
+});
+
+test("done tasks are on the board, in the Done column of their lane", () => {
+  const lanes = boardOf([task("b1", "done", [], "", "Slugify"), task("b2", "ready")], "agent");
+  expect(lanes[0]?.cells.done?.map((t) => t.id)).toEqual(["b1"]);
+  expect(lanes[0]?.cells.ready?.map((t) => t.id)).toEqual(["b2"]);
+});
+
+test("an agent lane's grey line has its task count and its state as the sidebar says it, so a down agent never looks busy (#545)", () => {
+  expect(agentLaneSub(1, "down")).toBe("1 task · down");
+  expect(agentLaneSub(3, "working on b19")).toBe("3 tasks · working on b19");
+  expect(agentLaneSub(2, undefined)).toBe("2 tasks");
 });

@@ -1,5 +1,5 @@
 // The web UI's "add or set up a new project" (#447), server side: GET /api/add-project (repos from gh, the folder, the
-// projects, messaging, the legends), POST /api/add-project/check (a dry run: the seven steps, or a problem), POST
+// projects, messaging, the legends), POST /api/add-project/check (a dry run: the eight steps, or a problem), POST
 // /api/add-project (a run that clones or creates the repo, installs the kit with the real install.sh, writes the answers,
 // runs the new project's `factory init`, opens a setup pull request, lists the project and runs `factory doctor`), a retry from the failed step, and the WebSocket messages. gh is a fake that logs every call and
 // keeps its remotes as local bare repos; `factory` is a fake script (committed in each "cloned" repo) that logs what it
@@ -24,6 +24,10 @@ afterAll(async () => {
 /** The `factory` script a "cloned" repo carries: logs its arguments; `doctor` exits with the number in $FAKE_DOCTOR_FILE. */
 const FACTORY_SCRIPT = `#!/usr/bin/env bash
 echo "$*" >> "$FAKE_FACTORY_LOG"
+if [ "$1" = "heartbeat" ] && [ -f "$FAKE_DOCTOR_FILE.no-systemd" ]; then
+  echo '{"code": "no-systemd", "message": "systemctl was not found, so the service cannot be installed.", "fix": "This needs systemd."}' >&2
+  exit 1
+fi
 if [ "$1" = "doctor" ]; then
   echo "doctor ran"
   code=$(cat "$FAKE_DOCTOR_FILE" 2>/dev/null || echo 0)
@@ -238,14 +242,14 @@ test("GET /api/add-project: when gh fails there are no repos and one ui_add_gith
 
 // --- check -------------------------------------------------------------------------------------------------------------
 
-test("check: a good request gives the seven steps in order and writes nothing, runs no gh write", async () => {
+test("check: a good request gives the eight steps in order and writes nothing, runs no gh write", async () => {
   const s = await setup();
   const before = readFileSync(join(s.p.d, ".claude", "factory.json"), "utf8");
   const r = await check(s, req(s));
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(r.json.ok).toBe(true);
   const steps = r.json.steps as Row[];
-  expect(steps.map((x) => x.id)).toEqual(["repo", "kit", "answers", "init", "commit", "list", "doctor"]);
+  expect(steps.map((x) => x.id)).toEqual(["repo", "kit", "answers", "init", "commit", "list", "heartbeat", "doctor"]);
   for (const x of steps) {
     expect(typeof x.title).toBe("string");
     expect(typeof x.detail).toBe("string");
@@ -304,6 +308,7 @@ test("check: every refusal is 400 with {code, message, fix}", async () => {
 test("check: a clean git repo as a folder is accepted, and a path that is a checkout of the repo is accepted for clone", async () => {
   const s = await setup();
   const repo = mkRepo(join(s.folder, "mine"));
+  git(repo, "remote", "add", "origin", "https://github.com/acme/mine.git"); // a folder needs an origin for its setup pull request (#546)
   const folderOk = await check(s, req(s, { source: "folder", path: repo }));
   expect(folderOk.status, JSON.stringify(folderOk.json)).toBe(200);
   const checkout = mkRepo(join(s.folder, "shop"));
@@ -351,7 +356,8 @@ test("clone: every step runs, the answers are written, the project is listed, an
   const id = await start(s, req(s));
   const run = await waitRun(s.ui, id);
   expect(run.state, JSON.stringify(run)).toBe("done");
-  expect(states(run)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "commit:done", "list:done", "doctor:done"]);
+  expect(states(run)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "commit:done", "list:done", "heartbeat:done",
+    "doctor:done"]);
   expect(run).toMatchObject({ name: "shop", path: join(s.folder, "shop"), project: "shop" });
   for (const x of run.steps as Row[]) expect(x.problem).toBeNull();
   expect(String(step(run, "repo").command)).toContain("gh repo clone acme/shop");
@@ -387,6 +393,9 @@ test("clone: every step runs, the answers are written, the project is listed, an
   const calls = factoryCalls(s.p);
   expect(calls).toContain("init");
   expect(calls).toContain("doctor");
+  // the heartbeat daemon is made sure of on this machine, before the doctor (an agent started next shows as running)
+  expect(calls.indexOf("heartbeat ensure"), calls.join("\n")).toBeGreaterThan(calls.indexOf("init"));
+  expect(calls.indexOf("heartbeat ensure")).toBeLessThan(calls.indexOf("doctor"));
 
   expect(git(dest, "branch", "--list", "factory/setup").trim()).toContain("factory/setup");
   expect(git(s.remotes + "/acme/shop.git", "branch", "--list", "factory/setup").trim()).toContain("factory/setup");
@@ -467,6 +476,22 @@ test("a serving project that names the board gives the new project the board too
   expect((cfg.messaging as Row).transport).toBe("board");
 }, T);
 
+// --- the heartbeat daemon can't run here ------------------------------------------------------------------------------
+
+test("a machine where the heartbeat daemon can't run: that step is skipped with why and the fix, and the setup goes on", async () => {
+  const s = await setup();
+  writeFileSync(`${s.doctorFile}.no-systemd`, "");
+  const run = await waitRun(s.ui, await start(s, req(s)));
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  expect(states(run)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "commit:done", "list:done", "heartbeat:skipped",
+    "doctor:done"]);
+  const hb = step(run, "heartbeat");
+  expect(String(hb.command)).toContain("heartbeat ensure");
+  expect(String(hb.output)).toContain("systemctl was not found");
+  expect(String(hb.output)).toContain("This needs systemd.");
+  expect(hb.problem).toBeNull();
+}, T);
+
 // --- doctor fails, then a retry ----------------------------------------------------------------------------------------
 
 test("doctor fails: the run stops there with its output; a retry goes on from it and nothing is done twice", async () => {
@@ -476,7 +501,7 @@ test("doctor fails: the run stops there with its output; a retry goes on from it
   const failed = await waitRun(s.ui, id);
   expect(failed.state).toBe("failed");
   expect(states(failed)).toEqual(["repo:done", "kit:done", "answers:done", "init:done", "commit:done", "list:done",
-    "doctor:failed"]);
+    "heartbeat:done", "doctor:failed"]);
   const doctor = step(failed, "doctor");
   expect(String(doctor.output)).toContain("the fake doctor found something");
   const problem = doctor.problem as Row;
@@ -748,4 +773,19 @@ test("served from a release install whose archive can't be had: the kit step fai
   expect(fix).toContain("factory update --archive");
   expect(fix).toContain("v1.0.0");
   expect(existsSync(join(s.folder, "shop", ".claude", "factory", "release.json"))).toBe(false);
+}, T);
+
+test("check: a folder with no origin is refused with ui_add_no_remote, before anything runs (#546)", async () => {
+  const s = await setup();
+  const lone = mkRepo(join(s.folder, "lone"));
+  const r = await check(s, req(s, { source: "folder", repo: "", path: lone }));
+  expect(r.status, JSON.stringify(r.json)).toBe(400);
+  expect(r.json.code).toBe("ui_add_no_remote");
+  expect(String(r.json.message)).toContain("has no remote called origin");
+  expect(String(r.json.fix)).toContain("git remote add origin");
+  const started = await api(s.ui, "/api/add-project", { method: "POST", body: { confirm: true, ...req(s, { source: "folder", repo: "", path: lone }) } });
+  expect(started.status).toBe(400);
+  expect(started.json.code).toBe("ui_add_no_remote");
+  expect(existsSync(join(lone, ".claude", "hooks"))).toBe(false);
+  expect(ghCalls(s.p)).toEqual([]);
 }, T);

@@ -360,6 +360,8 @@ export interface PullRow {
   url: unknown;
   branch: string;
   draft: boolean;
+  /** When it was opened (GitHub's created_at), for the web UI's Activity (#455); null when GitHub didn't say. */
+  createdAt: string | null;
   cites: string[]; // the decisions and PRD stories its body cites (#438)
   head?: { sha: string; ageMinutes: number | null };
   labels?: string[];
@@ -440,7 +442,7 @@ function pulls(_cfg: Config, gateCfg: Config, now: number): Pulls {
     const sha = str(obj(p.head).sha);
     const branch = str(obj(p.head).ref);
     const out: PullRow = { number: n, title: str(p.title), url: p.html_url ?? null, branch, draft: Boolean(p.draft),
-      cites: citesIn(str(p.body)) };
+      createdAt: str(p.created_at) || null, cites: citesIn(str(p.body)) };
     try {
       const labels = (Array.isArray(p.labels) ? p.labels : []).map((x) => str(obj(x).name));
       const comments = fi.ghAll<Obj>(`repos/{owner}/{repo}/issues/${n}/comments`);

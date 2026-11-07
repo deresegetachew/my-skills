@@ -121,13 +121,18 @@ export function pidAlive(pid: unknown): boolean {
 export function isLoop(pid: unknown): boolean {
   const p = run(["ps", "-p", String(pid), "-o", "command="]);
   if (p.code === 127 && !p.stdout) return true; // no ps to ask: the pid alone decides
-  const words = p.stdout.split(/\s+/).filter((w) => w);
+  return isLoopCommand(p.stdout);
+}
+
+/** Whether a command line, as `ps` prints it, is a factory loop or an agent's Claude session. */
+export function isLoopCommand(command: string): boolean {
+  const words = command.split(/\s+/).filter((w) => w);
   if (!words.length) return false;
   const prog = basename(words[0] as string);
   if (prog === "factory-loop.sh") return true; // a script run directly (or a name set with exec -a)
   const shells = ["bash", "sh", "zsh", "dash"];
-  const full = p.stdout.trim();
-  return isClaude(p.stdout) || (shells.includes(prog) && runsLoopScript(full.slice((words[0] as string).length).trim()));
+  const full = command.trim();
+  return isClaude(command) || (shells.includes(prog) && runsLoopScript(full.slice((words[0] as string).length).trim()));
 }
 
 /** Whether a shell's arguments (as ps prints them, joined with spaces) start with the factory-loop.sh script.

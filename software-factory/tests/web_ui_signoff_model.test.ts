@@ -181,3 +181,41 @@ test("the history: newest first, in the person's words", async () => {
   const blockedOne = item("w", { history: [{ what: "result", by: "boss", at: t(6, 9), result: "blocked", note: "No device" }] });
   expect(historyOf(blockedOne, NOW)[0]?.text).toBe("boss recorded blocked: No device");
 });
+
+// --- board tasks and the add dialog (#552) -------------------------------------------------------------------------------
+
+test("a task is named as people see it: #12 for an issue's, b12 for a task made on the board", async () => {
+  const { taskLabel, listOf } = await mod();
+  expect(taskLabel("12")).toBe("#12");
+  expect(taskLabel("b12")).toBe("b12");
+  expect(taskLabel("acme/other#3")).toBe("acme/other#3");
+  const list = listOf([todo("a1"), { ...todo("a2"), task: "b12" }], new Date("2026-11-05T12:00:00Z"));
+  const subs = list.groups.flatMap((g) => g.rows.map((r) => r.sub));
+  expect(subs.some((s) => s.startsWith("For task #13 · "))).toBe(true);
+  expect(subs.some((s) => s.startsWith("For task b12 · "))).toBe(true);
+  expect(subs.some((s) => s.includes("#b12"))).toBe(false);
+});
+
+test("the add dialog takes a board task's id, an issue's number or #number, and nothing else", async () => {
+  const { taskInputOk } = await mod();
+  for (const ok of ["12", "#12", "b12", "B12", " b12 "]) expect(taskInputOk(ok), ok).toBe(true);
+  for (const bad of ["", "0", "b", "b0", "twelve", "12a", "#b12", "-3"]) expect(taskInputOk(bad), bad).toBe(false);
+});
+
+test("a failed item asks the product owner for a task linked to the item's task", async () => {
+  const { failedAsk } = await mod();
+  expect(failedAsk({ ...todo("a1"), task: "b12" }, "Step 1: blank")).toBe("It failed. Please make it a task for the builders, linked to task b12.\nStep 1: blank");
+  expect(failedAsk({ ...todo("a1"), task: "12" }, "")).toBe("It failed. Please make it a task for the builders, linked to task #12.");
+  expect(failedAsk({ ...todo("a1"), task: null }, "")).toBe("It failed. Please make it a task for the builders.");
+});
+
+test("an add that fails keeps the dialog open with the error and its fix; one that worked closes it", async () => {
+  const { addOutcome } = await mod();
+  expect(addOutcome({ ok: true, output: "posted" })).toEqual({ close: true, error: null });
+  expect(addOutcome({ ok: false, code: "ui_signoff_failed", message: "There is no task b99 on the board.", fix: "Check the id." }))
+    .toEqual({ close: false, error: { message: "There is no task b99 on the board.", fix: "Check the id." } });
+  const bare = addOutcome({});
+  expect(bare.close).toBe(false);
+  expect(bare.error?.message).not.toBe("");
+  expect(bare.error?.fix).not.toBe("");
+});

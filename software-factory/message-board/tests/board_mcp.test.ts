@@ -512,7 +512,7 @@ test("requests sent back to back without waiting are answered in order", async (
 });
 
 // ---------- owner and manager tools (#503) ----------
-const OWNER_TOOLS = ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment"];
+const OWNER_TOOLS = ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment", "board_signoff_add"];
 
 async function toolNames(c: Client): Promise<string[]> {
   return (((await c.request("tools/list")).result?.tools ?? []) as { name: string }[]).map((t) => t.name).sort();
@@ -564,6 +564,10 @@ test("the owner's tools take no sender and refuse what they don't list", async (
   expect(by.board_assign?.required?.sort()).toEqual(["task", "to"]);
   expect(by.board_link?.required?.sort()).toEqual(["from", "kind", "to"]);
   expect(by.board_link?.properties.kind).toMatchObject({ enum: ["blocks", "waits_for", "discovered_from", "supersedes", "duplicates", "related"] });
+  // which way a blocking link points, said plainly (an agent read waits_for backwards, 7 Nov)
+  const linkHelp = String((tools as unknown as { name: string; description?: string }[]).find((t) => t.name === "board_link")?.description);
+  expect(linkHelp).toContain("blocks: from must be done before to can start.");
+  expect(linkHelp).toContain("waits_for: from can't start until to is done.");
   expect(by.board_unlink?.required?.sort()).toEqual(["from", "kind", "to"]);
   expect(by.board_comment?.required?.sort()).toEqual(["body", "task"]);
   const e = await c.refused("board_comment", { task: 1, body: "hi", from: "dev-manager" });
@@ -767,7 +771,8 @@ test("board_link and board_unlink add and remove typed links; a loop is refused"
   expect(await c.ok("board_link", { from: n(a), to: n(b), kind: "blocks" })).toMatchObject({ linked: false });
   expect(await c.ok("board_link", { from: n(a), to: n(b), kind: "related" })).toMatchObject({ linked: true });
   expect((await po.get(b.id)).blockedBy).toEqual([a.id]);
-  const loop = await c.refused("board_link", { from: n(b), to: n(a), kind: "waits_for" });
+  // a blocks b, so a waiting for b would be a loop; b waiting for a says the same order again
+  const loop = await c.refused("board_link", { from: n(a), to: n(b), kind: "waits_for" });
   expect(loop.code).toBe("cycle");
   expect((await c.refused("board_link", { from: n(a), to: n(a), kind: "blocks" })).code).toBe("cycle");
   expect((await c.refused("board_link", { from: n(a), to: n(b), kind: "parent" })).code).toBe("bad-input");

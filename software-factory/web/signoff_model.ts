@@ -151,9 +151,34 @@ function byWhen(who: string, iso: string, now: Date): string {
   return `by ${who || "someone"}${when ? `, ${when}` : ""}`;
 }
 
+/** A task as people see it (#552): "#12" for an issue's, "b12" for a task made on the message board. */
+export function taskLabel(task: string): string {
+  return /^\d+$/.test(task) ? `#${task}` : task;
+}
+
+/** Whether the add dialog's "For task" names a task: 12 or #12 for an issue, b12 for a task made on the board. */
+export function taskInputOk(text: string): boolean {
+  return /^(?:#?[1-9]\d*|[bB][1-9]\d*)$/.test(text.trim());
+}
+
+/** What the add dialog does with the server's answer (#552): it closes on success; else it stays open, with what was
+ * typed, and shows the error and its fix. */
+export function addOutcome(r: Record<string, unknown>): { close: boolean; error: { message: string; fix: string } | null } {
+  if (r.ok === true) return { close: true, error: null };
+  const message = typeof r.message === "string" && r.message ? r.message : "It wasn't added.";
+  const fix = typeof r.fix === "string" && r.fix ? r.fix : "Check what you typed, then try again. Reload the page if it keeps failing.";
+  return { close: false, error: { message, fix } };
+}
+
+/** What "Failed: make it a task" asks the product owner: a task for the builders, linked to the item's task (#552). */
+export function failedAsk(it: SignoffItem, note: string): string {
+  const link = it.task ? `, linked to task ${taskLabel(it.task)}` : "";
+  return `It failed. Please make it a task for the builders${link}.${note ? `\n${note}` : ""}`;
+}
+
 /** The grey line under a row's title. */
 function subOf(it: SignoffItem, now: Date): string {
-  const task = it.task ? `For task #${it.task} · ` : "";
+  const task = it.task ? `For task ${taskLabel(it.task)} · ` : "";
   const g = groupOf(it);
   if (g === "proposed") {
     const n = stepsOf(it.text).length;

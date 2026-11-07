@@ -11,7 +11,7 @@
 import { randomUUID } from "node:crypto";
 import type { Board } from "./board.ts";
 import { refuse } from "./errors.ts";
-import type { Task } from "./types.ts";
+import type { Message, Task } from "./types.ts";
 
 /** A task's number as typed: a board id (b17), or an issue (3, #3, owner/name#3). */
 export type Named = { board: number } | { issue: number; repo: string | null };
@@ -21,6 +21,23 @@ const TYPED = /^(?:b(\d+)|#?(\d+)|([\w.-]+\/[\w.-]+)#(\d+))$/i;
 
 /** How to name a task, for a fix. */
 export const HOW_TO_NAME = "Name a task by its number: 3 or #3 for issue 3, b17 for a task made on the board.";
+
+/** The tag a message posted for a project carries (#549): `project:<owner>/<repo>`, lower case, so a message on no task
+ *  still says whose it is on a board that projects share. */
+export function projectTag(repo: string): string {
+  return `project:${repo.toLowerCase()}`;
+}
+
+/** Whether message `m` (on `task`, when it has one) is project `repo`'s (#549): its task is one of the repo's issues or a
+ *  card made for it; else its tag names the project. A message with neither (posted where no project was known) counts
+ *  for every project, so it is never lost. */
+export function isProjects(repo: string, m: Pick<Message, "tag">, task: Pick<Task, "ref"> | null): boolean {
+  const r = repo.toLowerCase();
+  const ref = (task?.ref ?? "").toLowerCase();
+  if (ref.startsWith("github:") || ref.startsWith("factory:")) return ref.startsWith(`github:${r}#`) || ref.startsWith(`factory:${r}/`);
+  const tag = (m.tag ?? "").toLowerCase();
+  return tag.startsWith("project:") ? tag === projectTag(r) : true;
+}
 
 export class Numbers {
   /** `repo`: the project's GitHub repo (owner/name), or null when it isn't known. */

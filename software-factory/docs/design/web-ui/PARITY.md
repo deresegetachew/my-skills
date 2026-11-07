@@ -21,7 +21,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 |---|---|---|---|
 | `ui` | terminal only | Starts the web UI itself | |
 | `install-shim` | terminal only | Puts `factory` on the PATH, before there is a UI to open; Welcome (Welcome.dc.html) says how | #457 |
-| `doctor` | planned | Health (Health.dc.html): each check with its fix, run again; Machine check (MachineCheck.dc.html) | #455 |
+| `doctor` | built | Health (Health.dc.html): each check grouped, with its fix, and Check again (`factory doctor --json`); Machine check (MachineCheck.dc.html) is #457 | #455 |
 | `bootstrap machine` | terminal only | Needs sudo; Machine check (MachineCheck.dc.html) shows the one admin step to type | #457 |
 | `bootstrap all` | terminal only | Needs sudo, as bootstrap machine | #457 |
 | `bootstrap uninstall` | terminal only | Needs sudo; removes the sandbox user and its guard | |
@@ -72,13 +72,13 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `status` | planned | Home (Main.dc.html) | #451 |
+| `status` | built | Home (Main.dc.html): needs you, the team, progress by epic, recent activity | #451 |
 | `snapshot` | built | What the UI reads; refresh asks for it again | |
 | `talk` | built | An agent channel's talk box for the dev manager and the product owner: one turn, answer in the chat | |
 | `owner answer` | built | The owner queue channel: answer, after a confirm | |
 | `alerts check` | planned | Inbox (Inbox.dc.html): notify me | #451 |
 | `alerts watch` | planned | Inbox (Inbox.dc.html): notify me | #451 |
-| `messages` | planned | Activity (Activity.dc.html): the feed and open questions | #451 |
+| `messages` | planned | Activity (Activity.dc.html): the feed and open questions (the board's events show who asked whom; the messages themselves are next) | #451 |
 | `issues` | built | The tasks channel; issues setup is in the Project wizard (ProjectWizard.dc.html) | #452 |
 | `next` | planned | Task (Task.dc.html): next in line | #452 |
 
@@ -86,8 +86,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `prs` | built | The pull requests channel | #452 |
-| `owner merge` | planned | PR (PR.dc.html): merge pinned to the head, after a confirm; Inbox | #452 |
+| `prs` | built | The pull requests channel, and each pull request's page (PR.dc.html) | #453 |
+| `owner merge` | built | PR (PR.dc.html): Merge, pinned to the head, after a confirm with its preconditions | #453 |
 | `owner label` | planned | Task (Task.dc.html), PR (PR.dc.html) | #452 |
 | `reviews` | agents only | PR (PR.dc.html): checks and reviews | |
 | `rereview plan` | agents only | PR (PR.dc.html): reviews | |
@@ -142,8 +142,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `reset-run` | planned | Health (Health.dc.html), Maintenance (Maintenance.dc.html): list, then clean after a confirm | #455 |
-| `usage` | planned | Usage and cost (Usage.dc.html) | #455 |
+| `reset-run` | built | Maintenance (Maintenance.dc.html): list, then clean after a confirm; Health (Health.dc.html) is #455 | #456 |
+| `usage` | built | Usage and cost (Usage.dc.html): tokens per task and per agent against the budget, GitHub calls | #455 |
 | `usage --task` | planned | Usage and cost (Usage.dc.html); Task (Task.dc.html): its budget | #455 |
 | `report` | planned | Usage and cost (Usage.dc.html) | #455 |
 | `lessons` | planned | Maintenance (Maintenance.dc.html); Usage (Usage.dc.html) | #456 |
@@ -152,13 +152,13 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `version` | planned | Releases (Releases.dc.html); Home: the new-version line | #456 |
+| `version` | built | Releases (Releases.dc.html): what runs, what main pins, the newest; Home: the new-version line is #451 | #456 |
 | `releases` | planned | Releases (Releases.dc.html) | #456 |
-| `update` | planned | Releases (Releases.dc.html): update, after a confirm | #456 |
+| `update` | built | Releases (Releases.dc.html): update, after a confirm with its preconditions | #456 |
 | `rollback` | planned | Releases (Releases.dc.html): roll back, after a confirm | #456 |
 | `migrate-to-release` | planned | Releases (Releases.dc.html): a project still on the submodule | #456 |
 | `owner release` | terminal only | Publishing a release is the owner's own step; Releases has no publish (RULES.md) | |
-| `clean` | planned | Maintenance (Maintenance.dc.html) | #456 |
+| `clean` | built | Maintenance (Maintenance.dc.html): what it will and won't touch, after a confirm | #456 |
 | `handover snapshot` | planned | Maintenance (Maintenance.dc.html) | #456 |
 | `manager-claims list` | planned | Maintenance (Maintenance.dc.html): who holds what | #456 |
 | `manager-claims next` | agents only | PR (PR.dc.html): review claim | |
@@ -189,16 +189,16 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `settings` | planned | Settings (Settings.dc.html): browse by section, search, help, change | #456 |
-| `settings list` | planned | Settings (Settings.dc.html) | #456 |
-| `settings help` | planned | Settings (Settings.dc.html): each setting's help | #456 |
-| `settings show` | planned | Settings (Settings.dc.html) | #456 |
-| `settings get` | planned | Settings (Settings.dc.html) | #456 |
-| `settings set` | planned | Settings (Settings.dc.html): checked against its type and limits | #456 |
-| `settings set --stage` | planned | Settings (Settings.dc.html): a project change is staged | #456 |
-| `settings diff` | planned | Settings (Settings.dc.html): where a value comes from | #456 |
-| `settings diff --staged` | planned | Settings (Settings.dc.html): the staged changes | #456 |
-| `settings validate` | planned | Settings (Settings.dc.html): a bad value is refused with its fix | #456 |
-| `settings pr` | planned | Settings (Settings.dc.html): propose the staged changes as a pull request | #456 |
-| `settings --local` | planned | Settings (Settings.dc.html): this machine, saved at once | #456 |
+| `settings` | built | Settings (Settings.dc.html): browse by section, search, help, change | #456 |
+| `settings list` | built | Settings (Settings.dc.html) | #456 |
+| `settings help` | built | Settings (Settings.dc.html): each setting's help | #456 |
+| `settings show` | built | Settings (Settings.dc.html) | #456 |
+| `settings get` | built | Settings (Settings.dc.html) | #456 |
+| `settings set` | built | Settings (Settings.dc.html): checked against its type and limits | #456 |
+| `settings set --stage` | built | Settings (Settings.dc.html): a project change is staged | #456 |
+| `settings diff` | built | Settings (Settings.dc.html): where a value comes from | #456 |
+| `settings diff --staged` | built | Settings (Settings.dc.html): the staged changes | #456 |
+| `settings validate` | built | Settings (Settings.dc.html): a bad value is refused with its fix | #456 |
+| `settings pr` | built | Settings (Settings.dc.html): propose the staged changes as a pull request | #456 |
+| `settings --local` | built | Settings (Settings.dc.html): this machine, saved at once | #456 |
 | `settings docs` | agents only | Writes the settings page of the wiki from the schema; nothing to show | |
