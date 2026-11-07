@@ -103,7 +103,9 @@ export interface UsageData {
   budget: { tokens: number | null; source: string | null; warnPercent: number };
   tasks: UsageRow[];
   /** What each task took (#580): build time, working time, sessions, tokens, cost, CI and reviews. */
-  byTask?: CostRow[];
+  byTask?: CostRow[] | null;
+  /** True while what each task took is being read (the rows shown are the last ones kept, or none yet). */
+  byTaskUpdating?: boolean;
   agents: UsageRow[];
   days?: UsageRow[];
   pricesAsOf?: string | null;

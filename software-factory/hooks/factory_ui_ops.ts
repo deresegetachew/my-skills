@@ -27,7 +27,9 @@
 //                                         Activity reads them) and the snapshot's CI runs and must-fixes are kept in the
 //                                         state folder (task-times.json); then `factory usage --json --by task` over the
 //                                         last COST_DAYS days joins them with the sessions. Kept like the usage; Usage and
-//                                         cost gets the same rows as byTask
+//                                         cost gets the same rows as byTask (null with byTaskUpdating while the first read
+//                                         runs). Usage and Needs attention never wait for it: they use what is kept and
+//                                         start a read in the background; {type: "costs", project} is pushed when it ends
 //
 // The WebSocket gets {type: "health", project} when a doctor run ends and {type: "activity", project, items} with
 // Activity's new entries (a board event, or what a new snapshot read tells, #583); the pages read their route again
@@ -422,17 +424,19 @@ export class Ops {
     if (p.problem) return { status: 200, body: { project: p.id, problems: [p.problem] } };
     if (page === "health") return { status: 200, body: { project: p.id, command: "factory doctor --json", ...this.healthBody(p, this.kept(p)) } };
     if (page === "usage") {
-      const [u, c] = await Promise.all([this.usageOf(p), this.costsOf(p)]);
+      // what each task took is never waited for (#580): the kept rows now, a read started in the background when old
+      const c = this.keptCosts(p);
+      const u = await this.usageOf(p);
       const seen = new Set<string>();
-      const problems = [...(Array.isArray(u.problems) ? (u.problems as Problem[]) : []), ...c.problems].filter((x) => {
+      const problems = [...(Array.isArray(u.problems) ? (u.problems as Problem[]) : []), ...(c?.problems ?? [])].filter((x) => {
         const k = `${x.code} ${x.message}`;
         return seen.has(k) ? false : (seen.add(k), true);
       });
-      return { status: 200, body: { project: p.id, ...u, byTask: c.tasks, problems } };
+      return { status: 200, body: { project: p.id, ...u, byTask: c?.tasks ?? null, byTaskUpdating: this.costsReading.has(p.id), problems } };
     }
     if (page === "costs") return { status: 200, body: { project: p.id, ...(await this.costsOf(p)) } };
     if (page === "attention") {
-      const [live] = await Promise.all([this.d.live(p), this.costsOf(p)]);
+      const live = await this.d.live(p); // the costs as kept: a slow `factory usage` never holds the answer (#580)
       return { status: 200, body: { project: p.id, items: this.attention(p, live), limits: limitsOf(p.config) } };
     }
     if (page === "activity") {
@@ -578,7 +582,10 @@ export class Ops {
     const job = this.readCosts(p).then((value) => {
       this.costs.set(p.id, { value, at: Date.now() });
       return value;
-    }).finally(() => this.costsReading.delete(p.id));
+    }).finally(() => {
+      this.costsReading.delete(p.id);
+      this.d.publish({ type: "costs", project: p.id }); // Needs attention is pushed again on the next tick when it changed
+    });
     this.costsReading.set(p.id, job);
     return job;
   }

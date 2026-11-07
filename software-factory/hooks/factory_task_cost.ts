@@ -131,7 +131,7 @@ export function snapshotEvents(snap: unknown): TaskEvent[] {
     const claimed = str(t.claimedAt);
     if (claimed && ms(claimed) !== null) out.push({ id: `claim-${id}-${claimed}`, task: id, kind: "claimed", at: claimed });
     const updated = str(t.updatedAt);
-    if (str(t.state) === "done" && updated && ms(updated) !== null) out.push({ id: `done-${id}`, task: id, kind: "done", at: updated });
+    if (str(t.state) === "done" && updated && ms(updated) !== null) out.push({ id: `done-${id}-${updated}`, task: id, kind: "done", at: updated }); // a task done again is a new event
   }
   if (at !== null) {
     for (const r of Array.isArray(obj(s.ci).runs) ? (obj(s.ci).runs as unknown[]).map(obj) : []) {

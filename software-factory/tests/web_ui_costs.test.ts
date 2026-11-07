@@ -18,6 +18,7 @@ afterAll(async () => {
 
 const FAKE_FACTORY = `#!/usr/bin/env bash
 echo "$*" >> "$FAKE_FACTORY_LOG"
+case "$*" in "usage --json --by task "*) sleep "\${FAKE_COSTS_SLEEP:-0}" ;; esac
 if [ "\${1:-}" = usage ] && [ "\${2:-}" != --github ]; then shift; exec "$FAKE_BUN" --no-env-file --config=/dev/null "$FAKE_USAGE_REAL" "$@"; fi
 case "$*" in
   "usage --github --json") echo '{"since":"2026-11-07T09:00:00+00:00","total":0,"agents":{},"commands":{},"endpoints":{},"callers":{},"github":null}' ;;
@@ -78,11 +79,25 @@ function setup(o: { done?: number } = {}): Project {
   return p;
 }
 
-async function started(p: Project): Promise<Running> {
-  const ui = await startUi(p, ["--port", "0"]);
+async function started(p: Project, env: Record<string, string> = {}): Promise<Running> {
+  const ui = await startUi(p, ["--port", "0"], null, env);
   running.push(ui);
   return ui;
 }
+
+/** Reads `path` until `ok` holds (what each task took is read in the background), or 20 s pass. */
+async function until(ui: Running, path: string, ok: (j: Row) => boolean): Promise<Row> {
+  const deadline = Date.now() + 20_000;
+  let last: Row = {};
+  while (Date.now() < deadline) {
+    last = (await api(ui, path)).json;
+    if (ok(last)) return last;
+    await Bun.sleep(150);
+  }
+  return last;
+}
+
+const spinning = (j: Row): Row[] => (Array.isArray(j.items) ? (j.items as Row[]) : []).filter((x) => x.kind === "task-spinning");
 
 test("costs: each task's build time, working minutes, sessions, tokens, cost, CI runs and review rounds; the epic's totals add up", async () => {
   const p = setup();
@@ -113,7 +128,8 @@ test("costs: each task's build time, working minutes, sessions, tokens, cost, CI
 test("usage: Usage and cost gets the same rows by task", async () => {
   const p = setup();
   const ui = await started(p);
-  const u = (await api(ui, "/api/projects/work/usage")).json;
+  const u = await until(ui, "/api/projects/work/usage", (j) => Array.isArray(j.byTask));
+  expect(u.byTaskUpdating).toBe(false);
   const byTask = u.byTask as Row[];
   expect(byTask.map((x) => x.task).sort()).toEqual(["1", "10", "2", "3", "4", "5", "7", "8", "9"]);
   expect(byTask.find((x) => x.task === "7")).toMatchObject({ title: "Search", workingMinutes: 180 });
@@ -122,10 +138,9 @@ test("usage: Usage and cost gets the same rows by task", async () => {
 test("attention: a task past the median, with too many review rounds, or failing CI in a row is spinning; Open its output", async () => {
   const p = setup();
   const ui = await started(p);
-  const r = await api(ui, "/api/projects/work/attention");
-  expect(r.status, JSON.stringify(r.json)).toBe(200);
-  expect(r.json.limits).toMatchObject({ spinFactor: 3, spinReviewRounds: 3, spinFailedCi: 3 });
-  const spin = (r.json.items as Row[]).filter((x) => x.kind === "task-spinning");
+  const j = await until(ui, "/api/projects/work/attention", (x) => spinning(x).length >= 3);
+  expect(j.limits).toMatchObject({ spinFactor: 3, spinReviewRounds: 3, spinFailedCi: 3 });
+  const spin = spinning(j);
   expect(spin.map((x) => x.task).sort()).toEqual(["7", "8", "9"]);
   const seven = spin.find((x) => x.task === "7") as Row;
   expect(seven.agent).toBe("taytu");
@@ -139,11 +154,51 @@ test("attention: a task past the median, with too many review rounds, or failing
 test("attention: with fewer than 5 done tasks nothing is compared with a median; the thresholds are settings", async () => {
   const p = setup({ done: 4 });
   const ui = await started(p);
-  const spin = ((await api(ui, "/api/projects/work/attention")).json.items as Row[]).filter((x) => x.kind === "task-spinning");
+  await api(ui, "/api/projects/work/costs"); // read once, so the next answer has them
+  const spin = spinning((await api(ui, "/api/projects/work/attention")).json);
   expect(spin.map((x) => x.task).sort()).toEqual(["8", "9"]);
 
   const q = setup();
   write(join(q.d, ".claude", "factory.json"), JSON.stringify({ ...CONFIG, attention: { spinFactor: 1000, spinReviewRounds: 4, spinFailedCi: 4 } }));
   const ui2 = await started(q);
-  expect(((await api(ui2, "/api/projects/work/attention")).json.items as Row[]).filter((x) => x.kind === "task-spinning")).toEqual([]);
+  await api(ui2, "/api/projects/work/costs");
+  expect(spinning((await api(ui2, "/api/projects/work/attention")).json)).toEqual([]);
+}, T);
+
+test("attention and usage never wait for a slow `factory usage`: they answer at once, and the spinning shows once it is read", async () => {
+  const p = setup();
+  const ui = await started(p, { FAKE_COSTS_SLEEP: "8" });
+  const t0 = Date.now();
+  const first = await api(ui, "/api/projects/work/attention");
+  expect(first.status).toBe(200);
+  expect(Date.now() - t0).toBeLessThan(5_000);
+  expect(spinning(first.json)).toEqual([]); // not read yet
+  const t1 = Date.now();
+  const u = (await api(ui, "/api/projects/work/usage")).json;
+  expect(Date.now() - t1).toBeLessThan(5_000);
+  expect(u).toMatchObject({ byTask: null, byTaskUpdating: true });
+  const later = await until(ui, "/api/projects/work/attention", (x) => spinning(x).length >= 3);
+  expect(spinning(later).map((x) => x.task).sort()).toEqual(["7", "8", "9"]);
+}, T);
+
+test("a task done, claimed again and done again takes its last done time, as the snapshots told them", async () => {
+  const p = setup();
+  const now = Date.now();
+  // the board's tasks part, as a snapshot reads it: #7 done once
+  const snap = JSON.parse(readFileSync(join(p.state, "snapshot.json"), "utf8")) as Row;
+  const tasks = (snap.tasks as Row).tasks as Row[];
+  const seven = tasks.find((t) => t.id === "7") as Row;
+  Object.assign(seven, { state: "done", updatedAt: iso(now - 3 * HOUR) });
+  write(join(p.state, "snapshot.json"), JSON.stringify(snap));
+  const ui = await started(p, { FACTORY_SNAPSHOT_CACHE_SECONDS: "0" });
+  const once = ((await api(ui, "/api/projects/work/costs")).json.tasks as Row[]).find((x) => x.task === "7");
+  expect(once?.doneAt).toBe(iso(now - 3 * HOUR));
+  // reopened: claimed again, then done again
+  Object.assign(seven, { state: "done", claimedAt: iso(now - 2 * HOUR), updatedAt: iso(now - HOUR) });
+  write(join(p.state, "snapshot.json"), JSON.stringify(snap));
+  const again = await until(ui, "/api/projects/work/costs", (j) => (j.tasks as Row[] | undefined)?.find((x) => x.task === "7")?.doneAt === iso(now - HOUR));
+  const row = (again.tasks as Row[]).find((x) => x.task === "7") as Row;
+  expect(row.doneAt).toBe(iso(now - HOUR));
+  // from the first claim (the board's, kept) to the last done
+  expect(row.buildMinutes).toBe(Math.round((3 * HOUR + 60_000) / 60_000));
 }, T);
