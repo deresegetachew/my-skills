@@ -11,6 +11,15 @@ through `src/index.ts`. `tools/check_skills.ts` enforces both:
 
 It uses Bun's built-in Postgres client (`SQL` from `bun`). It adds no npm package.
 
+The factory uses it as its record for tasks, their threads and the owner queue when a project sets `tasks.source` to
+`board`, and for claims, wake-ups and the pull request feed with `messaging.transport` `board`. How to set that up and
+go live is on the wiki's [message board page](../docs/wiki/board.md). This page is the framework itself.
+
+On this page: [what is here](#what-is-here), [setting it up](#setting-it-up), [logins for other machines](#logins-for-other-machines),
+[the API](#the-api), [the rules](#the-rules), [the import from GitHub](#the-import-from-github),
+[the mirror to GitHub](#the-mirror-to-github), [the MCP server](#the-mcp-server),
+[from synchronous code](#from-synchronous-code-the-child), [tests](#tests).
+
 ## What is here
 
 | Path | What it is |
@@ -27,6 +36,56 @@ It uses Bun's built-in Postgres client (`SQL` from `bun`). It adds no npm packag
 | `src/github/mirror.ts` | The GitHub adapter's mirror: the board's state changes, asks and answers sent to GitHub one way, and the answers there read back |
 | `bin.ts` | The command: `factory board <verb>` (`factory board help`) |
 | `tests/` | Tests against a real Postgres |
+
+## Setting it up
+
+`bun message-board/bin.ts <verb>` is its command; in a factory project it is `factory board <verb>`, and
+`factory board help` lists the verbs (the wiki's commands page describes each).
+
+- **Start it:** `factory board up [--port N]` starts Postgres (`postgres:17-alpine`) in Docker on this machine, published
+  on `127.0.0.1` and the Tailscale address only, never `0.0.0.0`. It writes the URL, with its password, to
+  `<machine settings folder>/message-board/url` (mode 600), then migrates. `MB_URL` overrides the file. The password
+  is never printed. Other machines use the next port (N+1) on the Tailscale address. `factory board down [--purge]`
+  stops it (`--purge` also removes its data).
+- **The schema:** `factory board migrate` applies the migrations not applied yet, each in one transaction, recorded
+  in `mb_migrations`. Safe to run twice. `factory board status` says whether it answers, the last migration and the
+  task counts.
+- **Backups:** `factory board backup [--out FILE]` runs `pg_dump` inside the container and writes it mode 600. A
+  nightly backup is a job you set up on the machine (cron or a systemd timer) that runs it.
+- **Stale claims:** `factory board sweep [--quiet-minutes N]` releases them (see the rules).
+- **Other machines** reach it with a login of their own (next section); `factory machine add` and `factory machine join`
+  make one and write it on the new machine.
+
+## Logins for other machines
+
+Another machine reaches the board over Tailscale with a login of its own (#504), so one can be taken away without
+touching the others:
+
+- `factory board login add <name> [--json]`, on the machine that runs the board, makes a Postgres role
+  `<database>_l_<name>` in the group `<database>_logins`. The group may connect to the board's database and read and
+  write its tables (and use their sequences), nothing more: no new tables, no roles, no `mb_logins`, and
+  `mb_migrations` only to read. Tables a later migration adds are granted too (default privileges, and each `add`
+  grants again). It prints the login's URL once: the board's Tailscale address and port from `state.json`, its database,
+  and the password, which the board doesn't keep (Postgres keeps only its hash).
+- The board notes when a login is first used itself: a login event trigger (Postgres 17) stamps `mb_logins.first_seen`
+  and `last_seen` (at most once a minute), and a login connected now (`pg_stat_activity`) counts too.
+  `factory board login ls [--json]` shows it.
+- `factory board login remove <name> [--unused]` drops the role and ends its connections; with `--unused`, only a login
+  that was never used (`login-used` otherwise).
+
+Making logins needs the board's own user (a superuser: the one `factory board up` made), because of the roles and the
+login trigger; a login can't make logins (`no-rights`).
+
+What else `login add` changes on the server, each time (safe to run twice):
+
+- PUBLIC loses CONNECT and TEMPORARY on the board's database, so only the board's user and the logins reach it, and a
+  login can't make temporary tables. PUBLIC also loses CONNECT on `postgres` and `template1`, so a login reaches no
+  other database (`template0` takes no connections anyway). The board's server holds only these databases, and its one
+  user is a superuser, whom none of this limits. On a server shared with other databases, those are left as they are;
+  a non-superuser that needs `postgres` must then be granted CONNECT there by name.
+- The password is in the `CREATE ROLE` statement, so that transaction sets `log_statement = 'none'` and
+  `log_min_error_statement = 'panic'` first (for itself only): neither a logged statement nor a failed one writes it to
+  the server's log. `factory machine add|join|ls|remove` use these verbs.
 
 ## The API
 
@@ -87,8 +146,6 @@ each.
 **Leases:** `lease(key, holder, ttlSeconds)` holds a named claim on anything that isn't a task (one holder until its time runs out; the holder taking it again moves the time on) and says `{ held, holder }`. `unlease(key, holder)`, `leaseHolder(key)` (`""` for nobody) and `dropLease(key)`.
 
 **Values:** `setValue(key, value, signals?)` keeps a JSON value by name, replacing what was there, and records the signals with it in one transaction (a watcher's snapshot and the changes it saw); `value(key)` reads it (null for none).
-
-**From synchronous code:** `src/child.ts` reads one JSON request on stdin (`{ url, as, session?, calls: [{ op, args }] }`), makes the calls as that actor, prints `{ ok, results }` or `{ ok: false, code, message, fix }` on one line and exits. Run it with `Bun.spawnSync`. Besides the methods above it has `find`, the events of a kind since a time whose payload matches, and `wait`, the first such event, waiting up to a number of seconds (`or` lists other kinds and matches that also end it).
 
 **Import:** `import(batch, { dryRun?, keepBoardStatus? })` brings in tasks, parents, `blocks` edges, context entries and messages, each
 keyed by an outside id (`ref`), in one transaction: a second run updates what changed and adds what is new, never a
@@ -210,42 +267,8 @@ The factory runs it as `factory board mirror` (its `board.mirror` setting turns 
   something new, so its own write never wakes it again. A GitHub failure keeps the place (with the states it did send)
   and is thrown as a `GithubError` whose fix is to run it again: nothing is sent twice.
 
-## Running it
-
-`factory board up` starts Postgres (`postgres:17-alpine`) in Docker on this machine, on `127.0.0.1` and the Tailscale
-address only. It writes the URL to `<machine settings folder>/message-board/url` (mode 600), then migrates.
-`MB_URL` overrides the file. `factory board help` lists the other verbs, and the wiki's commands page describes them.
-
-## Logins for other machines
-
-Another machine reaches the board over Tailscale with a login of its own (#504), so one can be taken away without
-touching the others:
-
-- `factory board login add <name> [--json]`, on the machine that runs the board, makes a Postgres role
-  `<database>_l_<name>` in the group `<database>_logins`. The group may connect to the board's database and read and
-  write its tables (and use their sequences), nothing more: no new tables, no roles, no `mb_logins`, and
-  `mb_migrations` only to read. Tables a later migration adds are granted too (default privileges, and each `add`
-  grants again). It prints the login's URL once: the board's Tailscale address and port from `state.json`, its database,
-  and the password, which the board doesn't keep (Postgres keeps only its hash).
-- The board notes when a login is first used itself: a login event trigger (Postgres 17) stamps `mb_logins.first_seen`
-  and `last_seen` (at most once a minute), and a login connected now (`pg_stat_activity`) counts too.
-  `factory board login ls [--json]` shows it.
-- `factory board login remove <name> [--unused]` drops the role and ends its connections; with `--unused`, only a login
-  that was never used (`login-used` otherwise).
-
-Making logins needs the board's own user (a superuser: the one `factory board up` made), because of the roles and the
-login trigger; a login can't make logins (`no-rights`).
-
-What else `login add` changes on the server, each time (safe to run twice):
-
-- PUBLIC loses CONNECT and TEMPORARY on the board's database, so only the board's user and the logins reach it, and a
-  login can't make temporary tables. PUBLIC also loses CONNECT on `postgres` and `template1`, so a login reaches no
-  other database (`template0` takes no connections anyway). The board's server holds only these databases, and its one
-  user is a superuser, whom none of this limits. On a server shared with other databases, those are left as they are;
-  a non-superuser that needs `postgres` must then be granted CONNECT there by name.
-- The password is in the `CREATE ROLE` statement, so that transaction sets `log_statement = 'none'` and
-  `log_min_error_statement = 'panic'` first (for itself only): neither a logged statement nor a failed one writes it to
-  the server's log. `factory machine add|join|ls|remove` use these verbs.
+The factory runs a pass before each of the dev manager's passes, stopped after 300 seconds (`factory board mirror
+--max-seconds 300`), and `factory board mirror --watch` runs it all the time.
 
 ## The MCP server
 
@@ -313,7 +336,7 @@ claude mcp add board -- bun <path>/message-board/bin.ts mcp --as owner --role ow
 Put your own name after `--as`: it is who the board says moved each card. The dev manager's session uses
 `--role manager`. `factory board mcp --help` prints the same lines, with this folder's path filled in.
 
-**From a Claude Code session.** Add it for one agent:
+**An agent's session.** Add it for one agent:
 
 ```sh
 claude mcp add message-board -- factory board mcp --as haile
@@ -334,13 +357,23 @@ claude --strict-mcp-config --mcp-config board-mcp.json
 ```
 
 The factory's own sessions get it by themselves when the board is on (`tasks.source` or `messaging.transport` is
-`board`, #501): `factory loop`, `factory agent` and the dev manager's and product owner's sessions start with only this
-server, named `board`, as their agent (`--role builder` for a coding agent, `manager` for the others), with a session id of
-their own. See the wiki's agent loops page.
+`board`, or no transport is set on a machine with a board; #501): `factory loop`, `factory agent` and the dev manager's
+and product owner's sessions start with only this server, named `board`, as their agent (`--role builder` for a coding
+agent, `manager` for the others), with a session id of their own, and the project's `.mcp.json` servers are not
+started. The agents' rules then allow each role only the tools it uses: a coding agent the builder's, the dev manager
+all of them, the product owner all but `board_claim`, `board_heartbeat`, `board_release` and `board_close` (it never
+builds). See the wiki's [agent loops page](../docs/wiki/agent-loops.md#when-the-board-is-on).
+
+## From synchronous code: the child
+
+`src/child.ts` reads one JSON request on stdin (`{ url, as, session?, calls: [{ op, args }] }`), makes the calls as that actor, prints `{ ok, results }` or `{ ok: false, code, message, fix }` on one line and exits. Run it with `Bun.spawnSync`. Besides the methods above it has `find`, the events of a kind since a time whose payload matches, and `wait`, the first such event, waiting up to a number of seconds (`or` lists other kinds and matches that also end it).
+
+The factory's ports (`TaskTracker`, `Messaging`, `Leases`, `Wakes`) are synchronous, so its board adapters
+(`hooks/core/adapters/board/child.ts`) call the board this way: one short-lived process a call.
 
 ## Tests
 
-`bun tools/run_tests.ts board_rules board_cli board_mcp board_import`. The import's tests put a fake `gh` on PATH that serves JSON
+`bun tools/run_tests.ts board_rules board_cli board_child board_logins board_mcp board_import`. The import's tests put a fake `gh` on PATH that serves JSON
 fixtures. The tests need a real Postgres:
 
 - `MB_TEST_URL` is a server they may create databases on (CI sets it to its `postgres` service).

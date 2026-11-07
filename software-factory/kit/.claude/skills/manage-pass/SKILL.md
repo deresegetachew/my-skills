@@ -35,7 +35,8 @@ again, then:
 
 ## When the board is on
 
-With `tasks.source` or `messaging.transport` set to `board`, your session has one MCP server, `board`, as a manager.
+With `tasks.source` or `messaging.transport` set to `board` (or no transport set, on a machine with a board), your
+session has one MCP server, `board`, as a manager.
 Everything else here stays the same; the PR gate, reviews, CI and merges stay on GitHub. With the board off, use the
 commands below and nothing changes.
 

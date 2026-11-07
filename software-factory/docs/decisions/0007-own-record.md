@@ -1,6 +1,11 @@
 # 0007: The factory's own record: a task and messaging framework on Postgres, with GitHub for code
 
-Date: 6 Nov 2026. Status: **accepted** (the owner, 6 Nov: "yesss pls", in the owner's session, after reading a summary of this record).
+Date: 6 Nov 2026. Status: **built** (accepted by the owner on 6 Nov: "yesss pls", in the owner's session, after reading a
+summary of this record). Built in PRs #492 (the framework, #489), #496 (the import, #494), #497 and #507 (the MCP server
+and its owner and manager tools, #495, #503), #499 (the web UI reads the board, #498), #506 (the adapters, #500), #508
+(NATS removed, board logins, #504), #509 (the board as the record, the mirror and the owner queue, #502), #510 (agents on
+the board's MCP server, #501) and #505 (the board's colours). A project moves onto it with `tasks.source: board`
+(wiki/board.md, "Going live").
 The direction was approved on #472 the same day: "Yes, this is important, go for it, and scalable. It should be part of
 the initial setup: when we start a new factory and connect GitHub we should be able to import issues or tasks." Epic
 #472. Product half: mentewab (product owner). Technical half: the owner's session (point 10), from fasil's answers.
@@ -157,6 +162,12 @@ is copied.
 
 ### 9. Moving over, one kind at a time, both copies kept
 
+*What was built (#500, #502):* `messaging.kinds` moves message kinds one at a time, and a moved kind is written to both
+while it is in `messaging.githubCopy`; a read gives what either holds. Only claims and wake-ups may drop their GitHub
+copy (the board's copy is not the record for what the PR gate reads). Misses are not counted. Tasks, their threads and the
+owner queue move together with `tasks.source: board`, with the mirror (point 5) as GitHub's copy. The text below is the
+plan as decided.
+
 As with NATS (0004 point 8): a kind moves when it is listed in a setting; for a period it is written to the database
 and to GitHub, and readers count what they find on one but not the other. After a period with nothing missed, the
 owner stops the GitHub copy for that kind. The web UI's reads move first.
@@ -243,12 +254,14 @@ The adapters pass 0003's contract suite (`hooks/core/adapters/memory`, the same 
 (`ready` maps to open); `Depends on #n` lines become `blocks` edges; a parent comes from an epic's `- [ ] #n` lines;
 `PRD:` and `Budget:` are kept in the body. A second run updates by external ref and makes no duplicates.
 
-**The order of the build:**
-1. The framework: schema, rules, API, command, and tests against Postgres.
-2. The import (command line), then the first-launch screen (#457).
-3. The adapters behind the ports, with the contract suite; the web UI reads from them first.
-4. The mirror to GitHub, and the owner queue to #293.
-5. The kinds move one at a time (point 9).
+**The order of the build** (status on 7 Nov 2026):
+1. The framework: schema, rules, API, command, and tests against Postgres. *Done (#489).*
+2. The import (command line), then the first-launch screen (#457). *The command line is done (#494); the first-launch
+   screen is not (#457).*
+3. The adapters behind the ports, with the contract suite; the web UI reads from them first. *Done (#498, #500), and the
+   agents' sessions use the board's MCP server (#495, #501, #503).*
+4. The mirror to GitHub, and the owner queue to #293. *Done (#502).*
+5. The kinds move one at a time (point 9). *Done as point 9 says; NATS was removed (#504).*
 
 The ideas filed on 6 Nov plug in as follows:
 - #485 (typed dependencies) and #486 (context to the next agent) are in step 1.
@@ -270,7 +283,7 @@ The ideas filed on 6 Nov plug in as follows:
 ## Consequences
 
 - PRD D10 becomes: "The factory's own database is the record for tasks and conversations; GitHub holds the code, the
-  pull requests, CI and what the PR gate trusts." 0004's NATS becomes optional. `messages.md` gains the database
+  pull requests, CI and what the PR gate trusts." 0004's NATS becomes optional (it was then removed, #504). `messages.md` gains the database
   transport.
 - One more service on the hub machine (a Postgres container), reached over Tailscale, backed up nightly.
 - An agent that can't reach the database can't take new work. Whether it falls back to GitHub, as with NATS, is in the
@@ -278,6 +291,8 @@ The ideas filed on 6 Nov plug in as follows:
 - The PRD gains section 4.11 (US-40 to US-48).
 
 ## Build tasks (a draft; filed with fasil once this decision is accepted)
+
+*Filed and built as the PRs in the status line; the first-launch import (4) is #457, still open. The docs (8) were brought up to date with the follow-ups of #511.*
 
 Each one PR, each with a `PRD: US-<n>` line. fasil sets the final split and order.
 

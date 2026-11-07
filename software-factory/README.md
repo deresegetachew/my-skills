@@ -202,6 +202,11 @@ flowchart LR
 Each agent gets its own folder, so two agents never trip over each other's files. Waiting costs no tokens: a loop
 that has nothing to do sleeps instead of asking a model.
 
+With the [message board](docs/wiki/board.md#the-message-board) on (decision 0007), a Postgres on one machine that the
+others reach over Tailscale holds the tasks, their threads, the claims and the owner queue instead of the task issues;
+GitHub keeps the code, the pull requests, CI and the gate's labels, and a mirror of each task's state and of the owner
+queue.
+
 <br>
 ## Where things stand
 
@@ -209,10 +214,12 @@ The factory is released in numbered versions; `v0.2.0` was the first full releas
 the newest. The `v0.1.0` pre-releases are the old Python factory, and `v0.2.0-alpha.1` was the first on Bun
 ([Updating from releases](docs/wiki/updating.md#updating-from-releases)).
 
+The interface is the web UI (`factory ui`), the Claude app with Remote Control, and the plain-text commands
+(`factory status`, `factory prs`, `factory follow`). The message board is built; a project moves onto it when you choose
+([Going live](docs/wiki/board.md#going-live)).
+
 Not built yet:
 
-- A custom screen. The Claude app, Remote Control and the plain-text commands (`factory status`, `factory prs`,
-  `factory agents ls`, `factory follow`) are the interface.
 - `factory bootstrap` runs on Linux only.
 - One command to bump the pin for a whole team.
 - A Slack or Mattermost bridge. It is an idea, not scheduled (PRD, sections 5 and 6).
@@ -243,6 +250,7 @@ The long parts of this guide are wiki pages in [`docs/wiki/`](docs/wiki). Each p
 
 - [CI and the build cache](docs/wiki/ci.md): GitHub's runners or your own Mac, and a shared build cache.
 - [A sandboxed machine](docs/wiki/sandboxed-machine.md): `factory bootstrap` and security notes.
+- [The message board](docs/wiki/board.md): the factory's own record on Postgres: set it up, go live, go back.
 
 **Reference**
 
@@ -289,7 +297,8 @@ flowchart LR
   ([settings](docs/wiki/settings.md#factoryjson-settings)), or ask Claude to "set up the software factory" (the `software-factory` skill
   walks through it).
 - `CLAUDE.md`, from `CLAUDE.factory.md`: the project's rules.
-- The tasks: `docs/build-plan.md`, or [GitHub issues](docs/wiki/agent-loops.md#issues-mode) (`factory issues setup` makes the labels once).
+- The tasks: `docs/build-plan.md`, or [GitHub issues](docs/wiki/agent-loops.md#issues-mode) (`factory issues setup` makes the labels once),
+  or the [message board](docs/wiki/board.md#going-live) once the issues are imported.
 - `.github/workflows/ci.yml`: your stack's commands.
 - For a project with no PRD scaffold yet, `factory init` adds the role folders, the labels, the owner queue, a starter
   PRD and the PRD-change PR template, and adds nothing twice ([From an idea to a first milestone](docs/wiki/roles.md#from-an-idea-to-a-first-milestone)).
@@ -351,6 +360,7 @@ software-factory/
       dev-manager.md            the dev manager
       ci.md                     CI and the shared build cache
       sandboxed-machine.md      `factory bootstrap` and security notes
+      board.md                  the message board: set up, going live, going back
       settings.md               style guides and every `factory.json` setting
       kit-files.md              the files in the kit
       submodule.md              projects that use the submodule

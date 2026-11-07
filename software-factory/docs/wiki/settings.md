@@ -312,4 +312,4 @@ change the table there, not here. `factory settings help <key>` has the long hel
 
 <br>
 
-Previous: [A sandboxed machine](sandboxed-machine.md) | Next: [The files in the kit](kit-files.md)
+Previous: [The message board](board.md) | Next: [The files in the kit](kit-files.md)

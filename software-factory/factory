@@ -188,11 +188,12 @@ Check
                          GitHub wins on status unless the task is held on the board (done here but open there:
                          reopened); comments deleted on GitHub stay on the board. With tasks.source board the board
                          is the record: a status it changed since the last import is kept
-  board mirror [--watch] [--every N]
+  board mirror [--watch] [--every N] [--max-seconds N]
                          carry the board to GitHub, one way: a task's state change sets its issue's labels with one
                          short line; owner asks and answers go to the owner-queue issue, and the owner's answers
                          there come back once. Safe to run twice; board.mirror false turns it off. --watch keeps
                          going: a pass on each change, and every N seconds (300) for answers on GitHub
+                         --max-seconds stops a one-off pass that runs longer (the dev manager's loop uses 300)
   board ask <id> <text>  ask the owner: with the owner queue on the board (tasks.source board, or ask in
                          messaging.kinds) written there and mirrored to the owner-queue issue; else a comment there
   board login add <name> | ls | remove <name> [--unused]

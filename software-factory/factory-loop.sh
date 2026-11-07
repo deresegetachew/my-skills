@@ -290,11 +290,14 @@ idle_minutes() {
 
 # With the message board on (main's tasks.source or messaging.transport is board), each dev manager pass first runs
 # `factory board mirror` (#502), which brings GitHub's mirror of the board up to date: safe to run twice, and cheap when
-# nothing changed. A release without factory_board.ts, or the board off, skips it. Never stops the pass.
+# nothing changed. A release without factory_board.ts, or the board off, skips it. Never stops the pass, and never stalls
+# it: a pass that runs longer than mirror_seconds is stopped (#511; macOS has no `timeout`, so the limit is the
+# command's own --max-seconds), and the next pass sends the rest.
+mirror_seconds=300
 mirror_board() {
   [ -f "$hooks/factory_board.ts" ] || return 0
   fh "$hooks/factory_mcp" board-on >/dev/null 2>&1 || return 0
-  fh "$hooks/factory_board" mirror 2>&1 | sed "s/^/[$agent] /"
+  fh "$hooks/factory_board" mirror --max-seconds "$mirror_seconds" 2>&1 | sed "s/^/[$agent] /"
   return 0
 }
 

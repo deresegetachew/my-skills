@@ -19,7 +19,7 @@ This file is the core. Open the others in this folder only when they apply:
 | `rework.md` | the pick prints `pr-<n>`: a must-fix on your open PR comes before any new task |
 | `questions.md` | you need something only a person has, a decision the docs leave open, or a decision number |
 | `waiting.md` | after shipping, or when you'd wait: merges, the PR cap, CI that never ran, the interactive loop, stopping |
-| `board.md` | `tasks.source` or `messaging.transport` is `board`: the board tools for claims, questions and notes |
+| `board.md` | your session has the `board` MCP server (the board is on): the board tools for claims, questions and notes |
 
 ## 1. Pick the task
 
