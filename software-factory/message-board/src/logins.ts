@@ -81,6 +81,52 @@ async function tableExists(sql: SQL, name: string): Promise<boolean> {
   return Boolean(((await sql`SELECT to_regclass(${name}) IS NOT NULL AS ok`) as Row[])[0]?.ok);
 }
 
+// Grants and revokes. Some catalog rows are shared by every database of the server (pg_database's), and two writes of
+// one row at once fail ("tuple concurrently updated"), which the board's own lock can't prevent across databases. So a
+// grant or revoke is written only when the ACL isn't already as wanted (after the first run nothing is written), and a
+// change that still crosses another is tried again (`retrying`).
+
+/** The oid of role `name`, 0 for PUBLIC (""), null when there is no such role. */
+async function granteeOid(tx: SQL, name: string): Promise<number | null> {
+  if (name === "") return 0;
+  const r = ((await tx`SELECT oid::int AS oid FROM pg_roles WHERE rolname = ${name}`) as Row[])[0];
+  return r ? Number(r.oid) : null;
+}
+
+/** Whether `grantee` ("" for PUBLIC) holds `privilege` on database `db` itself (not through a group). */
+async function dbHas(tx: SQL, db: string, grantee: string, privilege: string): Promise<boolean> {
+  const oid = await granteeOid(tx, grantee);
+  if (oid === null) return false;
+  return ((await tx`SELECT 1 FROM pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
+    WHERE d.datname = ${db} AND a.grantee::int = ${oid} AND a.privilege_type = ${privilege}`) as Row[]).length > 0;
+}
+
+/** Whether `grantee` ("" for PUBLIC) holds EXECUTE on function `fn` (a regprocedure's text) itself. */
+async function fnHas(tx: SQL, fn: string, grantee: string): Promise<boolean> {
+  const oid = await granteeOid(tx, grantee);
+  if (oid === null) return false;
+  return ((await tx`SELECT 1 FROM pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+    WHERE p.oid = ${fn}::regprocedure AND a.grantee::int = ${oid} AND a.privilege_type = 'EXECUTE'`) as Row[]).length > 0;
+}
+
+/** `fn` again when it fails because it crossed another change of the same catalog row ("tuple concurrently updated")
+ * or another transaction (a deadlock or serialization failure): up to 5 tries, 100 to 500 ms apart. */
+async function retrying<T>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (attempt >= 5 || !crossed(e)) throw e;
+      await Bun.sleep(100 + Math.floor(Math.random() * 400));
+    }
+  }
+}
+
+function crossed(e: unknown): boolean {
+  const x = e as { errno?: string; message?: string };
+  return (x.errno === "XX000" && /tuple concurrently (updated|deleted)/.test(x.message ?? "")) || x.errno === "40001" || x.errno === "40P01";
+}
+
 async function superuser(sql: SQL): Promise<boolean> {
   return Boolean(((await sql`SELECT rolsuper FROM pg_roles WHERE rolname = current_user`) as Row[])[0]?.rolsuper);
 }
@@ -172,13 +218,13 @@ async function ensure(tx: SQL, db: string): Promise<void> {
   // database, and none of them reaches the server's maintenance databases. The board's server holds only those
   // (factory board up), so nobody else needs PUBLIC's CONNECT there; on a server shared with other databases, those are
   // left as they are.
-  await tx.unsafe(`REVOKE CONNECT, TEMPORARY ON DATABASE ${ident(db)} FROM PUBLIC`);
-  for (const other of ["postgres", "template1"]) {
-    if (other !== db && ((await tx`SELECT 1 FROM pg_database WHERE datname = ${other}`) as Row[]).length) {
-      await tx.unsafe(`REVOKE CONNECT ON DATABASE ${ident(other)} FROM PUBLIC`);
-    }
+  if (await dbHas(tx, db, "", "CONNECT") || await dbHas(tx, db, "", "TEMPORARY")) {
+    await tx.unsafe(`REVOKE CONNECT, TEMPORARY ON DATABASE ${ident(db)} FROM PUBLIC`);
   }
-  await tx.unsafe(`GRANT CONNECT ON DATABASE ${ident(db)} TO ${ident(group)}`);
+  for (const other of ["postgres", "template1"]) {
+    if (other !== db && await dbHas(tx, other, "", "CONNECT")) await tx.unsafe(`REVOKE CONNECT ON DATABASE ${ident(other)} FROM PUBLIC`);
+  }
+  if (!(await dbHas(tx, db, group, "CONNECT"))) await tx.unsafe(`GRANT CONNECT ON DATABASE ${ident(db)} TO ${ident(group)}`);
   await tx.unsafe(`GRANT USAGE ON SCHEMA public TO ${ident(group)}`);
   await tx.unsafe(`GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${ident(group)}`);
   await tx.unsafe(`GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${ident(group)}`);
@@ -195,15 +241,17 @@ async function ensure(tx: SQL, db: string): Promise<void> {
   const advisory = (await tx`SELECT p.oid::regprocedure::text AS f FROM pg_proc p
     WHERE p.pronamespace = 'pg_catalog'::regnamespace AND p.proname ~ '^pg_(try_)?advisory_'`) as Row[];
   for (const { f } of advisory) {
-    await tx.unsafe(`REVOKE EXECUTE ON FUNCTION ${String(f)} FROM PUBLIC`);
-    await tx.unsafe(`GRANT EXECUTE ON FUNCTION ${String(f)} TO ${ident(group)}`);
+    if (await fnHas(tx, String(f), "")) await tx.unsafe(`REVOKE EXECUTE ON FUNCTION ${String(f)} FROM PUBLIC`);
+    if (!(await fnHas(tx, String(f), group))) await tx.unsafe(`GRANT EXECUTE ON FUNCTION ${String(f)} TO ${ident(group)}`);
   }
   // Large objects: the board has none, and nobody else on this database may make or write one (a role that owns one
   // used to outlive a remove's REASSIGN OWNED as the board user's).
   const largeObjects = (await tx`SELECT p.oid::regprocedure::text AS f FROM pg_proc p
     WHERE p.pronamespace = 'pg_catalog'::regnamespace
       AND p.proname IN ('lo_create', 'lo_creat', 'lo_from_bytea', 'lo_import', 'lowrite', 'lo_put')`) as Row[];
-  for (const { f } of largeObjects) await tx.unsafe(`REVOKE EXECUTE ON FUNCTION ${String(f)} FROM PUBLIC`);
+  for (const { f } of largeObjects) {
+    if (await fnHas(tx, String(f), "")) await tx.unsafe(`REVOKE EXECUTE ON FUNCTION ${String(f)} FROM PUBLIC`);
+  }
   // Runs as its owner on every connection to this database; a failure in it must never stop a login.
   await tx.unsafe(`CREATE OR REPLACE FUNCTION mb_login_seen() RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER
     SET search_path = public, pg_temp SET lock_timeout = '1s' AS $f$
@@ -219,8 +267,10 @@ async function ensure(tx: SQL, db: string): Promise<void> {
     WHERE p.proname = 'mb_redeem_login' AND p.pronamespace = 'public'::regnamespace`) as Row[])[0];
   if (old && old.r === "text") await tx.unsafe("DROP FUNCTION mb_redeem_login()");
   await tx.unsafe(REDEEM);
-  await tx.unsafe("REVOKE ALL ON FUNCTION mb_redeem_login() FROM PUBLIC");
-  await tx.unsafe(`GRANT EXECUTE ON FUNCTION mb_redeem_login() TO ${ident(group)}`); // it refuses a login that isn't a code's
+  if (await fnHas(tx, "mb_redeem_login()", "")) await tx.unsafe("REVOKE ALL ON FUNCTION mb_redeem_login() FROM PUBLIC");
+  if (!(await fnHas(tx, "mb_redeem_login()", group))) {
+    await tx.unsafe(`GRANT EXECUTE ON FUNCTION mb_redeem_login() TO ${ident(group)}`); // it refuses a login that isn't a code's
+  }
 }
 
 /** Makes login `name` with `password`; returns its role. Without `validFor` it is a login of the board (in the logins
@@ -233,8 +283,8 @@ export async function addLogin(sql: SQL, name: string, password: string, options
   if (validFor !== undefined && !(Number.isInteger(validFor) && validFor > 0)) {
     refuse("bad-input", `A login's validity is a whole number of seconds above 0, not ${validFor}.`, "For example: factory board login add laptop --valid-for 900");
   }
-  await ensureLocks(sql);
-  await sql.begin(async (tx) => {
+  await retrying(() => ensureLocks(sql));
+  await retrying(() => sql.begin(async (tx) => {
     await takeLock(tx, "logins", LOCKS_SECONDS);
     await tx.unsafe(`SET LOCAL lock_timeout = '${LOCKS_SECONDS}s'`);
     await ensure(tx, db);
@@ -254,7 +304,7 @@ export async function addLogin(sql: SQL, name: string, password: string, options
     await tx.unsafe(`GRANT CONNECT ON DATABASE ${ident(db)} TO ${ident(role)}`);
     await tx.unsafe(`GRANT EXECUTE ON FUNCTION mb_redeem_login() TO ${ident(role)}`);
     await tx`INSERT INTO mb_logins (name, role, is_code) VALUES (${name}, ${role}, true)`;
-  });
+  }));
   return { name, role };
 }
 
@@ -300,7 +350,7 @@ async function oidsOf(sql: SQL, roles: Iterable<string>): Promise<unknown[]> {
 async function cutOff(sql: SQL, roles: Iterable<string>): Promise<void> {
   const db = await database(sql);
   const group = groupOf(db);
-  await sql.begin(async (tx) => {
+  await retrying(() => sql.begin(async (tx) => {
     // the board's logins lock: two changes of the database's or the redeem's grants at once would fail ("tuple
     // concurrently updated"); only the board's own changes hold it, never a login's session
     await takeLock(tx, "logins", LOCKS_SECONDS);
@@ -308,13 +358,13 @@ async function cutOff(sql: SQL, roles: Iterable<string>): Promise<void> {
     const redeem = ((await tx`SELECT 1 FROM pg_proc WHERE proname = 'mb_redeem_login' AND pronamespace = 'public'::regnamespace`) as Row[]).length > 0;
     for (const r of roles) {
       if (!((await tx`SELECT 1 FROM pg_roles WHERE rolname = ${r}`) as Row[]).length) continue;
-      await tx.unsafe(`REVOKE CONNECT ON DATABASE ${ident(db)} FROM ${ident(r)}`);
-      if (redeem) await tx.unsafe(`REVOKE EXECUTE ON FUNCTION mb_redeem_login() FROM ${ident(r)}`);
+      if (await dbHas(tx, db, r, "CONNECT")) await tx.unsafe(`REVOKE CONNECT ON DATABASE ${ident(db)} FROM ${ident(r)}`);
+      if (redeem && await fnHas(tx, "mb_redeem_login()", r)) await tx.unsafe(`REVOKE EXECUTE ON FUNCTION mb_redeem_login() FROM ${ident(r)}`);
       const member = ((await tx`SELECT 1 FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid JOIN pg_roles u ON u.oid = m.member
         WHERE g.rolname = ${group} AND u.rolname = ${r}`) as Row[]).length > 0;
       if (member) await tx.unsafe(`REVOKE ${ident(group)} FROM ${ident(r)}`);
     }
-  });
+  }));
 }
 
 /** Ends the sessions of the roles with these oids, waiting up to 5 s for each. */
@@ -351,6 +401,10 @@ async function underLock<T>(sql: SQL, what: string, rolesNow: () => Promise<stri
         return await fn(tx);
       });
     } catch (e) {
+      if (crossed(e) && Date.now() < deadline) { // crossed another change of a shared catalog row: try again shortly
+        await Bun.sleep(100 + Math.floor(Math.random() * 400));
+        continue;
+      }
       if ((e as { errno?: string }).errno !== "55P03") throw e;
       if (Date.now() >= deadline) {
         refuse("busy", `${what} waited ${LOCK_BOUND_MS / 1000} s for the login's record, which another session kept; this step changed nothing.`,
