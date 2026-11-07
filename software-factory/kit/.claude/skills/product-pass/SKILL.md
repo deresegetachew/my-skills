@@ -90,7 +90,7 @@ no story used twice and no task naming a missing story.
 
 **PRD first, then tasks, then builders** (#578). Every task you file or change for a PRD change that is not merged yet
 gets a line of its own, `PRD change: #<pr>`, next to its `PRD: US-<n>` line (on the board: the card and the links in
-**When the board is on**). Until that pull request merges, no builder can claim it: `factory next` passes it over and says
+**When the board is on**). Until that pull request merges, no builder can claim it: the builders' pick passes it over and says
 why. File the tasks ready, as usual: the merge is what frees them, and nobody has to move them. If the owner closes the pull
 request without merging it, the tasks keep waiting: close them as not planned, or re-plan them. Only the owner says "build
 now" (taking the line out, or moving the card to done); do not do it for them. Tell the owner, in the same reply, that the

@@ -68,7 +68,7 @@ commands below and nothing changes.
 ## Tasks that wait for their PRD change (#578)
 
 The order is PRD, then tasks, then builders. A task with a `PRD change: #<pr>` line (on the board, a `waits_for` link to
-that change's card) can't be claimed until the pull request merges, and `factory next` says so ("Skipped #5: it waits for
+that change's card) can't be claimed until the pull request merges, and the builders' pick says so ("Skipped #5: it waits for
 its PRD change, PR #62, to merge."). When you file a task for a PRD change that is still open (a review follow-up that
 changes a story), give it the same line or link. A PRD pull request is merged by the owner, never by you. When builders sit
 idle because every ready task waits for one, say so to the owner once, in an owner ask naming the pull request.
