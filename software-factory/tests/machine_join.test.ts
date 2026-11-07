@@ -672,13 +672,19 @@ test("after a join the code's own role can't log in at all", async () => {
 test("machine remove works on a machine whose code role and login own something", async () => {
   const h = await hub();
   const a = add(h, "laptop");
-  for (const q of ["select lo_create(0)", "alter default privileges grant select on tables to public"]) {
-    const sql = new SQL(codeUrl(a.code), { max: 1 });
-    try {
-      await sql.unsafe(q);
-    } finally {
-      await sql.close();
-    }
+  const code = new SQL(codeUrl(a.code), { max: 1 });
+  try {
+    await code.unsafe("alter default privileges grant select on tables to public");
+  } finally {
+    await code.close();
+  }
+  const admin = new SQL(h.url, { max: 1 }); // a large object it owns (a code can't make one itself)
+  let lo = 0;
+  try {
+    lo = ((await admin`select lo_create(0)::int as oid`) as { oid: number }[])[0]?.oid as number;
+    await admin.unsafe(`alter large object ${lo} owner to "${decodeURIComponent(new URL(codeUrl(a.code)).username)}"`);
+  } finally {
+    await admin.close();
   }
   const m = world();
   expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
@@ -686,6 +692,12 @@ test("machine remove works on a machine whose code role and login own something"
   expect(r.code, r.out).toBe(0);
   expect(await roles(h)).toEqual([]);
   expect(await connects(read(urlFile(m)).trim())).toBe(false);
+  const check = new SQL(h.url, { max: 1 });
+  try {
+    expect(((await check`select 1 from pg_largeobject_metadata where oid = ${lo}`) as unknown[]).length).toBe(0);
+  } finally {
+    await check.close();
+  }
 });
 
 test("a redeem held open by a copy of the code doesn't stall machine remove, and the code then joins nothing", async () => {

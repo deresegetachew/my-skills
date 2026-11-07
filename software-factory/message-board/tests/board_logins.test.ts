@@ -492,19 +492,42 @@ test("after the redeem the code's role can't log in at all, and the next ls on t
 
 // ---------- a login that owns something (#514 review 3): any role may make a large object or set its default privileges
 /** What any role may do without CREATE, so that DROP ROLE alone fails on it. */
-async function poison(url: string): Promise<void> {
-  for (const q of ["select lo_create(0)", "alter default privileges grant select on tables to public"]) expect(await tryQuery(url, q)).toBe("ok");
+/** A login of `url` that owns something: default privileges it set itself, and a large object it owns (made by the
+ * board's user and given to it, as a login can't make one since #514's review 7). The large object's oid. */
+async function poison(w: World, url: string): Promise<number> {
+  expect(await tryQuery(url, "alter default privileges grant select on tables to public")).toBe("ok");
+  const role = decodeURIComponent(new URL(url).username);
+  const sql = new SQL(w.url, { max: 1 });
+  try {
+    const [o] = (await sql`select lo_create(0)::int as oid`) as { oid: number }[];
+    await sql.unsafe(`alter large object ${o?.oid} owner to "${role}"`);
+    return o?.oid as number;
+  } finally {
+    await sql.close();
+  }
+}
+
+async function largeObjects(w: World, oids: number[]): Promise<number> {
+  const sql = new SQL(w.url, { max: 1 });
+  try {
+    let n = 0;
+    for (const oid of oids) n += ((await sql`select 1 from pg_largeobject_metadata where oid = ${oid}`) as unknown[]).length;
+    return n;
+  } finally {
+    await sql.close();
+  }
 }
 
 test("a login that made a large object and set default privileges is still removed, and ls goes on for the others", async () => {
   const w = await hub();
   const a = add(w, "laptop");
   add(w, "desktop");
-  await poison(a.url);
+  const lo = await poison(w, a.url);
   expect(ls(w).map((l) => l.name)).toEqual(["desktop", "laptop"]);
   const r = board(w, ["login", "remove", "laptop"]);
   expect(r.code, r.stderr).toBe(0);
   expect(await roleExists(w, a.role)).toBe(false);
+  expect(await largeObjects(w, [lo])).toBe(0); // what it owned went with it
   expect(ls(w).map((l) => l.name)).toEqual(["desktop"]);
 });
 
@@ -512,10 +535,10 @@ test("a code role poisoned before the redeem is dropped by the next ls, and the 
   const w = await hub();
   const made = addFor(w, "laptop", 60);
   add(w, "desktop");
-  await poison(made.url);
+  const los = [await poison(w, made.url)];
   const r = await redeem(made.url);
   if (!("role" in r)) throw new Error(`redeem refused: ${r.code}`);
-  await poison(withLogin(made.url, r.role, r.password)); // the fresh role too
+  los.push(await poison(w, withLogin(made.url, r.role, r.password))); // the fresh role too
   const listed = board(w, ["login", "ls", "--json"]);
   expect(listed.code, listed.stderr).toBe(0);
   expect((JSON.parse(listed.stdout) as Row[]).map((l) => l.name)).toEqual(["desktop", "laptop"]);
@@ -523,19 +546,21 @@ test("a code role poisoned before the redeem is dropped by the next ls, and the 
   const gone = board(w, ["login", "remove", "laptop"]);
   expect(gone.code, gone.stderr).toBe(0);
   expect(await roleExists(w, r.role)).toBe(false);
+  expect(await largeObjects(w, los)).toBe(0);
 });
 
 test("the sweep drops a poisoned expired login and ends its held session", async () => {
   const w = await hub();
   const late = addFor(w, "laptop", 2);
   const other = addFor(w, "desktop", 2);
-  await poison(late.url);
+  const lo = await poison(w, late.url);
   const held = new SQL(late.url, { max: 1 });
   await held`select 1`;
   await Bun.sleep(3000);
   const r = board(w, ["sweep"]);
   expect(r.code, r.stderr).toBe(0);
   expect(await roleExists(w, late.role)).toBe(false);
+  expect(await largeObjects(w, [lo])).toBe(0);
   expect(await roleExists(w, other.role)).toBe(false);
   let ended = false;
   try {
@@ -720,4 +745,56 @@ test("a login holding the advisory locks the board once used doesn't affect logi
   } finally {
     await holder.close();
   }
+});
+
+// ---------- #514 review 7 ----------
+test("neither a code's role nor a login may make large objects", async () => {
+  const w = await hub();
+  const code = addFor(w, "laptop", 60);
+  const plain = add(w, "desktop");
+  const r = await redeem(code.url);
+  if (!("role" in r)) throw new Error(`redeem refused: ${r.code}`);
+  const other = addFor(w, "tablet", 60);
+  for (const url of [other.url, plain.url, withLogin(code.url, r.role, r.password)]) {
+    for (const q of ["select lo_create(0)", "select lo_creat(-1)", "select lo_from_bytea(0, 'x')", "select lo_put(1, 0, 'x')"]) {
+      expect(await tryQuery(url, q), q).toMatch(/permission denied/i);
+    }
+  }
+});
+
+test("a code used on more connections than it allows is refused as possibly copied, not as a board that doesn't answer", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  const held = [new SQL(made.url, { max: 1 }), new SQL(made.url, { max: 1 })];
+  try {
+    for (const h of held) await h`select 1`;
+    let e: { code?: string; message?: string; fix?: string } = {};
+    try {
+      const b = await Board.open(made.url, { max: 1 });
+      await b.end();
+    } catch (x) {
+      e = x as typeof e;
+    }
+    expect(e.code).toBe("login-in-use");
+    expect(e.message).toMatch(/may have been copied/);
+    expect(e.fix).toContain("factory machine remove");
+    expect(e.fix).toContain("factory machine add");
+  } finally {
+    for (const h of held) await h.close().catch(() => {});
+  }
+});
+
+test("login changes at the same moment don't trip over each other", async () => {
+  const w = await hub();
+  for (let round = 0; round < 3; round++) {
+    const names = ["a", "b", "c", "d"].map((x) => `${x}${round}`);
+    for (const n of names.slice(0, 2)) addFor(w, n, 60);
+    const runs = [
+      ["login", "remove", names[0] as string], ["login", "remove", names[1] as string],
+      ["login", "add", names[2] as string, "--valid-for", "60"], ["login", "add", names[3] as string, "--valid-for", "60"],
+    ].map((args) => Bun.spawn([process.execPath, "--no-env-file", BIN, ...args], { env: w.env, stdout: "pipe", stderr: "pipe" }));
+    for (const p of runs) expect(await p.exited, await new Response(p.stderr).text()).toBe(0);
+    for (const n of names.slice(2)) expect(board(w, ["login", "remove", n]).code).toBe(0);
+  }
+  expect(ls(w)).toEqual([]);
 });
