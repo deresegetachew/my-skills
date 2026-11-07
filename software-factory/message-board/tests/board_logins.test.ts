@@ -248,6 +248,32 @@ function addFor(w: World, name: string, seconds: number): Made {
   return JSON.parse(r.stdout) as Made;
 }
 
+/** Seconds until `role` stops being able to log in, by the server's clock (its VALID UNTIL); Infinity when it has none. */
+async function secondsLeft(w: World, role: string): Promise<number> {
+  const sql = new SQL(w.url, { max: 1 });
+  try {
+    const [r] = (await sql`select rolvaliduntil is null or rolvaliduntil = 'infinity' as never,
+      extract(epoch from rolvaliduntil - now())::float8 as left from pg_roles where rolname = ${role}`) as { never: boolean; left: number }[];
+    if (!r) throw new Error(`no role ${role}`);
+    return r.never ? Infinity : r.left;
+  } finally {
+    await sql.close();
+  }
+}
+
+/** Moves `role`'s VALID UNTIL (what --valid-for set, and what Postgres and the sweep check) a minute into the past, as
+ * the board's own user: the expiry arrives now instead of after a sleep that a slow machine can outrun (#525). */
+async function expire(w: World, role: string): Promise<void> {
+  const sql = new SQL(w.url, { max: 1 });
+  try {
+    const [r] = (await sql`select (now() - interval '1 minute')::text as t`) as { t: string }[];
+    await sql.unsafe(`alter role "${role}" valid until '${r?.t}'`);
+  } finally {
+    await sql.close();
+  }
+  expect(await secondsLeft(w, role)).toBeLessThan(0);
+}
+
 /** `url` as the login `role` with `password`. */
 const withLogin = (url: string, role: string, password: string): string => {
   const u = new URL(url);
@@ -281,16 +307,19 @@ async function redeem(url: string, keep: (login: { role: string; password: strin
 
 test("a login made with --valid-for is refused by Postgres itself once it expires", async () => {
   const w = await hub();
-  const made = addFor(w, "laptop", 2);
+  const made = addFor(w, "laptop", 600);
+  const left = await secondsLeft(w, made.role); // --valid-for sets the role's expiry, by the server's clock
+  expect(left).toBeLessThanOrEqual(600);
+  expect(left).toBeGreaterThan(600 - 120);
   expect(await tryQuery(made.url, "select 1")).toBe("ok");
-  await Bun.sleep(3500);
+  await expire(w, made.role);
   expect(await tryQuery(made.url, "select 1")).toMatch(/password authentication failed/i);
   expect(err(board(w, ["login", "add", "desktop", "--valid-for", "0"])).code).toBe("bad-input");
 });
 
 test("redeeming a login works once: it rotates the password and lifts the expiry", async () => {
   const w = await hub();
-  const made = addFor(w, "laptop", 3);
+  const made = addFor(w, "laptop", 600);
   expect(ls(w)[0]?.redeemedAt).toBeNull();
   const first = await redeem(made.url);
   if (!("password" in first)) throw new Error(`redeem refused: ${first.code}`);
@@ -300,8 +329,9 @@ test("redeeming a login works once: it rotates the password and lifts the expiry
   expect(await tryQuery(made.url, "select 1")).toMatch(/not permitted to log in/i); // the code's role can't log in any more
   expect(await tryQuery(fresh, "select 1")).toBe("ok");
   expect(ls(w)[0]?.redeemedAt).not.toBeNull();
-  await Bun.sleep(4000);
-  expect(await tryQuery(fresh, "select count(*) from tasks")).toBe("ok"); // past the code's expiry: the login is kept
+  // The login is kept past the code's expiry: the fresh role has none (Postgres lets it log in at any time to come).
+  expect(await secondsLeft(w, first.role)).toBe(Infinity);
+  expect(await tryQuery(fresh, "select count(*) from tasks")).toBe("ok");
   expect(await redeem(fresh)).toEqual({ code: "login-redeemed" });
   expect(await redeem(made.url)).toEqual({ code: "login-refused" });
 });
@@ -434,15 +464,16 @@ async function stealOnRedeem(url: string): Promise<void> {
 
 test("board sweep drops a join code's login that expired unredeemed and ends its sessions; others are kept", async () => {
   const w = await hub();
-  const late = addFor(w, "laptop", 2);
+  const late = addFor(w, "laptop", 600);
   const live = addFor(w, "desktop", 600);
-  const joined = addFor(w, "tablet", 2);
+  const joined = addFor(w, "tablet", 600);
   const plain = add(w, "phone");
   const redeemed = await redeem(joined.url);
   if (!("role" in redeemed)) throw new Error(`redeem refused: ${redeemed.code}`);
   const held = new SQL(late.url, { max: 1 });
   await held`select 1`;
-  await Bun.sleep(3000);
+  await expire(w, late.role);
+  await expire(w, joined.role); // the redeemed code's own expiry passes too
   let still = true;
   try {
     await held`select 1`; // VALID UNTIL is checked only when connecting: the session outlives it until a sweep
@@ -551,12 +582,13 @@ test("a code role poisoned before the redeem is dropped by the next ls, and the 
 
 test("the sweep drops a poisoned expired login and ends its held session", async () => {
   const w = await hub();
-  const late = addFor(w, "laptop", 2);
-  const other = addFor(w, "desktop", 2);
+  const late = addFor(w, "laptop", 600);
+  const other = addFor(w, "desktop", 600);
   const lo = await poison(w, late.url);
   const held = new SQL(late.url, { max: 1 });
   await held`select 1`;
-  await Bun.sleep(3000);
+  await expire(w, late.role);
+  await expire(w, other.role);
   const r = board(w, ["sweep"]);
   expect(r.code, r.stderr).toBe(0);
   expect(await roleExists(w, late.role)).toBe(false);
