@@ -10,16 +10,19 @@
 //   GET  /api/projects/:p/usage           tokens per task and per agent against the budget (`factory usage --json`, by
 //                                         task and by worker), and this machine's GitHub calls in the last hour
 //                                         (`factory usage --github --json`); kept for FACTORY_SNAPSHOT_CACHE_SECONDS
-//   GET  /api/projects/:p/activity        everything that happened, newest first: the message board's events (claims,
-//                                         moves, comments, closes) while it is the project's record, and the pull
-//                                         requests opened and gone from the snapshot. ?agent=, ?task=, ?kind= filter it
+//   GET  /api/projects/:p/activity        everything that happened, newest first, one line each with who, what, when and
+//                                         the page it opens (#583): the message board's events (claims, moves, comments,
+//                                         closes, agents up or down, the pull request feed) while it is the project's
+//                                         record, and what the snapshot read (pull requests opened and gone, their CI
+//                                         and reviews, failed runs). ?agent=, ?task=, ?epic=, ?kind= filter it
 //   GET  /api/projects/:p/home            what needs attention (#579), what needs the owner, the team, progress by epic
 //                                         and the last 10 events
 //   GET  /api/projects/:p/attention       what needs attention (factory_ui_attention.ts): anything stuck, each with its
 //                                         reason and one action, and the thresholds used
 //
-// The WebSocket gets {type: "health", project} when a doctor run ends and {type: "activity", project} on a board event;
-// the pages read their route again then (and on "state" and "views"), so they stay live.
+// The WebSocket gets {type: "health", project} when a doctor run ends and {type: "activity", project, items} with
+// Activity's new entries (a board event, or what a new snapshot read tells, #583); the pages read their route again
+// then (and on "state" and "views"), so they stay live.
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { branchTask } from "./factory_config.ts";
@@ -49,19 +52,24 @@ export interface ActivityItem {
   text: string;
   task: string | null;
   pr: number | null;
-  /** The page it opens (`view:tasks`, `view:pull-requests`, `view:ci`, `view:owner-queue`). */
+  /** The epic its task is in (#583), or null. */
+  epic: string | null;
+  /** The page it opens (#583): its task (`view:tasks` with `find`), its pull request's page (`pr:<n>`), its agent's
+   *  (`agent:<name>`), else `view:ci` or `view:owner-queue`. */
   link: string;
   /** The search a link opens with (`#7`). */
   find: string;
 }
 
-export const ACTIVITY_KINDS = ["claim", "move", "comment", "close", "handoff", "new", "note", "pr", "ci", "ask"] as const;
+export const ACTIVITY_KINDS = ["claim", "move", "comment", "close", "handoff", "new", "note", "agent", "pr", "ci", "review", "ask"] as const;
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number];
 
 /** What the board gives Activity for one project (factory_ui_board.ts BoardFeed.activity), or null when its tasks aren't
  *  read from the board. */
 export interface BoardEvents {
   activity(p: UiProject, most: number): Promise<ActivityItem[] | null>;
+  /** True while project `p`'s tasks come from the board. */
+  live?(p: UiProject): boolean;
 }
 
 export interface OpsDeps {
@@ -206,34 +214,70 @@ export const NOT_MEASURED = [
 
 // --- activity ----------------------------------------------------------------------------------------------------------
 
+interface SeenPull {
+  title: string;
+  agent: string | null;
+  task: string | null;
+  /** Its CI and review as last seen (#583); left out by an older server, so nothing is told for it the first time. */
+  ci?: string | null;
+  review?: string | null;
+}
+
 interface Seen {
-  open: Record<string, { title: string; agent: string | null; task: string | null }>;
+  open: Record<string, SeenPull>;
   gone: Array<{ number: number; title: string; agent: string | null; task: string | null; at: string }>;
+  /** The CI and review changes seen between two snapshots (#583), newest first. */
+  changes: ActivityItem[];
 }
 
 const SEEN_FILE = "ui-pulls-seen.json";
 
-/** The pull requests that left the snapshot's open list since the server first looked (kept in ui-pulls-seen.json):
- *  merged or closed, the snapshot can't tell which. */
-function pullsGone(p: UiProject, snap: Obj): Seen["gone"] {
+/** A pull request's CI as the snapshot gives it, when it is news: passed or failed. */
+const CI_WORDS: Record<string, string> = { green: "passed", red: "failed" };
+/** A review marker on a pull request's head, when it is news. */
+const REVIEW_WORDS: Record<string, string> = { "factory-approved": "was approved", "factory-mustfix": "got must-fixes" };
+
+/** What changed in the snapshot's open pull requests since the server first looked (kept in ui-pulls-seen.json): those
+ *  that left the list (merged or closed, the snapshot can't tell which), and each one whose CI passed or failed or whose
+ *  head was reviewed (#583). The first look only keeps what it saw. */
+function pullsSeen(p: UiProject, snap: Obj): Pick<Seen, "gone" | "changes"> {
   const path = join(stateDirOf(p), SEEN_FILE);
   const kept = obj(readJson(path));
-  if (!Array.isArray(snap.pulls)) return Array.isArray(kept.gone) ? (kept.gone as Seen["gone"]) : []; // not read: nothing is known gone
+  const keptGone = Array.isArray(kept.gone) ? (kept.gone as Seen["gone"]) : [];
+  const keptChanges = Array.isArray(kept.changes) ? (kept.changes as ActivityItem[]) : [];
+  if (!Array.isArray(snap.pulls)) return { gone: keptGone, changes: keptChanges }; // not read: nothing is known to have changed
   const pulls = list(snap.pulls).filter((x) => typeof x.number === "number");
-  const before: Seen = { open: obj(kept.open) as Seen["open"], gone: Array.isArray(kept.gone) ? (kept.gone as Seen["gone"]) : [] };
+  const before: Seen = { open: obj(kept.open) as Seen["open"], gone: keptGone, changes: keptChanges };
   const first = !existsSync(path);
   const now: Seen["open"] = {};
-  for (const x of pulls) now[String(x.number)] = { title: str(x.title), agent: str(x.agent) || null, task: branchTask(str(x.branch)) };
+  for (const x of pulls) {
+    now[String(x.number)] = { title: str(x.title), agent: str(x.agent) || null, task: branchTask(str(x.branch)), ci: str(x.ci) || null,
+      review: str(x.review) || null };
+  }
   const at = str(snap.generatedAt) || new Date().toISOString();
   const gone = first ? [] : Object.entries(before.open).filter(([n]) => !(n in now))
     .map(([n, x]) => ({ number: Number(n), title: str(x.title), agent: x.agent ?? null, task: x.task ?? null, at }));
-  const next: Seen = { open: now, gone: [...gone, ...before.gone].slice(0, PULLS_GONE_MAX) };
-  if (first || gone.length || JSON.stringify(Object.keys(now).sort()) !== JSON.stringify(Object.keys(before.open).sort())) writeAtomic(path, next);
-  return next.gone;
+  const changes: ActivityItem[] = [];
+  for (const [n, x] of first ? [] : Object.entries(now)) {
+    const was = before.open[n];
+    if (!was) continue;
+    const pr = Number(n);
+    const base = { at, agent: x.agent, task: x.task, pr, epic: null, link: `pr:${pr}`, find: "" };
+    const ci = x.ci ? CI_WORDS[x.ci] : undefined;
+    if ("ci" in was && was.ci !== x.ci && ci) changes.push({ ...base, id: `pr-${pr}-ci-${x.ci}-${at}`, kind: "ci", text: `CI ${ci} on PR #${pr}` });
+    const review = x.review ? REVIEW_WORDS[x.review] : undefined;
+    if ("review" in was && was.review !== x.review && review) {
+      changes.push({ ...base, id: `pr-${pr}-review-${x.review}-${at}`, kind: "review", text: `PR #${pr} ${review}` });
+    }
+  }
+  const next: Seen = { open: now, gone: [...gone, ...before.gone].slice(0, PULLS_GONE_MAX),
+    changes: [...changes, ...before.changes].slice(0, PULLS_GONE_MAX) };
+  if (first || gone.length || changes.length || JSON.stringify(now) !== JSON.stringify(before.open)) writeAtomic(path, next);
+  return { gone: next.gone, changes: next.changes };
 }
 
-/** What the snapshot knows as events: each open pull request (when it was opened), each one gone since, the failed CI
- *  runs and the owner's asks, at the times the snapshot gives. */
+/** What the snapshot knows as events: each open pull request (when it was opened), each one gone since, its CI and
+ *  review changes, the failed CI runs and the owner's asks, at the times the snapshot gives. No GitHub call. */
 function snapshotEvents(p: UiProject, snap: Obj, board: boolean): ActivityItem[] {
   const out: ActivityItem[] = [];
   const at = Date.parse(str(snap.generatedAt));
@@ -242,34 +286,55 @@ function snapshotEvents(p: UiProject, snap: Obj, board: boolean): ActivityItem[]
     const n = num(x.number);
     const task = branchTask(str(x.branch));
     out.push({ id: `pr-${n}-opened`, at: str(x.createdAt) || null, agent: str(x.agent) || null, kind: "pr", text: `opened PR #${n}: ${str(x.title)}`,
-      task, pr: n, link: "view:pull-requests", find: `#${n}` });
+      task, pr: n, epic: null, link: `pr:${n}`, find: "" });
   }
-  for (const g of pullsGone(p, snap)) {
+  const seen = pullsSeen(p, snap);
+  for (const g of seen.gone) {
     out.push({ id: `pr-${g.number}-gone-${g.at}`, at: g.at, agent: g.agent, kind: "pr", text: `PR #${g.number} is no longer open (merged or closed): ${g.title}`,
-      task: g.task, pr: g.number, link: "view:pull-requests", find: `#${g.number}` });
+      task: g.task, pr: g.number, epic: null, link: `pr:${g.number}`, find: "" });
   }
+  out.push(...seen.changes);
   for (const r of list(obj(snap.ci).runs)) {
     if (!["failure", "timed_out", "startup_failure"].includes(str(r.state))) continue;
     const pr = /^#(\d+)$/.exec(str(r.ref));
     out.push({ id: `ci-${str(r.id) || str(r.ref)}`, at: before(num(r.minutesAgo)), agent: null, kind: "ci",
       text: `${str(r.name) || "CI"} failed on ${pr ? `PR #${pr[1]}` : str(r.branch) || str(r.ref)}`, task: branchTask(str(r.branch)),
-      pr: pr ? Number(pr[1]) : null, link: "view:ci", find: str(r.ref) });
+      pr: pr ? Number(pr[1]) : null, epic: null, link: pr ? `pr:${pr[1]}` : "view:ci", find: pr ? "" : str(r.ref) });
   }
   if (!board) {
     for (const a of list(snap.needsYou).filter((x) => x.kind === "owner-ask")) {
       out.push({ id: `ask-${str(a.id)}`, at: a.ageMinutes === null || a.ageMinutes === undefined ? null : before(num(a.ageMinutes)), agent: null, kind: "ask",
-        text: `asked you: ${str(a.text).split("\n")[0]?.slice(0, 200) ?? ""}`, task: null, pr: null, link: "view:owner-queue", find: "" });
+        text: `asked you: ${str(a.text).split("\n")[0]?.slice(0, 200) ?? ""}`, task: null, pr: null, epic: null, link: "view:owner-queue", find: "" });
     }
   }
   return out;
 }
 
+/** What a pull request event from the snapshot is (opened, gone, a CI or review change), to leave out what the board's
+ *  own pull request feed already told (#583); "" for anything else. */
+function prWhat(x: ActivityItem): string {
+  if (x.pr === null) return "";
+  if (x.id.startsWith("board-")) return x.kind === "ci" ? "ci" : /^opened /.test(x.text) ? "opened" : /^(merged|closed) /.test(x.text) ? "gone" : "";
+  return x.id.endsWith("-opened") ? "opened" : x.id.includes("-gone-") ? "gone" : x.id.includes("-ci-") ? "ci" : "";
+}
+
+/** `<pr>:<what>` for a pull request event (prWhat), "" for any other. */
+function prKey(x: ActivityItem): string {
+  const what = prWhat(x);
+  return what ? `${x.pr}:${what}` : "";
+}
+
 const SNAPSHOT_ONLY: Problem = { code: "ui_activity_snapshot",
-  message: "The tasks are kept as GitHub issues, so claims, moves and comments aren't recorded here. This shows what the last snapshot knows: pull requests, failed CI runs and the asks waiting for you.",
-  fix: "Move the tasks to the message board to see every claim, move and comment as it happens." };
+  message: "The tasks are kept as GitHub issues, so claims, moves, comments and agents starting or going down aren't recorded here. This shows what the last snapshot knows: pull requests with their CI and reviews, failed CI runs and the asks waiting for you.",
+  fix: "Move the tasks to the message board to see every claim, move, comment and agent as it happens." };
+
+/** The board's order for its own events (`board-<seq>`): one transaction gives several the same time. */
+function seqOf(x: ActivityItem): number {
+  return x.id.startsWith("board-") ? Number(x.id.slice(6)) || 0 : 0;
+}
 
 function newestFirst(a: ActivityItem, b: ActivityItem): number {
-  return (b.at ?? "").localeCompare(a.at ?? "");
+  return (b.at ?? "").localeCompare(a.at ?? "") || seqOf(b) - seqOf(a);
 }
 
 // --- the pages' API ----------------------------------------------------------------------------------------------------
@@ -303,11 +368,14 @@ export class Ops {
     if (page === "activity") {
       const a = await this.activity(p);
       const want = (k: string): string => (url.searchParams.get(k) ?? "").trim().replace(/^#/, "");
-      const [agent, task, kind] = [want("agent"), want("task"), want("kind")];
+      const [agent, task, epic, kind] = [want("agent"), want("task"), want("epic"), want("kind")];
       const items = a.items.filter((x) => (!agent || x.agent === agent) && (!task || x.task === task || (x.pr !== null && String(x.pr) === task))
-        && (!kind || x.kind === kind));
+        && (!epic || x.epic === epic) && (!kind || x.kind === kind));
+      const titles = new Map(this.d.views(p).epics.epics.map((e) => [e.id, e.title]));
+      const epics = [...new Set(a.items.map((x) => x.epic).filter((x): x is string => !!x))].sort((x, y) => Number(x) - Number(y) || x.localeCompare(y))
+        .map((id) => ({ id, title: titles.get(id) ?? "" }));
       return { status: 200, body: { project: p.id, from: a.from, items, agents: [...new Set(a.items.map((x) => x.agent).filter((x): x is string => !!x))].sort(),
-        kinds: ACTIVITY_KINDS.filter((k) => a.items.some((x) => x.kind === k)), filter: { agent, task, kind }, problems: a.problems } };
+        kinds: ACTIVITY_KINDS.filter((k) => a.items.some((x) => x.kind === k)), epics, filter: { agent, task, kind, ...(epic ? { epic } : {}) }, problems: a.problems } };
     }
     return { status: 200, body: { project: p.id, ...(await this.home(p)) } };
   }
@@ -427,13 +495,69 @@ export class Ops {
   private async activity(p: UiProject): Promise<{ from: "board" | "snapshot"; items: ActivityItem[]; problems: Problem[] }> {
     const snap = snapshotOf(p);
     const fromBoard = await this.d.board.activity(p, ACTIVITY_MAX * 2).catch(() => null);
-    const items = [...(fromBoard ?? []), ...snapshotEvents(p, snap, fromBoard !== null)].sort(newestFirst).slice(0, ACTIVITY_MAX);
+    this.noteTold(p, fromBoard ?? []);
+    const told = this.toldBy.get(p.id) ?? new Set<string>();
+    const fromSnapshot = snapshotEvents(p, snap, fromBoard !== null).filter((x) => !told.has(prKey(x)));
+    const items = this.placed(p, [...(fromBoard ?? []), ...fromSnapshot], snap).sort(newestFirst).slice(0, ACTIVITY_MAX);
     const problems: Problem[] = [];
     if (fromBoard === null) problems.push(SNAPSHOT_ONLY);
     if (!Object.keys(snap).length) {
       problems.push({ code: "ui_no_snapshot", message: `${p.name} has no snapshot yet; one is being read.`, fix: "Wait a minute; the page fills in by itself." });
     }
     return { from: fromBoard === null ? "snapshot" : "board", items, problems };
+  }
+
+  /** `items` with what the server already holds filled in (#583): a pull request's agent and task from the snapshot's
+   *  pull requests (open or gone), and each one's epic from the views. No GitHub call. */
+  private placed(p: UiProject, items: ActivityItem[], snap: Obj = snapshotOf(p)): ActivityItem[] {
+    const views = this.d.views(p);
+    const epicOf = new Map<string, string>();
+    for (const e of views.epics.epics) for (const t of e.tasks) epicOf.set(t.id, e.id);
+    for (const t of views.tasks.tasks) if (t.epic) epicOf.set(t.id, t.epic);
+    const pulls = new Map<number, { agent: string | null; task: string | null }>();
+    const kept = obj(readJson(join(stateDirOf(p), SEEN_FILE)));
+    for (const [n, x] of Object.entries(obj(kept.open))) pulls.set(Number(n), { agent: str(obj(x).agent) || null, task: str(obj(x).task) || null });
+    for (const g of list(kept.gone)) pulls.set(num(g.number), { agent: str(g.agent) || null, task: str(g.task) || null });
+    for (const x of list(snap.pulls)) pulls.set(num(x.number), { agent: str(x.agent) || null, task: branchTask(str(x.branch)) });
+    return items.map((x) => {
+      const pr = x.pr === null ? undefined : pulls.get(x.pr);
+      const task = x.task ?? pr?.task ?? null;
+      const agent = x.agent ?? pr?.agent ?? null;
+      return { ...x, agent, task, epic: task ? epicOf.get(task) ?? null : null };
+    });
+  }
+
+  /** The board's new events for project `p`, as the WebSocket pushes them (#583): the same entries the page reads. */
+  pushed(p: UiProject, items: ActivityItem[]): ActivityItem[] {
+    this.noteTold(p, items);
+    return this.placed(p, items).sort(newestFirst);
+  }
+
+  private snapshotSent = new Map<string, Set<string>>();
+  /** Per project, the pull request events the board's own feed told (`<pr>:opened|gone|ci`, prKey), so the snapshot's
+   *  copy of one is neither listed nor pushed again (#583). */
+  private toldBy = new Map<string, Set<string>>();
+
+  private noteTold(p: UiProject, fromBoard: ActivityItem[]): void {
+    const keys = fromBoard.filter((x) => x.id.startsWith("board-")).map(prKey).filter((k) => k !== "");
+    if (!keys.length) return;
+    let told = this.toldBy.get(p.id);
+    if (!told) this.toldBy.set(p.id, (told = new Set()));
+    for (const k of keys) told.add(k);
+  }
+
+  /** The snapshot's events for project `p` the WebSocket hasn't pushed yet (#583); the first call only keeps what there
+   *  is, so an open page gets what is new, not everything again. Reads the snapshot's cache, no GitHub call. */
+  freshFromSnapshot(p: UiProject): ActivityItem[] {
+    if (p.problem) return [];
+    const snap = snapshotOf(p);
+    if (!Object.keys(snap).length) return [];
+    const all = snapshotEvents(p, snap, this.d.board.live?.(p) ?? false);
+    const sent = this.snapshotSent.get(p.id);
+    this.snapshotSent.set(p.id, new Set([...(sent ?? []), ...all.map((x) => x.id)]));
+    if (!sent) return [];
+    const told = this.toldBy.get(p.id) ?? new Set<string>();
+    return this.placed(p, all.filter((x) => !sent.has(x.id) && !told.has(prKey(x))), snap).sort(newestFirst);
   }
 
   // --- needs attention (#579) ----------------------------------------------------------------------------------------
@@ -448,7 +572,7 @@ export class Ops {
       : list(snap.needsYou).filter((x) => x.kind === "owner-ask" && str(x.state) === "product").length;
     const readable = live !== null && !live.problems.some((x) => x.code === "ui_agents_unreadable");
     return attentionOf({ config: p.config, views: this.d.views(p), agents: readable ? live.agents : null,
-      gone: pullsGone(p, snap).map((g) => ({ number: g.number, title: g.title, task: g.task, at: g.at })), productAsks });
+      gone: pullsSeen(p, snap).gone.map((g) => ({ number: g.number, title: g.title, task: g.task, at: g.at })), productAsks });
   }
 
   // --- home --------------------------------------------------------------------------------------------------------

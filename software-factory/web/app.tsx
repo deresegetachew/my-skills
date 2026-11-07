@@ -23,7 +23,7 @@ import type { DocSection } from "./docs_model.ts";
 import { addMachineAsk, agentArgs, plainProblem } from "./machines_model.ts";
 import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
 import { ARTIFACTS_CSS, ArtifactsPage } from "./artifacts.tsx";
-import { ActivityPage, HealthPage, HomePage, OPS_CSS, type OpsProps, UsagePage } from "./ops.tsx";
+import { ActivityPage, dispatchActivity, HealthPage, HomePage, OPS_CSS, type OpsProps, UsagePage } from "./ops.tsx";
 import { MenuIcon } from "./page_head.tsx";
 import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx";
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
@@ -614,6 +614,7 @@ function App() {
           setAttentionBy((before) => ({ ...before, [m.project as string]: Array.isArray(items) ? items : [] }));
         } else if (m.type === "add-project") setAddRun((m as unknown as { run: AddRun }).run);
         else if (m.type === "projects") setListed((n) => n + 1);
+        else if (m.type === "activity") dispatchActivity(m as unknown as { project?: string; items?: unknown }); // the entries themselves (#583)
         else dispatchLive(m);
       };
       ws.onclose = () => {
