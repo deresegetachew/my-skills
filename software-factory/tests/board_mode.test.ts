@@ -165,6 +165,26 @@ test("factory doctor: the board answers, or it says so with the fix", () => {
   expect(lines(doctor(old, env), "fix").find((l) => l.includes("messaging.transport"))).toContain("factory settings set messaging.transport board");
 });
 
+test("a board that refuses this machine's login: next and doctor say to ask the hub for a new code, not to start it", () => {
+  const p = boardProject();
+  const refusedUrl = new URL(world.url);
+  refusedUrl.password = "not-the-password"; // as a removed or expired login is refused
+  const env = { ...p.env, MB_URL: refusedUrl.toString() };
+  const r = hook(p.d, env, "next_task", "--note");
+  expect(r.code).not.toBe(0);
+  expect(r.out).toContain("This machine's board login was refused (removed or expired).");
+  expect(r.out).toContain("factory machine leave");
+  expect(r.out).not.toContain("factory board up");
+  expect(r.out).not.toContain(new URL(world.url).password);
+  const ok = doctorProject({}, { tasks: { source: "board" }, agents: ["haile"] });
+  const d = doctor(ok, { ...machine(), MB_URL: refusedUrl.toString() });
+  const fix = lines(d, "fix").find((l) => l.includes("message board"));
+  expect(fix, d.stdout).toBeDefined();
+  expect(fix).toContain("This machine's board login was refused (removed or expired).");
+  expect(fix).toContain("factory machine add <name> --agent ...");
+  expect(fix).not.toContain("factory board up");
+});
+
 test("factory next in board mode reads a pull request's comments only when it changed: one GitHub call when nothing did (#515)", () => {
   const p = boardProject();
   const db = p.env.FAKE_GH_DB as string;

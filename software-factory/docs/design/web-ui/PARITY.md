@@ -51,6 +51,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `machine` | planned | Machines (Machines.dc.html); agent names in Choose team (ChooseTeam.dc.html) | #455 |
 | `machine add` | built | Add machine (AddMachine.dc.html): the join code and the one command to run there | #445 |
 | `machine join` | terminal only | Runs on the new machine, before it has a UI; Join hub (JoinHub.dc.html) says what it does | #445 |
+| `machine leave` | terminal only | Runs on a machine that joined, to stop using the board there; machine administration, like join | #514 |
 | `machine ls` | built | Machines (Machines.dc.html): each machine added and whether it joined, its code is still waiting, or its code expired (its board login removed) | #445 |
 | `machine remove` | planned | Machines (Machines.dc.html), after a confirm | #455 |
 | `remote` | planned | Add machine (AddMachine.dc.html) | #445 |

@@ -122,8 +122,11 @@ Look
                          board's rights) and print one join code (short-lived, works once; it holds the board's URL
                          for that login, at its Tailscale address)
   machine join <code> [--no-tailscale] [--no-doctor]
-                         on the new machine: check Tailscale, write the board's URL (mode 600), check that it
-                         reaches the board, run factory doctor
+                         on the new machine: check Tailscale, redeem the code on the board (once: its login gets a
+                         fresh role and password only this machine has), write the board's URL (mode 600),
+                         run factory doctor
+  machine leave          on a machine that joined: stop using the board here (removes its URL file and the agent
+                         names the join added); the hub still drops its login with machine remove
   machine ls [--json]    the machines added and whether they joined, their code is still waiting, or it expired
   machine remove <name>  forget a machine and drop its board login
   follow [<agent>] [--read|--log] [--on R] [--all]

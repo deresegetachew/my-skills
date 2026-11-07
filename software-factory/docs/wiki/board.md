@@ -59,10 +59,36 @@ it by hand or as a job on the hub.
 
 ```sh
 factory machine add dev-pc --agent haile --agent tewodros   # on the hub: prints a join code (works once, 15 min)
-factory machine join <code>                                 # on dev-pc: writes the URL, checks it, runs factory doctor
+factory machine join <code>                                 # on dev-pc: redeems the code, writes the URL, runs factory doctor
 ```
 
-`factory machine ls` shows who joined; `factory machine remove <name>` drops a machine's login.
+The board enforces the code (#514):
+
+- **What a leaked code can do.** Until it expires (15 minutes by default) or is redeemed, whoever holds it can connect to
+  the board's database and call the redeem, nothing else: it can't read or write the board, take its locks or reach
+  another database. Postgres itself refuses the code's password once it expires (`VALID UNTIL`).
+- **It joins once.** `machine join` redeems it: the machine gets a fresh role for its login (no expiry, the board's
+  rights) with a password only it has, and the code's role can't log in any more. A second machine with a copy is
+  refused (`code-refused`), even one that started logging in just before. After the redeem the join ends every other
+  session of the code's role and connects as the fresh role; if either fails, the code may have been copied: the join
+  keeps nothing and says so (`code-compromised`).
+- **What the owner does.** If a code leaked, or a join says `code-compromised` or `code-in-use` (someone else holds
+  the code's connections), or is refused although the code is fresh (a holder can change the code's password), run `factory machine remove <name>` on
+  the hub and make a new code. Remove takes every role of that login away and ends their sessions, whatever those
+  sessions hold, within about 20 s.
+- **Cleaning up.** A session opened with a code before it expired may stay open until the hub drops the code:
+  `factory board sweep`, `machine ls` and `machine add` drop each code that expired unredeemed and end its sessions,
+  and drop spent code roles with whatever they made. One that can't be dropped is a warning; the others go on.
+
+`factory machine ls` shows who joined (a machine joins when its code is redeemed, not when something connects with it);
+`factory machine remove <name>` drops a machine's login.
+
+When the hub removes a machine's login, or it expired, that machine's `factory board status`, `factory next` and
+`factory doctor` say: "This machine's board login was refused (removed or expired). Ask the hub for a new code: on the
+hub run `factory machine add <name> --agent ...`, then `factory machine join <code>` here — or `factory machine
+leave` to stop using the board here." `factory machine leave` removes the board's URL file and the agent names the
+join added, so the board is no longer on by default there. "Start it: `factory board up`" is said only when the board
+doesn't answer at all.
 
 **Bring the issues in**, from the project's folder on any machine that reaches the board:
 

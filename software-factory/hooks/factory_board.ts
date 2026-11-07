@@ -408,7 +408,7 @@ function importVerb(cfg: Config, args: string[]): number {
 export const NO_BOARD_EXIT = 3;
 
 function boardCouldNotTake(e: { code: string }): boolean {
-  return ["board_missing", "no-answer", "board-unreachable", "failed"].includes(e.code) && !(e instanceof GithubError);
+  return ["board_missing", "no-answer", "login-refused", "board-unreachable", "failed"].includes(e.code) && !(e instanceof GithubError);
 }
 
 // --- the command ---------------------------------------------------------------------------------------------------------

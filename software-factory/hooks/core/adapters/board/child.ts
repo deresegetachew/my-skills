@@ -60,6 +60,8 @@ export class BoardChild {
     }
     if (answer.ok) return answer.results;
     if (answer.code === "no-answer") throw unreachable(answer.message);
+    // the board answers but refuses this machine's login (removed or expired, #514): as out of reach, with the board's advice
+    if (answer.code === "login-refused") throw new CoreError("board-unreachable", answer.message, answer.fix);
     throw new CoreError(answer.code, answer.message, answer.fix);
   }
 
