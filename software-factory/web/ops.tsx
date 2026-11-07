@@ -12,6 +12,8 @@ import { ago } from "./model.ts";
 import { type ActivityItem, activityDot, activitySub, attention, type HealthData, healthLine, type HomeData, homeLine, KIND_LABEL, mergePushed,
   passed, percentOf, type Problem, teamRow, tokensText, type UsageData, usageBar, usageTiles } from "./ops_model.ts";
 import { PageHead } from "./page_head.tsx";
+import { LinkCard } from "./phone.tsx";
+import { inInbox, needsCard } from "./phone_model.ts";
 import { Chips, ListRow, StatusDot, Tabs } from "./parts.tsx";
 import type { Post, Say } from "./views.tsx";
 
@@ -94,6 +96,8 @@ export function HomePage(p: OpsProps) {
   const stuck = useContext(AttentionContext).agents;
   const attention = p.attention ?? data?.attention ?? [];
   const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+  const card = data ? needsCard(data.needs) : null;
+  const rest = data ? data.needs.filter((n) => !inInbox(n.kind)) : [];
   return (
     <>
       <PageHead title="Home" purpose={data ? `${today}. ${homeLine(data)}` : "What the team is doing now, and what needs you."} onMenu={p.onMenu} />
@@ -102,22 +106,16 @@ export function HomePage(p: OpsProps) {
         {!data && !problem && <p className="empty">Reading what the team is doing…</p>}
         {data && (
           <>
+            {card && <div className="phone-only"><LinkCard title={card.title} line={card.line} onOpen={() => p.open("view:owner-queue")} /></div>}
             {attention.length > 0 && (
               <Section title="Needs attention">
                 <p className="ops-line">{attentionLine(attention)}</p>
                 <AttentionList items={attention} project={p.project} post={p.post} say={p.say} open={p.open} startAgent={p.startAgent} />
               </Section>
             )}
-            <Section title="Needs you">
-              {!data.needs.length && <p className="empty">Nothing needs you now.</p>}
-              <ul className="lrows" aria-label="Needs you">
-                {data.needs.map((n, i) => (
-                  <ListRow key={`${n.kind}/${i}`} lead={<StatusDot state={n.kind === "health" || n.kind === "ci" ? "red" : n.kind === "blocked" ? "waiting" : "red"} />}
-                    title={n.title} sub={n.sub}
-                    action={<button className={`btn small${i === 0 ? " primary" : ""}`} onClick={() => p.open(n.link, n.find)}>{n.action}</button>} />
-                ))}
-              </ul>
-            </Section>
+            {/* a phone (#458): what the Inbox answers is one card that opens it; the rest stays a list */}
+            <div className={card ? "desk-only" : undefined}><Needs needs={data.needs} open={p.open} /></div>
+            {card && rest.length > 0 && <div className="phone-only"><Needs needs={rest} open={p.open} /></div>}
             <Section title="The team" link={<button className="btn plain small" onClick={() => p.open("view:tasks")}>Open the board ›</button>}>
               {!data.team.length && <p className="empty">No agent has reported yet.</p>}
               <ul className="lrows" aria-label="The team">
@@ -152,6 +150,21 @@ export function HomePage(p: OpsProps) {
         )}
       </div>
     </>
+  );
+}
+
+function Needs({ needs, open }: { needs: HomeData["needs"]; open: OpsProps["open"] }) {
+  return (
+    <Section title="Needs you">
+      {!needs.length && <p className="empty">Nothing needs you now.</p>}
+      <ul className="lrows" aria-label="Needs you">
+        {needs.map((n, i) => (
+          <ListRow key={`${n.kind}/${i}`} lead={<StatusDot state={n.kind === "blocked" ? "waiting" : "red"} />}
+            title={n.title} sub={n.sub}
+            action={<button className={`btn small${i === 0 ? " primary" : ""}`} onClick={() => open(n.link, n.find)}>{n.action}</button>} />
+        ))}
+      </ul>
+    </Section>
   );
 }
 

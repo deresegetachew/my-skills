@@ -4,7 +4,7 @@ import { expect, test } from "bun:test";
 import type { QueueView, AskView } from "../web/chat_model.ts";
 import type { NeedRow } from "../web/ops_model.ts";
 import type { PullRow } from "../web/views_model.ts";
-import { inboxCount, inInbox, needsCard, ownerMerges, phoneTabs } from "../web/phone_model.ts";
+import { inboxCount, inInbox, type MergeCard, needsCard, ownerMerges, phoneTabs } from "../web/phone_model.ts";
 
 function pull(n: number, o: Partial<PullRow> = {}): PullRow {
   return {
@@ -58,15 +58,15 @@ test("only the Inbox carries a count badge, and not when it is zero or missing",
 test("merge cards: only pulls the owner merges, in the given order, each opening its PR's Merge confirm", () => {
   const cards = ownerMerges([pull(5), pull(6, { next: { action: "dev-manager-reviews", text: "" } }), pull(4)]);
   expect(cards.map((c) => c.number)).toEqual([5, 4]);
-  expect(cards[0].title).toBe("Merge PR #5");
-  expect(cards[0].channel).toBe("pr:5");
-  expect(cards[0].find).toBe("merge");
+  expect(cards[0]?.title).toBe("Merge PR #5");
+  expect(cards[0]?.channel).toBe("pr:5");
+  expect(cards[0]?.find).toBe("merge");
   expect(ownerMerges([])).toEqual([]);
   expect(ownerMerges([pull(6, { next: { action: "wait", text: "" } })])).toEqual([]);
 });
 
 test("merge card sub: checks and review in plain words", () => {
-  const sub = (o: Partial<PullRow>) => ownerMerges([pull(1, o)])[0].sub;
+  const sub = (o: Partial<PullRow>) => ownerMerges([pull(1, o)])[0]?.sub;
   expect(sub({})).toBe("Checks passed · approved");
   expect(sub({ checks: { state: "red", failing: ["t"] } })).toBe("Checks failing · approved");
   expect(sub({ checks: { state: "running", failing: [] } })).toBe("Checks running · approved");
@@ -77,7 +77,7 @@ test("merge card sub: checks and review in plain words", () => {
 
 test("merge card why: protected, not protected, and not known", () => {
   const tail = "It merges only while its head is still the one you saw.";
-  const why = (p: boolean | null) => ownerMerges([pull(7, { title: "Add x", protected: p })])[0].why;
+  const why = (p: boolean | null) => ownerMerges([pull(7, { title: "Add x", protected: p })])[0]?.why;
   expect(why(true)).toBe(`Add x. It changes protected files, so only you can merge it. ${tail}`);
   expect(why(false)).toBe(`Add x. Only you can merge it. ${tail}`);
   expect(why(null)).toBe(`Add x. Only you can merge it. ${tail}`);
@@ -85,7 +85,7 @@ test("merge card why: protected, not protected, and not known", () => {
 
 test("no command names in anything a merge card says", () => {
   for (const p of [true, false, null]) {
-    const c = ownerMerges([pull(7, { protected: p })])[0];
+    const c = ownerMerges([pull(7, { protected: p })])[0] as MergeCard;
     for (const s of [c.title, c.sub, c.why]) {
       expect(s).not.toContain("factory ");
       expect(s).not.toContain("gh ");
