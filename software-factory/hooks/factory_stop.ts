@@ -5,8 +5,12 @@
 // turn ends, this hook sees the mark and ends the Claude process a few seconds later (so the last message stays on
 // screen). The loop then counts down and starts the next task in a fresh session. Without the mark, or outside an
 // interactive loop, it does nothing.
+//
+// In a dev manager's sub-manager (#585) it only says that a turn ended: the orchestrator gives the session
+// FACTORY_SUB_TURN, a file this hook touches, and reads the item again then; once the item is resolved the orchestrator
+// ends the session itself (it started it, so it knows its pid).
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { doneFile } from "./factory_claims.ts";
 import { claudePid } from "./factory_session.ts";
 import { runMain } from "./factory_lib.ts";
@@ -16,6 +20,17 @@ function main(): number {
     JSON.parse(readFileSync(0, "utf8"));
   } catch {
     // no event: nothing in it is needed
+  }
+  const turn = process.env.FACTORY_SUB_TURN;
+  if (turn) {
+    if (turn.endsWith(".turn")) {
+      try {
+        writeFileSync(turn, new Date().toISOString() + "\n");
+      } catch {
+        // the orchestrator is gone: its time limit, or the owner, ends the session
+      }
+    }
+    return 0;
   }
   const agent = process.env.FACTORY_AGENT;
   if (process.env.FACTORY_INTERACTIVE !== "1" || !agent) return 0;

@@ -60,6 +60,22 @@ test("stopping an agent that runs elsewhere, or not at all, keeps the button off
   expect(idle.doesNot).not.toContain("#");
 });
 
+test("stopping a sub-manager (#585): its parent goes on; one whose session can't be reached keeps the button off and says why", () => {
+  const sub = { name: "fasil-board-m12", here: true, state: "stuck", machineName: "sandbox", task: null,
+    sub: { parent: "fasil", item: "board-m12", stoppable: true } };
+  const s = stopAgentAsk(sub);
+  expect(s.checks.map((c) => [c.title, c.met])).toEqual([["fasil-board-m12 is running", true],
+    ["fasil-board-m12 runs on this machine", true], ["Its session can be reached", true]]);
+  expect(s.happens).toContain("fasil's sub-manager on board-m12 ends");
+  expect(s.happens).toContain("fasil goes on with its pass");
+  expect(confirmState(s, "").ready).toBe(true);
+  const lost = stopAgentAsk({ ...sub, sub: { ...sub.sub, stoppable: false } });
+  const c = lost.checks.find((x) => !x.met);
+  expect(c?.title).toBe("Its session can be reached");
+  expect(c?.sub).toContain("Stop fasil instead");
+  expect(confirmState(lost, "").ready).toBe(false);
+});
+
 test("starting an agent: it must not be running already; it starts on this machine", () => {
   const s = startAgentAsk({ ...agent, state: "down" });
   expect(s.title).toBe("Start haile?");

@@ -241,7 +241,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("manager.ownerWaitMinutes", "int", "agents", "A pull request labelled for the product owner or the owner that has waited this long is reported (check 5)."),
   S("manager.agentIdleMinutes", "int", "agents", "A coding agent idle this long while tasks are ready is reported to the owner (check 6)."),
   S("manager.ciQueuedMinutes", "int", "agents", "A CI run queued this long is reported (check 7)."),
-  S("manager.subManagerMinutes", "int", "agents", "A sub-manager session is stopped after this many minutes."),
+  S("manager.subManagerMinutes", "int", "agents", "A sub-manager session, the one you can type into under `loop -i` too, is stopped after this many minutes; its item is logged as timed out and the pass goes on to the next. After that `factory agents ls` shows a sub-manager still running as stuck. 0 turns the limit off."),
   S("trustedReviewers", "list", "gate", "GitHub logins whose approvals count. Empty: " + "any.", { default: [] }),
   S("holdLabel", "str", "gate", "The label the dev manager puts on a PR it is reviewing."),
   S("agents", "list", "agents", "The agents' names, in order (lowercase letters, digits, dashes)."),

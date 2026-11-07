@@ -180,6 +180,17 @@
     ]
   },
   "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "env -u BUN_OPTIONS bun --no-env-file --config=/dev/null \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/factory_stop.ts",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",

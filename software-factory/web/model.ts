@@ -60,7 +60,7 @@ export function agentState(agent: { state: string; detail: string } | undefined,
   }
   if (agent.state === "working") return { text, tone: "good" };
   if (agent.state === "waiting") return { text, tone: "warn" };
-  if (agent.state === "down") return { text, tone: "bad" };
+  if (agent.state === "down" || agent.state === "stuck") return { text, tone: "bad" };
   return { text, tone: "quiet" };
 }
 
@@ -114,4 +114,12 @@ export const ROLE_TITLE: Record<string, string> = {
   "coding-agent": "Coding agent",
   "dev-manager": "Dev manager",
   "product-owner": "Product owner",
+  "sub-manager": "Sub-manager",
 };
+
+/** The Role line of an agent's page: "Sub-manager of fasil · on board-m12" for a dev manager's sub-manager (#585), else
+ * the role's title. */
+export function roleLine(agent: { parent?: string | null; item?: string | null } | undefined, role: string | undefined): string {
+  if (agent?.parent) return `Sub-manager of ${agent.parent}${agent.item ? ` · on ${agent.item}` : ""}`;
+  return ROLE_TITLE[role ?? ""] ?? role ?? "";
+}
