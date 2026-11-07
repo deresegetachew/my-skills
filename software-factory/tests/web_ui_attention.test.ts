@@ -46,7 +46,7 @@ function cache(p: Project, s: Snap = {}): void {
 }
 
 /** Everyone running and well: menelik works on #7, the others idle. */
-const WELL: Row[] = [hbRow("menelik", { state: "working", detail: "working on #7", task: "7", since: ago(5) }), hbRow("taytu"),
+const WELL: Row[] = [hbRow("menelik", { state: "working", detail: "working on #7", task: "7", since: ago(5) }), hbRow("taytu", { since: ago(2) }),
   hbRow("fasil", { kind: "dev-manager" }), hbRow("mentewab", { kind: "product-owner" })];
 
 function team(over: Record<string, Row> = {}): Row[] {
@@ -96,7 +96,7 @@ test("nothing is stuck: the list is empty, and the thresholds in use are their d
   const r = await api(ui, "/api/projects/work/attention");
   expect(r.status).toBe(200);
   expect(r.json.items).toEqual([]);
-  expect(r.json.limits).toEqual({ taskQuietMinutes: 60, prWaitHours: 24, maxMinutes: { "coding-agent": 120, "dev-manager": 30, "product-owner": 30 } });
+  expect(r.json.limits).toEqual({ taskQuietMinutes: 60, prWaitHours: 24, maxMinutes: { "coding-agent": 120, "dev-manager": 30, "product-owner": 30 }, idleWithReadyMinutes: 10 });
 }, T);
 
 test("an agent down while it holds a task: Start it, and its task shows held by one that is down (Release); both clear when it runs", async () => {
@@ -136,6 +136,51 @@ test("a role down while its queue has items: no dev manager with a PR to review,
     reason: "1 ask waits for it, and no product owner runs to take it.", action: { kind: "start", label: "Start mentewab", agent: "mentewab" } });
   heartbeat(p, WELL);
   expect(await until(ui, (l) => l.length === 0)).toEqual([]);
+}, T);
+
+test("a coding agent idle longer than attention.idleWithReadyMinutes while a task it may take is ready (#591): Start work; it clears once claimed", async () => {
+  const p = workProject();
+  const ui = await started(p);
+  heartbeat(p, team({ taytu: { since: ago(40), prompt: "empty", detail: "idle at its prompt" } }));
+  const x = await until(ui, has("idle-ready:taytu"));
+  expect(one(x, "idle-ready:taytu")).toMatchObject({ kind: "idle-ready", agent: "taytu", task: "10", title: "taytu is idle while #10 is ready",
+    reason: "taytu has been idle for 40 minutes while #10 Export to CSV is ready.",
+    action: { kind: "say", label: "Start work", agent: "taytu", text: "/next-task" } });
+  expect(x.filter((i) => i.kind === "idle-ready").map((i) => i.agent)).toEqual(["taytu"]); // menelik works, the roles aren't builders
+  // the task is claimed: it clears
+  cache(p, { tasks: TASKS.map((t) => (t.id === "10" ? { ...t, state: "in-progress", holders: ["menelik"] } : t)) });
+  expect(await until(ui, hasNot("idle-ready:taytu"))).toEqual([]);
+}, T);
+
+test("idle with a message typed but not sent (#591): the reason says so; a task handed to another, one that waits, or a short idle isn't flagged", async () => {
+  const p = workProject();
+  const ui = await started(p);
+  heartbeat(p, team({ taytu: { since: ago(120), prompt: "unsent", detail: "idle: a message is typed in its session but not sent" } }));
+  const x = await until(ui, has("idle-ready:taytu"));
+  expect(one(x, "idle-ready:taytu")).toMatchObject({ title: "taytu has a message typed but not sent",
+    reason: "taytu has been idle for 120 minutes while #10 Export to CSV is ready. A message is typed in its session but not sent.",
+    action: { kind: "say", label: "Start work", agent: "taytu", text: "/next-task" } });
+  // #10 handed to menelik, #11 waiting for #7: nothing taytu may take
+  cache(p, { tasks: [...TASKS.map((t) => (t.id === "10" ? { ...t, assignee: "menelik" } : t)),
+    { id: "11", title: "Import", state: "ready", holders: [], group: "", todos: [], dependsOn: ["7"] }] });
+  expect(await until(ui, hasNot("idle-ready:taytu"))).toEqual([]);
+  // a ready task, but taytu idle for a few minutes only; a higher limit clears a long one too
+  cache(p);
+  heartbeat(p, team({ taytu: { since: ago(5) } }));
+  await Bun.sleep(1500);
+  expect((await items(ui)).map((i) => i.id)).toEqual([]);
+  write(join(p.d, ".claude", "factory.json"), JSON.stringify({ ...CONFIG, attention: { idleWithReadyMinutes: 180 } }));
+  heartbeat(p, team({ taytu: { since: ago(120) } }));
+  await Bun.sleep(1500);
+  expect((await items(ui)).map((i) => i.id)).toEqual([]);
+}, T);
+
+test("Start work sends /next-task to the agent's session through the chat (factory say)", async () => {
+  const p = workProject();
+  const ui = await started(p);
+  const r = await api(ui, "/api/projects/work/agents/taytu/chat", { method: "POST", body: { text: "/next-task" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(readFileSync(p.factoryLog, "utf8")).toContain("say taytu /next-task");
 }, T);
 
 test("a role down with an empty queue isn't flagged", async () => {
@@ -276,5 +321,5 @@ test("Close runs after a confirm: a task's and an epic's issue are closed as com
 test("the thresholds are settings, on the settings page", () => {
   const page = readmeAndWiki("settings.md");
   for (const key of ["attention.taskQuietMinutes", "attention.prWaitHours", "attention.coding-agent.maxMinutes", "attention.dev-manager.maxMinutes",
-    "attention.product-owner.maxMinutes"]) expect(page).toContain(`| \`${key}\` | int |`);
+    "attention.product-owner.maxMinutes", "attention.idleWithReadyMinutes"]) expect(page).toContain(`| \`${key}\` | int |`);
 });

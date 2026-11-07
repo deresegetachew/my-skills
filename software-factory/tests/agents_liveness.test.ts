@@ -160,3 +160,40 @@ test("a pid that is alive but is not a talk any more counts for nothing", () => 
   expect(rows(w).haile).toBeUndefined();
   expect(readdirSync(join(w.state, "proj-factory", "talks"))).toEqual([]);
 });
+
+// --- 4. a Claude session parked at its prompt, and one holding text nobody sent (#591) --------------------------------
+
+/** A pane running a factory loop whose Claude session (a process named claude) waits at its prompt, showing `screen`. */
+function claudeSession(w: World, name: string, screen: string): void {
+  const script = writeExe(join(w.d, "..", `loop-${name}`, "factory-loop.sh"), "#!/bin/bash\n(exec -a claude sleep 600)\n");
+  session(w, name, `bash ${script}`, screen);
+}
+
+interface PromptRow extends Row { prompt: string | null }
+
+function promptRows(w: World): Record<string, PromptRow> {
+  return rows(w) as Record<string, PromptRow>;
+}
+
+test("a Claude session idle at its prompt with text typed but not sent: agents ls says message not sent (#591)", () => {
+  const w = world();
+  claudeSession(w, "taytu", "● Task b31 done: https://github.com/o/r/pull/9.\n\n╭────╮\n❯ /next-task\n╰────╯\n  ? for shortcuts\n");
+  const t = promptRows(w).taytu;
+  expect([t?.state, t?.prompt]).toEqual(["idle", "unsent"]);
+  expect(t?.detail).toBe("idle: a message is typed in its session but not sent");
+});
+
+test("a Claude session idle at an empty prompt says so; a placeholder Claude Code draws dim is not a message", () => {
+  const w = world();
+  claudeSession(w, "taytu", "● Done.\n❯ \x1b[2mTry \"fix lint errors\"\x1b[22m\n  ? for shortcuts\n");
+  const t = promptRows(w).taytu;
+  expect([t?.state, t?.prompt, t?.detail]).toEqual(["idle", "empty", "idle at its prompt"]);
+});
+
+test("a loop between sessions (no Claude process) has no prompt, whatever its screen still shows", () => {
+  const w = world();
+  const script = writeExe(join(w.d, "..", "loop-taytu", "factory-loop.sh"), "#!/bin/bash\nsleep 600\n");
+  session(w, "taytu", `bash ${script}`, "❯ /next-task\n[taytu] 12:44 nothing ready (every task is done, blocked or taken).\n");
+  const t = promptRows(w).taytu;
+  expect([t?.state, t?.prompt, t?.detail]).toEqual(["idle", null, "idle"]);
+});

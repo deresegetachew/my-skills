@@ -27,7 +27,9 @@
 //   working   alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (#366); also a
 //             dev manager or product owner the owner is talking to (`factory talk`, factory_talks.ts): "talking with
 //             the owner"
-//   idle      alive, no task, and quiet
+//   idle      alive, no task, and quiet. When its Claude session waits at its prompt (a claude process in its tmux
+//             session, the prompt line on screen), `prompt` says "empty", or "unsent" when the box holds text nobody
+//             sent (#591): such a session never looks for work by itself
 //
 // A loop counts as alive by its checkout claim, or, with no live claim, by a factory loop (or Claude session) running in
 // the panes of its tmux session `<repo>-<name>`. So `factory agents ls` (and the web UI) is right without the daemon too.
@@ -76,6 +78,7 @@ import { agentIssues, current, fields, nameOf, recall, remember, update } from "
 import { ensureCli, ensureLines, installCli, restartCli, serviceText, uninstallCli } from "./factory_heartbeat_service.ts";
 import { machineId, machineNames, refuse, repoKey, stateDir } from "./factory_machine.ts";
 import { sessionName } from "./factory_resume.ts";
+import { isClaude } from "./factory_session.ts";
 import { limitStatus } from "./factory_views_cache.ts";
 import { Exit, flock, isoUtc, pyDumps, pyRepr, run as runCmd, runMain, splitLines } from "./factory_lib.ts";
 
@@ -201,6 +204,41 @@ export function followUrl(text: string | null | undefined): string | null {
   return found.length ? (found[found.length - 1] as string).replace(/[.,)]+$/, "") : null;
 }
 
+const SGR = /\x1b\[([0-9;]*)m/g;
+
+/** A screen captured with its escapes (`capture-pane -e`) as plain text: no colours, cursor moves or hyperlink marks. */
+function plain(screen: string): string {
+  return screen.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+}
+
+/** The text after the prompt mark that was typed: what Claude Code draws dim (a placeholder) is left out, as are the
+ *  other escapes and the box's right edge. */
+function typedAfter(s: string): string {
+  let dim = false;
+  let out = "";
+  let at = 0;
+  for (const m of s.matchAll(SGR)) {
+    if (!dim) out += s.slice(at, m.index);
+    for (const p of (m[1] || "0").split(";")) {
+      if (p === "2" || p === "90") dim = true;
+      else if (p === "0" || p === "22" || p === "39") dim = false;
+    }
+    at = (m.index ?? 0) + m[0].length;
+  }
+  if (!dim) out += s.slice(at);
+  return out.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").replace(/│\s*$/, "").trim();
+}
+
+/** A Claude session's prompt box from its screen (`capture-pane -e`, #591): "unsent" when the last prompt line (`❯`)
+ *  holds typed text, "empty" when it holds none, null when the screen shows no prompt or the session is busy. */
+export function promptOf(screen: string | null | undefined): "empty" | "unsent" | null {
+  const lines = splitLines(screen || "").filter((l) => l.replace(SGR, "").trim()).slice(-15);
+  if (lines.some((l) => l.includes("esc to interrupt"))) return null;
+  const line = [...lines].reverse().find((l) => l.includes("❯"));
+  if (line === undefined) return null;
+  return typedAfter(line.slice(line.indexOf("❯") + 1)) ? "unsent" : "empty";
+}
+
 /** When Claude last wrote to a session log of the project folder `path`, or null. */
 function transcriptActivity(path: string | null | undefined): number | null {
   const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
@@ -312,6 +350,9 @@ export interface HeartbeatRow extends Derived {
   parent?: string;
   item?: string;
   stoppable?: boolean;
+  /** An idle agent's Claude session at its prompt (#591): "empty", or "unsent" when its prompt box holds text nobody sent;
+   *  null when no Claude session waits at its prompt in its tmux session. */
+  prompt?: string | null;
 }
 
 export interface LocalState {
@@ -477,6 +518,11 @@ function logOf(pid: number): string | null {
 /** The pid of the factory loop (or an agent's Claude session) that runs in tmux session `session`: the first one in its
  *  panes' process trees, from `ps`. Null when the session has none, or tmux can't list its panes. */
 function loopInSession(ps: Procs, session: string): number | null {
+  return inSession(ps, session, isLoopCommand);
+}
+
+/** The first process below the panes of tmux session `session` whose command line `match` takes, or null. */
+function inSession(ps: Procs, session: string, match: (args: string) => boolean): number | null {
   const kids = new Map<number, number[]>();
   for (const [pid, [ppid]] of ps) {
     if (!kids.has(ppid)) kids.set(ppid, []);
@@ -491,7 +537,7 @@ function loopInSession(ps: Procs, session: string): number | null {
       if (seen.has(pid)) continue;
       seen.add(pid);
       const args = ps.get(pid)?.[1];
-      if (args && isLoopCommand(args)) return pid;
+      if (args && match(args)) return pid;
       queue.push(...(kids.get(pid) ?? []));
     }
   }
@@ -562,7 +608,17 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
       path: claim.path ?? null, pid, session: null, follow: null, activity, runs: "", log: null };
     if (sessions.has(session)) {
       row.session = session;
-      if (alive) row.follow = followUrl(tmux("capture-pane", "-p", "-J", "-S", "-300", "-t", `=${session}`));
+      if (alive) {
+        const screen = tmux("capture-pane", "-p", "-e", "-J", "-S", "-300", "-t", `=${session}`);
+        row.follow = followUrl(plain(screen ?? ""));
+        // an idle agent whose Claude session waits at its prompt never looks for work by itself, and text left in its
+        // prompt box was never sent (#591): say which, so the web UI can tell it from a loop that waits for a task
+        const prompt = row.state === "idle" && inSession(ps, session, isClaude) !== null ? promptOf(screen) : null;
+        if (prompt) {
+          row.prompt = prompt;
+          row.detail = prompt === "unsent" ? "idle: a message is typed in its session but not sent" : "idle at its prompt";
+        }
+      }
     }
     if (alive) {
       row.runs = row.session ? "tmux" : "nohup";
