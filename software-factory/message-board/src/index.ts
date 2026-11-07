@@ -11,3 +11,5 @@ export { MIRROR_MARK, type MirrorOptions, mirrorState, type MirrorSummary, mirro
 export { boardDir, boardUrl } from "./server.ts";
 /** The child a synchronous caller runs with Bun.spawnSync (src/child.ts): one JSON request in, one JSON answer out. */
 export type { Answer as ChildAnswer, Call as ChildCall, EventRule, Request as ChildRequest, WaitFor } from "./child.ts";
+/** The factory's sign-off and testing queue on the board (#552). */
+export { addSignoff, postSignoff, SIGNOFF_TITLE, signoffEntries, signoffIds, signoffItemBody, signoffQueue, signoffQueueRef, signoffTask } from "./signoff.ts";

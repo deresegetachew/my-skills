@@ -365,7 +365,7 @@ export async function work(cfg: Config, role: string, _name = ""): Promise<strin
       const items = ghAll(`repos/{owner}/{repo}/issues?state=open&labels=${label}`);
       lines.push(...items.map((i) => `${i.pull_request ? "PR" : "issue"} #${i.number}: ${i.title} (${label})`));
     }
-    return [...lines, ...await poQuestions(cfg), ...await productAsks(cfg), ...signoffDigest(cfg), ...await planning(cfg)];
+    return [...lines, ...await poQuestions(cfg), ...await productAsks(cfg), ...await signoffDigest(cfg), ...await planning(cfg)];
   }
   if (role === "dev-manager") {
     const github = (await import("./factory_wait.ts")).precheck(cfg);

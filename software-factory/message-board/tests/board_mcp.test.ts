@@ -512,7 +512,7 @@ test("requests sent back to back without waiting are answered in order", async (
 });
 
 // ---------- owner and manager tools (#503) ----------
-const OWNER_TOOLS = ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment"];
+const OWNER_TOOLS = ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment", "board_signoff_add"];
 
 async function toolNames(c: Client): Promise<string[]> {
   return (((await c.request("tools/list")).result?.tools ?? []) as { name: string }[]).map((t) => t.name).sort();

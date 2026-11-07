@@ -411,6 +411,7 @@ neither lists these tools nor runs them (a call to one is an unknown tool, `-326
 | `board_link` | `from`, `to`, `kind` | "from blocks to" and the other edge kinds; a loop is refused with `cycle`; `{ linked }` |
 | `board_unlink` | `from`, `to`, `kind` | Remove a link; `{ unlinked }` |
 | `board_comment` | `task`, `body` | A note on the task's thread, as you |
+| `board_signoff_add` | `id`, `task`, `check` | Put what only a person can check for a task on the project's sign-off and testing queue (the factory's `factory signoff`, #552); `conflict` when the id is taken |
 
 Each move is a board event (`task.moved`, and `task.taken_back` for a held task), so the board's listeners, the web UI
 among them, see it at once. The same input checks hold as for the other tools: no field a tool doesn't list, and the

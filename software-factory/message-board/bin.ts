@@ -538,6 +538,7 @@ recorded as --as, with --session on its events; no tool takes a sender.
                                                waits_for: from can't start until to is done
                                 board_unlink   remove a link
                                 board_comment  a note on a task's thread
+                                board_signoff_add  put what only a person can check on the sign-off queue
 
 Tasks are named by their number, as people see them: 3 or #3 for issue 3 of the project (its repo: --repo, else
 GH_REPO or the folder's git remote origin), b17 for a task made on the board. Results name tasks the same way.
