@@ -686,7 +686,7 @@ export function board(r: Reporter, cfg: Config): void {
     info = boardInfo();
   } catch (e) {
     if (!(e instanceof CoreError)) throw e;
-    r.fix("message board answers", `${e.message} ${e.fix}`);
+    r.fix("message board answers", `${e.message.trim().replace(/[.!?]?$/, ".")} Fix: ${e.fix}`); // two sentences (#520)
     return;
   }
   if (!info.counts) r.fix("message board tables", "the board answers but has none yet: run `factory board migrate`");

@@ -84,7 +84,8 @@ test("the dry run says it too", () => {
 
 test("factory next --dry-run prints what it would take and claims nothing, even with --claim (#520)", () => {
   const [d, env] = project([issue(7)]);
-  const before = read(env.FAKE_GH_DB as string);
+  const issuesNow = (): unknown => (JSON.parse(read(env.FAKE_GH_DB as string)) as { issues: unknown }).issues; // the fake's clock ticks on reads
+  const before = issuesNow();
   let p = sh(["bash", join(SF, "factory"), "next", "--dry-run"], { cwd: d, env });
   expect(p.code, p.out).toBe(0);
   expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
@@ -95,7 +96,7 @@ test("factory next --dry-run prints what it would take and claims nothing, even 
   expect(p.code, p.out).toBe(0);
   expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
   expect(p.stdout).toContain("Dry run: nothing was claimed.");
-  expect(read(env.FAKE_GH_DB as string), "GitHub was not written").toBe(before);
+  expect(issuesNow(), "no issue was labelled or claimed").toEqual(before);
 });
 
 test("factory next --dry-run with --issue is refused with code, message and fix", () => {

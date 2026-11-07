@@ -123,7 +123,8 @@ async function withBoard<T>(fn: (b: Board) => Promise<T>, as?: string): Promise<
 
 const print = (s = ""): void => console.log(s);
 const json = (v: unknown): void => console.log(JSON.stringify(v, null, 2));
-const state = (t: Task): string => (t.blocked && t.status === "open" ? "blocked" : t.status);
+/** A task's state word; an open note (an issue that isn't work: a channel, an untriaged report) is `note` (#520). */
+const state = (t: Task): string => (t.kind === "note" && t.status === "open" ? "note" : t.blocked && t.status === "open" ? "blocked" : t.status);
 
 /** How tasks are named here (#515): --repo, else GH_REPO or the folder's git remote origin; with neither, no repo (any
  * GitHub issue's task is "#n"). A --repo that isn't a repo name is refused. */

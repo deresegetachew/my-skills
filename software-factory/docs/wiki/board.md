@@ -142,6 +142,12 @@ board (no issue) is `b17`. The commands and the tools take `3`, `#3` or `b17` (`
 the project's repo comes from `--repo`, else `GH_REPO` or the git remote `origin`. The board's own id stays inside the
 mirror's marker on GitHub, where nobody reads it.
 
+**What the Board page shows.** The web UI's Board page is the open work: the tasks and bugs whose issue is this
+project's (`#3`), from Ready to Blocked, as `factory next` sees them. A done task is not on it, so its Done column stays
+empty, and a task made on the board with no issue (`b17`) is not on it either. `factory board status` counts every task
+on the board, done ones too, and `factory board tasks --all` lists them (`factory board tasks` lists the open ones, and
+marks an open note, an issue that isn't work, as `note`) (#520).
+
 **When the board can't be reached** while it is the record (`tasks.source: board`), the web UI says so once ("The
 message board can't be reached, so tasks are unknown until it's back. On the hub, start it again.") and shows no tasks:
 not GitHub's, which are out of date. A project whose tasks aren't on the board falls back to GitHub's snapshot, as

@@ -220,8 +220,9 @@ export async function run(cfg: Config, asJson = false, localOnly = false, fresh 
   if (rows.length) console.log(table(rows, now).join("\n"));
   else console.log("No agents known yet. `factory machine setup <names>` names this machine's agents; `factory loop -i` starts one.");
   if (!daemon.running) {
+    const to = taskSource(cfg) === "board" ? "the message board" : "GitHub"; // where an agent's state goes (#520)
     console.log("\nThe heartbeat daemon is not running here, so this machine's rows were worked out just now and nothing " +
-      "reports to GitHub while an agent waits. Start it: factory heartbeat install");
+      `reports to ${to} while an agent waits. Start it: factory heartbeat install`);
   }
   if (!github.ok) {
     console.log(`\nGitHub: can't read the other machines' agents (${github.error}).` +
