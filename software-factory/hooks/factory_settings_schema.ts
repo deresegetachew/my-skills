@@ -295,6 +295,11 @@ export const SETTINGS: Record<string, Setting> = table([
   S("ui.projects", "list", "ui", "Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout.", { default: [] }),
   S("ui.port", "int", "ui", "The port `factory ui` listens on (`--port` wins for one run).", { default: 4747 }),
   S("ui.pollSeconds", "int", "ui", "How often `factory ui` reads the agents and machines again and pushes what changed to the open pages.", { default: 5 }),
+  S("attention.taskQuietMinutes", "int", "ui", "Needs attention: a task in progress shows when nothing has moved on it (no heartbeat from a holder working on it, no change on the board) for this many minutes.", { default: 60 }),
+  S("attention.prWaitHours", "int", "ui", "Needs attention: a pull request shows when it has been open this many hours with red checks, no review, a must-fix nobody picked up, or a merge only a person can do.", { default: 24 }),
+  S("attention.coding-agent.maxMinutes", "int", "ui", "Needs attention: a coding agent's session shows when it has been working this many minutes without a pause.", { default: 120 }),
+  S("attention.dev-manager.maxMinutes", "int", "ui", "Needs attention: a dev manager's session shows when it has been working this many minutes without a pause.", { default: 30 }),
+  S("attention.product-owner.maxMinutes", "int", "ui", "Needs attention: a product owner's session shows when it has been working this many minutes without a pause.", { default: 30 }),
   S("tasks.labels", "dict", "issues", "The GitHub labels that mark a task: ready, inProgress, inReview, blocked and the agentPrefix."),
   S("structure.roots", "list", "commands", "Folders the structure check (the hexagonal skill's check_structure script) looks at, when a style uses it.", { default: [] }),
   S("structure.legacy", "str", "commands", "The list of legacy files the structure check leaves alone (it only shrinks).", { default: "" }),
@@ -523,6 +528,16 @@ const MORE: Record<string, More> = {
     "lists it under its folder's name, with its own agents and views, read through that project's own commands. A path " +
     "that is not there is shown with what to do.",
   examples: ["factory settings set ui.projects '[\"/home/me/shop\"]'"] },
+  "attention.taskQuietMinutes": { long: "The web UI's Needs attention list (Home, and the count beside Home in the sidebar) shows a " +
+    "task in progress whose holder is down at once. One whose holder runs shows when neither the holder's heartbeat (while " +
+    "it works on that task) nor the task itself (on the message board) has moved for this long. Its action is Release.",
+  examples: ["factory settings set attention.taskQuietMinutes 90"] },
+  "attention.prWaitHours": { long: "Counted from when the pull request was opened, as the last snapshot read it. A draft never " +
+    "shows. Its action opens the pull request's page.",
+  examples: ["factory settings set attention.prWaitHours 12"] },
+  "attention.dev-manager.maxMinutes": { long: "A dev manager's pass is short, so one that has been working much longer is " +
+    "likely stuck. Counted from when its state last changed (its heartbeat's since). The item opens its output, where Stop is.",
+  examples: ["factory settings set attention.dev-manager.maxMinutes 45"] },
   "ui.pollSeconds": { long: "Each read runs `factory agents ls --json` for every project shown, which asks GitHub at most " +
     "once per FACTORY_AGENTS_CACHE_SECONDS (45). The server reads only while a page is open.",
   examples: ["factory settings set ui.pollSeconds 10"] },
