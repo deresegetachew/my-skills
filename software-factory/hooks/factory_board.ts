@@ -18,8 +18,9 @@
 //       shape of a GitHub comment (body, user.login, created_at), so `factory prd --stage` and the web UI's Inbox read the
 //       board as they read the issue. Exit 3 when the board can't be had: they fall back to GitHub.
 //   factory board sweep [--quiet-minutes N] [--max-seconds N]
-//       the board's sweep (message-board/bin.ts); --max-seconds stops one that runs longer, as the mirror's does, for the
-//       dev manager's pass in factory-loop.sh (#513).
+//       first closes the tasks in progress or in review whose pull request merged and the epics whose tasks are all done
+//       (#536, factory_board_merged.ts), then the board's sweep (message-board/bin.ts); --max-seconds stops one that runs
+//       longer, as the mirror's does, for the dev manager's pass in factory-loop.sh (#513).
 //   factory board import github ...
 //       the board's import, with `--board-is-record` when `tasks.source` is board: a status the board changed since the
 //       last import is kept (the board is the record); new issues, edited titles and bodies and new comments still come in.
@@ -35,6 +36,7 @@ import { boardMirror, type Config, load, taskSource } from "./factory_config.ts"
 import { comment } from "./factory_issues.ts";
 import { countGithubCall, Exit, pyDumps, runMain } from "./factory_lib.ts";
 import { OWNER_TITLE, ownerLogin, ownerQueue } from "./factory_orchestrator.ts";
+import { closeMerged, type MergedPull, mergedPulls, open as openTasks } from "./factory_board_merged.ts";
 import { breakMarkers, ownerAskIds, trustedOf } from "./factory_prs.ts";
 import { Board, BoardError, boardUrl, ghCli, GithubError, isProjects, type Message, type MirrorSummary, mirrorToGithub, Numbers,
   type Task } from "../message-board/src/index.ts";
@@ -352,15 +354,48 @@ async function ask(cfg: Config, args: string[]): Promise<number> {
 
 // --- the sweep -----------------------------------------------------------------------------------------------------------
 
-/** `factory board sweep [--quiet-minutes N] [--max-seconds N]`: the board's sweep (message-board/bin.ts), stopped after
- * --max-seconds when given, so a board that doesn't answer can't stall the dev manager's pass (#513). */
+/** Before the sweep (#536): each of the project's tasks in progress or in review whose linked pull request merged is closed
+ * (factory_board_merged.ts), then each epic whose tasks are all done. False when GitHub couldn't list the pull requests:
+ * then no claim may be freed this pass, or a merged task could go back to ready. */
+async function closeFinished(): Promise<boolean> {
+  const repo = boardRepo();
+  const board = await open("system");
+  let read = true;
+  try {
+    const tasks = repo ? await openTasks(board, repo) : [];
+    if (tasks.length) {
+      let pulls: MergedPull[] = [];
+      try {
+        pulls = mergedPulls(ghCli({ onCall: (a) => countGithubCall(a) }), repo);
+      } catch (e) {
+        if (!(e instanceof GithubError)) throw e;
+        read = false;
+        process.stderr.write(pyDumps({ code: "merged_unread", message: `GitHub didn't list the merged pull requests (${e.message}), so this pass frees no claim: a task whose pull request merged would go back to ready. The next pass tries again.`,
+          fix: e.fix }) + "\n");
+      }
+      for (const c of await closeMerged(board, repo, tasks, pulls)) console.log(`closed ${c.label}: pull request #${c.pull} merged (closed after merge by the dev manager)`);
+    }
+    const numbers = new Numbers(repo || null);
+    for (const id of await board.settleEpics()) console.log(`closed the epic ${numbers.label(await board.get(id))}: all its tasks are done`);
+  } finally {
+    await board.end().catch(() => {});
+  }
+  return read;
+}
+
+/** `factory board sweep [--quiet-minutes N] [--max-seconds N]`: first closes the tasks whose pull request merged and the
+ * epics whose tasks are all done (closeFinished), then the board's sweep (message-board/bin.ts), all stopped after
+ * --max-seconds when given, so a board or a `gh` that doesn't answer can't stall the dev manager's pass (#513). */
 async function sweep(args: string[]): Promise<number> {
   const lim = args.indexOf("--max-seconds");
-  if (lim < 0) return spawnSync(process.execPath, ["--no-env-file", "--config=/dev/null", BIN, "sweep", ...args], { stdio: "inherit" }).status ?? 1;
+  if (lim < 0) {
+    if (!(await closeFinished())) return 0;
+    return spawnSync(process.execPath, ["--no-env-file", "--config=/dev/null", BIN, "sweep", ...args], { stdio: "inherit" }).status ?? 1;
+  }
   const seconds = Number(args[lim + 1]);
   if (!Number.isFinite(seconds) || seconds < 1) refuse("bad_args", "--max-seconds takes a number of seconds, 1 or more.", "factory board sweep --max-seconds 60");
   const rest = args.filter((_, i) => i !== lim && i !== lim + 1);
-  return within(seconds, [BIN, "sweep", ...rest], () => refuse("sweep_timeout",
+  return within(seconds, [import.meta.path, "sweep", ...rest], () => refuse("sweep_timeout",
     `factory board sweep ran longer than ${seconds} seconds and was stopped. A claim it freed stays freed; the next pass sweeps again.`,
     "Check the board with `factory board status`, then run `factory board sweep` by hand."));
 }

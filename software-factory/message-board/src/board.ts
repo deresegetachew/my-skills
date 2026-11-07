@@ -200,15 +200,54 @@ export class Board {
     }
   }
 
-  /** One write: `fn` in a transaction, which returns the event to record; the event and NOTIFY go last. */
-  private write<T>(fn: (tx: Tx) => Promise<{ result: T; event: { kind: string; subject: string; payload: Record<string, unknown> } | null }>): Promise<T> {
+  /** One write: `fn` in a transaction, which returns the event to record; the event and NOTIFY go last. `epics`: the
+   * epics whose tasks it changed, settled in the same transaction (settleEpicsIn). */
+  private write<T>(fn: (tx: Tx) => Promise<{ result: T; event: { kind: string; subject: string; payload: Record<string, unknown> } | null;
+    epics?: (number | null)[] }>): Promise<T> {
     return this.run(() =>
       this.sql.begin(async (tx) => {
-        const { result, event } = await fn(tx);
+        const { result, event, epics } = await fn(tx);
         if (event) await recordEvents(tx, this.as, this.session, [event]);
+        if (epics) await this.settleEpicsIn(tx, epics, true);
         return result;
       }) as Promise<T>,
     );
+  }
+
+  /** An epic is done when all its tasks are: each of `ids` that is an open epic with tasks (its children of kind task or
+   * bug), every one of them done, is closed as done, with an `epic.done` event by system; with `reopen`, each that was
+   * closed as done and has a task that isn't done is opened again (`epic.reopened`). An epic with no tasks is left as it
+   * is, as is one someone moved (`task.moved`) after its last task changed: a person's word on it stands. `ids` null:
+   * every epic. Returns the epics closed and reopened. */
+  private async settleEpicsIn(tx: Tx, ids: (number | null)[] | null, reopen: boolean): Promise<{ closed: number[]; reopened: number[] }> {
+    const want = ids === null ? null : [...new Set(ids.filter((i): i is number => typeof i === "number"))];
+    if (want !== null && !want.length) return { closed: [], reopened: [] };
+    const which = want === null ? "TRUE" : "e.id = ANY($1::bigint[])";
+    const params = want === null ? [] : [want];
+    const work = `c.parent_id = e.id AND c.kind IN (${CLAIMABLE})`;
+    const closed = rows(await tx.unsafe(`UPDATE tasks e SET status = 'done', outcome = 'done', version = e.version + 1, updated_at = now()
+      WHERE e.kind = 'epic' AND e.status IN ('open', 'in_review') AND ${which}
+        AND EXISTS (SELECT 1 FROM tasks c WHERE ${work})
+        AND NOT EXISTS (SELECT 1 FROM tasks c WHERE ${work} AND c.status <> 'done')
+        AND NOT EXISTS (SELECT 1 FROM events v WHERE v.subject = 'task:' || e.id AND v.kind = 'task.moved'
+          AND v.at > (SELECT max(c.updated_at) FROM tasks c WHERE ${work}))
+      RETURNING e.id::int AS id`, params)).map((r) => Number(r.id));
+    const reopened = !reopen ? [] : rows(await tx.unsafe(`UPDATE tasks e SET status = 'open', outcome = NULL, version = e.version + 1, updated_at = now()
+      WHERE e.kind = 'epic' AND e.status = 'done' AND e.outcome = 'done' AND ${which}
+        AND EXISTS (SELECT 1 FROM tasks c WHERE ${work} AND c.status <> 'done')
+      RETURNING e.id::int AS id`, params)).map((r) => Number(r.id));
+    await recordEvents(tx, "system", this.session, [
+      ...closed.map((id) => ({ kind: "epic.done", subject: `task:${id}`, payload: { reason: "all its tasks are done" } })),
+      ...reopened.map((id) => ({ kind: "epic.reopened", subject: `task:${id}`, payload: { reason: "one of its tasks is open again" } })),
+    ]);
+    return { closed, reopened };
+  }
+
+  /** Close every epic whose tasks are all done and that isn't done yet (an epic with no tasks, or one someone moved after
+   * its last task changed, is left): what the dev manager's pass runs, for epics whose tasks were done before the board
+   * closed epics itself. It never reopens one. The epics closed. */
+  async settleEpics(): Promise<number[]> {
+    return this.run(() => this.sql.begin(async (tx) => (await this.settleEpicsIn(tx, null, false)).closed) as Promise<number[]>);
   }
 
   private async taskIn(tx: Tx, id: number): Promise<Task | null> {
@@ -251,7 +290,8 @@ export class Board {
         VALUES (${input.title}, ${input.body ?? ""}, ${kind}, ${priority}, ${input.parentId ?? null}, ${input.ref ?? null}, ${this.as})
         RETURNING id::int AS id`);
       const task = await this.mustTask(tx, Number(r[0]?.id));
-      return { result: task, event: { kind: "task.created", subject: `task:${task.id}`, payload: { title: task.title, kind, parent: task.parentId, ref: task.ref } } };
+      return { result: task, event: { kind: "task.created", subject: `task:${task.id}`, payload: { title: task.title, kind, parent: task.parentId, ref: task.ref } },
+        epics: [task.parentId] };
     });
   }
 
@@ -312,7 +352,8 @@ export class Board {
       }
       const task = (await this.taskIn(tx, id)) as Task;
       const fields = Object.keys(changes).filter((k) => k !== "version");
-      return { result: task, event: { kind: "task.updated", subject: `task:${id}`, payload: { fields, version: task.version } } };
+      return { result: task, event: { kind: "task.updated", subject: `task:${id}`, payload: { fields, version: task.version } },
+        epics: [before.parentId, task.parentId] };
     });
   }
 
@@ -495,7 +536,8 @@ export class Board {
         }
         task = (await this.taskIn(tx, id)) as Task;
       }
-      return { result: task, event: { kind: "task.closed", subject: `task:${id}`, payload: { outcome, reason: options.reason ?? null } } };
+      return { result: task, event: { kind: "task.closed", subject: `task:${id}`, payload: { outcome, reason: options.reason ?? null } },
+        epics: [task.parentId] };
     });
   }
 
@@ -542,6 +584,7 @@ export class Board {
         events.push({ kind: "task.moved", subject: `task:${id}`,
           payload: { from: before.status, to, status, outcome, reason: reason ?? null, blockedBy, holder: before.holder } });
         await recordEvents(tx, this.as, this.session, events);
+        await this.settleEpicsIn(tx, [before.parentId], true);
         return (await this.taskIn(tx, id)) as Task;
       }) as Promise<Task>,
     );
@@ -867,6 +910,7 @@ export class Board {
           out = result;
           if (dryRun) throw new DryRun();
           await recordEvents(tx, this.as, this.session, events);
+          await this.settleEpicsIn(tx, null, false); // a task closed on GitHub may have been its epic's last
         }),
       );
     } catch (e) {
