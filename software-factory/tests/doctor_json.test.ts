@@ -51,3 +51,12 @@ test("--json on a clean machine is ok with no fix", () => {
   expect(out).toMatchObject({ ok: true, fixes: 0 });
   expect(out.checks.length).toBeGreaterThan(3);
 }, 60_000);
+
+test("--json names the claude it found, in the machine group (#568)", () => {
+  const d = project();
+  const env = machine();
+  const out = JSON.parse(doctor(d, env, "--json").stdout) as Out;
+  const c = out.checks.find((x) => x.what.startsWith("Claude Code"));
+  expect(c, JSON.stringify(out.checks)).toMatchObject({ group: "machine", level: "ok" });
+  expect(c?.what).toContain(`${env.PATH}/claude`);
+}, 60_000);

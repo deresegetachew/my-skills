@@ -2,7 +2,7 @@
 // Runs with a PATH of stub tools, so it doesn't depend on what this machine has installed.
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, unlinkSync } from "node:fs";
 import { basename, join } from "node:path";
 import { doctor, hookLine, lines, machine, project, stub } from "./doctor_support.ts";
 import { HOOKS, readmeAndWiki, runBun, SF, tmp, write } from "./support.ts";
@@ -309,4 +309,22 @@ test("with the message board, a missing heartbeat service is flagged with its na
   stub(env.PATH, "systemctl", "exit 0");
   p = doctor(d, env);
   expect(lines(p, "ok").some((l) => l.includes("heartbeat daemon") && l.includes(name)), p.stdout).toBe(true);
+});
+
+// #568: a shell that is not a login shell lacks ~/.local/bin, where Claude Code's installer puts `claude`
+test("doctor says which claude it found: on the PATH, else ~/.local/bin; with none, where it looked", () => {
+  const d = project();
+  const env = machine();
+  let p = doctor(d, env);
+  expect(lines(p, "ok").some((l) => l.includes("Claude Code 2.1.310") && l.includes(join(env.PATH, "claude"))), p.stdout).toBe(true);
+  const local = join(env.HOME, ".local", "bin", "claude");
+  write(local, "#!/bin/sh\necho '2.1.311 (Claude Code)'\n", 0o755);
+  renameSync(join(env.PATH, "claude"), join(env.HOME, "claude.gone"));
+  p = doctor(d, env);
+  expect(lines(p, "ok").some((l) => l.includes("Claude Code 2.1.311") && l.includes(local)), p.stdout).toBe(true);
+  unlinkSync(local);
+  p = doctor(d, env);
+  const fix = lines(p, "fix").find((l) => l.includes("Claude Code"));
+  expect(fix, p.stdout).toBeDefined();
+  expect(fix).toContain("looked in: PATH, ~/.local/bin, ~/.claude/local");
 });

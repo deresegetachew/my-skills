@@ -14,6 +14,7 @@
 // Exit: 0 nothing to do, or the session's own exit code; 1 the tick can't run (the line says why and what to do).
 import { existsSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { claudeBin } from "./factory_claude.ts";
 import { load, roleNames } from "./factory_config.ts";
 import { configured, flags, ModelsError, type Models } from "./factory_models.ts";
 import { skillLine } from "./factory_roles.ts";
@@ -67,7 +68,8 @@ export function tick(args: string[]): number {
     console.log("a manager pass is already running here; this tick starts nothing");
     return 0;
   }
-  return run(cmd, { inherit: true }).code;
+  // the `claude` to run (#568): PATH, else ~/.local/bin, else ~/.claude/local; none: claude_missing
+  return run([claudeBin(), ...cmd.slice(1)], { inherit: true }).code;
 }
 
 if (import.meta.main) await runMain(() => tick(process.argv.slice(2)));

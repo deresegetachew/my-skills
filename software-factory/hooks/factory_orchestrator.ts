@@ -41,6 +41,7 @@ import * as lease from "./factory_lease.ts";
 import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_roles.ts";
 import { ciState, collect, isoformat, issueOf, isOwn, type Item, make, minutes, type Pull, reviewState } from "./factory_watch.ts";
 import { boardOn } from "./factory_mcp.ts";
+import { claudeBin } from "./factory_claude.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./factory_lib.ts";
 import { remember, settled } from "./factory_views_cache.ts";
 import { ensureWatcher, freshPrs, prFeedIsOn } from "./factory_pr_feed.ts";
@@ -530,6 +531,7 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
     if (item.kind === "board-question") {
       writeFileSync(triesFile(name, ref), JSON.stringify({ n: boardTries(name, ref).n + 1, last: lease.now() }));
     }
+    const claude = claudeBin(); // PATH, else ~/.local/bin, else ~/.claude/local (#568); none: claude_missing
     if (item.target) {
       held = lease.acquire(item.target, item.lease[0], item.lease[1], name, toFloat(managerSetting(cfg, "claimMinutes")) ?? 0);
       if (!held) {
@@ -551,7 +553,7 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
     out(`${ref}: starting a ${interactive ? "session you can type into" : "sub-manager"} (${item.line})`);
     let rc: number;
     if (interactive) {
-      const args = ["claude", ...flags];
+      const args = [claude, ...flags];
       if ((process.env.FACTORY_REMOTE_CONTROL ?? "1") === "1") args.push(`--remote-control=${name} ${ref}`);
       rc = run([...args, text], { env, inherit: true }).code;
     } else {
@@ -560,7 +562,7 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
       let windowed: number | null | "busy" = null;
       if (process.env.FACTORY_WINDOW && which("tmux")) { // the dev manager has a window, so its sub-managers get one
         const { TMUX: _t, TMUX_PANE: _p, ...rest } = clean;
-        windowed = inWindow(name, ref, { argv: ["claude", ...flags, ...permissionFlags(cfg), "--output-format", "stream-json",
+        windowed = inWindow(name, ref, { argv: [claude, ...flags, ...permissionFlags(cfg), "--output-format", "stream-json",
           "--verbose", "-p", text], env: rest, log: logfile, rc: join(stateDir(name), `${ref}.rc`) }, limit, out);
       }
       if (windowed === "busy") return 0; // no verdict: the open window may still post its own
@@ -568,7 +570,7 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
       else {
         const fd = openSync(logfile, "w");
         try {
-          const p = Bun.spawnSync(["claude", ...flags, ...permissionFlags(cfg), "-p", text], {
+          const p = Bun.spawnSync([claude, ...flags, ...permissionFlags(cfg), "-p", text], {
             env: clean, stdin: "ignore", stdout: fd, stderr: fd, timeout: limit * 1000, killSignal: "SIGKILL",
           });
           if (p.exitedDueToTimeout) {

@@ -1,8 +1,8 @@
 // `factory talk` (#395, #425): one turn of a talk with the dev manager or the product owner, which the web UI's chat
 // runs. It answers in a fresh role session (a fake `claude`) and posts a summary on the owner queue (a fake `gh`).
 import { expect, test } from "bun:test";
-import { cpSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { cpSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { project } from "./roles_support.ts";
 import { type Proc, read, SF, sh, writeExe } from "./support.ts";
 
@@ -253,4 +253,44 @@ test("factory help and the commands page list talk", () => {
   const h = sh(["bash", join(SF, "factory"), "help"], { cwd: r.work, env: r.env });
   expect(h.stdout).toMatch(/^ {2}talk <dev-manager\|product-owner> <text>/m);
   expect(read(join(SF, "docs", "wiki", "commands.md"))).toMatch(/^\| `factory talk <dev-manager\\\|product-owner> <text>/m);
+});
+
+// --- finding claude (#568) ---------------------------------------------------------------------------------------------
+
+/** A PATH with the fake gh, Bun and the system's tools, but no `claude`: as in a shell that is not a login shell. */
+function noClaudePath(r: Rig): string {
+  const path = [join(r.d, "bin"), dirname(process.execPath), "/usr/bin", "/bin"].join(":");
+  expect(Bun.which("claude", { PATH: path }), "this machine has claude in a system folder").toBeNull();
+  return path;
+}
+
+test("with claude off the PATH, talk runs ~/.local/bin/claude, where Claude Code's installer puts it", () => {
+  const r = rig();
+  mkdirSync(join(r.d, ".local", "bin"), { recursive: true });
+  renameSync(join(r.d, "bin", "claude"), join(r.d, ".local", "bin", "claude"));
+  const p = talk(r, ["dev-manager", "what is waiting on me?"], { PATH: noClaudePath(r), HOME: r.d });
+  expect(p.code, p.out).toBe(0);
+  expect((JSON.parse(p.stdout) as { answer: string }).answer).toBe("Two PRs wait for review.");
+  expect(claudeCalls(r).length).toBe(1);
+});
+
+test("an older install in ~/.claude/local is found too", () => {
+  const r = rig();
+  mkdirSync(join(r.d, ".claude", "local"), { recursive: true });
+  renameSync(join(r.d, "bin", "claude"), join(r.d, ".claude", "local", "claude"));
+  const p = talk(r, ["product-owner", "hello"], { PATH: noClaudePath(r), HOME: r.d });
+  expect(p.code, p.out).toBe(0);
+  expect(claudeCalls(r).length).toBe(1);
+});
+
+test("with no claude anywhere, talk is claude_missing and names where it looked", () => {
+  const r = rig();
+  renameSync(join(r.d, "bin", "claude"), join(r.d, "claude.gone"));
+  const p = talk(r, ["dev-manager", "hello"], { PATH: noClaudePath(r), HOME: r.d });
+  expect(p.code).not.toBe(0);
+  const e = problem(p);
+  expect(e.code).toBe("claude_missing");
+  expect(e.message).toContain("looked in: PATH, ~/.local/bin, ~/.claude/local");
+  expect(e.fix).toContain("~/.local/bin");
+  expect(posted(r)).toEqual([]);
 });

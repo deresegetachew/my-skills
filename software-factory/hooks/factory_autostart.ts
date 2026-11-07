@@ -20,6 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
+import { findClaude } from "./factory_claude.ts";
 import { type Config, load } from "./factory_config.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
 import { autostartSettings, checkedNames, namesFile, refuse, repoKey, saveMachineSettings, stateDir } from "./factory_machine.ts";
@@ -74,7 +75,7 @@ export function domain(): string {
 export function servicePath(): string {
   const dirs: string[] = [];
   for (const tool of ["tmux", "claude", "gh", "docker", "git", "node", "pnpm", "bun", "sops"]) {
-    const found = which(tool);
+    const found = tool === "claude" ? findClaude() : which(tool); // ~/.local/bin too (#568)
     const d = found ? dirname(found) : "";
     if (d.startsWith("/") && !dirs.includes(d)) dirs.push(d);
   }
