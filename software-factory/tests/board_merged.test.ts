@@ -196,3 +196,44 @@ test("with nothing in progress or in review, the pass asks GitHub nothing", asyn
   expect(ghCalls(w)).toEqual([]);
   expect((await w.board.get(1)).status).toBe("open");
 });
+
+/** The issues the fake GitHub holds; a pull request is one with `pull_request` (merged when merged_at is a time). */
+function setIssues(w: World, issues: Row[]): void {
+  const db = JSON.parse(readFileSync(w.dbFile, "utf8")) as Row;
+  writeFileSync(w.dbFile, JSON.stringify({ ...db, issues }));
+}
+
+const prdPull = (number: number, merged: string | null): Row =>
+  ({ number, title: "PRD: Shelf v1.1", state: merged ? "closed" : "open", pull_request: { url: `https://x/pulls/${number}`, merged_at: merged } });
+
+test("a PRD change's card is closed once its pull request merges, and the tasks that wait for it are ready (#578)", async () => {
+  const w = await world();
+  const card = await w.board.create({ title: "PRD change: #62 (Shelf v1.1)", kind: "note", body: "PRD change: #62", ref: `factory:${REPO}/prd-62` });
+  const later = await w.board.create({ title: "PRD change: #63", kind: "note", ref: `factory:${REPO}/prd-63` });
+  const task = await w.board.create({ title: "Shelf search", body: "PRD change: #62", ref: `factory:${REPO}/search` });
+  await w.board.link(task.id, card.id, "waits_for");
+  setIssues(w, [prdPull(62, null), prdPull(63, null)]);
+  const open = sweep(w);
+  expect(open.code, open.out).toBe(0);
+  expect((await w.board.get(card.id)).status).toBe("open");
+  expect((await w.board.ready()).map((t) => t.id)).toEqual([]);
+  setIssues(w, [prdPull(62, "2026-11-07T09:00:00Z"), prdPull(63, null)]);
+  const merged = sweep(w);
+  expect(merged.code, merged.out).toBe(0);
+  expect(merged.stdout).toContain(`closed the PRD change b${card.id}: pull request #62 merged`);
+  expect(await w.board.get(card.id)).toMatchObject({ status: "done", outcome: "done" });
+  expect((await w.board.get(later.id)).status).toBe("open");
+  expect((await w.board.ready()).map((t) => t.id)).toEqual([task.id]);
+  const moved = (await w.board.events(0, 500, { kind: "task.moved" })).find((e) => e.subject === `task:${card.id}`);
+  expect(String(moved?.payload.reason)).toContain("pull request #62 merged");
+});
+
+test("with no PRD change card open, the pass asks GitHub nothing for them (#578)", async () => {
+  const w = await world();
+  const card = await w.board.create({ title: "PRD change: #62", kind: "note", ref: `factory:${REPO}/prd-62` });
+  await w.board.close(card.id, { outcome: "done" });
+  await w.board.create({ title: "A plain note", kind: "note", ref: `factory:${REPO}/note` });
+  const p = sweep(w);
+  expect(p.code, p.out).toBe(0);
+  expect(ghCalls(w)).toEqual([]);
+});

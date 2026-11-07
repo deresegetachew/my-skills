@@ -4,10 +4,12 @@
 // tests/web_ui_attention_model.test.ts runs it as it is. The server's rules are in hooks/factory_ui_attention.ts.
 
 export interface AttentionAction {
-  kind: "release" | "close" | "start" | "open";
+  kind: "release" | "close" | "start" | "say" | "open";
   label: string;
   task?: string;
   agent?: string;
+  /** For say: the one line sent to the agent's session (`/next-task`). */
+  text?: string;
   link?: string;
 }
 
@@ -31,7 +33,7 @@ export function stuckMarks(items: AttentionItem[]): { tasks: Record<string, stri
   for (const i of items) {
     if ((i.kind === "task-quiet" || i.kind === "task-pr-gone") && i.task && !(i.task in tasks)) tasks[i.task] = i.reason;
     if (i.kind === "epic-done" && i.epic && !(i.epic in tasks)) tasks[i.epic] = i.reason;
-    if ((i.kind === "agent-down" || i.kind === "session-long" || i.kind === "role-down") && i.agent && !(i.agent in agents)) agents[i.agent] = i.reason;
+    if (["agent-down", "session-long", "role-down", "idle-ready"].includes(i.kind) && i.agent && !(i.agent in agents)) agents[i.agent] = i.reason;
   }
   return { tasks, agents };
 }
@@ -47,11 +49,19 @@ export function attentionLine(items: AttentionItem[]): string {
   return `${items.length} ${items.length === 1 ? "thing is" : "things are"} stuck or waiting too long.`;
 }
 
-/** What the page does for an item's action: a task's confirm (release, close), an agent's start confirm, or a page. */
+/** What the page does for an item's action: a task's confirm (release, close), an agent's start confirm, the confirm
+ *  that sends one line to an agent's session (say), or a page. */
 export function actionOf(i: AttentionItem): { do: "task"; action: "release" | "close"; task: string } | { do: "start"; agent: string }
-  | { do: "open"; link: string } {
+  | { do: "say"; agent: string; text: string } | { do: "open"; link: string } {
   const a = i.action;
   if ((a.kind === "release" || a.kind === "close") && a.task) return { do: "task", action: a.kind, task: a.task };
   if (a.kind === "start" && a.agent) return { do: "start", agent: a.agent };
+  if (a.kind === "say" && a.agent && a.text) return { do: "say", agent: a.agent, text: a.text };
   return { do: "open", link: a.link ?? "page:home" };
+}
+
+/** What Start work's confirm says (#591): the line goes to the agent's session as the chat sends it (`factory say`). */
+export function sayAsk(agent: string, text: string): { happens: string; doesNot: string } {
+  return { happens: `${text} is sent to ${agent}'s session, as if typed there, and it looks for the next ready task.`,
+    doesNot: "Nothing is claimed for it here. If the same text is already typed in its prompt box, it is sent, not typed again." };
 }

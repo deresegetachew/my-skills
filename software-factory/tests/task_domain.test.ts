@@ -1,7 +1,7 @@
 // The Task and Claim rules (decision 0003, #377): plain functions, tested without any fake.
 import { expect, test } from "bun:test";
 import { type ClaimEvent, isMe, standing, winner } from "../hooks/core/domain/claim.ts";
-import { checkClaim, dependencies, type Task, tickTodo, todos } from "../hooks/core/domain/task.ts";
+import { checkClaim, dependencies, prdChangeIn, type Task, tickTodo, todos } from "../hooks/core/domain/task.ts";
 
 const claim = (agent: string, machine: string | null = null): ClaimEvent => ({ claim: { agent, machine } });
 
@@ -54,4 +54,22 @@ test("only a ready task whose dependencies are done can be claimed, and in this 
   expect(checkClaim(task({ state: "blocked" }), "haile", mine, () => ["3"])).toEqual(["blocked", []]);
   expect(checkClaim(task(), "haile", mine, () => ["3"])).toEqual(["waiting", ["3"]]);
   expect(checkClaim(task({ state: "new" }), "haile", mine, none)).toEqual(["not-ready", []]);
+});
+
+test("a task from a PRD change waits for its pull request before its dependencies; merged, it is free (#578)", () => {
+  const none = (): string[] => [];
+  const mine = (): boolean => true;
+  expect(checkClaim(task({ waitsForPrd: "62" }), "haile", mine, () => ["3"])).toEqual(["prd", ["62"]]);
+  expect(checkClaim(task({ state: "blocked", waitsForPrd: "62" }), "haile", mine, none)).toEqual(["blocked", []]);
+  expect(checkClaim(task({ state: "in-progress", holders: ["haile"], waitsForPrd: "62" }), "haile", mine, none)).toEqual(["mine", []]);
+  expect(checkClaim(task(), "haile", mine, none)).toEqual(["free", []]);
+});
+
+test("the PRD change a task names: `PRD change: #62` or the pull request's link, on a line of its own (#578)", () => {
+  expect(prdChangeIn("PRD: US-3\nPRD change: #62\n\nBuild it.")).toBe("62");
+  expect(prdChangeIn("  - prd change: https://github.com/acme/shop/pull/62")).toBe("62");
+  expect(prdChangeIn("PRD change: #62 (Shelf v1.1)")).toBe("62");
+  expect(prdChangeIn("PRD: US-62\nDepends on #62")).toBeNull();
+  expect(prdChangeIn("See the PRD change: #62 in the text")).toBeNull();
+  expect(prdChangeIn("")).toBeNull();
 });

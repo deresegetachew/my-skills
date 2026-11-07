@@ -36,7 +36,7 @@ import { boardMirror, type Config, load, taskSource } from "./factory_config.ts"
 import { comment } from "./factory_issues.ts";
 import { countGithubCall, Exit, pyDumps, runMain } from "./factory_lib.ts";
 import { OWNER_TITLE, ownerLogin, ownerQueue } from "./factory_orchestrator.ts";
-import { closeMerged, type MergedPull, mergedPulls, open as openTasks } from "./factory_board_merged.ts";
+import { closeMerged, closeMergedPrds, type MergedPull, mergedPulls, open as openTasks, prdCards } from "./factory_board_merged.ts";
 import { breakMarkers, ownerAskIds, trustedOf } from "./factory_prs.ts";
 import { Board, BoardError, boardUrl, ghCli, GithubError, isProjects, type Message, type MirrorSummary, mirrorToGithub, Numbers,
   type Task } from "../message-board/src/index.ts";
@@ -355,7 +355,8 @@ async function ask(cfg: Config, args: string[]): Promise<number> {
 // --- the sweep -----------------------------------------------------------------------------------------------------------
 
 /** Before the sweep (#536): each of the project's tasks in progress or in review whose linked pull request merged is closed
- * (factory_board_merged.ts), then each epic whose tasks are all done. False when GitHub couldn't list the pull requests:
+ * (factory_board_merged.ts), each PRD change card whose pull request merged (#578, so the tasks from it are ready), then
+ * each epic whose tasks are all done. False when GitHub couldn't list the pull requests:
  * then no claim may be freed this pass, or a merged task could go back to ready. */
 async function closeFinished(): Promise<boolean> {
   const repo = boardRepo();
@@ -374,6 +375,18 @@ async function closeFinished(): Promise<boolean> {
           fix: e.fix }) + "\n");
       }
       for (const c of await closeMerged(board, repo, tasks, pulls)) console.log(`closed ${c.label}: pull request #${c.pull} merged (closed after merge by the dev manager)`);
+    }
+    const cards = repo ? await prdCards(board, repo) : [];
+    if (cards.length) {
+      try {
+        for (const c of await closeMergedPrds(board, repo, cards, ghCli({ onCall: (a) => countGithubCall(a) }))) {
+          console.log(`closed the PRD change ${c.label}: pull request #${c.pull} merged, so the tasks that wait for it are ready`);
+        }
+      } catch (e) {
+        if (!(e instanceof GithubError)) throw e;
+        process.stderr.write(pyDumps({ code: "prd_unread", message: `GitHub didn't say whether the PRD changes' pull requests merged (${e.message}), so their tasks wait one more pass.`,
+          fix: e.fix }) + "\n");
+      }
     }
     const numbers = new Numbers(repo || null);
     for (const id of await board.settleEpics()) console.log(`closed the epic ${numbers.label(await board.get(id))}: all its tasks are done`);

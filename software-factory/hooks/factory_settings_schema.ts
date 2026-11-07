@@ -303,6 +303,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("attention.coding-agent.maxMinutes", "int", "ui", "Needs attention: a coding agent's session shows when it has been working this many minutes without a pause.", { default: 120 }),
   S("attention.dev-manager.maxMinutes", "int", "ui", "Needs attention: a dev manager's session shows when it has been working this many minutes without a pause.", { default: 30 }),
   S("attention.product-owner.maxMinutes", "int", "ui", "Needs attention: a product owner's session shows when it has been working this many minutes without a pause.", { default: 30 }),
+  S("attention.idleWithReadyMinutes", "int", "ui", "Needs attention: a coding agent shows when it has been idle this many minutes while a task it may take is ready (on the board, ready this long too).", { default: 10 }),
   S("tasks.labels", "dict", "issues", "The GitHub labels that mark a task: ready, inProgress, inReview, blocked and the agentPrefix."),
   S("structure.roots", "list", "commands", "Folders the structure check (the hexagonal skill's check_structure script) looks at, when a style uses it.", { default: [] }),
   S("structure.legacy", "str", "commands", "The list of legacy files the structure check leaves alone (it only shrinks).", { default: "" }),
@@ -539,6 +540,11 @@ const MORE: Record<string, More> = {
   "attention.prWaitHours": { long: "Counted from when the pull request was opened, as the last snapshot read it. A draft never " +
     "shows. Its action opens the pull request's page.",
   examples: ["factory settings set attention.prWaitHours 12"] },
+  "attention.idleWithReadyMinutes": { long: "Idle is counted from the agent's heartbeat (its since). A task it may take is ready, " +
+    "held by nobody, handed to nobody else and waiting for no open task. A Claude session idle at its prompt never looks " +
+    "for work by itself, and one whose prompt box still holds text is said to have a message typed but not sent. Its action " +
+    "is Start work: after a confirm, `/next-task` goes to the agent's session through `factory say`, as the chat sends it.",
+  examples: ["factory settings set attention.idleWithReadyMinutes 20"] },
   "attention.dev-manager.maxMinutes": { long: "A dev manager's pass is short, so one that has been working much longer is " +
     "likely stuck. Counted from when its state last changed (its heartbeat's since). The item opens its output, where Stop is.",
   examples: ["factory settings set attention.dev-manager.maxMinutes 45"] },

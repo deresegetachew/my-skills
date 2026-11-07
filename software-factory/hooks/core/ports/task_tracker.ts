@@ -19,6 +19,13 @@ export interface NewTask {
   tags?: string[]; // labels, besides ready
 }
 
+/** A ready task passed over because its PRD change hasn't merged (#578): how people call it ("#5", "b12", "1.3") and the
+ * pull request it waits for. */
+export interface SkippedForPrd {
+  name: string;
+  pr: string;
+}
+
 export interface Filed {
   id: string;
   url: string;
@@ -29,8 +36,10 @@ export interface TaskTracker {
   list(): Task[];
   /** The task as a person reads it: title, state, text and what people said about it. */
   show(id: string): string;
-  /** The first ready task nobody holds whose dependencies are done; claims nothing. */
-  next(): Task | null;
+  /** The first ready task nobody holds whose dependencies are done and whose PRD change merged; claims nothing.
+   * `skipped`, when given, hears the ready tasks passed over only for their PRD change (#578), so a caller can say why
+   * without listing the tasks again. */
+  next(skipped?: SkippedForPrd[]): Task | null;
   /** The agent's own in-progress task first, else the next ready one, claimed. A claim lost in a race moves on to the
    * one after. */
   pick(who: Claimant): Picked;

@@ -38,7 +38,7 @@ import { type Config, load, type TaskLabels, taskLabels, taskSource, toFloat } f
 import { taskTracker } from "./core/compose.ts";
 import { type ClaimEvent, isMe as isMyClaim, standing, winner } from "./core/domain/claim.ts";
 import { CoreError } from "./core/domain/error.ts";
-import { dependencies } from "./core/domain/task.ts";
+import { dependencies, prdChangeIn } from "./core/domain/task.ts";
 import { machineId } from "./factory_machine.ts";
 import { holderIsMe, leasesOn } from "./factory_leases.ts";
 import { asPull, freshPrs, readyOf } from "./factory_pr_feed.ts";
@@ -166,6 +166,24 @@ export function openDependencies(issue: Issue, openNumbers: Set<number>, lookedU
   return stillOpen;
 }
 
+/** Whether the PRD change in pull request `pr` still holds its tasks back (#578): GitHub has it and it hasn't merged
+ * (open, or closed without merging; an issue in its place holds back while it is open). A number GitHub doesn't have
+ * holds nothing back. `lookedUp` caches the answers across issues. */
+export function prdOpen(pr: number, lookedUp: Map<number, boolean>): boolean {
+  if (!lookedUp.has(pr)) {
+    const found = gh<Issue | null>("GET", `repos/{owner}/{repo}/issues/${pr}`, undefined, true);
+    const pull = found && typeof found.pull_request === "object" && found.pull_request !== null ? (found.pull_request as { merged_at?: unknown }) : null;
+    lookedUp.set(pr, Boolean(found) && (pull ? !pull.merged_at : found?.state === "open"));
+  }
+  return lookedUp.get(pr) as boolean;
+}
+
+/** The pull request of the PRD change `text` names (its `PRD change:` line) while that hasn't merged, else null (#578). */
+export function prdWait(text: string, lookedUp: Map<number, boolean>): string | null {
+  const pr = prdChangeIn(text);
+  return pr !== null && prdOpen(Number(pr), lookedUp) ? pr : null;
+}
+
 export type ClaimMark = [agent: string, machine: string | null];
 
 /** [agent, machine] for the claim comments since the last release, oldest first. `machine` is null for a claim
@@ -210,13 +228,22 @@ export function ownIssue(n: number, agent: string, machine: string): boolean {
 /** An issue labelled `epic` (#440) groups tasks; it is never a task itself. */
 export const isEpic = (i: Issue): boolean => names(i).has("epic");
 
-export function readyIssues(cfg: Config, openNow: Issue[] = taskIssues()): Issue[] {
+/** The ready task issues nobody holds, in build order, whose dependencies are done and whose PRD change (if any) merged.
+ * `heldForPrd` hears the ones held back only for their PRD change; `prds` caches the pull requests looked up. */
+export function readyIssues(cfg: Config, openNow: Issue[] = taskIssues(), heldForPrd: { issue: Issue; pr: string }[] = [],
+  prds: Map<number, boolean> = new Map()): Issue[] {
   const L = taskLabels(cfg);
   const openNumbers = new Set(openNow.map((i) => i.number));
   const ready = openNow.filter((i) => !isEpic(i) && names(i).has(L.ready) && !names(i).has(L.blocked) &&
     ![...names(i)].some((x) => x.startsWith(L.agentPrefix)));
   const lookedUp = new Map<number, boolean>();
-  return sortedByOrder(ready).filter((i) => !openDependencies(i, openNumbers, lookedUp).length);
+  return sortedByOrder(ready).filter((i) => {
+    if (openDependencies(i, openNumbers, lookedUp).length) return false;
+    // a task from a PRD change waits until that change merges (#578); `heldForPrd` hears which, for the caller to say
+    const pr = prdWait(i.body ?? "", prds);
+    if (pr !== null) heldForPrd.push({ issue: i, pr });
+    return pr === null;
+  });
 }
 
 /** How long a claim waits for a simultaneous one to land: 2 s, or FACTORY_CLAIM_SETTLE_SECONDS (the tests set 0). */

@@ -9,7 +9,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync
 import { dirname, join } from "node:path";
 import { api, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { buildRelease, sha256 } from "./release_support.ts";
-import { git, gitRepo, read, readJson, SF, sh, write, writeExe } from "./support.ts";
+import { git, gitRepo, read, readJson, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 const T = 90_000;
 const running: Running[] = [];
@@ -757,6 +757,14 @@ test("served from a release install: check passes, and the kit step installs tha
   expect(pinned.tag).toBe("v1.0.0");
   expect(pinned.sha256).toBe(sha256(readFileSync(join(dist, "software-factory-1.0.0.tar.gz"))));
   expect(readFileSync(join(dest, ".claude", "hooks", "factory_x.ts"), "utf8")).toBe('export const VERSION = "1.0.0";\n');
+  // #540: the answers' allow rules reach the agents' rules the way `factory update` puts them there, and the pin holds
+  const answers = step(run, "answers");
+  expect(answers.state, JSON.stringify(run)).toBe("done");
+  const rules = readJson<Row>(join(dest, ".claude", "factory", "settings.json"));
+  expect(((rules.permissions as Row).allow as string[])).toContain("Bash(bun test*)");
+  const repinned = readJson<Row>(join(dest, ".claude", "factory", "release.json"));
+  expect((repinned.files as Row)[".claude/factory/settings.json"])
+    .toBe(sha256(readFileSync(join(dest, ".claude", "factory", "settings.json"))));
 }, T);
 
 test("served from a release install whose archive can't be had: the kit step fails with the update --archive fix (#537)", async () => {
@@ -788,4 +796,90 @@ test("check: a folder with no origin is refused with ui_add_no_remote, before an
   expect(started.json.code).toBe("ui_add_no_remote");
   expect(existsSync(join(lone, ".claude", "hooks"))).toBe(false);
   expect(ghCalls(s.p)).toEqual([]);
+}, T);
+
+// --- the setup passes doctor (#540) -------------------------------------------------------------------------------------
+
+test("board: with a board on this machine, tasks from the board write tasks.source board and messaging.transport board (#540)", async () => {
+  const config = tmp("factory-board-config-");
+  roots.push(config);
+  write(join(config, "message-board", "url"), "postgres://127.0.0.1:1/none\n");
+  const s = await setup(null, { FACTORY_CONFIG_DIR: config });
+  const run = await waitRun(s.ui, await start(s, req(s, { tasks: "board" })));
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  const cfg = readJson<Row>(join(s.folder, "shop", ".claude", "factory.json"));
+  expect((cfg.tasks as Row).source).toBe("board");
+  expect((cfg.messaging as Row).transport).toBe("board");
+}, T);
+
+test("commands: only the ones given are written, an empty answer clears the template's, and a given reviewer is trusted (#540)", async () => {
+  const s = await setup();
+  const run = await waitRun(s.ui, await start(s, req(s, { lint: "", install: "bun install", reviewer: "octo-owner" })));
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  const cfg = readJson<Row>(join(s.folder, "shop", ".claude", "factory.json"));
+  expect(cfg.commands).toMatchObject({ install: "bun install", typecheck: "", lint: "", test: "bun test", build: "" });
+  expect(cfg.trustedReviewers).toEqual(["octo-owner"]);
+  expect((cfg.permissions as Row).allow).toEqual(["Bash(bun test*)", "Bash(./factory run-check*)"]);
+  const rules = readJson<Row>(join(s.folder, "shop", ".claude", "factory", "settings.json"));
+  expect(((rules.permissions as Row).allow as string[])).toContain("Bash(bun test*)");
+  expect(String(step(run, "answers").output)).toContain("Trusted reviewer: octo-owner");
+}, T);
+
+test("check: a reviewer that isn't a GitHub login is refused with ui_add_reviewer (#540)", async () => {
+  const s = await setup();
+  const r = await check(s, req(s, { reviewer: "not a login" }));
+  expect(r.status).toBe(400);
+  expect(r.json.code).toBe("ui_add_reviewer");
+  expect(typeof r.json.fix).toBe("string");
+}, T);
+
+test("check: a command with a line break or a control character, or over 200 characters, is refused with ui_add_command (#540)", async () => {
+  const s = await setup();
+  for (const over of [{ test: "bun test\nrm -rf ~" }, { lint: "bun x tsc\u0007" }, { build: `echo ${"x".repeat(200)}` }]) {
+    const r = await check(s, req(s, over));
+    expect(r.status, JSON.stringify(over)).toBe(400);
+    expect(r.json.code).toBe("ui_add_command");
+    expect(typeof r.json.message).toBe("string");
+    expect(String(r.json.fix).length).toBeGreaterThan(0);
+  }
+  const started = await api(s.ui, "/api/add-project", { method: "POST", body: { confirm: true, ...req(s, { test: "a\nb" }) } });
+  expect(started.status).toBe(400);
+  expect(started.json.code).toBe("ui_add_command");
+  expect(existsSync(join(s.folder, "shop"))).toBe(false);
+  expect((await check(s, req(s, { build: `echo ${"x".repeat(195)}` }))).status, "200 characters are taken").toBe(200);
+}, T);
+
+test("check: a command that is only a runner gets a warning on Review, and a whole command none (#540)", async () => {
+  const s = await setup();
+  const r = await check(s, req(s, { test: "bun", lint: "npx" }));
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const warnings = r.json.warnings as string[];
+  expect(warnings.length).toBe(2);
+  expect(warnings.some((w) => w.includes("test command is only `bun`") && w.includes("Bash(bun*)"))).toBe(true);
+  expect(warnings.some((w) => w.includes("lint command is only `npx`"))).toBe(true);
+  expect(warnings.join("\n")).toContain("almost anything");
+  expect((await check(s, req(s))).json.warnings).toEqual([]);
+}, T);
+
+test("a project with a package.json keeps CI's Node setup, and its steps run the commands from the settings (#540)", async () => {
+  const s = await setup();
+  const dir = folderRepo(s, "node");
+  write(join(dir, "package.json"), '{"name": "node"}\n');
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "package.json");
+  git(dir, "push", "-q", "origin", "main");
+  const run = await waitRun(s.ui, await start(s, req(s, { source: "folder", repo: "", path: dir })));
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  const ci = read(join(dir, ".github", "workflows", "ci.yml"));
+  expect(ci).toContain("actions/setup-node");
+  expect(ci).not.toMatch(/run: pnpm/);
+  for (const c of ["install", "typecheck", "lint", "test", "build"]) expect(ci).toContain(`factory_stack.ts run ${c}`);
+}, T);
+
+test("doctor finds something the setup should have fixed: the step still fails, with no to-dos (#540)", async () => {
+  const s = await setup();
+  writeFileSync(s.doctorFile, "1");
+  const run = await waitRun(s.ui, await start(s, req(s)));
+  expect(run.state).toBe("failed");
+  expect(step(run, "doctor").todos).toEqual([]);
 }, T);

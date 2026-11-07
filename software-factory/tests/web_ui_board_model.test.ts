@@ -1,7 +1,7 @@
 // The task board's rules that aren't drawing (#439): its columns, and its lanes by agent or by epic, from
 // web/board_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, COLUMNS, columnsOf, epicColour, laneColours, ownerOf, taskAsk, taskLabel, unheldText } from "../web/board_model.ts";
+import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, COLUMNS, columnsOf, epicColour, laneColours, ownerOf, prdText, taskAsk, taskLabel, unheldText } from "../web/board_model.ts";
 import { filterRows, type TaskRow } from "../web/views_model.ts";
 
 const task = (id: string, state: string, holders: string[] = [], group = "", title = `Task ${id}`): TaskRow => ({ id, title, state,
@@ -173,4 +173,10 @@ test("an agent lane's grey line has its task count and its state as the sidebar 
   expect(agentLaneSub(1, "down")).toBe("1 task · down");
   expect(agentLaneSub(3, "working on b19")).toBe("3 tasks · working on b19");
   expect(agentLaneSub(2, undefined)).toBe("2 tasks");
+});
+
+test("a card waiting for its PRD change says so, with the pull request; one with none says nothing (#578)", () => {
+  expect(prdText({ prd: { number: 62 } })).toBe("Waits for its PRD: PR #62 to merge");
+  expect(prdText({ prd: null })).toBe("");
+  expect(prdText({})).toBe("");
 });

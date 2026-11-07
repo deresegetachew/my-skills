@@ -5,7 +5,7 @@
 // serves the page.
 import { type ReactNode, useEffect, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
-import { Board, EpicChips, TaskPage } from "./board.tsx";
+import { Board, EpicChips, PrdLink, TaskPage } from "./board.tsx";
 import { type LaneBy, taskLabel } from "./board_model.ts";
 import { Cited, Cites } from "./docs.tsx";
 import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
@@ -118,6 +118,7 @@ function TaskLine({ t, open, docs, openTask }: { t: TaskRow; open: ViewProps["op
           {t.group && <span>{t.group}</span>}
           {t.todos.all > 0 && <span>{t.todos.done} of {t.todos.all} todos done</span>}
           {t.dependsOn.length > 0 && <span>after {t.dependsOn.map((d) => `#${d.replace(/^#/, "")}`).join(", ")}</span>}
+          {t.prd && <span>waits for its PRD: <PrdLink prd={t.prd} /></span>}
           {t.pr && <span>PR <button className="link" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>#{t.pr.number}</button></span>}
           <Cites cites={t.cites} title={t.title} docs={docs} open={open} />
         </span>
