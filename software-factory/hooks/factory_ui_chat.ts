@@ -69,6 +69,8 @@ export interface Queue {
   url: string | null;
   asks: Ask[];
   problem: Problem | null;
+  /** Where it was read (#545): the message board, or GitHub's owner-queue issue. The Inbox words its empty state by it. */
+  from: "board" | "github";
 }
 
 export interface Reply {
@@ -258,19 +260,19 @@ async function boardQueue(p: UiProject): Promise<{ issue: number | null; url: st
 export async function readQueue(p: UiProject): Promise<Queue> {
   const trusted = trustedOf((p.config ?? {}) as Config);
   const board = await boardQueue(p);
-  if (board) return asksOf(board.issue, board.url, board.comments, new Set([...trusted, "owner"]));
+  if (board) return { ...asksOf(board.issue, board.url, board.comments, new Set([...trusted, "owner"])), from: "board" };
   const issues = await ghAll(p, "repos/{owner}/{repo}/issues?state=open");
-  if (!Array.isArray(issues)) return { issue: null, url: null, asks: [], problem: issues };
+  if (!Array.isArray(issues)) return { issue: null, url: null, asks: [], problem: issues, from: "github" };
   const queue = issues.find((i) => str(i.title).startsWith(OWNER_QUEUE_TITLE) && !i.pull_request);
-  if (!queue) return { issue: null, url: null, asks: [], problem: null };
+  if (!queue) return { issue: null, url: null, asks: [], problem: null, from: "github" };
   const n = Number(queue.number);
   const comments = await ghAll(p, `repos/{owner}/{repo}/issues/${n}/comments`);
-  if (!Array.isArray(comments)) return { issue: n, url: str(queue.html_url) || null, asks: [], problem: comments };
-  return asksOf(n, str(queue.html_url) || null, comments, trusted);
+  if (!Array.isArray(comments)) return { issue: n, url: str(queue.html_url) || null, asks: [], problem: comments, from: "github" };
+  return { ...asksOf(n, str(queue.html_url) || null, comments, trusted), from: "github" };
 }
 
 /** The asks in an owner queue's comments, each with its state and the owner's answer. */
-function asksOf(n: number | null, url: string | null, comments: Obj[], trusted: Set<string>): Queue {
+function asksOf(n: number | null, url: string | null, comments: Obj[], trusted: Set<string>): Omit<Queue, "from"> {
   const open = new Set(openOwnerAsks(comments, trusted).map(([id]) => id));
   const answers = new Map<string, string>();
   for (const c of comments) for (const m of str(c.body).matchAll(OWNER_ANSWER)) answers.set(m[1] as string, askText(str(c.body)));

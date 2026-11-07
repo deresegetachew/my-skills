@@ -6,7 +6,7 @@
 // whose answer arrives later. The owner queue shows each ask as a card with its options as buttons; a tap asks first,
 // then runs `factory owner answer`.
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { type AskView, type ChatItemView, itemLabel, mergeItems, orderAsks, type ProblemView, type QueueView } from "./chat_model.ts";
+import { type AskView, type ChatItemView, emptyQueueText, itemLabel, mergeItems, orderAsks, type ProblemView, type QueueView } from "./chat_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
 
@@ -268,7 +268,7 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
       {done && <div className="notice good" role="status"><span className="dot good" aria-hidden="true" /><div><strong>{done}</strong><p>Posted on the owner queue; the dev manager reads it on its next pass.</p></div></div>}
       {!queue && !problem && <p className="empty">Reading the owner queue…</p>}
       {queue && queue.issue === null && !queue.problem && (
-        <p className="empty">There is no owner queue yet: the dev manager opens the issue “Dev manager: needs the owner” with its first ask.</p>
+        <p className="empty">{emptyQueueText(queue.from)}</p>
       )}
       {queue && queue.issue !== null && (
         <p className="queue-head">

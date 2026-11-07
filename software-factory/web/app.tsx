@@ -9,7 +9,7 @@
 // tested on their own. Nothing on screen names a command.
 import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
+import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, pickProject, type ProjectView, ROLE_TITLE, searchChannels,
   type Tone } from "./model.ts";
 import { ADD_CSS, AddProjectPage } from "./add_project.tsx";
 import type { Run as AddRun } from "./add_project_model.ts";
@@ -86,6 +86,23 @@ class Unauthorized extends Error {}
 const UNREACHABLE_FIX = "Check that the web UI still runs on the machine that serves this page, start it again there, then reload.";
 
 const TOKEN_KEY = "factory-ui-token";
+const PROJECT_KEY = "factory-ui-project"; // the project last opened on this browser (#545)
+
+function storedProject(): string | null {
+  try {
+    return localStorage.getItem(PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function keepProject(id: string): void {
+  try {
+    localStorage.setItem(PROJECT_KEY, id);
+  } catch {
+    // a private window: the next visit opens the first project
+  }
+}
 const ADD_HASH = "#/add-project";
 
 function storedToken(): string {
@@ -676,7 +693,8 @@ function App() {
       open={(p) => { setAdding(false); location.hash = channelHash(p, "page:home"); }} />;
   }
 
-  const project = projects.find((p) => p.id === route?.project) ?? projects[0] as Project;
+  const project = pickProject(projects, route?.project, storedProject()) as Project;
+  if (route?.project === project.id) keepProject(project.id);
   const view = views.find((v) => v.id === project.id) ?? { id: project.id, name: project.name, channels: [] };
   const docRoute = route ? parseDocChannel(route.channel) : null;
   const docPages = pagesOf(docsBy[project.id]);

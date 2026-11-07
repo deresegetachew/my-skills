@@ -40,6 +40,15 @@ export interface QueueView {
   url: string | null;
   asks: AskView[];
   problem: ProblemView | null;
+  /** Where the owner queue was read: the message board or GitHub (#545); missing from an older server. */
+  from?: "board" | "github";
+}
+
+/** The Inbox's words when nothing was asked yet (#545): on the board there is no issue to wait for. */
+export function emptyQueueText(from: QueueView["from"]): string {
+  return from === "board"
+    ? "Nothing asked yet. When the dev manager or the product owner asks you something, it shows here."
+    : "There is no owner queue yet: the dev manager opens the issue “Dev manager: needs the owner” with its first ask.";
 }
 
 /** `before` and `more` as one chat: each id once (the newer copy wins), in time order. */
