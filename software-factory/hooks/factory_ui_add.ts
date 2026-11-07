@@ -1,7 +1,8 @@
 // Adding a project from the web UI (#447): bring a GitHub repo (clone one, make a new one, or a folder already on this
 // machine), install the factory in it, save the owner's answers in its .claude/factory.json, make its labels, owner queue
-// and starter PRD (`factory init`), open a pull request with the setup, list it in the page and run `factory doctor`
-// there. The page shows each step as it goes; a failed step stops the run, and Retry goes
+// and starter PRD (`factory init`), open a pull request with the setup, list it in the page, make sure the heartbeat daemon
+// runs on this machine (`factory heartbeat ensure`; where it can't, the step is skipped with why and the fix) and run
+// `factory doctor` there. The page shows each step as it goes; a failed step stops the run, and Retry goes
 // on from that step. Each step looks first, so running one again adds nothing twice.
 //
 //   GET  /api/add-project                   the owner's repos (gh repo list), the folder new ones go in, the legends
@@ -230,6 +231,7 @@ export function plan(req: AddRequest, host: AddHost): { id: string; title: strin
     { id: "init", title: "Labels, owner queue and PRD", detail: `${req.tasks === "issues" ? "The task labels, " : ""}the owner queue issue, a starter PRD and the role folders` },
     { id: "commit", title: "Open the setup pull request", detail: `Everything above on the branch ${SETUP_BRANCH}, for you to merge into ${req.mainBranch}` },
     { id: "list", title: "Show it in the sidebar", detail: `${name} joins the projects on the left` },
+    { id: "heartbeat", title: "Watch its agents", detail: "The heartbeat daemon on this machine, so each agent shows as running, waiting or down" },
     { id: "doctor", title: "Check the project", detail: "Each check the factory needs, with what to do for any that fails" },
   ];
 }
@@ -405,6 +407,20 @@ function stepList(req: AddRequest, step: AddStep, host: AddHost, run: AddRun): D
   return { state: listed ? "skipped" : "done", output: `${p.name} is on the left.` };
 }
 
+/** `factory heartbeat ensure` in the new project: installed if missing, started if stopped, nothing if it runs. A machine
+ *  where it can't run (no systemd user manager) doesn't stop the setup: the step says why and what to do, and the agents'
+ *  state is then worked out each time it is asked. */
+async function stepHeartbeat(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
+  const p = newProject(req, host);
+  try {
+    return { state: "done", output: await must(step, ["bash", join(req.path, "factory"), "heartbeat", "ensure"], req.path, envFor(p),
+      "Run `factory heartbeat install` in the project.") };
+  } catch (e) {
+    if (!(e instanceof StepFailed)) throw e;
+    return { state: "skipped", output: `The heartbeat daemon couldn't be started here: ${e.problem.message} Fix: ${e.problem.fix}` };
+  }
+}
+
 async function stepDoctor(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
   const p = newProject(req, host);
   return { state: "done", output: await must(step, ["bash", join(req.path, "factory"), "doctor"], req.path, envFor(p),
@@ -520,6 +536,7 @@ export class AddRuns {
       case "init": return stepInit(req, step, this.host);
       case "commit": return stepCommit(req, step);
       case "list": return stepList(req, step, this.host, run);
+      case "heartbeat": return stepHeartbeat(req, step, this.host);
       default: return stepDoctor(req, step, this.host);
     }
   }

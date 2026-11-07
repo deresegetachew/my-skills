@@ -116,6 +116,8 @@ async function runFile(path: string): Promise<Result> {
     GIT_CONFIG_GLOBAL: gitConfig(scratch),
     // `pick` waits 2 s after claiming for a simultaneous claim; the tests' claims are made up in advance.
     FACTORY_CLAIM_SETTLE_SECONDS: "0",
+    // `factory init` and `factory owner start` make sure the heartbeat service runs: never this machine's real one here
+    FACTORY_SETUP_HEARTBEAT: "off",
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   });
