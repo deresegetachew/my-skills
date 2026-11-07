@@ -403,7 +403,8 @@ const err = (id: Id | null, code: number, message: string, data?: unknown): Repl
 /** A board error (or anything else) as a tool result with isError. */
 function toolError(e: unknown, log: (line: string) => void, labels: Map<number, string> = new Map()): Out {
   let error: { code: string; message: string; fix: string };
-  if (e instanceof BoardError) error = { code: e.code, message: relabel(e.message, labels), fix: relabel(e.fix, labels) };
+  // only the tasks the board itself named (its taskOf tokens) are renamed: a lookup's "#3" is already what people see
+  if (e instanceof BoardError) error = { code: e.code, ...e.named((n) => labels.get(n) ?? `b${n}`) };
   else {
     const message = (e instanceof Error ? e.message : String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
     log(`factory board mcp: unexpected error: ${message}`);
@@ -476,9 +477,18 @@ export async function present(board: Board, numbers: Numbers, out: Out, known: M
   return rename(out) as Out;
 }
 
-/** `text` with each board id in `labels` (written `#<id>`) named by its number. */
-function relabel(text: string, labels: Map<number, string>): string {
-  return text.replace(/#(\d+)\b/g, (whole, id: string) => labels.get(Number(id)) ?? whole);
+/** The numbers ("#3", "b17") of the tasks with these board ids: from `known`, else read from the board. */
+async function labelsOf(board: Board, numbers: Numbers, ids: number[], known: Map<number, string>): Promise<Map<number, string>> {
+  const out = new Map(known);
+  for (const id of ids) {
+    if (out.has(id)) continue;
+    try {
+      out.set(id, numbers.label(await board.get(id)));
+    } catch {
+      out.set(id, `b${id}`); // not on the board: its board id is all there is
+    }
+  }
+  return out;
 }
 
 export interface McpOptions {
@@ -601,7 +611,8 @@ export class McpSession {
       const out = await present(this.o.board, this.numbers, raw, labels);
       return ok(id, { content: [{ type: "text", text: JSON.stringify(out) }], structuredContent: out });
     } catch (e) {
-      return ok(id, toolError(e, this.log, labels));
+      const named = e instanceof BoardError ? await labelsOf(this.o.board, this.numbers, e.tasks(), labels).catch(() => labels) : labels;
+      return ok(id, toolError(e, this.log, named));
     }
   }
 }

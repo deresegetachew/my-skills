@@ -2,7 +2,7 @@
 // that also inserts its event and NOTIFYs mb_events with the event's seq, so a listener re-reads from its cursor.
 import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
-import { BoardError, refuse } from "./errors.ts";
+import { BoardError, refuse, taskOf } from "./errors.ts";
 import { GRAPH_LOCK, type NewEvent, reaches, recordEvents } from "./graph.ts";
 import { applyImport } from "./import.ts";
 import { addLogin, listLogins, type Login, removeLogin } from "./logins.ts";
@@ -186,7 +186,7 @@ export class Board {
 
   private async mustTask(tx: Tx, id: number): Promise<Task> {
     const t = await this.taskIn(tx, wholeNumber("A task id", id));
-    if (!t) refuse("not-found", `There is no task #${id} on the board.`, "Check the id (`factory board tasks` lists them).");
+    if (!t) refuse("not-found", `There is no task ${taskOf(id)} on the board.`, "Check the id (`factory board tasks` lists them).");
     return t;
   }
 
@@ -264,18 +264,18 @@ export class Board {
       if (changes.parentId !== undefined && changes.parentId !== null) {
         await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
         if (changes.parentId === id || (await reaches(tx, id, changes.parentId))) {
-          refuse("cycle", `#${changes.parentId} can't be the parent of #${id}: that makes a loop (it is #${id} itself, under it, or waits on it).`,
+          refuse("cycle", `${taskOf(changes.parentId)} can't be the parent of ${taskOf(id)}: that makes a loop (it is ${taskOf(id)} itself, under it, or waits on it).`,
             "Choose another parent, or remove the edge that makes the loop first.");
         }
       }
       if (changes.status && changes.status !== "in_review" && before.holder) {
-        refuse("bad-input", `#${id} is held by ${before.holder}; update can't move it to ${changes.status}.`,
+        refuse("bad-input", `${taskOf(id)} is held by ${before.holder}; update can't move it to ${changes.status}.`,
           "The holder releases it (board.release with next ready or deferred), or the sweep does once the claim is stale.");
       }
       const r = rows(await tx.unsafe(`UPDATE tasks SET ${[...set, "version = version + 1", "updated_at = now()"].join(", ")}
         WHERE id = $1 AND version = $2 RETURNING id`, params));
       if (!r.length) {
-        refuse("conflict", `#${id} has changed since you read it (you read version ${version}; it is at ${before.version}).`,
+        refuse("conflict", `${taskOf(id)} has changed since you read it (you read version ${version}; it is at ${before.version}).`,
           "Read it again (board.get), apply your change to what is there now, and send it with the new version.");
       }
       const task = (await this.taskIn(tx, id)) as Task;
@@ -298,12 +298,12 @@ export class Board {
     await this.mustTask(tx, from);
     await this.mustTask(tx, to);
     if (from === to) {
-      refuse(BLOCKING.includes(k) ? "cycle" : "bad-input", `A task can't ${k.replace("_", " ")} itself (#${from}).`, "Link two different tasks.");
+      refuse(BLOCKING.includes(k) ? "cycle" : "bad-input", `A task can't ${k.replace("_", " ")} itself (${taskOf(from)}).`, "Link two different tasks.");
     }
     if (BLOCKING.includes(k)) {
       await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
       if (await reaches(tx, to, from)) {
-        refuse("cycle", `#${from} ${k.replace("_", " ")} #${to} would make a loop: #${from} already waits on #${to}, or is under it.`,
+        refuse("cycle", `${taskOf(from)} ${k.replace("_", " ")} ${taskOf(to)} would make a loop: ${taskOf(from)} already waits on ${taskOf(to)}, or is under it.`,
           "Remove the edge that makes the loop first, or link them the other way.");
       }
     }
@@ -395,11 +395,11 @@ export class Board {
     const t = await this.mustTask(tx, id);
     const why = !(CLAIMABLE_KINDS as readonly string[]).includes(t.kind) ? `it is ${/^[aeiou]/.test(t.kind) ? "an" : "a"} ${t.kind}; only tasks and bugs are claimed`
       : t.holder ? `${t.holder} holds it`
-      : t.blocked ? `it is blocked by ${t.blockedBy.map((b) => `#${b}`).join(", ")}`
+      : t.blocked ? `it is blocked by ${t.blockedBy.map((b) => taskOf(b)).join(", ")}`
       : t.status !== "open" ? `it is ${t.status}`
       : t.assignee && t.assignee !== this.as ? `it was handed to ${t.assignee}`
       : "it changed while you claimed it";
-    return refuse("not-ready", `#${id} isn't ready for ${this.as}: ${why}.`, "Claim another task (`board.claim()` takes the first ready one), or wait for it.");
+    return refuse("not-ready", `${taskOf(id)} isn't ready for ${this.as}: ${why}.`, "Claim another task (`board.claim()` takes the first ready one), or wait for it.");
   }
 
   /** A token-checked update; refused with `claim-lost` when the token no longer holds the task. */
@@ -408,7 +408,7 @@ export class Board {
       WHERE id = $1 AND claim_token = $2 RETURNING id`, [id, token, ...params]));
     if (!r.length) {
       const t = await this.mustTask(tx, id);
-      refuse("claim-lost", `Your claim on #${id} is gone: ${t.holder ? `${t.holder} holds it now` : "nobody holds it now"}.`,
+      refuse("claim-lost", `Your claim on ${taskOf(id)} is gone: ${t.holder ? `${t.holder} holds it now` : "nobody holds it now"}.`,
         "Stop working on it. Claim it again if it is ready (`board.claim(id)`), or take another task.");
     }
     return (await this.taskIn(tx, id)) as Task;
@@ -452,10 +452,10 @@ export class Board {
         if (!r.length) {
           const t = await this.mustTask(tx, id);
           if (!t.holder) {
-            refuse("bad-input", `#${id} is already done (${t.outcome ?? "no outcome"}).`,
+            refuse("bad-input", `${taskOf(id)} is already done (${t.outcome ?? "no outcome"}).`,
               "Move it back to ready first (board_move with to ready, which the owner and the dev manager have; board.move in code), then close it with the new outcome.");
           }
-          refuse("claim-lost", `#${id} is held by ${t.holder}; only its holder closes it, with its token.`,
+          refuse("claim-lost", `${taskOf(id)} is held by ${t.holder}; only its holder closes it, with its token.`,
             "Ask the holder to close it, or wait until it is released.");
         }
         task = (await this.taskIn(tx, id)) as Task;
@@ -490,7 +490,7 @@ export class Board {
         const before = await this.mustTask(tx, id);
         if (to === "in_progress") {
           if (before.holder) return before;
-          refuse("bad-input", `#${id} isn't held: in progress means an agent holds it, and only a claim puts a task there.`,
+          refuse("bad-input", `${taskOf(id)} isn't held: in progress means an agent holds it, and only a claim puts a task there.`,
             "Hand it to the agent (board_assign) so they claim it, or move it to ready.");
         }
         const events: NewEvent[] = [];
@@ -522,7 +522,7 @@ export class Board {
       this.sql.begin(async (tx) => {
         await tx`SELECT id FROM tasks WHERE id = ${wholeNumber("A task id", id)} FOR NO KEY UPDATE`;
         const before = await this.mustTask(tx, id);
-        if (before.status === "done") refuse("bad-input", `#${id} is done; a done task isn't handed on.`, "Move it to ready first (board_move), then assign it.");
+        if (before.status === "done") refuse("bad-input", `${taskOf(id)} is done; a done task isn't handed on.`, "Move it to ready first (board_move), then assign it.");
         const events: NewEvent[] = [];
         if (before.holder) events.push(this.takeBackEvent(before, reason, "assign"));
         await tx.unsafe(`UPDATE tasks SET assignee = $2, status = CASE WHEN holder IS NULL THEN status ELSE 'open' END, holder = NULL,
@@ -537,7 +537,7 @@ export class Board {
   /** The event for taking a held task back from its holder; refused without a reason. */
   private takeBackEvent(t: Task, reason: string | undefined, why: string): NewEvent {
     if (reason === undefined) {
-      refuse("bad-input", `#${t.id} is held by ${t.holder}; this takes the claim back from them, so it needs a reason.`,
+      refuse("bad-input", `${taskOf(t.id)} is held by ${t.holder}; this takes the claim back from them, so it needs a reason.`,
         "Pass reason: why you take it back (the holder and the board's events show it).");
     }
     return { kind: "task.taken_back", subject: `task:${t.id}`, payload: { holder: t.holder, reason, for: why } };

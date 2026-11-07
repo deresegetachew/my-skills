@@ -231,8 +231,8 @@ reads again, with a comment saying where the factory defines each.
   owner queue are notes (never claimed). **Only an issue the factory took as a task** (one of the mapping's labels:
   ready, in progress, in review, blocked, or `agent:<name>`, as in issues mode, where only a labelled issue is claimed)
   comes in as a task or bug; any other open issue (a channel, an untriaged report) comes in as a note, which is never
-  ready and which the mirror never labels (#515). A closed issue that is a task or bug on the board stays one: the
-  mirror takes the factory's labels off an issue it closes. The body is kept, with its `PRD:` and `Budget:` lines, and a `Milestone:` line
+  ready and which the mirror never labels (#515). A task or bug already on the board is never demoted: it may be held or
+  in progress, and the mirror takes the factory's labels off an issue it closes. The body is kept, with its `PRD:` and `Budget:` lines, and a `Milestone:` line
   is added.
 - **Status:** ready or no label is open; in review is in review; closed is done. **In progress comes in open, with no
   holder,** and a context entry "was in progress on GitHub, claimed by <agent>": a holder needs a claim token, which only
@@ -312,7 +312,9 @@ point 8).
 of the project), `"b17"` (a task made on the board) or `"owner/name#3"`, and every result names tasks the same way: a
 task's `id`, `parentId` and `blockedBy`, a message's or a context entry's `taskId`, an edge's ends, an event's subject.
 Message ids stay numbers. The project's repo is `--repo owner/name`, else `GH_REPO` or the git remote `origin`; with
-none, `3` is the task of any repo's issue 3 (refused when two repos have one). A board error names the task the same way.
+none, `3` is the task of any repo's issue 3 (refused when two repos have one). A board error names its tasks the same way:
+the board writes each task it names as a token (`BoardError.template`, `taskOf`), rendered `#<id>` in `message` and
+renamed by the server; any other `#n` in an error is left as written.
 
 **The tools**, each with a JSON Schema for its inputs, checked before anything runs:
 

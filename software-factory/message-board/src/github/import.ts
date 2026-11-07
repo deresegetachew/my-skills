@@ -290,16 +290,17 @@ export function isFactoryTask(i: GhIssue, map: GithubMapping): boolean {
   return labelNames(i).some((l) => [L.ready, L.inProgress, L.inReview, L.blocked].includes(l) || l.startsWith(L.agentPrefix));
 }
 
-/** What issue `i` is on the board. An open issue the factory didn't take as a task (no factory label: a channel, a bug
- * report nobody triaged) is a note, never ready. A closed one that is a task or a bug on the board stays one: the
- * mirror takes the factory's labels off an issue it closes. */
+/** What issue `i` is on the board. A new issue the factory didn't take as a task (no factory label: a channel, a bug
+ * report nobody triaged) comes in as a note, never ready. A task or a bug already on the board is never demoted (#515):
+ * it may be held, or in progress, and the mirror takes the factory's labels off an issue it closes; it keeps its kind
+ * until a factory label says otherwise. */
 function kindOf(i: GhIssue, map: GithubMapping, onBoard?: TaskKind): TaskKind {
   const labels = labelNames(i);
   if (labels.some((l) => map.kinds.epic.includes(l))) return "epic";
   if (labels.some((l) => map.kinds.noteLabels.includes(l)) || map.kinds.noteTitles.includes(i.title)) return "note";
-  if (!isFactoryTask(i, map) && !(i.state === "closed" && (onBoard === "task" || onBoard === "bug"))) return "note";
-  if (labels.some((l) => map.kinds.bug.includes(l))) return "bug";
-  return onBoard === "bug" && !isFactoryTask(i, map) ? "bug" : "task";
+  const work = onBoard === "task" || onBoard === "bug";
+  if (!isFactoryTask(i, map)) return work ? (onBoard as TaskKind) : "note";
+  return labels.some((l) => map.kinds.bug.includes(l)) ? "bug" : "task";
 }
 
 /** Turn what was read into an ImportBatch: pure, no calls. */
