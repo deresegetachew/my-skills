@@ -244,7 +244,9 @@ function sessionFiles(d: string, f: string): [string, string][] {
 
 interface Building {
   branches: Map<string, number>;
-  rows: Row[];
+  /** Each reply, with the task its own branch names (null: not a task branch), so a session that worked on several
+   * tasks one after another is split between them (#612). */
+  items: Array<{ t: number; ts: string; task: string | null; row: Row }>;
   role: string;
   prompt: string;
   worker: string | null;
@@ -269,16 +271,14 @@ export function collect(found: Pick<Found, "scope" | "folders">, since: number, 
           seen.add(r.id);
           if (prompt === null) prompt = firstPrompt(join(d, f));
           let s = sessions.get(sid);
-          if (!s) sessions.set(sid, (s = { branches: new Map(), rows: [], role: sessionRole(prompt), prompt, worker: null, first: null, last: null }));
+          if (!s) sessions.set(sid, (s = { branches: new Map(), items: [], role: sessionRole(prompt), prompt, worker: null, first: null, last: null }));
           if (s.worker === null && r.cwd && kind === "main") s.worker = workerOf(r.cwd, scope);
           const m = TASK.exec(r.branch);
-          if (m && kind === "main") {
-            const k = (m[1] as string).replace(/-/g, ".");
-            s.branches.set(k, (s.branches.get(k) ?? 0) + 1);
-          }
+          const own = m ? (m[1] as string).replace(/-/g, ".") : null;
+          if (own !== null && kind === "main") s.branches.set(own, (s.branches.get(own) ?? 0) + 1);
           if (!s.first || t < s.first[0]) s.first = [t, r.ts];
           if (!s.last || t > s.last[0]) s.last = [t, r.ts];
-          s.rows.push({ kind, model: r.model, tokens: tokens(r.usage), day: new Date(t).toISOString().slice(0, 10), cost: costOf(r.model, r.usage, prices) });
+          s.items.push({ t, ts: r.ts, task: own, row: { kind, model: r.model, tokens: tokens(r.usage), day: new Date(t).toISOString().slice(0, 10), cost: costOf(r.model, r.usage, prices) } });
         }
       }
     }
@@ -287,8 +287,25 @@ export function collect(found: Pick<Found, "scope" | "folders">, since: number, 
   for (const [sid, s] of sessions) {
     const branch = mostCommon(s.branches)[0]?.[0] ?? null;
     const fromPrompt = branch === null ? promptTask(s.prompt) : null;
-    out.set(sid, { task: branch ?? fromPrompt ?? "-", taskFrom: branch !== null ? "branch" : fromPrompt !== null ? "prompt" : null,
-      rows: s.rows, role: s.role, worker: s.worker ?? PROJECT_FOLDER, first: s.first?.[1] ?? "", last: s.last?.[1] ?? "" });
+    const fallback = branch ?? fromPrompt ?? "-";
+    const fallbackFrom: Session["taskFrom"] = branch !== null ? "branch" : fromPrompt !== null ? "prompt" : null;
+    // each reply counts for the task its own branch names; one on HEAD or main for the task worked on just before it,
+    // else the session's task (#612)
+    const parts = new Map<string, { from: Session["taskFrom"]; rows: Row[]; first: [number, string] | null; last: [number, string] | null }>();
+    let carry: string | null = null;
+    for (const it of [...s.items].sort((a, b) => a.t - b.t)) {
+      if (it.task !== null) carry = it.task;
+      const task = it.task ?? carry ?? fallback;
+      let p = parts.get(task);
+      if (!p) parts.set(task, (p = { from: it.task !== null || carry !== null ? "branch" : fallbackFrom, rows: [], first: null, last: null }));
+      p.rows.push(it.row);
+      if (!p.first || it.t < p.first[0]) p.first = [it.t, it.ts];
+      if (!p.last || it.t > p.last[0]) p.last = [it.t, it.ts];
+    }
+    for (const [task, p] of parts) {
+      out.set(parts.size === 1 ? sid : `${sid}:${task}`, { task, taskFrom: task === "-" ? null : p.from, rows: p.rows, role: s.role,
+        worker: s.worker ?? PROJECT_FOLDER, first: p.first?.[1] ?? "", last: p.last?.[1] ?? "" });
+    }
   }
   return out;
 }

@@ -308,3 +308,25 @@ test("a board task (b<n>) gets its sessions: from a task/b<n>- branch, or from i
   expect(data.groups.b40?.replies).toBe(1);
   expect(data.total.tasks).toEqual(["7", "8", "b27", "b31", "b40"]);
 });
+
+test("a session that builds several tasks one after another splits between them; HEAD replies go with the task before (#612)", () => {
+  const [root, logs] = setup();
+  const dir = join(logs, slugOf(root));
+  write(join(dir, "loop.jsonl"), [
+    reply("L1", "HEAD", root, { ts: "2026-10-24T08:00:00Z" }), // before any task branch: the session's task
+    reply("L2", "task/b12-items", root, { ts: "2026-10-24T08:10:00Z" }),
+    reply("L3", "task/b12-items", root, { ts: "2026-10-24T08:20:00Z" }),
+    reply("L4", "HEAD", root, { ts: "2026-10-24T08:25:00Z" }), // after b12: still b12
+    reply("L5", "task/b13-tags", root, { ts: "2026-10-24T09:00:00Z" }),
+    reply("L6", "main", root, { ts: "2026-10-24T09:05:00Z" }), // after b13: b13
+  ].join("\n") + "\n");
+  const p = usage(root, logs, "--json");
+  expect(p.code, p.out).toBe(0);
+  const data = JSON.parse(p.stdout) as Data & { sessions: Array<{ id: string; task: string; replies: number; first: string; last: string }> };
+  // b12 and b13 have two branch replies each, so L1 goes to the session's most common task, which comes first: b12
+  expect(data.groups.b12?.replies).toBe(4); // L1, L2, L3, L4
+  expect(data.groups.b13?.replies).toBe(2); // L5, L6
+  const rows = data.sessions.filter((s) => s.id.startsWith("loop"));
+  expect(rows.map((s) => [s.id, s.task, s.replies]).sort()).toEqual([["loop:b12", "b12", 4], ["loop:b13", "b13", 2]]);
+  expect(rows.find((s) => s.task === "b13")).toMatchObject({ first: "2026-10-24T09:00:00Z", last: "2026-10-24T09:05:00Z" });
+});
