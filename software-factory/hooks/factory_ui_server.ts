@@ -323,7 +323,7 @@ export function serve(o: ServeOptions): Running {
     if (rest[0] === "ci" && rest[1] === "actions" && rest.length === 3) {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
       const r = await ciAction(p, rest[2] as string, await req.json().catch(() => null));
-      if (rest[2] !== "log" && (r.status === 200 || r.status === 500)) refresher.start(p, true); // read again: the next look shows what changed
+      if (rest[2] !== "log" && (r.status === 200 || r.status === 500)) void refresher.readAgain(p); // read again: the next look shows what changed
       return json(r.status, r.body);
     }
     if (rest[0] === "tasks" && rest[2] === "actions" && rest.length === 4) {

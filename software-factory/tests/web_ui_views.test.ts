@@ -177,6 +177,9 @@ test("each CI action runs its factory command", async () => {
   }
   // after an action the server reads the snapshot again (factory snapshot), so the channel shows what changed
   expect(factoryCalls(p).filter((c) => c !== "snapshot")).toEqual(seen);
+  // the read is started before the answer; the fake logs it once bash reaches its first line, which load delays (#519)
+  const until = Date.now() + 2_000;
+  while (!factoryCalls(p).includes("snapshot") && Date.now() < until) await Bun.sleep(25);
   expect(factoryCalls(p)).toContain("snapshot");
 }, T);
 
