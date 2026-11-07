@@ -166,9 +166,10 @@ Check
                          on Postgres, in Docker on this machine (127.0.0.1 and the Tailscale address), then migrated
   board down [--purge]   stop it; --purge also removes its data
   board status           whether it answers, its schema and its task counts
-  board migrate|backup|sweep
-                         apply the schema (safe to run twice) | a pg_dump, mode 600 | release the claims whose time
-                         is up and whose holder has been quiet for 30 minutes (--quiet-minutes N)
+  board migrate|backup   apply the schema (safe to run twice) | a pg_dump, mode 600
+  board sweep [--quiet-minutes N] [--max-seconds N]
+                         release the claims whose time is up and whose holder has been quiet for 30 minutes (N);
+                         --max-seconds stops one that runs longer (the dev manager's loop runs it with 60 each pass)
   board tasks|ready [--json]
                          the tasks not done (--all: every one) | the ready queue, in claim order (--for <actor>:
                          with the tasks handed to that actor)
@@ -196,6 +197,8 @@ Check
                          --max-seconds stops a one-off pass that runs longer (the dev manager's loop uses 300)
   board ask <id> <text>  ask the owner: with the owner queue on the board (tasks.source board, or ask in
                          messaging.kinds) written there and mirrored to the owner-queue issue; else a comment there
+  board queue [--json]   the owner queue as the board has it: each ask, open or answered (--json: every message, in
+                         the shape of the issue's comments); factory prd --stage and the web UI's Inbox read it
   board login add <name> | ls | remove <name> [--unused]
                          logins of their own for other machines (factory machine add makes them): a Postgres role
                          with only the board's rights; ls says when each was first used
@@ -439,7 +442,7 @@ case "$cmd" in
              mb="$hooks/../message-board/bin"
              [ -f "$mb.ts" ] || { printf '{"code": "board_missing", "message": "This project has no message board: %s.ts is missing.", "fix": "Run `factory update` to a release that ships it (#500), or install.sh --link again in a linked project."}\n' "$mb" >&2; exit 1; }
              # mirror, ask and import need the project's settings (#502): the factory's own side runs them.
-             case "${1:-}" in mirror|ask|import) fh "$hooks/factory_board" "$@" ;; *) fh "$mb" "${1:-help}" "${@:2}" ;; esac ;;
+             case "${1:-}" in mirror|ask|import|queue|sweep) fh "$hooks/factory_board" "$@" ;; *) fh "$mb" "${1:-help}" "${@:2}" ;; esac ;;
   version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).
