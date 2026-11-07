@@ -355,8 +355,9 @@ case "$cmd" in
       exit 1
     fi
     # Only the project's MCP servers, as main has them on origin (never this worktree's .mcp.json), and never the
-    # user's own connectors (#55), as in factory-loop.sh. --mcp-config takes several values, so a flag must follow it.
-    mcp="$(fh "$dir/.claude/hooks/factory_mcp")"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
+    # user's own connectors (#55), as in factory-loop.sh. With the board on (#501), only the board's
+    # server, as this agent. --mcp-config takes several values, so a flag must follow it.
+    mcp="$(fh "$dir/.claude/hooks/factory_mcp" --as "$name" --role coding-agent)"; [ -n "$mcp" ] || mcp='{"mcpServers":{}}'
     # The agents' rules as main has them on origin (#258), as in factory-loop.sh. No rules, no session.
     agent_settings="$(fh "$dir/.claude/hooks/factory_agent_settings")" || exit 1
     # The `models` setting for the builder (factory_models.ts): after the MCP flags, before your own arguments.

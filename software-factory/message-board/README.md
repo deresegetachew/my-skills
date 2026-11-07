@@ -285,8 +285,10 @@ claude --strict-mcp-config --mcp-config board-mcp.json
 }
 ```
 
-The factory's own agent sessions are not wired to it yet: that comes with step 3 of decision 0007, once the factory
-reads from the board.
+The factory's own sessions get it by themselves when the board is on (`tasks.source` or `messaging.transport` is
+`board`, #501): `factory loop`, `factory agent` and the dev manager's and product owner's sessions start with only this
+server, named `board`, as their agent (`--role builder` for a coding agent, `manager` for the others), with a session id of
+their own. See the wiki's agent loops page.
 
 ## Tests
 

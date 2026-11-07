@@ -15,6 +15,18 @@ Run `/product-pass` alone for a whole pass (non-interactive: triage only). Under
 PRD"): answer from the PRD, show the numbers below, and write down what was decided. `--dry-run` anywhere means: read, print
 what you would do, one line each, write nothing.
 
+## When the board is on
+
+With `tasks.source` or `messaging.transport` set to `board`, your session has one MCP server, `board`, as a manager.
+Everything else here stays the same; the PRD, decisions and the owner queue stay where they are. With the board off,
+use the commands below and nothing changes.
+
+- **Start** with `board_prime`, then `board_on_me` for the product questions addressed to you.
+- **Questions and proposals:** read the thread with `board_thread`; reply with `board_post` on that thread.
+- **What was decided** for a task (the owner's yes, a changed "Done when") goes on it with `board_note`.
+- **Tasks:** `board_create` files a task under its epic, and `board_link` records what it waits for. Scope and order are
+  still the owner's: file only what the owner agreed to.
+
 ## Discovery: from an idea to a first milestone (`/product-pass discover`)
 
 A product owner started with `-i` and nothing queued is at the start of a project (or of a new direction). This is a

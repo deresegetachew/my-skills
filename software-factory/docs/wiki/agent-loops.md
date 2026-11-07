@@ -141,6 +141,15 @@ rules stop agents editing it, so a change to it needs a person to merge.
 If the agents need an MCP server (a docs or design server, for example), add it to `.mcp.json` at the project root
 in a PR that a person merges. Check a new session with `/mcp`: it should list only the project's servers.
 
+**With the message board on** (`tasks.source` or `messaging.transport` is `board`, as main has them; #501), a session
+gets exactly one server, `board`, and main's `.mcp.json` is not used: `bun .claude/message-board/bin.ts mcp --as <agent>
+--role <builder|manager> --session <id>`. A coding agent is the board's builder; the dev manager and the product owner
+are its managers. The board's URL reaches the server through its environment (MB_URL, or this machine's url file), never
+a command line. The agents' rules allow each role only its board tools (`mcp__board__board_prime` and the rest), and the
+skills say which to use. The PR gate and the guard still read only GitHub. `/mcp` in a session should list only `board`.
+With the board on, the dev manager's loop also runs `factory board mirror` before each pass, so GitHub's copy of the
+board stays current (#502; a release without it skips this).
+
 ### Practical notes
 
 - More agents only help when the plan has tasks that don't depend on each other, and each one costs tokens.

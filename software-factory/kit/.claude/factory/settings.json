@@ -45,7 +45,19 @@
       "Bash(cd *)",
       "Bash(ls *)",
       "Bash(mkdir -p *)",
-      "Bash(git rev-parse*)"
+      "Bash(git rev-parse*)",
+      "mcp__board__board_prime",
+      "mcp__board__board_ready",
+      "mcp__board__board_claim",
+      "mcp__board__board_heartbeat",
+      "mcp__board__board_release",
+      "mcp__board__board_close",
+      "mcp__board__board_show",
+      "mcp__board__board_post",
+      "mcp__board__board_thread",
+      "mcp__board__board_note",
+      "mcp__board__board_on_me",
+      "mcp__board__board_delegated"
     ],
     "deny": [
       "Read(./.env)",

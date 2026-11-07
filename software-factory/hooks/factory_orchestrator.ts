@@ -423,7 +423,7 @@ export function runSub(cfg: Config, name: string, ref: string, interactive = fal
     }
     const sheet = factSheet(cfg, item, held, note, ownerLogin(cfg));
     const text = rolePrompt(cfg, "dev-manager", name, ref, sheet);
-    const flags = sessionFlags(cfg, "dev-manager");
+    const flags = sessionFlags(cfg, "dev-manager", name);
     const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: "dev-manager", FACTORY_LOOP: "1", FACTORY_ITEM: ref };
     const limit = (toFloat(managerSetting(cfg, "subManagerMinutes")) ?? 0) * 60;
     const before = new Set<unknown>(item.pr ? ghAll<Comment>(`repos/{owner}/{repo}/issues/${item.pr}/comments`).map((c) => c.id) : []);

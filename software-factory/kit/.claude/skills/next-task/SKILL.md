@@ -19,6 +19,7 @@ This file is the core. Open the others in this folder only when they apply:
 | `rework.md` | the pick prints `pr-<n>`: a must-fix on your open PR comes before any new task |
 | `questions.md` | you need something only a person has, a decision the docs leave open, or a decision number |
 | `waiting.md` | after shipping, or when you'd wait: merges, the PR cap, CI that never ran, the interactive loop, stopping |
+| `board.md` | `tasks.source` or `messaging.transport` is `board`: the board tools for claims, questions and notes |
 
 ## 1. Pick the task
 
@@ -77,9 +78,8 @@ Anything only a person can provide, or a gap the docs leave open: `questions.md`
    says it formatted files, commit them and run it again.
 4. **Extra reviews:** run `bun --no-env-file --config=/dev/null .claude/hooks/factory_reviews.ts` and do each line it prints (a skill such as
    `design-check` or the eval, or a subagent such as `safety-auditor` or `security-reviewer`), fixing every must-fix.
-   Ask the `safety-auditor` whenever the diff touches what CLAUDE.md calls critical rules, and the
-   `security-reviewer` for auth, payments, public endpoints, uploads, storage, tenancy, secrets or model calls on
-   untrusted input.
+   Ask the `safety-auditor` whenever the diff touches what CLAUDE.md calls critical rules, and the `security-reviewer`
+   for auth, payments, public endpoints, uploads, storage, tenancy, secrets or model calls on untrusted input.
 5. Ask the `reviewer` subagent to review the diff, and the `architecture-reviewer` on styled paths. Fix every
    must-fix; the PR gate needs their passes for the current commit.
 6. **The reviewer starts on Sonnet, Opus when it finds something.** The `reviewer` runs on Sonnet (`model:` in its

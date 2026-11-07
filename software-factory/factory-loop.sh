@@ -195,10 +195,11 @@ home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 # Only the project's MCP servers: never the user's own claude.ai connectors or the servers in their settings, which
 # would put tool definitions nobody here needs into every turn (#55). The config is the .mcp.json main has on origin
 # (factory_mcp.ts), never this worktree's copy, since Claude starts those servers without asking. Set before each
-# run, since main may change it. --mcp-config takes several values, so another flag must follow it.
+# run, since main may change it. With the message board on (#501), only the board's server, as this agent in its
+# role. --mcp-config takes several values, so another flag must follow it.
 isolate() {
   local cfg
-  cfg="$(fh "$hooks/factory_mcp")" || cfg='{"mcpServers":{}}'
+  cfg="$(fh "$hooks/factory_mcp" --as "$agent" --role "$role")" || cfg='{"mcpServers":{}}'
   [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
   if [ "$role" = coding-agent ]; then
     # The agents' rules (deny list, PR gate, hooks) as main has them on origin, never this worktree's copy (#258).
@@ -287,11 +288,22 @@ idle_minutes() {
   echo "$1"
 }
 
+# With the message board on (main's tasks.source or messaging.transport is board), each dev manager pass first runs
+# `factory board mirror` (#502), which brings GitHub's mirror of the board up to date: safe to run twice, and cheap when
+# nothing changed. A release without factory_board.ts, or the board off, skips it. Never stops the pass.
+mirror_board() {
+  [ -f "$hooks/factory_board.ts" ] || return 0
+  fh "$hooks/factory_mcp" board-on >/dev/null 2>&1 || return 0
+  fh "$hooks/factory_board" mirror 2>&1 | sed "s/^/[$agent] /"
+  return 0
+}
+
 # One pass of a manager or a product owner. Returns 0 (it had work and did it), 3 (nothing to do), 4 (GitHub was busy)
 # or 1 (it failed).
 # When factory_roles.ts finds work, one fresh `claude -p` runs the role's skill (`claude` without -p under -i).
 role_pass() {
   local found rc prompt discover=0
+  [ "$role" = dev-manager ] && mirror_board
   if [ "$role_kind" = orchestrator ]; then
     # No model here: the orchestrator reads GitHub, posts to the owner queue and starts one-item sub-managers.
     fh "$hooks/factory_orchestrator" cycle --name "$agent" $([ "$interactive" = 1 ] && echo --interactive); rc=$?

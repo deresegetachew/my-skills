@@ -14,7 +14,7 @@
 // Exit: 0 nothing to do, or the session's own exit code; 1 the tick can't run (the line says why and what to do).
 import { existsSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { load } from "./factory_config.ts";
+import { load, roleNames } from "./factory_config.ts";
 import { configured, flags, ModelsError, type Models } from "./factory_models.ts";
 import { skillLine } from "./factory_roles.ts";
 import { precheck } from "./factory_wait.ts";
@@ -25,9 +25,10 @@ export const PROFILE = join(".claude", "manager", "settings.json");
 // prompt names the skill's file (factory_roles.ts skillLine), and the marker lets `factory usage --by role` count it.
 export const PROMPT = `${skillLine("manage-pass")}\n\n<!-- factory-role role=dev-manager name=tick -->`;
 
-/** Only the project's MCP servers, from main on the remote (factory_mcp.ts); none when it can't say. */
-export function mcpFlags(): string[] {
-  const p = run(bunCmd(join(import.meta.dir, "factory_mcp.ts")), { timeoutMs: 120_000 });
+/** Only the project's MCP servers, from main on the remote (factory_mcp.ts); none when it can't say. With the board on
+ * (#501), only the board's, as `as` (the dev manager's first name, else dev-manager). */
+export function mcpFlags(as = roleNames(load(), "dev-manager")[0] || "dev-manager"): string[] {
+  const p = run([...bunCmd(join(import.meta.dir, "factory_mcp.ts")), "--as", as, "--role", "dev-manager"], { timeoutMs: 120_000 });
   const cfg = p.stdout.trim() || '{"mcpServers":{}}';
   return ["--mcp-config", cfg, "--strict-mcp-config"];
 }

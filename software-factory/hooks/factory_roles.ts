@@ -339,9 +339,11 @@ export function permissionFlags(cfg: Config): string[] {
 }
 
 /** The `claude` arguments for a session of `role` started from a script (the orchestrator's sub-managers), the same
- * the loop script builds: only the project's MCP servers as main has them, the role's profile, and the model. */
-export function sessionFlags(cfg: Config, role: string): string[] {
-  const mcp = run(bunCmd(join(import.meta.dir, "factory_mcp.ts"))).stdout.trim() || '{"mcpServers":{}}';
+ * the loop script builds: only the project's MCP servers as main has them (with the board on, only the board's, as
+ * `name`, #501), the role's profile, and the model. `name` defaults to the role's first name, else the role. */
+export function sessionFlags(cfg: Config, role: string, name = ""): string[] {
+  const as = name || roleNames(cfg, role)[0] || role;
+  const mcp = run([...bunCmd(join(import.meta.dir, "factory_mcp.ts")), "--as", as, "--role", role]).stdout.trim() || '{"mcpServers":{}}';
   const flags = ["--mcp-config", mcp, "--strict-mcp-config", ...profileFlags(cfg, role)];
   try {
     flags.push(...modelFlags(need(role).model, validate(cfg.models === undefined ? {} : cfg.models)));
