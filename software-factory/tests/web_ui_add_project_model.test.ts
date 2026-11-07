@@ -67,7 +67,8 @@ test("Create waits for a main branch and a team where every agent has its own na
 test("the request is what the server takes: trimmed, the repo left out for a folder", () => {
   const f = { ...withRepo(emptyForm("/d"), "boss/shop"), test: " bun test ", mainBranch: " main " };
   expect(requestOf(f)).toEqual({ source: "clone", repo: "boss/shop", path: "/d/shop", visibility: "private", tasks: "issues", mainBranch: "main",
-    test: "bun test", lint: "", protected: [".claude/", ".github/workflows/", "factory", "factory-loop.sh"],
+    install: "", typecheck: "", lint: "", test: "bun test", build: "", reviewer: "",
+    protected: [".claude/", ".github/workflows/", "factory", "factory-loop.sh"],
     team: { devManager: "fasil", productOwner: "mentewab", builders: ["menelik", "taytu"] } });
   expect(requestOf({ ...f, source: "folder" }).repo).toBe("");
 });
@@ -95,4 +96,25 @@ test("a run's progress: how many steps are through, and where it stopped", () =>
   expect(runProgress({ state: "failed", steps: [step("a", "done"), step("b", "failed", { message: "It broke." })] }))
     .toEqual({ tone: "bad", text: "Stopped at Step b: It broke." });
   expect(runProgress({ state: "done", steps: [step("a", "done"), step("b", "skipped")] })).toEqual({ tone: "good", text: "Done: all 2 steps." });
+});
+
+test("a new form gives no commands and no reviewer: nothing is a pnpm guess, and the page fills the login in (#540)", () => {
+  const f = emptyForm("/d");
+  expect([f.install, f.typecheck, f.lint, f.test, f.build, f.reviewer]).toEqual(["", "", "", "", "", ""]);
+  const r = requestOf({ ...withRepo(f, "boss/shop"), tasks: "board", install: " bun install ", build: "bun run build", reviewer: " octo " });
+  expect(r).toMatchObject({ tasks: "board", install: "bun install", build: "bun run build", reviewer: "octo" });
+});
+
+test("What will be created names the trusted reviewer, and the login when it is known (#540)", () => {
+  const f = withRepo(emptyForm("/d"), "boss/shop");
+  const row = (x: ReturnType<typeof createsOf>) => x.find((c) => c.title === "The trusted reviewer");
+  expect(row(createsOf(f))?.detail).toContain("Your GitHub login");
+  expect(row(createsOf({ ...f, reviewer: "octo" }))?.detail).toContain("octo");
+});
+
+test("a run that is done with to-dos for the owner says how many (#540)", () => {
+  const todo = { what: "main requires a review", fix: "Add a ruleset" };
+  expect(runProgress({ state: "done", steps: [{ id: "a", title: "A", state: "done", problem: null },
+    { id: "doctor", title: "Check", state: "done", problem: null, todos: [todo] }] }))
+    .toEqual({ tone: "warn", text: "Done: all 2 steps. 1 to-do for you, below." });
 });

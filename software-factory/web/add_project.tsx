@@ -15,6 +15,10 @@ interface Info {
   projects: { id: string; name: string; path: string }[];
   messaging: string;
   problems: Problem[];
+  /** This machine has a message board, so tasks can come from it (#540). */
+  board?: boolean;
+  /** The GitHub login signed in here: the trusted reviewer unless the owner types another. */
+  login?: string;
 }
 
 type Post = (path: string, body: unknown) => Promise<Record<string, unknown>>;
@@ -152,7 +156,16 @@ function AboutTab({ form, set }: { form: Form; set: (f: Form) => void }) {
   );
 }
 
-function TasksTab({ form, set }: { form: Form; set: (f: Form) => void }) {
+/** The commands the owner gives (#540): each written as given; an empty one is left out. */
+const COMMAND_FIELDS: { key: "install" | "typecheck" | "lint" | "test" | "build"; label: string; hint: string }[] = [
+  { key: "test", label: "Test command", hint: "Agents run it unattended before every pull request, and CI runs it." },
+  { key: "lint", label: "Lint command", hint: "Empty: no lint step." },
+  { key: "typecheck", label: "Type check command", hint: "Empty: no type check step." },
+  { key: "install", label: "Install command", hint: "CI runs it first. Empty: nothing to install." },
+  { key: "build", label: "Build command", hint: "Empty: no build step." },
+];
+
+function TasksTab({ form, set, board }: { form: Form; set: (f: Form) => void; board: boolean }) {
   const [adding, setAdding] = useState("");
   return (
     <div className="ap-section">
@@ -165,6 +178,11 @@ function TasksTab({ form, set }: { form: Form; set: (f: Form) => void }) {
           <Choice name="ap-source" checked={form.tasks === "plan"} onPick={() => set({ ...form, tasks: "plan" })} title="A build plan file">
             A checklist in the repo; agents tick a box when a task merges. Good for a small project.
           </Choice>
+          {board && (
+            <Choice name="ap-source" checked={form.tasks === "board"} onPick={() => set({ ...form, tasks: "board" })} title="The message board">
+              Tasks live on this machine's message board, where the agents already talk. GitHub gets a copy.
+            </Choice>
+          )}
         </div>
         {form.tasks === "issues" && <span className="ap-hint">We add four labels on GitHub: ready, in progress, in review and blocked. Labels that already exist are left as they are.</span>}
       </fieldset>
@@ -172,11 +190,13 @@ function TasksTab({ form, set }: { form: Form; set: (f: Form) => void }) {
         <Field id="ap-main" label="Main branch" hint="Agents never push here.">
           <input id="ap-main" value={form.mainBranch} onChange={(e) => set({ ...form, mainBranch: e.target.value })} />
         </Field>
-        <Field id="ap-test" label="Test command" hint="Empty keeps the template's; you can change it later in Settings.">
-          <input id="ap-test" className="mono" value={form.test} onChange={(e) => set({ ...form, test: e.target.value })} />
-        </Field>
-        <Field id="ap-lint" label="Lint and type check" hint="Runs before every pull request">
-          <input id="ap-lint" className="mono" value={form.lint} onChange={(e) => set({ ...form, lint: e.target.value })} />
+        {COMMAND_FIELDS.map((c) => (
+          <Field key={c.key} id={`ap-${c.key}`} label={c.label} hint={c.hint}>
+            <input id={`ap-${c.key}`} className="mono" value={form[c.key]} onChange={(e) => set({ ...form, [c.key]: e.target.value })} />
+          </Field>
+        ))}
+        <Field id="ap-reviewer" label="Trusted reviewer" hint="The GitHub login whose reviews count at a merge. It starts as the one signed in here.">
+          <input id="ap-reviewer" className="mono" value={form.reviewer} onChange={(e) => set({ ...form, reviewer: e.target.value })} />
         </Field>
       </div>
       <div className="ap-field">
@@ -247,7 +267,8 @@ function CiTab({ form }: { form: Form }) {
   return (
     <div className="ap-section">
       <p>The checks run on GitHub Actions: the kit adds the workflow. Every pull request gets the factory's guard (tests not weakened,
-        no new dependency unreviewed, protected paths respected) and{form.test || form.lint ? " your test and lint commands" : " the project's tests"}.</p>
+        no new dependency unreviewed, protected paths respected) and the commands you gave on Tasks
+        {form.test ? <> (tests: <code>{form.test}</code>)</> : " (none yet)"}. A project with no package.json gets no pnpm or Node steps.</p>
       <p className="ap-hint">Runners on your own machines come later, on Machines; nothing to choose here now.</p>
     </div>
   );
@@ -287,6 +308,11 @@ function RunView({ run }: { run: Run }) {
           sub={<>
             {s.state === "failed" && s.problem ? s.problem.message : s.detail}
             {s.state === "failed" && s.problem?.fix && <span className="ap-fix">{s.problem.fix}</span>}
+            {(s.todos ?? []).length > 0 && (
+              <ul className="ap-todos" aria-label="To do, only you can">
+                {(s.todos ?? []).map((t) => <li key={t.what}><strong>To do: {t.what}.</strong> <span className="ap-fix">{t.fix}</span></li>)}
+              </ul>
+            )}
             {s.output && (s.state === "failed" || s.state === "done") && (
               <details open={s.state === "failed"}><summary>What it printed</summary><pre className="ap-log">{s.output}</pre></details>
             )}
@@ -320,7 +346,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
   useEffect(() => {
     get<Info>("/api/add-project").then((i) => {
       setInfo(i);
-      setForm((f) => (f.folder ? f : { ...f, folder: i.folder }));
+      setForm((f) => ({ ...f, folder: f.folder || i.folder, reviewer: f.reviewer || (i.login ?? "") }));
     }).catch(() => setInfo({ repos: [], folder: "", projects: [], messaging: "github",
       problems: [{ code: "ui_add_unreachable", message: "The server can't be reached.", fix: "Is the web UI still running?" }] }));
   }, [get]);
@@ -417,7 +443,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
             <div className="ap-split">
               <div className="ap-main">
                 {tab === 0 && <AboutTab form={form} set={setForm} />}
-                {tab === 1 && <TasksTab form={form} set={setForm} />}
+                {tab === 1 && <TasksTab form={form} set={setForm} board={info?.board === true} />}
                 {tab === 2 && <TeamTab form={form} set={setForm} />}
                 {tab === 3 && <CiTab form={form} />}
                 {last && <ReviewTab steps={steps} problem={problem} checking={busy && !steps.length} />}
@@ -526,6 +552,7 @@ export const ADD_CSS = String.raw`
 .ap-where { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; }
 .ap-later { color: var(--text-2); font-weight: 500; }
 .ap-fix { color: var(--text); }
+.ap-todos { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; }
 .ap-log { margin: 6px 0 0; padding: 10px 12px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: 10px; font-size: 12px;
   white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; color: var(--text); }
 .ap-rows details summary { cursor: pointer; color: var(--text-2); }

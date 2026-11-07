@@ -12,12 +12,14 @@
 //   POST /api/add-project/runs/:id/retry    {confirm: true}: go on from the failed step
 //
 // Every change is pushed to the page as {type: "add-project", run}; {type: "projects"} once the new project is listed.
-import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { addedFile, addedPaths, envFor, factoryScript, type Obj, type Problem, projectAt, readJson, type Ran, spawn,
   type UiProject } from "./factory_ui_data.ts";
-import { messagingSettings } from "./core/compose.ts";
-import { archiveName, cacheFolder, DEFAULT_REPO, type Pin, readPin, sha256File } from "./factory_release.ts";
+import { boardSetUp, messagingSettings } from "./core/compose.ts";
+import { AGENT_SETTINGS, FactoryError } from "./factory_lib.ts";
+import { commandRules, commandsWorkflow } from "./factory_stack.ts";
+import { archiveName, cacheFolder, DEFAULT_REPO, mergeAllow, type Pin, readPin, sha256File } from "./factory_release.ts";
 import type { Config } from "./factory_config.ts";
 
 const HOOKS = import.meta.dir;
@@ -58,13 +60,31 @@ export interface AddRequest {
   repo: string;
   path: string;
   visibility: "private" | "public";
-  tasks: "issues" | "plan";
+  tasks: "issues" | "plan" | "board";
   mainBranch: string;
-  test: string;
+  /** The project's commands (#540): each one is written as given, and an empty one clears the template's. */
+  install: string;
+  typecheck: string;
   lint: string;
+  test: string;
+  build: string;
+  /** The GitHub login whose reviews count (trustedReviewers); empty: the login signed in on this machine. */
+  reviewer: string;
   protected: string[];
   team: { devManager: string; productOwner: string; builders: string[] };
 }
+
+/** The commands a request gives, in the order factory.json keeps them. */
+export const COMMANDS = ["install", "typecheck", "lint", "test", "build"] as const;
+
+/** A doctor finding only the owner can clear (GitHub's settings, Claude Code's trust question): the last step lists it
+ * as a to-do with its fix instead of failing (#540). */
+export interface Todo {
+  what: string;
+  fix: string;
+}
+
+const OWNER_ONLY = [/^main requires /, /^gh login has admin rights$/, /^Claude Code does not trust /];
 
 export type StepState = "waiting" | "running" | "done" | "skipped" | "failed";
 
@@ -76,6 +96,8 @@ export interface AddStep {
   command: string;
   output: string;
   problem: Problem | null;
+  /** What only the owner can do (the doctor step): each with its fix. */
+  todos: Todo[];
 }
 
 export interface AddRun {
@@ -202,7 +224,17 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
     }
   }
   const tasks = b.tasks;
-  if (tasks !== "issues" && tasks !== "plan") return problem("ui_add_tasks", "Say where tasks come from.", "Pick GitHub issues or A build plan file.");
+  if (tasks !== "issues" && tasks !== "plan" && tasks !== "board") {
+    return problem("ui_add_tasks", "Say where tasks come from.", "Pick GitHub issues, A build plan file or The message board.");
+  }
+  if (tasks === "board" && !boardSetUp()) {
+    return problem("ui_add_no_board", "This machine has no message board, so tasks can't come from it.",
+      "Start one with `factory board up` (or `factory machine join <code>` to join the hub's), then add the project again; or pick GitHub issues.");
+  }
+  const reviewer = str(b.reviewer);
+  if (reviewer && !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(reviewer)) {
+    return problem("ui_add_reviewer", `"${reviewer}" isn't a GitHub login.`, "Type the GitHub login whose reviews count, or leave it empty for the one signed in here.");
+  }
   const mainBranch = str(b.mainBranch);
   if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(mainBranch) || mainBranch === SETUP_BRANCH) {
     return problem("ui_add_branch", `${!mainBranch ? "No main branch" : mainBranch === SETUP_BRANCH
@@ -229,8 +261,18 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
       "Install the factory here from a release (`factory update`), or start the web UI from a my-skills checkout, then add the project again.");
   }
   return { source, repo: source === "folder" ? "" : repo, path, visibility: b.visibility === "public" ? "public" : "private", tasks,
-    mainBranch, test: str(b.test), lint: str(b.lint), protected: [...new Set(prot)], team };
+    mainBranch, install: str(b.install), typecheck: str(b.typecheck), lint: str(b.lint), test: str(b.test), build: str(b.build),
+    reviewer, protected: [...new Set(prot)], team };
 }
+
+/** The commands a request gives, in words: "test `bun test`, lint `x`", or that none is given. */
+function commandWords(req: AddRequest): string {
+  const given = COMMANDS.filter((c) => req[c]).map((c) => `${c} \`${req[c]}\``);
+  const empty = COMMANDS.filter((c) => !req[c]);
+  return given.length ? `commands ${given.join(", ")}${empty.length ? ` (no ${empty.join(", ")})` : ""}` : "no commands yet";
+}
+
+const TASK_WORDS: Record<AddRequest["tasks"], string> = { issues: "GitHub issues", plan: "a build plan file", board: "the message board" };
 
 /** The steps a request takes, in order, each with what it does in plain words. */
 export function plan(req: AddRequest, host: AddHost): { id: string; title: string; detail: string }[] {
@@ -240,12 +282,15 @@ export function plan(req: AddRequest, host: AddHost): { id: string; title: strin
       detail: req.source === "clone" ? `${req.repo} into ${req.path}` : req.source === "new"
         ? `A ${req.visibility} repo ${req.repo} on GitHub, cloned into ${req.path}` : `${req.path} is a git checkout with no changes` },
     { id: "kit", title: "Install the factory", detail: "The agents, their rules, the hooks and the templates; a file already there is kept" },
-    { id: "answers", title: "Save your answers", detail: "Task source, main branch, commands, protected paths and the team, in the project's settings" },
+    { id: "answers", title: "Save your answers", detail: `Tasks from ${TASK_WORDS[req.tasks]}, main branch ${req.mainBranch}, ` +
+      `${commandWords(req)}, protected paths and the team, in the project's settings. The agents may run those commands ` +
+      `unattended, CI runs them, and ${req.reviewer || "the GitHub login signed in here"} is the trusted reviewer` },
     { id: "init", title: "Labels, owner queue and PRD", detail: `${req.tasks === "issues" ? "The task labels, " : ""}the owner queue issue, a starter PRD and the role folders` },
     { id: "commit", title: "Open the setup pull request", detail: `Everything above on the branch ${SETUP_BRANCH}, for you to merge into ${req.mainBranch}` },
     { id: "list", title: "Show it in the sidebar", detail: `${name} joins the projects on the left` },
     { id: "heartbeat", title: "Watch its agents", detail: "The heartbeat daemon on this machine, so each agent shows as running, waiting or down" },
-    { id: "doctor", title: "Check the project", detail: "Each check the factory needs, with what to do for any that fails" },
+    { id: "doctor", title: "Check the project", detail: "Each check the factory needs, with what to do for any that fails; " +
+      "what only you can set (on GitHub, or Claude Code's trust question) is listed as a to-do" },
   ];
 }
 
@@ -367,7 +412,43 @@ function objAt(o: Obj, key: string): Obj {
   return made;
 }
 
-function stepAnswers(req: AddRequest, step: AddStep, host: AddHost): Done {
+/** The GitHub login signed in on this machine, or "" when gh can't say. */
+async function signedInLogin(cwd: string): Promise<string> {
+  const r = await spawn(["gh", "api", "user"], cwd, gitEnv(), 60_000);
+  let login = "";
+  try {
+    const user = r.code === 0 ? JSON.parse(r.stdout) as unknown : null;
+    if (typeof user === "object" && user !== null && typeof (user as Obj).login === "string") login = (user as Obj).login as string;
+  } catch {
+    login = "";
+  }
+  return /^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(login) ? login : "";
+}
+
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/** The answers in the project's .claude/factory.json (#540): the task source (the board also as the messaging transport),
+ * the main branch, every command as given (an empty answer clears the template's pnpm one), the allow rules an unattended
+ * agent needs to run them, the trusted reviewer, the protected paths and the team. Then the agents' rules get the allow
+ * rules too, as `factory update` puts them there, and the kit's pnpm CI workflow runs these commands instead. */
+async function stepAnswers(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
+  const out = [writeAnswers(req, step, host, await reviewerOf(req))];
+  out.push(...refreshRules(req));
+  out.push(...ciForCommands(req));
+  return { state: "done", output: out.filter(Boolean).join("\n") };
+}
+
+async function reviewerOf(req: AddRequest): Promise<string> {
+  return req.reviewer || await signedInLogin(req.path);
+}
+
+function writeAnswers(req: AddRequest, step: AddStep, host: AddHost, reviewer: string): string {
   const file = join(req.path, ".claude", "factory.json");
   step.command = `write ${file}`;
   let cfg: Obj = {};
@@ -382,17 +463,53 @@ function stepAnswers(req: AddRequest, step: AddStep, host: AddHost): Done {
   objAt(cfg, "tasks").source = req.tasks;
   cfg.mainBranch = req.mainBranch;
   const commands = objAt(cfg, "commands");
-  if (req.test) commands.test = req.test;
-  if (req.lint) commands.lint = req.lint;
+  for (const c of COMMANDS) commands[c] = req[c];
+  const perms = objAt(cfg, "permissions");
+  const allow = Array.isArray(perms.allow) ? perms.allow.filter((r): r is string => typeof r === "string") : [];
+  perms.allow = [...new Set([...allow, ...allowedCommands(req)])];
+  const trusted = Array.isArray(cfg.trustedReviewers) ? cfg.trustedReviewers.filter((r): r is string => typeof r === "string") : [];
+  if (reviewer) cfg.trustedReviewers = [...new Set([...trusted, reviewer])];
   const had = Array.isArray(cfg.protected) ? cfg.protected.filter((p): p is string => typeof p === "string") : [];
   cfg.protected = [...new Set([...had, ...req.protected.map(protectedRegex)])];
   cfg.agents = req.team.builders;
   const roles = objAt(cfg, "roles");
   objAt(roles, "dev-manager").names = [req.team.devManager];
   objAt(roles, "product-owner").names = [req.team.productOwner];
-  if (namesBoard(host.serving)) objAt(cfg, "messaging").transport = "board";
+  if (req.tasks === "board" || namesBoard(host.serving)) objAt(cfg, "messaging").transport = "board";
   writeJson(file, cfg);
-  return { state: "done", output: `Saved in ${file}.` };
+  return [`Saved in ${file}.`, reviewer ? `Trusted reviewer: ${reviewer}.`
+    : "No trusted reviewer: GitHub didn't say who is signed in here. Set one with `factory settings set trustedReviewers '[\"<your-login>\"]'`."].join("\n");
+}
+
+/** The allow rules for the commands an agent runs unattended (#540): each check command, alone and through run-check. */
+function allowedCommands(req: AddRequest): string[] {
+  return [...new Set((["typecheck", "lint", "test", "build"] as const).flatMap((c) => commandRules(req[c])))];
+}
+
+/** The agents' rules (.claude/factory/settings.json) get the project's allow rules, as `factory update` writes them, and a
+ * release's pin follows (mergeAllow). A link (a project on the submodule) is left alone: the factory adds them when it
+ * starts an agent (#258). */
+function refreshRules(req: AddRequest): string[] {
+  let added: string[];
+  try {
+    added = mergeAllow(req.path);
+  } catch (e) {
+    if (!(e instanceof FactoryError)) throw e;
+    throw new StepFailed(problem(e.code, e.message, e.fix), "");
+  }
+  return added.length ? [`The agents' rules (${AGENT_SETTINGS}) allow ${added.map((r) => `\`${r}\``).join(", ")}.`] : [];
+}
+
+/** The kit's pnpm CI workflow, made to run the commands given (with no pnpm or Node steps when there is no package.json). */
+function ciForCommands(req: AddRequest): string[] {
+  const file = join(req.path, ".github", "workflows", "ci.yml");
+  if (!existsSync(file) || isLink(file)) return [];
+  const text = readFileSync(file, "utf8");
+  const node = existsSync(join(req.path, "package.json"));
+  const made = commandsWorkflow(text, node);
+  if (made === text) return [];
+  writeFileSync(file, made);
+  return [`CI (.github/workflows/ci.yml) runs the commands from the project's settings${node ? "" : ", with no pnpm or Node steps (there is no package.json)"}.`];
 }
 
 async function stepInit(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
@@ -468,10 +585,35 @@ async function stepHeartbeat(req: AddRequest, step: AddStep, host: AddHost): Pro
   }
 }
 
+/** The `fix` lines of doctor's report as {what, fix}: `fix   <what>: <how>`. */
+export function doctorFixes(text: string): Todo[] {
+  return text.split("\n").filter((l) => l.startsWith("fix   ")).map((l) => {
+    const rest = l.slice(6);
+    const at = OWNER_ONLY.some((re) => re.test(rest)) ? rest.indexOf(": ") : -1;
+    return at < 0 ? { what: rest, fix: "" } : { what: rest.slice(0, at), fix: rest.slice(at + 2) };
+  });
+}
+
+/** `factory doctor` in the new project. What only the owner can set (GitHub's rules and admin rights, Claude Code's trust
+ * question) doesn't stop the setup: the step is done and lists each as a to-do with its fix (#540). Anything else the
+ * doctor finds fails the step, as before. */
 async function stepDoctor(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
   const p = newProject(req, host);
-  return { state: "done", output: await must(step, ["bash", join(req.path, "factory"), "doctor"], req.path, envFor(p),
-    "Fix what it says (each failed check has its own fix), then press Retry.") };
+  const cmd = ["bash", join(req.path, "factory"), "doctor"];
+  step.command = cmd.join(" ");
+  const r = await spawn(cmd, req.path, envFor(p), STEP_TIMEOUT_MS);
+  const out = tail(`${r.stdout}\n${r.stderr}`);
+  if (r.code === 0) return { state: "done", output: out };
+  const found = doctorFixes(r.stdout);
+  const owners = found.filter((f) => OWNER_ONLY.some((re) => re.test(f.what)));
+  const counted = Number(/(\d+) to fix\.\s*$/.exec(r.stdout.trim())?.[1] ?? -1);
+  if (!found.length || owners.length !== found.length || counted !== found.length) {
+    const last = r.stderr.trim().split("\n").at(-1) ?? "";
+    throw new StepFailed(problem("ui_add_step_failed", `${step.title} didn't work (${(last || `exit ${r.code}`).slice(0, 200)}).`,
+      "Fix what it says (each failed check has its own fix), then press Retry."), out);
+  }
+  step.todos = owners;
+  return { state: "done", output: `${out}\n\nTo do (only you can): ${owners.map((t) => t.what).join("; ")}.` };
 }
 
 // --- the runs ----------------------------------------------------------------------------------------------------------
@@ -510,7 +652,9 @@ export class AddRuns {
     const repos = rows.map((x) => ({ name: str(x.nameWithOwner), private: x.isPrivate === true, updatedAt: str(x.updatedAt) }))
       .filter((x) => x.name).map((x) => ({ ...x, inFactory: inFactory(x.name) }));
     return { repos, folder: dirname(resolve(this.host.serving.path)), projects: this.host.projects().map((p) => ({ id: p.id, name: p.name, path: p.path })),
-      messaging: messagingOf(this.host.serving), legends: LEGENDS, problems };
+      messaging: messagingOf(this.host.serving), legends: LEGENDS, problems,
+      // #540: the board is a task source only where there is one; the login signed in here is the trusted reviewer
+      board: boardSetUp(), login: r.code === 0 ? await signedInLogin(this.host.serving.path) : "" };
   }
 
   get(id: string): AddRun | null {
@@ -526,7 +670,7 @@ export class AddRuns {
     if (this.busy()) return { status: 409, body: { ...problem("ui_add_busy", "A project is being added already.", "Wait until it is done or stops, then try again.") } };
     const id = String(++this.n);
     const run: AddRun = { id, name: req.repo ? repoBase(req.repo) : basename(req.path), path: req.path, state: "running", project: null,
-      steps: plan(req, this.host).map((s) => ({ ...s, state: "waiting", command: "", output: "", problem: null })) };
+      steps: plan(req, this.host).map((s) => ({ ...s, state: "waiting", command: "", output: "", problem: null, todos: [] })) };
     this.runs.set(id, { run, req });
     void this.go(run, req);
     return { status: 202, body: { run } };
@@ -555,6 +699,7 @@ export class AddRuns {
       step.command = "";
       step.output = "";
       step.problem = null;
+      step.todos = [];
       this.send(run);
       try {
         const r = await this.one(step, req, run);
