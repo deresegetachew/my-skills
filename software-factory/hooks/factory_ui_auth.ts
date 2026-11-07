@@ -12,16 +12,23 @@
 //
 // Codes are kept in memory only, as an HMAC under a key made at start. Asking for codes is limited per address and per
 // address of the asker (IP), and so are wrong codes: after `ui.signIn.maxWrongCodes` wrong codes an address (or an IP,
-// at four times that) is locked for `ui.signIn.lockoutMinutes`, and its code is gone.
+// at four times that) is locked for `ui.signIn.lockoutMinutes`, and its code is gone. Only wrong codes for an address
+// with a code waiting count towards its lock, so guessing at an address can't lock its owner out when they have asked
+// for nothing; and this machine's own address (127.0.0.1, ::1), which the agents share, has no per-IP limit or lock.
+// The bodies of these requests, which come before any sign-in, are at most 4 KB (413 past that).
 //
 // A session is a random id in an HttpOnly, SameSite=Strict cookie (Secure over HTTPS) named for the server's port, with
-// Path=/api: the page itself needs none, and a preview served on another port of the same host (cookies ignore ports)
-// never gets it, since it answers only /preview/... Only its SHA-256 is kept, in <machine settings folder>/ui/sessions.json
+// Path=/api: the page itself needs none. Cookies ignore ports, so the browser would send it to /api/... on any port of
+// this host, a preview's (#599) too; Path=/api only keeps it off the preview's own /preview/... pages, which is all a
+// preview port answers. What protects the UI is the server: a request with the cookie from another origin (a preview's
+// page calling this port, or any page on another port or site) is refused, below and on the WebSocket, and SameSite=Strict
+// keeps it off requests from other sites. It is not protected from a program running as this machine's user, which can
+// read the sessions file's folder anyway. Only its SHA-256 is kept, in <machine settings folder>/ui/sessions.json
 // (mode 600), for `ui.signIn.sessionDays`. `factory ui sessions ls` and `revoke <id|all>` read and change that file, and
 // the server reads it on each request, so a revoke takes effect at once. A request that comes with the cookie must come
 // from the UI's own page: one with another Origin, or that the browser marks as sent from another site, is refused.
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Notifier } from "./core/ports/notifications.ts";
 import { configDir, machineSettings } from "./factory_machine.ts";
@@ -94,9 +101,46 @@ export function readSessions(now = Date.now()): Session[] {
   }
 }
 
-/** Writes `list` (mode 600, in a folder of mode 700), all at once. */
-export function writeSessions(list: Session[]): void {
-  writePrivate(sessionsFile(), JSON.stringify({ sessions: list }, null, 1) + "\n");
+/** A lock older than this was left by a process that died while holding it: it is taken over. */
+const STALE_LOCK_MS = 10_000;
+
+/** Runs `fn` holding <sessions file>.lock (made with O_EXCL), so a sign-in and a revoke in two processes never undo
+ * each other: each re-reads the file inside the lock. Waits for a held lock; takes over one left by a dead process. */
+function locked<T>(fn: () => T): T {
+  const lock = `${sessionsFile()}.lock`;
+  const dir = dirname(lock);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (;;) {
+    try {
+      closeSync(openSync(lock, "wx", 0o600));
+      break;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      let age = 0;
+      try {
+        age = Date.now() - statSync(lock).mtimeMs;
+      } catch {
+        continue; // it went in the meantime
+      }
+      if (age > STALE_LOCK_MS) rmSync(lock, { force: true });
+      else Bun.sleepSync(10);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/** Changes the sessions: `change` gets the file as it is now (read inside the lock, expired ones left out) and returns
+ * the new list, written through a temporary file and a rename (mode 600, in a folder of mode 700). */
+export function updateSessions(change: (list: Session[]) => Session[], now = Date.now()): Session[] {
+  return locked(() => {
+    const next = change(readSessions(now));
+    writePrivate(sessionsFile(), JSON.stringify({ sessions: next }, null, 1) + "\n");
+    return next;
+  });
 }
 
 /** Writes `text` to `file` through a temporary file, mode 600 in a mode-700 folder; nothing half written is left. */
@@ -143,6 +187,35 @@ export function foreign(req: Request): boolean {
   }
   const site = req.headers.get("sec-fetch-site");
   return site !== null && site !== "same-origin" && site !== "none";
+}
+
+/** The most a sign-in request's body may hold: these answer before any token or session. */
+export const MAX_BODY = 4096;
+
+/** The request's body as text, or null once it passes `max` bytes (read no further than that). */
+async function bodyText(req: Request, max: number): Promise<string | null> {
+  const declared = Number(req.headers.get("content-length") ?? "0");
+  if (declared > max) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const next = await reader.read();
+    if (next.done) break;
+    size += next.value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => undefined);
+      return null;
+    }
+    parts.push(next.value);
+  }
+  return new TextDecoder().decode(Buffer.concat(parts));
+}
+
+/** This machine itself: agents run here too, so a per-IP lock on it would lock the owner out with them. */
+export function loopback(ip: string): boolean {
+  return ip === "::1" || /^(::ffff:)?127\./.test(ip);
 }
 
 export const FOREIGN = problem(403, "ui_cross_origin", "The web UI's API answers its own page only, not a page from another address.",
@@ -248,10 +321,19 @@ export class SignIn {
     const secure = url.protocol === "https:" || req.headers.get("x-forwarded-proto") === "https";
     if (what === "signout") {
       const s = this.session(req);
-      if (s) writeSessions(readSessions(this.now()).filter((x) => x.id !== s.id));
+      if (s) updateSessions((now) => now.filter((x) => x.id !== s.id), this.now());
       return { status: 200, body: { ok: true }, headers: { "set-cookie": this.setCookie("", 0, secure) } };
     }
-    const body = (await req.json().catch(() => null)) as { email?: unknown; code?: unknown } | null;
+    const text = await bodyText(req, MAX_BODY);
+    if (text === null) {
+      return problem(413, "ui_body_too_large", `A sign-in request is at most ${MAX_BODY} bytes.`, "Send only {\"email\"} or {\"email\", \"code\"}.");
+    }
+    let body: { email?: unknown; code?: unknown } | null = null;
+    try {
+      body = JSON.parse(text) as { email?: unknown; code?: unknown } | null;
+    } catch {
+      // not JSON: no address
+    }
     const email = normal(typeof body?.email === "string" ? body.email : "");
     if (!EMAIL.test(email)) return problem(400, "ui_email_bad", "That isn't an email address.", "Type the address the code should go to, like me@example.com.");
     this.prune();
@@ -266,11 +348,12 @@ export class SignIn {
     }
     const { allowed, limits } = this.settings();
     const hour = 3_600_000;
-    if (this.recent(this.asked, `a:${email}`, hour) >= limits.codesPerHour || this.recent(this.asked, `ip:${ip}`, hour) >= limits.codesPerHour * IP_FACTOR) {
+    const byIp = !loopback(ip); // this machine's own requests are limited per address only
+    if (this.recent(this.asked, `a:${email}`, hour) >= limits.codesPerHour || (byIp && this.recent(this.asked, `ip:${ip}`, hour) >= limits.codesPerHour * IP_FACTOR)) {
       return problem(429, "ui_codes_limit", "Too many codes were asked for in the last hour.", "Wait an hour, or sign in with the token.");
     }
     this.recent(this.asked, `a:${email}`, hour, true);
-    this.recent(this.asked, `ip:${ip}`, hour, true);
+    if (byIp) this.recent(this.asked, `ip:${ip}`, hour, true);
     // the same work for every address, and the mail after the answer: neither the answer nor its time says who is allowed
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     const hash = this.mac(email, code);
@@ -305,14 +388,18 @@ export class SignIn {
       const created = new Date(this.now());
       const s: Session = { id: randomBytes(5).toString("hex"), hash: sha256(value), email, created: created.toISOString(),
         expires: new Date(created.getTime() + limits.sessionDays * 86_400_000).toISOString(), ip };
-      writeSessions([...readSessions(this.now()), s]);
+      updateSessions((now) => [...now, s], this.now());
       return { status: 200, body: { ok: true, email }, headers: { "set-cookie": this.setCookie(value, limits.sessionDays * 86_400, secure) } };
     }
     if (p && !live) this.pending.delete(email);
     const window = limits.lockoutMinutes * 60_000;
-    const byAddress = this.recent(this.wrong, `a:${email}`, window, true);
-    const byIp = this.recent(this.wrong, `ip:${ip}`, window, true);
-    if (byAddress >= limits.maxWrongCodes || byIp >= limits.maxWrongCodes * IP_FACTOR) {
+    // An address is locked only for wrong codes while it has a code waiting: guesses at an address with none can't lock
+    // its owner out. They are counted apart ("ghost") and answered the same way, so the answers never show whether an
+    // address has a code waiting, but that count blocks nothing. This machine's own IP is never locked (agents share it).
+    const byAddress = live ? this.recent(this.wrong, `a:${email}`, window, true) : 0;
+    const ghost = live ? 0 : this.recent(this.wrong, `g:${email}`, window, true);
+    const byIp = loopback(ip) ? 0 : this.recent(this.wrong, `ip:${ip}`, window, true);
+    if (byAddress >= limits.maxWrongCodes || ghost >= limits.maxWrongCodes || byIp >= limits.maxWrongCodes * IP_FACTOR) {
       if (byAddress >= limits.maxWrongCodes) {
         this.locked.set(`a:${email}`, this.now() + window);
         this.pending.delete(email); // its code is gone too
@@ -381,14 +468,17 @@ export function sessionsCli(argv: string[], refuse: (r: Refusal) => never): numb
   if (cmd === "revoke") {
     const id = rest[0] ?? "";
     if (!id || rest.length > 1) refuse({ code: "ui_sessions_usage", message: "factory ui sessions revoke takes one id, or all.", fix: "`factory ui sessions ls` lists the ids." });
+    let gone = 0;
+    updateSessions((now) => {
+      const left = id === "all" ? [] : now.filter((s) => s.id !== id);
+      gone = now.length - left.length;
+      return left;
+    });
     if (id === "all") {
-      writeSessions([]);
-      console.log(`Revoked ${list.length} session${list.length === 1 ? "" : "s"}.`);
+      console.log(`Revoked ${gone} session${gone === 1 ? "" : "s"}.`);
       return 0;
     }
-    const left = list.filter((s) => s.id !== id);
-    if (left.length === list.length) refuse({ code: "ui_session_unknown", message: `There is no session ${id} on this machine.`, fix: "`factory ui sessions ls` lists them." });
-    writeSessions(left);
+    if (!gone) refuse({ code: "ui_session_unknown", message: `There is no session ${id} on this machine.`, fix: "`factory ui sessions ls` lists them." });
     console.log(`Revoked session ${id}.`);
     return 0;
   }

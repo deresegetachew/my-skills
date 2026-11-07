@@ -620,11 +620,12 @@ const MORE: Record<string, More> = {
   examples: ["factory settings --local set ui.signIn.sessionDays 7"] },
   "ui.signIn.codesPerHour@machine": { long: "Counted over the last hour for each address asked for, allowed or not (so the limit " +
     "says nothing about who is allowed), and for each IP at four times this. Past it the page answers that too many codes " +
-    "were asked for.",
+    "were asked for. Requests from this machine itself (127.0.0.1, ::1) are counted per address only.",
   examples: ["factory settings --local set ui.signIn.codesPerHour 3"] },
   "ui.signIn.maxWrongCodes@machine": { long: "Wrong codes are counted per address, and per IP at four times this, over " +
     "`ui.signIn.lockoutMinutes`. At the limit, signing in is locked for that address (or IP) for `ui.signIn.lockoutMinutes`, " +
-    "even with the right code, and the address's code is thrown away.",
+    "even with the right code, and the address's code is thrown away. Only wrong codes while the address has a code waiting count " +
+    "towards its lock, and this machine's own address (127.0.0.1, ::1), which the agents share, is never locked per IP.",
   examples: ["factory settings --local set ui.signIn.maxWrongCodes 3"] },
   "ui.signIn.lockoutMinutes@machine": { long: "How long a lock lasts, and the time over which wrong codes are counted.",
   examples: ["factory settings --local set ui.signIn.lockoutMinutes 60"] },

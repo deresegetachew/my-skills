@@ -8,7 +8,7 @@
 //   session opens the API and the WebSocket, a cross-origin request with the cookie is refused, `factory ui sessions`
 //   lists and revokes, and the token still works.
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Notifier } from "../hooks/core/ports/notifications.ts";
@@ -166,6 +166,51 @@ test("wrong codes from one IP across many addresses lock that IP", async () => {
   expect(eighth.status).toBe(429);
   expect((await ask("/api/auth/verify", { email: "y@example.com", code: "123456" }, { ip: "10.9.9.9" })).status).toBe(429);
   expect((await ask("/api/auth/verify", { email: "y@example.com", code: "123456" }, { ip: "10.1.1.1" })).status).toBe(401);
+});
+
+test("guessing codes for an address with no code waiting never locks its owner out", async () => {
+  const { mail, ask } = signIn({ limits: { maxWrongCodes: 3 } });
+  const answers: number[] = [];
+  for (let i = 0; i < 10; i++) answers.push((await ask("/api/auth/verify", { email: OWNER, code: "123456" }, { ip: `10.3.0.${i}` })).status);
+  expect(answers.slice(0, 2)).toEqual([401, 401]);
+  expect(answers.slice(2).every((s) => s === 429)).toBe(true); // answered as a lock, the same as for any address
+  expect((await ask("/api/auth/code", { email: OWNER })).status).toBe(202);
+  await settle();
+  expect(mail?.sent.length).toBe(1);
+  expect((await ask("/api/auth/verify", { email: OWNER, code: codeIn(mail?.sent[0]) })).status).toBe(200);
+});
+
+test("this machine's own address is never locked or limited per IP: agents share it with the owner", async () => {
+  const { mail, ask } = signIn({ limits: { maxWrongCodes: 2, codesPerHour: 1 } }); // per IP: 8 wrong codes, 4 codes
+  for (const ip of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+    for (let i = 0; i < 12; i++) expect((await ask("/api/auth/verify", { email: `${ip.length}a${i}@example.com`, code: "123456" }, { ip })).status).toBe(401);
+    for (let i = 0; i < 6; i++) expect((await ask("/api/auth/code", { email: `${ip.length}x${i}@example.com` }, { ip })).status).toBe(202);
+  }
+  expect((await ask("/api/auth/code", { email: OWNER }, { ip: "127.0.0.1" })).status).toBe(202);
+  await settle();
+  expect((await ask("/api/auth/verify", { email: OWNER, code: codeIn(mail?.sent.at(-1)) }, { ip: "127.0.0.1" })).status).toBe(200);
+  // another IP still gets its lock
+  for (let i = 0; i < 7; i++) await ask("/api/auth/verify", { email: `z${i}@example.com`, code: "123456" }, { ip: "10.4.4.4" });
+  expect((await ask("/api/auth/verify", { email: "z8@example.com", code: "123456" }, { ip: "10.4.4.4" })).status).toBe(429);
+});
+
+test("a sign-in body over 4 KB is refused with 413, whether its length is declared or streamed", async () => {
+  const { s, mail } = signIn();
+  const big = JSON.stringify({ email: OWNER, pad: "x".repeat(5000) });
+  for (const path of ["/api/auth/code", "/api/auth/verify"]) {
+    const url = new URL("http://127.0.0.1:4747" + path);
+    const declared = new Request(url, { method: "POST", headers: { host: url.host, "content-type": "application/json" }, body: big });
+    const streamed = new Request(url, { method: "POST", headers: { host: url.host, "content-type": "application/json" },
+      body: new ReadableStream({ start(c) { for (let i = 0; i < 10; i++) c.enqueue(new TextEncoder().encode("x".repeat(1000))); c.close(); } }) });
+    for (const req of [declared, streamed]) {
+      const a = await s.api(req, url, "10.0.0.1");
+      expect(a?.status).toBe(413);
+      expect(a?.body.code).toBe("ui_body_too_large");
+      expect(Object.keys(a?.body ?? {}).sort()).toEqual(["code", "fix", "message"]);
+    }
+  }
+  await settle();
+  expect(mail?.sent.length).toBe(0);
 });
 
 test("asking for codes is limited per address, allowed or not alike, and per IP", async () => {
@@ -388,6 +433,76 @@ test("factory ui sessions ls lists the session without its secret; revoke ends i
   expect(all.stdout).toContain("Revoked 2 sessions.");
   for (const c of [a, b]) expect((await get(ui, "/api/projects", { cookie: c })).status).toBe(401);
   expect(factoryUi(p, ["sessions", "ls"]).stdout).toContain("No sign-in sessions on this machine.");
+}, T);
+
+/** A WebSocket opened with `cookie`, once it said hello; `closed` gives its close code (or "open" after `ms`). */
+async function openSocket(ui: Running, cookie: string): Promise<{ closed: (ms: number) => Promise<number | "open">; ws: WebSocket }> {
+  const ws = new WebSocket(ui.url.replace("http", "ws") + "/api/ws", { headers: { cookie } } as unknown as string[]);
+  let code: number | null = null;
+  ws.onclose = (e) => { code = e.code; };
+  await new Promise<void>((done, failed) => {
+    ws.onmessage = () => done();
+    ws.onerror = () => failed(new Error("the socket was refused"));
+  });
+  return {
+    ws,
+    closed: async (ms) => {
+      const end = Date.now() + ms;
+      while (code === null && Date.now() < end) await Bun.sleep(50);
+      return code ?? "open";
+    },
+  };
+}
+
+test("an open WebSocket is closed (4401) within a poll once its session is revoked or signed out", async () => {
+  const { p, ui } = await hub(); // ui.pollSeconds is 1
+  const a = await signedIn(ui);
+  const b = await signedIn(ui);
+  const sa = await openSocket(ui, a);
+  const sb = await openSocket(ui, b);
+  const tokenWs = new WebSocket(ui.url.replace("http", "ws") + `/api/ws?token=${ui.token}`);
+  let tokenClosed = false;
+  tokenWs.onclose = () => { tokenClosed = true; };
+  const ids = (JSON.parse(factoryUi(p, ["sessions", "ls", "--json"]).stdout) as { sessions: Row[] }).sessions.map((s) => String(s.id));
+  const first = ids[0] as string; // made first: a's
+  expect(factoryUi(p, ["sessions", "revoke", first]).code).toBe(0);
+  expect(await sa.closed(4000)).toBe(4401);
+  expect(await sb.closed(1500)).toBe("open"); // the other session's socket stays
+  expect((await post(ui, "/api/auth/signout", {}, { cookie: b })).status).toBe(200);
+  expect(await sb.closed(4000)).toBe(4401);
+  expect(tokenClosed).toBe(false); // the token's socket isn't a session's
+  tokenWs.close();
+}, T);
+
+test("session writes wait for the lock, so a revoke and a sign-in never undo each other; a dead holder's lock is taken over", async () => {
+  const { p, ui, config } = await hub();
+  const file = join(config, "ui", "sessions.json");
+  const lock = `${file}.lock`;
+  const cookie = await signedIn(ui);
+  write(lock, "held");
+  const revoking = Bun.spawn([...BUN, join(HOOKS, "factory_ui.ts"), "sessions", "revoke", "all"], { cwd: p.d,
+    env: Object.fromEntries(Object.entries(p.env).filter((e): e is [string, string] => e[1] !== undefined)), stdout: "pipe", stderr: "pipe" });
+  await Bun.sleep(700);
+  expect(revoking.exitCode).toBe(null); // waiting for the lock
+  expect((await get(ui, "/api/projects", { cookie })).status).toBe(200);
+  rmSync(lock);
+  expect(await revoking.exited).toBe(0);
+  expect(await new Response(revoking.stdout).text()).toContain("Revoked 1 session.");
+  expect((await get(ui, "/api/projects", { cookie })).status).toBe(401);
+  // a lock left by a process that died: older than 10 s, taken over
+  write(lock, "left");
+  utimesSync(lock, new Date(Date.now() - 60_000), new Date(Date.now() - 60_000));
+  const again = await signedIn(ui);
+  expect((await get(ui, "/api/projects", { cookie: again })).status).toBe(200);
+  expect(existsSync(lock)).toBe(false);
+  expect(readFileSync(file, "utf8")).toContain('"sessions"');
+}, T);
+
+test("an over-long sign-in body is refused by the real server with 413", async () => {
+  const { ui } = await hub();
+  const r = await post(ui, "/api/auth/code", { email: OWNER, pad: "x".repeat(5000) });
+  expect(r.status).toBe(413);
+  expect(r.json.code).toBe("ui_body_too_large");
 }, T);
 
 test("signing out ends the session and clears the cookie", async () => {
