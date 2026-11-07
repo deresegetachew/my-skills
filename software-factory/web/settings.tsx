@@ -1,21 +1,21 @@
 // Factory settings (#456), from the owner's design (docs/design/web-ui/Settings.dc.html, Releases.dc.html and
-// Maintenance.dc.html): the team (add a coding agent, remove one after its preconditions), every project setting with
-// its plain name, help and where its value comes from (staged, then proposed as one pull request the owner merges),
-// this machine's settings (saved at once), the factory's version and update, and the clean-ups. The rules and words are
-// in settings_model.ts; the data and every change go through /api/projects/:p/settings (factory_ui_settings.ts). Nothing
-// here shows a command.
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Avatar } from "./avatar_view.tsx";
+// Maintenance.dc.html): Your team (read only: adding, removing and renaming an agent are on the Team page, team.tsx,
+// #581), every project setting with its plain name, help and where its value comes from (staged, then proposed as one
+// pull request the owner merges), this machine's settings (saved at once), the factory's version and update, and the
+// clean-ups. The rules and words are in settings_model.ts; the data and every change go through
+// /api/projects/:p/settings (factory_ui_settings.ts). The pieces the Team page shares are exported. Nothing here shows a
+// command.
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ROLE_TITLE } from "./model.ts";
 import { channelOf, SETTINGS_TABS } from "./nav_model.ts";
 import { ConfirmDialog, ListRow, StatusDot, Tabs } from "./parts.tsx";
 import type { Check, ConfirmSpec } from "./parts_model.ts";
-import { addAgentAsk, agentOfAnswer, type CheckoutFacts, checkoutText, fieldOf, type Fixing, fromText, inputOf, type LiveAgent, MAINTENANCE,
-  machineAgentsText, maintenanceAsk, nameProblem, proposeAsk, rawOf, recheckAgent, removeAgentAsk, removeFactsOf, searchSettings, type SettingRow,
+import { agentOfAnswer, type CheckoutFacts, checkoutText, fieldOf, type Fixing, fromText, inputOf, type LiveAgent, MAINTENANCE,
+  machineAgentsText, maintenanceAsk, proposeAsk, rawOf, recheckAgent, removeFactsOf, searchSettings, type SettingRow,
   type Staged, stagedText, syncAsk, updateAsk, valueText } from "./settings_model.ts";
 import type { Post, Say } from "./views.tsx";
 
-interface Problem {
+export interface Problem {
   code: string;
   message: string;
   fix: string;
@@ -24,11 +24,12 @@ interface Problem {
 /** What the page needs to know of an agent as it runs now (the shell's live state). */
 export type { LiveAgent };
 
-interface SettingsData {
-  team: { agents: { name: string; role: string }[]; next: Record<string, string[]>; free: string[] };
+/** What GET /api/projects/:p/settings answers; the Team page (team.tsx, #581) reads it too. */
+export interface SettingsData {
+  team: { agents: { name: string; role: string }[]; next: Record<string, string[]>; free: string[]; former: Record<string, string[]> };
   sections: { id: string; title: string; rows: SettingRow[] }[];
   staged: { changes: Array<{ key: string; name: string; value?: unknown; unset?: true }>; problem: string | null };
-  machine: { agents: string[]; from: string; board: boolean; rows: SettingRow[] };
+  machine: { agents: string[]; from: string; board: boolean; rows: SettingRow[]; pending: { join: string[]; leave: string[] } };
   release: { pinned: string | null };
   dirty: boolean;
   pr: { number: number; url: string; title: string } | null;
@@ -44,7 +45,7 @@ interface ReleaseData {
   problems: Problem[];
 }
 
-interface Props {
+export interface Props {
   project: { id: string; name: string };
   get: <T>(path: string) => Promise<T>;
   post: Post;
@@ -60,7 +61,93 @@ function isProblem(x: unknown): x is Problem {
   return typeof x === "object" && x !== null && "code" in x && "fix" in x && !("team" in x) && !("installed" in x) && !("canUpdate" in x);
 }
 
-function Notice({ p, tone = "bad" }: { p: Problem; tone?: "bad" | "quiet" }) {
+/** The settings read (GET /api/projects/:p/settings), what went wrong reading it, and a way to read it again. */
+export function useSettingsData(p: Pick<Props, "get" | "project">) {
+  const [data, setData] = useState<SettingsData | null>(null);
+  const [problem, setProblem] = useState<Problem | null>(null);
+  const base = `/api/projects/${encodeURIComponent(p.project.id)}/settings`;
+  const load = useCallback(() => {
+    p.get<SettingsData | Problem>(base).then((d) => {
+      if (isProblem(d)) setProblem(d);
+      else {
+        setProblem(null);
+        setData(d);
+      }
+    }).catch(() => setProblem(UNREACHABLE));
+  }, [p.get, base]);
+  useEffect(load, [load]);
+  return { data, problem, load, base };
+}
+
+/** The remove (and rename, #581) dialog's own Stop and Release buttons: after one ran, the agent is read again until it
+ * shows (#589), beside the live push. `target` is the agent the dialog is about; a new or closed one ends the reading. */
+export function useFixDialog(p: Pick<Props, "get" | "project" | "agents">, act: Act) {
+  const [target, setTarget] = useState<string | null>(null);
+  const [fresh, setFresh] = useState<LiveAgent | null>(null);
+  const [checking, setChecking] = useState<Fixing | null>(null);
+  const round = useRef(0);
+  useEffect(() => {
+    round.current += 1;
+    setFresh(null);
+    setChecking(null);
+  }, [target]);
+  useEffect(() => () => {
+    round.current += 1;
+  }, []);
+  const recheck = useCallback((name: string, done: Fixing): void => {
+    const mine = ++round.current;
+    setChecking(done);
+    const path = `/api/projects/${encodeURIComponent(p.project.id)}/agents/${encodeURIComponent(name)}`;
+    void recheckAgent({ read: () => p.get<unknown>(path).then((b) => agentOfAnswer(name, b)), done,
+      seen: (a) => { if (round.current === mine) setFresh(a); }, gone: () => round.current !== mine })
+      .finally(() => { if (round.current === mine) setChecking(null); });
+  }, [p.get, p.project.id]);
+  /** The facts of the dialog's agent, with its role. */
+  const facts = (name: string, role: string) => ({ ...removeFactsOf(role, p.agents.find((x) => x.name === name), fresh), name, checking });
+  const fix = (c: Check): void => {
+    if (!target || !c.fix) return;
+    const name = target;
+    const task = removeFactsOf("", p.agents.find((x) => x.name === name), fresh).task;
+    const done: Fixing | null = c.fix.startsWith("Stop") ? "stop" : task ? "release" : null;
+    if (!done) return;
+    const run = done === "stop" ? act(`agents/${encodeURIComponent(name)}/stop`, { confirm: true }, { title: `Stopped ${name}.` })
+      : act(`tasks/${encodeURIComponent(task ?? "")}/actions/release`, { confirm: true }, { title: `#${task} is back to Ready.` });
+    void run.then((ok) => { if (ok) recheck(name, done); });
+  };
+  return { target, setTarget, facts, fix };
+}
+
+/** An open settings pull request, with its link. */
+export function PrNotice({ pr }: { pr: SettingsData["pr"] }) {
+  if (!pr) return null;
+  return (
+    <div className="notice" role="status">
+      <StatusDot state="waiting" />
+      <div><strong>A settings pull request is open: #{pr.number} {pr.title}</strong>
+        <p>It changes the project once you merge it. Agents can't merge it: it changes their own rules.</p></div>
+      <a className="btn small" href={/^https:\/\//.test(pr.url) ? pr.url : "#"} target="_blank" rel="noreferrer noopener">Open the pull request</a>
+    </div>
+  );
+}
+
+/** The staged changes in one bar: Drop all, and Propose as a pull request after its confirm. */
+export function StagedBar({ changes, busy, act, ask }: { changes: SettingsData["staged"]["changes"]; busy: boolean; act: Act;
+  ask: (a: { spec: ConfirmSpec; run: () => Promise<unknown> }) => void }) {
+  if (!changes.length) return null;
+  return (
+    <div className="staged-bar" role="region" aria-label="Staged changes">
+      <StatusDot state="waiting" />
+      <span className="staged-n">{stagedText(changes.length)}</span>
+      <span className="staged-what">{changes.map((c) => c.name).join(", ")}.</span>
+      <button className="btn small" disabled={busy} onClick={() => void act("settings/unstage", {}, { title: "Dropped the staged changes." })}>Drop all</button>
+      <button className="btn small primary" disabled={busy}
+        onClick={() => ask({ spec: proposeAsk(changes.length), run: () => act("settings/pr", { confirm: true }, { title: "Pull request opened." }) })}>
+        Propose as a pull request</button>
+    </div>
+  );
+}
+
+export function Notice({ p, tone = "bad" }: { p: Problem; tone?: "bad" | "quiet" }) {
   return (
     <div className={`notice ${tone}`} role={tone === "bad" ? "alert" : "status"}>
       <StatusDot state={tone === "bad" ? "red" : "idle"} /><div><strong>{p.message}</strong><p>{p.fix}</p></div>
@@ -73,8 +160,11 @@ export function SettingsTabs({ page, open }: { page: string; open: (channel: str
   return <Tabs label="Factory settings" value={page} onChange={(p) => open(channelOf(p))} tabs={SETTINGS_TABS.map((t) => ({ id: t.page, label: t.label }))} />;
 }
 
+/** A change through the API: the answer when it went well, else null (the toast says why). */
+export type Act = (path: string, body: unknown, good: { title: string; text?: string }) => Promise<Record<string, unknown> | null>;
+
 /** Says how a change went: a toast, and the data read again. */
-function useAct(p: Props, reload: () => void) {
+export function useAct(p: Pick<Props, "post" | "say" | "project">, reload: () => void): { busy: boolean; act: Act } {
   const [busy, setBusy] = useState(false);
   const act = useCallback(async (path: string, body: unknown, good: { title: string; text?: string }): Promise<Record<string, unknown> | null> => {
     setBusy(true);
@@ -90,20 +180,9 @@ function useAct(p: Props, reload: () => void) {
 
 // --- Settings -------------------------------------------------------------------------------------------------------------
 
+
 export function SettingsPage(p: Props) {
-  const [data, setData] = useState<SettingsData | null>(null);
-  const [problem, setProblem] = useState<Problem | null>(null);
-  const base = `/api/projects/${encodeURIComponent(p.project.id)}/settings`;
-  const load = useCallback(() => {
-    p.get<SettingsData | Problem>(base).then((d) => {
-      if (isProblem(d)) setProblem(d);
-      else {
-        setProblem(null);
-        setData(d);
-      }
-    }).catch(() => setProblem(UNREACHABLE));
-  }, [p.get, base]);
-  useEffect(load, [load]);
+  const { data, problem, load, base } = useSettingsData(p);
   // this machine's checkout against main (#566): read apart, since it fetches main from GitHub
   const [checkout, setCheckout] = useState<CheckoutFacts | null>(null);
   const loadCheckout = useCallback(() => {
@@ -115,28 +194,7 @@ export function SettingsPage(p: Props) {
     loadCheckout();
   }, [load, loadCheckout]);
   const { busy, act } = useAct(p, reload);
-  const [ask, setAsk] = useState<{ spec: ConfirmSpec; run: () => Promise<unknown>; fix?: (c: Check) => void } | null>(null);
-  const [removing, setRemoving] = useState<string | null>(null);
-  // after the remove dialog's own Stop or Release ran (#589): the agent read again until it shows, beside the live push
-  const [fresh, setFresh] = useState<LiveAgent | null>(null);
-  const [checking, setChecking] = useState<Fixing | null>(null);
-  const round = useRef(0); // a new or closed dialog ends the reading of the one before
-  useEffect(() => {
-    round.current += 1;
-    setFresh(null);
-    setChecking(null);
-  }, [removing]);
-  useEffect(() => () => {
-    round.current += 1;
-  }, []);
-  const recheck = useCallback((name: string, done: Fixing): void => {
-    const mine = ++round.current;
-    setChecking(done);
-    const path = `/api/projects/${encodeURIComponent(p.project.id)}/agents/${encodeURIComponent(name)}`;
-    void recheckAgent({ read: () => p.get<unknown>(path).then((b) => agentOfAnswer(name, b)), done,
-      seen: (a) => { if (round.current === mine) setFresh(a); }, gone: () => round.current !== mine })
-      .finally(() => { if (round.current === mine) setChecking(null); });
-  }, [p.get, p.project.id]);
+  const [ask, setAsk] = useState<{ spec: ConfirmSpec; run: () => Promise<unknown> } | null>(null);
 
   if (!data) {
     return (
@@ -146,49 +204,14 @@ export function SettingsPage(p: Props) {
       </div>
     );
   }
-  const changes = data.staged.changes;
-  const removeSpec = (name: string): ConfirmSpec => {
-    const role = data.team.agents.find((x) => x.name === name)?.role ?? "coding-agent";
-    return removeAgentAsk({ ...removeFactsOf(role, p.agents.find((x) => x.name === name), fresh), name, checking });
-  };
-  const confirm = async (): Promise<void> => {
-    if (removing) {
-      const ok = await act(`settings/team/${encodeURIComponent(removing)}/remove`, { confirm: true }, { title: `${removing} leaves the team once you propose and merge it.` });
-      if (ok) setRemoving(null);
-      return;
-    }
-    if (!ask) return;
-    await ask.run();
-    setAsk(null);
-  };
-  const fixRemove = (c: Check): void => {
-    if (!removing || !c.fix) return;
-    const name = removing;
-    const task = removeFactsOf("", p.agents.find((x) => x.name === name), fresh).task;
-    const done: Fixing | null = c.fix.startsWith("Stop") ? "stop" : task ? "release" : null;
-    if (!done) return;
-    const run = done === "stop" ? act(`agents/${encodeURIComponent(name)}/stop`, { confirm: true }, { title: `Stopped ${name}.` })
-      : act(`tasks/${encodeURIComponent(task ?? "")}/actions/release`, { confirm: true }, { title: `#${task} is back to Ready.` });
-    void run.then((ok) => { if (ok) recheck(name, done); });
-  };
 
   return (
     <div className="body settings">
       <SettingsTabs page="settings" open={p.open} />
       {problem && <Notice p={problem} />}
       {data.problems.map((x) => <Notice key={x.code} p={x} tone="quiet" />)}
-      {data.pr && (
-        <div className="notice" role="status">
-          <StatusDot state="waiting" />
-          <div><strong>A settings pull request is open: #{data.pr.number} {data.pr.title}</strong>
-            <p>It changes the project once you merge it. Agents can't merge it: it changes their own rules.</p></div>
-          <a className="btn small" href={/^https:\/\//.test(data.pr.url) ? data.pr.url : "#"} target="_blank" rel="noreferrer noopener">Open the pull request</a>
-        </div>
-      )}
-      <TeamCard data={data} agents={p.agents} busy={busy} open={p.open}
-        add={(name) => setAsk({ spec: addAgentAsk(name), run: () => act("settings/team", { name }, { title: `${name} is staged.`,
-          text: "Propose the staged changes when you are ready." }) })}
-        remove={(name) => setRemoving(name)} />
+      <PrNotice pr={data.pr} />
+      <TeamSummary data={data} agents={p.agents} open={p.open} />
       <ProjectSettings data={data} busy={busy}
         stage={(key, raw) => act("settings/stage", { key, value: raw }, { title: "Staged.", text: "Propose the staged changes when you are ready." })}
         reset={(key) => act("settings/stage", { key, unset: true }, { title: "Staged: back to the default." })} />
@@ -198,68 +221,37 @@ export function SettingsPage(p: Props) {
         reset={(key) => act("settings/machine", { key, unset: true }, { title: "Back to the default on this machine." })} />
       <p className="hint">Agents can't change their own rules: a project change is a pull request only you merge. This machine's settings are kept
         outside the repository and save at once.</p>
-      {changes.length > 0 && (
-        <div className="staged-bar" role="region" aria-label="Staged changes">
-          <StatusDot state="waiting" />
-          <span className="staged-n">{stagedText(changes.length)}</span>
-          <span className="staged-what">{changes.map((c) => c.name).join(", ")}.</span>
-          <button className="btn small" disabled={busy} onClick={() => void act("settings/unstage", {}, { title: "Dropped the staged changes." })}>Drop all</button>
-          <button className="btn small primary" disabled={busy}
-            onClick={() => setAsk({ spec: proposeAsk(changes.length), run: () => act("settings/pr", { confirm: true }, { title: "Pull request opened." }) })}>
-            Propose as a pull request</button>
-        </div>
-      )}
-      {(ask || removing) && (
-        <ConfirmDialog key={removing ?? ask?.spec.title} spec={removing ? removeSpec(removing) : (ask as { spec: ConfirmSpec }).spec} busy={busy}
-          onConfirm={() => void confirm()} onCancel={() => { setAsk(null); setRemoving(null); }} onFix={fixRemove} />
-      )}
+      <StagedBar changes={data.staged.changes} busy={busy} act={act} ask={setAsk} />
+      {ask && <ConfirmDialog key={ask.spec.title} spec={ask.spec} busy={busy} onCancel={() => setAsk(null)}
+        onConfirm={() => void ask.run().then(() => setAsk(null))} />}
     </div>
   );
 }
 
-function TeamCard({ data, agents, busy, add, remove, open }: { data: SettingsData; agents: LiveAgent[]; busy: boolean; add: (name: string) => void;
-  remove: (name: string) => void; open: (channel: string) => void }) {
-  const [name, setName] = useState("");
-  const taken = useMemo(() => [...new Set([...data.team.agents.map((a) => a.name), ...Object.values(data.team.next).flat()])], [data]);
-  const why = name ? nameProblem(name.trim(), taken) : null;
+/** Your team, read only: adding, removing, renaming and where each one runs are on the Team page (#581). */
+function TeamSummary({ data, agents, open }: { data: SettingsData; agents: LiveAgent[]; open: (channel: string) => void }) {
   const nextAll = Object.values(data.team.next).flat();
-  const adds = (data.team.next["coding-agent"] ?? []).filter((n) => !data.team.agents.some((a) => a.name === n));
+  const adds = Object.values(data.team.next).flat().filter((n) => !data.team.agents.some((a) => a.name === n));
   return (
     <section className="card" aria-labelledby="team-h">
       <h3 id="team-h">Your team</h3>
       <ul className="lrows">
         {data.team.agents.map((a) => {
           const live = agents.find((x) => x.name === a.name);
-          const leaving = !nextAll.includes(a.name);
           const running = !!live && live.state !== "down";
           return (
             <ListRow key={a.name} avatar={{ name: a.name, role: a.role }}
               title={<button className="link" onClick={() => open(`agent:${a.name}`)}>{a.name}</button>}
-              sub={`${ROLE_TITLE[a.role] ?? a.role}${live?.task ? ` · holds #${live.task}` : ""}${leaving ? " · staged to leave" : ""}`}
-              status={{ state: running ? "working" : "idle", text: running ? live?.state ?? "running" : "not running" }}
-              action={leaving ? null : <button className="btn small" disabled={busy} onClick={() => remove(a.name)}>Remove</button>} />
+              sub={`${ROLE_TITLE[a.role] ?? a.role}${live?.task ? ` · holds #${live.task}` : ""}${nextAll.includes(a.name) ? "" : " · staged to leave"}`}
+              status={{ state: running ? "working" : "idle", text: running ? live?.state ?? "running" : "not running" }} />
           );
         })}
-        {adds.map((n) => <ListRow key={n} avatar={{ name: n, role: "coding-agent" }} title={n} sub="Coding agent · staged to join"
-          status={{ state: "waiting", text: "staged" }} />)}
+        {adds.map((n) => <ListRow key={n} avatar={{ name: n, role: "coding-agent" }} title={n} sub="Staged to join" status={{ state: "waiting", text: "staged" }} />)}
       </ul>
-      <form className="add-agent" onSubmit={(e) => { e.preventDefault(); if (!why && name.trim()) { add(name.trim()); setName(""); } }}>
-        <label htmlFor="agent-name">Add a coding agent</label>
-        {data.team.free.length > 0 && (
-          <div className="chips" role="group" aria-label="Free names">
-            {data.team.free.map((n) => (
-              <button key={n} type="button" className="chip" aria-pressed={name === n} onClick={() => setName(n)}>
-                <Avatar name={n} role="coding-agent" size={20} />{n}</button>
-            ))}
-          </div>
-        )}
-        <span className="add-row">
-          <input id="agent-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Pick a name above, or type one"
-            aria-invalid={!!why} aria-describedby={why ? "agent-err" : undefined} />
-          <button className="btn primary" type="submit" disabled={busy || !name.trim() || !!why}>Add</button>
-        </span>
-        {why && <span id="agent-err" className="send-problem">{why}</span>}
-      </form>
+      <div className="actions row-actions">
+        <button className="btn primary" onClick={() => open(channelOf("team"))}>Manage the team</button>
+        <span className="hint">Add, remove or rename an agent, choose where it runs and how many build at once, on the Team page.</span>
+      </div>
     </section>
   );
 }

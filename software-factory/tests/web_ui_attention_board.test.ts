@@ -112,6 +112,32 @@ test("a task nothing moved on the board for longer than attention.taskQuietMinut
   expect(await until(fresh, () => true)).toEqual([]);
 }, T);
 
+test("a board task ready longer than attention.idleWithReadyMinutes while taytu is idle with a message unsent (#591): Start work; it clears once taytu claims it", async () => {
+  const db = await freshDb(pg);
+  drops.push(db.drop);
+  const { board, sql } = await seeded(db.url, 10);
+  const b32 = await board.create({ title: "Shelf search", ref: `factory:${REPO}/b32-uuid`, priority: 2 });
+  const fresh = await board.create({ title: "Made ready just now", ref: `factory:${REPO}/fresh-uuid`, priority: 3 });
+  await sql`UPDATE tasks SET updated_at = now() - make_interval(mins => 40) WHERE id = ${b32.id}`;
+  const p = workProject({ ...CONFIG, tasks: { source: "board" } });
+  heartbeat(p, [hbRow("menelik", { state: "working", detail: "working on #7", task: "7", since: new Date().toISOString() }),
+    hbRow("taytu", { since: new Date(Date.now() - 120 * 60_000).toISOString(), prompt: "unsent", detail: "idle: a message is typed in its session but not sent" }),
+    hbRow("fasil", { kind: "dev-manager" }), hbRow("mentewab", { kind: "product-owner" })]);
+  const ui = await startUi(p, ["--port", "0"], null, { MB_URL: db.url });
+  running.push(ui);
+  const x = await until(ui, (l) => l.some((i) => i.id === "idle-ready:taytu"));
+  const item = x.find((i) => i.id === "idle-ready:taytu") as Item;
+  expect(item, JSON.stringify(x)).toBeTruthy();
+  expect(item.reason).toBe(`taytu has been idle for 120 minutes while b${b32.id} Shelf search is ready. A message is typed in its session but not sent.`);
+  expect(item.action).toEqual({ kind: "say", label: "Start work", agent: "taytu", text: "/next-task" });
+  // claimed: b32 is taken, and the task made ready a minute ago doesn't count yet
+  const taytu = await Board.open(db.url, { as: "taytu", max: 1 });
+  boards.push(taytu);
+  await taytu.claim(b32.id);
+  expect(await until(ui, (l) => !l.some((i) => i.id === "idle-ready:taytu"))).toEqual([]);
+  expect(fresh.status).toBe("open");
+}, T);
+
 test("with tasks.source board, Close moves the task to done on the board; its item and the finished epic's both clear", async () => {
   const db = await freshDb(pg);
   drops.push(db.drop);

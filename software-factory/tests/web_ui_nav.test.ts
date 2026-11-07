@@ -16,7 +16,7 @@ const TEAM: TeamInput[] = [
 test("the pages in the design's order, then Run the factory", () => {
   const s = sidebar({ page: "home", team: [] });
   expect(s.main.map((n) => n.label)).toEqual(["Home", "Inbox", "Board", "Epics", "Pull requests", "PRD and decisions", "Sign-off and testing", "Activity"]);
-  expect(s.ops.map((n) => n.label)).toEqual(["CI and runners", "Machines", "Health", "Usage and cost", "Factory settings"]);
+  expect(s.ops.map((n) => n.label)).toEqual(["Team", "CI and runners", "Machines", "Health", "Usage and cost", "Factory settings"]);
 });
 
 test("exactly the page shown is selected; a settings tab selects Factory settings", () => {
@@ -28,6 +28,7 @@ test("exactly the page shown is selected; a settings tab selects Factory setting
   expect(on("board")).toEqual(["Board"]);
   expect(on("prs")).toEqual(["Pull requests"]);
   expect(on("usage")).toEqual(["Usage and cost"]);
+  expect(on("team")).toEqual(["Team"]); // #581
   for (const tab of ["settings", "integrations", "releases", "maintenance"]) expect(on(tab)).toEqual(["Factory settings"]);
   expect(on("haile")).toEqual(["haile"]);
 });
@@ -75,6 +76,7 @@ test("each item opens its page: the views that exist keep their addresses, the r
   expect(channelOf("machines")).toBe("view:machines");
   expect(channelOf("signoff")).toBe("page:signoff");
   expect(channelOf("settings")).toBe("page:settings");
+  expect(channelOf("team")).toBe("page:team");
   const s = sidebar({ page: "home", team: [] });
   for (const n of [...s.main, ...s.ops]) expect(pageOf(n.channel)).toBe(n.page);
 });

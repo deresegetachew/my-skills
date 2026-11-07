@@ -39,8 +39,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `coding-agent` | built | An agent's channel: start | #453 |
 | `dev-manager` | built | The dev manager's channel: start | #453 |
 | `product-owner` | built | The product owner's channel: start | #453 |
-| `owner start` | built | An agent's channel: start, after a confirm | |
-| `owner stop` | built | An agent's channel: stop, after a confirm | |
+| `owner start` | built | An agent's channel and Team: start, after a confirm (Team also says when this machine runs as many coding agents as it may) | #581 |
+| `owner stop` | built | An agent's channel and Team: stop, after a confirm | #581 |
 | `agent` | planned | Agent (Agent.dc.html): open its session | #453 |
 | `follow` | planned | Agent (Agent.dc.html): recent output and its Remote Control link | #453 |
 | `say` | built | An agent's channel: chat | |

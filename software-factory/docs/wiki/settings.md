@@ -217,6 +217,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `github.reserve` | int | `500` | GitHub's API limit is shared by every agent on the account (5,000 calls an hour). When fewer than this many are left, idle loops wait twice as long, so the limit is not used up. 0: never slow down. |
 | `models` | dict | `{}` | The model per role (builder, manager, product-owner, test-writer, reviewer, architecture-reviewer, safety-auditor, security-reviewer): {"builder": {"model": "opus", "effort": "high"}, "reviewer": {"model": "sonnet", "escalateTo": "opus"}}. effort (low, medium, high, xhigh, max) is for builder and manager only. A role with no entry keeps today's model: the agent file's, or Claude Code's default. |
 | `budget.builder` | int | `null` | The token budget of a task whose issue has no `Budget:` line, counting fresh input (input + cache writes) + output as `factory usage` reports them. Advisory: shown and compared, a warning at 80%, never a stop. Empty: no budget. |
+| `formerNames` | dict | `{}` | An agent's earlier names, by its name now: {"haile": ["tewodros"]}. The web UI's Team page adds to it when it renames an agent and shows them; the pull requests, branches, messages and finished tasks of an old name keep that name. |
 | `permissions.allow` | list | `[]` | Extra Claude Code allow rules for this project's agents, like "Edit(src/**)". A rule applies on an agent's next run once the pull request from `factory settings pr` is merged: the factory adds them to the agents' settings, after the release's own. |
 
 **Issues mode**
@@ -283,6 +284,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `autostart` | bool | `false` | Bring the stack and this machine's agents back after a reboot (`factory autostart`). |
 | `autostartAgents` | list | `[]` | The agents it starts at boot. Empty: the names this machine runs. |
 | `autostartReport` | bool | `true` | Post the boot report on the first started agent's issue (issues mode). |
+| `maxCodingAgents` | int | `null` | How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`) is refused. Empty: no limit. |
 | `ci.runners` | int | `null` | Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's. |
 
 **Messaging**
@@ -308,6 +310,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `attention.coding-agent.maxMinutes` | int | `120` | Needs attention: a coding agent's session shows when it has been working this many minutes without a pause. |
 | `attention.dev-manager.maxMinutes` | int | `30` | Needs attention: a dev manager's session shows when it has been working this many minutes without a pause. |
 | `attention.product-owner.maxMinutes` | int | `30` | Needs attention: a product owner's session shows when it has been working this many minutes without a pause. |
+| `attention.idleWithReadyMinutes` | int | `10` | Needs attention: a coding agent shows when it has been idle this many minutes while a task it may take is ready (on the board, ready this long too). |
 <!-- settings:end -->
 
 <br>

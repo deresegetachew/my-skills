@@ -132,3 +132,13 @@ test("a session busy for longer than the wait: say is bounded and does not hang"
   expect(p.code).not.toBe(0);
   expect(error(p).code).toBe("say-unsent");
 });
+
+test("the same text already typed and unsent in the box (an earlier say, #591): say presses Enter, it doesn't type it twice", () => {
+  const w = world();
+  write(join(w.dir, "box"), "/next-task");
+  const p = say(w, "/next-task");
+  expect(p.code, p.out).toBe(0);
+  expect(box(w)).toBe("");
+  expect(submitted(w)).toEqual(["> /next-task"]);
+  expect(calls(w).filter((l) => l.includes(" -l -- "))).toEqual([]);
+});

@@ -471,7 +471,7 @@ which tmux session and Remote Control link it has, and when it last produced out
 |---|---|
 | `working` | Alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (a dev manager reviewing, a coding agent on its PR); or a dev manager or product owner the owner is talking to (`factory talk`, the web UI's chat), doing "talking with the owner" |
 | `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge) |
-| `idle` | Alive, no task, and quiet for 2 minutes |
+| `idle` | Alive, no task, and quiet for 2 minutes. When its Claude session waits at its prompt (a `claude` process in its tmux session, the `❯` line on screen) the detail says "idle at its prompt", or "idle: a message is typed in its session but not sent" when the prompt box holds text (`prompt` in `factory agents ls --json`: `empty` or `unsent`, #591). Such a session never looks for work by itself: the loop looks only between sessions |
 | `down` | No live process holds its checkout and none runs in its tmux session (a killed session, a power cut after a reboot) |
 
 A loop is alive by its checkout claim, or, when no live claim names it, by a factory loop (or Claude session) running in
@@ -598,7 +598,8 @@ factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent:
   Claude Code's "How is Claude doing this session?" survey takes the keys typed under it, so `say` dismisses it (`0`)
   first; sessions the factory starts in tmux also get `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`.
   If the text is still there it stops with `say-unsent`: the text is typed in the box, so press Enter in the session
-  (`factory follow <agent>`) rather than sending it again.
+  (`factory follow <agent>`), or send the same text again once the session is idle: when the prompt box already holds
+  exactly that text, `say` only presses Enter and never types it twice (#591).
 
 <br>
 ## After a reboot: `factory autostart`

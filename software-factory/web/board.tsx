@@ -26,7 +26,7 @@ function Dot({ tone }: { tone: Tone }) {
 }
 
 /** Calls `close` when Escape is pressed (#545: every dialog closes with Escape), unless `hold` (it is working). */
-function useEscape(close: () => void, hold = false): void {
+export function useEscape(close: () => void, hold = false): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape" && !hold) {
