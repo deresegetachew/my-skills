@@ -590,7 +590,7 @@ export const ADD_CSS = String.raw`
 .ap-field label, .ap-fieldset legend { font-weight: 600; }
 .ap-fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .ap-fieldset legend { font-size: 20px; margin-bottom: 4px; padding: 0; }
-.ap-page input:not([type]), .ap-page input[type="text"], .ap-page select { height: 44px; border: 1px solid var(--border-strong);
+.ap-page input:not([type]), .ap-page input[type="text"], .ap-page input[type="password"], .ap-page select { height: 44px; border: 1px solid var(--border-strong);
   border-radius: 10px; padding: 0 12px; font: inherit; background: var(--surface); color: var(--text); min-width: 0; width: 100%; }
 .ap-search input:not([type]) { border: 0; height: auto; padding: 0; }
 .ap-page .mono { font-family: var(--mono); font-size: 13px; }

@@ -150,7 +150,7 @@ export function MachineCheckPage({ project, get, post, go }: { project: string; 
           </div>
           <div className="ap-row">
             <button className="btn" disabled={checking} onClick={() => void again()}>Check again</button>
-            <button className="btn primary" disabled={!m.ready || checking} onClick={() => go("#/add-project")}>Continue</button>
+            <button className="btn primary" disabled={checking && !health?.ranAt} onClick={() => go("#/add-project")}>Continue</button>
           </div>
         </div>
         {m.groups.map((g) => (
@@ -178,7 +178,7 @@ export function MachineCheckPage({ project, get, post, go }: { project: string; 
         ))}
         <div className="ap-foot">
           <button className="btn" onClick={() => go("#/welcome")}>Back</button>
-          <span className="ap-hint">{m.ready ? "Next: add a project." : "Continue turns on once nothing needs a fix. A note is worth a look but doesn't stop you."}</span>
+          <span className="ap-hint">{m.ready ? "Next: add a project." : "The agents may not work until what needs a fix is fixed. You can go on now and come back with Check again."}</span>
         </div>
       </main>
     </div>
@@ -260,7 +260,7 @@ export function JoinPage({ post, go }: { post: Post; go: (hash: string) => void 
           <>
             <div className="ap-field">
               <label htmlFor="ob-join-code">Join code</label>
-              <input id="ob-join-code" type="text" className="mono" value={code} autoComplete="off" spellCheck={false}
+              <input id="ob-join-code" type="password" className="mono" value={code} autoComplete="off" spellCheck={false}
                 placeholder="FM1-…" onChange={(e) => setCode(e.target.value)} />
               <span className="ap-hint">{code.trim() && wrong ? wrong : "No code yet? On the hub open Machines › Add machine."}</span>
             </div>
