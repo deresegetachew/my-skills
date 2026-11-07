@@ -208,7 +208,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `manager.ownerWaitMinutes` | int | `120` | A pull request labelled for the product owner or the owner that has waited this long is reported (check 5). |
 | `manager.agentIdleMinutes` | int | `45` | A coding agent idle this long while tasks are ready is reported to the owner (check 6). |
 | `manager.ciQueuedMinutes` | int | `10` | A CI run queued this long is reported (check 7). |
-| `manager.subManagerMinutes` | int | `30` | A sub-manager session is stopped after this many minutes. |
+| `manager.subManagerMinutes` | int | `30` | A sub-manager session, the one you can type into under `loop -i` too, is stopped after this many minutes; its item is logged as timed out and the pass goes on to the next. After that `factory agents ls` shows a sub-manager still running as stuck. 0 turns the limit off. |
 | `agents` | list | `see `factory settings help agents`` | The agents' names, in order (lowercase letters, digits, dashes). |
 | `claimStaleHours` | int | `6` | How long a local claim or a pushed task branch holds a task. |
 | `permissionMode` | one of acceptEdits/default | `"acceptEdits"` | How unattended `claude -p` runs get their permissions: acceptEdits (the default) or default (your own Claude Code settings decide). |

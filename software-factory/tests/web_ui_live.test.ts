@@ -113,6 +113,22 @@ test("stop and start run the same commands factory runs: owner stop <name>, owne
   expect(readFileSync(p.factoryLog, "utf8").trim().split("\n")).toEqual(["owner stop menelik", "owner start dev-manager fasil"]);
 }, T);
 
+test("a dev manager's sub-manager is a sub-manager of its parent, on its item, and Stop runs owner stop for it (#585)", async () => {
+  const p = live();
+  heartbeat(p, [
+    hbRow("fasil", { kind: "dev-manager", state: "working", detail: "working" }),
+    hbRow("fasil-board-m12", { kind: "sub-manager", state: "stuck", detail: "stuck: on board-m12 for 83 min", session: null, runs: "",
+      parent: "fasil", item: "board-m12", stoppable: true }),
+  ]);
+  const ui = await startedOn(p);
+  const rows = agentsOf((await api(ui, "/api/projects/work/agents")).json);
+  expect(rows.find((a) => a.name === "fasil-board-m12")).toMatchObject({ role: "sub-manager", parent: "fasil", item: "board-m12",
+    stoppable: true, state: "stuck" });
+  const stop = await api(ui, "/api/projects/work/agents/fasil-board-m12/stop", { method: "POST", body: { confirm: true } });
+  expect(stop.status, JSON.stringify(stop.json)).toBe(200);
+  expect(stop.json.command).toBe("factory owner stop fasil-board-m12");
+}, T);
+
 test("start or stop of a name that isn't the project's agent is 404, and nothing runs", async () => {
   const p = live();
   const ui = await startedOn(p);

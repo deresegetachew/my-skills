@@ -17,7 +17,8 @@
 // factory.json, else the hostname, which another machine posts only with tasks.showWhere, else the id; #383), source
 // (local or github) and expected: this machine's names file (or FACTORY_AGENTS) names it, so the web UI lists it even
 // when it is down (#366); runs, how it runs (tmux, nohup, cloud, or "" when not known), and log, the file a loop
-// outside tmux writes to (#395).
+// outside tmux writes to (#395); parent, item and stoppable for a dev manager's sub-manager (#585), which shows as
+// `stuck` once it has run longer than manager.subManagerMinutes, with the command that ends it.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -61,6 +62,11 @@ export interface LsRow {
   runs: string;
   /** The file a loop outside tmux writes to, on this machine; null when unknown. */
   log: string | null;
+  /** A sub-manager's dev manager and item (#585); null for every other row. */
+  parent: string | null;
+  item: string | null;
+  /** `factory owner stop` can end it from this machine (its session is known); null when it is not a sub-manager. */
+  stoppable: boolean | null;
 }
 
 /** The name to show for machine `id` (#383): `machines.<id>.name` in factory.json, else the hostname it posted (only
@@ -94,7 +100,8 @@ function localRows(cfg: Config): [LsRow[], DaemonInfo] {
     rows.push({ name, kind: kindText(r.kind), where: "this machine", state: r.state, detail: r.detail || r.state,
       task: r.task ?? null, on: r.on ?? null, since: r.since ?? null, lastSeen: r.state !== "down" ? iso(seen) : null,
       follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: mine, machineName: myName,
-      source: "local", expected: names.includes(name), runs: r.runs ?? "", log: r.log ?? null });
+      source: "local", expected: names.includes(name), runs: r.runs ?? "", log: r.log ?? null, parent: r.parent ?? null,
+      item: r.item ?? null, stoppable: typeof r.stoppable === "boolean" ? r.stoppable : null });
   }
   return [rows, { running: fresh, updated: Object.keys(data).length ? iso(data.updated as number | undefined) : null,
     errors: fresh ? ((data.errors as string[] | undefined) || []) : [] }];
@@ -178,7 +185,7 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
       session: f.session ?? null, activity: null, machine,
       machineName: cloud ? "cloud" : nameOf(cfg, machine, f.where || null), source: "github", expected: false,
-      runs: cloud ? "cloud" : f.runs || (f.session ? "tmux" : ""), log: null });
+      runs: cloud ? "cloud" : f.runs || (f.session ? "tmux" : ""), log: null, parent: null, item: null, stoppable: null });
   }
   return rows;
 }
@@ -192,7 +199,7 @@ function ago(stamp: string | null, now: number): string {
 
 function table(rows: LsRow[], now: number): string[] {
   const head = ["Name", "Kind", "Where", "State", "Doing", "Since", "Last seen", "Follow"];
-  const body = rows.map((r) => [r.name, r.kind, r.where, r.state, r.detail !== r.state ? r.detail : "-",
+  const body = rows.map((r) => [r.name, r.parent ? `${r.kind} of ${r.parent}` : r.kind, r.where, r.state, r.detail !== r.state ? r.detail : "-",
     ago(r.since, now), ago(r.lastSeen, now), r.follow || "-"]);
   const all = [head, ...body];
   const widths = head.slice(0, -1).map((_, i) => Math.max(...all.map((x) => (x[i] as string).length)));

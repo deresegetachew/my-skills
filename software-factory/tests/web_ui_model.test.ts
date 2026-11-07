@@ -1,7 +1,15 @@
 // The web app's few rules that aren't the API's (#421, #422): the search across channels, the words and tone of an
 // agent's state, and the address of a channel in the page's hash. web/model.ts holds them, with no React in it.
 import { expect, test } from "bun:test";
-import { agentState, channelHash, parseHash, pickProject, type ProjectView, searchChannels, splitTask, taskChannel } from "../web/model.ts";
+import { agentState, channelHash, parseHash, pickProject, type ProjectView, roleLine, searchChannels, splitTask, taskChannel } from "../web/model.ts";
+
+test("a sub-manager shows as its dev manager's, on its item, and one past its time is stuck in red (#585)", () => {
+  expect(roleLine({ parent: "fasil", item: "board-m12" }, "sub-manager")).toBe("Sub-manager of fasil · on board-m12");
+  expect(roleLine({ parent: null, item: null }, "coding-agent")).toBe("Coding agent");
+  expect(roleLine(undefined, "dev-manager")).toBe("Dev manager");
+  expect(agentState({ state: "stuck", detail: "stuck: on board-m12 for 83 min" }, null))
+    .toEqual({ text: "stuck: on board-m12 for 83 min", tone: "bad" });
+});
 
 const PROJECTS: ProjectView[] = [
   { id: "work", name: "work", channels: [
