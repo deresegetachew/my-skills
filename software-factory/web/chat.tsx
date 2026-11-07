@@ -6,6 +6,7 @@
 // whose answer arrives later. The owner queue shows each ask as a card with its options as buttons; a tap asks first,
 // then runs `factory owner answer`.
 import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import type { MergeCard } from "./phone_model.ts";
 import { askedBy, type AskView, type ChatItemView, emptyQueueText, itemLabel, mergeItems, orderAsks, type ProblemView, type QueueView } from "./chat_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
@@ -208,7 +209,8 @@ interface Confirm {
 }
 
 /** The owner queue: each ask as a card, its options as buttons; a tap asks first, then answers it. */
-export function OwnerQueueChannel({ token, project }: { token: string; project: string }) {
+export function OwnerQueueChannel({ token, project, merges = [], open: openPage }: { token: string; project: string; merges?: MergeCard[];
+  open?: (channel: string, find?: string) => void }) {
   const [queue, setQueue] = useState<QueueView | null>(null);
   const [problem, setProblem] = useState<ProblemView | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -279,6 +281,20 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
           {queue.issue !== null && <>{" "}on{" "}{queue.url ? <a href={queue.url} target="_blank" rel="noreferrer">#{queue.issue}</a> : `#${queue.issue}`}</>}.
         </p>
       )}
+      {merges.length > 0 && openPage && (
+        <section className="merges" aria-label="Pull requests only you can merge">
+          {merges.map((m) => (
+            <article key={m.number} className="card ask merge-card" aria-label={m.title}>
+              <h3><span className="dot" aria-hidden="true" style={{ background: "var(--red-dot)" }} />{m.title}<span className="ask-age">{m.sub}</span></h3>
+              <p className="ask-text">{m.why}</p>
+              <div className="actions">
+                <button className="btn primary" onClick={() => openPage(m.channel, m.find)}>Merge #{m.number}</button>
+                <button className="btn" onClick={() => openPage(m.channel)}>Look first</button>
+              </div>
+            </article>
+          ))}
+        </section>
+      )}
       {asks.map((a) => (
         <section key={a.id} className={`card ask${a.state === "open" ? "" : " answered"}`} aria-label={`Ask ${a.id}`}>
           <h3>
@@ -295,7 +311,7 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
             <>
               {a.options.length > 0 && (
                 <span className="options">
-                  {a.options.map((o) => <button key={o} className="btn" onClick={() => setConfirm({ ask: a, answer: o })}>{o}</button>)}
+                  {a.options.map((o, i) => <button key={o} className={i === 0 ? "btn primary" : "btn"} onClick={() => setConfirm({ ask: a, answer: o })}>{o}</button>)}
                 </span>
               )}
               <form className="own" onSubmit={(e) => { e.preventDefault(); const t = (own[a.id] ?? "").trim(); if (t) setConfirm({ ask: a, answer: t }); }}>
@@ -312,9 +328,9 @@ export function OwnerQueueChannel({ token, project }: { token: string; project: 
           <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="answer-title">
             <h3 id="answer-title">Answer {confirm.ask.id}?</h3>
             <p>“{confirm.answer}”</p>
-            <p>This runs <code>factory owner answer {confirm.ask.id} …</code> and {confirm.ask.issue
-              ? <>posts it on the owner queue (#{confirm.ask.issue}) as you.</>
-              : <>writes it on the message board as you, to {confirm.ask.from || "whoever asked"}.</>}</p>
+            <p>{confirm.ask.issue
+              ? <>It is posted on the owner queue (#{confirm.ask.issue}) as you.</>
+              : <>It is written on the message board as you, to {confirm.ask.from || "whoever asked"}.</>}</p>
             <div className="actions">
               <button className="btn" onClick={() => setConfirm(null)} disabled={busy} autoFocus>Cancel</button>
               <button className="btn primary" onClick={() => void answer()} disabled={busy}>{busy ? "Answering…" : "Answer"}</button>
@@ -363,6 +379,9 @@ form.send { display: flex; flex-direction: column; gap: 6px; }
 .own { display: flex; gap: 8px; }
 .own input { flex: 1; min-width: 0; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; height: 44px; background: var(--surface); color: var(--text); font: inherit; }
 .ask-answer { margin: 0; color: var(--text-2); }
+.merges { display: flex; flex-direction: column; gap: 12px; }
+.merge-card h3 { flex-wrap: wrap; }
+.merge-card .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 `;
 
 if (typeof document !== "undefined") {

@@ -149,6 +149,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 |---|---|---|---|
 | `reset-run` | built | Maintenance (Maintenance.dc.html): list, then clean after a confirm; Health (Health.dc.html) is #455 | #456 |
 | `usage` | built | Usage and cost (Usage.dc.html): tokens per task and per agent against the budget, GitHub calls | #455 |
+| `usage --window` | built | Usage and cost (Usage.dc.html): Claude's limit windows, the last 5 hours and 7 days per agent, the soft budget; Home's Needs attention: the Claude limit | #614 |
 | `usage --task` | planned | Usage and cost (Usage.dc.html); Task (Task.dc.html): its budget | #455 |
 | `report` | planned | Usage and cost (Usage.dc.html) | #455 |
 | `lessons` | planned | Maintenance (Maintenance.dc.html); Usage (Usage.dc.html) | #456 |

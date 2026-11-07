@@ -110,8 +110,33 @@ export interface UsageData {
   days?: UsageRow[];
   pricesAsOf?: string | null;
   github: { total: number; agents: Record<string, number>; commands: Record<string, number>; account: { used: number; limit: number; reset: string } | null } | null;
+  /** Claude's limit windows (#614); null or left out from an older factory. */
+  window?: UsageWindow | null;
   notMeasured: string[];
   problems: Problem[];
+}
+
+/** Claude's limit windows (#614): the tokens of the last 5 hours and the last 7 days per agent (fresh input + output). */
+export interface UsageWindow {
+  since5h: string | null;
+  since7d: string | null;
+  agents: Array<{ agent: string; window: number; week: number }>;
+  total: { window: number; week: number };
+  softTokens5h: number | null;
+  over: boolean;
+  /** Until when the loops wait on Claude's usage limit (seconds since 1970), or null. */
+  limitUntil: number | null;
+}
+
+/** The line above Claude's limit windows. `hhmm` turns a time into the page's clock (the viewer's, by default). */
+export function windowLine(w: UsageWindow, hhmm: (t: number) => string = (t) =>
+  new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })): string {
+  const parts = [`${tokensText(w.total.window)} in the last 5 hours, ${tokensText(w.total.week)} in the last 7 days`];
+  if (w.softTokens5h !== null) {
+    parts.push(`soft budget ${tokensText(w.softTokens5h)} per 5 hours${w.over ? ", used up: the loops start no new task" : ""}`);
+  }
+  if (w.limitUntil !== null) parts.push(`Claude's usage limit is reached: the agents wait until ${hhmm(w.limitUntil)}`);
+  return parts.join("; ") + ".";
 }
 
 /** 950 -> "950", 300000 -> "300k", 1240000 -> "1.2M". */

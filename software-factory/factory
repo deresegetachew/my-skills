@@ -273,6 +273,9 @@ Measure
   usage --task <n> --budget
                          the task's tokens against its budget (fresh input + output): used, budget, left, percent;
                          warns at 80%, never stops anything
+  usage --window [--json]
+                         Claude's limit windows: tokens of the last 5 hours and the last 7 days per agent, the soft
+                         budget (claudeLimit.softTokens5h) and the Claude limit the loops wait on
   report [--since D]     per task, from GitHub: claim to PR to merge, rework rounds and CI runs (failed), budget vs used
 
 Maintain

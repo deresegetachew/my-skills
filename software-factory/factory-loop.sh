@@ -19,7 +19,8 @@
 #                                each task opens a normal Claude session you can type into, with the task
 #                                already started. When the task is done the session closes by itself and the
 #                                next one starts after a 10 s countdown (q stops). If the session closes before
-#                                the task is done (/exit, a crash, a usage limit), it also carries on after 10 s
+#                                the task is done (/exit, a crash), it also carries on after 10 s; when it ended on
+#                                Claude's usage limit, it waits for the reset instead (#614, factory_claude_limit.ts)
 #   (or: ./factory loop [-i] [N])
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
@@ -118,9 +119,9 @@ else
   fi
 fi
 # On exit: stop the claim's keeper, drop the local claims, and say this agent is down (on GitHub in issues mode, on the
-# message board with tasks.source board; a no-op otherwise).
-keeper=""
-trap 'type keep_stop >/dev/null 2>&1 && keep_stop; fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1' EXIT
+# message board with tasks.source board; a no-op otherwise). A wait on Claude's limit (#614) is stopped too.
+keeper=""; limit_pid=""
+trap '[ -n "${limit_pid:-}" ] && kill "$limit_pid" 2>/dev/null; type keep_stop >/dev/null 2>&1 && keep_stop; fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1' EXIT
 trap 'exit 130' INT TERM
 main=$(setting mainBranch main)
 if [ "$dir" != "$PWD" ]; then
@@ -339,6 +340,27 @@ keep_stop() {
   kill "$keeper" 2>/dev/null; wait "$keeper" 2>/dev/null; keeper=""
 }
 
+# Claude's usage limit (#614). A session that ends on the login's 5-hour or weekly limit would end again at once, so the
+# loop waits for the reset instead of starting one every 10 s. claude_limit_check $1 (when the session started) reads
+# the session's transcript (factory_claude_limit.ts says which messages count) and writes the reset time to the shared
+# file in the state folder; claude_limit_wait, before every session, waits while that file says the limit holds (one loop
+# finds it, every loop of the project on this machine waits), printing "Claude limit reached; waiting until HH:MM
+# (local)", and while the last 5 hours passed claudeLimit.softTokens5h. It runs in the background so Ctrl-C and a stop
+# end it at once (the EXIT trap kills it). 0: it waited; 1: nothing to wait for, or a release without it.
+claude_limit_wait() {
+  [ -f "$hooks/factory_claude_limit.ts" ] && command -v bun >/dev/null 2>&1 || return 1
+  bun --no-env-file --config=/dev/null "$hooks/factory_claude_limit.ts" wait --name "$agent" &
+  limit_pid=$!
+  local rc=0
+  wait "$limit_pid" || rc=$?
+  limit_pid=""
+  return "$rc"
+}
+claude_limit_check() {
+  [ -f "$hooks/factory_claude_limit.ts" ] || return 1
+  fh "$hooks/factory_claude_limit" check --since "$1" --name "$agent"
+}
+
 # One pass of a manager or a product owner. Returns 0 (it had work and did it), 3 (nothing to do), 4 (GitHub was busy)
 # or 1 (it failed).
 # When factory_roles.ts finds work, one fresh `claude -p` runs the role's skill (`claude` without -p under -i).
@@ -366,10 +388,12 @@ role_pass() {
   if [ "$repeats" -ge 3 ]; then
     echo "[$agent] '$item' came up 3 times in a row; stopping so a person can look."; exit 1
   fi
+  claude_limit_wait || true  # Claude's limit holds: wait for its reset before starting a session (#614)
   echo "=== [$agent] $(date '+%H:%M') $role: $item ==="
   isolate
   prompt="$(fh "$hooks/factory_roles" prompt "$role" "$agent" $([ "$discover" = 1 ] && echo discover))"
   fh "$hooks/factory_agents" ping --agent "$agent" --status "$item" >/dev/null 2>&1 || true
+  started=$(date +%s)
   if [ "$interactive" = 1 ]; then
     if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then "$claude_bin" "${claude_flags[@]}" --remote-control="$agent" "$prompt"; else "$claude_bin" "${claude_flags[@]}" "$prompt"; fi
     rc=$?; stty sane 2>/dev/null
@@ -378,6 +402,9 @@ role_pass() {
     "$claude_bin" "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt"; rc=$?
   fi
   [ "$discover" = 0 ] || exit "$rc"
+  # Ended on Claude's limit: not a failed pass, and not counted as the item coming up again; the next pass waits for the
+  # reset (#614).
+  if claude_limit_check "$started"; then repeats=$((repeats - 1)); return 0; fi
   [ "$rc" = 0 ] || return 1
   return 0
 }
@@ -425,6 +452,9 @@ for ((n = 1; n <= limit; n++)); do
     else role_sleep "$role_busy"; fi
     continue
   fi
+  # Claude's limit holds (this loop or another found it): wait for its reset before claiming a task, so no claim is held
+  # through the wait (#614). The check just before the session covers a limit found while this loop looked for work.
+  claude_limit_wait || true
   # Nothing to do: wait for work instead of exiting (`waitMinutes` in factory.json; 0 = exit as before). While it waits
   # the agent stays registered as idle, so the dev manager doesn't take it for dead. Ctrl-C stops it.
   waited=0
@@ -460,6 +490,7 @@ for ((n = 1; n <= limit; n++)); do
     echo "[$agent] Task $id came up 3 times in a row without being ticked or pushed; stopping so a person or the dev manager can look."
     exit 1
   fi
+  claude_limit_wait || true  # a limit found while this loop looked for work: wait for its reset first (#614)
   echo "=== [$agent] $(date '+%H:%M') task $next ==="
   case "$id" in issue-*) echo "[$agent] claimed issue #${id#issue-} (this run claims this one only)" ;; esac
   isolate
@@ -481,6 +512,7 @@ for ((n = 1; n <= limit; n++)); do
     # type into it (/exit included) from your phone.
     rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$hooks/factory_machine" remote 2>/dev/null || echo 1)"
     keep_start "$id"
+    started=$(date +%s)
     if [ "$rc" = 1 ]; then
       "$claude_bin" "${claude_flags[@]}" --remote-control="$agent $id" "$prompt" || true
     else
@@ -495,8 +527,14 @@ for ((n = 1; n <= limit; n++)); do
       # The agent finished and the Stop hook closed the session: go on unless you say stop.
       printf '[%s] Task %s done. Next task in 10 s; type q and Enter to stop: ' "$agent" "$finished"
       if read -r -t 10 answer </dev/tty; then :; else answer=""; echo; fi
+    elif claude_limit_check "$started"; then
+      # It ended on Claude's usage limit (#614): wait for the reset once, instead of a new session every 10 s that
+      # ends at once. Not counted as the task coming up again. Ctrl-C stops the loop during the wait.
+      repeats=$((repeats - 1))
+      claude_limit_wait || true
+      answer=""
     else
-      # The session closed before the task was done (/exit, a crash, a usage limit). Carry on unless you say stop,
+      # The session closed before the task was done (/exit, a crash). Carry on unless you say stop,
       # so a loop never waits all night for a key. The same task usually comes back; 3 times in a row stops the loop.
       printf '[%s] Task %s session ended before it was done. Carrying on in 10 s; type q and Enter to stop: ' "$agent" "$id"
       if read -r -t 10 answer </dev/tty; then :; else answer=""; echo; fi
@@ -506,8 +544,11 @@ for ((n = 1; n <= limit; n++)); do
   else
     trust_gate || { fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null; give_back "$id"; exit 1; }
     keep_start "$id"
+    started=$(date +%s)
     "$claude_bin" "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
     keep_stop
+    # Ended on Claude's usage limit (#614): the next pass waits for the reset; not counted as the task coming up again.
+    claude_limit_check "$started" && repeats=$((repeats - 1))
   fi
   fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
   give_back "$id"

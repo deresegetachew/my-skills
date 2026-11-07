@@ -12,6 +12,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { type Config, DEFAULTS, roleNames } from "./factory_config.ts";
 import { limitSentence } from "./factory_snapshot.ts";
+import { clock, LIMIT_FILE, readLimit } from "./factory_claude_limit.ts";
 import { countGithubCall, type GithubCallsSummary, githubCallsSummary, run } from "./factory_lib.ts";
 
 const HOOKS = import.meta.dir;
@@ -85,6 +86,17 @@ export interface Runner {
 
 export interface Limit {
   reset: number;
+  message: string;
+}
+
+/** Claude's usage limit while the loops wait on it (#614, factory_claude_limit.ts's shared file). */
+export interface ClaudeLimit {
+  /** Until when the loops wait (seconds since 1970), without the margin. */
+  until: number;
+  /** False when the reset time couldn't be read and the loops wait claudeLimit.waitMinutes. */
+  known: boolean;
+  /** five_hour, seven_day or null. */
+  window: string | null;
   message: string;
 }
 
@@ -379,6 +391,16 @@ function limitOf(state: string, cache: Obj, now: number): Limit | null {
     }
   }
   return null;
+}
+
+/** Claude's usage limit while it holds (the shared file in the state folder, #614), else null. */
+export function claudeLimitOf(state: string, now: number): ClaudeLimit | null {
+  const s = readLimit(join(state, LIMIT_FILE));
+  if (!s || s.until <= now) return null;
+  const which = s.window === "seven_day" ? "weekly " : s.window === "five_hour" ? "5-hour " : "";
+  return { until: s.until, known: s.reset !== null, window: s.window,
+    message: `Claude's ${which}usage limit is reached${s.reset === null ? " (its reset time couldn't be read)" : ""}: the agents wait until ` +
+      `${clock(s.until, now)} (this machine's time), then carry on by themselves.` };
 }
 
 function machinesOf(agents: Agent[], here: string | null): Machine[] {

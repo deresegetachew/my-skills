@@ -244,6 +244,26 @@ test("usage: the page reads the real logs of the project folder and an agent's w
   expect((u.tasks as Row[])[0]?.cost).toBeCloseTo((200 * 4 + 900 * 20) / 1_000_000, 9);
 }, T);
 
+test("usage: Claude's limit windows, the last 5 hours and the last 7 days per agent from the same logs, with the soft budget (#614)", async () => {
+  const p = workProject({ ...CONFIG, claudeLimit: { softTokens5h: 1000 } });
+  p.env.FAKE_USAGE_REAL = join(HOOKS, "factory_usage.ts");
+  p.env.FAKE_BUN = process.execPath;
+  const top = realpathSync(p.d);
+  const logs = join(p.root, "home", ".claude", "projects");
+  const reply = (id: string, cwd: string, hoursAgo: number, out: number): string => JSON.stringify({ type: "assistant",
+    timestamp: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(), gitBranch: "main", cwd, message: { id, model: "claude-opus-5-5",
+      usage: { input_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 5000, output_tokens: out } } });
+  const slug = (x: string): string => x.replace(/[^A-Za-z0-9]/g, "-");
+  const wt = `${top}-agents/taytu`;
+  write(join(logs, slug(wt), "agent.jsonl"), [reply("b1", wt, 1, 900), reply("b2", wt, 30, 400)].join("\n") + "\n");
+  write(join(logs, slug(top), "own.jsonl"), [reply("a1", top, 50, 10), reply("a2", top, 24 * 9, 10)].join("\n") + "\n");
+  const ui = await started(p);
+  const u = (await api(ui, "/api/projects/work/usage")).json;
+  expect(u.window, JSON.stringify(u)).toMatchObject({ agents: [{ agent: "taytu", window: 1000, week: 1500 }, { agent: "(project folder)", window: 0, week: 110 }],
+    total: { window: 1000, week: 1610 }, softTokens5h: 1000, over: true, limitUntil: null });
+  expect(calls(p, "usage --window --json")).toBe(1);
+}, T);
+
 test("usage: no logs says where it looked; a failed run shows its own error, not just that it failed (#571)", async () => {
   const p = workProject();
   p.env.FAKE_USAGE_REAL = join(HOOKS, "factory_usage.ts");
