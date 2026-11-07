@@ -39,12 +39,40 @@ taskTrackerContract("github", (specs) => {
   const rows = specs.map((s, k) => {
     const deps = s.dependsOn?.length ? `Depends on ${s.dependsOn.map((d) => `#${d + 1}`).join(", ")}\n\n` : "";
     const todos = Array.from({ length: s.todos ?? 0 }, (_, j) => `- [ ] todo ${j + 1}`).join("\n");
-    const row = issue(k + 1, [s.state === "blocked" ? "factory:blocked" : "factory:ready"], deps + todos);
+    const prd = s.prd ? "PRD: US-3\nPRD change: #500\n\n" : "";
+    const row = issue(k + 1, [s.state === "blocked" ? "factory:blocked" : "factory:ready"], prd + deps + todos);
     return { ...row, title: s.title ?? row.title, state: s.state === "done" ? "closed" : "open" };
   });
-  const db = world(rows);
+  const db = world([...rows, prdPull(500, null)]);
   return { port: new GithubTaskTracker(cfg), ids: specs.map((_, k) => String(k + 1)), missing: "99", foreign: "1.3",
-    rival: (id, who) => claimComment(db, Number(id), who.agent, who.machine) };
+    rival: (id, who) => claimComment(db, Number(id), who.agent, who.machine), prd: "500", mergePrd: () => mergePull(db, 500) };
+});
+
+/** The PRD change's pull request as the issues API gives it: merged when `merged` is a time. */
+function prdPull(n: number, merged: string | null): IssueRow {
+  return { ...issue(n, []), title: "PRD: Shelf v1.1", state: merged ? "closed" : "open", pull_request: { url: `https://x/pulls/${n}`, merged_at: merged } };
+}
+
+function mergePull(db: string, n: number): void {
+  const data = loadDb(db);
+  data.issues = data.issues.map((i) => (i.number === n ? prdPull(n, "2026-11-07T09:00:00Z") : i));
+  saveDb(db, data);
+}
+
+test("github: a PRD change closed without merging still holds its task back; a pull request that isn't there doesn't (#578)", () => {
+  world([issue(3, ["factory:ready"], "PRD change: #40"), { ...prdPull(40, null), state: "closed" },
+    issue(4, ["factory:ready"], "PRD change: https://github.com/acme/shop/pull/41")]);
+  const port = new GithubTaskTracker(cfg);
+  expect(port.list().map((t) => [t.id, t.waitsForPrd])).toEqual([["3", "40"], ["4", undefined]]);
+  let got: unknown = null;
+  try {
+    port.claim("3", { agent: "haile", machine: "m1" });
+  } catch (e) {
+    got = (e as { toJSON(): unknown }).toJSON();
+  }
+  expect(got).toEqual({ code: "issue-waits-for-prd", message: "#3 waits for its PRD change, PR #40, to merge.",
+    fix: "Pick another issue: #3 is ready once the owner merges PR #40. To build it now, the owner takes the `PRD change:` line out of #3." });
+  expect(port.next()?.id).toBe("4");
 });
 
 test("github: the same agent name on two machines: the second machine's claim is refused", () => {

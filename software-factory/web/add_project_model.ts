@@ -45,10 +45,16 @@ export interface Form {
   /** The owner typed the path: picking a repo leaves it. */
   pathEdited: boolean;
   visibility: "private" | "public";
-  tasks: "issues" | "plan";
+  tasks: "issues" | "plan" | "board";
   mainBranch: string;
-  test: string;
+  /** The project's commands (#540): written as given; an empty one is left out, never a template's pnpm guess. */
+  install: string;
+  typecheck: string;
   lint: string;
+  test: string;
+  build: string;
+  /** The GitHub login whose reviews count; it starts as the login signed in here. */
+  reviewer: string;
   protected: string[];
   team: Team;
 }
@@ -74,6 +80,8 @@ export interface RunStep {
   command?: string;
   output?: string;
   problem: { message: string; fix?: string } | null;
+  /** What only the owner can do, each with its fix (the last step, #540). */
+  todos?: { what: string; fix: string }[];
 }
 
 export interface Run {
@@ -92,7 +100,7 @@ export function teamOf(builders: number): Team {
 
 export function emptyForm(folder: string): Form {
   return { source: "clone", repo: "", folder, path: "", pathEdited: false, visibility: "private", tasks: "issues", mainBranch: "main",
-    test: "", lint: "", protected: [...DEFAULT_PROTECTED], team: teamOf(2) };
+    install: "", typecheck: "", lint: "", test: "", build: "", reviewer: "", protected: [...DEFAULT_PROTECTED], team: teamOf(2) };
 }
 
 /** Where `repo` (owner/name) is cloned in `folder`. */
@@ -134,7 +142,8 @@ export function setupProblem(form: Form): string | null {
 /** The request the server takes (POST /api/add-project). */
 export function requestOf(form: Form): Record<string, unknown> {
   return { source: form.source, repo: form.source === "folder" ? "" : form.repo.trim(), path: form.path.trim(), visibility: form.visibility,
-    tasks: form.tasks, mainBranch: form.mainBranch.trim(), test: form.test.trim(), lint: form.lint.trim(), protected: form.protected,
+    tasks: form.tasks, mainBranch: form.mainBranch.trim(), install: form.install.trim(), typecheck: form.typecheck.trim(),
+    lint: form.lint.trim(), test: form.test.trim(), build: form.build.trim(), reviewer: form.reviewer.trim(), protected: form.protected,
     team: { devManager: form.team.devManager, productOwner: form.team.productOwner, builders: form.team.builders } };
 }
 
@@ -152,6 +161,8 @@ export function createsOf(form: Form): { title: string; where: string; detail: s
     { title: "The owner queue", where: "GitHub issue", detail: "One issue where the agents ask what only you decide" },
     { title: "A starter PRD", where: "Repo", detail: `docs/PRD.md with headings for ${form.team.productOwner} to fill in with you` },
     { title: "Your answers", where: "Repo", detail: "Task source, protected paths, commands and the team, saved in the project" },
+    { title: "What agents may run", where: "Repo", detail: "Your commands, allowed for unattended agents and run by CI" },
+    { title: "The trusted reviewer", where: "Repo", detail: `${form.reviewer || "Your GitHub login"}: only these reviews count at a merge` },
     { title: "The setup pull request", where: "GitHub", detail: "All of the above, for you to merge" },
   ];
 }
@@ -162,6 +173,10 @@ export function runProgress(run: Run): { tone: "good" | "warn" | "bad"; text: st
   if (run.state === "failed") {
     const f = run.steps.find((s) => s.state === "failed");
     return { tone: "bad", text: `Stopped at ${f?.title ?? "a step"}${f?.problem ? `: ${f.problem.message}` : "."}` };
+  }
+  const todos = run.steps.reduce((n, s) => n + (s.todos?.length ?? 0), 0);
+  if (run.state === "done" && todos) {
+    return { tone: "warn", text: `Done: all ${run.steps.length} steps. ${todos} to-do${todos === 1 ? "" : "s"} for you, below.` };
   }
   if (run.state === "done") return { tone: "good", text: `Done: all ${run.steps.length} steps.` };
   const now = run.steps.find((s) => s.state === "running");

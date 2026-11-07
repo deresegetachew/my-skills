@@ -1,9 +1,9 @@
 // `factory next` says it does not claim and shows the claim command (#155).
 import { expect, test } from "bun:test";
-import { symlinkSync } from "node:fs";
+import { renameSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type Env, issue, type IssueRow, setup } from "./issues_support.ts";
-import { HOOKS, read, readmeAndWiki, runHook, SF, sh } from "./support.ts";
+import { HOOKS, read, readmeAndWiki, runHook, SF, sh, writeExe } from "./support.ts";
 
 // The command a person runs to claim (the .ts since #252; it was python3 .claude/hooks/next_task.py before).
 const CLAIM = "bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --pid $$";
@@ -106,4 +106,43 @@ test("factory next --dry-run with --issue is refused with code, message and fix"
   const e = JSON.parse(p.stderr.trim().split("\n").at(-1) as string) as { code: string; message: string; fix: string };
   expect(e.code).toBe("dry_run_issue");
   expect(e.fix).toContain("factory issues show 7");
+});
+
+/** The PRD change's pull request as the issues API gives it: merged when `merged` is a time. */
+function prdPull(n: number, merged: string | null): IssueRow {
+  return { ...issue(n, []), title: "PRD: Shelf v1.1", state: merged ? "closed" : "open", pull_request: { url: `https://x/pulls/${n}`, merged_at: merged } };
+}
+
+test("factory next skips a task whose PRD change hasn't merged and says why; a claim skips it too (#578)", () => {
+  const [d, env] = project([issue(5, ["factory:ready"], "PRD: US-12\nPRD change: #62"), issue(7), prdPull(62, null)]);
+  let p = sh(["bash", join(SF, "factory"), "next"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
+  expect(p.stderr).toContain("Skipped #5: it waits for its PRD change, PR #62, to merge.");
+  p = sh(["bash", join(SF, "factory"), "next", "--dry-run", "--claim", "taytu"], { cwd: d, env });
+  expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
+  expect(p.stderr).toContain("Skipped #5");
+  p = runHook("next_task", ["--claim", "taytu", "--pid", "1"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.trim()).toBe("issue-7 Task 7");
+  expect(p.stderr).toContain("Skipped #5: it waits for its PRD change, PR #62, to merge.");
+  p = runHook("next_task", ["--claim", "menelik", "--pid", "2"], { cwd: d, env });
+  expect(p.code).toBe(1);
+  expect(p.stdout.trim()).toBe("none");
+  expect(p.stderr).toContain("PR #62");
+});
+
+test("factory next asks GitHub about a PRD change's pull request once, and says the skip once (#578)", () => {
+  const [d, env] = project([issue(5, ["factory:ready"], "PRD change: #62"), issue(6, ["factory:ready"], "PRD change: #62"), issue(7),
+    prdPull(62, null)]);
+  // the fake gh, with every call it is asked written to a log first
+  const bin = join(d, "bin");
+  renameSync(join(bin, "gh"), join(bin, "gh-fake"));
+  writeExe(join(bin, "gh"), `#!/bin/sh\necho "$*" >> "${join(d, "gh.log")}"\nexec "${join(bin, "gh-fake")}" "$@"\n`);
+  const p = runHook("next_task", ["--no-rework"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.trim()).toBe("issue-7 Task 7");
+  expect(p.stderr.split("\n").filter((l) => l.startsWith("Skipped"))).toEqual([
+    "Skipped #5: it waits for its PRD change, PR #62, to merge.", "Skipped #6: it waits for its PRD change, PR #62, to merge."]);
+  expect(read(join(d, "gh.log")).split("\n").filter((l) => l.includes("issues/62")).length).toBe(1);
 });

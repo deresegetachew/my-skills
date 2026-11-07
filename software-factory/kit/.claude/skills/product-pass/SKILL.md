@@ -29,6 +29,10 @@ use the commands below and nothing changes.
   (`{from: <the task>, to: <what it waits for>, kind: "waits_for"}`: from can't start until to is done). A task the owner
   dropped is moved to done as not planned (`board_move` with outcome `wont_do`). You never build, so you have no claim tools.
   Scope and order are still the owner's: file only what the owner agreed to.
+- **Tasks from a PRD change** (#578): first `board_create` one note card for the change, titled `PRD change: #<pr> (<what>)`
+  with the line `PRD change: #<pr>` in its body, then `board_link` each task to it (`{from: <the task>, to: <the card>,
+  kind: "waits_for"}`). The tasks stay out of the ready queue until the pull request merges; the dev manager's sweep then
+  closes the card. Never move the card to done yourself: that is the owner's "build now".
 - **Sign-off and testing:** with `tasks.source` board the queue is on the board, not in a GitHub issue. Add what only a
   person can check with `board_signoff_add` (`id`, `task` as the board names it, `b12` or `12`, and `check`); plans,
   confirmations and results stay `factory signoff plan|confirm|result`, which write to the same queue. When the owner
@@ -49,7 +53,7 @@ project, never only in chat. `factory prd --stage` shows where you are and what 
    Then `factory prd --stage --ask design`.
 3. **Plan.** Only after the design is approved. Cut the stories into milestones and tasks: `factory issues new --title ...
    --body-file ... --milestone ...`, each from the task template with a `PRD: US-<n>` line, a brief, "Done when" and edge
-   cases. Size each task with a `Budget:` line next to the `PRD:` line (tokens, counting fresh input + output, for example
+   cases. While the PRD's pull request is still open, add `PRD change: #<pr>` under the `PRD:` line (see **Pivot** below). Size each task with a `Budget:` line next to the `PRD:` line (tokens, counting fresh input + output, for example
    `Budget: 300k`): see **Sizing tasks** below. Read `factory prd` until no story lacks a task. The dev manager checking the plan for buildability is not built yet
    (#96 follow-up): look for dependencies, an order that works, and a "Done when" a test can check. Then `factory prd --stage
    --ask plan`.
@@ -83,6 +87,14 @@ marks it ready and merges it): the stories touched, the tasks that move, a decis
 number on main and in open PRs), and the owner's yes. In the same pass change the task issues (new, edited "Done when", frozen
 with `factory-hold`, or closed as not planned) so running agents and the dev manager pick the change up from GitHub. Check `factory prd` shows
 no story used twice and no task naming a missing story.
+
+**PRD first, then tasks, then builders** (#578). Every task you file or change for a PRD change that is not merged yet
+gets a line of its own, `PRD change: #<pr>`, next to its `PRD: US-<n>` line (on the board: the card and the links in
+**When the board is on**). Until that pull request merges, no builder can claim it: the builders' pick passes it over and says
+why. File the tasks ready, as usual: the merge is what frees them, and nobody has to move them. If the owner closes the pull
+request without merging it, the tasks keep waiting: close them as not planned, or re-plan them. Only the owner says "build
+now" (taking the line out, or moving the card to done); do not do it for them. Tell the owner, in the same reply, that the
+tasks wait for that pull request.
 
 ## What is yours to do without asking
 

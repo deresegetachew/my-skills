@@ -61,6 +61,17 @@ commands below and nothing changes.
   claims go back to ready by the board's sweep rules.
 - **Cards:** `board_move` (with a reason when it takes a claim back), `board_assign`, `board_link` and `board_unlink`,
   only for what this skill already lets you do on your own; `board_create` for a review follow-up task.
+- **PRD change cards** (#578): a note card titled `PRD change: #<pr>` holds back the tasks linked to it until that pull
+  request merges; `factory board sweep` closes it then, and says so. Never move one to done, or unlink its tasks, yourself:
+  that is the owner's "build now".
+
+## Tasks that wait for their PRD change (#578)
+
+The order is PRD, then tasks, then builders. A task with a `PRD change: #<pr>` line (on the board, a `waits_for` link to
+that change's card) can't be claimed until the pull request merges, and the builders' pick says so ("Skipped #5: it waits for
+its PRD change, PR #62, to merge."). When you file a task for a PRD change that is still open (a review follow-up that
+changes a story), give it the same line or link. A PRD pull request is merged by the owner, never by you. When builders sit
+idle because every ready task waits for one, say so to the owner once, in an owner ask naming the pull request.
 
 ## What you do on your own, and what you ask the owner first
 

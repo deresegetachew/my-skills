@@ -18,7 +18,7 @@
 //   idle-ready      a coding agent idle for attention.idleWithReadyMinutes while a task
 //                   it may take is ready (#591); its session may hold a message typed
 //                   but not sent                                                           Start work
-//   epic-done      an epic whose tasks are all done is still open                         Close
+//   epic-done       an epic whose tasks are all done is still open                         Close
 //   prd-open        a PRD change is still an open PR while tasks are being built (#578)    open the PR
 //   pr-waiting      a PR open longer than attention.prWaitHours with red checks, no
 //                   review, a must-fix nobody picked up, or a merge only a person can do  open the PR

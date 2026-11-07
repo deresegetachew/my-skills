@@ -787,6 +787,28 @@ test("board_link and board_unlink add and remove typed links; a loop is refused"
   expect(await c.end()).toBe(0);
 });
 
+test("a task linked to its PRD change's note card isn't ready until the card is done; the owner moving it is build now (#578)", async () => {
+  const url = await database();
+  const po = new Client(url, ["--as", "po", "--role", "manager"]);
+  const builder = new Client(url, ["--as", "haile"]);
+  const owner = new Client(url, ["--as", "abebe", "--role", "owner"]);
+  for (const c of [po, builder, owner]) await c.start();
+  // the tools name cards as people see them: b<id>
+  const card = String(((await po.ok("board_create", { title: "PRD change: #62 (Shelf v1.1)", kind: "note", body: "PRD change: #62" })).task as Json).id);
+  const task = String(((await po.ok("board_create", { title: "Shelf search", kind: "task", body: "PRD: US-12\nPRD change: #62" })).task as Json).id);
+  expect(await po.ok("board_link", { from: task, to: card, kind: "waits_for" })).toMatchObject({ linked: true });
+  expect(((await builder.ok("board_ready")).tasks as Json[]).map((t) => t.id)).toEqual([]);
+  expect((await builder.refused("board_claim", { task })).code).toBe("not-ready");
+  await owner.ok("board_move", { task: card, to: "done", reason: "build now: the owner read PR #62" });
+  expect(((await builder.ok("board_ready")).tasks as Json[]).map((t) => t.id)).toEqual([task]);
+  expect(((await builder.ok("board_claim", { task })).claim as Json).task).toMatchObject({ id: task, holder: "haile" });
+  const b = await Board.open(url, { as: "po" });
+  const moved = (await b.events(0, 500, { kind: "task.moved" })).find((e) => e.subject === `task:${card.slice(1)}`);
+  expect(moved).toMatchObject({ actor: "abebe", payload: { to: "done", reason: "build now: the owner read PR #62" } });
+  await b.end();
+  for (const c of [po, builder, owner]) expect(await c.end()).toBe(0);
+});
+
 test("board_comment posts a note on the task's thread as the server's actor", async () => {
   const url = await database();
   const po = await Board.open(url, { as: "po" });

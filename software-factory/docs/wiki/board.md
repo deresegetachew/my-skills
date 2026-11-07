@@ -54,7 +54,8 @@ Machine logins aren't in a backup, so each other machine joins again: `factory m
 With tasks on the board, a claim whose agent went quiet is freed by `factory board sweep` (its time passed and its agent
 sent no heartbeat for 30 minutes). The dev manager's loop runs it on each pass (below); with no dev manager running, run
 it by hand or as a job on the hub. Before it frees any claim it closes each task in progress or in review whose pull
-request merged (#536), so a finished task is never sent back to ready, and each epic whose tasks are all done.
+request merged (#536), so a finished task is never sent back to ready, each PRD change card whose pull request merged
+(#578, so the tasks from that change are ready), and each epic whose tasks are all done.
 
 **Each other machine** gets a login of its own:
 

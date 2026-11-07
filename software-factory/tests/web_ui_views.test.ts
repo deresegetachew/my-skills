@@ -87,6 +87,24 @@ test("tasks: in the order factory next walks them, with state, agent, links and 
   expect(String(tasks[0]?.find)).toBe("#7 Add the login page in progress menelik Phase 1");
 }, T);
 
+test("tasks: one waiting for its PRD change shows as waiting, with a link to the PRD pull request, and is never next (#578)", async () => {
+  const p = project();
+  roots.push(p.root);
+  cache(p, { tasks: { source: "issues", tasks: [
+    { id: "9", title: "Shelf search", state: "ready", holders: [], group: "", todos: [], dependsOn: [], waitsForPrd: "62" },
+    { id: "10", title: "Export to CSV", state: "ready", holders: [], group: "", todos: [], dependsOn: [] },
+  ] } });
+  const ui = await startUi(p, ["--port", "0"]);
+  running.push(ui);
+  const r = await api(ui, "/api/projects/work/tasks");
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const [waits, free] = r.json.tasks as Row[];
+  expect(waits).toMatchObject({ id: "9", state: "blocked", stateText: "waits for its PRD", next: false,
+    prd: { number: 62, url: "https://github.com/o/work/pull/62" } });
+  expect(free).toMatchObject({ id: "10", state: "ready", next: true, prd: null });
+  expect(r.json.next).toBe("10");
+}, T);
+
 test("tasks: no cache yet says so, with the command that reads it", async () => {
   const { ui } = await started(false);
   const r = await api(ui, "/api/projects/work/tasks");

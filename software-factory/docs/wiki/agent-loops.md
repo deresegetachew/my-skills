@@ -168,8 +168,8 @@ say which to use. The PR gate and the guard still read only GitHub. `/mcp` in a 
 With the board on, the dev manager's loop also runs `factory board mirror` before each pass, so GitHub's copy of the
 board stays current (#502; a release without it skips this). A mirror pass that runs longer than 300 seconds is
 stopped (`--max-seconds`, #511), so it never stalls the pass; the next one sends the rest. After the mirror it runs
-`factory board sweep` (#513), stopped after 60 seconds: it closes the tasks whose pull request merged and the epics
-whose tasks are all done (#536), then a claim whose agent went quiet goes back to ready. With
+`factory board sweep` (#513), stopped after 60 seconds: it closes the tasks whose pull request merged, the PRD change cards whose pull request merged (#578: their tasks become
+ready) and the epics whose tasks are all done (#536), then a claim whose agent went quiet goes back to ready. With
 `tasks.source: board` a builder's loop keeps its claim alive while the session runs: `factory_agents.ts keep` sends a
 heartbeat on the claimed task every 10 minutes (a third of the claim's 30) and stops when the session ends, so a long
 quiet build isn't swept. Setting the board up and moving a project onto it:
