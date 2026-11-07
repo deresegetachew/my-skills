@@ -33,6 +33,8 @@ export interface AskView {
   url: string | null;
   created: string | null;
   answer: string | null;
+  from?: string | null;
+  task?: string | null;
 }
 
 export interface QueueView {
@@ -40,6 +42,21 @@ export interface QueueView {
   url: string | null;
   asks: AskView[];
   problem: ProblemView | null;
+  source?: "board" | "github";
+}
+
+/** Who asked and about which task, for an ask's card: "mentewab asked about #101", "mentewab asked", or "" when the
+ * asker isn't known. */
+export function askedBy(a: AskView): string {
+  if (!a.from) return "";
+  return `${a.from} asked${a.task ? ` about ${a.task}` : ""}`;
+}
+
+/** What the Inbox says when nothing has been asked: with the board as the record, where questions come from; on GitHub,
+ * that the owner-queue issue isn't open yet. */
+export function emptyQueueText(q: QueueView): string {
+  return q.source === "board" ? "Nothing waiting for you. Questions the agents ask you appear here."
+    : "There is no owner queue yet: the dev manager opens the issue “Dev manager: needs the owner” with its first ask.";
 }
 
 /** `before` and `more` as one chat: each id once (the newer copy wins), in time order. */

@@ -1,0 +1,1 @@
+../../../../software-factory/message-board/src/migrations/004_waits_for.sql

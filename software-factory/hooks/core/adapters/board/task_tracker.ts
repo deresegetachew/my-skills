@@ -7,7 +7,8 @@
 //   ref `factory:<owner>/<repo>/<uuid>`, whose id is `b<board id>`. Other projects on the same board are left out. With
 //   no repo known (no GitHub origin and no GH_REPO), every task on the board is the project's.
 // - States: open is ready, in_progress in progress, in_review in review, done done, and deferred blocked (a block sends
-//   the task there, with its reason as a `blocker` note). Dependencies are the `blocks` and `waits_for` edges into it.
+//   the task there, with its reason as a `blocker` note). Dependencies are the `blocks` edges into it and the `waits_for`
+//   edges out of it (from waits for to).
 // - A claim's token is kept on this machine (tokens.ts) and sent with release, review, done, block and tick. A task
 //   another agent holds can't be released, closed or blocked from here: the board's sweep frees a stale claim. Going to
 //   review ends the claim (in review, held by nobody), so the dev manager on any machine can mark it done. A holder whose
@@ -40,8 +41,15 @@ export interface BoardTrackerOptions {
 }
 
 const WORK = new Set(["task", "bug"]);
-const BLOCKING = new Set(["blocks", "waits_for"]);
 const NOT_FOUND_FIX = "Check the id with `factory next` or `factory board tasks`.";
+
+/** The task that waits and the one it waits for, from a blocking edge; null for any other kind. blocks: from must be
+ * done before to can start. waits_for: from can't start until to is done. */
+function waiterAndBlocker(e: Edge): [number, number] | null {
+  if (e.kind === "blocks") return [e.to, e.from];
+  if (e.kind === "waits_for") return [e.from, e.to];
+  return null;
+}
 
 /** The board's tasks as this project sees them, read once per port call. */
 class View {
@@ -65,10 +73,13 @@ class View {
       return true;
     });
     for (const e of edges) {
-      if (!BLOCKING.has(e.kind) || !this.ids.has(e.to) || !this.ids.has(e.from)) continue;
-      const list = this.deps.get(e.to) ?? [];
-      if (!list.includes(e.from)) list.push(e.from);
-      this.deps.set(e.to, list);
+      if (!this.ids.has(e.to) || !this.ids.has(e.from)) continue;
+      const pair = waiterAndBlocker(e);
+      if (!pair) continue;
+      const [waiter, blocker] = pair;
+      const list = this.deps.get(waiter) ?? [];
+      if (!list.includes(blocker)) list.push(blocker);
+      this.deps.set(waiter, list);
     }
   }
 
