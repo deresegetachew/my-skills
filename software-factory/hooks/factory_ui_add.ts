@@ -86,8 +86,8 @@ const AVATAR_KINDS: Record<string, { ext: string; magic: (b: Buffer) => boolean 
   "image/gif": { ext: "gif", magic: (b) => b.subarray(0, 4).toString("latin1") === "GIF8" },
 };
 const AVATAR_MAX_BYTES = 256 * 1024;
-/** Every extension an owner's picture can have (factory_ui_data.ts reads these), so a new one replaces any other. */
 const AVATARS_DIR = ".claude/factory/avatars";
+/** Every extension an owner's picture can have (factory_ui_data.ts reads these), so a new one replaces any other. */
 const AVATAR_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
 
 /** A picture's extension and bytes from its data URL, or null when it isn't a picture the setup takes. */
