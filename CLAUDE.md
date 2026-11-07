@@ -2,7 +2,7 @@
 
 my-skills holds the owner's reusable Claude Code skills. The big one is **software-factory**: coding agents build a
 project task by task, a dev manager reviews and merges, and a project gets the factory as a numbered release
-(`factory update`). This repo is also built with its own factory (#112): the task list is this repo's GitHub issues.
+(`factory update`). This repo is also built with its own factory (#112): the task list is on the message board (decision 0007, `tasks.source: board`), mirrored to this repo's GitHub issues.
 
 What is here (read the part your task is about, not everything):
 
@@ -81,9 +81,11 @@ A change that breaks one of these is wrong even if the tests pass.
   sessions the factory starts (#258), so the owner's own sessions are not governed by them. Edit the real
   files in `software-factory/`, never through a link. Run `./factory doctor` first on a new machine, then
   `./factory loop -i`. Do not run `factory update` here: this repo is where the releases come from.
-- One task is one GitHub issue, labelled `factory:ready`, `factory:in-progress`, `factory:in-review`,
-  `factory:blocked` (the labels are made once by `factory issues setup`; do not create labels by hand). The order is
-  in issue #114. `factory next` gives the next one. Small pull requests with `Closes #<n>` (or `Part of #<n>`).
+- One task is one card on the message board. A task that came from GitHub keeps its issue number (`#n`); one made on the
+  board is `b<n>`. The board is the record: claim, block and release go through the board (the `board` MCP tools,
+  `factory next`, the web UI), and `factory board mirror` carries each change to the issue's `factory:*` labels. Do not set
+  those labels by hand. A task made for a PRD change waits until that PRD pull request merges. The order is in issue
+  #114. `factory next` gives the next one. Small pull requests with `Closes #<n>` (or `Closes b<n>`, `Part of #<n>`).
 - A pull request body lists: what changed, the tests run (command and counts), protected files touched, choices made
   where the issue left them open, and risks. When an owner decision is missing, take the simplest option that fits,
   and write it down under "Choices I made".
@@ -92,4 +94,5 @@ A change that breaks one of these is wrong even if the tests pass.
 
 ## Where the tasks are
 
-The issues are the list, in the order of #114. `factory next` shows the next one. Scope is in the PRD.
+The message board is the list (`factory board tasks`, `factory board ready`, the web UI's Board), in the order of #114;
+GitHub issues mirror it. `factory next` shows the next one. Scope is in the PRD.
