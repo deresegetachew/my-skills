@@ -74,10 +74,17 @@ export function threadText(epic: { id: string; title: string }, text: string): s
 
 export type EpicChoice<T> = { show: "list" } | { show: "page"; epic: T } | { show: "missing"; id: string };
 
+/** Whether the epics were read without a problem: the snapshot has them, and neither the tasks nor the epics failed. */
+export function epicsRead(v: { problems: unknown[]; epics: { from?: string; problems: unknown[] } }): boolean {
+  return v.epics.from !== "unknown" && !v.problems.length && !v.epics.problems.length;
+}
+
 /** What the epics channel shows for the epic it was asked for (`#n`, or a click): its page, a "not found" when no epic
- * has that number (#464), or the list when none was asked for. */
-export function epicChoice<T extends { id: string }>(all: T[], chosen: string | null): EpicChoice<T> {
+ * has that number (#464), or the list when none was asked for. When the epics were not read (`read` false), a number
+ * no epic has shows the list, whose problems say why, never "not found". */
+export function epicChoice<T extends { id: string }>(all: T[], chosen: string | null, read = true): EpicChoice<T> {
   if (chosen === null) return { show: "list" };
   const epic = all.find((e) => e.id === chosen);
-  return epic ? { show: "page", epic } : { show: "missing", id: chosen };
+  if (epic) return { show: "page", epic };
+  return read ? { show: "missing", id: chosen } : { show: "list" };
 }

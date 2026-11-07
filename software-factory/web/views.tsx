@@ -9,7 +9,7 @@ import { Board, EpicChips, PrdLink, TaskPage } from "./board.tsx";
 import { type LaneBy, taskLabel } from "./board_model.ts";
 import { Cited, Cites } from "./docs.tsx";
 import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
-import { epicChoice } from "./epics_model.ts";
+import { epicChoice, epicsRead } from "./epics_model.ts";
 import { Tabs } from "./parts.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
@@ -246,10 +246,11 @@ export function EpicsChannel(p: ViewProps) {
   const v = p.views;
   const all = v.epics.epics;
   const rows = filterRows(all, chosen ? "" : typed);
-  const choice = epicChoice(all, chosen);
+  const choice = epicChoice(all, chosen, epicsRead(v));
   const talkers = p.talkers ?? [];
-  // an epic no one has (a wrong #n) says so, instead of every epic; not while the epics are still being read (#464)
-  if (choice.show === "missing" && v.epics.from !== "unknown") {
+  // an epic no one has (a wrong #n) says so, instead of every epic; only when the epics were read, else the list's
+  // problems say why (#464)
+  if (choice.show === "missing") {
     return (
       <div className="body">
         <button className="link" onClick={() => setChosen(null)}>‹ All epics</button>
@@ -271,7 +272,7 @@ export function EpicsChannel(p: ViewProps) {
         <button className="btn primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>New epic</button>
       </div>
       {adding && <NewEpic token={p.token ?? ""} project={p.project.id} talkers={talkers} close={() => setAdding(false)} />}
-      {!all.length && !v.problems.length && v.epics.from !== "unknown" && <p className="empty">No epics. Tell the product owner what you want with New epic.</p>}
+      {!all.length && epicsRead(v) && <p className="empty">No epics. Tell the product owner what you want with New epic.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
       {rows.length > 0 && tab === "board" && <EpicBoard epics={rows} open={setChosen} />}
       {rows.length > 0 && tab === "list" && <ul className="vcards" aria-label="Epics">{rows.map((e) => <EpicCard key={e.id} e={e} open={p.open} pick={setChosen} docs={p.docs} />)}</ul>}
