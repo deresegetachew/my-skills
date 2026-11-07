@@ -615,3 +615,29 @@ test("a session of the code's role that predates its NOLOGIN can't redeem", asyn
   }
   expect(await rolesOf(w, made.role)).toEqual([made.role]); // no fresh role was made
 });
+
+test("a redeem held open by a copy of the code doesn't stall login remove: it ends that session and removes the login", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  add(w, "desktop");
+  const copy = new SQL(made.url, { max: 1 });
+  const tx = await copy.reserve();
+  await tx`begin`;
+  await tx`select * from mb_redeem_login()`; // holds the login's row and never commits
+  const started = Date.now();
+  const r = board(w, ["login", "remove", "laptop"]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(Date.now() - started).toBeLessThan(20_000);
+  let ended = false;
+  try {
+    await tx`commit`;
+    await tx`select 1`;
+  } catch {
+    ended = true;
+  }
+  tx.release();
+  await copy.close().catch(() => {});
+  expect(ended).toBe(true);
+  expect(await rolesOf(w, made.role)).toEqual([]);
+  expect(ls(w).map((l) => l.name)).toEqual(["desktop"]);
+});

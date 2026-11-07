@@ -687,3 +687,30 @@ test("machine remove works on a machine whose code role and login own something"
   expect(await roles(h)).toEqual([]);
   expect(await connects(read(urlFile(m)).trim())).toBe(false);
 });
+
+test("a redeem held open by a copy of the code doesn't stall machine remove, and the code then joins nothing", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const copy = new SQL(codeUrl(a.code), { max: 1 });
+  const tx = await copy.reserve();
+  await tx`begin`;
+  await tx`select * from mb_redeem_login()`; // holds the login's row and never commits
+  const started = Date.now();
+  const r = machine(h, ["remove", "laptop"]);
+  expect(r.code, r.out).toBe(0);
+  expect(Date.now() - started).toBeLessThan(20_000);
+  let ended = false;
+  try {
+    await tx`commit`;
+    await tx`select 1`;
+  } catch {
+    ended = true;
+  }
+  tx.release();
+  await copy.close().catch(() => {});
+  expect(ended).toBe(true);
+  expect(await roles(h)).toEqual([]);
+  const m = world();
+  refused(machine(m, ["join", a.code, "--no-doctor"]), "code-refused");
+  expect(existsSync(m.board)).toBe(false);
+});
