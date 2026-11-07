@@ -597,3 +597,25 @@ test("leave on the machine that runs the board is refused and changes nothing", 
   expect(e.fix).toContain("factory board down");
   expect(read(urlFile(h))).toBe(before);
 });
+
+test("a join whose new password doesn't work after the redeem says the code may have been copied and keeps nothing", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const sql = new SQL(h.url, { max: 1 }); // as if a copy of the code changed the login's password during the join
+  try {
+    await sql.unsafe(`create or replace function steal() returns trigger language plpgsql security definer as $f$
+      begin execute format('alter role %I password %L', new.role, 'stolen-password'); return new; end $f$`);
+    await sql.unsafe("create trigger steal after update of redeemed_at on mb_logins for each row execute function steal()");
+  } finally {
+    await sql.close();
+  }
+  const m = world();
+  const p = machine(m, ["join", a.code, "--no-doctor"]);
+  const e = refused(p, "code-compromised");
+  expect(e.message).toContain("may have been copied");
+  expect(e.fix).toContain("factory machine remove laptop");
+  expect(p.out).not.toContain("stolen-password");
+  expect(existsSync(m.board)).toBe(false);
+  expect(existsSync(join(m.cfg, "machine-joins.json"))).toBe(false); // the code isn't marked used here
+  expect(machine(m, ["show"]).out).not.toContain("haile");
+});

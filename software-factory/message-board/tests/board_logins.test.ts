@@ -385,3 +385,77 @@ test("a refused login says to ask the hub for a new code, not to start the board
   expect(err(t).code).toBe("login-refused");
   expect(err(t).fix).toContain("factory machine leave");
 });
+
+test("a session that connected during the redeem and survived the commit is ended before the redeem returns", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  const copy = new SQL(made.url, { max: 1 });
+  let connected = false;
+  const r = await redeem(made.url, async () => {
+    await copy`select 1`; // a copy of the code connects while the redeem's transaction is open
+    connected = true;
+  });
+  expect(connected).toBe(true);
+  expect("password" in r).toBe(true);
+  let ended = false;
+  try {
+    await copy`select 1`;
+  } catch {
+    ended = true;
+  }
+  await copy.close().catch(() => {});
+  expect(ended).toBe(true);
+});
+
+test("a redeem whose new password doesn't work after the commit says the code may have been copied", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  await stealOnRedeem(w.url);
+  expect(await redeem(made.url)).toEqual({ code: "login-compromised" });
+});
+
+/** As if a copy of the code changed the login's password just as it was redeemed: a trigger on the board's record of
+ * logins sets another password in the redeem's own transaction. */
+async function stealOnRedeem(url: string): Promise<void> {
+  const sql = new SQL(url, { max: 1 });
+  try {
+    await sql.unsafe(`create or replace function steal() returns trigger language plpgsql security definer as $f$
+      begin execute format('alter role %I password %L', new.role, 'stolen-password'); return new; end $f$`);
+    await sql.unsafe("create trigger steal after update of redeemed_at on mb_logins for each row execute function steal()");
+  } finally {
+    await sql.close();
+  }
+}
+
+test("board sweep drops a join code's login that expired unredeemed and ends its sessions; others are kept", async () => {
+  const w = await hub();
+  const late = addFor(w, "laptop", 2);
+  const live = addFor(w, "desktop", 600);
+  const joined = addFor(w, "tablet", 2);
+  const plain = add(w, "phone");
+  expect("password" in (await redeem(joined.url))).toBe(true);
+  const held = new SQL(late.url, { max: 1 });
+  await held`select 1`;
+  await Bun.sleep(3000);
+  let still = true;
+  try {
+    await held`select 1`; // VALID UNTIL is checked only when connecting: the session outlives it until a sweep
+  } catch {
+    still = false;
+  }
+  expect(still).toBe(true);
+  const r = board(w, ["sweep"]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(r.stdout).toContain("laptop");
+  expect(await roleExists(w, late.role)).toBe(false);
+  let ended = false;
+  try {
+    await held`select 1`;
+  } catch {
+    ended = true;
+  }
+  await held.close().catch(() => {});
+  expect(ended).toBe(true);
+  for (const kept of [live, joined, plain]) expect(await roleExists(w, kept.role)).toBe(true);
+  expect(ls(w).map((l) => l.name)).toEqual(["desktop", "phone", "tablet"]);
+});
