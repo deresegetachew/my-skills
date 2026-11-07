@@ -495,7 +495,7 @@ test("with tasks.source board, the board isn't shown as live until its tasks are
     await held;
   });
   try {
-    await lockTaken;
+    await Promise.race([lockTaken, tx.then(() => { throw new Error("the lock transaction ended before it took the lock"); })]);
     const ui = await started(workProject(0, BOARD_CONFIG), url);
     await Bun.sleep(1_500); // the server has opened the board and waits on the tasks table
     const opening = (await api(ui, "/api/projects/work/tasks")).json;
@@ -548,7 +548,7 @@ test("the server logs that the board can't be read, and that it reconnected once
   };
   try {
     expect(await until("can't be read", 15_000), out).toBe(true);
-      const admin = new SQL(pg.url, { max: 1 });
+    const admin = new SQL(pg.url, { max: 1 });
     try {
       await admin.unsafe(`create database ${name}`);
     } finally {

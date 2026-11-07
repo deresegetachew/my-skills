@@ -193,10 +193,20 @@ export class BoardFeed {
       // page would show an empty board "from the board", and an action sent then would be refused
       const board = await this.api.Board.open(this.url, { as: ACTOR, session: `ui-${process.pid}`, max: 2 });
       let listener: Listener | null = null;
+      // an error from the listen before the board is kept is this open's to handle: fail() would close nothing yet
+      let starting = true;
+      let failed: { e: unknown } | null = null;
       try {
         const all = await board.tasks({ all: true, limit: MOST });
-        listener = await board.listen((_e: BoardEvent) => this.schedule(), { onError: (e) => void this.fail(e) });
+        listener = await board.listen((_e: BoardEvent) => this.schedule(), {
+          onError: (e) => {
+            if (starting) failed = { e };
+            else void this.fail(e);
+          },
+        });
         if (this.stopped) throw new Error("stopped");
+        if (failed) throw (failed as { e: unknown }).e;
+        starting = false;
         this.all = all;
       } catch (e) {
         await listener?.close().catch(() => {});
