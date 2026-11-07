@@ -641,3 +641,79 @@ test("a redeem held open by a copy of the code doesn't stall login remove: it en
   expect(await rolesOf(w, made.role)).toEqual([]);
   expect(ls(w).map((l) => l.name)).toEqual(["desktop"]);
 });
+
+// ---------- an unredeemed code can do almost nothing (#514 review 6) ----------
+test("a code's role can only connect and redeem: no board tables, no advisory locks; the fresh role can use the board", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  expect(await tryQuery(made.url, "select 1")).toBe("ok");
+  for (const q of ["select count(*) from tasks", "insert into tasks (title) values ('x')", "select * from mb_locks", "select pg_advisory_lock(4891009)",
+    "select pg_advisory_xact_lock(4891008)", "select pg_try_advisory_lock(1)"]) {
+    expect(await tryQuery(made.url, q), q).toMatch(/permission denied/i);
+  }
+  const r = await redeem(made.url);
+  if (!("role" in r)) throw new Error(`redeem refused: ${r.code}`);
+  const fresh = withLogin(made.url, r.role, r.password);
+  expect(await tryQuery(fresh, "select count(*) from tasks")).toBe("ok");
+  expect(await tryQuery(fresh, "select * from mb_locks")).toMatch(/permission denied/i);
+  expect(await redeem(fresh)).toEqual({ code: "login-redeemed" });
+});
+
+test("a plain login can't redeem: only a join code's role can", async () => {
+  const w = await hub();
+  const plain = add(w, "laptop");
+  expect(await redeem(plain.url)).toEqual({ code: "not-found" });
+});
+
+test("a holder that reconnects in a loop and re-runs a redeem it never commits can't keep login remove from finishing", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 120);
+  let stop = false;
+  let held = 0;
+  const loop = (async () => {
+    while (!stop) {
+      const c = new SQL(made.url, { max: 1, connectionTimeout: 2 });
+      try {
+        const t = await c.reserve();
+        await t`begin`;
+        await t`select * from mb_redeem_login()`;
+        held++;
+        await t`select pg_sleep(30)`;
+      } catch {
+        // ended, or refused
+      } finally {
+        await c.close().catch(() => {});
+      }
+      await Bun.sleep(20);
+    }
+  })();
+  while (held === 0) await Bun.sleep(50);
+  const started = Date.now();
+  const p = Bun.spawn([process.execPath, "--no-env-file", BIN, "login", "remove", "laptop"], { env: w.env, stdout: "pipe", stderr: "pipe" });
+  const code = await p.exited;
+  const took = Date.now() - started;
+  stop = true;
+  await loop;
+  expect(code, await new Response(p.stderr).text()).toBe(0);
+  expect(took).toBeLessThan(30_000);
+  expect(await rolesOf(w, made.role)).toEqual([]);
+  expect(await tryQuery(made.url, "select 1")).not.toBe("ok");
+  expect(ls(w)).toEqual([]);
+});
+
+test("a login holding the advisory locks the board once used doesn't affect login add, remove, ls, sweep or migrate", async () => {
+  const w = await hub();
+  const plain = add(w, "laptop");
+  const holder = new SQL(plain.url, { max: 1 });
+  try {
+    await holder`select pg_advisory_lock(4891008), pg_advisory_lock(4891007)`;
+    const started = Date.now();
+    for (const args of [["login", "add", "desktop", "--valid-for", "60"], ["login", "ls"], ["login", "remove", "desktop"], ["sweep"], ["migrate"]]) {
+      const r = board(w, args);
+      expect(r.code, `${args.join(" ")}: ${r.stderr}`).toBe(0);
+    }
+    expect(Date.now() - started).toBeLessThan(30_000);
+  } finally {
+    await holder.close();
+  }
+});
