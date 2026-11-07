@@ -608,8 +608,9 @@ What is built:
   #498, #523).* (US-43)
 - **US-23.** As the owner, Sign-off and testing lists what waits for me, what is ready to test and the results, and
   Designs and artifacts shows each artifact's copy and whether it is current. *Built (#488; #454).* From an item I open a
-  preview of the app as built (its pull request's head, else main), run by the hub behind the web UI's token, and it
-  stops when I sign the item off or send it back. *(#582)*
+  preview of the app as built (its pull request's head, else main), and it stops when I sign the item off or send it
+  back. It runs that code on the hub with my machine user's rights, so it is off until I turn on `preview.enabled`;
+  isolating it is a follow-up. *(#582)*
 - **US-24.** As the owner, the + in the rail adds a project: clone one of my repos, make a new one or pick a checkout,
   answer the setup questions, and Create installs the factory and opens the setup pull request, step by step with Retry.
   It starts no agent. *Built (#480; #447).*

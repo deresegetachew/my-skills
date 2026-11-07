@@ -7,6 +7,7 @@
 // app, committed in the test project, is what the preview runs.
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { api, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
@@ -24,8 +25,12 @@ afterAll(async () => {
 // environment's names), /go (a redirect to /echo) and /ws (a WebSocket echo). It starts a child that sleeps, so stopping
 // it must kill the whole group; both pids go to $FAKE_APP_PIDS (which reaches it through agentEnv).
 const APP = `import { appendFileSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 const child = Bun.spawn(["sleep", "300"], { stdio: ["ignore", "ignore", "ignore"] });
-if (process.env.FAKE_APP_PIDS) appendFileSync(process.env.FAKE_APP_PIDS, process.pid + "\\n" + child.pid + "\\n");
+// one that leaves the process group (its own session, as setsid does) but stays in the worktree
+const escaped = spawn("sleep", ["301"], { detached: true, stdio: "ignore" });
+escaped.unref();
+if (process.env.FAKE_APP_PIDS) appendFileSync(process.env.FAKE_APP_PIDS, process.pid + "\\n" + child.pid + "\\n" + escaped.pid + "\\n");
 const host = process.env.FAKE_APP_HOST || "127.0.0.1";
 Bun.serve({ hostname: host, port: Number(process.env.PORT), websocket: { message(ws, m) { ws.send("echo:" + m); } }, fetch(req, server) {
   const u = new URL(req.url);
@@ -50,28 +55,42 @@ interface Started {
 
 /** A project whose main has the fake app and `preview` settings, a sign-off queue with two items (task 12 and 13), and
  * the web UI running. `branch` adds task/12-x (an open pull request for task 12) with its own version file. */
-async function started(preview: Row, opts: { env?: Record<string, string>; branch?: boolean; appHost?: string } = {}): Promise<Started> {
+async function started(preview: Row, opts: { env?: Record<string, string>; branch?: boolean; tag?: boolean; appHost?: string } = {}): Promise<Started> {
   const p = project({ tasks: { source: "issues" }, agents: ["menelik"], ui: { pollSeconds: 1 }, preview });
   roots.push(p.root);
   const pids = join(p.root, "pids");
   write(pids, "");
   // what the app gets besides PATH, HOME, PORT and HOST: the project's agentEnv, its secrets' names left out
-  write(join(p.d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "issues" }, agents: ["menelik"], ui: { pollSeconds: 1 }, preview,
+  const settings = (pv: Row): string => JSON.stringify({ tasks: { source: "issues" }, agents: ["menelik"], ui: { pollSeconds: 1 }, preview: pv,
     agentEnv: { FAKE_APP_PIDS: pids, FAKE_APP_HOST: opts.appHost ?? "", APP_DB: "shop{suffix}", APP_PORT: "{port:4100}", GH_TOKEN: "from-agentenv",
-      MB_URL: "postgres://from-agentenv" } }));
+      MB_URL: "postgres://from-agentenv" } });
+  write(join(p.d, ".claude", "factory.json"), settings(preview));
   write(join(p.d, "app.ts"), APP);
   write(join(p.d, "version.txt"), "main-1\n");
   git(p.d, "add", "-A");
   git(p.d, "commit", "-q", "-m", "app");
   const main = git(p.d, "rev-parse", "HEAD").trim();
+  // an agent's commits that try to change what runs: they set preview.command to something else
+  const sneaky = (word: string): Row => ({ ...preview, command: `echo ${word}-COMMAND-RAN; ${String(preview.command)}` });
   if (opts.branch) {
     git(p.d, "checkout", "-q", "-b", "task/12-x");
     write(join(p.d, "version.txt"), "pr-12\n");
+    write(join(p.d, ".claude", "factory.json"), settings(sneaky("PR")));
     git(p.d, "commit", "-q", "-am", "pr");
     const head = git(p.d, "rev-parse", "HEAD").trim();
     git(p.d, "checkout", "-q", "main");
     write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
       pulls: [{ number: 7, title: "Task 12", branch: "task/12-x", head, draft: false }] }));
+  }
+  if (opts.tag) { // a tag named main, on an agent's commit
+    git(p.d, "checkout", "-q", "--detach");
+    write(join(p.d, "version.txt"), "tag-commit\n");
+    write(join(p.d, ".claude", "factory.json"), settings(sneaky("TAG")));
+    git(p.d, "commit", "-q", "-am", "agent");
+    git(p.d, "tag", "main");
+    git(p.d, "checkout", "-q", "refs/heads/main");
+    git(p.d, "symbolic-ref", "HEAD", "refs/heads/main");
+    git(p.d, "reset", "-q", "--hard", main);
   }
   write(join(p.d, "version.txt"), "not committed\n"); // the folder's own copy is never what runs
   write(join(p.root, "db.json"), JSON.stringify({
@@ -87,7 +106,7 @@ async function started(preview: Row, opts: { env?: Record<string, string>; branc
 }
 
 const BASE = "/api/projects/work/signoff";
-const APP_CMD = { command: "bun --no-env-file app.ts", health: "/healthz" };
+const APP_CMD = { enabled: true, command: "bun --no-env-file app.ts", health: "/healthz" };
 
 /** The preview's status, asked until `done` says so (or `ms` pass). */
 async function waitFor(ui: Running, id: string, done: (s: Row) => boolean, ms = 30_000): Promise<Row> {
@@ -152,6 +171,22 @@ async function originOf(ui: Running): Promise<string> {
   expect(port).toBeGreaterThan(0);
   expect(ui.url).not.toBe(`http://127.0.0.1:${port}`);
   return `http://127.0.0.1:${port}`;
+}
+
+/** `n` ports in a row that nothing listens on: the first one. */
+async function freeRange(n: number): Promise<number> {
+  const free = (port: number): Promise<boolean> => new Promise((resolve) => {
+    const s = createServer();
+    s.once("error", () => resolve(false));
+    s.listen(port, "127.0.0.1", () => s.close(() => resolve(true)));
+  });
+  for (let tries = 0; tries < 50; tries++) {
+    const base = 20_000 + Math.floor(Math.random() * 30_000);
+    let ok = true;
+    for (let i = 0; i < n && ok; i++) ok = await free(base + i);
+    if (ok) return base;
+  }
+  throw new Error("no free range of ports");
 }
 
 async function get(base: string, path: string, init: RequestInit = {}): Promise<Response> {
@@ -224,7 +259,14 @@ test("the preview origin takes only that preview's cookie: not the UI token, not
   // one item's cookie doesn't open another item's preview
   const a = await cookieFor(ui, "label-check");
   expect((await get(origin, "/preview/work/label-check/", { headers: { cookie: a.cookie } })).status).toBe(200);
-  expect((await get(origin, "/preview/work/other-check/", { headers: { cookie: a.cookie } })).status).toBe(401);
+  // each preview has its own port, so its own origin: this one serves no other preview
+  const b = await cookieFor(ui, "other-check");
+  expect(b.origin).not.toBe(a.origin);
+  const elsewhere = await get(origin, "/preview/work/other-check/", { headers: { cookie: b.cookie } });
+  expect(elsewhere.status).toBe(404);
+  expect(((await elsewhere.json()) as Row).code).toBe("preview_not_found");
+  expect((await get(b.origin, "/preview/work/other-check/", { headers: { cookie: a.cookie } })).status).toBe(401);
+  expect((await get(b.origin, "/preview/work/other-check/", { headers: { cookie: b.cookie } })).status).toBe(200);
   // the preview origin has no API
   for (const path of ["/api/projects", "/api/ws", "/", "/app.js"]) {
     const r = await get(origin, path, { headers: { cookie: a.cookie, authorization: `Bearer ${ui.token}` } });
@@ -311,7 +353,7 @@ test("a result on the item (signed off) stops the preview, kills its processes, 
   await runningPreview(ui, "label-check");
   const { origin, cookie } = await cookieFor(ui, "label-check");
   const procs = pidsOf(pids);
-  expect(procs.length).toBe(2);
+  expect(procs.length).toBe(3); // the app, its child, and one that left the process group
   const r = await api(ui, `${BASE}/label-check/result`, { method: "POST", body: { outcome: "pass" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   const s = await waitFor(ui, "label-check", ended);
@@ -320,12 +362,11 @@ test("a result on the item (signed off) stops the preview, kills its processes, 
   expect(await allDead(procs)).toBe(true);
   expect(worktrees(p)).toEqual([]);
   expect(previewDirs(p)).toEqual([]);
-  const after = await get(origin, "/preview/work/label-check/", { headers: { cookie } });
-  expect(after.status).toBe(404);
-  expect(((await after.json()) as Row).code).toBe("preview_not_running");
+  // its port is closed with it
+  expect(await get(origin, "/preview/work/label-check/", { headers: { cookie } }).then(() => "answered", () => "gone")).toBe("gone");
   // a new preview of the same item has a new token: the old cookie stays dead
   await runningPreview(ui, "label-check");
-  expect((await get(origin, "/preview/work/label-check/", { headers: { cookie } })).status).toBe(401);
+  expect((await get(await originOf(ui), "/preview/work/label-check/", { headers: { cookie } })).status).toBe(401);
   expect((await api(ui, `${BASE}/other-check/preview/link`, { method: "POST" })).json.code).toBe("preview_not_running");
 }, T);
 
@@ -352,7 +393,7 @@ test("it stops after the idle time with no request", async () => {
 }, T);
 
 test("a start that fails shows the app's output and a fix, and leaves no worktree or process behind", async () => {
-  const { ui, p } = await started({ command: "echo 'cannot find module ./server' >&2; exit 3", health: "/healthz" });
+  const { ui, p } = await started({ enabled: true, command: "echo 'cannot find module ./server' >&2; exit 3", health: "/healthz" });
   const r = await api(ui, `${BASE}/label-check/preview`, { method: "POST" });
   expect(r.status, JSON.stringify(r.json)).toBe(202);
   const s = await waitFor(ui, "label-check", ended);
@@ -370,7 +411,7 @@ test("a start that fails shows the app's output and a fix, and leaves no worktre
 }, T);
 
 test("a health check that never answers times out with the output and a fix", async () => {
-  const { ui, p } = await started({ command: "echo waiting; sleep 300", health: "/healthz", startSeconds: 1 });
+  const { ui, p } = await started({ enabled: true, command: "echo waiting; sleep 300", health: "/healthz", startSeconds: 1 });
   await api(ui, `${BASE}/label-check/preview`, { method: "POST" });
   const s = await waitFor(ui, "label-check", ended);
   expect(s.state).toBe("failed");
@@ -380,8 +421,90 @@ test("a health check that never answers times out with the output and a fix", as
   expect(worktrees(p)).toEqual([]);
 }, T);
 
+test("previews are off by default: Open preview is refused with the risk and a fix, nothing made", async () => {
+  const { ui, p } = await started({ command: "bun --no-env-file app.ts", health: "/healthz" });
+  const r = await api(ui, `${BASE}/label-check/preview`, { method: "POST" });
+  expect(r.status).toBe(403);
+  expect(r.json.code).toBe("preview_disabled");
+  expect(String(r.json.message)).toContain("with this machine user's rights (it can read your tokens and files)");
+  expect(String(r.json.fix)).toContain("preview.enabled");
+  expect(worktrees(p)).toEqual([]);
+  expect(previewDirs(p)).toEqual([]);
+  const s = await api(ui, `${BASE}/label-check/preview`);
+  expect(s.json).toMatchObject({ state: "none", enabled: false, configured: true });
+  expect(String(s.json.risk)).toBe("This runs the pull request's code on this machine with this machine user's rights (it can read your tokens and files).");
+}, T);
+
+test("the settings come from the main branch only: a pull request changing preview.command, or a tag named main, changes nothing", async () => {
+  const { ui } = await started({ ...APP_CMD, command: "echo MAIN-COMMAND-RAN; bun --no-env-file app.ts" }, { branch: true, tag: true });
+  // the pull request's head runs (its code), but with main's command
+  await runningPreview(ui, "label-check");
+  const pr = await api(ui, `${BASE}/label-check/preview`);
+  const out = (pr.json.output as string[]).join("\n");
+  expect(out).toContain("MAIN-COMMAND-RAN");
+  expect(out).not.toContain("PR-COMMAND-RAN");
+  expect(out).not.toContain("TAG-COMMAND-RAN");
+  const a = await cookieFor(ui, "label-check");
+  expect(await (await get(a.origin, "/preview/work/label-check/", { headers: { cookie: a.cookie } })).text()).toBe("pr-12\n");
+  // an item with no pull request runs the main branch, not the tag of that name
+  await runningPreview(ui, "other-check");
+  const other = await api(ui, `${BASE}/other-check/preview`);
+  expect((other.json.output as string[]).join("\n")).not.toContain("TAG-COMMAND-RAN");
+  const b = await cookieFor(ui, "other-check");
+  expect(await (await get(b.origin, "/preview/work/other-check/", { headers: { cookie: b.cookie } })).text()).toBe("main-1\n");
+}, T);
+
+test("each preview gets a fresh, empty HOME of its own, removed when it stops", async () => {
+  const { ui, p } = await started(APP_CMD);
+  await runningPreview(ui, "label-check");
+  const { origin, cookie } = await cookieFor(ui, "label-check");
+  const env = (await (await get(origin, "/preview/work/label-check/env", { headers: { cookie } })).json()) as Record<string, string>;
+  const home = String(env.HOME);
+  expect(home).not.toBe(String(p.env.HOME));
+  expect(home).toContain(join(p.state, "previews"));
+  expect(existsSync(home)).toBe(true);
+  expect(readdirSync(home)).toEqual([]);
+  await api(ui, `${BASE}/label-check/preview`, { method: "DELETE" });
+  await waitFor(ui, "label-check", ended);
+  expect(existsSync(home)).toBe(false);
+}, T);
+
+test("KNOWN GAP (the follow-up to #599): a preview runs as this machine's user, so its command can read the web UI's token", async () => {
+  // This records today's behaviour on purpose. Isolating previews (another user, a container) is the owner's decision;
+  // when it is built, this test turns around: the command must not be able to read the token.
+  const { ui } = await started({ ...APP_CMD, command: "cat \"$(git rev-parse --git-common-dir)/factory/ui-token\"; bun --no-env-file app.ts" });
+  await runningPreview(ui, "label-check");
+  const s = await api(ui, `${BASE}/label-check/preview`);
+  expect((s.json.output as string[]).join("\n")).toContain(ui.token);
+}, T);
+
+test("after a crash of the web UI, its next start kills what the previews left (the group and an escaped process) and removes their worktrees", async () => {
+  const { ui, p, pids } = await started(APP_CMD);
+  await runningPreview(ui, "label-check");
+  const procs = pidsOf(pids);
+  expect(procs.length).toBe(3);
+  ui.proc.kill(9); // no clean stop
+  await ui.proc.exited;
+  expect(procs.every(alive)).toBe(true);
+  expect(worktrees(p).length).toBe(1);
+  const again = await startUi(p, ["--port", "0"]);
+  running.push(again);
+  expect(await allDead(procs)).toBe(true);
+  expect(worktrees(p)).toEqual([]);
+  expect(previewDirs(p)).toEqual([]);
+}, T);
+
+test("with preview.listenPort, previews take the ports of their range, one each", async () => {
+  const base = await freeRange(2);
+  const { ui } = await started({ ...APP_CMD, max: 2, listenPort: base });
+  await runningPreview(ui, "label-check");
+  await runningPreview(ui, "other-check");
+  const ports = [(await api(ui, `${BASE}/label-check/preview`)).json.port, (await api(ui, `${BASE}/other-check/preview`)).json.port];
+  expect(ports.sort()).toEqual([base, base + 1]);
+}, T);
+
 test("no preview command set: refused with a fix, nothing made", async () => {
-  const { ui, p } = await started({});
+  const { ui, p } = await started({ enabled: true });
   const r = await api(ui, `${BASE}/label-check/preview`, { method: "POST" });
   expect(r.status).toBe(400);
   expect(r.json.code).toBe("preview_not_set");
@@ -404,6 +527,17 @@ test("one preview per item, and at most preview.max at once", async () => {
   expect(String(b.json.fix)).not.toBe("");
   expect(worktrees(p).length).toBe(1);
   expect((await api(ui, `${BASE}/no-such-item/preview`, { method: "POST" })).json.code).toBe("preview_no_item");
+}, T);
+
+test("an app that listens on every IPv6 address is stopped too", async () => {
+  const v6 = Object.values(networkInterfaces()).flat().find((i) => i && i.family === "IPv6" && !i.internal && !/^fe80:/i.test(i.address));
+  if (!v6) return; // no routable IPv6 address on this machine
+  const { ui, p } = await started(APP_CMD, { appHost: "::" });
+  await api(ui, `${BASE}/label-check/preview`, { method: "POST" });
+  const s = await waitFor(ui, "label-check", (x) => isRunning(x) || ended(x));
+  expect(s.state).toBe("failed");
+  expect((s.error as Row).code).toBe("preview_exposed");
+  expect(worktrees(p)).toEqual([]);
 }, T);
 
 test("an app that listens beyond 127.0.0.1 is stopped", async () => {

@@ -298,13 +298,14 @@ export const SETTINGS: Record<string, Setting> = table([
   S("ui.projects", "list", "ui", "Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout.", { default: [] }),
   S("ui.port", "int", "ui", "The port `factory ui` listens on (`--port` wins for one run).", { default: 4747 }),
   S("ui.pollSeconds", "int", "ui", "How often `factory ui` reads the agents and machines again and pushes what changed to the open pages.", { default: 5 }),
+  S("preview.enabled", "bool", "ui", "Lets the web UI run Open preview on a sign-off item. A preview runs the pull request's code on this machine with this machine user's rights: it can read your tokens and files. Off until you turn it on.", { default: false }),
   S("preview.command", "str", "ui", "Open preview on a sign-off item: the command that runs the app, for example `bun run src/server.ts`. It runs in a temporary worktree of the item's commit with PORT set and should listen on HOST (127.0.0.1) only. Read from the settings committed on the main branch. Empty: no preview.", { default: "" }),
   S("preview.port", "int", "ui", "The port the preview listens on, for an app that can't take PORT. Unset: a free port, given in PORT.", { default: null }),
   S("preview.health", "str", "ui", "The path the web UI asks until the preview answers (below 400) before it shows the link, for example /healthz.", { default: "/" }),
   S("preview.startSeconds", "int", "ui", "How long a preview may take to answer its health path before it counts as failed and is stopped.", { default: 60 }),
   S("preview.idleMinutes", "int", "ui", "A preview stops after this many minutes with no request through its link. It also stops when its item gets a result.", { default: 30 }),
   S("preview.max", "int", "ui", "At most this many previews run at once on the machine that runs the web UI.", { default: 3 }),
-  S("preview.listenPort", "int", "ui", "The port `factory ui` serves the previews on, their own origin apart from the UI's, on the same addresses. Unset: ui.port + 1.", { default: null }),
+  S("preview.listenPort", "int", "ui", "The first port `factory ui` serves previews on, one port each (up to preview.listenPort + preview.max - 1), on the UI's addresses, so each is an origin of its own. Unset: ui.port + 1.", { default: null }),
   S("attention.taskQuietMinutes", "int", "ui", "Needs attention: a task in progress shows when nothing has moved on it (no heartbeat from a holder working on it, no change on the board) for this many minutes.", { default: 60 }),
   S("attention.prWaitHours", "int", "ui", "Needs attention: a pull request shows when it has been open this many hours with red checks, no review, a must-fix nobody picked up, or a merge only a person can do.", { default: 24 }),
   S("attention.coding-agent.maxMinutes", "int", "ui", "Needs attention: a coding agent's session shows when it has been working this many minutes without a pause.", { default: 120 }),
@@ -557,14 +558,22 @@ const MORE: Record<string, More> = {
   examples: ["factory settings set attention.dev-manager.maxMinutes 45"] },
   "preview.command": { long: "Open preview on a sign-off item (#582) checks out the item's commit (the head of its task's " +
     "open pull request, else the main branch) in a temporary worktree and runs this command there with `bash -c`, PORT " +
-    "set to a free port and HOST to 127.0.0.1; its environment is only PATH, HOME, PORT, HOST and the project's agentEnv " +
-    "(as the first agent gets it), never GitHub, Anthropic, board or web UI secrets. The web UI waits for `preview.health`, " +
-    "then serves the app on its own origin (`preview.listenPort`) at /preview/<project>/<item>/, opened through a one-time " +
-    "link from the item that sets that preview's own cookie; the web UI's token is never used there. An app that answers " +
-    "on another address than 127.0.0.1 is stopped. The command is read from .claude/factory.json as committed on the main " +
-    "branch, never from the request or from the pull request. Stopping kills the whole process group and removes the " +
-    "worktree. Install the app's dependencies in the command when it needs them.",
+    "set to a free port and HOST to 127.0.0.1. It runs as this machine's user, with that user's rights: the code can read " +
+    "the web UI's token, `gh auth token`, ~/.ssh and any other file you can, so `preview.enabled` must be on first. Its " +
+    "environment is kept small (PATH, an empty HOME of its own, PORT, HOST and the project's agentEnv as the first agent " +
+    "gets it) so secrets in the web UI's own environment aren't handed over by mistake; that is not a fence. The web UI " +
+    "waits for `preview.health`, then serves the app on a port of its own (from `preview.listenPort`) at " +
+    "/preview/<project>/<item>/, opened through a one-time link that sets that preview's own cookie. An app that answers on " +
+    "another address than 127.0.0.1 is stopped. The settings are read from .claude/factory.json as committed on the main " +
+    "branch (origin's, else the local branch), never from the request, the pull request or a tag. Stopping kills the " +
+    "process group and anything still working in the worktree, and removes the worktree and HOME. Install the app's " +
+    "dependencies in the command when it needs them.",
   examples: ["factory settings set preview.command 'bun install && bun run src/server.ts'", "factory settings set preview.health /healthz"] },
+  "preview.enabled": { long: "Open preview (#582) runs the code of a pull request an agent wrote on the machine that runs " +
+    "`factory ui`, as your user. Nothing stops that code from reading your tokens (the web UI's, GitHub's), your keys and " +
+    "your files, or from acting with them. Turn this on only if you accept that for this project; isolating previews (another " +
+    "user, a container) is a follow-up of #599.",
+  examples: ["factory settings set preview.enabled true"] },
   "ui.pollSeconds": { long: "Each read runs `factory agents ls --json` for every project shown, which asks GitHub at most " +
     "once per FACTORY_AGENTS_CACHE_SECONDS (45). The server reads only while a page is open.",
   examples: ["factory settings set ui.pollSeconds 10"] },

@@ -148,10 +148,6 @@ async function main(argv: string[]): Promise<number> {
       app: new TextDecoder().decode(script) });
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
-    if (why.startsWith("preview listener:")) { // the previews' own origin (#582)
-      fail("ui_preview_port_busy", `factory ui could not listen for previews on port ${previewPort} (${why.slice(17, 200).trim()}).`,
-        `Set preview.listenPort to a free port (factory settings set preview.listenPort ${previewPort + 1}), or pick another --port.`);
-    }
     if (/EADDRINUSE|in use/i.test(why)) {
       fail("ui_port_busy", `Port ${port} is in use on this machine.`, `Pick another: factory ui --port ${port + 1} (or set ui.port).`);
     }
@@ -162,7 +158,7 @@ async function main(argv: string[]): Promise<number> {
   // one write, so a reader that waits for the token line has the whole message
   process.stdout.write([`factory ui: serving ${list[0]?.name}${others ? ` and ${others} other project${others > 1 ? "s" : ""}` : ""}`,
     `  open: ${link("127.0.0.1", server.port, t)}`, ...(tail ? [`  tailscale: ${link(tail, server.port, t)}`] : []),
-    `  previews: port ${server.previewPort} (their own origin; each sign-off item gives its link)`,
+    ...(server.previewPort ? [`  previews: from port ${server.previewPort}, one port each (only with preview.enabled; they run with this user's rights)`] : []),
     `  token: ${t} (kept in .git/factory/ui-token)`, "Ctrl-C stops it.", ""].join("\n"));
   await new Promise<void>((done) => {
     const stop = (): void => {

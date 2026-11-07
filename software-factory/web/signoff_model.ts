@@ -181,6 +181,9 @@ export interface PreviewStatus {
   state: "none" | "starting" | "running" | "stopping" | "failed" | "stopped";
   /** Whether the project says how to run its app (preview.command on its main branch). */
   configured: boolean;
+  /** Whether the project turned previews on (preview.enabled), and what a preview risks, in words for the confirm. */
+  enabled?: boolean;
+  risk?: string;
   path: string | null;
   output: string[];
   error: { code: string; message: string; fix: string } | null;

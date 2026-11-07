@@ -509,14 +509,11 @@ export function serve(o: ServeOptions): Running {
     port = s.port ?? port;
     servers.push(s);
   }
-  // the previews' own origin (#582): another port on the same addresses, which never takes the UI's token
-  let previewPort: number;
-  try {
-    previewPort = previews.listen(o.hosts, o.previewPort ?? (o.port === 0 ? 0 : o.port + 1), (id) => byId.get(id));
-  } catch (e) {
-    for (const s of servers) s.stop(true);
-    throw new Error(`preview listener: ${e instanceof Error ? e.message : String(e)}`);
-  }
+  // the previews (#582): each on its own port from previewPort up, on the same addresses, never taking the UI's token;
+  // what a crashed earlier run left behind goes first
+  const previewPort = o.previewPort ?? (o.port === 0 ? 0 : o.port + 1);
+  previews.configure(o.hosts, previewPort, (id) => byId.get(id));
+  previews.sweep(list);
   return {
     port,
     previewPort,

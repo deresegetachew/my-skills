@@ -205,7 +205,18 @@ function PreviewBox({ path, token, get, post, say, tick }: { path: string; token
     return () => clearTimeout(t);
   }, [s, line?.busy, load]);
   if (!s || (!s.configured && s.state === "none")) return null;
+  const risk = s.risk ?? "This runs the pull request's code on this machine with this machine user's rights (it can read your tokens and files).";
+  if (!s.enabled && s.state === "none") {
+    return (
+      <section aria-labelledby="preview-h" className="spreview">
+        <h2 id="preview-h">Try it</h2>
+        <p className="muted">Previews are off for this project. {risk}</p>
+        <span className="hint">If you accept that, turn on preview.enabled in Factory settings.</span>
+      </section>
+    );
+  }
   const start = async (): Promise<void> => {
+    if (!window.confirm(`${risk}\n\nOpen the preview?`)) return;
     setBusy(true);
     const r = await post(path, {});
     setBusy(false);
@@ -252,7 +263,7 @@ function PreviewBox({ path, token, get, post, say, tick }: { path: string; token
           <pre className="sout">{s.output.join("\n")}</pre>
         </details>
       )}
-      <span className="hint">It stops when you record a result, after a while with nothing opened, or with Stop preview.</span>
+      <span className="hint">{risk} It stops when you record a result, after a while with nothing opened, or with Stop preview.</span>
     </section>
   );
 }
