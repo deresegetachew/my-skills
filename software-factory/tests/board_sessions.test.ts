@@ -18,7 +18,7 @@ const URL_WITH_PASSWORD = `postgres://factory:${SECRET}@127.0.0.1:1/board`;
 
 const BUILDER_TOOLS = ["board_prime", "board_ready", "board_claim", "board_heartbeat", "board_release", "board_close",
   "board_show", "board_post", "board_thread", "board_note", "board_on_me", "board_delegated"];
-const MANAGER_TOOLS = [...BUILDER_TOOLS, "board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment"];
+const MANAGER_TOOLS = [...BUILDER_TOOLS, "board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment", "board_signoff_add"];
 // The product owner never builds (#511): no claim, heartbeat, release or close; a task dropped is moved to done as wont_do.
 const PO_TOOLS = MANAGER_TOOLS.filter((t) => !["board_claim", "board_heartbeat", "board_release", "board_close"].includes(t));
 

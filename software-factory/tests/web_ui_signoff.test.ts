@@ -119,6 +119,16 @@ test("add: bad input is refused with signoff_bad_input and nothing runs", async 
   expect(factoryCalls(p)).toEqual([]);
 }, T);
 
+test("add: a board task's id or #number is passed on as the task (#552)", async () => {
+  const { ui, p } = await started();
+  for (const task of ["b12", "#12", "12"]) {
+    const r = await api(ui, BASE, { method: "POST", body: { id: "login-page", task, check: "Open it" } });
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+  }
+  expect(factoryCalls(p)).toEqual(["signoff add login-page --task b12 --check Open it", "signoff add login-page --task 12 --check Open it",
+    "signoff add login-page --task 12 --check Open it"]);
+}, T);
+
 test("confirm: runs factory signoff confirm", async () => {
   const { ui, p } = await started();
   const r = await api(ui, `${BASE}/login-flow/confirm`, { method: "POST" });

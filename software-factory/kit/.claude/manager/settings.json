@@ -72,7 +72,8 @@
       "mcp__board__board_assign",
       "mcp__board__board_link",
       "mcp__board__board_unlink",
-      "mcp__board__board_comment"
+      "mcp__board__board_comment",
+      "mcp__board__board_signoff_add"
     ],
     "deny": [
       "Bash(git checkout *.claude*)",

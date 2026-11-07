@@ -35,7 +35,7 @@ export const BOARD_BIN = join(import.meta.dir, "..", "message-board", "bin.ts");
 export const BOARD_TOOLS = {
   builder: ["board_prime", "board_ready", "board_claim", "board_heartbeat", "board_release", "board_close", "board_show",
     "board_post", "board_thread", "board_note", "board_on_me", "board_delegated"],
-  manager: ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment"],
+  manager: ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment", "board_signoff_add"],
 };
 
 const ACTOR = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;

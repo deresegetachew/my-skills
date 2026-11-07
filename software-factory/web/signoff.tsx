@@ -9,7 +9,7 @@ import { itemLabel } from "./chat_model.ts";
 import { PageHead, PlusIcon } from "./page_head.tsx";
 import { type DotState, ListRow, StatusDot, type Talker, Tabs, TalkBox } from "./parts.tsx";
 import { itemThread, talkText } from "./parts_model.ts";
-import { type Dot, filterGroups, groupOf, historyOf, listOf, type Mark, noteOf, outcomeOf, passWhen, type SignoffItem, statusOf, stepsOf, type Tab,
+import { addOutcome, type Dot, filterGroups, groupOf, historyOf, listOf, type Mark, noteOf, outcomeOf, passWhen, type SignoffItem, statusOf, stepsOf, type Tab, taskInputOk, taskLabel, failedAsk,
   titleOf, whenText } from "./signoff_model.ts";
 import type { Post, Say } from "./views.tsx";
 
@@ -81,7 +81,7 @@ export function SignoffPage(p: Props) {
           <PageHead title="Sign-off and testing" onMenu={p.onMenu} />
           <div className="body">
             <button className="link back" onClick={() => p.open("page:signoff")}>‹ Sign-off and testing</button>
-            {!data ? <p className="empty">Reading the sign-off queue from GitHub…</p>
+            {!data ? <p className="empty">Reading the sign-off queue…</p>
               : <><Problems list={data.problems} />{!data.problems.length && <p className="empty">There is no item {p.id} in the queue.</p>}</>}
           </div>
         </>
@@ -106,7 +106,7 @@ function ListPage(p: Props & { data: Queue | null; base: string; reload: () => v
       <div className="body">
         {p.data && <Problems list={p.data.problems} />}
         <Tabs label="Filter" value={tab} onChange={setTab} tabs={list.tabs.map((t) => ({ id: t.id, label: t.label, count: t.count }))} />
-        {!p.data && <p className="empty">Reading the sign-off queue from GitHub…</p>}
+        {!p.data && <p className="empty">Reading the sign-off queue…</p>}
         {p.data && !p.data.problems.length && !list.groups.length && (
           <p className="empty">When a task needs a person's eyes, the product owner adds it here. Or add one yourself.</p>)}
         {p.data && list.groups.length > 0 && !groups.length && <p className="empty">Nothing here now.</p>}
@@ -137,15 +137,24 @@ function AddDialog({ base, post, say, close }: { base: string; post: Post; say: 
   const [task, setTask] = useState("");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ message: string; fix: string } | null>(null);
   const id = name.trim() || slug(check.split("\n")[0] ?? "");
-  const ready = check.trim() !== "" && /^\d+$/.test(task.trim()) && Number(task) > 0 && /^[A-Za-z0-9][\w.-]{0,63}$/.test(id);
+  const ready = check.trim() !== "" && taskInputOk(task) && /^[A-Za-z0-9][\w.-]{0,63}$/.test(id);
   const submit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
     if (!ready || busy) return;
     setBusy(true);
-    const r = await post(base, { id, task: Number(task), check: check.trim() });
+    setError(null);
+    const r = await post(base, { id, task: task.trim(), check: check.trim() });
     setBusy(false);
-    if (told(r, say, "Added to the sign-off queue.")) close(true);
+    // a failed add keeps the dialog open with what was typed, and says what went wrong and what to do (#552)
+    const out = addOutcome(r);
+    if (!out.close) {
+      setError(out.error);
+      return;
+    }
+    say({ title: "Added to the sign-off queue.", text: "", tone: "good" });
+    close(true);
   };
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) close(false); }}>
@@ -156,13 +165,19 @@ function AddDialog({ base, post, say, close }: { base: string; post: Post; say: 
         <label>What should a person check?
           <textarea rows={3} value={check} onChange={(e) => setCheck(e.target.value)} placeholder="Open the guide in Arabic and read the warning" autoFocus />
         </label>
-        <label>For task number
-          <input inputMode="numeric" value={task} onChange={(e) => setTask(e.target.value.replace(/[^\d]/g, ""))} placeholder="437" />
+        <label>For task
+          <input value={task} onChange={(e) => setTask(e.target.value)} placeholder="b12 or 437" autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+          <span className="muted">Its number as the board shows it: b12 for a task made on the board, 437 for an issue.</span>
         </label>
         <label>Short name
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder={id || "arabic-warning"} />
           <span className="muted">Letters, digits and dashes. It names the item on the queue.</span>
         </label>
+        {error && (
+          <div className="notice bad" role="alert">
+            <StatusDot state="red" /><div><strong>{error.message}</strong><p>{error.fix}</p></div>
+          </div>
+        )}
         <div className="actions">
           <button className="btn primary" type="submit" disabled={!ready || busy}>{busy ? "Adding…" : "Add it"}</button>
           <button className="btn plain" type="button" onClick={() => close(false)} disabled={busy}>Cancel</button>
@@ -223,7 +238,7 @@ function ItemPage(p: Props & { item: SignoffItem; base: string; reload: () => vo
   const note = noteOf(steps, marks, extra);
   const failed = async (): Promise<void> => {
     if (!(await act("result", { outcome: "fail", note }, "Recorded as failed."))) return;
-    if (po) await poChat.send(talkText(talkItem, `It failed. Please make it a task for the builders.${note ? `\n${note}` : ""}`));
+    if (po) await poChat.send(talkText(talkItem, failedAsk(item, note)));
   };
   const askChange = (): void => {
     if (po) setTo(po.name);
@@ -247,7 +262,7 @@ function ItemPage(p: Props & { item: SignoffItem; base: string; reload: () => vo
               {item.by && <Avatar name={item.by} size={32} />}
               <p>
                 {item.by ? <strong>{item.by}</strong> : "Someone"} {item.kind === "testplan" ? "proposed this" : "added this"} {when(item.at)}.
-                {item.task && <> It is for <button className="link" onClick={() => p.open("view:tasks", `#${item.task}`)}>task #{item.task}</button>.</>}
+                {item.task && <> It is for <button className="link" onClick={() => p.open("view:tasks", taskLabel(item.task as string))}>task {taskLabel(item.task)}</button>.</>}
               </p>
             </div>
           </header>

@@ -116,7 +116,11 @@ US-2   in progress  0/1   Review the draft guide
 ```
 
 **`factory signoff`** is the sign-off and testing queue: one issue, "Sign-off and testing queue" (pin it), made on first use,
-with one comment per item. The state is read from the comments after the item, so nothing is edited.
+with one comment per item. The state is read from the comments after the item, so nothing is edited. With
+`tasks.source: board` the queue is on the message board instead (#552): a note task of the project, "Sign-off and testing
+queue", with one message per entry, and no GitHub call; the product owner can add an item with its `board_signoff_add`
+tool. A task is named as people see it: `12` or `#12` for issue 12, `b12` for a task made on the board (board only; on the
+board the task must be there, and the refusal says how to find its number).
 
 | Command | What it does |
 |---|---|
