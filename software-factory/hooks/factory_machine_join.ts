@@ -26,7 +26,7 @@
 // remove --unredeemed`; marked revoked, kept so `ls` can say so). When the board doesn't answer nothing is changed.
 // Errors are `{code, message, fix}` on stderr.
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Board, BoardError, boardDir, LOGIN_NAME } from "../message-board/src/index.ts";
 import { now } from "./factory_clock.ts";
@@ -311,6 +311,8 @@ async function cmdJoin(argv: string[]): Promise<number> {
   const freshDir = !existsSync(dir);
   const before = existsSync(file) ? readFileSync(file, "utf8") : null;
   const joinedBefore = existsSync(joinedFile) ? readFileSync(joinedFile, "utf8") : null;
+  const usedBefore = existsSync(usedFile) && statSync(usedFile).isFile() ? readFileSync(usedFile, "utf8") : null;
+  let wroteUsed = false;
   const settingsBefore = machineSettings();
   let wroteSettings = false;
   const undo = (): void => {
@@ -319,6 +321,10 @@ async function cmdJoin(argv: string[]): Promise<number> {
     if (joinedBefore === null) rmSync(joinedFile, { force: true });
     else writeAtomic(joinedFile, joinedBefore, 0o600);
     if (freshDir) rmSync(dir, { recursive: true, force: true });
+    if (wroteUsed) {
+      if (usedBefore === null) rmSync(usedFile, { force: true });
+      else writeAtomic(usedFile, usedBefore, 0o600);
+    }
     if (wroteSettings) {
       try {
         writeMachineSettings(settingsBefore);
@@ -351,12 +357,17 @@ async function cmdJoin(argv: string[]): Promise<number> {
       writeAtomic(file, withPassword(p.url, password) + "\n", 0o600);
       writeAtomic(joinedFile, pyDumps({ name: p.name, agents: added } satisfies Joined) + "\n", 0o600);
       writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
+      wroteUsed = true; // only once it is written: a failed write changed nothing
       wroteSettings = true;
       saveMachineSettings({ agents: [...had, ...added] });
       saving = false;
     });
   } catch (e) {
     undo();
+    if (e instanceof BoardError && e.code === "login-compromised") {
+      refuse("code-compromised", `${p.name}'s join was redeemed on the board, but its new login didn't hold: this code may have been copied. Nothing was kept here.`,
+        `Run \`factory machine remove ${p.name}\` on the hub and make a new code (\`factory machine add ${p.name} --agent ...\`), then join with it.`);
+    }
     if (e instanceof BoardError && (e.code === "login-redeemed" || e.code === "login-expired")) {
       refuse(e.code === "login-redeemed" ? "code-used" : "code-expired", `The board refused ${p.name}'s join code: ${masked(e)}`, newCode);
     }

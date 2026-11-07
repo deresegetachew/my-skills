@@ -23,7 +23,8 @@ events on Postgres.
   factory board migrate              apply the schema migrations not applied yet (safe to run twice)
   factory board backup [--out FILE]  a pg_dump from inside the container, mode 600
   factory board sweep [--quiet-minutes N]
-                                     release the claims whose time is up and whose holder has been quiet N minutes (30)
+                                     release the claims whose time is up and whose holder has been quiet N minutes (30);
+                                     on the board's machine, also drop the join codes' logins that expired unredeemed
   factory board tasks [--all] [--json]
                                      the tasks not done (--all: every task)
   factory board ready [--for <actor>] [--json]
@@ -306,9 +307,10 @@ async function sweep(argv: string[]): Promise<number> {
   const q = option(args, "--quiet-minutes");
   leftovers(args, "factory board sweep [--quiet-minutes N]");
   const quietSeconds = q === undefined ? undefined : wholeNumber(q, "--quiet-minutes", 0, 100_000) * 60;
-  const swept = await withBoard((b) => b.sweep({ quietSeconds }));
+  const { swept, dropped } = await withBoard(async (b) => ({ swept: await b.sweep({ quietSeconds }), dropped: await b.dropExpiredLogins() }));
   if (!swept.length) print("No stale claims.");
   for (const s of swept) print(`released #${s.id} (held by ${s.holder})`);
+  for (const name of dropped) print(`dropped the login ${name}: its join code expired unredeemed (its sessions were ended)`);
   return 0;
 }
 

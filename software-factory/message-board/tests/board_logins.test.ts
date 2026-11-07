@@ -254,7 +254,7 @@ const withPassword = (url: string, password: string): string => {
 };
 
 /** Redeems the login of `url`; the new password, or the refusal's code. */
-async function redeem(url: string, keep: (password: string) => void = () => {}): Promise<{ password: string } | { code: string }> {
+async function redeem(url: string, keep: (password: string) => Promise<void> | void = () => {}): Promise<{ password: string } | { code: string }> {
   let b: Board;
   try {
     b = await Board.open(url, { max: 1 });
@@ -265,7 +265,7 @@ async function redeem(url: string, keep: (password: string) => void = () => {}):
     let password = "";
     await b.redeemLogin((p) => {
       password = p;
-      keep(p);
+      return keep(p);
     });
     return { password };
   } catch (e) {

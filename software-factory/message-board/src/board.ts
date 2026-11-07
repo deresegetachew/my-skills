@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { BoardError, LOGIN_REFUSED, LOGIN_REFUSED_FIX, refuse } from "./errors.ts";
 import { GRAPH_LOCK, type NewEvent, reaches, recordEvents } from "./graph.ts";
 import { applyImport } from "./import.ts";
-import { addLogin, listLogins, type Login, redeemLogin, removeLogin } from "./logins.ts";
+import { addLogin, dropExpiredLogins, listLogins, type Login, redeemLogin, removeLogin } from "./logins.ts";
 import { applied, migrate } from "./migrate.ts";
 import { CONTEXT_COLS, EVENT_COLS, MESSAGE_COLS, type Row, TASK_SELECT, toContext, toEvent, toMessage, toTask } from "./rows.ts";
 import {
@@ -108,7 +108,7 @@ function seconds(value: number | undefined, fallback: number): number {
 }
 
 export class Board {
-  private constructor(private readonly sql: SQL, readonly as: string, readonly session: string | null) {}
+  private constructor(private readonly sql: SQL, readonly as: string, readonly session: string | null, private readonly url: string) {}
 
   /** Connect to the board's database at `url` (checked with one query). */
   static async open(url: string, options: OpenOptions = {}): Promise<Board> {
@@ -124,7 +124,7 @@ export class Board {
       throw new BoardError("no-answer", `The board's database doesn't answer: ${String(translate(e)).replace(/\/\/[^@\s]*@/g, "//***@")}`,
         "Start it (`factory board up`) or check its URL, then try again.");
     }
-    return new Board(sql, as, options.session ?? null);
+    return new Board(sql, as, options.session ?? null, url);
   }
 
   /** Close the connections. (`close` closes a task.) */
@@ -146,7 +146,13 @@ export class Board {
   /** Redeems this connection's own join-code login once (logins.ts): `keep` gets its new password before the commit, and
    * a `keep` that throws undoes the redeem. */
   async redeemLogin(keep: (password: string) => Promise<void> | void): Promise<void> {
-    return this.run(() => redeemLogin(this.sql, keep));
+    return this.run(() => redeemLogin(this.sql, this.url, keep));
+  }
+
+  /** Drops the join codes' logins that expired unredeemed, ending their sessions (logins.ts); the names. Only the board's
+   * own user can; for anyone else, none. */
+  async dropExpiredLogins(): Promise<string[]> {
+    return this.run(() => dropExpiredLogins(this.sql));
   }
 
   /** Every login, with when it was first used and whether it is connected now. */

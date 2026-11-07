@@ -76,13 +76,16 @@ touching the others:
 - **Join codes (#514).** `login add --valid-for <seconds>` makes the role with `VALID UNTIL` that long from now by the
   server's clock, so Postgres itself refuses its password afterwards. `mb_redeem_login()` redeems it once
   (`Board.redeemLogin(keep)`): called by the login itself, it marks `mb_logins.redeemed_at`, sets `VALID UNTIL
-  'infinity'`, gives the role a new random password (two `gen_random_uuid()`, 64 hex characters), ends the role's other
-  connections and returns the password. It refuses a login already redeemed (`login-redeemed`), one that expired
+  'infinity'`, gives the role a new random password (two `gen_random_uuid()`, 64 hex characters) and returns it. It refuses a login already redeemed (`login-redeemed`), one that expired
   (`login-expired`), and a user that isn't a login (`not-found`). The redeem runs in the caller's transaction and
   `keep` gets the password before the commit: a `keep` that throws undoes it, so the code still works. The function
   is `SECURITY DEFINER`, owned by the board's user, with `search_path` pinned to `pg_catalog, public, pg_temp`; it
   touches only the row and role of `session_user`, takes the role's name from `mb_logins` (which logins can't write)
   and builds its one dynamic statement with `format('%I', '%L')`. Only the logins group may execute it (PUBLIC can't).
+  After the commit `redeemLogin` ends the login's other sessions (a copy of the code may have connected while the old
+  password still worked) and connects anew with the new password; if that fails it refuses `login-compromised` (the
+  code may have been copied). `VALID UNTIL` stops only new sessions: `Board.dropExpiredLogins`, run by `factory board
+  sweep` as the board's own user, drops each login whose code expired unredeemed and ends its sessions.
   `factory machine add` makes its login with `--valid-for` (the code's time), `factory machine join` redeems it.
 - A login the board refuses (wrong or rotated password, expired, removed: SQLSTATE 28P01 or 28000, or no CONNECT) is
   `login-refused`, whose message and fix say to ask the hub for a new code or `factory machine leave`. A board that

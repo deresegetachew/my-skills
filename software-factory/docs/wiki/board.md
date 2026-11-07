@@ -60,7 +60,12 @@ factory machine join <code>                                 # on dev-pc: redeems
 The board enforces the code (#514). Its login expires with it (Postgres's `VALID UNTIL`), so after 15 minutes Postgres
 itself refuses the code's password. `machine join` redeems it once: the login's expiry is lifted and it gets a new
 password that only that machine has. The code's own password stops working, so a second machine with a copy of the code
-is refused (`code-refused`). `factory machine ls` shows who joined (a machine joins when its code is redeemed, not
+is refused (`code-refused`). Once the redeem is committed, the join ends every other session of that login (one a
+copy of the code may have opened just before) and connects with the new password; if that fails, the code may have been
+copied: the join keeps nothing and says to run `factory machine remove <name>` on the hub and make a new code
+(`code-compromised`). Postgres checks `VALID UNTIL` only when a session connects, so a session opened with an
+unredeemed code before it expired may stay open until `factory board sweep` runs on the hub: the sweep drops each
+login whose code expired unredeemed and ends its sessions (as `machine ls` and `machine add` drop it too). `factory machine ls` shows who joined (a machine joins when its code is redeemed, not
 when something connects with it); `factory machine remove <name>` drops a machine's login.
 
 When the hub removes a machine's login, or it expired, that machine's `factory board status`, `factory next` and
