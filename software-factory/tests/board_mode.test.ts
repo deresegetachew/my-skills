@@ -4,7 +4,7 @@
 // and the factory's messages go there too. With `messaging.transport: "board"`, claims, wake-ups and the pull request
 // feed are the board's. `factory doctor` says whether the board answers, with the fix when it doesn't.
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Message as BoardMessage, Task as BoardTask } from "../message-board/src/index.ts";
 import { type BoardWorld, boardWorld } from "./board_support.ts";
@@ -163,4 +163,40 @@ test("factory doctor: the board answers, or it says so with the fix", () => {
   expect(doctor(github, { ...env, MB_URL: down.toString() }).stdout).not.toContain("message board");
   const old = doctorProject({}, { agents: ["haile"], messaging: { transport: "nats" } });
   expect(lines(doctor(old, env), "fix").find((l) => l.includes("messaging.transport"))).toContain("factory settings set messaging.transport board");
+});
+
+test("factory next in board mode reads a pull request's comments only when it changed: one GitHub call when nothing did (#515)", () => {
+  const p = boardProject();
+  const db = p.env.FAKE_GH_DB as string;
+  const read = (): Record<string, unknown> => JSON.parse(readFileSync(db, "utf8")) as Record<string, unknown>;
+  const old = "2026-10-01T09:00:00Z";
+  const head = (n: number): string => String(n).repeat(40).slice(0, 40);
+  const data = read();
+  data.pulls = [201, 202, 203].map((n) => ({ number: n, title: `PR ${n}`, labels: [], head: { sha: head(n % 10), ref: `task/${n}` }, updated_at: old }));
+  data.comments = { 201: [{ body: "Looks fine.", at: 1 }], 202: [], 203: [{ body: "Nice.", at: 1 }] };
+  writeFileSync(db, JSON.stringify(data));
+  const calls = (): number => Number(read().clock ?? 0);
+
+  let before = calls();
+  const first = hook(p.d, p.env, "next_task", "--json");
+  expect(first.code, first.out).toBe(0);
+  expect(JSON.parse(first.stdout)).toMatchObject({ id: "101" });
+  expect(calls() - before).toBe(4); // the open pull requests, then each one's comments once
+
+  before = calls();
+  const again = hook(p.d, p.env, "next_task", "--json");
+  expect(again.code, again.out).toBe(0);
+  expect(calls() - before).toBeLessThanOrEqual(2); // nothing changed: the list, and no comments read
+  expect(calls() - before).toBe(1);
+
+  // a must-fix on #202's head: its updated_at moves, so its comments (only its) are read again
+  const changed = read();
+  (changed.comments as Record<string, unknown[]>)["202"] = [{ body: `<!-- factory-mustfix sha=${head(2).slice(0, 7)} -->\nFix it.`, at: 2 }];
+  ((changed.pulls as Record<string, unknown>[])[1] as Record<string, unknown>).updated_at = "2026-10-02T09:00:00Z";
+  writeFileSync(db, JSON.stringify(changed));
+  before = calls();
+  const rework = hook(p.d, p.env, "next_task", "--json");
+  expect(rework.code, rework.out).toBe(0);
+  expect(JSON.parse(rework.stdout)).toMatchObject({ id: "pr-202" });
+  expect(calls() - before).toBe(2);
 });
