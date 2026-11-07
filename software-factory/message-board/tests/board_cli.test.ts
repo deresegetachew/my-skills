@@ -78,7 +78,7 @@ const password = (url: string): string => decodeURIComponent(new URL(url).passwo
 test("help lists every verb", () => {
   const r = board(world(), ["help"]);
   expect(r.code).toBe(0);
-  for (const verb of ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "show <id>", "ready", "prime <actor>"]) {
+  for (const verb of ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "show <number>", "ready", "prime <actor>", "restore <file> --yes"]) {
     expect(r.stdout).toContain(`factory board ${verb}`);
   }
 });

@@ -94,9 +94,9 @@ export function ensureDir(path: string, mode: number): void {
   chmodSync(path, mode);
 }
 
-export function sh(cmd: string[], opts: { cwd?: string; timeoutMs?: number; stdout?: number } = {}): { code: number; stdout: string; stderr: string } {
+export function sh(cmd: string[], opts: { cwd?: string; timeoutMs?: number; stdout?: number; stdin?: number } = {}): { code: number; stdout: string; stderr: string } {
   try {
-    const p = Bun.spawnSync(cmd, { cwd: opts.cwd, stdin: "ignore", stdout: opts.stdout ?? "pipe", stderr: "pipe", timeout: opts.timeoutMs ?? 120_000 });
+    const p = Bun.spawnSync(cmd, { cwd: opts.cwd, stdin: opts.stdin ?? "ignore", stdout: opts.stdout ?? "pipe", stderr: "pipe", timeout: opts.timeoutMs ?? 120_000 });
     return { code: p.exitCode ?? 124, stdout: p.stdout?.toString() ?? "", stderr: p.stderr?.toString() ?? "" };
   } catch (e) {
     return { code: 127, stdout: "", stderr: e instanceof Error ? e.message : String(e) };
@@ -125,10 +125,10 @@ export function tailscaleAddress(): string {
   return p.code === 0 && IPV4.test(first) ? first : "";
 }
 
-export function compose(args: string[], opts: { stdout?: number; timeoutMs?: number } = {}): { code: number; stdout: string; stderr: string } {
+export function compose(args: string[], opts: { stdout?: number; stdin?: number; timeoutMs?: number } = {}): { code: number; stdout: string; stderr: string } {
   const dir = boardDir();
   return sh(["docker", "compose", "--file", join(dir, "compose.yaml"), "--project-name", COMPOSE_PROJECT, ...args],
-    { cwd: dir, timeoutMs: opts.timeoutMs ?? 300_000, stdout: opts.stdout });
+    { cwd: dir, timeoutMs: opts.timeoutMs ?? 300_000, stdout: opts.stdout, stdin: opts.stdin });
 }
 
 /** The compose file: the pinned image, the credentials from db.env, the data volume, and the host ports on localhost

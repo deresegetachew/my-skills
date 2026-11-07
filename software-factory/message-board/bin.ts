@@ -22,16 +22,23 @@ events on Postgres.
   factory board down [--purge]       stop it; --purge also removes its data
   factory board status               whether the board answers, its schema and its counts
   factory board migrate              apply the schema migrations not applied yet (safe to run twice)
-  factory board backup [--out FILE]  a pg_dump from inside the container, mode 600
+  factory board backup [--out FILE]  a pg_dump from inside the container (no owner, no grants), mode 600; its default
+                                     name, backups/board-<date>-<time>-utc.sql, is in UTC
+  factory board restore <file> --yes replace the board's data with a backup's, in one transaction, then migrate it;
+                                     refused without --yes. Machine logins aren't in a backup: machines join again
   factory board sweep [--quiet-minutes N]
                                      release the claims whose time is up and whose holder has been quiet N minutes (30)
   factory board tasks [--all] [--json]
                                      the tasks not done (--all: every task)
   factory board ready [--for <actor>] [--json]
                                      the ready queue, in claim order; tasks handed to an actor show only with --for
-  factory board show <id> [--json]   one task: its fields, edges, context and thread
+  factory board show <number> [--json]
+                                     one task: its fields, edges, context and thread
   factory board prime <actor> [--json]
                                      an actor's start: what it holds, what is ready, what is blocked, recent events
+
+  A task is named by its number: #3 (or 3) for issue 3 of the project, b17 for a task made on the board. The project's
+  repo is --repo owner/name (tasks, ready, show, prime, sweep, mcp), else GH_REPO or the folder's git remote origin.
   factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]
                                      serve the board to one agent as an MCP server over stdio (JSON-RPC, one message a
                                      line); every write is recorded as <actor>, and no tool can name another sender.
@@ -190,13 +197,15 @@ async function up(argv: string[]): Promise<number> {
     undo();
     throw e;
   }
+  // a container that is stopped (not changed, not running) is started by this run: say so, not "up to date" (#515)
+  const wasRunning = !fresh && compose(["ps", "--status", "running", "--quiet", "db"], { timeoutMs: 60_000 }).stdout.trim() !== "";
   const r = compose(["up", "-d", ...(w.changed ? ["--force-recreate"] : [])]);
   if (r.code !== 0) {
     undo();
     fail("compose-failed", `docker compose couldn't start the board's Postgres: ${(r.stderr || r.stdout).trim().slice(-400)}`,
       "Fix what Docker says, then run `factory board up` again. Nothing was changed.");
   }
-  print(w.changed ? `Started the message board (${IMAGE}) from ${dir}.` : `The message board is up to date (${dir}).`);
+  print(w.changed || !wasRunning ? `Started the message board (${IMAGE}) from ${dir}.` : `The message board is up to date (${dir}).`);
   print(`This machine connects on 127.0.0.1:${port}` + (address ? `; other machines on ${address}:${s.tailnetPort}.` : "."));
   if (!address) {
     print("note: Tailscale isn't installed or isn't up here, so the board listens on localhost only: other machines can't " +
@@ -263,13 +272,13 @@ function backup(argv: string[]): number {
   let path = out;
   if (!path) {
     ensureDir(join(dir, "backups"), 0o700);
-    path = join(dir, "backups", `board-${new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)}.sql`);
+    path = join(dir, "backups", `board-${new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)}-utc.sql`);
   }
   const tmp = `${path}.tmp-${process.pid}`;
   const fd = openSync(tmp, "w", 0o600);
   let r: { code: number; stderr: string };
   try {
-    r = compose(["exec", "-T", "db", "pg_dump", "-U", DB_USER, "-d", DB_NAME], { stdout: fd, timeoutMs: 3_600_000 });
+    r = compose(["exec", "-T", "db", "pg_dump", "-U", DB_USER, "-d", DB_NAME, "--no-owner", "--no-privileges"], { stdout: fd, timeoutMs: 3_600_000 });
   } finally {
     closeSync(fd);
   }
@@ -278,7 +287,50 @@ function backup(argv: string[]): number {
     fail("backup-failed", `pg_dump failed: ${r.stderr.trim().slice(-400)}`, "Check that the board runs (`factory board status`), then run this again.");
   }
   renameSync(tmp, path);
-  print(`Wrote a backup of the board to ${path} (${statSync(path).size} bytes, mode 600).`);
+  print(`Wrote a backup of the board to ${path} (${statSync(path).size} bytes, mode 600)` + (out ? "." : "; the time in its name is UTC."));
+  return 0;
+}
+
+const RESTORE_USAGE = "factory board restore <file> --yes";
+
+/** `factory board restore <file> --yes` (#515): the board's data replaced with a backup's, in one transaction inside the
+ * running container (psql --single-transaction: a failure changes nothing), then migrated. Refused without --yes. */
+async function restore(argv: string[]): Promise<number> {
+  const args = [...argv];
+  const yes = flag(args, "--yes");
+  const file = args.shift();
+  leftovers(args, RESTORE_USAGE);
+  const dir = boardDir();
+  if (!file) fail("bad-input", "restore needs the backup file.", `For example: factory board restore ${join(dir, "backups", "board-20261107-101500-utc.sql")} --yes`);
+  if (!existsSync(file) || !statSync(file).isFile()) {
+    fail("no-file", `There is no backup file at ${file}.`, `Check the path: \`factory board backup\` says where it wrote each one (${join(dir, "backups")} unless --out named another).`);
+  }
+  if (!existsSync(join(dir, "compose.yaml"))) {
+    fail("no-board", "There is no board container on this machine to restore into.", "Run it on the machine that runs the board, after `factory board up`.");
+  }
+  if (!yes) {
+    fail("needs-yes", `A restore replaces everything on the board with what ${file} holds: what was written since that backup is lost.`,
+      `Take a backup of the board as it is now if you may want it (factory board backup), then run factory board restore ${file} --yes.`);
+  }
+  dockerReady();
+  const fd = openSync(file, "r");
+  let r: { code: number; stderr: string };
+  try {
+    r = compose(["exec", "-T", "db", "psql", "-U", DB_USER, "-d", DB_NAME, "-q", "-v", "ON_ERROR_STOP=1", "--single-transaction",
+      "-c", "SET lock_timeout = '60s'", "-c", "DROP SCHEMA public CASCADE", "-c", "CREATE SCHEMA public", "-f", "-"], { stdin: fd, timeoutMs: 3_600_000 });
+  } finally {
+    closeSync(fd);
+  }
+  if (r.code !== 0) {
+    fail("restore-failed", `psql couldn't restore ${file}: ${r.stderr.trim().slice(-400) || `exit ${r.code}`}`,
+      "Nothing was changed: the restore runs in one transaction. Check that the board runs (`factory board status`, `factory board up`) and that the file " +
+      "is one `factory board backup` wrote, then run this again.");
+  }
+  print(`Restored the message board from ${file}.`);
+  const applied = await withBoard((b) => b.migrate());
+  print(applied.length ? `Applied ${applied.join(", ")}.` : "The schema is up to date.");
+  print("Machine logins aren't in a backup: each other machine joins again. On this machine run `factory machine remove <name>` and " +
+    "`factory machine add <name> --agent <agent>`; on that machine, `factory machine join <code>`.");
   return 0;
 }
 
@@ -664,7 +716,7 @@ async function importVerb(argv: string[]): Promise<number> {
 }
 
 const VERBS: Record<string, (args: string[]) => number | Promise<number>> = {
-  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, import: importVerb, mcp, login,
+  up, down, status, migrate: migrateVerb, backup, restore, sweep, tasks, ready, show, prime, import: importVerb, mcp, login,
 };
 
 async function main(argv: string[]): Promise<number> {

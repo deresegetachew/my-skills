@@ -216,10 +216,10 @@ test("each tool's happy path, all written as haile", async () => {
   const c = new Client(url, ["--as", "haile", "--session", "s-9"]);
   await c.start();
 
-  const ready = (await c.ok("board_ready")).tasks as { id: number }[];
+  const ready = (await c.ok("board_ready")).tasks as { id: string }[];
   expect(ready.map((t) => t.id)).toEqual([n(a), n(b)]);
 
-  const claimed = (await c.ok("board_claim")).claim as { token: string; task: { id: number; holder: string } };
+  const claimed = (await c.ok("board_claim")).claim as { token: string; task: { id: string; holder: string } };
   expect(claimed.task.id).toBe(n(a));
   expect(claimed.task.holder).toBe("haile");
   expect(claimed.token).toMatch(/^[0-9a-f-]{36}$/);
@@ -229,7 +229,7 @@ test("each tool's happy path, all written as haile", async () => {
   expect(Date.parse(hb.claimUntil)).toBeGreaterThan(Date.now() + 500_000);
 
   const onMe = await c.ok("board_on_me");
-  expect((onMe.tasks as { id: number }[]).map((t) => t.id)).toEqual([n(a)]);
+  expect((onMe.tasks as { id: string }[]).map((t) => t.id)).toEqual([n(a)]);
   expect((onMe.messages as { body: string }[]).map((m) => m.body)).toEqual(["Which issues first?"]);
 
   const question = (await po.thread({ task: a.id }))[0] as { id: number };
@@ -254,9 +254,9 @@ test("each tool's happy path, all written as haile", async () => {
 
   const prime = await c.ok("board_prime");
   expect(prime.actor).toBe("haile");
-  expect((prime.holding as { task: { id: number } }[]).map((h) => h.task.id)).toEqual([n(a)]);
-  expect((prime.ready as { id: number }[]).map((t) => t.id)).toEqual([n(b)]);
-  expect((prime.blocked as { id: number }[]).map((t) => t.id)).toEqual([n(blocked)]);
+  expect((prime.holding as { task: { id: string } }[]).map((h) => h.task.id)).toEqual([n(a)]);
+  expect((prime.ready as { id: string }[]).map((t) => t.id)).toEqual([n(b)]);
+  expect((prime.blocked as { id: string }[]).map((t) => t.id)).toEqual([n(blocked)]);
   expect((prime.recent as unknown[]).length).toBeGreaterThan(0);
 
   const delegated = await c.ok("board_delegated");
