@@ -18,6 +18,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { branchTask } from "./factory_config.ts";
 
+/** The task a branch is for: task/<n>-… for an issue, or task/b<n>-… for a board task (#604). */
+function taskOfBranch(branch: string): string | null {
+  return branchTask(branch) ?? /^task\/(b\d+)(?:-|$)/.exec(branch)?.[1] ?? null;
+}
+
 export const TIMES_FILE = "task-times.json";
 /** The events kept at most (the oldest go first). */
 export const TIMES_MAX = 20_000;
@@ -136,13 +141,13 @@ export function snapshotEvents(snap: unknown): TaskEvent[] {
   if (at !== null) {
     for (const r of Array.isArray(obj(s.ci).runs) ? (obj(s.ci).runs as unknown[]).map(obj) : []) {
       const state = str(r.state);
-      const task = branchTask(str(r.branch));
+      const task = taskOfBranch(str(r.branch));
       const id = str(r.id);
       if (!task || !id || !FINISHED.has(state) || state === "skipped") continue;
       out.push({ id: `ci-${id}`, task, kind: "ci", at: new Date(at - num(r.minutesAgo) * 60_000).toISOString(), failed: FAILED.has(state) });
     }
     for (const p of Array.isArray(s.pulls) ? (s.pulls as unknown[]).map(obj) : []) {
-      const task = branchTask(str(p.branch));
+      const task = taskOfBranch(str(p.branch));
       const head = str(p.head);
       if (!task || str(p.review) !== "factory-mustfix") continue;
       out.push({ id: `review-${num(p.number)}-${head || "head"}`, task, kind: "review", at: new Date(at).toISOString() });

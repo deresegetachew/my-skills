@@ -57,7 +57,8 @@ import { duration, eventsIn, mediansOf, sessionsOf, type TaskCost, taskCosts } f
 
 export { PROJECT_FOLDER };
 
-const TASK = /^task\/(\d+(?:[.-]\d+)*?)-/;
+// A task branch: task/<n>-… for an issue (task/31-2-… for a sub-task) or task/b<n>-… for a board task (#604).
+const TASK = /^task\/(b\d+|\d+(?:[.-]\d+)*?)-/;
 export const FIELDS = ["input", "cache_write", "cache_read", "output"] as const;
 export type Tokens = { input: number; cache_write: number; cache_read: number; output: number };
 type Obj = Record<string, unknown>;
@@ -153,14 +154,16 @@ export function sessionRole(prompt: string): string {
 }
 
 // A session not on a task branch (a dev manager's sub-manager runs on the manager's) names its task in its first prompt:
-// the item (`/manage-pass issue-31`, `/next-task issue-31`) or the fact sheet (`Task issue: #31.`, `on branch task/31-x`).
-const PROMPT_TASK = [/\/(?:manage-pass|next-task)\s+issue-(\d+)\b/, /\bTask issue: #(\d+)\b/, /\bon branch task\/(\d+(?:[.-]\d+)*?)-/];
+// the item (`/manage-pass issue-31`, `/next-task issue-b31`) or the fact sheet (`Task issue: #31.` or `b31`, `on branch task/31-x`).
+const PROMPT_TASK = [/\/(?:manage-pass|next-task)\s+issue-(b\d+|\d+)\b/, /\bTask issue: (?:#(\d+)|(b\d+))\b/,
+  /\bon branch task\/(b\d+|\d+(?:[.-]\d+)*?)-/];
 
 /** The task a session's first prompt names, or null. */
 export function promptTask(prompt: string): string | null {
   for (const re of PROMPT_TASK) {
     const m = re.exec(prompt);
-    if (m) return (m[1] as string).replace(/-/g, ".");
+    const id = m?.slice(1).find((g) => g !== undefined);
+    if (id) return id.replace(/-/g, ".");
   }
   return null;
 }
