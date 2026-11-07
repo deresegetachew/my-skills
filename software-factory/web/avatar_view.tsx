@@ -6,7 +6,9 @@ import { avatarSrc, initialsSrc } from "./avatar.ts";
 import type { Tone } from "./model.ts";
 
 /** The current project's agents by name: their role and the owner's image, when there is one. */
-export const AgentsContext = createContext<Record<string, { role?: string; avatar?: string }>>({});
+/** The project's agents by name: their role, the owner's image, and (#545) their state as the sidebar shows it, so every
+ *  place that shows an agent says the same thing. */
+export const AgentsContext = createContext<Record<string, { role?: string; avatar?: string; tone?: Tone; state?: string }>>({});
 
 /** `name`'s avatar, `size` pixels across, with its state as a dot on the corner when `tone` is given. Decorative: the
  * name is always written beside it. `image` (an agent of another project, found by the search) stands in for the
