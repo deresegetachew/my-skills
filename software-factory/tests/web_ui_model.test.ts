@@ -1,7 +1,7 @@
 // The web app's few rules that aren't the API's (#421, #422): the search across channels, the words and tone of an
 // agent's state, and the address of a channel in the page's hash. web/model.ts holds them, with no React in it.
 import { expect, test } from "bun:test";
-import { agentState, channelHash, parseHash, searchChannels, type ProjectView } from "../web/model.ts";
+import { agentState, channelHash, parseHash, searchChannels, splitTask, taskChannel, type ProjectView } from "../web/model.ts";
 
 const PROJECTS: ProjectView[] = [
   { id: "work", name: "work", channels: [
@@ -48,4 +48,15 @@ test("a channel's address in the hash, and back", () => {
   expect(channelHash("my proj", "view:ci")).toBe("#/my%20proj/view:ci");
   expect(parseHash("")).toBeNull();
   expect(parseHash("#/only")).toBeNull();
+});
+
+test("a task opened on the board has its own address, so it can be shared and Back closes it (#543)", () => {
+  const hash = channelHash("work", taskChannel("view:tasks", "b3"));
+  expect(hash).toBe("#/work/view:tasks/task:b3");
+  const r = parseHash(hash);
+  expect(r).toEqual({ project: "work", channel: "view:tasks/task:b3" });
+  expect(splitTask(r?.channel ?? "")).toEqual({ channel: "view:tasks", task: "b3" });
+  expect(splitTask("view:tasks/task:12")).toEqual({ channel: "view:tasks", task: "12" });
+  expect(splitTask("view:tasks")).toEqual({ channel: "view:tasks", task: null });
+  expect(splitTask("view:tasks/task:../x")).toEqual({ channel: "view:tasks/task:../x", task: null }); // not a task id
 });
