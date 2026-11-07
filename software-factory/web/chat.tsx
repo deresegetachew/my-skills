@@ -9,6 +9,7 @@ import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "re
 import { askedBy, type AskView, type ChatItemView, emptyQueueText, itemLabel, mergeItems, orderAsks, type ProblemView, type QueueView } from "./chat_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
+import { authHeaders } from "./signin_model.ts";
 
 interface LiveMessage {
   type: string;
@@ -43,7 +44,7 @@ const UNREACHABLE: ProblemView = { code: "ui_unreachable", message: "The server 
 async function call(token: string, path: string, body?: unknown): Promise<{ status: number; json: Json }> {
   try {
     const r = await fetch(path, { method: body === undefined ? "GET" : "POST",
-      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
+      headers: { ...authHeaders(token), "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: r.status, json: (await r.json()) as Json };
   } catch {
     return { status: 0, json: {} };

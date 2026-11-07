@@ -681,6 +681,11 @@ What is planned:
   Comment and Close, each asked first; the task and agent pages and search across everything are still to come.*
 - **US-39.** As the owner, the web UI works on a phone: a bottom tab bar and big buttons for approvals, and every page
   fits at phone width. *Decided (#458).*
+- **US-68.** As the owner, I sign in to the web UI with a 6-digit code sent to my email (allowed addresses in this
+  machine's settings, mail through an HTTP mail API or SMTP set with `factory ui mail set`), not by copying the token;
+  the page never says which addresses are allowed, the session is a cookie I can list and revoke (`factory ui sessions`),
+  and the token keeps working for scripts and as the fallback. *Built (#542).* (Numbered after 4.12's range: US-14 to
+  US-39 are taken.)
 
 No tmux (D16, #526) changes how an agent's channel shows its output: from its log file, not a tmux pane.
 

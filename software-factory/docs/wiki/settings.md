@@ -97,7 +97,10 @@ Reading (`list`, `get`, `help`, `diff`, `validate`) stays allowed. Nothing merge
 **Machine scope** (`factory settings --local ...`, section 10 of the menu). Some settings belong to a machine, not the
 project, so they live in its own file outside the repo (`factory machine show` prints where) and are never committed:
 `agents` (the names this machine runs; `FACTORY_AGENTS` overrides), `remoteControl` (start sessions with Remote Control;
-`FACTORY_REMOTE_CONTROL=0|1` overrides), `autostart`, `autostartAgents` and `autostartReport`. The order of precedence
+`FACTORY_REMOTE_CONTROL=0|1` overrides), `autostart`, `autostartAgents` and `autostartReport`. The web UI's sign-in
+settings (`ui.signIn.*`, #542, listed under Web UI) are machine settings too: who may sign in with a code sent by email
+is never committed. The mail sender for those codes, with its key or password, is not a setting at all: `factory ui mail
+set` keeps it in `ui/mail.json` in the machine settings folder (mode 600), and nothing prints the secret. The order of precedence
 is the defaults in `factory_config.ts`, then the project file, then the machine file (machine keys only), then the
 environment.
 
@@ -316,6 +319,11 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `attention.spinFactor` | int | `3` | Needs attention: a task being built shows as spinning when its tokens or its agent's working time pass this many times the median of the done tasks (needs 5 done tasks). |
 | `attention.spinReviewRounds` | int | `3` | Needs attention: a task being built shows as spinning when it has had this many review rounds with must-fixes. |
 | `attention.spinFailedCi` | int | `3` | Needs attention: a task being built shows as spinning when this many of its CI runs failed in a row. |
+| `ui.signIn.allowed` | list | `[]` | This machine only (`--local`): the email addresses that may sign in to the web UI with a code sent by email. Empty: nobody, the token only. |
+| `ui.signIn.sessionDays` | int | `30` | This machine only (`--local`): how many days a web UI sign-in lasts before the code is asked for again. |
+| `ui.signIn.codesPerHour` | int | `5` | This machine only (`--local`): how many sign-in codes one address may ask for in an hour (one IP: four times that). |
+| `ui.signIn.maxWrongCodes` | int | `5` | This machine only (`--local`): wrong sign-in codes before an address is locked (one IP: four times that). |
+| `ui.signIn.lockoutMinutes` | int | `15` | This machine only (`--local`): how long a lock after too many wrong codes lasts, in minutes. |
 <!-- settings:end -->
 
 <br>

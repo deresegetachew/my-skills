@@ -34,6 +34,8 @@ import { run as sandbox } from "./factory_sandbox.ts";
 import { allowRules } from "./factory_stack.ts";
 import * as factoryTrust from "./factory_trust.ts";
 import { explain, probe, settings as turboSettings, TurboSettingError, turboJsonSigns } from "./factory_turbo.ts";
+import { settings as signInSettings } from "./factory_ui_auth.ts";
+import { doctorLine as mailLine } from "./factory_ui_mail.ts";
 import * as wf from "./factory_workflow.ts";
 
 const LINUX = process.platform === "linux";
@@ -755,6 +757,22 @@ export function board(r: Reporter, cfg: Config): void {
   }
 }
 
+/** The web UI's mail sender for sign-in codes (#542), when one is set on this machine: its file is mode 600 and its
+ * settings can be used (nothing is sent: `factory ui mail test` does that). Allowed addresses with no sender, or a
+ * sender with nobody allowed, is a note. The key or password is never read out. */
+export function uiMail(r: Reporter): void {
+  const line = mailLine();
+  const allowed = signInSettings().allowed.length;
+  if (line === null) {
+    if (allowed) r.note("web UI mail", "ui.signIn.allowed has addresses but no mail sender is set up, so no code can be sent: run `factory ui mail set`");
+    return;
+  }
+  const [level, what, how] = line;
+  if (level === "fix") r.fix(what, how);
+  else r.ok(what);
+  if (level === "ok" && !allowed) r.note("web UI sign-in", "a mail sender is set up but nobody is allowed: `factory settings --local set ui.signIn.allowed '[\"you@example.com\"]'`");
+}
+
 /** The artifact copies in the repo (#104): each one exists, is not edited by hand, and is not older than its artifact
  * when the project can say (`artifacts.info`). */
 export function artifacts(r: Reporter, cfg: Config): void {
@@ -924,6 +942,8 @@ export async function main(argv: string[]): Promise<number> {
     r.section("project");
     artifacts(r, cfg);
     release(r);
+    r.section("machine");
+    uiMail(r);
   }
   if (argv.includes("--sandbox")) {
     if (!json) {

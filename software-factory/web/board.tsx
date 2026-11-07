@@ -11,6 +11,7 @@ import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, columnsOf, epic
 import { costFacts } from "./cost_model.ts";
 import { CostFacts, useCosts } from "./costs.tsx";
 import { Chips } from "./parts.tsx";
+import { authHeaders } from "./signin_model.ts";
 import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
 import type { Post, Say, ViewProps } from "./views.tsx";
@@ -113,7 +114,7 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
   useEffect(() => {
     let gone = false;
     if (!t) return;
-    fetch(`/api/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${token}` } })
+    fetch(`/api/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(id)}`, { headers: authHeaders(token) })
       .then((r) => r.json() as Promise<Json>)
       .then((j) => { if (!gone) setGot(j); })
       .catch(() => { if (!gone) setGot({ message: "The server can't be reached.", fix: "Check that the web UI still runs, then open this again." }); });
