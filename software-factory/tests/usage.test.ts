@@ -1,8 +1,8 @@
 // `factory usage`: tokens per task from Claude Code's logs.
 import { expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { read, runHook, tmp, write } from "./support.ts";
+import { git, gitRepo, read, runHook, tmp, write } from "./support.ts";
 
 function reply(mid: string, branch: string, cwd: string, o: { inp?: number; write?: number; read?: number; out?: number;
   ts?: string; model?: string } = {}): string {
@@ -116,4 +116,157 @@ test("by role tells a manager session from a builder session", () => {
   const data = JSON.parse(usage(root, logs, "--json", "--by", "role").stdout) as Data;
   expect(data.groups.manager?.replies).toBe(3);
   expect(data.groups.builder?.replies).toBe(4);
+});
+
+// --- #571: the logs of the project folder, every worktree and the dev manager's helpers, from a temporary HOME -----------
+
+type Group = { replies: number; tokens: Record<string, number>; cost_usd: number; unpriced_replies: number };
+type Full = { by: string; groups: Record<string, Group>; days: Record<string, Group>;
+  total: { tasks: string[]; replies: number; cost_usd: number; unpriced_replies: number };
+  sessions: Array<{ id: string; task: string; task_from: string | null; worker: string; role: string; replies: number;
+    first: string; last: string; tokens: Record<string, number>; cost_usd: number }>;
+  looked: Array<{ dir: string; state: string; folders: string[] }>; problems: Array<{ code: string; message: string; fix: string }> };
+
+const dayOf = (back: number): string => new Date(Date.now() - back * 86_400_000).toISOString().slice(0, 10);
+const at = (back: number, h: number): string => `${dayOf(back)}T${String(h).padStart(2, "0")}:00:00Z`;
+
+/** A project in git with two agent worktrees (<root>-agents/taytu and the dev manager's <root>-agents/menelik) and a
+ * helper worktree elsewhere; HOME is a temporary folder whose ~/.claude/projects holds Claude Code's logs, keyed by the
+ * real path of each session's folder, as Claude Code writes them. */
+function hub(): { root: string; home: string; logs: string } {
+  const base = tmp();
+  mkdirSync(join(base, "factory-sandbox"));
+  const root = gitRepo(join(base, "factory-sandbox"));
+  const worktrees: Array<[string, string]> = [[root + "-agents/taytu", "task/8-y"], [root + "-agents/menelik", "manager/menelik"],
+    [join(base, "helpers", "fix-ci"), "fix-ci"]];
+  for (const [path, branch] of worktrees) {
+    mkdirSync(join(path, ".."), { recursive: true });
+    git(root, "worktree", "add", "-q", "-b", branch, path);
+  }
+  const home = join(base, "home");
+  const logs = join(home, ".claude", "projects");
+  const real = (p: string): string => realpathSync(p);
+  const dir = (p: string): string => join(logs, slugOf(real(p)));
+  // Your own session in the project folder, task 7, over two days.
+  const r = real(root);
+  write(join(dir(root), "own.jsonl"), [reply("h1", "task/7-x", r, { ts: at(0, 9) }), reply("h2", "task/7-x", r, { ts: at(1, 9) })].join("\n") + "\n");
+  // A coding agent in its worktree, task 8, with a reviewer subagent.
+  const wt = real(root + "-agents/taytu");
+  write(join(dir(wt), "agent.jsonl"), reply("t1", "task/8-y", wt, { ts: at(0, 10) }) + "\n");
+  write(join(dir(wt), "agent", "subagents", "agent-r.jsonl"), reply("t2", "task/8-y", wt, { ts: at(0, 10), model: "claude-sonnet-5-5" }) + "\n");
+  writeFileSync(join(dir(wt), "agent", "subagents", "agent-r.meta.json"), JSON.stringify({ agentType: "reviewer" }));
+  // The dev manager's helper (a sub-manager): its folder is on the manager's branch; the task is in its first prompt.
+  const mg = real(root + "-agents/menelik");
+  const prompt = "/manage-pass pr-12\n\nItem pr-12 (review).\nPR #12: \"Add search\" on branch task/31-search into main.\nTask issue: #31.\n" +
+    "<!-- factory-role role=dev-manager name=menelik -->";
+  write(join(dir(mg), "sub.jsonl"), [JSON.stringify({ type: "user", cwd: mg, message: { role: "user", content: prompt } }),
+    reply("m1", "manager/menelik", mg, { ts: at(0, 11) }), reply("m2", "manager/menelik", mg, { ts: at(0, 12) })].join("\n") + "\n");
+  // A helper worktree outside <root>-agents, found through git.
+  const hp = real(join(base, "helpers", "fix-ci"));
+  write(join(dir(hp), "helper.jsonl"), reply("x1", "fix-ci", hp, { ts: at(0, 13) }) + "\n");
+  // A log folder whose name doesn't match (a symlinked path, say), found by the folder its sessions ran in.
+  write(join(logs, "-some-link-to-the-project", "linked.jsonl"), reply("l1", "task/7-x", r, { ts: at(0, 14) }) + "\n");
+  // Another project's log is never counted.
+  write(join(logs, "-elsewhere", "other.jsonl"), reply("o1", "task/9-z", "/elsewhere", { ts: at(0, 9) }) + "\n");
+  return { root, home, logs };
+}
+
+function hubUsage(cwd: string, home: string, ...args: string[]) {
+  return runHook("factory_usage", args, { cwd, env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: undefined, CLAUDE_PROJECT_DIR: undefined } });
+}
+
+test("reads the project folder, every agent worktree and the helpers from Claude Code's folder in HOME (#571)", () => {
+  const { root, home } = hub();
+  for (const cwd of [root, root + "-agents/taytu"]) { // the same answer from the project folder and from an agent's worktree
+    const p = hubUsage(cwd, home, "--json", "--by", "worker");
+    expect(p.code, p.out).toBe(0);
+    const data = JSON.parse(p.stdout) as Full;
+    expect(Object.keys(data.groups).sort()).toEqual(["(project folder)", "fix-ci", "menelik", "taytu"]);
+    expect(data.groups["(project folder)"]?.replies).toBe(3); // h1, h2 and the linked folder's l1
+    expect(data.groups.taytu?.replies).toBe(2); // t1 and its reviewer's t2
+    expect(data.groups.menelik?.replies).toBe(2);
+    expect(data.groups["fix-ci"]?.replies).toBe(1);
+    expect(data.total.replies).toBe(8); // never the other project's o1
+    expect(data.problems).toEqual([]);
+  }
+});
+
+test("by task: a helper session's task comes from its prompt; by day; each session is kept, joinable to its task (#571)", () => {
+  const { root, home } = hub();
+  const data = JSON.parse(hubUsage(root, home, "--json").stdout) as Full;
+  expect(Object.keys(data.groups).sort()).toEqual(["-", "31", "7", "8"]);
+  expect(data.groups["31"]?.replies).toBe(2);
+  expect(data.groups["7"]?.replies).toBe(3);
+  expect(data.total.tasks).toEqual(["31", "7", "8"]);
+  expect(Object.keys(data.days).sort()).toEqual([dayOf(1), dayOf(0)]);
+  expect(data.days[dayOf(1)]?.replies).toBe(1);
+  const sub = data.sessions.find((s) => s.id === "sub");
+  expect(sub).toMatchObject({ task: "31", task_from: "prompt", worker: "menelik", role: "manager", replies: 2,
+    first: at(0, 11), last: at(0, 12) });
+  expect(data.sessions.find((s) => s.id === "agent")).toMatchObject({ task: "8", task_from: "branch", worker: "taytu", replies: 2 });
+  expect(data.sessions.find((s) => s.id === "helper")).toMatchObject({ task: "-", task_from: null, worker: "fix-ci" });
+  const byDay = JSON.parse(hubUsage(root, home, "--json", "--by", "day").stdout) as Full;
+  expect(byDay.by).toBe("day");
+  expect(byDay.groups[dayOf(0)]?.replies).toBe(7);
+  const text = hubUsage(root, home, "--by", "worker");
+  expect(text.code, text.out).toBe(0);
+  expect(text.stdout).toContain("menelik");
+  expect(text.stdout).toContain("taytu");
+});
+
+test("cost where the model's price is known; other models are counted and said to have no price (#571)", () => {
+  const { root, home, logs } = hub();
+  const r = realpathSync(root);
+  // One million of each kind on claude-opus-5-5: $4 input, $5 cache writes (1.25x), $0.20 cache reads, $20 output.
+  write(join(logs, slugOf(r), "priced.jsonl"), [
+    reply("p1", "task/40-a", r, { ts: at(0, 15), inp: 1_000_000, write: 1_000_000, read: 1_000_000, out: 1_000_000 }),
+    reply("p2", "task/40-a", r, { ts: at(0, 15), model: "claude-made-up-9" })].join("\n") + "\n");
+  let data = JSON.parse(hubUsage(root, home, "--json", "--task", "40").stdout) as Full;
+  expect(data.groups["40"]?.cost_usd).toBeCloseTo(29.2, 6);
+  expect(data.groups["40"]?.unpriced_replies).toBe(1);
+  expect(data.total.unpriced_replies).toBe(1);
+  // usage.prices adds a model's price (USD per million tokens).
+  write(join(root, ".claude", "factory.json"), JSON.stringify({ usage: { prices: { "claude-made-up-9": { input: 1, output: 2, cacheRead: 0.5 } } } }));
+  data = JSON.parse(hubUsage(root, home, "--json", "--task", "40").stdout) as Full;
+  // p2: 10 input ($1/M), 100 cache writes (1.25 x $1/M), 1000 cache reads ($0.5/M), 50 output ($2/M)
+  expect(data.groups["40"]?.cost_usd).toBeCloseTo(29.2 + (10 + 125 + 500 + 100) / 1_000_000, 9);
+  expect(data.groups["40"]?.unpriced_replies).toBe(0);
+  const text = hubUsage(root, home, "--task", "40");
+  expect(text.stdout).toContain("$29.20");
+});
+
+test("no logs: says where it looked and why, with the fix (#571)", () => {
+  const base = tmp();
+  mkdirSync(join(base, "proj"));
+  const root = gitRepo(join(base, "proj"));
+  const home = join(base, "home");
+  mkdirSync(join(home, ".claude", "projects", "-elsewhere"), { recursive: true });
+  const p = hubUsage(root, home, "--json");
+  expect(p.code, p.out).toBe(0);
+  const data = JSON.parse(p.stdout) as Full;
+  expect(data.total.replies).toBe(0);
+  const no = data.problems.find((x) => x.code === "usage_no_logs");
+  expect(no?.message).toContain(join(home, ".claude", "projects"));
+  expect(no?.message).toContain(slugOf(realpathSync(root)));
+  expect(no?.fix).toContain("usage.logFolders");
+  expect(data.looked.map((l) => [l.dir, l.state])).toEqual([[join(home, ".claude", "projects"), "none"]]);
+  // A Claude Code folder that isn't there says so too.
+  const q = JSON.parse(hubUsage(root, join(base, "nobody"), "--json").stdout) as Full;
+  expect(q.looked[0]?.state).toBe("missing");
+  expect(q.problems[0]?.code).toBe("usage_no_logs");
+  const text = hubUsage(root, join(base, "nobody"));
+  expect(text.code, text.out).toBe(0);
+  expect(text.stdout).toContain("usage_no_logs");
+  expect(text.stdout).toContain("Fix: ");
+});
+
+test("usage.logFolders reads the Claude Code folder of the user that runs the agents (#571)", () => {
+  const { root, logs } = hub();
+  const mine = join(tmp(), "home");
+  mkdirSync(mine, { recursive: true });
+  write(join(root, ".claude", "factory.json"), JSON.stringify({ usage: { logFolders: [logs] } }));
+  const data = JSON.parse(hubUsage(root, mine, "--json").stdout) as Full;
+  expect(data.total.replies).toBe(8);
+  expect(data.looked.map((l) => l.dir)).toEqual([join(mine, ".claude", "projects"), logs]);
+  expect(data.problems).toEqual([]);
 });

@@ -3,10 +3,10 @@
 // snapshot cache written by hand: the JSON each page gets, the command each action runs, and that the doctor (it costs
 // GitHub calls) and the usage report are run once and kept, never on each look.
 import { afterAll, expect, test } from "bun:test";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { api, CONFIG, heartbeat, hbRow, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
-import { write, writeExe } from "./support.ts";
+import { HOOKS, write, writeExe } from "./support.ts";
 
 const T = 60_000;
 const running: Running[] = [];
@@ -18,6 +18,8 @@ afterAll(async () => {
 
 const FAKE_FACTORY = `#!/usr/bin/env bash
 echo "$*" >> "$FAKE_FACTORY_LOG"
+if [ "\${1:-}" = usage ] && [ -n "\${FAKE_USAGE_REAL:-}" ]; then shift; exec "$FAKE_BUN" --no-env-file --config=/dev/null "$FAKE_USAGE_REAL" "$@"; fi
+if [ "\${1:-}" = usage ] && [ "\${2:-}" != --github ] && [ -n "\${FAKE_USAGE_FAIL:-}" ]; then echo "$FAKE_USAGE_FAIL" >&2; exit 2; fi
 case "$*" in
   "doctor --json") sleep "\${FAKE_DOCTOR_SLEEP:-0}"; cat "$FAKE_DOCTOR"; exit 1 ;;
   "usage --json") cat "$FAKE_USAGE_TASK" ;;
@@ -214,6 +216,57 @@ test("usage: over the budget is over; with no budget nothing is compared; no tok
   expect(u.tasks).toEqual([]);
   expect(u.budget).toEqual({ tokens: null, source: null, warnPercent: 80 });
   expect(u.github).toMatchObject({ total: 42 });
+}, T);
+
+test("usage: the page reads the real logs of the project folder and an agent's worktree, by task, agent and day, with cost (#571)", async () => {
+  const p = workProject();
+  p.env.FAKE_USAGE_REAL = join(HOOKS, "factory_usage.ts");
+  p.env.FAKE_BUN = process.execPath;
+  const top = realpathSync(p.d);
+  const logs = join(p.root, "home", ".claude", "projects");
+  const day = new Date().toISOString().slice(0, 10);
+  const reply = (id: string, branch: string, cwd: string, out: number): string => JSON.stringify({ type: "assistant",
+    timestamp: `${day}T08:00:00Z`, gitBranch: branch, cwd, message: { id, model: "claude-opus-5-5",
+      usage: { input_tokens: 100, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: out } } });
+  const slug = (x: string): string => x.replace(/[^A-Za-z0-9]/g, "-");
+  write(join(logs, slug(top), "own.jsonl"), reply("a1", "main", top, 10) + "\n");
+  const wt = `${top}-agents/taytu`;
+  write(join(logs, slug(wt), "agent.jsonl"), [reply("b1", "task/7-login", wt, 400), reply("b2", "task/7-login", wt, 500)].join("\n") + "\n");
+  const ui = await started(p);
+  const u = (await api(ui, "/api/projects/work/usage")).json;
+  expect(u.problems, JSON.stringify(u)).toEqual([]);
+  expect(u.measured).toBe(true);
+  expect((u.tasks as Row[]).map((t) => [t.key, t.title, t.used, t.replies])).toEqual([["7", "Add the login page", 1100, 2], ["-", "No task", 110, 1]]);
+  expect((u.agents as Row[]).map((a) => [a.key, a.used])).toEqual([["taytu", 1100], ["(project folder)", 110]]);
+  expect((u.days as Row[]).map((d) => [d.key, d.used, d.replies])).toEqual([[day, 1210, 3]]);
+  // 300 input at $4 per million and 910 output at $20 per million
+  expect((u.total as Row).cost).toBeCloseTo((300 * 4 + 910 * 20) / 1_000_000, 9);
+  expect((u.tasks as Row[])[0]?.cost).toBeCloseTo((200 * 4 + 900 * 20) / 1_000_000, 9);
+}, T);
+
+test("usage: no logs says where it looked; a failed run shows its own error, not just that it failed (#571)", async () => {
+  const p = workProject();
+  p.env.FAKE_USAGE_REAL = join(HOOKS, "factory_usage.ts");
+  p.env.FAKE_BUN = process.execPath;
+  const ui = await started(p);
+  const u = (await api(ui, "/api/projects/work/usage")).json;
+  expect(u.measured).toBe(false);
+  const no = (u.problems as Row[]).find((x) => x.code === "usage_no_logs");
+  expect(String(no?.message)).toContain(join(p.root, "home", ".claude", "projects"));
+  expect(String(no?.fix)).toContain("usage.logFolders");
+
+  const q = workProject();
+  q.env.FAKE_USAGE_FAIL = "factory usage: error: argument --by: invalid choice: 'worker' (choose from 'task', 'agent', 'model', 'role')";
+  const ui2 = await started(q);
+  const bad = (await api(ui2, "/api/projects/work/usage")).json.problems as Row[];
+  expect(bad[0]?.code).toBe("ui_usage_unreadable");
+  expect(String(bad[0]?.message)).toContain("invalid choice: 'worker'");
+  expect(String(bad[0]?.fix)).toContain("factory update");
+
+  const r = workProject();
+  r.env.FAKE_USAGE_FAIL = JSON.stringify({ code: "bun_missing", message: "factory_usage.ts needs Bun.", fix: "Install Bun." });
+  const ui3 = await started(r);
+  expect(((await api(ui3, "/api/projects/work/usage")).json.problems as Row[])[0]).toEqual({ code: "bun_missing", message: "factory_usage.ts needs Bun.", fix: "Install Bun." });
 }, T);
 
 // --- Activity ----------------------------------------------------------------------------------------------------------

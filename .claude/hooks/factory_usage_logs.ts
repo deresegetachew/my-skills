@@ -1,0 +1,1 @@
+../../software-factory/hooks/factory_usage_logs.ts
