@@ -74,6 +74,7 @@ export const LABELS: Record<string, string> = {
   "tasks.staleHours": "A task is stale after (hours)",
   "manager.claimMinutes": "A dev manager's lease lasts (minutes)",
   agents: "Coding agents",
+  formerNames: "Earlier agent names",
 };
 export const MACHINE_LABELS: Record<string, string> = {
   agents: "Agents on this machine",
@@ -82,6 +83,7 @@ export const MACHINE_LABELS: Record<string, string> = {
   autostartAgents: "Agents started after a reboot",
   autostartReport: "Post the boot report",
   "ci.runners": "CI runners on this machine",
+  maxCodingAgents: "Coding agents at once on this machine",
 };
 
 const SHOUTED = new Set(["ci", "ui", "pr", "prs", "api", "env", "prd", "id"]);
@@ -263,6 +265,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("tasks.releaseDownMinutes", "int", "issues", "An agent that is plainly down (its loop or the daemon said so) gets its in-progress issues back to ready by the sweep after this long."),
   S("tasks.showWhere", "bool", "issues", "Post the machine, folder, tmux session and Remote Control link on agent issues (anyone who can read the repo sees them).", { default: false }),
   S("machines", "dict", "issues", 'Names for the machines, by machine id (`factory machine id` prints it): {"469ae1ea6a9e": {"name": "dev-pc"}}. The web UI and `factory agents ls --json` show the name; with none, the hostname (another machine\'s only with tasks.showWhere), else the id.', { default: {}, read_by: "factory_agents_ls.ts (`factory agents ls`, the web UI)" }),
+  S("formerNames", "dict", "agents", 'An agent\'s earlier names, by its name now: {"haile": ["tewodros"]}. The web UI\'s Team page adds to it when it renames an agent and shows them; the pull requests, branches, messages and finished tasks of an old name keep that name.', { default: {}, read_by: "the web UI's Team page (factory_ui_settings.ts)" }),
   // #251, #258: the factory adds main's rules to the agents' settings each time it starts one.
   S("permissions.allow", "list", "agents", 'Extra Claude Code allow rules for this project\'s agents, like "Edit(src/**)". A rule applies on an agent\'s next run once the pull request from `factory settings pr` is merged: the factory adds them to the agents\' settings, after the release\'s own.'),
   S("reviews.safety-auditor.paths", "list", "gate", "Regexes of paths that need the safety auditor."),
@@ -323,6 +326,7 @@ export const MACHINE: Record<string, Setting> = table([
   S("autostart", "bool", "machine", "Bring the stack and this machine's agents back after a reboot (`factory autostart`).", { scope: "machine", default: false }),
   S("autostartAgents", "list", "machine", "The agents it starts at boot. Empty: the names this machine runs.", { scope: "machine", default: [] }),
   S("autostartReport", "bool", "machine", "Post the boot report on the first started agent's issue (issues mode).", { scope: "machine", default: true }),
+  S("maxCodingAgents", "int", "machine", "How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`) is refused. Empty: no limit.", { scope: "machine", default: null, minimum: 1, maximum: 32, read_by: "`factory owner start` (factory_owner.ts) and the web UI's Team page" }),
   S("ci.runners", "int", "machine", "Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's.", { scope: "machine", default: null, minimum: 1, maximum: 16 }),
 ]);
 
@@ -373,7 +377,7 @@ const MORE: Record<string, More> = {
     "(factory_usage_logs.ts says which, and as of when). A model it doesn't know is counted but not priced; give its " +
     "prices here, or correct one. A 1-hour cache write is 2 x input; fast mode is priced only where it is known.",
   read_by: "factory_usage.ts",
-  examples: ["factory settings set usage.prices '{\"claude-haiku-5-5\": {\"input\": 0.1, \"output\": 0.5, \"cacheRead\": 0.01}}'"] },
+  examples: ["factory settings set usage.prices '{\"claude-sonnet-4-5\": {\"input\": 3, \"output\": 15, \"cacheRead\": 0.3}}'"] },
   "commands.typecheck": { long: "Run by CI and by the Stop check after the agent's turn. Empty: skipped.",
     examples: ["factory settings set commands.typecheck 'pnpm -s typecheck'"] },
   "commands.test": { long: "The full test command, run by CI and by the Stop check when files under `codePaths` " +

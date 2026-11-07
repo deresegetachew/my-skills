@@ -235,6 +235,22 @@ test("cost where the model's price is known; other models are counted and said t
   expect(text.stdout).toContain("$29.20");
 });
 
+test("claude-haiku-5-5 is priced per reply by its prompt's size: up to 100K tokens, then the long-prompt price (#571)", () => {
+  const { root, home, logs } = hub();
+  const r = realpathSync(root);
+  // a prompt of exactly 100K tokens: $0.10 input, $0.50 output per million
+  write(join(logs, slugOf(r), "haiku-short.jsonl"),
+    reply("k1", "task/41-a", r, { ts: at(0, 15), model: "claude-haiku-5-5", inp: 100_000, write: 0, read: 0, out: 1_000_000 }) + "\n");
+  // 50K input + 40K cache writes + 20K cache reads = 110K, over 100K: $0.50 input (writes 1.25x), $0.05 reads, $2.50 output
+  write(join(logs, slugOf(r), "haiku-long.jsonl"),
+    reply("k2", "task/42-a", r, { ts: at(0, 15), model: "claude-haiku-5-5", inp: 50_000, write: 40_000, read: 20_000, out: 1_000_000 }) + "\n");
+  const data = JSON.parse(hubUsage(root, home, "--json").stdout) as Full;
+  expect(data.groups["41"]?.cost_usd).toBeCloseTo(0.01 + 0.5, 9);
+  expect(data.groups["42"]?.cost_usd).toBeCloseTo((50_000 * 0.5 + 40_000 * 0.625 + 20_000 * 0.05) / 1_000_000 + 2.5, 9);
+  expect(data.groups["41"]?.unpriced_replies).toBe(0);
+  expect(data.groups["42"]?.unpriced_replies).toBe(0);
+});
+
 test("no logs: says where it looked and why, with the fix (#571)", () => {
   const base = tmp();
   mkdirSync(join(base, "proj"));

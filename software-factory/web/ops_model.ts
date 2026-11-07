@@ -172,15 +172,39 @@ export interface ActivityItem {
   text: string;
   task: string | null;
   pr: number | null;
+  /** The epic its task is in (#583); left out by an older server. */
+  epic?: string | null;
   link: string;
   find: string;
 }
 
 export const KIND_LABEL: Record<string, string> = { claim: "Claims", move: "Moves", comment: "Comments", close: "Closes", handoff: "Hand-offs",
-  new: "New tasks", note: "Notes", pr: "Pull requests", ci: "CI", ask: "Asks" };
+  new: "New tasks", note: "Notes", agent: "Agents", pr: "Pull requests", ci: "CI", review: "Reviews", ask: "Asks" };
 
 const KIND_WORD: Record<string, string> = { claim: "Claim", move: "Move", comment: "Comment", close: "Close", handoff: "Hand-off", new: "New task",
-  note: "Note", pr: "Pull request", ci: "CI", ask: "Question" };
+  note: "Note", agent: "Agent", pr: "Pull request", ci: "CI", review: "Review", ask: "Question" };
+
+/** The filters the Activity page sends (#583): "" for any. A task matches its own entries and its pull request's (`#21`). */
+export interface ActivityFilter {
+  agent: string;
+  task: string;
+  epic: string;
+  kind: string;
+}
+
+const ACTIVITY_SHOWN = 200;
+
+/** The page's entries with those the WebSocket pushed (#583): each new one that matches the filters goes in, once, newest
+ *  first, keeping the newest `most`. */
+export function mergePushed(shown: ActivityItem[], pushed: ActivityItem[], f: ActivityFilter, most = ACTIVITY_SHOWN): ActivityItem[] {
+  const task = f.task.trim().replace(/^#/, "");
+  const fits = (x: ActivityItem): boolean => (!f.agent || x.agent === f.agent) && (!f.kind || x.kind === f.kind) && (!f.epic || x.epic === f.epic)
+    && (!task || x.task === task || (x.pr !== null && String(x.pr) === task));
+  const have = new Set(shown.map((x) => x.id));
+  const fresh = pushed.filter((x) => fits(x) && !have.has(x.id));
+  if (!fresh.length) return shown;
+  return [...fresh, ...shown].sort((a, b) => (b.at ?? "").localeCompare(a.at ?? "")).slice(0, most);
+}
 
 /** The grey line under an event: its kind, its task or PR, and when. */
 export function activitySub(x: ActivityItem, now = Date.now()): string {
@@ -190,7 +214,10 @@ export function activitySub(x: ActivityItem, now = Date.now()): string {
 
 /** The dot of an event: red for what waits on the owner, the failed CI too; yellow for moves and hand-offs. */
 export function activityDot(x: ActivityItem): DotState {
-  if (x.kind === "ask" || x.kind === "ci") return "red";
+  if (x.kind === "ci") return /^CI passed/.test(x.text) ? "working" : "red";
+  if (x.kind === "agent") return x.text === "went down" ? "down" : "working";
+  if (x.kind === "review") return /must-fix/.test(x.text) ? "waiting" : "working";
+  if (x.kind === "ask") return "red";
   if (x.kind === "move" || x.kind === "handoff") return "waiting";
   if (x.kind === "claim" || x.kind === "close" || x.kind === "pr") return "working";
   return "idle";

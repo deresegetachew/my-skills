@@ -264,6 +264,8 @@ export interface Price {
   output: number;
   cacheRead: number;
   cacheWrite?: number;
+  /** Another price for a reply whose prompt (input, cache writes and cache reads together) is over `above` tokens. */
+  long?: { above: number; input: number; output: number; cacheRead: number };
 }
 
 /** When the prices below were last checked against Anthropic's price list. */
@@ -285,6 +287,8 @@ export const PRICES: Record<string, Price> = {
   "claude-sonnet-5": { input: 2, output: 10, cacheRead: 0.2 },
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3 },
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1 },
+  // Up to 100K tokens of prompt; beyond, $0.50 / $2.50. Cache reads at 0.1 x input, as on the other models.
+  "claude-haiku-5-5": { input: 0.1, output: 0.5, cacheRead: 0.01, long: { above: 100_000, input: 0.5, output: 2.5, cacheRead: 0.05 } },
 };
 
 /** Fast mode is twice the price on these. */
@@ -330,7 +334,9 @@ export function costOf(model: string, usage: Obj, extra: Record<string, Price>):
   return !extra[key] && FAST_DOUBLE.has(key) ? priced(p, usage, write) * 2 : null; // fast mode: only where its price is known
 }
 
-function priced(p: Price, usage: Obj, write: number): number {
+function priced(price: Price, usage: Obj, write: number): number {
+  const prompt = num(usage.input_tokens) + write + num(usage.cache_read_input_tokens);
+  const p: Price = price.long && prompt > price.long.above ? { ...price.long } : price; // the long-prompt price writes at 1.25 x its input
   const split = isObj(usage.cache_creation) ? usage.cache_creation : {};
   const hour = Math.min(num(split.ephemeral_1h_input_tokens), write);
   const fiveMin = write - hour;

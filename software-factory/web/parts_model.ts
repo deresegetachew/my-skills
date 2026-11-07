@@ -45,6 +45,13 @@ export interface AgentFacts {
   task: string | null;
   /** A dev manager's sub-manager (#585): its dev manager, its item, and whether its session can be reached to end it. */
   sub?: { parent: string; item: string; stoppable: boolean } | null;
+  /** A coding agent's start on a machine with a limit (#581): the limit and the coding agents running here now. */
+  atOnce?: { max: number; running: string[] } | null;
+}
+
+/** "menelik", "menelik and taytu", "menelik, taytu and haile". */
+export function andList(names: string[]): string {
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : (names[0] ?? "");
 }
 
 /** Stopping an agent: it must be running, on this machine. Its session ends; its task, branch and pull request stay.
@@ -88,10 +95,14 @@ export function stopAgentAsk(a: AgentFacts): ConfirmSpec {
 /** Starting an agent: only one that isn't running already. It starts on this machine and takes up its work. */
 export function startAgentAsk(a: AgentFacts): ConfirmSpec {
   const down = a.state === "down";
+  const cap = a.atOnce ?? null;
+  const room = !cap || cap.running.filter((n) => n !== a.name).length < cap.max;
+  const capCheck = cap ? [{ title: `This machine runs fewer than ${cap.max} coding agent${cap.max === 1 ? "" : "s"} now`, met: room,
+    ...(room ? {} : { sub: `${andList(cap.running)} ${cap.running.length === 1 ? "runs" : "run"} here. Stop one first, or raise the limit on the Team page.` }) }] : [];
   return {
     title: `Start ${a.name}?`,
     checks: [{ title: `${a.name} isn't running yet`, met: down,
-      ...(down ? {} : { sub: `It is already running on ${a.machineName ?? "a machine"}.` }) }],
+      ...(down ? {} : { sub: `It is already running on ${a.machineName ?? "a machine"}.` }) }, ...capCheck],
     happens: `${a.name} starts on this machine and picks up its task, or the next one.`,
     doesNot: "Nothing else is started or stopped, and nothing on GitHub changes until it works.",
     action: `Start ${a.name}`,

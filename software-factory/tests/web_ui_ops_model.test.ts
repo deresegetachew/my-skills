@@ -1,8 +1,8 @@
 // The words of Health, Usage and cost, Activity and Home (#455, #451), from web/ops_model.ts as it is (no React): the
 // head lines, what needs attention, the usage bars against the budget, an event's grey line, and a team member's row.
 import { expect, test } from "bun:test";
-import { activityDot, activitySub, attention, costText, type HealthData, healthLine, type HomeData, homeLine, passed, percentOf, rangeText, teamRow,
-  tokensText, type UsageData, type UsageRow, usageBar, usageTiles } from "../web/ops_model.ts";
+import { type ActivityItem, activityDot, activitySub, attention, costText, type HealthData, healthLine, type HomeData, homeLine, passed, percentOf,
+  rangeText, teamRow, mergePushed, tokensText, type UsageData, type UsageRow, usageBar, usageTiles } from "../web/ops_model.ts";
 
 const NOW = Date.parse("2026-11-07T10:00:00Z");
 
@@ -67,6 +67,25 @@ test("activity: an event's grey line is its kind, its task or PR, and when", () 
   expect(activitySub({ ...item, kind: "new", task: "b12", at: null }, NOW)).toBe("New task · b12");
   expect(activityDot({ ...item, kind: "ask" })).toBe("red");
   expect(activityDot({ ...item, kind: "move" })).toBe("waiting");
+});
+
+test("activity: an entry pushed over the WebSocket goes on top when it matches the filters, once", () => {
+  const at = (m: number): string => new Date(NOW - m * 60_000).toISOString();
+  const item = (id: string, m: number, more: Partial<ActivityItem> = {}): ActivityItem => ({ id, at: at(m), agent: "menelik", kind: "claim", text: id,
+    task: "7", pr: null, epic: "1", link: "view:tasks", find: "#7", ...more });
+  const shown = [item("b", 5), item("a", 10)];
+  const none = { agent: "", task: "", epic: "", kind: "" };
+  expect(mergePushed(shown, [item("c", 1), item("b", 5)], none).map((x) => x.id)).toEqual(["c", "b", "a"]);
+  expect(mergePushed(shown, [item("c", 1, { agent: "taytu" })], { ...none, agent: "menelik" }).map((x) => x.id)).toEqual(["b", "a"]);
+  expect(mergePushed(shown, [item("c", 1, { kind: "agent" })], { ...none, kind: "claim" }).map((x) => x.id)).toEqual(["b", "a"]);
+  expect(mergePushed(shown, [item("c", 1, { epic: null })], { ...none, epic: "1" }).map((x) => x.id)).toEqual(["b", "a"]);
+  expect(mergePushed(shown, [item("c", 1, { task: null, pr: 21 })], { ...none, task: "#21" }).map((x) => x.id)).toEqual(["c", "b", "a"]);
+  expect(mergePushed(shown, [item("c", 1, { task: "8", pr: 22 })], { ...none, task: "#21" }).map((x) => x.id)).toEqual(["b", "a"]);
+  expect(mergePushed(shown, [item("c", 1)], none, 2).map((x) => x.id)).toEqual(["c", "b"]);
+  expect(activitySub(item("x", 10, { kind: "agent", task: null }), NOW)).toBe("Agent · 10 min ago");
+  expect(activityDot(item("x", 1, { kind: "ci", text: "CI passed on PR #21" }))).toBe("working");
+  expect(activityDot(item("x", 1, { kind: "ci", text: "CI failed on PR #21" }))).toBe("red");
+  expect(activityDot(item("x", 1, { kind: "agent", text: "went down" }))).toBe("down");
 });
 
 test("home: the head line and a team member's row", () => {

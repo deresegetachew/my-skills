@@ -18,6 +18,10 @@
 // blocker note (deferred), reassign a hand-off (only that agent may claim it). `factory board mirror` carries each to GitHub.
 // A deferred task is "blocked", as the task tracker says (adapters/board/task_tracker.ts): one word on both.
 //
+// Activity (#455, #583) reads the board's events: those about the project's tasks, its agents' liveness (`signal.agent`,
+// told only when one starts or goes down, not each ping) and its pull requests (`signal.pr`, the pull request feed).
+// The events heard on the listen are told to the server as items once the tasks are read again, so it pushes them.
+//
 // The board's code sits beside the hooks folder (.claude/message-board: linked in my-skills and a linked project,
 // shipped by a release since #500). It is loaded when the server starts, and without it there is no board: the GitHub
 // path, as before.
@@ -25,6 +29,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Board, BoardEvent, ContextEntry, Listener, Message, Task } from "../message-board/src/index.ts";
+import { messagingProject } from "./core/compose.ts";
 import { citesIn } from "./core/domain/cites.ts";
 import { parseEpic } from "./core/domain/epic.ts";
 import { prdChangeIn, todos } from "./core/domain/task.ts";
@@ -38,6 +43,9 @@ export const ACTOR = "web-ui";
 const RETRY_MS = 5_000;
 const CHECK_MS = 5_000;
 const MOST = 5_000;
+/** Activity reads the board's events back this many at a time, and at most SCAN_MAX in one read (#583). */
+const SCAN_PAGE = 1_000;
+const SCAN_MAX = 20_000;
 
 type BoardApi = typeof import("../message-board/src/index.ts");
 
@@ -206,12 +214,19 @@ export class BoardFeed {
   private url: string | null | undefined;
   private retry: ReturnType<typeof setTimeout> | null = null;
   private check: ReturnType<typeof setInterval> | null = null;
+  /** The events heard since the last read, told to the server as items once the tasks are read again (#583). */
+  private pending: BoardEvent[] = [];
+  /** Each project's agents' last status as heard live (project id to agent to status), so a ping isn't news. */
+  private agents = new Map<string, Map<string, string>>();
+  private names = new Map<string, string>();
 
   /** `url`: the board's; left out, this machine's (MB_URL, else the settings folder's url file, as `factory board`). */
   constructor(private readonly projects: UiProject[], private readonly o: { url?: string | null; repoOf: (p: UiProject) => string;
     changed: (p: UiProject) => void; fellBack?: (p: UiProject, wasLive: boolean) => void; log?: (line: string) => void;
-    /** An event Activity shows was recorded (#455). */
-    event?: () => void }) {
+    /** Events Activity shows were recorded about project `p` (#455): its new entries, oldest first (#583). */
+    event?: (p: UiProject, items: ActivityItem[]) => void;
+    /** The project's name in the board's signals; left out, compose.ts messagingProject in its folder. */
+    nameOf?: (p: UiProject) => string }) {
     // fellBack(p, wasLive): p's tasks come from GitHub again (wasLive), or turned out not to come from the board
     // known at once when there is no board, so a project without one waits for nothing
     this.url = o.url !== undefined ? o.url : maybeBoard() ? undefined : null;
@@ -246,9 +261,10 @@ export class BoardFeed {
       try {
         const all = await board.tasks({ all: true, limit: MOST });
         await this.checkSchema(board);
+        await this.seedAgents(board);
         listener = await board.listen((e: BoardEvent) => {
+          if (this.o.event && (e.kind in KIND || e.kind === "signal.agent" || e.kind === "signal.pr")) this.pending.push(e);
           this.schedule();
-          if (SHOWN.has(e.kind)) this.o.event?.();
         }, {
           onError: (e) => {
             if (starting) failed = { e };
@@ -339,25 +355,78 @@ export class BoardFeed {
     return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
   }
 
-  /** Activity (#455): the board's events about project `p`'s tasks, newest first, from the last `most` events: claims,
-   *  moves, comments, closes, hand-offs, new tasks and notes. Null while `p`'s tasks aren't read from the board. */
+  /** Activity (#455, #583): the last `most` of the board's events about project `p`, newest first: claims, moves,
+   *  comments, closes, hand-offs, new tasks and notes on its tasks, its agents starting or going down, and its pull
+   *  requests. An agent's pings don't count towards `most`. Null while `p`'s tasks aren't read from the board. */
   async activity(p: UiProject, most = 400): Promise<ActivityItem[] | null> {
     const board = this.board;
     if (!board || !this.live(p)) return null;
+    const scope = this.scopeOf(p, new Map());
+    try {
+      // read back a page at a time past the agents' pings (a `signal.agent` per hook, #583), so they don't push older
+      // events out: until `most` events of the kinds shown are found, or SCAN_MAX events are read
+      const kept: BoardEvent[][] = [];
+      let found = 0;
+      let start = await board.lastSeq();
+      for (let read = 0; start > 0 && found < most && read < SCAN_MAX; read += SCAN_PAGE) {
+        const from = Math.max(0, start - SCAN_PAGE);
+        const page = (await board.events(from, start - from)).filter((e) => e.kind in KIND || e.kind === "signal.agent" || e.kind === "signal.pr");
+        found += page.filter((e) => e.kind !== "signal.agent").length;
+        kept.unshift(page);
+        start = from;
+      }
+      const items = kept.flat().map((e) => itemOf(e, scope)).filter((x): x is ActivityItem => x !== null);
+      return items.slice(-most).reverse();
+    } catch (e) {
+      await this.fail(e);
+      return null;
+    }
+  }
+
+  /** What turns the board's events into project `p`'s items, with `status` as its agents' last status. */
+  private scopeOf(p: UiProject, status: Map<string, string>): EventScope {
     const prefix = prefixOf(this.o.repoOf(p));
     const ids = new Map<number, string>();
     for (const t of this.all) {
       const n = numberOf(t, prefix);
       if (n !== null) ids.set(t.id, n);
     }
-    const titles = new Map(this.all.map((t) => [t.id, t.title]));
-    try {
-      const last = await board.lastSeq();
-      const events = await board.events(Math.max(0, last - most), most);
-      return events.map((e) => itemOf(e, ids, titles)).filter((x): x is ActivityItem => x !== null).reverse();
-    } catch (e) {
-      await this.fail(e);
-      return null;
+    return { ids, titles: new Map(this.all.map((t) => [t.id, t.title])), name: this.nameOf(p), status };
+  }
+
+  /** The project's name in the board's signals (compose.ts messagingProject), worked out once. */
+  private nameOf(p: UiProject): string {
+    let n = this.names.get(p.id);
+    if (n === undefined) {
+      n = this.o.nameOf ? this.o.nameOf(p) : messagingProject(p.path);
+      this.names.set(p.id, n);
+    }
+    return n;
+  }
+
+  /** Each project's agents' status as the board keeps it now, so the first event heard about one is judged against it. */
+  private async seedAgents(board: Board): Promise<void> {
+    if (!this.o.event) return;
+    for (const p of this.projects) {
+      const seen = new Map<string, string>();
+      for (const v of await board.values(`${this.nameOf(p)}:agent:`)) {
+        const s = typeof v.value === "object" && v.value !== null ? (v.value as Record<string, unknown>) : {};
+        if (typeof s.name === "string" && typeof s.status === "string") seen.set(s.name, s.status);
+      }
+      this.agents.set(p.id, seen);
+    }
+  }
+
+  /** Tells the server each live project's items among `events` (heard live, read after the tasks they are about). */
+  private tell(events: BoardEvent[]): void {
+    if (!events.length || !this.o.event) return;
+    for (const p of this.projects) {
+      if (!this.live(p)) continue;
+      let status = this.agents.get(p.id);
+      if (!status) this.agents.set(p.id, (status = new Map()));
+      const scope = this.scopeOf(p, status);
+      const items = events.map((e) => itemOf(e, scope)).filter((x): x is ActivityItem => x !== null);
+      if (items.length) this.o.event(p, items);
     }
   }
 
@@ -399,10 +468,12 @@ export class BoardFeed {
   private async read(): Promise<void> {
     const board = this.board;
     if (!board) return;
+    const heard = this.pending.splice(0); // read before the tasks, so a task they are about is there
     try {
       this.all = await board.tasks({ all: true, limit: MOST });
       const changed = await this.checkSchema(board);
       this.publish(changed);
+      this.tell(heard);
     } catch (e) {
       await this.fail(e);
     }
@@ -438,6 +509,7 @@ export class BoardFeed {
     if (first) this.o.log?.(`message board: can't be read (${masked(e instanceof Error ? e.message : String(e)).slice(0, 200)}); trying again every ${RETRY_MS / 1000} s.`);
     await this.close();
     this.parts.clear();
+    this.pending = []; // what the page missed while the board was down, it reads again when the board is back
     if (first) {
       for (const p of this.projects) this.o.changed(p);
       for (const p of wasLive) this.o.fellBack?.(p, true); // its tasks were not read from GitHub: read them now (or right after)
@@ -461,18 +533,65 @@ export class BoardFeed {
   }
 }
 
-/** The board's event kinds Activity shows, and the kind of item each is. */
+/** The board's event kinds Activity shows about a task, and the kind of item each is. */
 const KIND: Record<string, ActivityKind> = { "task.claimed": "claim", "task.moved": "move", "task.closed": "close", "task.released": "handoff",
-  "task.assigned": "handoff", "task.swept": "handoff", "task.created": "new", "message.posted": "comment", "context.noted": "note" };
-const SHOWN = new Set(Object.keys(KIND));
+  "task.assigned": "handoff", "task.swept": "handoff", "task.taken_back": "handoff", "task.created": "new", "message.posted": "comment",
+  "context.noted": "note" };
 
 function text(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-/** One board event as an Activity item, or null when it isn't about one of the project's tasks (`ids`: board id to the
- *  task's id on the page) or isn't a kind Activity shows. */
-function itemOf(e: BoardEvent, ids: Map<number, string>, titles: Map<number, string>): ActivityItem | null {
+/** What one Activity read needs to turn the board's events into a project's items (#583). */
+export interface EventScope {
+  /** Board id to the task's id on the page (`7`, `b3`). */
+  ids: Map<number, string>;
+  titles: Map<number, string>;
+  /** The project's name in signals (compose.ts messagingProject). */
+  name: string;
+  /** Each agent's last status seen (`<name>`), so only an agent starting or going down is told, not every ping. */
+  status: Map<string, string>;
+}
+
+const up = (status: string): boolean => status !== "down";
+
+/** An agent's liveness (`signal.agent`, core/adapters/board/agents.ts) as an item when it started or went down. A first
+ *  sighting is told only when it is down: a live first sighting may be a ping of an agent that was already working. */
+function agentItem(e: BoardEvent, s: EventScope): ActivityItem | null {
+  const name = text(e.payload.name);
+  const status = text(e.payload.status);
+  if (text(e.payload.project) !== s.name || !name || !status) return null;
+  const before = s.status.get(name);
+  s.status.set(name, status);
+  if (before === undefined ? up(status) : up(before) === up(status)) return null;
+  return { id: `board-${e.seq}`, at: e.at.toISOString(), agent: name, kind: "agent", text: up(status) ? "started" : "went down", task: null, pr: null,
+    epic: null, link: `agent:${name}`, find: "" };
+}
+
+/** A pull request's change from the board's pull request feed (`signal.pr`, factory_pr_feed.ts) as an item: opened,
+ *  pushed to, CI passed or failed, merged or closed. Its agent and task come from the snapshot (factory_ui_ops.ts). */
+function prItem(e: BoardEvent, s: EventScope): ActivityItem | null {
+  const pr = Number(e.payload.pr);
+  if (text(e.payload.project) !== s.name || !Number.isInteger(pr) || pr <= 0) return null;
+  const checks = text(e.payload.checks);
+  const said: Record<string, [ActivityKind, string] | null> = {
+    opened: ["pr", `opened PR #${pr}`],
+    head: ["pr", `pushed to PR #${pr}`],
+    checks: checks === "green" ? ["ci", `CI passed on PR #${pr}`] : checks === "failed" ? ["ci", `CI failed on PR #${pr}`] : null,
+    merged: ["pr", `merged PR #${pr}`],
+    closed: ["pr", `closed PR #${pr} without merging`],
+  };
+  const it = said[text(e.payload.change)];
+  if (!it) return null;
+  return { id: `board-${e.seq}`, at: e.at.toISOString(), agent: null, kind: it[0], text: it[1], task: null, pr, epic: null, link: `pr:${pr}`, find: "" };
+}
+
+/** One board event as an Activity item, or null when it isn't about the project (one of its tasks, agents or pull
+ *  requests) or isn't a kind Activity shows. */
+export function itemOf(e: BoardEvent, s: EventScope): ActivityItem | null {
+  if (e.kind === "signal.agent") return agentItem(e, s);
+  if (e.kind === "signal.pr") return prItem(e, s);
+  const { ids, titles } = s;
   const kind = KIND[e.kind];
   if (!kind) return null;
   const board = e.subject.startsWith("task:") ? Number(e.subject.slice(5)) : typeof e.payload.task === "number" ? e.payload.task : NaN;
@@ -488,6 +607,7 @@ function itemOf(e: BoardEvent, ids: Map<number, string>, titles: Map<number, str
     "task.released": () => `released ${n}${why}`,
     "task.assigned": () => `handed ${n} to ${text(pay.to) || "nobody"}${why}`,
     "task.swept": () => `${n} was freed: ${text(pay.holder) || "its holder"} went quiet`,
+    "task.taken_back": () => `took ${n} back${why}`,
     "task.created": () => `filed ${n}: ${text(pay.title) || titles.get(board) || ""}`,
     "message.posted": () => {
       const to = Array.isArray(pay.to) ? pay.to.map(text).filter(Boolean).join(", ") : text(pay.to);
@@ -497,7 +617,7 @@ function itemOf(e: BoardEvent, ids: Map<number, string>, titles: Map<number, str
     "context.noted": () => `noted a ${text(pay.kind) || "note"} on ${n}`,
   };
   return { id: `board-${e.seq}`, at: e.at.toISOString(), agent: e.actor || null, kind, text: (words[e.kind] as () => string)(), task: id, pr: null,
-    link: "view:tasks", find: n };
+    epic: null, link: "view:tasks", find: n };
 }
 
 function messageOf(m: Message): Obj {

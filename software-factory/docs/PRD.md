@@ -645,11 +645,15 @@ What is planned:
   reads, no GitHub call; the thresholds are the `attention.*` settings.*
 - **US-33.** As the owner, the Inbox holds everything that needs me, and I answer and merge in place. *Decided (#451);
   the owner queue part is built (US-17).*
-- **US-34.** As the owner, Activity shows the team's feed and the open questions. *Partly built (#451): with the board as
-  the record, its events (claims, moves, comments, notes, closes, hand-offs) for the project's tasks, live, beside the
-  pull requests opened and gone from the snapshot; filters by agent, task and kind; with tasks on GitHub issues, what
-  the snapshot knows (pull requests, failed CI, the owner's open asks), and it says so. Left: answering a question in
-  place, and "merged" told apart from "closed" (the snapshot sees only that a PR left the open list).*
+- **US-34.** As the owner, Activity shows the team's feed and the open questions. *Built (#451, #583): one stream across
+  agents, newest first, each entry one line with who, what, when and a link to its task, pull request or agent. With
+  the board as the record, its events for the project (claims, releases, blocks and moves, comments, questions and
+  answers, notes, closes, hand-offs, an agent starting or going down, and from the pull request feed a PR opened, pushed
+  to, CI passed or failed, merged or closed), beside what the snapshot already read (PRs opened and gone, their CI
+  passing or failing and their reviews between two reads, failed CI runs); a new entry is pushed over the WebSocket as
+  itself. Filters by agent, task, epic and kind. No GitHub call of its own. With tasks on GitHub issues, what the
+  snapshot knows, and it says the rest comes with the board. Left: answering a question in place, and "merged" told
+  apart from "closed" without the board's pull request feed.*
 - **US-35.** As the owner, an epic has a page of its own, as in the design's `Epic.dc.html`. *Proposal; no issue yet.*
 - **US-36.** As the owner, Factory settings has tabs: the settings (project changes staged into a pull request, this
   machine's saved at once), Releases and updates (no publish there) and Maintenance. *Built (#456): Your team (add a
@@ -658,6 +662,11 @@ What is planned:
   proposed as one pull request the owner merges, this machine's settings saved at once (which agents run here, and only
   whether a message board is set), the version and Update, and the clean-ups (`clean`, `ci clean`, `reset-run`), each
   saying what it will and won't touch. Integrations is #441; Roll back and the release notes are not on the page yet.*
+  As the owner, I change the team in one place: a Team page lists every role with where it runs, its state and task,
+  and Start or Stop; I add an agent (a free name and a machine), remove or rename one (refused while it runs or holds a
+  task, with "Release its work first"), and set how many coding agents run at once on this machine, each asked first
+  and staged into the settings pull request. *Built (#581): adding, removing and renaming moved here from Factory
+  settings; a rename keeps the old name in `formerNames` and on its history; `maxCodingAgents` is this machine's.*
 - **US-37.** As the owner, an Integrations tab lists what the factory connects to and what each agent may use, and a
   change to what governs an agent is proposed as a pull request I merge. *Proposal (#441).*
 - **US-38.** As the owner, a task, a pull request and an agent each have a page of their own, and search covers

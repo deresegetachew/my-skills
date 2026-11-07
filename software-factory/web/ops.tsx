@@ -8,8 +8,8 @@ import { AttentionContext } from "./attention_context.tsx";
 import { type AttentionItem, attentionLine } from "./attention_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
-import { type ActivityItem, activityDot, activitySub, attention, type HealthData, healthLine, type HomeData, homeLine, KIND_LABEL, passed,
-  percentOf, type Problem, teamRow, tokensText, type UsageData, usageBar, usageTiles } from "./ops_model.ts";
+import { type ActivityItem, activityDot, activitySub, attention, type HealthData, healthLine, type HomeData, homeLine, KIND_LABEL, mergePushed,
+  passed, percentOf, type Problem, teamRow, tokensText, type UsageData, usageBar, usageTiles } from "./ops_model.ts";
 import { PageHead } from "./page_head.tsx";
 import { Chips, ListRow, StatusDot, Tabs } from "./parts.tsx";
 import type { Post, Say } from "./views.tsx";
@@ -28,6 +28,14 @@ export interface OpsProps {
   attention?: AttentionItem[];
   /** Opens the confirm to start an agent (the same as its page's Start). */
   startAgent?: (name: string) => void;
+}
+
+/** The entries the WebSocket pushes ({type: "activity", project, items}, #583), for the Activity page on screen. */
+const activityBus = new EventTarget();
+
+/** Hands a pushed Activity message to the page (app.tsx calls it for each one). */
+export function dispatchActivity(m: { project?: string; items?: unknown }): void {
+  if (m.project && Array.isArray(m.items)) activityBus.dispatchEvent(new CustomEvent("items", { detail: { project: m.project, items: m.items as ActivityItem[] } }));
 }
 
 const UNREACHABLE: Problem = { code: "unreachable", message: "The server can't be reached.", fix: "Check that the web UI is still running on its machine, then reload the page." };
@@ -152,7 +160,8 @@ function Feed({ items, open }: { items: ActivityItem[]; open: OpsProps["open"] }
     <ul className="lrows" aria-label="Activity">
       {items.map((x) => (
         <ListRow key={x.id} lead={x.agent ? <Avatar name={x.agent} size={32} /> : <StatusDot state={activityDot(x)} />}
-          title={<>{x.agent && <strong>{x.agent} </strong>}<span className="ops-feed-text">{x.text}</span></>} sub={activitySub(x)}
+          title={<button className="ops-feed-open" onClick={() => open(x.link, x.find)}>{x.agent && <strong>{x.agent} </strong>}<span className="ops-feed-text">{x.text}</span></button>}
+          sub={activitySub(x)}
           action={<button className="btn plain small" onClick={() => open(x.link, x.find)}>Open</button>} />
       ))}
     </ul>
@@ -166,6 +175,7 @@ interface ActivityData {
   items: ActivityItem[];
   agents: string[];
   kinds: string[];
+  epics?: Array<{ id: string; title: string }>;
   problems: Problem[];
 }
 
@@ -173,11 +183,26 @@ export function ActivityPage(p: OpsProps) {
   const [agent, setAgent] = useState("");
   const [kind, setKind] = useState("");
   const [task, setTask] = useState("");
+  const [epic, setEpic] = useState("");
   const [paused, setPaused] = useState(false);
+  const [pushed, setPushed] = useState<ActivityItem[]>([]);
   const pulse = useRef(p.pulse);
   if (!paused) pulse.current = p.pulse;
-  const q = new URLSearchParams({ ...(agent ? { agent } : {}), ...(kind ? { kind } : {}), ...(task.trim() ? { task: task.trim() } : {}) }).toString();
+  const q = new URLSearchParams({ ...(agent ? { agent } : {}), ...(kind ? { kind } : {}), ...(epic ? { epic } : {}),
+    ...(task.trim() ? { task: task.trim() } : {}) }).toString();
   const { data, problem } = useLoad<ActivityData>(p.get, `${base(p)}/activity${q ? `?${q}` : ""}`, pulse.current);
+  // a new entry the WebSocket pushes goes on top at once (#583); the next read has it too
+  useEffect(() => setPushed([]), [data]);
+  useEffect(() => {
+    if (paused) return;
+    const h = (e: Event): void => {
+      const d = (e as CustomEvent<{ project: string; items: ActivityItem[] }>).detail;
+      if (d.project === p.project.id) setPushed((before) => [...d.items, ...before]);
+    };
+    activityBus.addEventListener("items", h);
+    return () => activityBus.removeEventListener("items", h);
+  }, [paused, p.project.id]);
+  const items = data ? mergePushed(data.items, pushed, { agent, task, epic, kind }) : [];
   const waiting = paused && p.pulse !== pulse.current;
   return (
     <>
@@ -190,10 +215,14 @@ export function ActivityPage(p: OpsProps) {
           tabs={[{ id: "", label: "Everything" }, ...(data?.kinds ?? []).map((k) => ({ id: k, label: KIND_LABEL[k] ?? k }))]} />
         <div className="ops-filters">
           <Chips label="Agent" value={agent} onChange={setAgent} chips={[{ id: "", label: "Everyone" }, ...(data?.agents ?? []).map((a) => ({ id: a, label: a }))]} />
+          {(data?.epics?.length ?? 0) > 0 && (
+            <Chips label="Epic" value={epic} onChange={setEpic}
+              chips={[{ id: "", label: "Every epic" }, ...(data?.epics ?? []).map((e) => ({ id: e.id, label: `#${e.id}${e.title ? ` ${e.title}` : ""}` }))]} />
+          )}
           <label className="ops-task">Task <input type="search" placeholder="#7" value={task} onChange={(e) => setTask(e.target.value)} aria-label="Filter by task" /></label>
         </div>
         {!data && !problem && <p className="empty">Reading what happened…</p>}
-        {data && <Feed items={data.items} open={p.open} />}
+        {data && <Feed items={items} open={p.open} />}
       </div>
     </>
   );
@@ -307,6 +336,9 @@ export const OPS_CSS = String.raw`
 .ops-sec-head h2 { margin: 0 0 6px; font-size: 15px; font-weight: 600; }
 .ops-line { margin: 4px 0 10px; color: var(--text-2); }
 .ops-feed-text { font-weight: 400; }
+.ops-feed-open { all: unset; cursor: pointer; }
+.ops-feed-open:hover .ops-feed-text { text-decoration: underline; }
+.ops-feed-open:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; border-radius: 4px; }
 .ops-bars { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .ops-bars li { display: grid; grid-template-columns: minmax(120px, 2fr) 3fr 120px; align-items: center; gap: 14px; }
 .ops-bars .ops-bar-num { justify-content: flex-end; }
