@@ -25,7 +25,7 @@
 import { createInterface } from "node:readline";
 import type { Board } from "./board.ts";
 import { BoardError, refuse } from "./errors.ts";
-import { HOW_TO_NAME, Numbers } from "./numbers.ts";
+import { HOW_TO_NAME, Numbers, projectTag } from "./numbers.ts";
 import { CONTEXT_KINDS, EDGE_KINDS, type EdgeKind, MOVE_TARGETS, type MoveTarget, type Outcome, OUTCOMES } from "./types.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
@@ -255,9 +255,11 @@ export const TOOLS: Tool[] = [
       to: text("Who it is for (optional).", 200),
       inReplyTo: messageId("The id of the message it answers or follows (optional)."),
     }, ["kind", "body"]),
-    run: async (b, a) => ({
+    // tagged with the project when the server knows it (#549): a message on no task still says whose it is, so a project's
+    // owner sees the questions its agents ask and not another project's on a shared board
+    run: async (b, a, n) => ({
       message: await b.post({ kind: str(a, "kind") as (typeof POST_KINDS)[number], body: str(a, "body"), task: optNum(a, "task"),
-        to: optStr(a, "to"), inReplyTo: optNum(a, "inReplyTo") }),
+        to: optStr(a, "to"), inReplyTo: optNum(a, "inReplyTo"), ...(n.repo ? { tag: projectTag(n.repo) } : {}) }),
     }),
   },
   {
@@ -309,8 +311,9 @@ export const TOOLS: Tool[] = [
 const CREATE_KINDS = ["task", "bug", "epic", "note"] as const;
 const reason = (what: string): Prop => text(what, 2_000);
 const actorName = (what: string): Prop => text(what, 200);
-const edge = { from: taskId("The task the link starts at: from blocks to."), to: taskId("The task it points to."),
-  kind: oneOf(EDGE_KINDS, "blocks, waits_for, discovered_from, supersedes, duplicates or related.") };
+const edge = { from: taskId("The task the link starts at."), to: taskId("The task it points to."),
+  kind: oneOf(EDGE_KINDS, "blocks, waits_for, discovered_from, supersedes, duplicates or related. " +
+    "blocks: from must be done before to can start. waits_for: from can't start until to is done.") };
 
 export const OWNER_TOOLS: Tool[] = [
   {
@@ -362,6 +365,7 @@ export const OWNER_TOOLS: Tool[] = [
     name: "board_link",
     title: "Link two cards",
     description: "Link two tasks: from blocks, waits_for, discovered_from, supersedes, duplicates or is related to to. " +
+      "blocks: from must be done before to can start. waits_for: from can't start until to is done. " +
       "A blocking link that would make a loop is refused with cycle. linked is false when the link was there already.",
     inputSchema: schema({ ...edge }, ["from", "to", "kind"]),
     run: async (b, a) => ({ linked: await b.link(num(a, "from"), num(a, "to"), str(a, "kind") as EdgeKind) }),

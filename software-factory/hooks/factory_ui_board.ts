@@ -112,8 +112,13 @@ function stateOf(t: Task): string {
 
 const WORK = new Set(["task", "bug"]);
 
-/** Project `repo`'s tasks part from all the board's tasks, or null when none of them is the project's. */
-export function partOf(all: Task[], repo: string): Obj | null {
+/** How long a done task stays on the Board page's Done column (#545: finished work mustn't vanish at once). */
+export const DONE_DAYS = 7;
+
+/** Project `repo`'s tasks part from all the board's tasks, or null when none of them is the project's: its open tasks
+ *  (`tasks`) and, apart, those done in the last DONE_DAYS (`done`, newest first), each with who holds it and who it was
+ *  handed to. */
+export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj | null {
   const prefix = prefixOf(repo);
   const ids = new Map<number, string>();
   for (const t of all) {
@@ -134,13 +139,18 @@ export function partOf(all: Task[], repo: string): Obj | null {
   const named = (id: number): string => ids.get(id) ?? byId.get(id)?.ref ?? `board task ${id}`;
   const mine = all.filter((t) => ids.has(t.id));
   const work = mine.filter((t) => WORK.has(t.kind));
-  const tasks = work.filter((t) => t.status !== "done").map((t) => {
+  const since = now - DONE_DAYS * 86_400_000;
+  const doneAt = (t: Task): number => new Date(t.updatedAt).getTime();
+  const recent = work.filter((t) => t.status === "done" && doneAt(t) >= since).sort((a, b) => doneAt(b) - doneAt(a));
+  const rowOf = (t: Task): Obj => {
     const epic = epicOf(t);
-    const blockedBy = t.blockedBy.map(named);
-    return { id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [],
+    const blockedBy = t.status === "done" ? [] : t.blockedBy.map(named);
+    return { id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [], assignee: t.assignee ?? null,
       group: /^Milestone:[ \t]*(.+)$/m.exec(t.body)?.[1]?.trim() ?? "", todos: todos(t.body).map((d) => ({ done: d.done })),
       dependsOn: blockedBy, blockedBy, cites: citesIn(t.body), epic: epic ? ids.get(epic.id) : null };
-  });
+  };
+  const tasks = work.filter((t) => t.status !== "done").map(rowOf);
+  const done = recent.map(rowOf);
   const epics = mine.filter((t) => t.kind === "epic").map((e) => {
     const id = ids.get(e.id) as string;
     const parsed = parseEpic({ number: Number(id), title: e.title, body: e.body, labels: [], closed: e.status === "done", openIds: new Set() });
@@ -149,7 +159,7 @@ export function partOf(all: Task[], repo: string): Obj | null {
     const stage = e.status === "done" ? "done" : e.status === "deferred" ? "parked" : "";
     return { id, title: e.title, stage, prd: parsed.prd, decisions: parsed.decisions, summary: parsed.summary, cites: parsed.cites, tasks: children, url: null };
   });
-  return { source: "issues", from: "board", tasks, epics };
+  return { source: "issues", from: "board", tasks, done, epics };
 }
 
 /** The one connection to the board, its listen(), and the tasks part of each project, read again on every event. */
@@ -273,7 +283,9 @@ export class BoardFeed {
       const [thread, context] = await Promise.all([this.board.thread({ task: task.id }), this.board.contextFor(task.id)]);
       const view = JSON.parse(this.parts.get(p.id) ?? "{}") as Obj;
       const row = (Array.isArray(view.tasks) ? (view.tasks as Obj[]) : []).find((t) => t.id === id) ?? { id, title: task.title, state: stateOf(task) };
-      return { status: 200, body: { project: p.id, from: "board", task: row, thread: thread.map(messageOf), context: context.map(contextOf) } };
+      // the task's own words (#543: a card opens the task), when it was made and last changed
+      return { status: 200, body: { project: p.id, from: "board", task: row, body: task.body, createdAt: new Date(task.createdAt).toISOString(),
+        updatedAt: new Date(task.updatedAt).toISOString(), thread: thread.map(messageOf), context: context.map(contextOf) } };
     } catch (e) {
       await this.fail(e);
       return { status: 503, body: { ...(this.down ?? unreachable(String(e))) } };

@@ -10,7 +10,7 @@
 import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { agentState, ago, type ChannelView, channelHash, type LimitView, parseHash, type ProjectView, ROLE_TITLE, searchChannels,
-  type Tone } from "./model.ts";
+  splitTask, taskChannel, type Tone } from "./model.ts";
 import { ADD_CSS, AddProjectPage } from "./add_project.tsx";
 import type { Run as AddRun } from "./add_project_model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
@@ -474,9 +474,11 @@ const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel
 // --- the app -----------------------------------------------------------------------------------------------------------
 
 /** The page the address bar names; a page's own name (`page:board`) is read as the address it opens. */
-function routeOf(hash: string): { project: string; channel: string } | null {
+function routeOf(hash: string): { project: string; channel: string; task: string | null } | null {
   const r = parseHash(hash);
-  return r ? { ...r, channel: addressOf(r.channel) } : null;
+  if (!r) return null;
+  const s = splitTask(r.channel); // a task opened on the board (#543): view:tasks/task:b3
+  return { project: r.project, channel: addressOf(s.channel), task: s.task };
 }
 
 function Gate({ onToken, wrong }: { onToken: (t: string) => void; wrong: boolean }) {
@@ -727,7 +729,9 @@ function App() {
     const talkers = talkTargets(view.channels.filter((c) => c.kind === "agent"));
     return <View key={`${project.id}/${name}`} project={project} views={viewsBy[project.id]} find={find} post={post} say={setToast} docs={docPages}
       token={token} talkers={talkers}
-      open={(c, f) => go(project.id, c, f)} />;
+      open={(c, f) => go(project.id, c, f)}
+      task={route?.task ?? null}
+      openTask={(id) => { location.hash = channelHash(project.id, id ? taskChannel(`view:${name}`, id) : `view:${name}`); }} />;
   };
 
   const agentChannels = view.channels.filter((c) => c.kind === "agent");
@@ -747,7 +751,10 @@ function App() {
     : channel?.kind === "agent" ? { title: channel.name, purpose: [role, agentState(agent, live?.limit ?? null).text].filter(Boolean).join(" · ") }
     : pageHead(page);
 
-  const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => [c.name, { role: c.role, avatar: c.avatar }]));
+  const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => {
+    const s = agentState(agentOf(c.name), live?.limit ?? null); // the same words and tone as the sidebar (#545)
+    return [c.name, { role: c.role, avatar: c.avatar, tone: s.tone, state: s.text }];
+  }));
 
   return (
     <AgentsContext.Provider value={agentsHere}>

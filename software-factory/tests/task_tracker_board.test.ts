@@ -178,3 +178,19 @@ test("board: keep moves this machine's claim's time on by the claim time; a clai
   world.child.call("taytu", [{ op: "claim", args: [id] }]);
   expect(refusal(() => port.keep("101")).code).toBe("claim-lost");
 });
+
+test("board: waits_for points the other way from blocks; the prerequisite comes first (7 Nov)", () => {
+  // as on the sandbox: 102 waits for 101 and 103 waits for 102, linked the way the product owner linked them; 104 blocks 105
+  const f = world.tracker([{ title: "First" }, { title: "Second" }, { title: "Third" }, { title: "Blocker" }, { title: "Blocked" }]);
+  const [b1, b2, b3, b4, b5] = f.boardIds as [number, number, number, number, number];
+  world.child.call("system", [{ op: "link", args: [b2, b1, "waits_for"] }, { op: "link", args: [b3, b2, "waits_for"] },
+    { op: "link", args: [b4, b5, "blocks"] }]);
+  const deps = Object.fromEntries(f.port.list().map((t) => [t.id, t.dependsOn]));
+  expect(deps).toEqual({ "101": [], "102": ["101"], "103": ["102"], "104": [], "105": ["104"] });
+  for (const id of ["102", "103", "105"]) expect(refusal(() => f.port.claim(id, haile)).code).toBe("task-blocked");
+  expect(f.port.pick(haile).task?.id).toBe("101");
+  f.port.setState("101", "done");
+  expect(f.port.list().find((t) => t.id === "102")?.state).toBe("ready");
+  expect(refusal(() => f.port.claim("103", taytu)).code).toBe("task-blocked");
+  expect(f.port.claim("102", taytu).id).toBe("102");
+});

@@ -534,6 +534,8 @@ recorded as --as, with --session on its events; no tool takes a sender.
                                 board_create   a task, bug, epic or note, under a parent
                                 board_assign   hand a task to one actor: only they may claim it
                                 board_link     link two tasks (blocks, waits_for, related ...)
+                                               blocks: from must be done before to can start
+                                               waits_for: from can't start until to is done
                                 board_unlink   remove a link
                                 board_comment  a note on a task's thread
 

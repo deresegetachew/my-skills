@@ -134,6 +134,15 @@ Then:
 - `factory prd --stage` and the web UI's Inbox read the owner queue from the board (`factory board queue`): each ask to
   the owner and the owner's answers. When the board can't be reached they read the owner-queue issue on GitHub, as
   before.
+- A question an agent asks the owner through the board's MCP (`board_post`, kind `question`, `to: owner`, with or
+  without a task, #549) is in the owner queue too, as `m<id>` (board message id), with who asked, the task it is about
+  and when. `factory owner answer m<id> <text>` (the Inbox's answer box) writes the answer on the board in reply to
+  it, to the agent who asked, and marks it answered; the agent reads it with `board_thread`. `factory board mirror`
+  posts each such question once on the owner-queue issue, marked as an ask, and its answer; a plain reply there is
+  read back once. The MCP tags what an agent posts with its project (`project:<owner>/<repo>`), so a project's owner
+  sees only its own agents' questions on a shared board.
+- The dev manager's work check (`factory_roles.ts work dev-manager`) counts the open board questions addressed to the
+  dev manager (its names, or `dev-manager`), so a question asked only on the board starts its pass.
 - The PR gate and the Factory guard still read only GitHub. Nothing on the board changes what may merge.
 
 **One number for a task.** A task that came from an issue is named by the issue's number, `#3`, everywhere you read it:
@@ -142,11 +151,15 @@ board (no issue) is `b17`. The commands and the tools take `3`, `#3` or `b17` (`
 the project's repo comes from `--repo`, else `GH_REPO` or the git remote `origin`. The board's own id stays inside the
 mirror's marker on GitHub, where nobody reads it.
 
-**What the Board page shows.** The web UI's Board page is the open work: the tasks and bugs whose issue is this
-project's (`#3`), from Ready to Blocked, as `factory next` sees them. A done task is not on it, so its Done column stays
-empty, and a task made on the board with no issue (`b17`) is not on it either. `factory board status` counts every task
-on the board, done ones too, and `factory board tasks --all` lists them (`factory board tasks` lists the open ones, and
-marks an open note, an issue that isn't work, as `note`) (#520).
+**What the Board page shows.** The web UI's Board page is the project's work: the tasks and bugs whose issue is this
+project's (`#3`) and those made on the board for it (`b17`, #528), from Ready to Blocked as `factory next` sees them,
+and in the Done column the ones finished in the last 7 days, newest first (#545). A task handed to an agent that hasn't taken it yet
+says "For <agent>" and sits in that agent's lane. A click on a card opens the task's page (its words, who has it, its
+epic, what blocks it, its pull request, its actions, its context and its thread) at its own address,
+`#/<project>/view:tasks/task:b17`, so it can be shared and Back closes it; Escape closes it too (#543). A live board has no
+"Read again" button: every change on the board reaches the page within a second. `factory board status` counts every
+task on the board, done ones too, and `factory board tasks --all` lists them (`factory board tasks` lists the open ones,
+and marks an open note, an issue that isn't work, as `note`) (#520).
 
 **When the board can't be reached** while it is the record (`tasks.source: board`), the web UI says so once ("The
 message board can't be reached, so tasks are unknown until it's back. On the hub, start it again.") and shows no tasks:
