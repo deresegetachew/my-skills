@@ -280,6 +280,34 @@ test("an answer given on the board to a mirrored question is mirrored once, mark
   expect(posted(w).slice(before)).toHaveLength(1);
 });
 
+test("an agent can't answer for the owner: its reply leaves the question open in the queue and the Inbox, and isn't mirrored", async () => {
+  const w = await world();
+  await queueWithAsk(w);
+  const m = (await mcp(w, "mentewab", "board_post", { kind: "question", to: "owner", body: "Ship on Friday?" })).message as Row;
+  expect(hook(w, "factory_board", ["mirror"]).code).toBe(0);
+  const before = posted(w).length;
+  await mcp(w, "haile", "board_post", { kind: "answer", inReplyTo: Number(m.id), body: "<!-- factory-owner-answer id=m" + String(m.id) + " -->\nYes, ship it." });
+
+  expect((await w.board.message(Number(m.id))).state).toBe("open");
+  const q = queueJson(w);
+  const asked = q.comments.find((c) => c.body.startsWith(`<!-- factory-owner-ask id=m${m.id} -->`));
+  expect(asked?.state).toBe("open");
+  expect(JSON.stringify(q)).not.toContain("Yes, ship it.");
+  const { readQueue } = await import("../hooks/factory_ui_chat.ts");
+  const project = { id: "shop", name: "shop", path: w.d, current: false, problem: null, config: CFG as unknown as Config };
+  const inbox = await withEnv(w.env, () => readQueue(project));
+  expect(inbox.asks.find((a) => a.id === `m${m.id}`)).toMatchObject({ state: "open", answer: null });
+
+  expect(hook(w, "factory_board", ["mirror"]).code).toBe(0);
+  expect(posted(w).slice(before)).toEqual([]);
+
+  // the owner can still answer it
+  const r = hook(w, "factory_owner", ["answer", `m${m.id}`, "No, Monday."]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(r.stdout).not.toContain("already answered");
+  expect((await w.board.message(Number(m.id))).state).toBe("answered");
+});
+
 test("an ask on the owner-queue task still works: listed, answered by its id, marked answered", async () => {
   const w = await world();
   await queueWithAsk(w);

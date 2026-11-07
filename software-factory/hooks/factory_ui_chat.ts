@@ -279,18 +279,23 @@ export async function readQueue(p: UiProject): Promise<Queue> {
 }
 
 /** The asks in an owner queue's comments, each with its state, who asked, the task it is about (an agent's question on
- * the board, #549) and the owner's answer. A question's state is the board's own. */
+ * the board, #549) and the owner's answer. A question is answered only by an answer from the board's `owner`: another
+ * actor's reply, marked or not, leaves it open. */
 function asksOf(n: number | null, url: string | null, comments: Obj[], trusted: Set<string>): Omit<Queue, "source"> {
   const open = new Set(openOwnerAsks(comments, trusted).map(([id]) => id));
+  const questions = new Set(comments.filter((c) => c.kind === "question").flatMap((c) => ownerAskIds(str(c.body))));
+  const answers = new Map<string, string>();
   for (const c of comments) {
-    if (c.kind !== "question") continue;
-    for (const id of ownerAskIds(str(c.body))) {
-      if (c.state === "open") open.add(id);
-      else open.delete(id);
+    for (const m of str(c.body).matchAll(OWNER_ANSWER)) {
+      const id = m[1] as string;
+      if (questions.has(id) && str(obj(c.user).login) !== "owner") continue;
+      answers.set(id, askText(str(c.body)));
     }
   }
-  const answers = new Map<string, string>();
-  for (const c of comments) for (const m of str(c.body).matchAll(OWNER_ANSWER)) answers.set(m[1] as string, askText(str(c.body)));
+  for (const id of questions) {
+    if (answers.has(id)) open.delete(id);
+    else open.add(id);
+  }
   const asks: Ask[] = [];
   const seen = new Set<string>();
   for (const c of comments) {

@@ -308,7 +308,10 @@ export async function answerOnBoard(cfg: Config, id: string, text: string): Prom
     const n = /^m(\d+)$/.exec(id)?.[1];
     const ask = asked ?? (n === undefined ? null : await ownerQuestion(board, repo, Number(n)));
     if (!ask) return n === undefined ? "absent" : "no-question";
-    if (ask.state !== "open") {
+    // a question is answered once the owner answered it: another actor's reply doesn't count (#549)
+    const done = asked ? ask.state !== "open"
+      : (await board.thread({ thread: ask.threadId })).some((m) => m.kind === "answer" && m.from === OWNER && m.inReplyTo === ask.id);
+    if (done) {
       console.log(`${id} is already answered on the message board; nothing written.`);
       return "already";
     }
@@ -406,7 +409,13 @@ async function boardQueue(board: Board, repo: string): Promise<BoardQueue> {
   const all = (await board.messages()).messages;
   const questions = new Set(all.filter((m) => m.kind === "question" && m.to === OWNER &&
     isProjects(repo, m, m.taskId === null ? null : taskOf.get(m.taskId) ?? null)).map((m) => m.id));
-  for (const m of all) if (questions.has(m.id) || (m.kind === "answer" && m.inReplyTo !== null && questions.has(m.inReplyTo))) byId.set(m.id, m);
+  // only the owner answers a question to the owner: another actor's reply to it is left out, so it can't close it
+  for (const m of all) {
+    if (questions.has(m.id) || (m.kind === "answer" && m.from === OWNER && m.inReplyTo !== null && questions.has(m.inReplyTo))) byId.set(m.id, m);
+  }
+  // a question is answered when the owner answered it, whatever the board's state says
+  const ownerAnswered = new Set([...byId.values()].filter((m) => m.kind === "answer" && m.from === OWNER && m.inReplyTo !== null)
+    .map((m) => m.inReplyTo as number));
   const messages = [...byId.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
   const slugOf = new Map<number, string>();
   for (const m of messages) {
@@ -415,7 +424,7 @@ async function boardQueue(board: Board, repo: string): Promise<BoardQueue> {
   }
   const bodyOf = (m: Message): string => {
     if (questions.has(m.id)) return `<!-- factory-owner-ask id=m${m.id} -->\n${breakMarkers(m.body.trim())}`;
-    const answers = m.kind === "answer" && m.inReplyTo !== null ? slugOf.get(m.inReplyTo) : undefined;
+    const answers = m.kind === "answer" && m.from === OWNER && m.inReplyTo !== null ? slugOf.get(m.inReplyTo) : undefined;
     return answers && !OWNER_ANSWER_MARK.test(m.body) ? `<!-- factory-owner-answer id=${answers} -->\n\n${m.body}` : m.body;
   };
   const queueIds = new Set(queues.map((q) => q.id));
@@ -431,7 +440,7 @@ async function boardQueue(board: Board, repo: string): Promise<BoardQueue> {
   };
   return { source: "board", issue, url: issue === null ? null : `https://github.com/${repo}/issues/${issue}`,
     comments: messages.map((m) => ({ id: m.id, body: bodyOf(m), user: { login: m.from }, created_at: m.createdAt.toISOString(), html_url: link(m),
-      kind: m.kind, state: m.state, task: about(m) })) };
+      kind: m.kind, state: questions.has(m.id) ? (ownerAnswered.has(m.id) ? "answered" : "open") : m.state, task: about(m) })) };
 }
 
 /** `factory board queue [--json]`: the owner queue as the board has it. Exit 3 (NO_BOARD_EXIT) when the board can't be

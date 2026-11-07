@@ -274,7 +274,8 @@ class Run {
     if (m.kind !== "answer" || m.inReplyTo === null) return null;
     const p = await this.board.message(m.inReplyTo);
     if (p.kind === "ask") return onTask();
-    if (!(await this.ownerQuestion(p))) return null;
+    // only `asksTo` (the owner) answers a question to it: another actor's reply stays on the board (#549)
+    if (m.from !== this.map.asksTo || !(await this.ownerQuestion(p))) return null;
     const n = await this.queue();
     if (n === null) return null;
     return { issue: n, body: ANSWER_ID.test(m.body) ? m.body : `<!-- factory-owner-answer id=m${p.id} -->\n\n${breakMarkers(m.body.trim())}` };
