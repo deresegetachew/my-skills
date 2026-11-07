@@ -52,7 +52,8 @@ On this page: [what is here](#what-is-here), [setting it up](#setting-it-up), [l
   task counts.
 - **Backups:** `factory board backup [--out FILE]` runs `pg_dump` inside the container and writes it mode 600. A
   nightly backup is a job you set up on the machine (cron or a systemd timer) that runs it.
-- **Stale claims:** `factory board sweep [--quiet-minutes N]` releases them (see the rules).
+- **Stale claims:** `factory board sweep [--quiet-minutes N]` releases them (see the rules). The dev manager's loop runs
+  it on each pass (#513), and a builder's loop sends a heartbeat on its claim while its session runs.
 - **Other machines** reach it with a login of their own (next section); `factory machine add` and `factory machine join`
   make one and write it on the new machine.
 
@@ -145,7 +146,8 @@ each.
 
 **Leases:** `lease(key, holder, ttlSeconds)` holds a named claim on anything that isn't a task (one holder until its time runs out; the holder taking it again moves the time on) and says `{ held, holder }`. `unlease(key, holder)`, `leaseHolder(key)` (`""` for nobody) and `dropLease(key)`.
 
-**Values:** `setValue(key, value, signals?)` keeps a JSON value by name, replacing what was there, and records the signals with it in one transaction (a watcher's snapshot and the changes it saw); `value(key)` reads it (null for none).
+**Values:** `setValue(key, value, signals?)` keeps a JSON value by name, replacing what was there, and records the signals with it in one transaction (a watcher's snapshot and the changes it saw); `value(key)` reads it (null for none); `values(prefix)` lists every value whose key starts with `prefix`, with who wrote
+it last and when (the factory keeps each agent's liveness as `<project>:agent:<name>`, #513).
 
 **Import:** `import(batch, { dryRun?, keepBoardStatus? })` brings in tasks, parents, `blocks` edges, context entries and messages, each
 keyed by an outside id (`ref`), in one transaction: a second run updates what changed and adds what is new, never a
@@ -244,7 +246,8 @@ The factory runs it as `factory board mirror` (its `board.mirror` setting turns 
 - **Tasks:** a task whose ref is one of the repo's issues and whose state the board changed (the events `task.claimed`,
   `released`, `closed`, `moved`, `assigned`, `swept`, `taken_back`, and `task.updated` with its status) gets, per
   change, three calls: one read of the issue (its other labels, since a label call replaces them all), one call that sets the issue's labels (the mapping's state label, `agent:<holder>` while in progress; every
-  other label is kept) and opens or closes it, and one short line under `<!-- factory-mirror v=1 task=<id> state=<s> -->`.
+  other label is kept) and opens or closes it, and one short line under
+  `<!-- factory-mirror v=1 task=<id> state=<s> line=<id of the line> -->`.
   A state that comes back to what was last sent sends nothing; a heartbeat is no change; a task with no issue is left
   alone, and so are epics, notes (the owner queue) and decisions. States: open is ready, in progress, in review, deferred is blocked (the line carries the reason as
   `**Blocked:** ...`), done closes the issue.
@@ -261,14 +264,18 @@ The factory runs it as `factory board mirror` (its `board.mirror` setting turns 
   `--watch` and a run by hand, or two machines, never send twice; a pass that waited 15 s for it sends nothing and says
   so (`busy`). Before posting an ask or an answer it records the message as pending in its place; a pass that finds one
   pending and not linked first looks for a comment carrying that message's marker (one read of the issue's recent
-  comments) and links it instead of posting again, so a crash between the post and the link sends nothing twice.
+  comments) and links it instead of posting again, so a crash between the post and the link sends nothing twice. A
+  task's line is recorded the same way before it is posted (the state it sends and its line id; not on a first pass,
+  which keeps no place until it is done), so a pass killed after posting it finds the line by its id and doesn't post it
+  again (#513).
 - **Its place** is the value `mirror:github:<owner>/<repo>`: the last event read and the state sent per task. It reads
   the events after it, so it is safe to run twice and goes on after downtime; it moves its place only when it read
   something new, so its own write never wakes it again. A GitHub failure keeps the place (with the states it did send)
   and is thrown as a `GithubError` whose fix is to run it again: nothing is sent twice.
 
 The factory runs a pass before each of the dev manager's passes, stopped after 300 seconds (`factory board mirror
---max-seconds 300`), and `factory board mirror --watch` runs it all the time.
+--max-seconds 300`), then `factory board sweep --max-seconds 60` (#513), and `factory board mirror --watch` runs it all
+the time (an agent's liveness and a claim's heartbeat start no pass).
 
 ## The MCP server
 

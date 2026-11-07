@@ -59,7 +59,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `board status` | planned | Machines (Machines.dc.html): whether the message board answers | #472 |
 | `board migrate` | terminal only | Run once after an update | |
 | `board backup` | terminal only | Machine administration; a nightly backup is a job on the machine | |
-| `board sweep` | terminal only | Machine administration: run by hand or as a job on the board's machine; nothing runs it by itself yet | #511 |
+| `board sweep` | terminal only | Machine administration: the dev manager's loop runs it on each pass (#513); by hand or as a job on the board's machine otherwise | #511, #513 |
+| `board queue` | built | Inbox: the page reads the owner queue with it when the owner queue is on the board | #513 |
 | `board login add` | terminal only | `machine add` and `machine remove` make and drop a machine's board login; by hand it is machine administration | |
 | `heartbeat` | planned | Machines (Machines.dc.html) | #455 |
 | `autostart` | planned | Machines (Machines.dc.html), Team setup (TeamSetup.dc.html) | #455 |

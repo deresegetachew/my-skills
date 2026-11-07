@@ -160,8 +160,12 @@ tools (`mcp__board__board_prime` and the rest; the product owner, who never buil
 say which to use. The PR gate and the guard still read only GitHub. `/mcp` in a session should list only `board`.
 With the board on, the dev manager's loop also runs `factory board mirror` before each pass, so GitHub's copy of the
 board stays current (#502; a release without it skips this). A mirror pass that runs longer than 300 seconds is
-stopped (`--max-seconds`, #511), so it never stalls the pass; the next one sends the rest. Setting the board up and
-moving a project onto it: [The message board](board.md#the-message-board).
+stopped (`--max-seconds`, #511), so it never stalls the pass; the next one sends the rest. After the mirror it runs
+`factory board sweep` (#513), stopped after 60 seconds, so a claim whose agent went quiet goes back to ready. With
+`tasks.source: board` a builder's loop keeps its claim alive while the session runs: `factory_agents.ts keep` sends a
+heartbeat on the claimed task every 10 minutes (a third of the claim's 30) and stops when the session ends, so a long
+quiet build isn't swept. Setting the board up and moving a project onto it:
+[The message board](board.md#the-message-board).
 
 ### Practical notes
 
@@ -440,6 +444,12 @@ current; the task never has to. Only an agent that has registered gets an issue,
 - **Where.** By default the issue says only the agent's slot. With `"tasks": { "showWhere": true }` it also posts
   the machine name and folder name.
 - The hooks never fail or slow a session: errors are ignored.
+- **On the message board** (`tasks.source: board`, #513) there are no agent issues: the same moments write the agent's
+  state to the board instead, as the value `<project>:agent:<name>` with a `signal.agent` event, and GitHub is not
+  asked. `factory agents list`, `factory agents sweep` and the agents part of `factory status` read it with the rules
+  above. The heartbeat daemon doesn't write there, so the hooks always ping. `factory agents sweep` marks a silent agent
+  down, then runs the board's sweep, which frees a claim whose time has passed and whose agent sent no heartbeat for
+  `tasks.downMinutes`; while a builder's session runs, the loop's heartbeat keeps its claim.
 
 ### The heartbeat daemon
 
