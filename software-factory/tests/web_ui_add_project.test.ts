@@ -301,6 +301,7 @@ test("check: every refusal is 400 with {code, message, fix}", async () => {
 test("check: a clean git repo as a folder is accepted, and a path that is a checkout of the repo is accepted for clone", async () => {
   const s = await setup();
   const repo = mkRepo(join(s.folder, "mine"));
+  git(repo, "remote", "add", "origin", "https://github.com/acme/mine.git"); // a folder needs an origin for its setup pull request (#546)
   const folderOk = await check(s, req(s, { source: "folder", path: repo }));
   expect(folderOk.status, JSON.stringify(folderOk.json)).toBe(200);
   const checkout = mkRepo(join(s.folder, "shop"));
@@ -685,4 +686,19 @@ test("a second start while one is running is 409 ui_add_busy, and the first stil
   expect(run.state, JSON.stringify(run)).toBe("done");
   expect(ghCalls(s.p).filter((l) => l.startsWith("gh repo clone")).length).toBe(1);
   expect(sh(["ls", s.folder]).stdout).not.toContain("other");
+}, T);
+
+test("check: a folder with no origin is refused with ui_add_no_remote, before anything runs (#546)", async () => {
+  const s = await setup();
+  const lone = mkRepo(join(s.folder, "lone"));
+  const r = await check(s, req(s, { source: "folder", repo: "", path: lone }));
+  expect(r.status, JSON.stringify(r.json)).toBe(400);
+  expect(r.json.code).toBe("ui_add_no_remote");
+  expect(String(r.json.message)).toContain("has no remote called origin");
+  expect(String(r.json.fix)).toContain("git remote add origin");
+  const started = await api(s.ui, "/api/add-project", { method: "POST", body: { confirm: true, ...req(s, { source: "folder", repo: "", path: lone }) } });
+  expect(started.status).toBe(400);
+  expect(started.json.code).toBe("ui_add_no_remote");
+  expect(existsSync(join(lone, ".claude", "hooks"))).toBe(false);
+  expect(ghCalls(s.p)).toEqual([]);
 }, T);
