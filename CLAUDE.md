@@ -84,8 +84,9 @@ A change that breaks one of these is wrong even if the tests pass.
   `./factory loop -i`. Do not run `factory update` here: this repo is where the releases come from.
 - One task is one card on the message board: `#n` when it came from a GitHub issue, `b<n>` when it was made on the
   board. Claim, block and release go through the board: the `board` MCP tools, `factory next` or the web UI.
-- `factory board mirror` carries each board change to the issue's `factory:*` labels. Those labels are made once by
-  `factory issues setup`; do not create or set them by hand.
+- `factory board mirror` carries each board change to the issue's labels (`factory:ready`, `factory:in-progress`,
+  `factory:in-review`, `factory:blocked`). Those labels are made once by `factory issues setup`; do not create or set
+  them by hand.
 - A task made for a PRD change waits until that PRD pull request merges. The order is in issue #114; `factory next`
   gives the next one. Small pull requests with `Closes #<n>` (or `Closes b<n>`, `Part of #<n>`).
 - A pull request body lists: what changed, the tests run (command and counts), protected files touched, choices made
