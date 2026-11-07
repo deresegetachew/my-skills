@@ -115,18 +115,18 @@ test("migrate, then tasks, ready, show, prime and sweep print what is on the boa
 
   const tasks = board(w, ["tasks"]);
   expect(tasks.code, tasks.stderr).toBe(0);
-  expect(tasks.stdout).toMatch(new RegExp(`#${a.id}\\s+in_progress\\s+haile\\s+Write the importer`));
-  expect(tasks.stdout).toMatch(new RegExp(`#${b.id}\\s+blocked\\s+Show the board in the web UI`));
+  expect(tasks.stdout).toMatch(new RegExp(`b${a.id}\\s+in_progress\\s+haile\\s+Write the importer`));
+  expect(tasks.stdout).toMatch(new RegExp(`b${b.id}\\s+blocked\\s+Show the board in the web UI`));
 
   const ready = board(w, ["ready"]);
   expect(ready.stdout).toContain("Nothing is ready");
 
-  const show = board(w, ["show", String(a.id)]);
+  const show = board(w, ["show", `b${a.id}`]);
   expect(show.code, show.stderr).toBe(0);
-  for (const s of ["Write the importer", "status    in_progress", "holder    haile", "From GitHub issues.", `blocks #${b.id}`, "Keep the issue number as the ref"]) {
+  for (const s of ["Write the importer", "status    in_progress", "holder    haile", "From GitHub issues.", `blocks b${b.id}`, "Keep the issue number as the ref"]) {
     expect(show.stdout).toContain(s);
   }
-  const json = JSON.parse(board(w, ["show", String(a.id), "--json"]).stdout) as { task: { id: number; holder: string } };
+  const json = JSON.parse(board(w, ["show", `b${a.id}`, "--json"]).stdout) as { task: { id: number; holder: string } };
   expect(json.task).toMatchObject({ id: a.id, holder: "haile" });
   expect(err(board(w, ["show", "999999"])).code).toBe("not-found");
   expect(err(board(w, ["show"])).code).toBe("bad-input");
@@ -134,15 +134,15 @@ test("migrate, then tasks, ready, show, prime and sweep print what is on the boa
   const prime = board(w, ["prime", "haile"]);
   expect(prime.code, prime.stderr).toBe(0);
   expect(prime.stdout).toContain("Holding");
-  expect(prime.stdout).toContain(`#${a.id}`);
+  expect(prime.stdout).toContain(`b${a.id}`);
   expect(prime.stdout).toContain("Keep the issue number as the ref");
 
   await Bun.sleep(1200);
   const sweep = board(w, ["sweep", "--quiet-minutes", "0"]);
   expect(sweep.code, sweep.stderr).toBe(0);
-  expect(sweep.stdout).toContain(`released #${a.id} (held by haile)`);
+  expect(sweep.stdout).toContain(`released b${a.id} (held by haile)`);
   expect(board(w, ["sweep"]).stdout).toContain("No stale claims");
-  expect(board(w, ["ready"]).stdout).toContain(`#${a.id}`);
+  expect(board(w, ["ready"]).stdout).toContain(`b${a.id}`);
 });
 
 test("status says the board answers, and never prints the password", () => {
@@ -338,5 +338,48 @@ test("ready leaves out tasks handed to someone else; --for <actor> shows that ac
   expect(board(w, ["ready"]).stdout).not.toContain("Handed to menelik");
   const mine = board(w, ["ready", "--for", "menelik"]);
   expect(mine.code, mine.stderr).toBe(0);
-  expect(mine.stdout).toMatch(new RegExp(`#${t.id}\\s+open\\s+menelik\\s+Handed to menelik`));
+  expect(mine.stdout).toMatch(new RegExp(`b${t.id}\\s+open\\s+menelik\\s+Handed to menelik`));
+});
+
+test("tasks, ready, show and prime name a task by its issue number (#7) or b<id>, and show takes 7, #7 or b<id> (#515)", async () => {
+  const fresh = await freshDatabase(server as Server);
+  try {
+    const url = fresh.url;
+    const w = world(url);
+    board(w, ["migrate"]);
+    const po = await Board.open(url, { as: "po" });
+    const epic = await po.create({ title: "The epic", kind: "epic", ref: "github:o/r#9" });
+    const seven = await po.create({ title: "Issue seven", ref: "github:o/r#7", parentId: epic.id, priority: 1 });
+    const filed = await po.create({ title: "Filed on the board", priority: 2 });
+    await po.link(seven.id, filed.id, "blocks");
+    await po.end();
+
+    const tasks = board(w, ["tasks", "--repo", "o/r"]);
+    expect(tasks.code, tasks.stderr).toBe(0);
+    expect(tasks.stdout).toMatch(/^#7\s+open\s+Issue seven$/m);
+    expect(tasks.stdout).toMatch(new RegExp(`^b${filed.id}\\s+blocked\\s+Filed on the board$`, "m"));
+    expect(tasks.stdout).not.toContain(`#${seven.id} `);
+    // the repo from GH_REPO, as the importer takes it
+    expect(board(w, ["ready"], { GH_REPO: "o/r" }).stdout).toMatch(/^#7\s+open/m);
+    for (const named of ["7", "#7"]) {
+      const show = board(w, ["show", named, "--repo", "o/r"]);
+      expect(show.code, show.stderr).toBe(0);
+      expect(show.stdout.split("\n")[0]).toBe("#7 Issue seven");
+      expect(show.stdout).toContain("parent    #9");
+      expect(show.stdout).toContain(`edge      blocks b${filed.id}`);
+    }
+    const filedShow = board(w, ["show", `b${filed.id}`, "--repo", "o/r"]);
+    expect(filedShow.stdout).toContain("blocked   by #7");
+    const json = JSON.parse(board(w, ["show", "7", "--json", "--repo", "o/r"]).stdout) as { task: { id: number; number: string } };
+    expect(json.task).toMatchObject({ id: seven.id, number: "#7" });
+    const list = JSON.parse(board(w, ["tasks", "--json", "--repo", "o/r"]).stdout) as { number: string }[];
+    expect(list.map((t) => t.number)).toEqual(["#7", "#9", `b${filed.id}`]);
+    const missing = board(w, ["show", "8", "--repo", "o/r"]);
+    expect(err(missing).code).toBe("not-found");
+    expect(err(missing).message).toContain("issue #8");
+    expect(err(board(w, ["show", "seven"])).code).toBe("bad-input");
+    expect(board(w, ["prime", "nobody", "--repo", "o/r"]).stdout).toMatch(/Blocked\n\s+b\d+\s+blocked\s+Filed on the board \(by #7\)/);
+  } finally {
+    await fresh.drop();
+  }
 });
