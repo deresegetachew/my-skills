@@ -60,6 +60,41 @@ export const NEEDS: Record<string, string> = {
   "reviews.security-reviewer.paths": "the owner's decision: it changes which changes get the security reviewer",
 };
 
+// Plain names for the settings people change most (the web UI's Factory settings, #456). A setting without one is
+// named from its key there (`labelOf`).
+export const LABELS: Record<string, string> = {
+  mainBranch: "Main branch",
+  "commands.test": "Test command",
+  "commands.lint": "Lint command",
+  "commands.typecheck": "Typecheck command",
+  "commands.build": "Build command",
+  "commands.install": "Install command",
+  "tasks.source": "Where tasks come from",
+  protected: "Protected paths",
+  "tasks.staleHours": "A task is stale after (hours)",
+  "manager.claimMinutes": "A dev manager's lease lasts (minutes)",
+  agents: "Coding agents",
+};
+export const MACHINE_LABELS: Record<string, string> = {
+  agents: "Agents on this machine",
+  remoteControl: "Remote Control",
+  autostart: "Start again after a reboot",
+  autostartAgents: "Agents started after a reboot",
+  autostartReport: "Post the boot report",
+  "ci.runners": "CI runners on this machine",
+};
+
+const SHOUTED = new Set(["ci", "ui", "pr", "prs", "api", "env", "prd", "id"]);
+
+/** A setting's name in words, from its key: `tasks.pingMinutes` is "Tasks: ping minutes". */
+export function labelOf(key: string): string {
+  const words = (part: string): string => part.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/-/g, " ").toLowerCase().split(" ")
+    .map((w) => (SHOUTED.has(w) ? w.toUpperCase() : w)).join(" ");
+  const parts = key.split(".").map(words);
+  const text = parts.length > 1 ? `${parts.slice(0, -1).join(" ")}: ${parts.at(-1)}` : (parts[0] ?? key);
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** A value that doesn't fit its setting; the message says what is wrong. */
 export class SettingError extends Error {}
 
@@ -79,6 +114,7 @@ interface More {
   examples?: string[];
   read_by?: string;
   needs?: string;
+  label?: string;
 }
 
 export class Setting {
@@ -97,6 +133,8 @@ export class Setting {
   examples: string[];
   readBy: string;
   needs: string;
+  /** Its plain name on a page (#456). */
+  label: string;
 
   constructor(key: string, kind: Kind, section: string, short: string, more: More = {}) {
     this.key = key;
@@ -114,6 +152,7 @@ export class Setting {
     this.examples = more.examples ?? [];
     this.readBy = more.read_by ?? (SECTION_READERS[section] as string);
     this.needs = more.needs ?? NEEDS[key] ?? "";
+    this.label = more.label ?? (this.scope === "project" ? LABELS : MACHINE_LABELS)[key] ?? labelOf(key);
   }
 
   get default(): unknown {
