@@ -21,6 +21,9 @@
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
 //   GET|POST /api/projects/:p/signoff, POST .../signoff/:id/confirm|result: the sign-off and testing queue (factory_ui_signoff.ts, #454)
 //   GET  /api/projects/:p/artifacts, POST .../artifacts/pull: designs and artifacts (factory_ui_artifacts.ts, #454)
+//   GET|POST /api/projects/:p/settings[/...]   Factory settings, releases and updates, maintenance (factory_ui_settings.ts,
+//                                              #456): the team, project settings staged and proposed as one pull request,
+//                                              this machine's saved at once, update, the clean-ups
 //   POST /api/projects/:p/tasks/:id/actions/:name  the board's release, block and reassign (#439): factory_ui_views.ts
 //   GET  /api/projects/:p/pull-requests/:n      a pull request's page (#453), read when it opens and kept until its head
 //                                              changes; POST .../pull-requests/:n/actions/:name the owner's merge, ready,
@@ -41,9 +44,10 @@ import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
 import { AddRuns } from "./factory_ui_add.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
-import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, refreshConfig, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
+import { settingsApi } from "./factory_ui_settings.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
 import { BoardFeed } from "./factory_ui_board.ts";
 import { ciAction, pullRowOf, Refresher, repoOfProject, taskAction, viewsOf } from "./factory_ui_views.ts";
@@ -229,6 +233,7 @@ export function serve(o: ServeOptions): Running {
     }
     const p = byId.get(parts[1] ?? "");
     if (!p) return problem(404, "ui_project_unknown", `There is no project ${parts[1]} here.`, "GET /api/projects lists them; add one with ui.projects.");
+    refreshConfig(p); // a merged and pulled settings change shows without a restart (#456)
     const rest = parts.slice(2);
     const talked = await chat.api(req, p, rest, seen(p));
     if (talked) return json(talked.status, talked.body);
@@ -244,6 +249,16 @@ export function serve(o: ServeOptions): Running {
     }
     if (rest[0] === "signoff") { // the sign-off and testing page (#454)
       const r = await signoffApi(req, p, rest);
+      return json(r.status, r.body);
+    }
+    if (rest[0] === "settings") { // Factory settings, releases and updates, maintenance (#456)
+      const r = await settingsApi(req, p, rest, {
+        agents: async () => (await state(p, 0)).data.agents,
+        changed: () => {
+          kept.delete(p.id); // read again: the next look shows what changed
+          if (clients) void tick();
+        },
+      });
       return json(r.status, r.body);
     }
     if (rest[0] === "artifacts") { // designs and artifacts (#454)

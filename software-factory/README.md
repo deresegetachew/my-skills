@@ -230,7 +230,8 @@ Not built yet:
 
 - No tmux: agent loops will run as background services with a log file that `factory follow` reads (#526). Today some
   sessions still start in tmux.
-- The web UI's first launch, Home, Activity, settings pages and phone layout (PRD, section 4.13).
+- The web UI's first launch, Home, Activity, Integrations and phone layout (PRD, section 4.13). Factory settings,
+  Releases and updates and Maintenance are built (#456).
 - `factory bootstrap` runs on Linux only.
 - One command to bump the pin for a whole team.
 - A Slack or Mattermost bridge. It is an idea, not scheduled (PRD, sections 5 and 6).
