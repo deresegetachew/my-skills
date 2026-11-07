@@ -382,7 +382,6 @@ form.send { display: flex; flex-direction: column; gap: 6px; }
 .merges { display: flex; flex-direction: column; gap: 12px; }
 .merge-card h3 { flex-wrap: wrap; }
 .merge-card .actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.merge-card .actions .btn.primary { flex: 1 1 auto; }
 `;
 
 if (typeof document !== "undefined") {

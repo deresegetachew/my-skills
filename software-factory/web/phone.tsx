@@ -61,6 +61,8 @@ export const PHONE_CSS = String.raw`
   .toast { bottom: 92px; }
   /* big buttons for what needs the owner: one under another, 52 px high */
   .ask .options { flex-direction: column; align-items: stretch; }
+  .merge-card .actions { flex-wrap: nowrap; }
+  .merge-card .actions .btn.primary { flex: 1 1 auto; }
   .ask .options .btn, .merge-card .btn, .own .btn { height: 52px; font-size: 15px; white-space: normal; }
   .own input { height: 52px; }
 }
