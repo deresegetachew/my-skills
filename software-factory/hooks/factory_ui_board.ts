@@ -27,7 +27,7 @@ import { join } from "node:path";
 import type { Board, BoardEvent, ContextEntry, Listener, Message, Task } from "../message-board/src/index.ts";
 import { citesIn } from "./core/domain/cites.ts";
 import { parseEpic } from "./core/domain/epic.ts";
-import { todos } from "./core/domain/task.ts";
+import { prdChangeIn, todos } from "./core/domain/task.ts";
 import type { Obj, Problem, UiProject } from "./factory_ui_data.ts";
 import type { ActivityItem, ActivityKind } from "./factory_ui_ops.ts";
 
@@ -159,10 +159,18 @@ export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj
   const since = now - DONE_DAYS * 86_400_000;
   const doneAt = (t: Task): number => new Date(t.updatedAt).getTime();
   const recent = work.filter((t) => t.status === "done" && doneAt(t) >= since).sort((a, b) => doneAt(b) - doneAt(a));
+  /** The pull request of the open PRD change card `id` is (#578), or null for any other card. */
+  const prdOf = (id: number): string | null => {
+    const c = byId.get(id);
+    return c && !WORK.has(c.kind) && c.kind !== "epic" && c.status !== "done" ? prdChangeIn(`${c.title}\n${c.body}`) : null;
+  };
   const rowOf = (t: Task): Obj => {
     const epic = epicOf(t);
-    const blockedBy = t.status === "done" ? [] : t.blockedBy.map(named);
-    return { id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [], assignee: t.assignee ?? null,
+    const open = t.status === "done" ? [] : t.blockedBy;
+    // a PRD change card it waits for is its waitsForPrd, not a blocker (#578)
+    const prd = open.map(prdOf).find((p) => p !== null) ?? null;
+    const blockedBy = open.filter((b) => prdOf(b) === null).map(named);
+    return { ...(prd === null ? {} : { waitsForPrd: prd }), id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [], assignee: t.assignee ?? null,
       group: /^Milestone:[ \t]*(.+)$/m.exec(t.body)?.[1]?.trim() ?? "", todos: todos(t.body).map((d) => ({ done: d.done })),
       dependsOn: blockedBy, blockedBy, cites: citesIn(t.body), epic: epic ? ids.get(epic.id) : null };
   };

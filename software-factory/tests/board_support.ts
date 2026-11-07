@@ -58,12 +58,24 @@ export async function boardWorld(): Promise<BoardWorld> {
         if (s.state === "done") after.push({ op: "close", args: [boardIds[i], { outcome: "done" }] });
         if (s.state === "blocked") after.push({ op: "update", args: [boardIds[i], { version: 1, status: "deferred" }] });
       });
+      // A PRD change (#578) is a note card for its pull request, and each task from it waits for that card.
+      let card = 0;
+      if (specs.some((s) => s.prd)) {
+        card = (child.one("system", "create", { title: "PRD change: #500 (Shelf v1.1)", kind: "note", body: "PRD change: #500",
+          ref: `factory:${r}/prd-500` }) as BoardTask).id;
+        specs.forEach((s, i) => {
+          if (s.prd) after.push({ op: "link", args: [boardIds[i], card, "waits_for"] });
+        });
+      }
       if (after.length) child.call("system", after);
       const ids = specs.map((_, i) => String(101 + i));
       const rival = (id: string, who: Claimant): void => {
         child.call(who.agent, [{ op: "claim", args: [boardIds[ids.indexOf(id)]] }]);
       };
-      return { port, ids, missing: "99", foreign: "1.3", rival, repo: r, boardIds, tokens };
+      const mergePrd = (): void => {
+        if (card) child.call("system", [{ op: "close", args: [card, { outcome: "done" }] }]);
+      };
+      return { port, ids, missing: "99", foreign: "1.3", rival, repo: r, boardIds, tokens, prd: "500", mergePrd };
     },
     messaging() {
       return { port: new BoardMessaging({ child, repo: repo() }), ref: "issue#5", other: "pr#7" };

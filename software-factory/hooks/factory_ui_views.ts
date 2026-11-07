@@ -69,6 +69,8 @@ export interface TaskRow {
   blockedBy: string[];
   url: string | null;
   pr: { number: number; url: string | null; checks: PullView["checks"] } | null;
+  /** The PRD change it waits for, while that pull request hasn't merged (#578): it shows as waiting and is never next. */
+  prd: { number: number; url: string | null } | null;
   next: boolean;
   /** What the board offers on it (#439): issues mode only, by its state. */
   actions: TaskActionName[];
@@ -296,15 +298,19 @@ function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], ori
     const dependsOn = (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(str).filter(Boolean);
     const blockedBy = (Array.isArray(t.blockedBy) ? t.blockedBy : []).map(str).filter(Boolean);
     const todos = list(t.todos);
-    // `factory next`: the first ready task nobody holds whose dependencies are done
-    const isNext = next === null && str(t.state) === "ready" && !holders.length && !dependsOn.some((d) => open.has(d.replace(/^#/, "")));
+    const prdPr = /^\d+$/.test(str(t.waitsForPrd)) ? Number(str(t.waitsForPrd)) : null;
+    const prd = prdPr === null ? null : { number: prdPr, url: repo ? `https://github.com/${repo}/pull/${prdPr}` : null };
+    // waiting for its PRD change is shown as blocked: `factory next` passes it over (#578)
+    const state = prd && str(t.state) === "ready" ? "blocked" : str(t.state);
+    // `factory next`: the first ready task nobody holds whose dependencies are done and whose PRD change merged
+    const isNext = next === null && state === "ready" && !holders.length && !dependsOn.some((d) => open.has(d.replace(/^#/, "")));
     if (isNext) next = id;
     const pr = prOf.get(id);
     const assignee = str(t.assignee) || null;
-    return { id, title: str(t.title), state: str(t.state), stateText: taskStateText(str(t.state)), holders, assignee: holders.length ? null : assignee, group: str(t.group),
+    return { id, title: str(t.title), state, stateText: prd ? "waits for its PRD" : taskStateText(state), holders, assignee: holders.length ? null : assignee, group: str(t.group),
       todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn, blockedBy,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
-      pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, next: isNext, actions: actionsFor(str(t.state), source),
+      pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, prd, next: isNext, actions: actionsFor(str(t.state), source),
       epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
   };
   const tasks = rows.map(toRow);

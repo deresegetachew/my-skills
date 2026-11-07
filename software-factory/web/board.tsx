@@ -6,7 +6,7 @@
 // taskAction); the board is live through the views message. Colours are the palette's (theme.ts) only.
 import { useContext, useEffect, useState } from "react";
 import { Avatar, AgentsContext } from "./avatar_view.tsx";
-import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, type TaskAction, taskAsk, taskLabel, unheldText } from "./board_model.ts";
+import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, prdText, type TaskAction, taskAsk, taskLabel, unheldText } from "./board_model.ts";
 import { Chips } from "./parts.tsx";
 import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
@@ -134,6 +134,7 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
               : unheldText(t)}</dd></div>
             {t.epic && <div><dt>Epic</dt><dd><button className="link" onClick={() => open("view:epics", `#${t.epic}`)}>#{t.epic}</button></dd></div>}
             {blockersText(t) && <div><dt>Blocked by</dt><dd>{blockersText(t).replace(/^Blocked by /, "")}</dd></div>}
+            {t.prd && <div><dt>Waits for its PRD</dt><dd><PrdLink prd={t.prd} /></dd></div>}
             {t.pr && <div><dt>Pull request</dt><dd><button className="link" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>PR #{t.pr.number}</button>
               {t.pr.checks && <span className="muted"> · {checksText(t.pr.checks)}</span>}</dd></div>}
             {t.url && <div><dt>On GitHub</dt><dd><a className="ext" href={t.url} target="_blank" rel="noreferrer noopener">Issue {taskLabel(id)}</a></dd></div>}
@@ -167,6 +168,11 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
 }
 
 /** True when a click on a card was on one of its own controls (a link or a button), which keep their own action. */
+/** The PRD change's pull request a task waits for (#578), linked to GitHub when the repo is known. */
+export function PrdLink({ prd }: { prd: { number: number; url: string | null } }) {
+  return prd.url ? <a className="ext" href={prd.url} target="_blank" rel="noreferrer noopener">PR #{prd.number}</a> : <>PR #{prd.number}</>;
+}
+
 function onControl(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest("button, a, input, select, textarea") !== null;
 }
@@ -189,6 +195,7 @@ function Card({ t, edge, pull, open, act, openTask }: { t: TaskRow; edge: string
         <span className="btag">{tag.needsYou && <span className="sdot down" aria-hidden="true" />}{tag.text}</span>
       </div>
       {blockers && <p className="bblock"><Dot tone="bad" />{blockers}</p>}
+      {t.prd && <p className="bblock" title={prdText(t)}><Dot tone="warn" />Waits for its PRD: <PrdLink prd={t.prd} /></p>}
       {t.pr && (
         <p className="bpr">
           <button className="blink" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>PR #{t.pr.number}</button>

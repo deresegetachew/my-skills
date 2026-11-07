@@ -145,6 +145,11 @@ export function blockersText(t: { blockedBy?: string[] }): string {
   return b.length ? `Blocked by ${b.map((x) => (/^\d+$/.test(x) ? `#${x}` : x)).join(", ")}` : "";
 }
 
+/** What a card waiting for its PRD change says (#578): "Waits for its PRD: PR #62 to merge", or "" with none. */
+export function prdText(t: { prd?: { number: number } | null }): string {
+  return t.prd ? `Waits for its PRD: PR #${t.prd.number} to merge` : "";
+}
+
 export type TaskAction = "release" | "block" | "reassign";
 
 /** What a card's action does and doesn't do, in plain words, for its confirm. The commands change the issue's labels

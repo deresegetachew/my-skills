@@ -219,6 +219,10 @@ until he agrees them."
   wait for my approval. *Built (#148); this is the acceptance test of the roles epic.* (#103, #95)
 - **P10.** As the PO, I also test the running app: someone sets it up, I write test plans, the owner confirms what is
   tested, and results are recorded. *To be seen; needs a spike.* (#101)
+- **P11.** As the owner, the order is PRD, then tasks, then builders: a task made for a PRD change (a `PRD change: #<pr>`
+  line; on the board, a link to that change's card) is not claimable until the pull request merges. `factory next` says
+  which it skipped and why, and the web UI shows it as waiting, with the link. Taking the line out, or moving the card to
+  done, builds it now. *Built (#578).* (#578)
 
 ### 4.4 Reviewer
 

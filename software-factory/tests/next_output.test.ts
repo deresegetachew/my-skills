@@ -107,3 +107,27 @@ test("factory next --dry-run with --issue is refused with code, message and fix"
   expect(e.code).toBe("dry_run_issue");
   expect(e.fix).toContain("factory issues show 7");
 });
+
+/** The PRD change's pull request as the issues API gives it: merged when `merged` is a time. */
+function prdPull(n: number, merged: string | null): IssueRow {
+  return { ...issue(n, []), title: "PRD: Shelf v1.1", state: merged ? "closed" : "open", pull_request: { url: `https://x/pulls/${n}`, merged_at: merged } };
+}
+
+test("factory next skips a task whose PRD change hasn't merged and says why; a claim skips it too (#578)", () => {
+  const [d, env] = project([issue(5, ["factory:ready"], "PRD: US-12\nPRD change: #62"), issue(7), prdPull(62, null)]);
+  let p = sh(["bash", join(SF, "factory"), "next"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
+  expect(p.stderr).toContain("Skipped #5: it waits for its PRD change, PR #62, to merge.");
+  p = sh(["bash", join(SF, "factory"), "next", "--dry-run", "--claim", "taytu"], { cwd: d, env });
+  expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
+  expect(p.stderr).toContain("Skipped #5");
+  p = runHook("next_task", ["--claim", "taytu", "--pid", "1"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.trim()).toBe("issue-7 Task 7");
+  expect(p.stderr).toContain("Skipped #5: it waits for its PRD change, PR #62, to merge.");
+  p = runHook("next_task", ["--claim", "menelik", "--pid", "2"], { cwd: d, env });
+  expect(p.code).toBe(1);
+  expect(p.stdout.trim()).toBe("none");
+  expect(p.stderr).toContain("PR #62");
+});

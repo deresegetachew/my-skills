@@ -10,11 +10,12 @@ import { join, resolve } from "node:path";
 import { citesIn } from "../../../factory_cites.ts";
 import { alive, type Claims, claimTask, locked } from "../../../factory_claims.ts";
 import { blockedIds, type Config, toFloat } from "../../../factory_config.ts";
+import { prdWait } from "../../../factory_issues.ts";
 import { run } from "../../../factory_lib.ts";
 import type { Claimant } from "../../domain/claim.ts";
 import type { Epic } from "../../domain/epic.ts";
 import { CoreError } from "../../domain/error.ts";
-import { checkClaim, dependencies, type Task, tickTodo, todos } from "../../domain/task.ts";
+import { checkClaim, dependencies, prdSkipNote, type Task, tickTodo, todos } from "../../domain/task.ts";
 import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
 
 const LINE = /^[^\S\n]*- \[( |x|X)\] \*\*(\d+(?:\.\d+)*)\s*([^*]*)\*\*/;
@@ -46,15 +47,19 @@ export class PlanTaskTracker implements TaskTracker {
 
   next(): Task | null {
     const all = this.all();
-    return all.find((t) => t.state === "ready" && !waiting(t, all).length) ?? null;
+    return all.find((t) => t.state === "ready" && !t.waitsForPrd && !waiting(t, all).length) ?? null;
   }
 
   pick(who: Claimant): Picked {
     const all = this.all();
     const open = all.filter((t) => (t.state === "ready" || t.state === "in-progress") && !waiting(t, all).length);
-    const id = open.length ? claimTask(open.map((t) => t.id), who.agent, who.pid ?? process.pid, this.cfg) : null;
-    const t = open.find((x) => x.id === id);
-    return { task: t ? { ...t, state: "in-progress", holders: [who.agent] } : null };
+    // a ready task whose PRD change hasn't merged is skipped, and the note says so (#578)
+    const note = prdSkipNote(open.filter((t) => t.waitsForPrd).map((t) => ({ name: t.id, pr: t.waitsForPrd as string })));
+    const free = open.filter((t) => !t.waitsForPrd);
+    const id = free.length ? claimTask(free.map((t) => t.id), who.agent, who.pid ?? process.pid, this.cfg) : null;
+    const t = free.find((x) => x.id === id);
+    const picked: Picked = { task: t ? { ...t, state: "in-progress", holders: [who.agent] } : null };
+    return note ? { ...picked, note } : picked;
   }
 
   claim(id: string, who: Claimant): Task {
@@ -67,6 +72,10 @@ export class PlanTaskTracker implements TaskTracker {
     if (check === "mine") return t;
     if (check === "taken") throw new CoreError("task-taken", `${id} is already taken by ${t.holders[0] ?? "another agent"}.`, "Pick another task.");
     if (check === "blocked") throw new CoreError("task-blocked", `${id} is blocked (${this.cfg.blocked}).`, "Pick another task.");
+    if (check === "prd") {
+      throw new CoreError("task-waits-for-prd", `${id} waits for its PRD change, PR #${open[0]}, to merge.`,
+        `Pick another task: ${id} is ready once the owner merges PR #${open[0]}. To build it now, take the \`PRD change:\` line out of ${id} in ${this.cfg.plan}.`);
+    }
     if (check === "waiting") throw new CoreError("task-blocked", `${id} waits for ${open.join(", ")}.`, "Build the tasks it depends on first, or pick another task.");
     if (check === "not-ready") throw new CoreError("task-not-ready", `${id} is not ready.`, "Pick another task.");
     if (claimTask([id], who.agent, who.pid ?? process.pid, this.cfg) !== id) {
@@ -133,13 +142,16 @@ export class PlanTaskTracker implements TaskTracker {
     const lines = this.read(this.cfg.plan).split("\n");
     const blocked = blockedIds(this.read(this.cfg.blocked));
     const held = this.held();
+    const prds = new Map<number, boolean>();
     return parse(lines).map((l): Task => {
       const block = lines.slice(l.at + 1, l.end).join("\n");
       const holder = held[l.id];
       const state = l.done ? "done" : blocked.has(l.id) ? "blocked" : holder ? "in-progress" : "ready";
+      // a ready task's PRD change (#578) is looked up on GitHub, once per pull request; a task without the line asks nothing
+      const prd = state === "ready" ? prdWait(`${lines[l.at]}\n${block}`, prds) : null;
       return { id: l.id, title: l.title, state, holders: holder && !l.done ? [holder] : [],
         dependsOn: dependencies(`${lines[l.at]}\n${block}`, "plan"), todos: todos(block), group: l.group, tags: [],
-        cites: citesIn(`${lines[l.at]}\n${block}`) };
+        cites: citesIn(`${lines[l.at]}\n${block}`), ...(prd === null ? {} : { waitsForPrd: prd }) };
     });
   }
 

@@ -188,6 +188,20 @@ test("when an epic's last task is done on the board, the Epics page shows its st
   expect(e).toMatchObject({ stage: "done", done: 3, all: 3 });
 }, T);
 
+test("a task that waits for its PRD change's card shows as waiting, with a link to the PRD pull request, not as blocked by the card (#578)", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const card = await board.create({ title: "PRD change: #62 (Shelf v1.1)", kind: "note", body: "PRD change: #62", ref: `factory:${REPO}/prd-62` });
+  await board.link(id[12] as number, card.id, "waits_for");
+  const ui = await started(workProject(), url);
+  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const t = byId(json);
+  expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9"]); // the card is not a task
+  expect(t["12"]).toMatchObject({ state: "blocked", stateText: "waits for its PRD", blockedBy: [], next: false,
+    prd: { number: 62, url: `https://github.com/${REPO}/pull/62` } });
+  expect(t["11"]?.prd).toBeNull();
+}, T);
+
 function problemsOf(json: Row): string[] {
   return ((json.problems as Row[] | undefined) ?? []).map((p) => String(p.code));
 }

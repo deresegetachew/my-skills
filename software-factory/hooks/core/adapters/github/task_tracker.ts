@@ -7,13 +7,13 @@ import { claimRecord } from "../../../factory_budget.ts";
 import { citesIn } from "../../../factory_cites.ts";
 import { type Config, taskLabels } from "../../../factory_config.ts";
 import { addLabels, claimSettleSeconds, claimWinner, comment, gh, ghAll, humanComments, type Issue, names, openDependencies,
-  isEpic, ownIssue, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
+  isEpic, ownIssue, prdWait, readyIssues, releaseIssue, removeLabel, sortedByOrder, taskIssues, waitingForSlot } from "../../../factory_issues.ts";
 import { sleepSync } from "../../../factory_lib.ts";
 import { claimCopy, holderIsMe, holderName, leasesOn } from "../../../factory_leases.ts";
 import { type Claimant, isMe } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
 import { type Epic, parseEpic } from "../../domain/epic.ts";
-import { checkClaim, dependencies, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
+import { checkClaim, dependencies, prdSkipNote, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
 import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
 
 /** How long a task claim on the board lasts when nothing releases it (#412): a week. A release, a block, giving it back and
@@ -24,7 +24,8 @@ export class GithubTaskTracker implements TaskTracker {
   constructor(private readonly cfg: Config) {}
 
   list(): Task[] {
-    return sortedByOrder(taskIssues().filter((i) => !isEpic(i))).map((i) => this.task(i));
+    const prds = new Map<number, boolean>();
+    return sortedByOrder(taskIssues().filter((i) => !isEpic(i))).map((i) => this.task(i, prds));
   }
 
   epics(): Epic[] {
@@ -47,8 +48,9 @@ export class GithubTaskTracker implements TaskTracker {
   }
 
   next(): Task | null {
-    const i = readyIssues(this.cfg)[0];
-    return i ? this.task(i) : null;
+    const prds = new Map<number, boolean>();
+    const i = readyIssues(this.cfg, taskIssues(), [], prds)[0];
+    return i ? this.task(i, prds) : null;
   }
 
   pick(who: Claimant): Picked {
@@ -62,10 +64,15 @@ export class GithubTaskTracker implements TaskTracker {
       // Its branch is pushed but the PR can't open yet: wait instead of a session that the gate stops, and don't take
       // new work meanwhile. The next pick after a merge frees a slot opens the PR.
       if (full) return { task: null, note: `#${i.number} is ready on its branch and waits for a pull-request slot (${full}).` };
-      return { task: this.task(i) }; // carry on with what this agent already holds
+      return { task: this.task(i, new Map()) }; // carry on with what this agent already holds
     }
-    for (const i of readyIssues(this.cfg)) if (this.take(i, who)) return { task: { ...this.task(i), state: "in-progress", holders: [who.agent] } };
-    return { task: null };
+    // the ready ones held back only for their PRD change (#578) are named in the note, claimed or not
+    const held: { issue: Issue; pr: string }[] = [];
+    const prds = new Map<number, boolean>();
+    const ready = readyIssues(this.cfg, taskIssues(), held, prds);
+    const note = prdSkipNote(held.map((h) => ({ name: `#${h.issue.number}`, pr: h.pr })));
+    for (const i of ready) if (this.take(i, who)) return withNote({ task: { ...this.task(i, prds), state: "in-progress", holders: [who.agent] } }, note);
+    return withNote({ task: null }, note);
   }
 
   claim(id: string, who: Claimant): Task {
@@ -74,7 +81,7 @@ export class GithubTaskTracker implements TaskTracker {
     const i = gh<Issue | null>("GET", `repos/{owner}/{repo}/issues/${n}`, undefined, true);
     if (!i || i.state !== "open" || "pull_request" in i) throw notFound(id);
     if (isEpic(i)) throw new CoreError("issue-epic", `#${n} is an epic, not a task.`, "Claim one of the tasks it lists instead, or run `factory next`.");
-    const t = this.task(i);
+    const t = this.task(i, new Map());
     const [check, open] = checkClaim(t, who.agent, () => ownIssue(n, who.agent, who.machine),
       () => openDependencies(i, new Set(taskIssues().map((x) => x.number)), new Map()).map(String));
     if (check === "mine") return t;
@@ -83,6 +90,10 @@ export class GithubTaskTracker implements TaskTracker {
         "Pick another issue, or ask the dev manager to release it with `factory issues release`.");
     }
     if (check === "blocked") throw new CoreError("issue-blocked", `#${n} is blocked.`, "Wait for the dev manager to unblock it, or pick another issue.");
+    if (check === "prd") {
+      throw new CoreError("issue-waits-for-prd", `#${n} waits for its PRD change, PR #${open[0]}, to merge.`,
+        `Pick another issue: #${n} is ready once the owner merges PR #${open[0]}. To build it now, the owner takes the \`PRD change:\` line out of #${n}.`);
+    }
     if (check === "waiting") {
       throw new CoreError("issue-blocked", `#${n} waits for ${open.map((d) => "#" + d).join(", ")}.`,
         "Build the issues it depends on first, or pick another issue.");
@@ -178,7 +189,8 @@ export class GithubTaskTracker implements TaskTracker {
     return false;
   }
 
-  private task(i: Issue): Task {
+  /** Issue `i` as a task. `prds` caches the PRD changes looked up, so a list asks GitHub once per pull request. */
+  private task(i: Issue, prds: Map<number, boolean>): Task {
     const L = taskLabels(this.cfg);
     const have = names(i);
     const state: TaskState = i.state !== "open" ? "done" : have.has(L.inProgress) ? "in-progress" : have.has(L.inReview) ? "in-review" :
@@ -186,8 +198,19 @@ export class GithubTaskTracker implements TaskTracker {
     const body = i.body ?? "";
     return { id: String(i.number), title: i.title, state, holders: [...have].filter((x) => x.startsWith(L.agentPrefix))
       .map((x) => x.slice(L.agentPrefix.length)), dependsOn: dependencies(body, "issue"), todos: todos(body),
-    group: i.milestone?.title ?? "", tags: [...have], cites: citesIn(body) };
+    group: i.milestone?.title ?? "", tags: [...have], cites: citesIn(body), ...this.prd(i, state, prds) };
   }
+
+  /** `waitsForPrd` for a ready or new task whose PRD change hasn't merged (#578). One held, blocked, in review or done waits
+   * for nothing, and costs no look. */
+  private prd(i: Issue, state: TaskState, prds: Map<number, boolean>): { waitsForPrd?: string } {
+    const pr = state === "ready" || state === "new" ? prdWait(i.body ?? "", prds) : null;
+    return pr === null ? {} : { waitsForPrd: pr };
+  }
+}
+
+function withNote(p: Picked, note: string | undefined): Picked {
+  return note ? { ...p, note } : p;
 }
 
 function notFound(id: string): CoreError {

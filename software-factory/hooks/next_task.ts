@@ -33,6 +33,10 @@
 // Board mode (`tasks.source: "board"`, #500): the same, on the message board; a task is printed by its id (the issue
 // number for a task that came from GitHub, b<n> for one filed on the board), and `--issue N` works there too.
 //
+// A task from a PRD change (a `PRD change: #62` line, or on the board a link to the change's card, #578) is skipped until
+// that pull request merges, in every mode: one line on stderr says so ("Skipped #5: it waits for its PRD change, PR #62,
+// to merge.").
+//
 // Reads the plan and blocked list from the main branch when it can (`git show origin/<main>:...`), so a stale
 // working copy can't make the agent skip or repeat a task.
 //
@@ -42,7 +46,7 @@ import { join } from "node:path";
 import { type Config, load, taskSource, toFloat } from "./factory_config.ts";
 import { compose } from "./core/compose.ts";
 import { CoreError } from "./core/domain/error.ts";
-import type { Task } from "./core/domain/task.ts";
+import { prdSkipNote, type Task } from "./core/domain/task.ts";
 import type { TaskTracker } from "./core/ports/task_tracker.ts";
 import { staleClaims } from "./factory_agents.ts";
 import { claimRework, claimTask, describeRework, isMine, release, reworkHolder } from "./factory_claims.ts";
@@ -235,7 +239,9 @@ function main(argv: string[]): number {
   // Plan mode claims through the local claims file below, together with any rework, so only the list comes from the port.
   const listed = tracker.list();
   const blocked = new Set(listed.filter((t) => t.state === "blocked").map((t) => t.id));
-  let openTasks: Job[] = listed.filter((t) => t.state !== "blocked" && !waits(t, listed)).map((t): Job => [t.id, t.title]);
+  const free = listed.filter((t) => t.state !== "blocked" && !waits(t, listed));
+  sayPrdSkips(free);
+  let openTasks: Job[] = free.filter((t) => !(t.state === "ready" && t.waitsForPrd)).map((t): Job => [t.id, t.title]);
   if (a.after) {
     const ids = openTasks.map(([i]) => i);
     if (ids.includes(a.after)) openTasks = openTasks.slice(ids.indexOf(a.after) + 1);
@@ -279,6 +285,20 @@ function waits(t: Task, open: Task[]): boolean {
   return t.dependsOn.some((d) => open.some((x) => x.id === d));
 }
 
+/** On stderr, one line per ready task in `tasks` held back for its PRD change (#578). */
+function sayPrdSkips(tasks: Task[]): void {
+  const note = prdSkipNote(tasks.filter((t) => t.state === "ready" && t.waitsForPrd)
+    .map((t) => ({ name: /^\d+$/.test(t.id) ? `#${t.id}` : t.id, pr: t.waitsForPrd as string })));
+  if (note) process.stderr.write(note + "\n");
+}
+
+/** `factory next` only looks (`next()`), which says nothing of what it passed over: the open tasks' list does (#578). */
+function lookAndSay(tracker: TaskTracker): Task | null {
+  const t = tracker.next();
+  sayPrdSkips(tracker.list());
+  return t;
+}
+
 /** --claim AGENT --issue N: claim exactly that issue, or refuse with {code, message, fix} and change nothing. */
 function namedIssue(tracker: TaskTracker, a: Args): number {
   let t: Task;
@@ -317,7 +337,7 @@ function issuesMode(cfg: Config, tracker: TaskTracker, a: Args): number {
       const picked = tracker.pick({ agent: a.claim, machine: machineId() });
       if (picked.note) process.stderr.write(picked.note + "\n");
       t = picked.task;
-    } else t = tracker.next();
+    } else t = lookAndSay(tracker);
     if (t) {
       jobs = [[`issue-${t.id}`, t.title]];
       if (a.claim) ping(a.claim, Number(t.id));
@@ -354,7 +374,7 @@ function boardMode(cfg: Config, tracker: TaskTracker, a: Args): number {
         const picked = tracker.pick({ agent: a.claim, machine: machineId() });
         if (picked.note) process.stderr.write(picked.note + "\n");
         t = picked.task;
-      } else t = tracker.next();
+      } else t = lookAndSay(tracker);
     }
   } catch (e) {
     if (!(e instanceof CoreError)) throw e;

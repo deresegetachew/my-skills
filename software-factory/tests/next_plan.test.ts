@@ -3,7 +3,8 @@
 import { afterAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
-import { runHook, tmp, write } from "./support.ts";
+import { FAKE_GH, issue } from "./issues_support.ts";
+import { runHook, tmp, write, writeExe } from "./support.ts";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -40,4 +41,17 @@ test("--json lists the plan's blocked tasks, not a blocked line for a task that 
   const d = project("## Phase 1\n\n- [x] **1.1 One.**\n- [ ] **1.2 Two.**\n- [ ] **1.3 Three.**\n",
     "# Blocked\n\n- 1.1: was waiting\n- 1.2: needs keys\n- 9.9: gone\n");
   expect(JSON.parse(next(d, "--json")[1])).toEqual({ id: "1.3", title: "Three", remaining: 1, blocked: ["1.2"] });
+});
+
+test("a plan task whose PRD change hasn't merged is skipped with a line saying why, and is next once it merges (#578)", () => {
+  const d = project("## Phase 1\n\n- [ ] **1.1 Shelf search.** Build.\n  PRD change: #62\n- [ ] **1.2 Two.** Build.\n");
+  writeExe(join(d, "bin", "gh"), FAKE_GH);
+  const db = write(join(d, "gh-db.json"), JSON.stringify({ issues: [{ ...issue(62, []), pull_request: { url: "https://x/pulls/62", merged_at: null } }] }));
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: d, PATH: `${d}/bin:${process.env.PATH}`, FAKE_GH_DB: db, FACTORY_AGENT: undefined, FACTORY_PID: undefined };
+  let p = runHook("next_task", ["--no-rework"], { cwd: d, env });
+  expect([p.code, p.stdout.trim()]).toEqual([0, "1.2 Two"]);
+  expect(p.stderr).toContain("Skipped 1.1: it waits for its PRD change, PR #62, to merge.");
+  write(db, JSON.stringify({ issues: [{ ...issue(62, []), state: "closed", pull_request: { url: "https://x/pulls/62", merged_at: "2026-11-07T09:00:00Z" } }] }));
+  p = runHook("next_task", ["--no-rework"], { cwd: d, env });
+  expect([p.code, p.stdout.trim(), p.stderr]).toEqual([0, "1.1 Shelf search", ""]);
 });

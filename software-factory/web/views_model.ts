@@ -28,6 +28,8 @@ export interface TaskRow {
   blockedBy?: string[];
   url: string | null;
   pr: { number: number; url: string | null; checks?: { state: string; failing: string[] } } | null;
+  /** The PRD change it waits for, while that pull request hasn't merged (#578); missing or null with none. */
+  prd?: { number: number; url: string | null } | null;
   next: boolean;
   /** What the board offers on it (#439): release, block, reassign. */
   actions?: string[];
