@@ -24,7 +24,7 @@ import { dirname, join } from "node:path";
 import { type Config, taskSource, toFloat } from "./factory_config.ts";
 import { now as clockNow } from "./factory_clock.ts";
 import { agentIssues, current, fields, roleOf, stateOf } from "./factory_agents.ts";
-import { type HeartbeatRow, isFresh, loadLocal, observe } from "./factory_heartbeat.ts";
+import { type HeartbeatRow, isFresh, loadLocal, observe, withTalks } from "./factory_heartbeat.ts";
 import type { Issue } from "./factory_issues.ts";
 import { machineId, machineNames, stateDir } from "./factory_machine.ts";
 import { Exit, isoUtc, parseIso, pyDumps } from "./factory_lib.ts";
@@ -82,7 +82,8 @@ interface DaemonInfo {
 function localRows(cfg: Config): [LsRow[], DaemonInfo] {
   const data = loadLocal();
   const fresh = isFresh(data);
-  const agents = (fresh ? data.agents || {} : observe(cfg)) as Record<string, HeartbeatRow>;
+  // a talk that began since the daemon's last look shows at once (observe() adds the talks itself)
+  const agents = (fresh ? withTalks({ ...(data.agents || {}) }) : observe(cfg)) as Record<string, HeartbeatRow>;
   const seen = fresh ? (data.updated as number | undefined) : clockNow();
   const rows: LsRow[] = [];
   const names = machineNames();

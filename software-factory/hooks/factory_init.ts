@@ -9,10 +9,13 @@
 //   - the owner queue issue, "Dev manager: needs the owner", where the roles ask the owner (stage approvals too)
 //   - a starter PRD at the `prd` path, with the story format `factory prd` reads
 //   - the pull request template for a PRD change (`.github/PULL_REQUEST_TEMPLATE/prd-change.md`; `install.sh` adds it too)
+//   - on this machine, the heartbeat daemon (`factory heartbeat ensure`): installed if missing, started if stopped, so
+//     `factory agents ls` and the web UI show what each agent is doing; a failure is told with its fix, and init goes on
 // It never overwrites a file. Then it prints the next steps from an empty folder to a first milestone. Needs `gh` signed in.
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Config, load, ROLE_NAMES, rolesDir } from "./factory_config.ts";
+import { ensureDaemon } from "./factory_heartbeat.ts";
 import { ghAll, setupLabels } from "./factory_issues.ts";
 import { ownerQueue } from "./factory_orchestrator.ts";
 import { init as initRoles } from "./factory_roles.ts";
@@ -28,6 +31,7 @@ Makes what is missing, and says what it made (running it again adds nothing and 
   - the owner queue issue, "Dev manager: needs the owner", where the roles ask the owner (stage approvals too)
   - a starter PRD at the \`prd\` path, with the story format \`factory prd\` reads
   - the pull request template for a PRD change (\`.github/PULL_REQUEST_TEMPLATE/prd-change.md\`; \`install.sh\` adds it too)
+  - on this machine, the heartbeat daemon (\`factory heartbeat ensure\`): installed if missing, started if stopped
 It never overwrites a file. Then it prints the next steps from an empty folder to a first milestone. Needs \`gh\` signed in.
 `;
 
@@ -122,7 +126,10 @@ export function init(cfg: Config, dry = false): string[] {
 export function main(a: string[]): void {
   if (a.some((x) => x !== "--dry-run")) die(DOC);
   const cfg = load();
-  console.log(init(cfg, a.includes("--dry-run")).join("\n"));
+  const dry = a.includes("--dry-run");
+  console.log(init(cfg, dry).join("\n"));
+  // the agents' state on this machine, live: the heartbeat daemon, installed and started once (safe to run twice)
+  console.log(dry ? "would make sure the heartbeat daemon runs here (`factory heartbeat ensure`)" : ensureDaemon().join("\n"));
   console.log("\n" + NEXT);
 }
 

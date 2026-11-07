@@ -25,6 +25,9 @@
 //                                              #456): the team, project settings staged and proposed as one pull request,
 //                                              this machine's saved at once, update, the clean-ups
 //   POST /api/projects/:p/tasks/:id/actions/:name  the board's release, block and reassign (#439): factory_ui_views.ts
+//   GET  /api/projects/:p/pull-requests/:n      a pull request's page (#453), read when it opens and kept until its head
+//                                              changes; POST .../pull-requests/:n/actions/:name the owner's merge, ready,
+//                                              comment, request-changes and close (factory_ui_pr.ts)
 //   GET  /api/projects/:p/tasks/:id            a task's page from the message board (#498): the task, its thread and its
 //                                              context entries (404 ui_board_absent when its tasks aren't on a board)
 //   GET|POST /api/add-project[/check|/runs/:id[/retry]]: add a project from the page (factory_ui_add.ts, #447); the
@@ -47,7 +50,8 @@ import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { settingsApi } from "./factory_ui_settings.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
 import { BoardFeed } from "./factory_ui_board.ts";
-import { ciAction, Refresher, repoOfProject, taskAction, viewsOf } from "./factory_ui_views.ts";
+import { ciAction, pullRowOf, Refresher, repoOfProject, taskAction, viewsOf } from "./factory_ui_views.ts";
+import { prAction, PrPages } from "./factory_ui_pr.ts";
 
 export interface ServeOptions {
   hosts: string[];
@@ -177,6 +181,7 @@ export function serve(o: ServeOptions): Running {
   const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
     changed: (p) => pushViews(p), fellBack: (p, wasLive) => refresher.tasksNeeded(p, wasLive), log: (line) => console.log(line) });
   const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
+  const prPages = new PrPages(); // a pull request's page (#453), kept until its head changes
   void feed.start();
   function viewsMessage(p: UiProject): string {
     return JSON.stringify({ type: "views", project: p.id, ...viewsOf(p, refresher.running(p), Date.now(), feed.view(p)) });
@@ -346,6 +351,21 @@ export function serve(o: ServeOptions): Running {
       const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null), feed.view(p).part, feed);
       // read again, started (or queued after a running read) before the answer, which comes at once (#519)
       if (r.status === 200 || r.status === 500) void refresher.readAgain(p);
+      return json(r.status, r.body);
+    }
+    if (rest[0] === "pull-requests" && (rest.length === 2 || (rest.length === 4 && rest[2] === "actions"))) { // #453
+      const n = rest[1] as string;
+      if (rest.length === 2) {
+        if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
+        const r = await prPages.detail(p, n, pullRowOf(p, n), url.searchParams.get("fresh") === "1");
+        return json(r.status, r.body);
+      }
+      if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
+      const r = await prAction(p, n, rest[3] as string, await req.json().catch(() => null), feed);
+      if (r.status === 200 || r.status === 500) {
+        prPages.forget(p, n); // the next look reads it again
+        void refresher.readAgain(p); // and the list, at once
+      }
       return json(r.status, r.body);
     }
     if (rest[0] === "tasks" && rest.length === 2) { // a task's page from the message board (#498)

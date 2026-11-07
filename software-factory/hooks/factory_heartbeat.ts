@@ -22,10 +22,15 @@
 // agent), and a one-item sub-manager by the orchestrator's pid file (`<git-common-dir>/factory-manager/<manager>.d/
 // <item>.pid`), named `<manager>-<item>`. A sub-manager's row stays on this machine: it has no agent issue, and one
 // that exits in seconds is simply gone at the next look.
-//   down      no live loop or Claude process holds the agent's checkout
+//   down      no live loop or Claude process holds the agent's checkout, and none runs in its tmux session
 //   waiting   alive, and a `factory wait` runs below it: deliberately blocked (a PR slot, CI, an answer, a merge)
-//   working   alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (#366)
+//   working   alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (#366); also a
+//             dev manager or product owner the owner is talking to (`factory talk`, factory_talks.ts): "talking with
+//             the owner"
 //   idle      alive, no task, and quiet
+//
+// A loop counts as alive by its checkout claim, or, with no live claim, by a factory loop (or Claude session) running in
+// the panes of its tmux session `<repo>-<name>`. So `factory agents ls` (and the web UI) is right without the daemon too.
 //
 // What it saw goes to this machine's state file every cycle (`heartbeat.json` in the state folder, see `factory
 // machine show`), which `factory agents ls` reads: instant, no network. GitHub is written (one PATCH of the agent's own
@@ -50,6 +55,7 @@
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts once        one cycle, then print what it saw
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts status      is it installed and running, and what it last saw
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts install     keep it running: a systemd user service or a LaunchAgent
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts ensure      install it if missing, start it if stopped (the setup paths do this)
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts uninstall
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_heartbeat.ts restart     run the files now on disk (`factory update` does it)
 //
@@ -63,9 +69,10 @@ import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { type Config, load, roleNames, taskSource, toFloat } from "./factory_config.ts";
 import { now as clockNow } from "./factory_clock.ts";
-import { alive as claimAlive, type Claim, pidAlive, stateDir as claimsStateDir } from "./factory_claims.ts";
+import { alive as claimAlive, type Claim, isLoopCommand, pidAlive, stateDir as claimsStateDir } from "./factory_claims.ts";
+import { TALKING, talksNow } from "./factory_talks.ts";
 import { agentIssues, current, fields, nameOf, recall, remember, update } from "./factory_agents.ts";
-import { installCli, restartCli, serviceText, uninstallCli } from "./factory_heartbeat_service.ts";
+import { ensureCli, ensureLines, installCli, restartCli, serviceText, uninstallCli } from "./factory_heartbeat_service.ts";
 import { machineId, machineNames, refuse, repoKey, stateDir } from "./factory_machine.ts";
 import { sessionName } from "./factory_resume.ts";
 import { limitStatus } from "./factory_views_cache.ts";
@@ -342,6 +349,12 @@ export function isFresh(data: LocalState, now: number | null = null): boolean {
   return Object.keys(data).length > 0 && age >= 0 && age <= wait;
 }
 
+/** For a setup path (`factory init`, `factory owner start`): install the daemon if missing, start it if stopped. The
+ *  lines to print; a failure is told with its fix, never thrown. */
+export function ensureDaemon(): string[] {
+  return ensureLines(isFresh(loadLocal()));
+}
+
 /** Whether the daemon on this machine is running and looks after `agent` (so the hooks need not write). */
 export function managed(agent: string): boolean {
   try {
@@ -467,6 +480,55 @@ function logOf(pid: number): string | null {
   }
 }
 
+/** The pid of the factory loop (or an agent's Claude session) that runs in tmux session `session`: the first one in its
+ *  panes' process trees, from `ps`. Null when the session has none, or tmux can't list its panes. */
+function loopInSession(ps: Procs, session: string): number | null {
+  const kids = new Map<number, number[]>();
+  for (const [pid, [ppid]] of ps) {
+    if (!kids.has(ppid)) kids.set(ppid, []);
+    (kids.get(ppid) as number[]).push(pid);
+  }
+  for (const line of splitLines(tmux("list-panes", "-s", "-t", `=${session}`, "-F", "#{pane_pid}") || "")) {
+    if (!/^\d+$/.test(line.trim())) continue;
+    const queue = [Number(line.trim())];
+    const seen = new Set<number>();
+    while (queue.length) {
+      const pid = queue.shift() as number;
+      if (seen.has(pid)) continue;
+      seen.add(pid);
+      const args = ps.get(pid)?.[1];
+      if (args && isLoopCommand(args)) return pid;
+      queue.push(...(kids.get(pid) ?? []));
+    }
+  }
+  return null;
+}
+
+/** Every name the project gives an agent: its coding agents, dev managers and product owners. */
+function projectNames(cfg: Cfg): string[] {
+  const agents = Array.isArray(cfg.agents) ? (cfg.agents as unknown[]).map(String) : [];
+  return [...agents, ...NAMED_ROLES.flatMap((role) => roleNames(cfg as Config, role))];
+}
+
+/** Rows with the talks running here (factory_talks.ts): a role the owner is talking to (`factory talk`) is working,
+ *  "talking with the owner", unless it already works or waits on something of its own. */
+export function withTalks(rows: Record<string, HeartbeatRow>, procs: Procs | null = null): Record<string, HeartbeatRow> {
+  let ps = procs;
+  const isTalk = (pid: number): boolean => {
+    ps ??= processes();
+    const args = ps.get(pid)?.[1];
+    return args === undefined ? ps.size === 0 : /factory_talk\.ts/.test(args); // no ps to ask: the pid alone decides
+  };
+  for (const t of talksNow(isTalk)) {
+    const row = rows[t.name];
+    if (row && (row.state === "working" || row.state === "waiting")) continue;
+    rows[t.name] = { ...(row ?? { name: t.name, kind: t.role, machine: machineId(), path: null, pid: null, session: null,
+      follow: null, activity: null, runs: "", log: null }), state: "working", detail: TALKING, task: null, on: null,
+    kind: t.role, since: isoUtc(t.at) };
+  }
+  return rows;
+}
+
 /** {agent: row}: what this machine shows about each agent, derived and not yet reported anywhere. */
 export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, HeartbeatRow> {
   const stale = toFloat(cfg.claimStaleHours ?? 6) ?? 6;
@@ -483,10 +545,16 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
   const me = machineId();
   const now = clockNow();
   const rows: Record<string, HeartbeatRow> = {};
-  for (const name of knownAgents(checkouts)) {
+  // A name with a session here counts too: its loop may run without a claim this clone can see (#3 of the liveness issue)
+  const known = knownAgents(checkouts);
+  const inTmux = projectNames(cfg).filter((n) => sessions.has(sessionName(n)));
+  for (const name of [...new Set([...known, ...inTmux])]) {
     const claim = checkouts[name] || {};
-    const alive = Object.keys(claim).length > 0 && claimAlive(claim, stale, true);
-    const pid = alive ? Math.trunc(Number(claim.pid)) : null;
+    const claimed = Object.keys(claim).length > 0 && claimAlive(claim, stale, true);
+    // no live claim: the loop (or Claude session) running in the agent's tmux session says it is alive all the same
+    const pid = claimed ? Math.trunc(Number(claim.pid)) : sessions.has(sessionName(name)) ? loopInSession(ps, sessionName(name)) : null;
+    const alive = pid !== null;
+    if (!alive && !known.includes(name)) continue; // a session with no loop in it, for a name nobody expects here
     const task = alive ? (Object.entries(tasks).find(([, c]) => c.agent === name && claimAlive(c, stale))?.[0] ?? null) : null;
     const wait = alive ? limitUntil(waitsInTree(ps, pid as number)) : null;
     const session = sessionName(name);
@@ -509,7 +577,7 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
     rows[name] = row;
   }
   for (const [name, row] of Object.entries(subManagers(ps, me))) if (!(name in rows)) rows[name] = row;
-  return rows;
+  return withTalks(rows, ps);
 }
 
 // --- reporting to GitHub -----------------------------------------------------------------------------------------
@@ -666,9 +734,10 @@ async function main(argv: string[]): Promise<void> {
   }
   if (cmd === "status") return status();
   if (cmd === "install") return installCli();
+  if (cmd === "ensure") return ensureCli(isFresh(loadLocal()));
   if (cmd === "uninstall") return uninstallCli();
   if (cmd === "restart") return restartCli();
-  refuse("unknown-command", `unknown command ${pyRepr(cmd)}.`, "Use status, run, once, install, uninstall or restart.");
+  refuse("unknown-command", `unknown command ${pyRepr(cmd)}.`, "Use status, run, once, install, ensure, uninstall or restart.");
 }
 
 if (import.meta.main) await runMain(() => main(process.argv.slice(2)));

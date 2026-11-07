@@ -123,7 +123,8 @@ export function startLoop(role: string, name: string, rest: string[]): Started {
         `Name one: factory ${role} <name> loop -i, or stop one of them first.`);
     }
     s = startWindow({ role, name, dir: top, argv: [join(top, "factory"), "loop", ...rest],
-      env: { ...carried(), FACTORY_ROLE: role, FACTORY_NAME: name } });
+      // no "How is Claude doing?" survey in an agent's session: it swallows what `factory say` types under it (#558)
+      env: { ...carried(), FACTORY_ROLE: role, FACTORY_NAME: name, CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" } });
   } catch (e) {
     if (e instanceof WindowError) refuse(e.code, e.message, e.fix);
     throw e;
