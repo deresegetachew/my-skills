@@ -31,7 +31,8 @@ import { todos } from "./core/domain/task.ts";
 import type { Obj, Problem, UiProject } from "./factory_ui_data.ts";
 
 /** The actor the web UI reads and writes as. It writes only a card's Release, Block and Reassign, and only for a project
- *  whose tasks.source is board (#502); otherwise those go through GitHub (0007 point 9). */
+ *  whose tasks.source is board (#502); otherwise those go through GitHub (0007 point 9). It also posts the owner's
+ *  "request changes" on a pull request to its author, as a verdict message (#453). */
 export const ACTOR = "web-ui";
 const RETRY_MS = 5_000;
 const CHECK_MS = 5_000;
@@ -307,6 +308,17 @@ export class BoardFeed {
     if (!task) throw { code: "ui_task_unknown", message: `${taskName(id)} isn't one of ${p.name}'s tasks on the message board.`, fix: "Read the board again, then pick a task it shows." };
     if (action === "reassign") return board.assign(task.id, to, { reason });
     return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
+  }
+
+  /** "Request changes" on a pull request (#453): a verdict message to `to` on task `id`'s thread (an issue number or
+   *  b<id>), as the dev manager's verdicts reach a builder. Null when this project's tasks aren't on the board. */
+  async verdict(p: UiProject, id: string | null, to: string, body: string): Promise<string | null> {
+    const board = this.board;
+    if (!board || !this.live(p)) return null;
+    const prefix = prefixOf(this.o.repoOf(p));
+    const task = id ? this.all.find((t) => numberOf(t, prefix) === id) : undefined;
+    await board.post({ task: task?.id ?? null, kind: "verdict", to, body });
+    return task ? `Told ${to} on the message board, on #${id}'s thread.` : `Told ${to} on the message board.`;
   }
 
   stop(): void {

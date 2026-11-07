@@ -640,7 +640,9 @@ What is planned:
 - **US-37.** As the owner, an Integrations tab lists what the factory connects to and what each agent may use, and a
   change to what governs an agent is proposed as a pull request I merge. *Proposal (#441).*
 - **US-38.** As the owner, a task, a pull request and an agent each have a page of their own, and search covers
-  everything. *Decided (#452, #453).*
+  everything. *Decided (#452, #453). A pull request's page is built (#453): its description, who opened it, its tasks,
+  checks, reviews, protected files and diff (a Markdown file read as a page), and Merge, Mark ready, Ask for changes,
+  Comment and Close, each asked first; the task and agent pages and search across everything are still to come.*
 - **US-39.** As the owner, the web UI works on a phone: a bottom tab bar and big buttons for approvals, and every page
   fits at phone width. *Decided (#458).*
 

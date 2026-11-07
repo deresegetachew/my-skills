@@ -26,6 +26,7 @@ import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx"
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
 import { MaintenancePage, ReleasesPage, SETTINGS_CSS, SettingsPage } from "./settings.tsx";
 import { SIGNOFF_CSS, SignoffPage } from "./signoff.tsx";
+import { PR_CSS, PrPage } from "./pr.tsx";
 import { CSS } from "./style.ts";
 import { THEME_CSS } from "./theme.ts";
 import { nextTheme, THEME_KEY, themeLabel, themeOf } from "./theme_model.ts";
@@ -490,6 +491,12 @@ const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel
 
 // --- the app -----------------------------------------------------------------------------------------------------------
 
+/** What the list knows of pull request `n` that changes its page: a new head, new checks, a draft made ready (#453). */
+function prRowKey(v: ViewsData | undefined, n: string): string {
+  const r = v?.pulls.pulls.find((x) => String(x.number) === n);
+  return r ? `${r.head ?? ""}|${r.checks.state}|${r.draft}|${r.next.action}` : "";
+}
+
 /** The page the address bar names; a page's own name (`page:board`) is read as the address it opens. */
 function routeOf(hash: string): { project: string; channel: string; task: string | null } | null {
   const r = parseHash(hash);
@@ -703,11 +710,12 @@ function App() {
   const docPages = pagesOf(docsBy[project.id]);
   const docPage = docRoute ? docPages.find((d) => d.id === docRoute.id) : undefined;
   const channel = view.channels.find((c) => c.id === route?.channel);
-  const pageRoute = route?.channel?.startsWith("page:") || route?.channel?.startsWith("signoff:");
+  const pageRoute = route?.channel?.startsWith("page:") || route?.channel?.startsWith("signoff:") || route?.channel?.startsWith("pr:");
   const page = channel || docRoute ? pageOf(route?.channel ?? "") : pageOf(pageRoute ? route?.channel ?? "" : "page:home");
   const signoffId = route?.channel?.startsWith("signoff:") ? route.channel.slice("signoff:".length) : null;
+  const prNumber = route?.channel?.startsWith("pr:") ? route.channel.slice("pr:".length) : null; // a pull request's page (#453)
   // the pages that write their own header from their data (#454)
-  const ownHead = !project.problem && !docRoute && !channel && (page === "signoff" || page === "artifacts");
+  const ownHead = !project.problem && !docRoute && !channel && (page === "signoff" || page === "artifacts" || prNumber !== null);
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
   const go = (p: string, c: string, f = ""): void => {
@@ -895,6 +903,8 @@ function App() {
           : page === "docs" ? <DocsIndex key={project.id} sections={docsBy[project.id]} open={(c) => go(project.id, c)} />
           : ownHead && page === "signoff" ? <SignoffPage key={project.id} project={project} id={signoffId} token={token} get={get} post={post} say={setToast}
             talkers={talkTargets(view.channels.filter((c) => c.kind === "agent"))} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} />
+          : ownHead && prNumber !== null ? <PrPage key={`${project.id}/${prNumber}`} project={project} number={prNumber} docs={docPages} get={get} post={post}
+            say={setToast} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} rowKey={prRowKey(viewsBy[project.id], prNumber)} />
           : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
           : !channel && SETTINGS_PAGES[page] ? (() => {
@@ -922,6 +932,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);
