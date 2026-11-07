@@ -329,7 +329,10 @@ until he agrees them."
   kept. `factory doctor` checks that the workflow matches `factory.json` (#205, #224). *Built,
   including `factory init` for an empty folder (#148).* (#102, #103, #199, #205)
 - **U13.** As the owner, the machines come back after a reboot: `factory autostart` starts the dev stack and this machine's
-  agents in detached tmux sessions. *Built.* (#88)
+  agents in detached tmux sessions. *Built.* (#88) *No tmux (D16, #526) moves this to background services.*
+
+Planned, after #526: one compiled `factory` binary (`bun build --compile`) with the kit files embedded and the hooks
+run as `factory hook <name>`. *Decided (owner, 7 Nov 2026); decision 0008, not written yet.*
 
 ### 4.7 CI runners
 
@@ -700,8 +703,7 @@ processes per test) still apply.
 
 - **Agent runtime** (owner, 7 Nov 2026): Claude Code is the only supported agent; its hooks are the Claude adapter. The
   real locks stay server-side (branch protection, the CI guard, the board), so another agent (Codex, Gemini) can be
-  added later without hooks. Later: one compiled `factory` binary (`bun build --compile`) with the kit files embedded
-  and the hooks run as `factory hook <name>`.
+  added later without hooks. (The compiled `factory` binary is planned: section 4.6, decision 0008.)
 - **A VS Code extension on stable APIs**, as a second screen on the same core as the web UI. (#295)
 - **An A2A adapter** for the message envelope, in the heartbeat daemon, beside the GitHub and board transports; a later
   step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)
