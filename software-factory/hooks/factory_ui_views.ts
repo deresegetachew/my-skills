@@ -606,6 +606,8 @@ export class Refresher {
   private readonly queued = new Set<string>();
   /** The read asked for (readAgain) while one ran, per project: it starts when that one ends. */
   private readonly after = new Map<string, Promise<void>>();
+  /** How many reads were started or queued, per project (the views' `reads`). */
+  private readonly count = new Map<string, number>();
 
   /** `fromBoard(p)`: project `p`'s tasks come from the message board (#498), so its snapshot leaves them out
    *  (FACTORY_SNAPSHOT_TASKS=board) and reads only what the board doesn't have: pull requests, CI, agents. null: not
@@ -625,12 +627,22 @@ export class Refresher {
     return this.busy.has(p.id);
   }
 
+  /** How many reads of `p` this server has started or queued: one more as soon as a read is asked for and taken. */
+  reads(p: UiProject): number {
+    return this.count.get(p.id) ?? 0;
+  }
+
+  private counted(p: UiProject): void {
+    this.count.set(p.id, this.reads(p) + 1);
+  }
+
   /** Starts a read unless one runs; `force` (the page's read again) ignores when the last one started. */
-  start(p: UiProject, force = false): boolean {
+  start(p: UiProject, force = false, queued = false): boolean {
     if (p.problem || this.busy.has(p.id)) return false;
     const last = this.started.get(p.id) ?? 0;
     if (!force && Date.now() - last < ttl() * 1000) return false; // one that failed is not tried again at each tick
     this.started.set(p.id, Date.now());
+    if (!queued) this.counted(p); // a queued one was counted when it was queued
     const skip = this.fromBoard(p) !== false;
     if (skip) this.skipped.add(p.id);
     else this.skipped.delete(p.id);
@@ -657,9 +669,10 @@ export class Refresher {
     }
     let next = this.after.get(p.id);
     if (!next) {
+      this.counted(p);
       next = now.then(() => {
         this.after.delete(p.id);
-        this.start(p, true); // already running when one queued by tasksNeeded() began first: that one is after the change too
+        this.start(p, true, true); // already running when one queued by tasksNeeded() began first: that one is after the change too
         return this.busy.get(p.id);
       });
       this.after.set(p.id, next);

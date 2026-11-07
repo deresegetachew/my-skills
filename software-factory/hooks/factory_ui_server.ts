@@ -63,18 +63,6 @@ export interface Running {
 }
 
 const TOPIC = "live";
-/** How long a task action's answer waits for the read it starts (#519); a slower read still ends, and is pushed. */
-const READ_AFTER_ACTION_MS = 30_000;
-
-/** Waits for `work` at most `ms`; the timer is cleared after, so it never keeps the server running. */
-async function within(work: Promise<unknown>, ms: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([work, new Promise<void>((done) => { timer = setTimeout(done, ms); })]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 /** The views' channels (#424) and the part of factory_ui_views.ts's Views each one is. */
 const VIEW_PARTS: Record<string, "tasks" | "epics" | "pulls" | "ci"> = { tasks: "tasks", epics: "epics", "pull-requests": "pulls", ci: "ci" };
@@ -328,7 +316,7 @@ export function serve(o: ServeOptions): Running {
       if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
       refresher.ifStale(p);
       const v = viewsOf(p, refresher.running(p), Date.now(), feed.view(p));
-      const meta = { project: p.id, generatedAt: v.generatedAt, age: v.age, refreshing: v.refreshing };
+      const meta = { project: p.id, generatedAt: v.generatedAt, age: v.age, refreshing: v.refreshing, reads: refresher.reads(p) };
       return json(200, view === "ci" ? { ...v.ci, ...meta, problems: [...v.problems, ...v.ci.problems] } // the verdict first
         : { ...meta, ...v[view], problems: [...v.problems, ...v[view].problems] });
     }
@@ -341,12 +329,8 @@ export function serve(o: ServeOptions): Running {
     if (rest[0] === "tasks" && rest[2] === "actions" && rest.length === 4) {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
       const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null), feed.view(p).part, feed);
-      if (r.status === 200 || r.status === 500) {
-        // read again, and answer once that read ran (#519): the board then shows what changed. Tasks the message board
-        // keeps are live already, so that answer doesn't wait.
-        const read = refresher.readAgain(p);
-        if (!feed.live(p)) await within(read, READ_AFTER_ACTION_MS);
-      }
+      // read again, started (or queued after a running read) before the answer, which comes at once (#519)
+      if (r.status === 200 || r.status === 500) void refresher.readAgain(p);
       return json(r.status, r.body);
     }
     if (rest[0] === "tasks" && rest.length === 2) { // a task's page from the message board (#498)

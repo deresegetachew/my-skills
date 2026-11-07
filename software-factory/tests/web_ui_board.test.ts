@@ -64,6 +64,24 @@ function factoryCalls(p: Project): string[] {
   return readFileSync(p.factoryLog, "utf8").split("\n").filter(Boolean);
 }
 
+/** The fake factory's log once `ok(log)` holds, or as it is after 2 s. The server starts (or queues) the read after an
+ *  action before it answers (`reads` shows that at once); the fake logs it only when bash reaches its first line, which a
+ *  loaded machine can delay (#519). */
+async function logOnce(p: Project, ok: (log: string[]) => boolean): Promise<string[]> {
+  const until = Date.now() + 2_000;
+  let log = factoryCalls(p);
+  while (!ok(log) && Date.now() < until) {
+    await Bun.sleep(25);
+    log = factoryCalls(p);
+  }
+  return log;
+}
+
+/** How many reads the server has started or queued for the project, from its tasks view. */
+async function reads(ui: Running): Promise<number> {
+  return Number((await api(ui, "/api/projects/work/tasks")).json.reads);
+}
+
 /** What the fake factory was asked, without the snapshot read the server adds after an action. */
 function calls(p: Project): string[] {
   return factoryCalls(p).filter((c) => c !== "snapshot");
@@ -227,7 +245,7 @@ test("release runs factory issues release with the default reason, or the one gi
   expect(r.json.ok).toBe(true);
   expect(r.json.command).toBe('factory issues release 7 "released from the web UI"');
   expect(calls(p)).toEqual(["issues release 7 released from the web UI"]);
-  expect(factoryCalls(p)).toContain("snapshot");
+  expect(await logOnce(p, (l) => l.includes("snapshot"))).toContain("snapshot");
   const again = await act(ui, "7", "release", { confirm: true, reason: "went quiet" });
   expect(again.status, JSON.stringify(again.json)).toBe(200);
   expect(calls(p)).toEqual(["issues release 7 released from the web UI", "issues release 7 went quiet"]);
@@ -236,14 +254,16 @@ test("release runs factory issues release with the default reason, or the one gi
 test("with no message board set up, the read after a release starts at once, every time (#498: nothing waits for a board)", async () => {
   for (let i = 0; i < 20; i++) {
     const { ui, p } = await started();
+    expect(await reads(ui), `run ${i + 1}`).toBe(0);
     const r = await act(ui, "7", "release");
     expect(r.status, JSON.stringify(r.json)).toBe(200);
-    expect(factoryCalls(p), `run ${i + 1}`).toContain("snapshot");
+    expect(await reads(ui), `run ${i + 1}`).toBe(1); // started before the answer, with nothing waiting for a board
+    expect(await logOnce(p, (l) => l.includes("snapshot")), `run ${i + 1}`).toContain("snapshot");
     await ui.stop();
   }
 }, 240_000);
 
-test("the answer to an action comes after the read it starts, so a slow-starting read is in the log (#519)", async () => {
+test("each action starts a read before its answer, and a read slow to start still runs (#519)", async () => {
   const p = project();
   roots.push(p.root);
   cache(p, "issues");
@@ -251,26 +271,30 @@ test("the answer to an action comes after the read it starts, so a slow-starting
   writeExe(join(p.d, "factory"), `#!/usr/bin/env bash\n[ "$1" = snapshot ] && sleep 0.5\necho "$*" >> "$FAKE_FACTORY_LOG"\necho "fake factory: $*"\n`);
   const ui = await startUi(p, ["--port", "0"]);
   running.push(ui);
+  let n = 0;
   for (const [id, name, body] of [["7", "release", { confirm: true }], ["10", "block", { confirm: true, reason: "needs keys" }]] as const) {
     const r = await act(ui, id, name, body);
     expect(r.status, JSON.stringify(r.json)).toBe(200);
-    expect(factoryCalls(p).at(-1), name).toBe("snapshot");
+    expect(await reads(ui), name).toBe(++n);
+    expect((await logOnce(p, (l) => l.at(-1) === "snapshot")).at(-1), name).toBe("snapshot");
   }
 }, T);
 
-test("an action while a read runs is read again after that one, before its answer (#519)", async () => {
+test("an action while a read runs is read again after that one (#519)", async () => {
   const p = project();
   roots.push(p.root);
   cache(p, "issues");
-  writeExe(join(p.d, "factory"), `#!/usr/bin/env bash\nif [ "$1" = snapshot ]; then echo "snapshot start" >> "$FAKE_FACTORY_LOG"; sleep 1; ` +
+  writeExe(join(p.d, "factory"), `#!/usr/bin/env bash\nif [ "$1" = snapshot ]; then echo "snapshot start" >> "$FAKE_FACTORY_LOG"; sleep 0.3; ` +
     `echo "snapshot end" >> "$FAKE_FACTORY_LOG"; exit 0; fi\necho "$*" >> "$FAKE_FACTORY_LOG"\n`);
   const ui = await startUi(p, ["--port", "0"]);
   running.push(ui);
   expect((await api(ui, "/api/projects/work/refresh", { method: "POST" })).status).toBe(202); // a read that began before the action
   const r = await act(ui, "7", "release");
   expect(r.status, JSON.stringify(r.json)).toBe(200);
-  const log = factoryCalls(p);
-  const after = log.slice(log.indexOf("issues release 7 released from the web UI") + 1);
+  expect(await reads(ui)).toBe(2); // queued before the answer
+  const tail = (l: string[]) => l.slice(l.indexOf("issues release 7 released from the web UI") + 1);
+  const log = await logOnce(p, (l) => tail(l).includes("snapshot start") && l.at(-1) === "snapshot end");
+  const after = tail(log);
   expect(after, log.join("\n")).toContain("snapshot start"); // the running read began before the release: another one ran
   expect(after.at(-1), log.join("\n")).toBe("snapshot end");
 }, T);
@@ -281,7 +305,7 @@ test("block runs factory issues block with the reason", async () => {
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(r.json.ok).toBe(true);
   expect(calls(p)).toEqual(["issues block 10 needs the Stripe keys"]);
-  expect(factoryCalls(p)).toContain("snapshot");
+  expect(await logOnce(p, (l) => l.includes("snapshot"))).toContain("snapshot");
 }, T);
 
 test("reassign releases the task, then tells the agent to take it", async () => {
@@ -291,7 +315,7 @@ test("reassign releases the task, then tells the agent to take it", async () => 
   expect(r.json.ok).toBe(true);
   expect(String(r.json.command)).toContain(" then ");
   expect(calls(p)).toEqual(["issues release 7 reassigned to taytu from the web UI", "say taytu /next-task issue-7"]);
-  expect(factoryCalls(p)).toContain("snapshot");
+  expect(await logOnce(p, (l) => l.includes("snapshot"))).toContain("snapshot");
 }, T);
 
 test("a failing step is 500 with the command's own error, and reassign says nothing after a failed release", async () => {
