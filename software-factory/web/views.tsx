@@ -9,6 +9,7 @@ import { Board, EpicChips, PrdLink, TaskPage } from "./board.tsx";
 import { type LaneBy, taskLabel } from "./board_model.ts";
 import { Cited, Cites } from "./docs.tsx";
 import { EPICS_CSS, EpicPage, NewEpic, type Talker } from "./epics.tsx";
+import { epicChoice } from "./epics_model.ts";
 import { Tabs } from "./parts.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
@@ -245,9 +246,19 @@ export function EpicsChannel(p: ViewProps) {
   const v = p.views;
   const all = v.epics.epics;
   const rows = filterRows(all, chosen ? "" : typed);
-  const epic = chosen ? all.find((e) => e.id === chosen) : undefined;
+  const choice = epicChoice(all, chosen);
   const talkers = p.talkers ?? [];
-  if (epic) {
+  // an epic no one has (a wrong #n) says so, instead of every epic; not while the epics are still being read (#464)
+  if (choice.show === "missing" && v.epics.from !== "unknown") {
+    return (
+      <div className="body">
+        <button className="link" onClick={() => setChosen(null)}>‹ All epics</button>
+        <p className="empty">Epic #{choice.id} was not found in this project. Open All epics to see the ones it has.</p>
+      </div>
+    );
+  }
+  if (choice.show === "page") {
+    const epic = choice.epic;
     return <EpicPage epic={epic} tasks={v.tasks.tasks} token={p.token ?? ""} project={p.project.id} talkers={talkers} docs={p.docs} open={p.open}
       back={() => setChosen(null)} />;
   }

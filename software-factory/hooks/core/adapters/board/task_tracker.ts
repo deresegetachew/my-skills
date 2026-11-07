@@ -285,7 +285,8 @@ export class BoardTaskTracker implements TaskTracker {
 
   epics(): Epic[] {
     const v = this.view();
-    const open = new Set(v.mine.filter((t) => WORK.has(t.kind) && t.status !== "done").map((t) => v.idOf(t)));
+    // every open item a line may name, a sub-epic too: open is not done (#464, parseEpic)
+    const open = new Set(v.mine.filter((t) => t.status !== "done").map((t) => v.idOf(t)));
     const url = (id: string): string | null => (this.o.repo && /^\d+$/.test(id) ? `https://github.com/${this.o.repo}/issues/${id}` : null);
     return v.mine.filter((t) => t.kind === "epic").map((e) => {
       const id = v.idOf(e);

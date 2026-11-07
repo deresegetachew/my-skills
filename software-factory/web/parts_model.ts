@@ -130,6 +130,20 @@ export function talkText(item: TalkItem, text: string): string {
   return `${tag(item)}${item.title.replace(/\s+/g, " ").trim()}): ${text.trim()}`;
 }
 
+/** A line the box sent, without the words that lead it (#464). The item's title as it is now is cut exactly, brackets
+ * and all; a line sent under an older title loses the bracket that closes the opening one. Any other line is kept. */
+export function talkBody(item: TalkItem, text: string): string {
+  const exact = `${tag(item)}${item.title.replace(/\s+/g, " ").trim()}): `;
+  if (text.startsWith(exact)) return text.slice(exact.length);
+  if (!text.startsWith(tag(item))) return text;
+  let depth = 1;
+  for (let i = tag(item).length; i < text.length; i++) {
+    if (text[i] === "(") depth++;
+    else if (text[i] === ")" && --depth === 0) return text.startsWith(": ", i + 1) ? text.slice(i + 3) : text;
+  }
+  return text;
+}
+
 /** The item's thread out of a chat: the owner's lines about it, and the answers after each, up to the owner's next line
  * about something else. */
 export function itemThread(items: ChatItemView[], item: { kind: string; id: string; title?: string }): ChatItemView[] {

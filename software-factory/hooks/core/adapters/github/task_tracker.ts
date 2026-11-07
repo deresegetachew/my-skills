@@ -29,9 +29,9 @@ export class GithubTaskTracker implements TaskTracker {
   }
 
   epics(): Epic[] {
-    const all = taskIssues("all");
-    const open = new Set(all.filter((i) => i.state === "open" && !isEpic(i)).map((i) => String(i.number)));
-    return all.filter(isEpic).sort((a, b) => a.number - b.number).map((i) => ({
+    // the epics by their label, and what is open now of any kind (#464): never every issue ever opened
+    const open = new Set(ghAll("repos/{owner}/{repo}/issues?state=open").map((i) => String(i.number)));
+    return taskIssues("all", "epic").filter(isEpic).sort((a, b) => a.number - b.number).map((i) => ({
       ...parseEpic({ number: i.number, title: i.title, body: i.body ?? "", labels: [...names(i)], closed: i.state !== "open", openIds: open }),
       url: typeof i.html_url === "string" ? i.html_url : null }));
   }

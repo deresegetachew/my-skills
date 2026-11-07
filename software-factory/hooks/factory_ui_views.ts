@@ -274,7 +274,7 @@ function epicRows(part: Obj): Obj[] {
 
 /** The epics view from a tasks part: the snapshot's, or the board's (#498), whose stage is "" when the board doesn't know
  *  it (a label on GitHub), so the last snapshot's `cached` stage is kept. */
-function epicsView(part: Obj, repo: string, origin: Origin, cached: Obj = {}): EpicsView {
+function epicsView(part: Obj, repo: string, origin: Origin, cached: Obj = {}, path = "the project"): EpicsView {
   const source = str(part.source);
   const stageBefore = new Map(epicRows(cached).map((e) => [str(e.id), str(e.stage)]));
   const epics = epicRows(part).map((e): EpicView => {
@@ -287,7 +287,10 @@ function epicsView(part: Obj, repo: string, origin: Origin, cached: Obj = {}): E
     return { id, title: str(e.title), stage, stageText: stage, done: tasks.filter((t) => t.done).length, all: tasks.length, tasks, prd: str(e.prd),
       decisions, summary, cites: strings(e.cites), url, find: [`#${id}`, str(e.title), stage, str(e.prd), summary, ...decisions].join(" ") };
   });
-  return { source, ...origin, epics, problems: [] };
+  // the epics failed on their own (#464): the tasks channel still has its tasks
+  const problems: Problem[] = str(part.epicsError) ? [{ code: "ui_epics_unreadable",
+    message: `The epics can't be read (${str(part.epicsError).slice(0, 200)}).`, fix: `Run \`factory snapshot\` in ${path} to see why.` }] : [];
+  return { source, ...origin, epics, problems };
 }
 
 function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], origin: Origin): TasksView {
@@ -479,7 +482,7 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now(), boar
   const limit = list(c.missing).filter((m) => str(m.code) === "github_limit").map((m) => ({ code: str(m.code), message: str(m.message), fix: str(m.fix) }));
   const { origin, part, problem } = tasksFrom(p, board, obj(c.tasks));
   const tasks = tasksView(p, part, repo, pulls.pulls, origin);
-  const epics = epicsView(part, repo, origin, obj(c.tasks));
+  const epics = epicsView(part, repo, origin, obj(c.tasks), p.path);
   if (problem) {
     tasks.problems.unshift(problem);
     epics.problems.unshift(problem);
