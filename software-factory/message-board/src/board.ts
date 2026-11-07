@@ -311,7 +311,8 @@ export class Board {
     });
   }
 
-  /** Link two tasks: `from` blocks, waits for, was discovered from ... `to`. A loop of blocking edges is refused. */
+  /** Link two tasks: `from` blocks, waits for, was discovered from ... `to`. blocks: from must be done before to can
+   * start; waits_for: from can't start until to is done. A loop of blocking edges is refused. */
   async link(from: number, to: number, kind: EdgeKind): Promise<boolean> {
     const k = oneOf("An edge's kind", kind, EDGE_KINDS);
     return this.write(async (tx) => {
@@ -328,9 +329,11 @@ export class Board {
       refuse(BLOCKING.includes(k) ? "cycle" : "bad-input", `A task can't ${k.replace("_", " ")} itself (${taskOf(from)}).`, "Link two different tasks.");
     }
     if (BLOCKING.includes(k)) {
+      // blocks: from comes first. waits_for: to comes first (from waits for to).
+      const [first, then] = k === "waits_for" ? [to, from] : [from, to];
       await tx`SELECT pg_advisory_xact_lock(${GRAPH_LOCK})`;
-      if (await reaches(tx, to, from)) {
-        refuse("cycle", `${taskOf(from)} ${k.replace("_", " ")} ${taskOf(to)} would make a loop: ${taskOf(from)} already waits on ${taskOf(to)}, or is under it.`,
+      if (await reaches(tx, then, first)) {
+        refuse("cycle", `${taskOf(from)} ${k.replace("_", " ")} ${taskOf(to)} would make a loop: ${taskOf(first)} already waits on ${taskOf(then)}, or is under it.`,
           "Remove the edge that makes the loop first, or link them the other way.");
       }
     }
