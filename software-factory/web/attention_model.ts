@@ -31,7 +31,7 @@ export function stuckMarks(items: AttentionItem[]): { tasks: Record<string, stri
   const tasks: Record<string, string> = {};
   const agents: Record<string, string> = {};
   for (const i of items) {
-    if ((i.kind === "task-quiet" || i.kind === "task-pr-gone") && i.task && !(i.task in tasks)) tasks[i.task] = i.reason;
+    if ((i.kind === "task-quiet" || i.kind === "task-pr-gone" || i.kind === "task-spinning") && i.task && !(i.task in tasks)) tasks[i.task] = i.reason;
     if (i.kind === "epic-done" && i.epic && !(i.epic in tasks)) tasks[i.epic] = i.reason;
     if (["agent-down", "session-long", "role-down", "idle-ready"].includes(i.kind) && i.agent && !(i.agent in agents)) agents[i.agent] = i.reason;
   }

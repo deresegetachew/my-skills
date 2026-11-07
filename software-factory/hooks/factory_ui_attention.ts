@@ -15,6 +15,10 @@
 //   task-quiet      a task in progress whose holder is down, or that nothing moved for
 //                   attention.taskQuietMinutes                                             Release
 //   session-long    a session "working" longer than attention.<role>.maxMinutes          open its output
+//   task-spinning   a task being built whose tokens or working time pass attention.spinFactor
+//                   times the done tasks' median (with 5 done tasks or more), or that had
+//                   attention.spinReviewRounds review rounds with must-fixes, or whose last
+//                   attention.spinFailedCi CI runs failed (#580; factory_task_cost.ts)       open its output
 //   idle-ready      a coding agent idle for attention.idleWithReadyMinutes while a task
 //                   it may take is ready (#591); its session may hold a message typed
 //                   but not sent                                                           Start work
@@ -28,8 +32,9 @@ import type { Config } from "./factory_config.ts";
 import type { Agent, Problem } from "./factory_ui_data.ts";
 import { SETTINGS } from "./factory_settings_schema.ts";
 import type { Views } from "./factory_ui_views.ts";
+import { type Medians, spinReason, type TaskCost } from "./factory_task_cost.ts";
 
-export const ATTENTION_KINDS = ["board-down", "runners-down", "agent-down", "role-down", "task-pr-gone", "task-quiet", "session-long", "idle-ready",
+export const ATTENTION_KINDS = ["board-down", "runners-down", "agent-down", "role-down", "task-pr-gone", "task-quiet", "session-long", "task-spinning", "idle-ready",
   "epic-done", "prd-open", "pr-waiting"] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 
@@ -72,6 +77,9 @@ export interface Limits {
   prWaitHours: number;
   maxMinutes: Record<string, number>;
   idleWithReadyMinutes: number;
+  spinFactor: number;
+  spinReviewRounds: number;
+  spinFailedCi: number;
 }
 
 export interface AttentionInput {
@@ -82,6 +90,8 @@ export interface AttentionInput {
   gone: GonePull[];
   /** The product owner's open asks. */
   productAsks: number;
+  /** What each task took (#580) and the done tasks' medians; null or left out while not read (no spinning is judged). */
+  costs?: { tasks: TaskCost[]; medians: Medians } | null;
   now?: number;
 }
 
@@ -111,7 +121,9 @@ export function limitsOf(cfg: Config | null): Limits {
   const maxMinutes: Record<string, number> = {};
   for (const r of ROLES) maxMinutes[r] = whole(obj(a[r]).maxMinutes, dflt(`attention.${r}.maxMinutes`));
   return { taskQuietMinutes: whole(a.taskQuietMinutes, dflt("attention.taskQuietMinutes")), prWaitHours: whole(a.prWaitHours, dflt("attention.prWaitHours")),
-    maxMinutes, idleWithReadyMinutes: whole(a.idleWithReadyMinutes, dflt("attention.idleWithReadyMinutes")) };
+    maxMinutes, idleWithReadyMinutes: whole(a.idleWithReadyMinutes, dflt("attention.idleWithReadyMinutes")),
+    spinFactor: whole(a.spinFactor, dflt("attention.spinFactor")), spinReviewRounds: whole(a.spinReviewRounds, dflt("attention.spinReviewRounds")),
+    spinFailedCi: whole(a.spinFailedCi, dflt("attention.spinFailedCi")) };
 }
 
 /** A task's name as the pages write it: `#7` for an issue, `b3` for a task made on the board. */
@@ -256,6 +268,20 @@ export function attentionOf(i: AttentionInput): AttentionItem[] {
         reason: `${a.name} has been idle for ${plural(idle, "minute")} while ${named(ready.id)} ${ready.title} is ready.` +
           (unsent ? " A message is typed in its session but not sent." : ""),
         action: { kind: "say", label: "Start work", agent: a.name, text: "/next-task" } });
+    }
+  }
+
+  // a task being built whose agent may be going in circles (#580)
+  if (i.costs) {
+    const costOf = new Map(i.costs.tasks.map((c) => [c.task, c]));
+    for (const t of tasks) {
+      const c = costOf.get(t.id);
+      if (!BUILDING.has(t.state) || !c) continue;
+      const reason = spinReason(c, i.costs.medians, lim);
+      if (!reason) continue;
+      const who = t.holders[0] ?? (c.worker && NAME.test(c.worker) ? c.worker : null);
+      item("task-spinning", t.id, { title: `${named(t.id)} ${t.title}`, task: t.id, agent: who, reason,
+        action: { kind: "open", label: "Open its output", link: who ? `agent:${who}` : "view:tasks" } });
     }
   }
 

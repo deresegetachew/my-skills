@@ -21,6 +21,13 @@
 //                                         and the last 10 events
 //   GET  /api/projects/:p/attention       what needs attention (factory_ui_attention.ts): anything stuck, each with its
 //                                         reason and one action, and the thresholds used
+//   GET  /api/projects/:p/costs           what each task took (#580, factory_task_cost.ts): its build time, working
+//                                         minutes, sessions, tokens, cost, CI runs and review rounds, each epic's totals and
+//                                         the done tasks' medians. The board's claims and done times (its events, as
+//                                         Activity reads them) and the snapshot's CI runs and must-fixes are kept in the
+//                                         state folder (task-times.json); then `factory usage --json --by task` over the
+//                                         last COST_DAYS days joins them with the sessions. Kept like the usage; Usage and
+//                                         cost gets the same rows as byTask
 //
 // The WebSocket gets {type: "health", project} when a doctor run ends and {type: "activity", project, items} with
 // Activity's new entries (a board event, or what a new snapshot read tells, #583); the pages read their route again
@@ -32,12 +39,32 @@ import { type AttentionItem, attentionOf, limitsOf } from "./factory_ui_attentio
 import type { Queue } from "./factory_ui_chat.ts";
 import { type Agent, envFor, factoryScript, type Live, type Obj, type Problem, readJson, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
 import { ttl, type Views } from "./factory_ui_views.ts";
+import { epicCost, type EpicCost, keepEvents, type Medians, snapshotEvents as snapshotTimes, type TaskCost, type TaskEvent } from "./factory_task_cost.ts";
 
 const DOCTOR_TIMEOUT_MS = 240_000;
 const USAGE_TIMEOUT_MS = 120_000;
 const ACTIVITY_MAX = 200;
 const HOME_RECENT = 10;
 const PULLS_GONE_MAX = 100;
+/** What each task took is read over this many days of logs (#580). */
+export const COST_DAYS = 30;
+/** The board's events read back for the tasks' claims and done times, at most. */
+const COST_EVENTS = 2_000;
+
+/** A task's cost and times as the pages show them: with its title, state and epic from the views. */
+export interface CostRow extends TaskCost {
+  title: string;
+  state: string | null;
+  epic: string | null;
+}
+
+export interface Costs {
+  since: string | null;
+  tasks: CostRow[];
+  epics: EpicCost[];
+  medians: Medians;
+  problems: Problem[];
+}
 
 export interface Reply {
   status: number;
@@ -61,6 +88,8 @@ export interface ActivityItem {
   link: string;
   /** The search a link opens with (`#7`). */
   find: string;
+  /** What it means for the task's times (#580): a claim, or done (closed done, moved to done, its pull request merged). */
+  mark?: "claimed" | "done";
 }
 
 export const ACTIVITY_KINDS = ["claim", "move", "comment", "close", "handoff", "new", "note", "agent", "pr", "ci", "review", "ask"] as const;
@@ -382,19 +411,28 @@ export class Ops {
   /** The reply to a Health, Usage, Activity or Home request (after the token), or null when the path is none of theirs. */
   async api(req: Request, p: UiProject, rest: string[], url: URL): Promise<Reply | null> {
     const page = rest[0] ?? "";
-    if (!["health", "usage", "activity", "home", "attention"].includes(page)) return null;
+    if (!["health", "usage", "activity", "home", "attention", "costs"].includes(page)) return null;
     if (page === "health" && rest.length === 2 && rest[1] === "check") {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST.");
       const h = await this.check(p);
       return { status: h.problem && !h.ranAt ? 500 : 200, body: { project: p.id, command: "factory doctor --json", ...this.healthBody(p, h) } };
     }
-    if (rest.length !== 1) return problem(404, "not_found", `There is no ${url.pathname}.`, "Health has GET and POST .../health/check; Usage, Activity, Home and Attention are GET.");
+    if (rest.length !== 1) return problem(404, "not_found", `There is no ${url.pathname}.`, "Health has GET and POST .../health/check; Usage, Activity, Home, Attention and Costs are GET.");
     if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
     if (p.problem) return { status: 200, body: { project: p.id, problems: [p.problem] } };
     if (page === "health") return { status: 200, body: { project: p.id, command: "factory doctor --json", ...this.healthBody(p, this.kept(p)) } };
-    if (page === "usage") return { status: 200, body: { project: p.id, ...(await this.usageOf(p)) } };
+    if (page === "usage") {
+      const [u, c] = await Promise.all([this.usageOf(p), this.costsOf(p)]);
+      const seen = new Set<string>();
+      const problems = [...(Array.isArray(u.problems) ? (u.problems as Problem[]) : []), ...c.problems].filter((x) => {
+        const k = `${x.code} ${x.message}`;
+        return seen.has(k) ? false : (seen.add(k), true);
+      });
+      return { status: 200, body: { project: p.id, ...u, byTask: c.tasks, problems } };
+    }
+    if (page === "costs") return { status: 200, body: { project: p.id, ...(await this.costsOf(p)) } };
     if (page === "attention") {
-      const live = await this.d.live(p);
+      const [live] = await Promise.all([this.d.live(p), this.costsOf(p)]);
       return { status: 200, body: { project: p.id, items: this.attention(p, live), limits: limitsOf(p.config) } };
     }
     if (page === "activity") {
@@ -526,6 +564,69 @@ export class Ops {
       notMeasured: NOT_MEASURED, problems };
   }
 
+  // --- what each task took (#580) ------------------------------------------------------------------------------------
+
+  private costs = new Map<string, { value: Costs; at: number }>();
+  private costsReading = new Map<string, Promise<Costs>>();
+
+  /** What each task took in project `p`: kept for the snapshot cache's time, read again after (one read at a time). */
+  costsOf(p: UiProject): Promise<Costs> {
+    const k = this.costs.get(p.id);
+    if (k && Date.now() - k.at <= ttl() * 1000) return Promise.resolve(k.value);
+    const busy = this.costsReading.get(p.id);
+    if (busy) return busy;
+    const job = this.readCosts(p).then((value) => {
+      this.costs.set(p.id, { value, at: Date.now() });
+      return value;
+    }).finally(() => this.costsReading.delete(p.id));
+    this.costsReading.set(p.id, job);
+    return job;
+  }
+
+  /** The costs last read for `p`, or null; a read is started when there are none or they are old. */
+  private keptCosts(p: UiProject): Costs | null {
+    const k = this.costs.get(p.id);
+    if ((!k || Date.now() - k.at > ttl() * 1000) && !p.problem) void this.costsOf(p).catch(() => null);
+    return k?.value ?? null;
+  }
+
+  private async readCosts(p: UiProject): Promise<Costs> {
+    const views = this.d.views(p);
+    const empty: Costs = { since: null, tasks: [], epics: [], medians: { done: 0, used: null, workingMinutes: null }, problems: [] };
+    if (p.problem) return { ...empty, problems: [p.problem] };
+    // the board's claims and done times, and the snapshot's CI runs and must-fixes, kept so they outlast both
+    const board = await this.d.board.activity(p, COST_EVENTS).catch(() => null);
+    const marked = board ? this.placed(p, board) : [];
+    const events: TaskEvent[] = marked.filter((x) => x.mark && x.task && x.at)
+      .map((x) => ({ id: x.id, task: x.task as string, kind: x.mark as "claimed" | "done", at: x.at as string }));
+    keepEvents(stateDirOf(p), [...events, ...snapshotTimes(snapshotOf(p))]);
+    const since = new Date(Math.floor(Date.now() / 86_400_000) * 86_400_000 - (COST_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
+    const r = await spawn(["bash", factoryScript(p), "usage", "--json", "--by", "task", "--since", since], p.path, envFor(p), USAGE_TIMEOUT_MS);
+    let report: Obj | null = null;
+    try {
+      const v = JSON.parse(r.stdout) as unknown;
+      if (Array.isArray(obj(v).task_costs)) report = obj(v);
+    } catch {
+      report = null;
+    }
+    if (!report) return { ...empty, problems: [usageFailure(p, r)] };
+    const rows = new Map<string, { title: string; state: string; epic: string | null }>();
+    for (const t of [...views.tasks.tasks, ...views.tasks.done]) if (!rows.has(t.id)) rows.set(t.id, { title: t.title, state: t.state, epic: t.epic });
+    const epicOf = new Map<string, string>();
+    for (const e of views.epics.epics) for (const t of e.tasks) epicOf.set(t.id, e.id);
+    const titles = new Map<string, string>();
+    for (const t of list(obj(snapshotOf(p).tasks).tasks)) titles.set(str(t.id), str(t.title));
+    const costs = (report.task_costs as unknown[]).map((x) => x as TaskCost);
+    const tasks: CostRow[] = costs.map((c) => {
+      const row = rows.get(c.task);
+      return { ...c, title: row?.title ?? titles.get(c.task) ?? "", state: row?.state ?? null, epic: row?.epic ?? epicOf.get(c.task) ?? null };
+    });
+    const m = obj(report.medians);
+    const medianOf = (v: unknown): number | null => (typeof v === "number" ? v : null);
+    return { since: str(report.since) || null, tasks, epics: views.epics.epics.map((e) => epicCost(e.id, e.tasks.map((t) => t.id), costs)),
+      medians: { done: num(m.done), used: medianOf(m.used), workingMinutes: medianOf(m.workingMinutes) }, problems: usageProblems(report) };
+  }
+
   // --- activity ----------------------------------------------------------------------------------------------------
 
   private async activity(p: UiProject): Promise<{ from: "board" | "snapshot"; items: ActivityItem[]; problems: Problem[] }> {
@@ -607,8 +708,10 @@ export class Ops {
     const productAsks = kept && !kept.problem ? kept.asks.filter((a) => a.state === "open" && a.forProduct).length
       : list(snap.needsYou).filter((x) => x.kind === "owner-ask" && str(x.state) === "product").length;
     const readable = live !== null && !live.problems.some((x) => x.code === "ui_agents_unreadable");
+    const costs = this.keptCosts(p);
     return attentionOf({ config: p.config, views: this.d.views(p), agents: readable ? live.agents : null,
-      gone: pullsSeen(p, snap).gone.map((g) => ({ number: g.number, title: g.title, task: g.task, at: g.at })), productAsks });
+      gone: pullsSeen(p, snap).gone.map((g) => ({ number: g.number, title: g.title, task: g.task, at: g.at })), productAsks,
+      costs: costs && !costs.problems.some((x) => x.code === "ui_usage_unreadable") ? costs : null });
   }
 
   // --- home --------------------------------------------------------------------------------------------------------

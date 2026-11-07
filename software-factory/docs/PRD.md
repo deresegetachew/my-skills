@@ -643,6 +643,12 @@ What is planned:
   and offers one action (Release, Close, Start, or open the PR or the output), at the top of Home, as a count beside Home
   in the sidebar, and as a "stuck" mark on the card or agent. *Built (#579): worked out from what the server already
   reads, no GitHub call; the thresholds are the `attention.*` settings.*
+  As the owner, I see what each task took to build (build time from claim to merge, the agent's working minutes, its
+  sessions, tokens and cost, its CI runs and review rounds) on its page, as a total on its epic's page, and sortable on
+  Usage and cost, and a task whose agent is going in circles is flagged in Needs attention. *Built (#580): from the
+  usage logs, the board's claims and done times and the snapshot, no GitHub call (`factory usage --by task`); spinning is
+  `attention.spinFactor` times the done tasks' median (with 5 done), `attention.spinReviewRounds` or
+  `attention.spinFailedCi`. Left: totals per release, CI minutes, and other machines' logs.*
 - **US-33.** As the owner, the Inbox holds everything that needs me, and I answer and merge in place. *Decided (#451);
   the owner queue part is built (US-17).*
 - **US-34.** As the owner, Activity shows the team's feed and the open questions. *Built (#451, #583): one stream across

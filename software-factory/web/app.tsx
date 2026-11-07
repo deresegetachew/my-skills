@@ -31,6 +31,7 @@ import { MaintenancePage, ReleasesPage, SETTINGS_CSS, SettingsPage } from "./set
 import { SIGNOFF_CSS, SignoffPage } from "./signoff.tsx";
 import { TEAM_CSS, TeamPage } from "./team.tsx";
 import { PR_CSS, PrPage } from "./pr.tsx";
+import { COSTS_CSS } from "./costs.tsx";
 import { CSS } from "./style.ts";
 import { THEME_CSS } from "./theme.ts";
 import { nextTheme, THEME_KEY, themeLabel, themeOf } from "./theme_model.ts";
@@ -972,6 +973,6 @@ function App() {
 
 const style = document.createElement("style");
 style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS
-  + OPS_CSS + TEAM_CSS;
+  + OPS_CSS + TEAM_CSS + COSTS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

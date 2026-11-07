@@ -5,6 +5,7 @@
 import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AttentionList } from "./attention.tsx";
 import { AttentionContext } from "./attention_context.tsx";
+import { CostTable } from "./costs.tsx";
 import { type AttentionItem, attentionLine } from "./attention_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
@@ -306,6 +307,12 @@ export function UsagePage(p: OpsProps) {
                     );
                   })}
                 </ul>
+                {tab === "task" && data.byTask && (
+                  <Section title="What each task took">
+                    <p className="ops-line">Build time is from the first claim to the merge (or done); agent working is its sessions added up. Pick a column to sort by it.</p>
+                    <CostTable rows={data.byTask} open={p.open} />
+                  </Section>
+                )}
                 <p className="empty">Tokens count fresh input and output, as a budget does. {data.budget.tokens === null ? "No budget is set, so nothing is compared." :
                   `A dot turns yellow at ${data.budget.warnPercent}% of the budget and red over it; a budget never stops an agent.`}</p>
               </>

@@ -96,7 +96,8 @@ test("nothing is stuck: the list is empty, and the thresholds in use are their d
   const r = await api(ui, "/api/projects/work/attention");
   expect(r.status).toBe(200);
   expect(r.json.items).toEqual([]);
-  expect(r.json.limits).toEqual({ taskQuietMinutes: 60, prWaitHours: 24, maxMinutes: { "coding-agent": 120, "dev-manager": 30, "product-owner": 30 }, idleWithReadyMinutes: 10 });
+  expect(r.json.limits).toEqual({ taskQuietMinutes: 60, prWaitHours: 24, maxMinutes: { "coding-agent": 120, "dev-manager": 30, "product-owner": 30 }, idleWithReadyMinutes: 10,
+    spinFactor: 3, spinReviewRounds: 3, spinFailedCi: 3 });
 }, T);
 
 test("an agent down while it holds a task: Start it, and its task shows held by one that is down (Release); both clear when it runs", async () => {
