@@ -160,7 +160,9 @@ test("the tasks API answers from the board: columns from its status, blocked and
   const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
   expect(json.from, JSON.stringify(json)).toBe("board");
   const t = byId(json);
-  expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9"]); // open tasks of this repo only; no #99 from GitHub, no epic, no other repo
+  // this repo's open tasks and those done this week (#545); no #99 from GitHub, no epic, no other repo
+  expect(Object.keys(t).sort()).toEqual(["10", "11", "12", "7", "9"]);
+  expect(t["10"]).toMatchObject({ state: "done", holders: [], blockedBy: [], actions: [] });
   expect(t["7"]).toMatchObject({ state: "in-progress", holders: ["menelik"], epic: "1", url: `https://github.com/${REPO}/issues/7` });
   expect(t["9"]).toMatchObject({ state: "blocked", holders: [], epic: "1", blockedBy: ["11"] });
   expect(t["11"]).toMatchObject({ state: "ready", group: "Phase 2", epic: null, blockedBy: [] });
@@ -290,7 +292,7 @@ test("a task made on the board for this project (ref factory:<repo>/...) is on t
   const ui = await started(p, url);
   const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
   const t = byId(json);
-  expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9", `b${mine.id}`]);
+  expect(Object.keys(t).sort()).toEqual(["10", "11", "12", "7", "9", `b${mine.id}`]);
   expect(t[`b${mine.id}`]).toMatchObject({ title: "Made on the board", state: "in-progress", holders: ["menelik"], url: null });
   const r = await api(ui, `/api/projects/work/tasks/b${mine.id}/actions/release`, { method: "POST", body: { confirm: true, reason: "try again" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -326,6 +328,60 @@ test("with tasks.source board, Reassign hands the task to the agent on the board
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(await board.get(id[7] as number)).toMatchObject({ assignee: "taytu", holder: null, status: "open" });
   expect(factoryRan(p)).toEqual(["say taytu /next-task issue-7"]);
+  await finish(ui);
+}, T);
+
+// --- #543, #545, #546: what a person sees on a card and its page ---------------------------------------------------------
+
+test("Reassign to an agent that isn't running: the board hands the task over and the answer says it is taken at the agent's start", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  // the fake factory refuses `say` as the real one does for an agent with no session here
+  writeExe(join(p.d, "factory"), FAKE_FACTORY.replace('echo "$*" >> "$FAKE_FACTORY_LOG"',
+    'echo "$*" >> "$FAKE_FACTORY_LOG"\nif [ "$1" = say ]; then echo \'{"code": "no-such-agent", "message": "No agent called taytu was found.", "fix": "x"}\' >&2; exit 1; fi'));
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/12/actions/reassign", { method: "POST", body: { confirm: true, agent: "taytu" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.json.ok).toBe(true);
+  expect(String(r.json.output)).toBe("#12 is handed to taytu on the message board. taytu isn't running on this machine now, so it takes #12 when it starts.");
+  expect(await board.get(id[12] as number)).toMatchObject({ assignee: "taytu", holder: null });
+  // the card says who it is for: the tasks API carries it
+  const json = await tasksUntil(ui, (j) => byId(j)["12"]?.assignee === "taytu", 15_000);
+  expect(byId(json)["12"]).toMatchObject({ assignee: "taytu", holders: [] });
+  await finish(ui);
+}, T);
+
+test("a task's page has its own words from the board, and when it was made and changed", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const made = await board.create({ title: "Export the list", ref: `factory:${REPO}/e1`, priority: 0, body: "Export the reading list as CSV.\n\nWith a header row." });
+  const ui = await started(workProject(), url);
+  await tasksUntil(ui, (j) => byId(j)[`b${made.id}`] !== undefined, 15_000);
+  const r = await api(ui, `/api/projects/work/tasks/b${made.id}`);
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.json.body).toBe("Export the reading list as CSV.\n\nWith a header row.");
+  expect(Number.isNaN(Date.parse(String(r.json.createdAt)))).toBe(false);
+  expect(Number.isNaN(Date.parse(String(r.json.updatedAt)))).toBe(false);
+  await finish(ui);
+}, T);
+
+test("a pull request names the board task it is for by its branch (task/b3-...) or its title (b3: ...), and the card links it", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const a = await board.create({ title: "Slugify", ref: `factory:${REPO}/s1`, priority: 0 });
+  const b = await board.create({ title: "Word count", ref: `factory:${REPO}/w1`, priority: 0 });
+  const p = workProject();
+  const c = JSON.parse(readFileSync(join(p.state, "snapshot.json"), "utf8")) as Row;
+  const pr = (n: number, branch: string, title: string): Row => ({ number: n, title, url: `https://github.com/${REPO}/pull/${n}`, branch, draft: false,
+    ci: "green", next: "none", nextText: "none", agent: "taytu", review: null, gate: null, notGreen: [], protected: null, claim: null });
+  c.pulls = [...(c.pulls as Row[]), pr(39, `task/b${a.id}-slugify`, "Slugify"), pr(41, "taytu/word-count", `b${b.id}: textkit: wordCount(text)`)];
+  write(join(p.state, "snapshot.json"), JSON.stringify(c));
+  const ui = await started(p, url);
+  const json = await tasksUntil(ui, (j) => byId(j)[`b${b.id}`] !== undefined, 15_000);
+  expect((byId(json)[`b${a.id}`]?.pr as Row | null)?.number).toBe(39);
+  expect((byId(json)[`b${b.id}`]?.pr as Row | null)?.number).toBe(41);
   await finish(ui);
 }, T);
 

@@ -6,7 +6,7 @@
 // taskAction); the board is live through the views message. Colours are the palette's (theme.ts) only.
 import { useContext, useEffect, useState } from "react";
 import { Avatar, AgentsContext } from "./avatar_view.tsx";
-import { blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, type TaskAction, taskAsk } from "./board_model.ts";
+import { blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, type TaskAction, taskAsk, taskLabel, unheldText } from "./board_model.ts";
 import { Chips } from "./parts.tsx";
 import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
@@ -23,6 +23,20 @@ function Dot({ tone }: { tone: Tone }) {
   return <span className={`dot ${tone}`} aria-hidden="true" />;
 }
 
+/** Calls `close` when Escape is pressed (#545: every dialog closes with Escape), unless `hold` (it is working). */
+function useEscape(close: () => void, hold = false): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape" && !hold) {
+        e.stopPropagation();
+        close();
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, [close, hold]);
+}
+
 /** The confirm for one card's action, in the shared confirm's look: a reason for block (needed) and release (optional),
  *  an agent for reassign, then what happens and what doesn't. */
 function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: ViewProps["project"]; post: Post; say: Say; close: () => void }) {
@@ -33,12 +47,14 @@ function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: View
   const [busy, setBusy] = useState(false);
   const ready = ask.action === "block" ? reason.trim() !== "" : ask.action === "reassign" ? agent !== "" : true;
   const words = taskAsk(ask.action, ask.task, agent);
+  useEscape(close, busy);
   const go = async (): Promise<void> => {
+    if (busy) return; // a second click while it runs does nothing
     setBusy(true);
     try {
       const path = `/api/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(ask.task.id)}/actions/${ask.action}`;
       const r = await post(path, { confirm: true, ...(reason.trim() ? { reason: reason.trim() } : {}), ...(ask.action === "reassign" ? { agent } : {}) });
-      say(r.ok === true ? { title: `${LABELS[ask.action]}: done for #${ask.task.id}.`, text: String(r.output ?? ""), tone: "good" }
+      say(r.ok === true ? { title: `${LABELS[ask.action]}: done for ${taskLabel(ask.task.id)}.`, text: String(r.output ?? ""), tone: "good" }
         : { title: String(r.message ?? "It didn't run."), text: [r.fix, r.output].filter(Boolean).map(String).join("\n\n"), tone: "bad" });
     } finally {
       setBusy(false);
@@ -48,7 +64,7 @@ function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: View
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget && !busy) close(); }}>
       <div className="dialog" role="dialog" aria-modal="true" aria-labelledby="task-ask">
-        <h2 id="task-ask">{LABELS[ask.action]} #{ask.task.id}?</h2>
+        <h2 id="task-ask">{LABELS[ask.action]} {taskLabel(ask.task.id)}?</h2>
         <p className="muted">{ask.task.title}</p>
         {ask.action === "reassign" && (
           <label className="field">To
@@ -60,7 +76,7 @@ function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: View
           </label>
         )}
         {ask.action !== "reassign" && (
-          <label className="field">{ask.action === "block" ? "What a person must provide" : "Why (optional)"}
+          <label className="field">{ask.action === "block" ? "Why it's blocked" : "Why (optional)"}
             <input type="text" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} autoFocus
               placeholder={ask.action === "block" ? "needs the Stripe keys" : "released from the web UI"} />
           </label>
@@ -81,63 +97,95 @@ function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: View
 
 type Json = Record<string, unknown>;
 
-/** A task's page from the message board (#498): its thread and its context entries, read when it opens. */
-function TaskThread({ t, project, token, close }: { t: TaskRow; project: ViewProps["project"]; token: string; close: () => void }) {
+/** A task's own page (#543), over the board: its words, who has it, its epic, what blocks it, its pull request, its actions
+ *  (each asks first, as on the card), then its context entries and its thread, read from the message board when it
+ *  opens. `t` is the task as the board shows it; null when the board doesn't list it (done long ago, or not this
+ *  project's), then the page says so. Escape, Close or a click outside closes it. */
+export function TaskPage({ id, t, project, token, open, post, say, close }: { id: string; t: TaskRow | null; project: ViewProps["project"]; token: string;
+  open: ViewProps["open"]; post: Post; say: Say; close: () => void }) {
   const [got, setGot] = useState<Json | null>(null);
+  const [ask, setAsk] = useState<Ask | null>(null);
+  useEscape(close, ask !== null);
   useEffect(() => {
     let gone = false;
-    fetch(`/api/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(t.id)}`, { headers: { authorization: `Bearer ${token}` } })
+    if (!t) return;
+    fetch(`/api/projects/${encodeURIComponent(project.id)}/tasks/${encodeURIComponent(id)}`, { headers: { authorization: `Bearer ${token}` } })
       .then((r) => r.json() as Promise<Json>)
       .then((j) => { if (!gone) setGot(j); })
       .catch(() => { if (!gone) setGot({ message: "The server can't be reached.", fix: "Check that the web UI still runs, then open this again." }); });
     return () => {
       gone = true;
     };
-  }, [project.id, t.id, token]);
+  }, [project.id, id, token, t?.state, t?.holders.join(",")]);
   const thread = Array.isArray(got?.thread) ? (got.thread as Json[]) : [];
   const context = Array.isArray(got?.context) ? (got.context as Json[]) : [];
   const failed = got !== null && !Array.isArray(got.thread);
+  const body = typeof got?.body === "string" ? got.body.trim() : "";
+  const actions = (t?.actions ?? []).filter((a): a is TaskAction => a in LABELS);
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
-      <div className="dialog bthread" role="dialog" aria-modal="true" aria-labelledby="task-thread">
-        <h2 id="task-thread">#{t.id} {t.title}</h2>
-        <p className="muted">{[t.stateText, t.holders[0] ? `held by ${t.holders[0]}` : "", blockersText(t)].filter(Boolean).join(" · ")}</p>
-        {got === null && <p className="empty">Reading the thread…</p>}
-        {failed && <div className="notice bad" role="alert"><div><strong>{String(got?.message ?? "")}</strong><p>{String(got?.fix ?? "")}</p></div></div>}
-        {context.length > 0 && <section aria-label="Context">
-          <h3 className="vgroup">Context</h3>
-          <ul className="bentries">{context.map((c) => (
-            <li key={String(c.id)}><span className="bkind">{String(c.kind)}</span> {String(c.body)} <span className="muted">· {String(c.author)}, {ago(String(c.at))}</span></li>
-          ))}</ul>
-        </section>}
-        {got !== null && !failed && <section aria-label="Thread">
-          <h3 className="vgroup">Thread</h3>
-          {thread.length ? <ul className="bentries">{thread.map((m) => (
-            <li key={String(m.id)}>
-              <p className="bwhofrom"><Avatar name={String(m.from)} size={18} /><strong>{String(m.from)}</strong>{m.to ? <span className="muted">to {String(m.to)}</span> : null}
-                <span className="bkind">{String(m.kind)}</span><span className="muted">{ago(String(m.at))}</span></p>
-              <p className="bbody">{String(m.body)}</p>
-            </li>
-          ))}</ul> : <p className="empty">Nothing said on this task yet.</p>}
-        </section>}
+      <div className="dialog bthread" role="dialog" aria-modal="true" aria-labelledby="task-page">
+        <h2 id="task-page">{taskLabel(id)} {t?.title ?? ""}</h2>
+        {!t && <p className="empty">{taskLabel(id)} isn't on {project.name}'s board now: it may have been done more than a week ago.</p>}
+        {t && <>
+          <dl className="facts">
+            <div><dt>State</dt><dd><Dot tone={taskTone(t.state)} />{t.stateText}</dd></div>
+            <div><dt>Who</dt><dd>{t.holders.length ? t.holders.map((h) => <button key={h} className="link" onClick={() => open(`agent:${h}`)}>{h}</button>)
+              : unheldText(t)}</dd></div>
+            {t.epic && <div><dt>Epic</dt><dd><button className="link" onClick={() => open("view:epics", `#${t.epic}`)}>#{t.epic}</button></dd></div>}
+            {blockersText(t) && <div><dt>Blocked by</dt><dd>{blockersText(t).replace(/^Blocked by /, "")}</dd></div>}
+            {t.pr && <div><dt>Pull request</dt><dd><button className="link" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>PR #{t.pr.number}</button>
+              {t.pr.checks && <span className="muted"> · {checksText(t.pr.checks)}</span>}</dd></div>}
+            {t.url && <div><dt>On GitHub</dt><dd><a className="ext" href={t.url} target="_blank" rel="noreferrer noopener">Issue {taskLabel(id)}</a></dd></div>}
+          </dl>
+          {actions.length > 0 && <div className="bactions">{actions.map((a) => <button key={a} className="btn small" onClick={() => setAsk({ task: t, action: a })}>{LABELS[a]}</button>)}</div>}
+          {got === null && <p className="empty">Reading the task…</p>}
+          {failed && <div className="notice bad" role="alert"><div><strong>{String(got?.message ?? "")}</strong><p>{String(got?.fix ?? "")}</p></div></div>}
+          {body && <section aria-label="What it is"><p className="bbody">{body}</p></section>}
+          {context.length > 0 && <section aria-label="Context">
+            <h3 className="vgroup">Context</h3>
+            <ul className="bentries">{context.map((c) => (
+              <li key={String(c.id)}><span className="bkind">{String(c.kind)}</span> {String(c.body)} <span className="muted">· {String(c.author)}, {ago(String(c.at))}</span></li>
+            ))}</ul>
+          </section>}
+          {got !== null && !failed && <section aria-label="Thread">
+            <h3 className="vgroup">Thread</h3>
+            {thread.length ? <ul className="bentries">{thread.map((m) => (
+              <li key={String(m.id)}>
+                <p className="bwhofrom"><Avatar name={String(m.from)} size={18} /><strong>{String(m.from)}</strong>{m.to ? <span className="muted">to {String(m.to)}</span> : null}
+                  <span className="bkind">{String(m.kind)}</span><span className="muted">{ago(String(m.at))}</span></p>
+                <p className="bbody">{String(m.body)}</p>
+              </li>
+            ))}</ul> : <p className="empty">Nothing said on this task yet.</p>}
+          </section>}
+        </>}
         <div className="actions"><button className="btn" onClick={close} autoFocus>Close</button></div>
       </div>
+      {ask && <AskDialog ask={ask} project={project} post={post} say={say} close={() => setAsk(null)} />}
     </div>
   );
 }
 
-function Card({ t, edge, pull, open, act, thread }: { t: TaskRow; edge: string; pull?: PullRow; open: ViewProps["open"]; act: (a: Ask) => void;
-  thread?: (t: TaskRow) => void }) {
+/** True when a click on a card was on one of its own controls (a link or a button), which keep their own action. */
+function onControl(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("button, a, input, select, textarea") !== null;
+}
+
+function Card({ t, edge, pull, open, act, openTask }: { t: TaskRow; edge: string; pull?: PullRow; open: ViewProps["open"]; act: (a: Ask) => void;
+  openTask?: (id: string) => void }) {
   const actions = (t.actions ?? []).filter((a): a is TaskAction => a in LABELS);
   const tag = cardTag(t, pull);
   const blockers = blockersText(t);
   return (
-    <li className="bcard" data-edge={edge} style={{ borderLeftColor: `var(--${edge}-dot)` }}>
-      <p className="btitle">{t.url ? <a className="ext" href={t.url} target="_blank" rel="noreferrer noopener">#{t.id}</a> : `#${t.id}`} {t.title}</p>
+    <li className={openTask ? "bcard opens" : "bcard"} data-edge={edge} style={{ borderLeftColor: `var(--${edge}-dot)` }}
+      onClick={(e) => { if (openTask && !onControl(e.target)) openTask(t.id); }}>
+      <p className="btitle">{openTask
+        ? <button className="blink btitle-open" onClick={() => openTask(t.id)} aria-label={`Open ${taskLabel(t.id)} ${t.title}`}>{taskLabel(t.id)} {t.title}</button>
+        : <>{t.url ? <a className="ext" href={t.url} target="_blank" rel="noreferrer noopener">{taskLabel(t.id)}</a> : taskLabel(t.id)} {t.title}</>}</p>
       <div className="bfoot">
         <span className="bwho">{t.holders.length ? t.holders.map((h) => (
           <button key={h} className="bavatar" title={h} aria-label={`Open ${h}'s page`} onClick={() => open(`agent:${h}`)}><Avatar name={h} size={20} /></button>
-        )) : <span className="bnone">Unassigned</span>}</span>
+        )) : <span className="bnone">{unheldText(t)}</span>}</span>
         <span className="btag">{tag.needsYou && <span className="sdot down" aria-hidden="true" />}{tag.text}</span>
       </div>
       {blockers && <p className="bblock"><Dot tone="bad" />{blockers}</p>}
@@ -147,9 +195,8 @@ function Card({ t, edge, pull, open, act, thread }: { t: TaskRow; edge: string; 
           {t.pr.checks && <span title={checksText(t.pr.checks)}><Dot tone={checksTone(t.pr.checks.state)} />{checksText(t.pr.checks)}</span>}
         </p>
       )}
-      {(actions.length > 0 || thread) && (
+      {actions.length > 0 && (
         <div className="bactions">
-          {thread && <button className="btn small" onClick={() => thread(t)}>Thread</button>}
           {actions.map((a) => <button key={a} className="btn small" onClick={() => act({ task: t, action: a })}>{LABELS[a]}</button>)}
         </div>
       )}
@@ -164,12 +211,11 @@ function laneSub(key: string, count: number, by: LaneBy, epics: EpicRow[]): stri
   return `${count} ${count === 1 ? "task" : "tasks"}`;
 }
 
-/** The board for `tasks` (already filtered), with its lanes by `by`. With `token` (its tasks come from the message board,
- *  #498) a card opens its thread. */
-export function Board({ tasks, all, epics, pulls, by, project, open, post, say, token }: { tasks: TaskRow[]; all: TaskRow[]; epics: EpicRow[];
-  pulls: PullRow[]; by: LaneBy; project: ViewProps["project"]; open: ViewProps["open"]; post: Post; say: Say; token?: string }) {
+/** The board for `tasks` (already filtered), with its lanes by `by`. With `openTask` (its tasks come from the message
+ *  board, #498) a click on a card opens the task's page (#543). */
+export function Board({ tasks, all, epics, pulls, by, project, open, post, say, openTask }: { tasks: TaskRow[]; all: TaskRow[]; epics: EpicRow[];
+  pulls: PullRow[]; by: LaneBy; project: ViewProps["project"]; open: ViewProps["open"]; post: Post; say: Say; openTask?: (id: string | null) => void }) {
   const [ask, setAsk] = useState<Ask | null>(null);
-  const [reading, setReading] = useState<TaskRow | null>(null);
   const columns = columnsOf(all);
   const lanes = boardOf(tasks, by, epics);
   const colours = laneColours(lanes, by, epics, useContext(AgentsContext));
@@ -197,14 +243,13 @@ export function Board({ tasks, all, epics, pulls, by, project, open, post, say, 
               <ul key={c.state} className="bcell" data-col={c.title} aria-label={`${l.title}: ${c.title}`}>
                 {(l.cells[c.state] ?? []).map((t) => <Card key={t.id} t={t} edge={cardEdge(t, by, colours[i] ?? "grey", epics)}
                   pull={t.pr ? pullOf.get(t.pr.number) : undefined} open={open} act={setAsk}
-                  thread={token ? setReading : undefined} />)}
+                  openTask={openTask ? (id) => openTask(id) : undefined} />)}
               </ul>
             ))}
           </div>
         </section>
       ))}
       {ask && <AskDialog ask={ask} project={project} post={post} say={say} close={() => setAsk(null)} />}
-      {reading && token && <TaskThread t={reading} project={project} token={token} close={() => setReading(null)} />}
     </div>
   );
 }
@@ -243,6 +288,11 @@ export const BOARD_CSS = String.raw`
   flex-direction: column; gap: 8px; box-shadow: var(--card-shadow); }
 .btitle { margin: 0; font-weight: 600; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .btitle .ext { color: inherit; text-decoration: none; }
+/* a card opens its task (#543): the whole card is the target, its title the keyboard's */
+.bcard.opens { cursor: pointer; }
+.bcard.opens:hover { border-color: var(--border-strong); }
+.btitle-open { font-weight: 600; text-align: left; line-height: 1.35; display: inline; }
+.btitle-open:focus-visible { outline: 2px solid var(--focus, currentColor); outline-offset: 2px; border-radius: 4px; }
 .btitle .ext:hover { text-decoration: underline; }
 .bfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--text-2); }
 .bwho { display: inline-flex; gap: 2px; align-items: center; }

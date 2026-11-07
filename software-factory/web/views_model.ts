@@ -19,6 +19,8 @@ export interface TaskRow {
   state: string;
   stateText: string;
   holders: string[];
+  /** Who it was handed to (Reassign) while nobody holds it, from the message board (#545); missing or null with nobody. */
+  assignee?: string | null;
   group: string;
   todos: { done: number; all: number };
   dependsOn: string[];

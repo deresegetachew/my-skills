@@ -59,6 +59,8 @@ export interface TaskRow {
   state: string;
   stateText: string;
   holders: string[];
+  /** Who the task was handed to (Reassign, #545), when nobody holds it yet; null with nobody. */
+  assignee: string | null;
   group: string;
   todos: { done: number; all: number };
   dependsOn: string[];
@@ -284,7 +286,8 @@ function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], ori
     const isNext = next === null && str(t.state) === "ready" && !holders.length && !dependsOn.some((d) => open.has(d.replace(/^#/, "")));
     if (isNext) next = id;
     const pr = prOf.get(id);
-    return { id, title: str(t.title), state: str(t.state), stateText: taskStateText(str(t.state)), holders, group: str(t.group),
+    const assignee = str(t.assignee) || null;
+    return { id, title: str(t.title), state: str(t.state), stateText: taskStateText(str(t.state)), holders, assignee: holders.length ? null : assignee, group: str(t.group),
       todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn, blockedBy,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
       pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, next: isNext, actions: actionsFor(str(t.state), source),
@@ -305,12 +308,20 @@ function reviewOf(p: Obj): PullView["review"] {
   return { state: "none", text: claim ? `being reviewed by ${claim}` : "not reviewed yet", claim };
 }
 
+/** The task a pull request is for: its branch (`task/7-login`, or `task/b3-slug` for a task made on the board), else
+ *  its title's start (`b3: ...`, `#7: ...`), as the agents name them (#545). */
+export function taskOfPull(branch: string, title: string): string | null {
+  const fromBranch = branchTask(branch) ?? /^task\/(b\d+)(?:-|$)/.exec(branch)?.[1];
+  if (fromBranch) return fromBranch;
+  return /^(b\d+|#?\d+)\s*:/.exec(title.trim())?.[1]?.replace(/^#/, "") ?? null;
+}
+
 function pullsView(cache: Obj): PullsView {
   const problems = missingOf(cache, /^pulls_/);
   const pulls = list(cache.pulls).filter((x) => typeof x.number === "number").map((x): PullView => {
     const branch = str(x.branch);
     return { number: num(x.number), title: str(x.title), url: str(x.url) || null, branch, draft: x.draft === true,
-      agent: str(x.agent) || null, task: branchTask(branch), checks: { state: str(x.ci) || "unknown",
+      agent: str(x.agent) || null, task: taskOfPull(branch, str(x.title)), checks: { state: str(x.ci) || "unknown",
         failing: list(x.notGreen).filter((j) => str(j.state) === "red").map((j) => str(j.name)) },
       review: reviewOf(x), protected: typeof x.protected === "boolean" ? x.protected : null,
       next: { action: str(x.next) || "none", text: str(x.nextText) || str(x.next) || "none" }, rework: str(x.rework) || null,
@@ -569,7 +580,12 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
     if (onBoard) {
       const wrote = await onTheBoard(board as TaskBoard, p, id, action, `reassigned to ${to} from the web UI`, to);
       if (wrote) return wrote;
-      return runSteps(p, [["factory", "say", to, `/next-task issue-${id}`]], TASK_ACTION_TIMEOUT_MS);
+      // the board took it: the task is the agent's now. Telling the agent is a nudge; one that isn't running takes the
+      // task when it starts, so that isn't a failure (#546)
+      const told = await runSteps(p, [["factory", "say", to, `/next-task issue-${id}`]], TASK_ACTION_TIMEOUT_MS);
+      if (told.status === 200) return told;
+      return { status: 200, body: { ok: true, command: `reassign #${id} to ${to} on the message board`,
+        output: `#${id} is handed to ${to} on the message board. ${to} isn't running on this machine now, so it takes #${id} when it starts.` } };
     }
     return runSteps(p, [["factory", "issues", "release", id, `reassigned to ${to} from the web UI`], ["factory", "say", to, `/next-task issue-${id}`]],
       TASK_ACTION_TIMEOUT_MS);
