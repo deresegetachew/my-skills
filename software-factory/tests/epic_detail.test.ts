@@ -4,7 +4,7 @@ import { afterAll, expect, test } from "bun:test";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { parseEpic } from "../hooks/core/domain/epic.ts";
-import { epicThread, stageSteps, talkText } from "../web/epics_model.ts";
+import { epicChoice, epicThread, stageSteps, talkText, threadText } from "../web/epics_model.ts";
 import { api, project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { write } from "./support.ts";
 
@@ -53,6 +53,24 @@ test("the stage steps: the stages before the current are done, the current is no
     ["planned", "done"], ["building", "now"], ["done", "later"]]);
   expect(stageSteps("investigating")[0]?.state).toBe("now");
   expect(stageSteps("parked").every((s) => s.state === "later")).toBe(true);
+});
+
+test("a thread message shows without its epic prefix, also when the title has a bracket (#464)", () => {
+  const epic = { id: "440", title: "Epics (above tasks) for :) all" };
+  expect(threadText(epic, talkText(epic, "Is this done?"))).toBe("Is this done?");
+  expect(threadText({ id: "440", title: "T" }, talkText({ id: "440", title: "T" }, "a (b): c"))).toBe("a (b): c");
+  expect(threadText(epic, "An answer with no prefix")).toBe("An answer with no prefix");
+});
+
+test("a message written under the epic's old title still loses its prefix (#464)", () => {
+  expect(threadText({ id: "440", title: "New name" }, "About epic #440 (Old (draft) name): hello")).toBe("hello");
+});
+
+test("opening #n: the epic's page when it exists, not found when it does not, the list otherwise (#464)", () => {
+  const all = [{ id: "5" }, { id: "9" }];
+  expect(epicChoice(all, "9")).toEqual({ show: "page", epic: { id: "9" } });
+  expect(epicChoice(all, "77")).toEqual({ show: "missing", id: "77" });
+  expect(epicChoice(all, null)).toEqual({ show: "list" });
 });
 
 const T = 60_000;
