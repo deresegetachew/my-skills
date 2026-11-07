@@ -243,6 +243,38 @@ test("with no message board set up, the read after a release starts at once, eve
   }
 }, 240_000);
 
+test("the answer to an action comes after the read it starts, so a slow-starting read is in the log (#519)", async () => {
+  const p = project();
+  roots.push(p.root);
+  cache(p, "issues");
+  // a busy machine: the snapshot's process takes a moment before it does anything (CI under load did this)
+  writeExe(join(p.d, "factory"), `#!/usr/bin/env bash\n[ "$1" = snapshot ] && sleep 0.5\necho "$*" >> "$FAKE_FACTORY_LOG"\necho "fake factory: $*"\n`);
+  const ui = await startUi(p, ["--port", "0"]);
+  running.push(ui);
+  for (const [id, name, body] of [["7", "release", { confirm: true }], ["10", "block", { confirm: true, reason: "needs keys" }]] as const) {
+    const r = await act(ui, id, name, body);
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(factoryCalls(p).at(-1), name).toBe("snapshot");
+  }
+}, T);
+
+test("an action while a read runs is read again after that one, before its answer (#519)", async () => {
+  const p = project();
+  roots.push(p.root);
+  cache(p, "issues");
+  writeExe(join(p.d, "factory"), `#!/usr/bin/env bash\nif [ "$1" = snapshot ]; then echo "snapshot start" >> "$FAKE_FACTORY_LOG"; sleep 1; ` +
+    `echo "snapshot end" >> "$FAKE_FACTORY_LOG"; exit 0; fi\necho "$*" >> "$FAKE_FACTORY_LOG"\n`);
+  const ui = await startUi(p, ["--port", "0"]);
+  running.push(ui);
+  expect((await api(ui, "/api/projects/work/refresh", { method: "POST" })).status).toBe(202); // a read that began before the action
+  const r = await act(ui, "7", "release");
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const log = factoryCalls(p);
+  const after = log.slice(log.indexOf("issues release 7 released from the web UI") + 1);
+  expect(after, log.join("\n")).toContain("snapshot start"); // the running read began before the release: another one ran
+  expect(after.at(-1), log.join("\n")).toBe("snapshot end");
+}, T);
+
 test("block runs factory issues block with the reason", async () => {
   const { ui, p } = await started();
   const r = await act(ui, "10", "block", { confirm: true, reason: "needs the Stripe keys" });

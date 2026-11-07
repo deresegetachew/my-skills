@@ -604,6 +604,8 @@ export class Refresher {
   /** The projects whose last (or running) read left the tasks out, and those with a full read to run after this one. */
   private readonly skipped = new Set<string>();
   private readonly queued = new Set<string>();
+  /** The read asked for (readAgain) while one ran, per project: it starts when that one ends. */
+  private readonly after = new Map<string, Promise<void>>();
 
   /** `fromBoard(p)`: project `p`'s tasks come from the message board (#498), so its snapshot leaves them out
    *  (FACTORY_SNAPSHOT_TASKS=board) and reads only what the board doesn't have: pull requests, CI, agents. null: not
@@ -642,6 +644,27 @@ export class Refresher {
     this.busy.set(p.id, job);
     this.changed(p);
     return true;
+  }
+
+  /** Reads `p` again after a change (an action, #519): now, or as soon as the running read ends (it may have begun
+   *  before the change); resolves when that read has ended, so whoever waits knows the read ran. */
+  readAgain(p: UiProject): Promise<void> {
+    if (p.problem) return Promise.resolve();
+    const now = this.busy.get(p.id);
+    if (!now) {
+      this.start(p, true);
+      return this.busy.get(p.id) ?? Promise.resolve();
+    }
+    let next = this.after.get(p.id);
+    if (!next) {
+      next = now.then(() => {
+        this.after.delete(p.id);
+        this.start(p, true); // already running when one queued by tasksNeeded() began first: that one is after the change too
+        return this.busy.get(p.id);
+      });
+      this.after.set(p.id, next);
+    }
+    return next;
   }
 
   /** Starts a read for `p` when its cache is stale. */
