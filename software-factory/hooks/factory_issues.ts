@@ -370,24 +370,26 @@ function main(argv: string[]): number {
     new: { valued: ["--title", "--body-file", "--milestone"], multi: ["--label"], required: ["--title", "--body-file"] },
   };
   const a = parseArgs(argv.slice(1), specs[cmd] ?? {}, `${PROG} ${cmd}`, `usage: ${PROG} ${cmd} [-h]`);
-  const n = a.n !== undefined ? intArg(a.n, "n", cmd) : 0;
   const cfg = load();
+  // on the board a task made there has no issue behind it and is named b<n> (#531, #544)
+  const boardId = taskSource(cfg) === "board" && typeof a.n === "string" && /^b\d+$/.test(a.n) ? a.n : null;
+  const n = boardId !== null ? 0 : a.n !== undefined ? intArg(a.n, "n", cmd) : 0;
   const L = taskLabels(cfg);
   try {
-    return command(cmd, a, n, cfg, L);
+    return command(cmd, a, n, cfg, L, boardId);
   } catch (e) {
     if (e instanceof CoreError) die(e.message); // a refusal from the tracker, said as this command always said it
     throw e;
   }
 }
 
-function command(cmd: string, a: ReturnType<typeof parseArgs>, n: number, cfg: Config, L: TaskLabels): number {
+function command(cmd: string, a: ReturnType<typeof parseArgs>, n: number, cfg: Config, L: TaskLabels, boardId: string | null = null): number {
   // `factory issues` is the GitHub Issues command, so it takes that tracker whatever `tasks.source` says, but on the
   // message board (`tasks.source: "board"`, #500), where the issues' tasks and claims are: there pick, peek, show,
   // tick, review, block, release and new act on the board (the rest still read GitHub).
   const tracker = taskTracker(cfg, taskSource(cfg) === "board" ? "board" : "issues");
   const named = (t: { id: string }): string => (taskSource(cfg) === "board" ? t.id : `issue-${t.id}`);
-  const id = String(n);
+  const id = boardId ?? String(n);
   if (cmd === "pick") {
     const { task, note } = tracker.pick({ agent: a.agent as string, machine: machineId() });
     if (note) process.stderr.write(note + "\n");
