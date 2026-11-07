@@ -11,7 +11,8 @@
 //
 // At boot the service runs `factory resume` (factory_resume.ts): it waits for Docker and the network, runs
 // `commands.stackUp`, saves any unfinished work of this machine's agents, and starts them in detached tmux sessions
-// with the settings and hooks loaded. Opt-in per machine: the names, "autostart", "autostartAgents" and "autostartReport"
+// with the settings and hooks loaded, at most this machine's maxCodingAgents in all (#596; `status` says which it would
+// skip). Opt-in per machine: the names, "autostart", "autostartAgents" and "autostartReport"
 // live in this machine's file (`factory machine show` prints where), never in the project. Errors are
 // `{code, message, fix}` on stderr.
 //
@@ -24,7 +25,7 @@ import { findClaude } from "./factory_claude.ts";
 import { type Config, load } from "./factory_config.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
 import { autostartSettings, checkedNames, namesFile, refuse, repoKey, saveMachineSettings, stateDir } from "./factory_machine.ts";
-import { agentPath, inspect, mainTop, SETTINGS_FIX } from "./factory_resume.ts";
+import { agentPath, capPlan, inspect, mainTop, SETTINGS_FIX } from "./factory_resume.ts";
 import { running as sessionRunning, sessionName } from "./factory_window.ts";
 import { plistDumps, pyRepr, run as runProc, runMain, splitLines, which } from "./factory_lib.ts";
 
@@ -326,6 +327,12 @@ function status(cfg: Config, top: string): void {
     unknown: "cannot tell (no usable systemctl --user or launchctl)" }[beat]);
   console.log(`boot report on the agent's issue: ${post ? "yes" : "no"} (issues mode only)`);
   console.log(`agents it would start${on ? "" : " once it is on"}: ${agents.length ? agents.join(", ") : "none"}`);
+  const [, skip, cap] = capPlan(cfg, agents);
+  if (cap) {
+    console.log(`limit: at most ${cap.max} coding agent${cap.max === 1 ? "" : "s"} at once on this machine (maxCodingAgents ` +
+      `${cap.max}), in the team's order` + (skip.length ? `; it would skip ${skip.join(", ")} ` +
+      `(\`factory settings --local set maxCodingAgents ${cap.max + skip.length}\` raises it)` : ""));
+  }
   for (const agent of agents) describe(cfg, top, agent);
   let last: string[];
   try {

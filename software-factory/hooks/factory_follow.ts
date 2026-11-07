@@ -12,6 +12,7 @@ import { NAME, tail } from "./factory_messages.ts";
 import * as R from "./factory_remotes.ts";
 import { RemoteError } from "./factory_remotes.ts";
 import { Exit, pyDumps, run, runMain, shQuote, sleepSync, splitLines, which } from "./factory_lib.ts";
+import { checkCap } from "./factory_window.ts";
 
 export const HELP = `\`factory follow\`, \`factory say\`, \`factory remote\` and \`factory agent <name> --detach\` (#106): watch and talk to an
 agent by its name, wherever it runs: on this machine (its own tmux, no remote needed), on a remote, or in the cloud.
@@ -394,6 +395,7 @@ function cmdDetach(argv: string[]): number {
     console.log(`${agent} is already running (tmux session ${session}). Follow it: factory follow ${agent}`);
     return 0;
   }
+  checkCap(agent); // this machine's maxCodingAgents, as every path that starts a coding agent (#596)
   const top = run(["git", "rev-parse", "--show-toplevel"]).stdout.trim();
   const command = "exec " + [join(top, "factory"), "agent", ...argv].map(shQuote).join(" ");
   const p = run(["tmux", "new-session", "-d", "-s", session, "-c", top, command]);

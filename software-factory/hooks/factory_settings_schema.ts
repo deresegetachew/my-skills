@@ -326,7 +326,7 @@ export const MACHINE: Record<string, Setting> = table([
   S("autostart", "bool", "machine", "Bring the stack and this machine's agents back after a reboot (`factory autostart`).", { scope: "machine", default: false }),
   S("autostartAgents", "list", "machine", "The agents it starts at boot. Empty: the names this machine runs.", { scope: "machine", default: [] }),
   S("autostartReport", "bool", "machine", "Post the boot report on the first started agent's issue (issues mode).", { scope: "machine", default: true }),
-  S("maxCodingAgents", "int", "machine", "How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`) is refused. Empty: no limit.", { scope: "machine", default: null, minimum: 1, maximum: 32, read_by: "`factory owner start` (factory_owner.ts) and the web UI's Team page" }),
+  S("maxCodingAgents", "int", "machine", "How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`, `factory loop -i`, `factory agent`) is refused, and `factory resume` at boot starts at most this many, in the team's order. Empty: no limit.", { scope: "machine", default: null, minimum: 1, maximum: 32, read_by: "factory_window.ts (`factory owner start`, `factory loop`, `factory agent`), `factory resume`, `factory autostart status` and the web UI's Team page" }),
   S("ci.runners", "int", "machine", "Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's.", { scope: "machine", default: null, minimum: 1, maximum: 16 }),
 ]);
 

@@ -12,6 +12,12 @@
 // place. Without tmux the step stops with {code, message, fix} (resume, autostart); `factory loop -i` checks first and
 // runs in place instead, with a note.
 //
+//   factory_window.ts cap [--name N]
+//       what `factory agent` and a coding agent's `factory loop` run in place check first (#596): refuses with
+//       `too_many_agents` when this machine already runs its maxCodingAgents coding agents (N itself not counted; a
+//       number is the Nth agent). `startLoop`, `factory owner start`, `factory resume` and `factory agent --detach` use
+//       the same check, codingAgentCap() below
+//
 //   factory_window.ts job <file>
 //       what a sub-manager's window runs (#307, PRD US-4): the job file (mode 600, written by the orchestrator and
 //       removed once read, so neither the prompt nor the environment is on tmux's command line) names the command,
@@ -20,8 +26,8 @@
 import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { load, toFloat } from "./factory_config.ts";
-import { freeNames } from "./factory_claims.ts";
-import { refuse, repoKey } from "./factory_machine.ts";
+import { alive as claimAlive, type Claims, freeNames, HOST, stateDir as claimsDir } from "./factory_claims.ts";
+import { machineSettings, refuse, repoKey } from "./factory_machine.ts";
 import { run, runMain, shQuote, which } from "./factory_lib.ts";
 
 export class WindowError extends Error {
@@ -46,6 +52,53 @@ export function windowName(role: string, name: string): string {
 
 export function running(session: string): boolean {
   return run(["tmux", "has-session", "-t", `=${session}`]).code === 0;
+}
+
+/** The pid of `name`'s live loop on this machine, from its checkout claim, or null (#395). */
+export function loopPid(name: string): number | null {
+  let data: Partial<Claims> = {};
+  try {
+    data = JSON.parse(readFileSync(join(claimsDir(), "claims.json"), "utf8")) as Partial<Claims>;
+  } catch {
+    return null;
+  }
+  const claim = data.checkouts?.[name];
+  // only a claim made here: one from another host (or this one under an old name) holds a pid of another machine
+  if (!claim || claim.host !== HOST) return null;
+  return claimAlive(claim, toFloat(load().claimStaleHours ?? 6) ?? 6, true) ? Math.trunc(Number(claim.pid)) : null;
+}
+
+/** This machine's maxCodingAgents (#581) and the project's coding agents (`agents`, in the team's order) running here
+ * now, in tmux or as a loop outside it, `except` not counted. */
+export interface Cap {
+  max: number;
+  busy: string[];
+}
+
+/** The limit and who counts against it, or null when this machine has no limit. Every path that starts a coding agent
+ * checks it (#596). */
+export function codingAgentCap(except = ""): Cap | null {
+  const max = machineSettings().maxCodingAgents;
+  if (typeof max !== "number" || !Number.isInteger(max) || max < 1) return null;
+  const names = ((load().agents ?? []) as unknown[]).filter((n): n is string => typeof n === "string" && n !== except);
+  return { max, busy: names.filter((n) => running(sessionName(n)) || loopPid(n) !== null) };
+}
+
+/** What a full machine says: [message, fix]. */
+export function capText(cap: Cap): [string, string] {
+  const { max, busy } = cap;
+  return [`This machine runs at most ${max} coding agent${max === 1 ? "" : "s"} at once (maxCodingAgents), and ` +
+    `${busy.join(", ")} ${busy.length === 1 ? "runs" : "run"} here now`,
+  `Stop one first (\`factory owner stop ${busy[0] ?? "<name>"}\`), or raise the limit: ` +
+    `\`factory settings --local set maxCodingAgents ${max + 1}\`.`];
+}
+
+/** Refuses with `too_many_agents` when one more coding agent (`who`, not counted itself) would pass the limit. */
+export function checkCap(who: string): void {
+  const cap = codingAgentCap(who);
+  if (!cap || cap.busy.length < cap.max) return;
+  const [message, fix] = capText(cap);
+  refuse("too_many_agents", `${message}; nothing was started.`, fix);
 }
 
 /** Throws WindowError when there is no tmux; else returns a note to print first, "" today (the 3.2 the retired cockpit
@@ -106,7 +159,8 @@ function carried(): Record<string, string> {
 }
 
 /** Starts `factory loop <rest>` as `role` (and `name`, else the first free one) in its window, without attaching:
- * what `factory loop -i` and `factory owner start` share. Says what it did; refuses with {code, message, fix}. */
+ * what `factory loop -i` and `factory owner start` share. Says what it did; refuses with {code, message, fix}, and a
+ * coding agent past this machine's maxCodingAgents with `too_many_agents` (#596). */
 export function startLoop(role: string, name: string, rest: string[]): Started {
   const top = run(["git", "rev-parse", "--show-toplevel"]).stdout.trim();
   let s: Started;
@@ -122,6 +176,8 @@ export function startLoop(role: string, name: string, rest: string[]): Started {
       refuse("no-free-name", `every ${role} name already has a live loop on this clone.`,
         `Name one: factory ${role} <name> loop -i, or stop one of them first.`);
     }
+    // one already running is only shown again, so it is never refused (#596)
+    if (role === "coding-agent" && !running(sessionName(name))) checkCap(name);
     s = startWindow({ role, name, dir: top, argv: [join(top, "factory"), "loop", ...rest],
       // no "How is Claude doing?" survey in an agent's session: it swallows what `factory say` types under it (#558)
       env: { ...carried(), FACTORY_ROLE: role, FACTORY_NAME: name, CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1" } });
@@ -240,6 +296,13 @@ async function job(file: string): Promise<number> {
 
 async function main(argv: string[]): Promise<number> {
   if (argv[0] === "loop") return loop(argv.slice(1));
+  if (argv[0] === "cap") {
+    const i = argv.indexOf("--name");
+    let who = i >= 0 ? argv[i + 1] ?? "" : "";
+    if (/^\d+$/.test(who)) who = ((load().agents ?? []) as string[])[Number(who) - 1] ?? who;
+    checkCap(who);
+    return 0;
+  }
   if (argv[0] === "job" && argv[1]) {
     try {
       return await job(argv[1]);
@@ -249,7 +312,8 @@ async function main(argv: string[]): Promise<number> {
     }
   }
   refuse("unknown-command", `unknown command ${JSON.stringify(argv[0] ?? "")}.`,
-    "Use: factory_window.ts loop --role R [--name N] -- <loop arguments>, or factory_window.ts job <file>");
+    "Use: factory_window.ts loop --role R [--name N] -- <loop arguments>, factory_window.ts cap [--name N], or " +
+    "factory_window.ts job <file>");
 }
 
 if (import.meta.main) await runMain(() => main(process.argv.slice(2)));
