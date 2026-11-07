@@ -107,7 +107,7 @@ test("an incomplete install that cannot fetch the release is refused with the fi
   const [d, env] = await oldClientInstall();
   const off = { ...OFFLINE(env), FACTORY_CACHE_DIR: join(env.FACTORY_CACHE_DIR as string, "empty") };
   const before = snapshot(d);
-  const [rc, out] = await fac(d, off, "update");
+  const [rc, out] = await fac(d, off, "update", "v1.0.0");
   expect(rc, out).toBe(1);
   expect(out).toContain("[incomplete_install]");
   expect(out).toContain(BOARD);
@@ -130,6 +130,7 @@ test("the factory command warns on start while the install is incomplete, and is
   // the project's own copy of the client is this one (the release's fake hooks stand in for the rest)
   symlinkSync(join(HOOKS, "factory_release.ts"), join(d, ".claude/hooks/factory_release.ts"));
   writeFileSync(join(d, ".claude/hooks/factory_status.ts"), "console.log('status ran');\n");
+  commit(d, "what the old client left, and the test's stand-ins");
   const factory = (e: Env): Promise<[number, string]> => spawn(["bash", join(SF, "factory"), "status"], d, e);
   let [rc, out] = await factory(OFFLINE(env));
   expect(rc, out).toBe(0);

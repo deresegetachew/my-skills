@@ -87,14 +87,18 @@ test("two files the manifest sends to one place are refused", async () => {
 });
 
 /** A project on v1.0.0 that lacks an engine file the release ships, and whose pin does not list it (what an older
- * client's rules left on remanual). */
-async function missingSettings(): Promise<[string, Record<string, string | undefined>]> {
+ * client's rules left on remanual). With `noList`, the release's list of its own files (#520) is gone too, as in a
+ * release built before it: then only the archive can tell. */
+async function missingSettings(noList = false): Promise<[string, Record<string, string | undefined>]> {
   const [, d, env] = await world("1.0.0");
   expect((await fac(d, env, "update", "v1.0.0"))[0]).toBe(0);
   const p = JSON.parse(read(join(d, PIN))) as { files: Record<string, string> };
-  delete p.files[".claude/factory/settings.json"];
+  const gone = [".claude/factory/settings.json", ...(noList ? [".claude/hooks/factory_release_files.json"] : [])];
+  for (const rel of gone) {
+    delete p.files[rel];
+    unlinkSync(join(d, rel));
+  }
   writeFileSync(join(d, PIN), JSON.stringify(p, null, 2) + "\n");
-  unlinkSync(join(d, ".claude/factory/settings.json"));
   commit(d);
   return [d, env];
 }
@@ -114,7 +118,8 @@ test("an update on the same release repairs an engine file the release ships tha
 });
 
 test("the same release with no network and nothing cached is still already installed", async () => {
-  const [d, env] = await missingSettings();
+  // a release built before #520: nothing offline says a file is missing (release_finish.test.ts has the case with the list)
+  const [d, env] = await missingSettings(true);
   rmSync(env.FACTORY_CACHE_DIR as string, { recursive: true, force: true });
   const [rc, out] = await fac(d, { ...env, FACTORY_RELEASE_API: "http://127.0.0.1:9" }, "update", "v1.0.0");
   expect(rc === 0 && out.includes("already on v1.0.0"), out).toBe(true);

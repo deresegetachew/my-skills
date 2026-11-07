@@ -71,6 +71,20 @@ An update on the release the project is already on also checks that every factor
 in the pin, and repairs one that is not (it needs the archive: from the download cache, or downloaded; with no network
 it says what it could not check and changes nothing).
 
+**A release finishes its own install (#520).** A client from before #278 (the Python factory, `v0.1.0-alpha.3`)
+installs a newer release by its own rules, leaves out what it does not know (the message board, the agents' rules) and
+still says "verified". Each release therefore carries the list of every factory file it installs, with its hash
+(`.claude/hooks/factory_release_files.json`, built by the release builder; every client installs `hooks/`). With it the
+new factory tells offline that its install is incomplete: `factory` warns on its first start after the pin changes
+(`[incomplete_install]`, with the files and the fix) and goes on with the command, and `factory doctor` and
+`factory version` name it. The fix is one more `factory update` (or `factory update --archive <file> --sums <file>`
+without the network): it adds what is missing, replaces a copy an older client wrote, rewrites the CI steps that call
+removed hooks, records it all in the pin and verifies against the release's list. It may run on the uncommitted change
+the old client left, because it writes only what is missing or an older copy; a factory file with your own uncommitted
+change still refuses it (`dirty_tree`). Run twice, the second says "already on". When the release cannot be fetched it
+refuses with `incomplete_install` and changes nothing. An old client's own `factory update` cannot be made to run the
+new client afterwards (its code is what runs), which is why the check is in the new `factory`.
+
 A project whose update from `v0.2.0-alpha.1` to `v0.2.0` left out `.claude/factory/settings.json` (the older client did
 not know the file, so the factory refuses to start an agent with `no_agent_settings`): `v0.2.0`'s client does not notice
 it on the same release. Run `factory rollback`, then `factory update`, or update to the next release, which puts it in
