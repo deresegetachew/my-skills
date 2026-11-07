@@ -1507,10 +1507,10 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   }
   const same = Boolean(pin) && (pin as Pin).tag === tag;
   if (same) expect = (pin as Pin).sha256 ?? null; // the same release: the cache holds it, and a download must be it
-  const local_ = same ? pinnedProblems(root, pin as Pin) : []; // the project's own changes to the factory's files
+  const localDrift = same ? pinnedProblems(root, pin as Pin) : []; // the project's own changes to the factory's files
   // #520: the release's own list of its files says, offline, what an older client left out
-  const incomplete = same && !local_.length ? installProblems(root, pin as Pin) : [];
-  const drift = [...local_, ...incomplete];
+  const incomplete = same && !localDrift.length ? installProblems(root, pin as Pin) : [];
+  const drift = [...localDrift, ...incomplete];
   let unpacked: [string, Files, Manifest] | null = null;
   let unchecked: string | null = null;
   if (incomplete.length) {
@@ -1538,8 +1538,8 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
     }
   }
   // Finishing an incomplete install writes only what is missing or an older copy, never a file with local changes
-  // (those are local_), so the uncommitted files an older client's update left are fine (#520).
-  if (dirtyOk && (!same || local_.length)) {
+  // (those are localDrift), so the uncommitted files an older client's update left are fine (#520).
+  if (dirtyOk && (!same || localDrift.length)) {
     throw new FactoryError("dirty_tree", "the working tree has uncommitted changes to the factory's own files.",
       "commit them (or `git checkout -- .claude factory factory-loop.sh` to drop them), then run it again. Nothing was changed.");
   }
