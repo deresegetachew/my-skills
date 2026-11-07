@@ -1,6 +1,8 @@
 // Needs attention on the message board (#579): a task in progress that nothing has moved on the board for
 // attention.taskQuietMinutes, while its holder isn't working on it, shows with Release; with tasks.source board, Close
-// moves a task (or an epic) to done on the board, after the confirm, and the item clears. A real Postgres (board_pg.ts),
+// moves a task to done on the board, after the confirm, and the item clears (the board then closes the finished epic
+// itself, #586); an epic left open with every task done shows with Close the epic; and a task whose earlier PR is gone
+// stops showing once it is claimed again. A real Postgres (board_pg.ts),
 // the real server (startUi), a fake `gh` and a fake `factory`.
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { SQL } from "bun";
@@ -43,19 +45,23 @@ echo "fake factory: $*"
 
 const ref = (n: number) => `github:${REPO}#${n}`;
 
-function workProject(cfg: Row): Project {
+function snapshot(p: Project, pulls: Row[] = []): void {
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
+    tasks: { source: "issues", tasks: [], epics: [] }, pulls, ci: { mode: "github", repo: REPO, runners: [], runs: [], errors: [] } }));
+}
+
+function workProject(cfg: Row, pulls: Row[] = []): Project {
   const p = project(cfg);
   roots.push(p.root);
   writeExe(join(p.d, "factory"), FAKE_FACTORY);
-  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
-    tasks: { source: "issues", tasks: [], epics: [] }, pulls: [], ci: { mode: "github", repo: REPO, runners: [], runs: [], errors: [] } }));
+  snapshot(p, pulls);
   // menelik runs but isn't working on #7: only the board's own changes keep #7 moving
   heartbeat(p, [hbRow("menelik"), hbRow("taytu"), hbRow("fasil", { kind: "dev-manager" }), hbRow("mentewab", { kind: "product-owner" })]);
   return p;
 }
 
 /** Epic #1 with #7 under it, #7 held by menelik and last changed `minutes` ago. */
-async function seeded(url: string, minutes: number): Promise<{ board: Board; epic: number; t7: number }> {
+async function seeded(url: string, minutes: number): Promise<{ board: Board; menelik: Board; sql: SQL; epic: number; t7: number }> {
   const board = await Board.open(url, { as: "system", max: 1 });
   boards.push(board);
   await board.migrate();
@@ -67,7 +73,7 @@ async function seeded(url: string, minutes: number): Promise<{ board: Board; epi
   const sql = new SQL(url, { max: 1 });
   sqls.push(sql);
   await sql`UPDATE tasks SET updated_at = now() - make_interval(mins => ${minutes}) WHERE id = ${t7.id}`;
-  return { board, epic: epic.id, t7: t7.id };
+  return { board, menelik, sql, epic: epic.id, t7: t7.id };
 }
 
 type Item = { id: string; reason: string; action: Row };
@@ -106,20 +112,55 @@ test("a task nothing moved on the board for longer than attention.taskQuietMinut
   expect(await until(fresh, () => true)).toEqual([]);
 }, T);
 
-test("with tasks.source board, Close moves the task to done on the board and the item clears; Close the epic does the same", async () => {
+test("with tasks.source board, Close moves the task to done on the board; its item and the finished epic's both clear", async () => {
   const db = await freshDb(pg);
   drops.push(db.drop);
   const { board, epic, t7 } = await seeded(db.url, 120);
   const ui = await startUi(workProject({ ...CONFIG, tasks: { source: "board" } }), ["--port", "0"], null, { MB_URL: db.url });
   running.push(ui);
   await until(ui, (l) => l.some((i) => i.id === "task-quiet:7"));
+  const no = await api(ui, "/api/projects/work/tasks/7/actions/close", { method: "POST", body: {} });
+  expect(no.status).toBe(400);
+  expect(no.json).toMatchObject({ code: "confirm_needed", message: "Closing a task or an epic marks it done and takes it from whoever holds it, so it needs a confirm." });
   const r = await api(ui, "/api/projects/work/tasks/7/actions/close", { method: "POST", body: { confirm: true } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(await board.get(t7)).toMatchObject({ status: "done", holder: null });
-  const x = await until(ui, (l) => l.some((i) => i.id === "epic-done:1") && !l.some((i) => i.id === "task-quiet:7"));
-  expect(x.map((i) => i.id)).toEqual(["epic-done:1"]); // every task of the epic is done now
+  expect(await until(ui, (l) => l.length === 0)).toEqual([]); // the board closed the epic with its last task (#586)
+  expect(await board.get(epic)).toMatchObject({ status: "done" });
+}, T);
+
+test("an epic left open with every task done (its task closed outside the board's own path) shows; Close the epic closes it", async () => {
+  const db = await freshDb(pg);
+  drops.push(db.drop);
+  const { board, sql, epic, t7 } = await seeded(db.url, 10);
+  // as a task closed before #586 was: done, with nothing closing its epic
+  await sql`UPDATE tasks SET status = 'done', outcome = 'done', holder = NULL, claim_token = NULL, claimed_at = NULL, claim_until = NULL WHERE id = ${t7}`;
+  const ui = await startUi(workProject({ ...CONFIG, tasks: { source: "board" } }), ["--port", "0"], null, { MB_URL: db.url });
+  running.push(ui);
+  const x = await until(ui, (l) => l.some((i) => i.id === "epic-done:1"));
+  expect(x.map((i) => [i.id, i.reason, i.action.kind])).toEqual([["epic-done:1", "Its only task is done, but the epic is still open.", "close"]]);
   const e = await api(ui, "/api/projects/work/tasks/1/actions/close", { method: "POST", body: { confirm: true } });
   expect(e.status, JSON.stringify(e.json)).toBe(200);
   expect(await board.get(epic)).toMatchObject({ status: "done" });
   expect(await until(ui, (l) => l.length === 0)).toEqual([]);
+}, T);
+
+test("a task whose earlier PR is gone shows with Close until it is claimed again, then clears while its new PR isn't open", async () => {
+  const db = await freshDb(pg);
+  drops.push(db.drop);
+  const { board, menelik, t7 } = await seeded(db.url, 10);
+  const pr = { number: 21, title: "Login", url: `https://github.com/${REPO}/pull/21`, branch: "task/7-login", draft: false, ci: "green", next: "none",
+    nextText: "none", agent: "menelik", review: null, gate: null, notGreen: [], protected: null, claim: null, createdAt: new Date().toISOString() };
+  const p = workProject(CONFIG, [pr]);
+  const ui = await startUi(p, ["--port", "0"], null, { MB_URL: db.url });
+  running.push(ui);
+  expect(await until(ui, (l) => l.length === 0)).toEqual([]); // the first look keeps which pull requests are open
+  await Bun.sleep(1_100);
+  snapshot(p, []); // PR #21 closed without merging
+  const x = await until(ui, (l) => l.some((i) => i.id === "task-pr-gone:7"));
+  expect(x.find((i) => i.id === "task-pr-gone:7")?.action).toMatchObject({ kind: "close", task: "7" });
+  await Bun.sleep(1_100);
+  await board.move(t7, { to: "ready", reason: "PR #21 was closed; try again" });
+  await menelik.claim(t7);
+  expect(await until(ui, (l) => !l.some((i) => i.id === "task-pr-gone:7"))).toEqual([]);
 }, T);

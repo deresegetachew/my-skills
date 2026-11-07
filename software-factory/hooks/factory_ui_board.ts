@@ -165,7 +165,7 @@ export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj
     return { id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [], assignee: t.assignee ?? null,
       group: /^Milestone:[ \t]*(.+)$/m.exec(t.body)?.[1]?.trim() ?? "", todos: todos(t.body).map((d) => ({ done: d.done })),
       dependsOn: blockedBy, blockedBy, cites: citesIn(t.body), epic: epic ? ids.get(epic.id) : null,
-      updatedAt: new Date(t.updatedAt).toISOString() };
+      updatedAt: new Date(t.updatedAt).toISOString(), claimedAt: t.claimedAt ? new Date(t.claimedAt).toISOString() : null };
   };
   const tasks = work.filter((t) => t.status !== "done").map(rowOf);
   const done = recent.map(rowOf);

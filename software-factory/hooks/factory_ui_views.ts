@@ -79,6 +79,8 @@ export interface TaskRow {
   cites: string[];
   /** When the task last changed (#579), from the message board; null on the GitHub path. */
   updatedAt: string | null;
+  /** When its holder claimed it (#579), from the message board; null on the GitHub path or when nobody holds it. */
+  claimedAt: string | null;
   find: string;
 }
 
@@ -316,7 +318,8 @@ function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], ori
       todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn, blockedBy,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
       pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, next: isNext, actions: actionsFor(str(t.state), source),
-      epic: epicOf.get(id) ?? null, cites: strings(t.cites), updatedAt: str(t.updatedAt) || null, find: taskText(t) };
+      epic: epicOf.get(id) ?? null, cites: strings(t.cites), updatedAt: str(t.updatedAt) || null,
+      claimedAt: str(t.claimedAt) || null, find: taskText(t) };
   };
   const tasks = rows.map(toRow);
   const done = list(part.done).filter((t) => str(t.id)).map(toRow); // the board's recently done (#545), never next
@@ -581,7 +584,8 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
   const action = name as TaskActionName;
   const b = obj(body);
   if (b.confirm !== true) {
-    return refusal(400, "confirm_needed", `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
+    return refusal(400, "confirm_needed", action === "close" ? "Closing a task or an epic marks it done and takes it from whoever holds it, so it needs a confirm."
+      : `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
   }
   const onBoard = str(obj(p.config?.tasks).source) === "board";
   if (onBoard && (!part || !board)) {

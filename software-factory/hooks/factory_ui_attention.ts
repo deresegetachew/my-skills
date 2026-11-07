@@ -192,6 +192,9 @@ export function attentionOf(i: AttentionInput): AttentionItem[] {
     if (!BUILDING.has(t.state) || t.pr) continue;
     const g = goneOf.get(t.id);
     if (!g) continue;
+    // claimed again since that PR went (one closed without merging, the task taken up again): its new PR isn't open yet
+    const claimed = t.claimedAt ? Date.parse(t.claimedAt) : NaN;
+    if (!Number.isNaN(claimed) && claimed > Date.parse(g.at)) continue;
     flagged.add(t.id);
     item("task-pr-gone", t.id, { title: `${named(t.id)} ${t.title}`, task: t.id, pr: g.number,
       reason: `PR #${g.number} is no longer open (merged or closed), but ${named(t.id)} is still ${t.stateText.toLowerCase() || t.state}.`,
@@ -234,7 +237,7 @@ export function attentionOf(i: AttentionInput): AttentionItem[] {
   // an epic whose tasks are all done
   for (const e of v.epics.epics) {
     if (e.all === 0 || e.done !== e.all || e.stage === "done") continue;
-    item("epic-done", e.id, { title: `${named(e.id)} ${e.title}`, epic: e.id, reason: `All ${plural(e.all, "task")} are done, but the epic is still open.`,
+    item("epic-done", e.id, { title: `${named(e.id)} ${e.title}`, epic: e.id, reason: `${e.all === 1 ? "Its only task is" : `All ${e.all} tasks are`} done, but the epic is still open.`,
       action: { kind: "close", label: "Close the epic", task: e.id } });
   }
 
