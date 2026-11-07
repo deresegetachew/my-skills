@@ -133,6 +133,15 @@ function configAt(path: string): Config | null {
   return Array.isArray(cfg.agents) ? cfg : { ...cfg, agents: DEFAULTS.agents };
 }
 
+/** Reads project `p`'s factory.json again (#456): a settings change merged and pulled into its checkout shows (a new
+ * agent in Your team, one that can be started) without starting the web UI again. A file that can't be read now keeps
+ * what was read before. */
+export function refreshConfig(p: UiProject): void {
+  if (p.problem) return;
+  const cfg = configAt(p.path);
+  if (cfg) p.config = cfg;
+}
+
 /** The `ui.projects` setting: the paths it lists. */
 export function uiSetting(cfg: Config, key: "projects" | "port" | "pollSeconds"): unknown {
   return obj(cfg.ui)[key];

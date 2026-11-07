@@ -24,6 +24,7 @@ import { ARTIFACTS_CSS, ArtifactsPage } from "./artifacts.tsx";
 import { MenuIcon } from "./page_head.tsx";
 import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx";
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
+import { MaintenancePage, ReleasesPage, SETTINGS_CSS, SettingsPage } from "./settings.tsx";
 import { SIGNOFF_CSS, SignoffPage } from "./signoff.tsx";
 import { CSS } from "./style.ts";
 import { THEME_CSS } from "./theme.ts";
@@ -437,10 +438,7 @@ const COMING: Record<string, { what: string; see: string[] }> = {
   activity: { what: "Activity will show everything that happened, newest first.", see: ["prs", "ci"] },
   health: { what: "Health will check every part of the factory and give a fix for what doesn't work.", see: ["machines", "ci"] },
   usage: { what: "Usage and cost will show what each agent and task used, against its budget.", see: ["board"] },
-  settings: { what: "The settings of this project and this machine will be set here.", see: [] },
   integrations: { what: "The services the agents use will be listed here, with whether each one works.", see: [] },
-  releases: { what: "The version this project runs, and the newer ones, will be shown here.", see: [] },
-  maintenance: { what: "Clean-ups and repairs will be here, each saying what it will and won't touch.", see: [] },
 };
 
 function ComingPage({ page, open }: { page: string; open: (channel: string) => void }) {
@@ -483,6 +481,9 @@ function DocsIndex({ sections, open }: { sections: DocSection[] | undefined; ope
     </div>
   );
 }
+
+/** Factory settings' own pages (#456, web/settings.tsx); Integrations is still to come (#441). */
+const SETTINGS_PAGES: Record<string, typeof SettingsPage> = { settings: SettingsPage, releases: ReleasesPage, maintenance: MaintenancePage };
 
 /** The views that are channels of their own (#424, web/views.tsx). */
 const VIEW_CHANNELS: Record<string, typeof TasksChannel> = { tasks: TasksChannel, epics: EpicsChannel, "pull-requests": PullsChannel, ci: CiChannel };
@@ -896,6 +897,11 @@ function App() {
             talkers={talkTargets(view.channels.filter((c) => c.kind === "agent"))} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} />
           : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
+          : !channel && SETTINGS_PAGES[page] ? (() => {
+            const Page = SETTINGS_PAGES[page] as typeof SettingsPage;
+            return <Page key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} open={(c) => go(project.id, c)}
+              agents={live?.agents ?? []} />;
+          })()
           : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} post={post} />
@@ -916,6 +922,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);
