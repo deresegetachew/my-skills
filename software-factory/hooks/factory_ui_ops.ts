@@ -318,6 +318,12 @@ function prWhat(x: ActivityItem): string {
   return x.id.endsWith("-opened") ? "opened" : x.id.includes("-gone-") ? "gone" : x.id.includes("-ci-") ? "ci" : "";
 }
 
+/** `<pr>:<what>` for a pull request event (prWhat), "" for any other. */
+function prKey(x: ActivityItem): string {
+  const what = prWhat(x);
+  return what ? `${x.pr}:${what}` : "";
+}
+
 const SNAPSHOT_ONLY: Problem = { code: "ui_activity_snapshot",
   message: "The tasks are kept as GitHub issues, so claims, moves, comments and agents starting or going down aren't recorded here. This shows what the last snapshot knows: pull requests with their CI and reviews, failed CI runs and the asks waiting for you.",
   fix: "Move the tasks to the message board to see every claim, move, comment and agent as it happens." };
@@ -489,8 +495,9 @@ export class Ops {
   private async activity(p: UiProject): Promise<{ from: "board" | "snapshot"; items: ActivityItem[]; problems: Problem[] }> {
     const snap = snapshotOf(p);
     const fromBoard = await this.d.board.activity(p, ACTIVITY_MAX * 2).catch(() => null);
-    const told = new Set((fromBoard ?? []).map((x) => `${x.pr}:${prWhat(x)}`).filter((k) => !k.endsWith(":")));
-    const fromSnapshot = snapshotEvents(p, snap, fromBoard !== null).filter((x) => !told.has(`${x.pr}:${prWhat(x)}`));
+    this.noteTold(p, fromBoard ?? []);
+    const told = this.toldBy.get(p.id) ?? new Set<string>();
+    const fromSnapshot = snapshotEvents(p, snap, fromBoard !== null).filter((x) => !told.has(prKey(x)));
     const items = this.placed(p, [...(fromBoard ?? []), ...fromSnapshot], snap).sort(newestFirst).slice(0, ACTIVITY_MAX);
     const problems: Problem[] = [];
     if (fromBoard === null) problems.push(SNAPSHOT_ONLY);
@@ -522,10 +529,22 @@ export class Ops {
 
   /** The board's new events for project `p`, as the WebSocket pushes them (#583): the same entries the page reads. */
   pushed(p: UiProject, items: ActivityItem[]): ActivityItem[] {
+    this.noteTold(p, items);
     return this.placed(p, items).sort(newestFirst);
   }
 
   private snapshotSent = new Map<string, Set<string>>();
+  /** Per project, the pull request events the board's own feed told (`<pr>:opened|gone|ci`, prKey), so the snapshot's
+   *  copy of one is neither listed nor pushed again (#583). */
+  private toldBy = new Map<string, Set<string>>();
+
+  private noteTold(p: UiProject, fromBoard: ActivityItem[]): void {
+    const keys = fromBoard.filter((x) => x.id.startsWith("board-")).map(prKey).filter((k) => k !== "");
+    if (!keys.length) return;
+    let told = this.toldBy.get(p.id);
+    if (!told) this.toldBy.set(p.id, (told = new Set()));
+    for (const k of keys) told.add(k);
+  }
 
   /** The snapshot's events for project `p` the WebSocket hasn't pushed yet (#583); the first call only keeps what there
    *  is, so an open page gets what is new, not everything again. Reads the snapshot's cache, no GitHub call. */
@@ -537,7 +556,8 @@ export class Ops {
     const sent = this.snapshotSent.get(p.id);
     this.snapshotSent.set(p.id, new Set([...(sent ?? []), ...all.map((x) => x.id)]));
     if (!sent) return [];
-    return this.placed(p, all.filter((x) => !sent.has(x.id)), snap).sort(newestFirst);
+    const told = this.toldBy.get(p.id) ?? new Set<string>();
+    return this.placed(p, all.filter((x) => !sent.has(x.id) && !told.has(prKey(x))), snap).sort(newestFirst);
   }
 
   // --- needs attention (#579) ----------------------------------------------------------------------------------------

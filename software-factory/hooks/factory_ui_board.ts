@@ -43,6 +43,9 @@ export const ACTOR = "web-ui";
 const RETRY_MS = 5_000;
 const CHECK_MS = 5_000;
 const MOST = 5_000;
+/** Activity reads the board's events back this many at a time, and at most SCAN_MAX in one read (#583). */
+const SCAN_PAGE = 1_000;
+const SCAN_MAX = 20_000;
 
 type BoardApi = typeof import("../message-board/src/index.ts");
 
@@ -352,16 +355,28 @@ export class BoardFeed {
     return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
   }
 
-  /** Activity (#455): the board's events about project `p`'s tasks, newest first, from the last `most` events: claims,
-   *  moves, comments, closes, hand-offs, new tasks and notes. Null while `p`'s tasks aren't read from the board. */
+  /** Activity (#455, #583): the last `most` of the board's events about project `p`, newest first: claims, moves,
+   *  comments, closes, hand-offs, new tasks and notes on its tasks, its agents starting or going down, and its pull
+   *  requests. An agent's pings don't count towards `most`. Null while `p`'s tasks aren't read from the board. */
   async activity(p: UiProject, most = 400): Promise<ActivityItem[] | null> {
     const board = this.board;
     if (!board || !this.live(p)) return null;
     const scope = this.scopeOf(p, new Map());
     try {
-      const last = await board.lastSeq();
-      const events = await board.events(Math.max(0, last - most), most);
-      return events.map((e) => itemOf(e, scope)).filter((x): x is ActivityItem => x !== null).reverse();
+      // read back a page at a time past the agents' pings (a `signal.agent` per hook, #583), so they don't push older
+      // events out: until `most` events of the kinds shown are found, or SCAN_MAX events are read
+      const kept: BoardEvent[][] = [];
+      let found = 0;
+      let start = await board.lastSeq();
+      for (let read = 0; start > 0 && found < most && read < SCAN_MAX; read += SCAN_PAGE) {
+        const from = Math.max(0, start - SCAN_PAGE);
+        const page = (await board.events(from, start - from)).filter((e) => e.kind in KIND || e.kind === "signal.agent" || e.kind === "signal.pr");
+        found += page.filter((e) => e.kind !== "signal.agent").length;
+        kept.unshift(page);
+        start = from;
+      }
+      const items = kept.flat().map((e) => itemOf(e, scope)).filter((x): x is ActivityItem => x !== null);
+      return items.slice(-most).reverse();
     } catch (e) {
       await this.fail(e);
       return null;

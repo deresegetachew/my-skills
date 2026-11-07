@@ -193,3 +193,57 @@ test("a new board event reaches an open page over the WebSocket as the entry its
   const j = await activityUntil(ui, (x) => (x.items as Row[])[0]?.text === "pushed to PR #21");
   expect(((j.items as Row[]).slice(0, 3)).map((x) => x.text)).toEqual(["pushed to PR #21", "went down", "moved #7 to blocked: the provider is down"]);
 }, T);
+
+test("an agent's pings don't push older events out of Activity: a claim followed by 1,000 pings still shows", async () => {
+  const url = await boardUrl();
+  const system = await as(url, "system");
+  await system.migrate();
+  const t7 = await system.create({ title: "Add the login page", ref: ref(7), priority: 1 });
+  const menelik = await as(url, "menelik");
+  await menelik.claim(t7.id);
+  await agentIs(menelik, "menelik", "working");
+  for (let i = 0; i < 1000; i++) await agentIs(menelik, "menelik", "working"); // a ping per hook: none is news
+  await agentIs(menelik, "menelik", "down");
+  const ui = await startUi(workProject(), ["--port", "0"], null, { MB_URL: url });
+  running.push(ui);
+  const j = await activityUntil(ui, (x) => x.from === "board");
+  expect(boardItems(j).map((x) => x.text)).toEqual(["went down", "claimed #7 Add the login page", "filed #7: Add the login page"]);
+}, T);
+
+test("what the board's pull request feed told is not pushed again from the snapshot", async () => {
+  const url = await boardUrl();
+  await seeded(url);
+  const p = workProject();
+  const ui = await startUi(p, ["--port", "0"], null, { MB_URL: url });
+  running.push(ui);
+  await activityUntil(ui, (x) => x.from === "board");
+  const ws = new WebSocket(ui.url.replace("http", "ws") + `/api/ws?token=${ui.token}`);
+  const pushed: Row[] = [];
+  ws.onmessage = (e) => {
+    const m = JSON.parse(String(e.data)) as Row;
+    if (m.type === "activity" && m.project === "work" && Array.isArray(m.items)) pushed.push(...(m.items as Row[]));
+  };
+  await new Promise((r) => { ws.onopen = r; });
+  const seen = async (ok: (x: Row) => boolean, ms = 30_000): Promise<Row | undefined> => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      const hit = pushed.find(ok);
+      if (hit) return hit;
+      await Bun.sleep(50);
+    }
+    return undefined;
+  };
+  await Bun.sleep(1500); // the page has what the snapshot knows now
+  await prChange(await as(url, "fasil"), 40, "opened");
+  expect(await seen((x) => x.text === "opened PR #40")).toMatchObject({ pr: 40, link: "pr:40" });
+  const pr = (n: number, title: string): Row => ({ number: n, title, url: `https://github.com/${REPO}/pull/${n}`, branch: `task/${n}-x`, draft: false,
+    ci: "green", next: "none", nextText: "none", agent: "taytu", review: null, gate: null, notGreen: [], protected: null, claim: null,
+    createdAt: new Date().toISOString() });
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
+    tasks: { source: "issues", tasks: [], epics: [] },
+    pulls: [{ ...pr(21, "Login"), branch: "task/7-login", agent: "menelik", createdAt: "2000-01-01T00:00:00Z" }, pr(40, "Search"), pr(42, "Export")],
+    ci: { mode: "github", repo: REPO, runners: [], runs: [], errors: [] } }));
+  expect(await seen((x) => x.text === "opened PR #42: Export")).toMatchObject({ pr: 42, link: "pr:42" }); // only the snapshot knows #42
+  ws.close();
+  expect(pushed.filter((x) => x.pr === 40).map((x) => x.text)).toEqual(["opened PR #40"]); // the board told it; the snapshot doesn't again
+}, T);
