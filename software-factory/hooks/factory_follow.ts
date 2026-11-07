@@ -301,7 +301,8 @@ function sayLimits(): [number, number] {
  *  that is busy (its pane shows "esc to interrupt") can drop an Enter, leaving the text typed in its prompt box, so it
  *  waits (up to `busy` seconds in all) for the session to be idle, types the text, presses Enter, and looks again: while
  *  the prompt line (the last `❯` line) still holds the text, it waits for idle again and presses Enter again, up to
- *  `enters` more times. Then the text is still unsent: it prints UNSENT and exits 5. No session: NOSESSION, exit 3; tmux
+ *  `enters` more times. Claude Code's "How is Claude doing this session?" survey, which swallows what is typed under it,
+ *  is dismissed (`0`) before it types or presses Enter. Then the text is still unsent: it prints UNSENT and exits 5. No session: NOSESSION, exit 3; tmux
  *  failing: exit 4. The use is logged there (who, when, which session), never the text. */
 export function sayScript(session: string, who: string, busy: number, enters: number): string {
   return [
@@ -312,8 +313,11 @@ export function sayScript(session: string, who: string, busy: number, enters: nu
     'pane() { tmux capture-pane -p -J -t "$T" 2>/dev/null; }',
     'busy() { pane | tail -n 15 | grep -q "esc to interrupt"; }',
     "unsent() { pane | grep '❯' | tail -n 1 | grep -qF -- \"$head\"; }",
+    // Claude Code's "How is Claude doing this session?" survey takes the keys typed under it: dismiss it (0) first
+    'survey() { pane | tail -n 15 | grep -q "How is Claude doing"; }',
     `deadline=$((SECONDS + ${busy}))`,
-    'idle() { while busy && [ "$SECONDS" -lt "$deadline" ]; do pause 0.5; done; }',
+    'idle() { while busy && [ "$SECONDS" -lt "$deadline" ]; do pause 0.5; done; n=0; ' +
+      'while survey && [ "$n" -lt 3 ]; do tmux send-keys -t "$T" 0 || exit 4; n=$((n + 1)); pause 0.5; done; }',
     'idle',
     'tmux send-keys -t "$T" -l -- "$msg" && tmux send-keys -t "$T" Enter || exit 4',
     'd="${XDG_STATE_HOME:-$HOME/.local/state}/software-factory"; mkdir -p "$d"',

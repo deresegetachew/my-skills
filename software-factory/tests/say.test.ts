@@ -18,8 +18,10 @@ case "$1" in
   capture-pane)
     cat "$d/history" 2>/dev/null
     b=$(num busy); if [ "$b" -gt 0 ]; then echo "✻ Thinking… (esc to interrupt)"; echo $((b - 1)) >"$d/busy"; fi
+    if [ -f "$d/survey" ]; then echo "● How is Claude doing this session? (optional)"; echo "  1: Bad    2: Fine   3: Good   0: Dismiss"; fi
     printf '❯ %s\\n' "$(cat "$d/box" 2>/dev/null)" ;;
   send-keys)
+    if [ -f "$d/survey" ]; then [ "$4" = "0" ] && rm -f "$d/survey"; exit 0; fi # the survey takes every key
     if [ "$4" = "-l" ]; then printf '%s' "$6" >>"$d/box"; exit 0; fi
     b=$(num busy); x=$(num drop)
     if [ "$b" -gt 0 ]; then exit 0; fi
@@ -81,6 +83,17 @@ test("say to a busy session waits until it is idle, then the text is submitted, 
   // it looked at the screen before it typed
   const log = calls(w);
   expect(log.findIndex((l) => l.startsWith("capture-pane"))).toBeLessThan(log.findIndex((l) => l.includes(" -l -- ")));
+});
+
+test("Claude Code's feedback survey on screen is dismissed with 0 first, then the text is typed and submitted", () => {
+  const w = world();
+  write(join(w.dir, "survey"), "");
+  const p = say(w, "Take b16 next.");
+  expect(p.code, p.out).toBe(0);
+  expect(box(w)).toBe("");
+  expect(submitted(w)).toEqual(["> Take b16 next."]);
+  const keys = calls(w).filter((l) => l.startsWith("send-keys"));
+  expect(keys).toEqual(["send-keys -t =app-taytu: 0", "send-keys -t =app-taytu: -l -- Take b16 next.", "send-keys -t =app-taytu: Enter"]);
 });
 
 test("an Enter the session drops is pressed again while the text is still in the box", () => {

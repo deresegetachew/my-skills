@@ -194,6 +194,7 @@ test("owner start starts the role's loop in its own tmux session and window, say
   expect(command).toContain("factory loop -i");
   expect(command).toContain("FACTORY_ROLE=coding-agent");
   expect(command).toContain("FACTORY_NAME=taytu");
+  expect(command).toContain("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1"); // the survey would swallow `factory say` (#558)
   expect(tmuxCalled(p, "attach-session")).toEqual([]);
   expect(tmuxCalled(p, "switch-client")).toEqual([]);
 });

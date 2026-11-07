@@ -587,6 +587,8 @@ factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent:
   prompt box. So `say` first waits while the pane shows `esc to interrupt` (20 seconds at most in all,
   `FACTORY_SAY_WAIT_SECONDS`), types the text and presses Enter, then looks again: while the prompt line (the last `❯` line)
   still holds the text, it waits for the session to be idle and presses Enter again, up to 3 times (`FACTORY_SAY_ENTERS`).
+  Claude Code's "How is Claude doing this session?" survey takes the keys typed under it, so `say` dismisses it (`0`)
+  first; sessions the factory starts in tmux also get `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`.
   If the text is still there it stops with `say-unsent`: the text is typed in the box, so press Enter in the session
   (`factory follow <agent>`) rather than sending it again.
 
