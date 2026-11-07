@@ -11,7 +11,9 @@
 //                                         usage --json`, by task and by worker), the problems it reported (no logs found:
 //                                         where it looked), or its own error when it failed (#571), and this machine's
 //                                         GitHub calls in the last hour
-//                                         (`factory usage --github --json`); kept for FACTORY_SNAPSHOT_CACHE_SECONDS
+//                                         (`factory usage --github --json`), and Claude's limit windows (#614: the last 5
+//                                         hours and 7 days per agent, the soft budget, `factory usage --window --json`);
+//                                         kept for FACTORY_SNAPSHOT_CACHE_SECONDS
 //   GET  /api/projects/:p/activity        everything that happened, newest first, one line each with who, what, when and
 //                                         the page it opens (#583): the message board's events (claims, moves, comments,
 //                                         closes, agents up or down, the pull request feed) while it is the project's
@@ -39,7 +41,7 @@ import { join } from "node:path";
 import { branchTask } from "./factory_config.ts";
 import { type AttentionItem, attentionOf, limitsOf } from "./factory_ui_attention.ts";
 import type { Queue } from "./factory_ui_chat.ts";
-import { type Agent, channels, envFor, factoryScript, type Live, type Obj, type Problem, readJson, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, channels, claudeLimitOf, envFor, factoryScript, type Live, type Obj, type Problem, readJson, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
 import { ttl, type Views } from "./factory_ui_views.ts";
 import { epicCost, type EpicCost, keepEvents, type Medians, snapshotEvents as snapshotTimes, type TaskCost, type TaskEvent } from "./factory_task_cost.ts";
 
@@ -265,6 +267,17 @@ function usageProblems(report: Obj | null): Problem[] {
 function builderBudget(p: UiProject): number | null {
   const v = obj(p.config?.budget).builder;
   return typeof v === "number" && Number.isInteger(v) && v > 0 ? v : null;
+}
+
+/** Claude's limit windows (#614), from `factory usage --window --json`: the last 5 hours and the last 7 days per agent,
+ *  the soft budget and the limit the loops wait on (its time as seconds since 1970). */
+function windowOf(w: Obj): Obj {
+  const limit = obj(w.limit);
+  return { since5h: str(w.window && obj(w.window).since) || null, since7d: str(w.week && obj(w.week).since) || null,
+    agents: list(w.agents).map((a) => ({ agent: str(a.agent), window: num(a.window), week: num(a.week) })),
+    total: { window: num(obj(w.total).window), week: num(obj(w.total).week) },
+    softTokens5h: typeof w.softTokens5h === "number" ? w.softTokens5h : null, over: w.over === true,
+    limitUntil: typeof limit.until === "number" ? limit.until : null };
 }
 
 /** What the Usage page says isn't measured (yet). */
@@ -529,7 +542,8 @@ export class Ops {
 
   private async readUsage(p: UiProject): Promise<Obj> {
     const run = (args: string[]) => spawn(["bash", factoryScript(p), "usage", ...args], p.path, envFor(p), USAGE_TIMEOUT_MS);
-    const [byTask, byWorker, github] = await Promise.all([run(["--json"]), run(["--json", "--by", "worker"]), run(["--github", "--json"])]);
+    const [byTask, byWorker, github, windows] = await Promise.all([run(["--json"]), run(["--json", "--by", "worker"]), run(["--github", "--json"]),
+      run(["--window", "--json"])]);
     const parse = (r: { stdout: string }): Obj | null => {
       try {
         const v = JSON.parse(r.stdout) as unknown;
@@ -542,6 +556,7 @@ export class Ops {
     const tasks = parse(byTask);
     const workers = parse(byWorker);
     const calls = parse(github);
+    const win = parse(windows); // an older factory without --window: no window section, nothing said
     if (!tasks) problems.push(usageFailure(p, byTask));
     else if (!workers) problems.push(usageFailure(p, byWorker));
     problems.push(...usageProblems(tasks));
@@ -565,7 +580,7 @@ export class Ops {
       tasks: taskRows, agents: agentRows,
       github: calls ? { total: num(calls.total), since: str(calls.since) || null, agents: obj(calls.agents), commands: obj(calls.commands),
         endpoints: obj(calls.endpoints), account: calls.github ?? null } : null,
-      notMeasured: NOT_MEASURED, problems };
+      window: win ? windowOf(win) : null, notMeasured: NOT_MEASURED, problems };
   }
 
   // --- what each task took (#580) ------------------------------------------------------------------------------------
@@ -718,7 +733,20 @@ export class Ops {
     const costs = this.keptCosts(p);
     return attentionOf({ config: p.config, views: this.d.views(p), agents: readable ? live.agents : null,
       gone: pullsSeen(p, snap).gone.map((g) => ({ number: g.number, title: g.title, task: g.task, at: g.at })), productAsks,
-      costs: costs && !costs.problems.some((x) => x.code === "ui_usage_unreadable") ? costs : null });
+      costs: costs && !costs.problems.some((x) => x.code === "ui_usage_unreadable") ? costs : null,
+      claudeLimit: claudeLimitOf(stateDirOf(p), Date.now() / 1000), softBudget: this.keptSoftBudget(p) });
+  }
+
+  /** The last 5 hours against claudeLimit.softTokens5h (#614), from the usage as kept; a read is started in the
+   *  background when it is old, never waited for. Null when the budget is off or nothing is kept yet. */
+  private keptSoftBudget(p: UiProject): { used: number; budget: number } | null {
+    const budget = obj(p.config?.claudeLimit).softTokens5h;
+    if (typeof budget !== "number" || budget <= 0 || p.problem) return null;
+    const k = this.usage.get(p.id);
+    if ((!k || Date.now() - k.at > ttl() * 1000) && !this.usageReading.has(p.id)) void this.usageOf(p).catch(() => null);
+    const w = obj(k?.value.window);
+    const used = obj(w.total).window;
+    return typeof used === "number" ? { used, budget } : null;
   }
 
   // --- home --------------------------------------------------------------------------------------------------------

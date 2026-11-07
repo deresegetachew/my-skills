@@ -308,3 +308,50 @@ test("a board task (b<n>) gets its sessions: from a task/b<n>- branch, or from i
   expect(data.groups.b40?.replies).toBe(1);
   expect(data.total.tasks).toEqual(["7", "8", "b27", "b31", "b40"]);
 });
+
+// --- Claude's limit windows (#614) ---------------------------------------------------------------------------------
+
+function windowWorld(): { root: string; logs: string; env: Record<string, string | undefined> } {
+  const root = join(tmp(), "proj");
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  write(join(root, ".claude", "factory.json"), JSON.stringify({ claudeLimit: { softTokens5h: 300 } }));
+  const logs = tmp();
+  const wt = root + "-agents/taytu";
+  const own = join(logs, slugOf(root));
+  const agent = join(logs, slugOf(root) + "-agents-taytu");
+  // each reply counts 160 (10 input + 100 cache writes + 50 output; cache reads are not counted)
+  write(join(own, "s1.jsonl"), [reply("a", "HEAD", root, { ts: "2026-10-24T11:00:00Z" }), reply("b", "HEAD", root, { ts: "2026-10-21T10:00:00Z" })].join("\n") + "\n");
+  write(join(agent, "s2.jsonl"), [reply("c", "task/8-y", wt, { ts: "2026-10-24T08:00:00Z" }), reply("d", "task/8-y", wt, { ts: "2026-10-10T10:00:00Z" })].join("\n") + "\n");
+  const env = { ...process.env, CLAUDE_PROJECT_DIR: root, FACTORY_NOW: String(Date.parse("2026-10-24T12:00:00Z") / 1000), TZ: "UTC", XDG_STATE_HOME: tmp() };
+  return { root, logs, env };
+}
+
+test("--window: the tokens of the last 5 hours and the last 7 days per agent, against the soft budget (#614)", () => {
+  const w = windowWorld();
+  const p = runHook("factory_usage", ["--logs", w.logs, "--window", "--json"], { cwd: w.root, env: w.env });
+  expect(p.code, p.out).toBe(0);
+  const data = JSON.parse(p.stdout) as Record<string, unknown>;
+  expect(data.agents).toEqual([{ agent: "(project folder)", window: 160, week: 320 }, { agent: "taytu", window: 160, week: 160 }]);
+  expect(data).toMatchObject({ total: { window: 320, week: 480 }, softTokens5h: 300, over: true, limit: null,
+    window: { since: "2026-10-24T07:00:00+00:00", hours: 5 }, week: { since: "2026-10-17T12:00:00+00:00", days: 7 } });
+  const text = runHook("factory_usage", ["--logs", w.logs, "--window"], { cwd: w.root, env: w.env });
+  expect(text.code, text.out).toBe(0);
+  expect(text.stdout).toMatch(/^agent\s+last 5 hours\s+last 7 days$/m);
+  expect(text.stdout).toMatch(/^taytu\s+160\s+160$/m);
+  expect(text.stdout).toMatch(/^all\s+320\s+480$/m);
+  expect(text.stdout).toContain("the last 5 hours used 107% of it. The loops start no new task until it is back under.");
+});
+
+test("--window says the Claude limit the loops wait on, and goes with no other option but --json (#614)", () => {
+  const w = windowWorld();
+  const until = Date.parse("2026-10-24T13:00:00Z") / 1000;
+  write(join(w.env.XDG_STATE_HOME as string, "proj-factory", "claude-limit.json"), JSON.stringify({ at: until - 3600, reset: until, until,
+    window: "five_hour", pattern: "quota-rejected", text: "x", by: "taytu" }));
+  const text = runHook("factory_usage", ["--logs", w.logs, "--window"], { cwd: w.root, env: w.env });
+  expect(text.stdout).toContain("Claude limit reached: the loops wait until 13:00 (local).");
+  const json = JSON.parse(runHook("factory_usage", ["--logs", w.logs, "--window", "--json"], { cwd: w.root, env: w.env }).stdout) as { limit: { until: number } };
+  expect(json.limit.until).toBe(until);
+  const bad = runHook("factory_usage", ["--window", "--task", "7"], { cwd: w.root, env: w.env });
+  expect(bad.code).toBe(2);
+  expect(bad.stderr).toContain("--window shows the last 5 hours and the last 7 days: use it alone or with --json");
+});

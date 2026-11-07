@@ -29,8 +29,8 @@ On this page:
 - **`factory loop -i`**: interactive. Each task opens a Claude session with `/next-task <id>` already started. When
   the agent has opened its PR, it marks the task done and the session closes by itself. The loop then counts down
   10 seconds and starts the next task; type `q` and Enter to stop. If the session ends before the task is done
-  (`/exit`, a crash, a usage limit), the loop also carries on after the same 10 s countdown, so it never waits all
-  night for a key.
+  (`/exit`, a crash), the loop also carries on after the same 10 s countdown, so it never waits all night for a key.
+  If it ended on Claude's usage limit, the loop waits for the reset instead (see "Claude's limit" below).
 - **`factory agent <name>`**: your own Claude session in that agent's folder, for manual work there (a fix by hand,
   a look around). The SessionStart hook claims the folder, runs the install (in a worktree) and `agentSetup`, sets the
   agent's ports and database, and (issues mode) registers the agent. Started with no other arguments, it says in one
@@ -116,6 +116,18 @@ as defaults.
 - **GitHub's limit.** Every agent on the account shares GitHub's 5,000 calls an hour. When a lookup meets the limit,
   the loop says `GitHub limit reached; waiting until HH:MM UTC`, waits for the reset and carries on. A secondary limit
   or a network timeout is tried again after 1, 2, 4, 8, then 15 minutes. Neither counts as a failed pass.
+- **Claude's limit** (#614). Every agent on a Claude login shares its 5-hour and weekly usage limits. When a session
+  ends on one, the loop reads the session's last reply in its transcript (`factory_claude_limit.ts` lists the messages
+  it knows and where they were seen), says `Claude limit reached; waiting until HH:MM (local)`, writes the reset time to
+  `claude-limit.json` in the state folder and waits until then plus `claudeLimit.marginSeconds` (60). Every loop of the
+  project on the machine reads that file before it starts a session, so the others wait too instead of each finding the
+  limit. When the reset time can't be read, it waits `claudeLimit.waitMinutes` (30) and says so. While it waits the
+  agent shows `waiting on the Claude limit until HH:MM` (`factory agents ls`, the web UI), and Needs attention has one
+  item for the team. Ctrl-C and a stop end the wait. A session that ended on the limit doesn't count towards "came up 3
+  times in a row", and a pass that did isn't a failed one. `factory usage --window` shows the tokens of the last 5
+  hours and 7 days per agent. With `claudeLimit.softTokens5h` set, the loops also start no new task while the last 5
+  hours of this project's sessions used more than that (running sessions finish); Needs attention says so. The dev
+  manager's orchestrator, which runs no model itself, doesn't wait.
 - **Waiting for a PR slot** (issues mode). When the agent's issue has its branch pushed, no PR yet, and `maxOpenPRs`
   ready PRs are open, the loop waits and takes no new work. As soon as a slot frees, it gives the agent that issue
   again, and the session opens the PR. Nobody has to restart it.

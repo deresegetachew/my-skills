@@ -70,3 +70,10 @@ test("idle while a task is ready (#591): Start work opens the say confirm with /
   expect(sayAsk("taytu", "/next-task")).toEqual({ happens: "/next-task is sent to taytu's session, as if typed there, and it looks for the next ready task.",
     doesNot: "Nothing is claimed for it here. If the same text is already typed in its prompt box, it is sent, not typed again." });
 });
+
+test("Claude's usage limit (#614): no action to run, a yellow dot, and no stuck mark on any agent", () => {
+  const limit = item("claude-limit", { reason: "Claude's 5-hour usage limit is reached: the agents wait until 16:00.", action: { kind: "none", label: "" } });
+  expect(actionOf(limit)).toEqual({ do: "none" });
+  expect(attentionDot(limit)).toBe("waiting");
+  expect(stuckMarks([limit])).toEqual({ tasks: {}, agents: {} });
+});

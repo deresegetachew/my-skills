@@ -29,6 +29,9 @@
 //   factory usage --github [--json]     this machine's GitHub calls in the last hour (#371), by agent, command and
 //                                       endpoint, biggest first, and what GitHub counts on the account (factory_lib.ts
 //                                       counts them; the other options don't apply)
+//   factory usage --window [--json]     Claude's limit windows (#614): the tokens of the last 5 hours and of the last 7
+//                                       days, per agent (as --by worker), against claudeLimit.softTokens5h when it is
+//                                       set, and the Claude limit the loops wait on, if any (factory_claude_limit.ts)
 //   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
 //                                       factory.json, default docs/factory-usage.md), to commit in a PR
 //
@@ -53,6 +56,8 @@ import { costOf, findLogs, listLogs, logBases, type Looked, type Price, PRICES_A
   PROJECT_FOLDER, type Scope, scopeOf, belongs, workerOf } from "./factory_usage_logs.ts";
 import { limitStatus } from "./factory_views_cache.ts";
 import { stateDir } from "./factory_machine.ts";
+import { activeLimit, clock, type LimitState, settingsOf } from "./factory_claude_limit.ts";
+import { now as clockNow } from "./factory_clock.ts";
 import { duration, eventsIn, mediansOf, sessionsOf, type TaskCost, taskCosts } from "./factory_task_cost.ts";
 
 export { PROJECT_FOLDER };
@@ -586,9 +591,65 @@ function isoformat(ms: number): string {
 
 const BY = ["task", "agent", "model", "role", "worker", "day"];
 
+// --- Claude's limit windows (#614) -------------------------------------------------------------------------------------
+
+const HOUR_MS = 3_600_000;
+
+export interface WindowReport {
+  now: string;
+  window: { since: string; hours: number };
+  week: { since: string; days: number };
+  /** Per agent (the folder its sessions ran in, as --by worker), biggest 5-hour use first. */
+  agents: Array<{ agent: string; window: number; week: number }>;
+  total: { window: number; week: number };
+  counts: string;
+  softTokens5h: number | null;
+  /** The last 5 hours used softTokens5h or more: the loops start no new task. */
+  over: boolean;
+  /** The Claude limit the loops wait on now, if any. */
+  limit: LimitState | null;
+  problems: Problem[];
+}
+
+/** The tokens (fresh input + output) of the last 5 hours and the last 7 days before `t` (seconds since 1970), per agent. */
+export function windowReport(cwd: string, t: number, logs: string | null, cfg: Config | null = null): WindowReport {
+  const usageCfg = isObj(cfg?.usage) ? cfg.usage : {};
+  const extra = Array.isArray(usageCfg.logFolders) ? usageCfg.logFolders.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+  const given = [process.env.CLAUDE_PROJECT_DIR ?? "", process.env.PWD ?? "", cwd].filter(Boolean);
+  const found = findAll(cwd, logs, extra, given);
+  const until = Math.floor(t * 1000) + 1;
+  const per = (since: number): Map<string, number> => {
+    const [groups] = summarise(collect(found, since, until), "worker");
+    return new Map([...groups].map(([key, g]) => [key, counted(g.tokens)]));
+  };
+  const win = per(until - 5 * HOUR_MS);
+  const week = per(until - 7 * DAY_MS);
+  const agents = [...new Set([...week.keys(), ...win.keys()])].map((agent) => ({ agent, window: win.get(agent) ?? 0, week: week.get(agent) ?? 0 }))
+    .sort((a, b) => b.window - a.window || b.week - a.week || a.agent.localeCompare(b.agent));
+  const total = { window: agents.reduce((n, a) => n + a.window, 0), week: agents.reduce((n, a) => n + a.week, 0) };
+  const soft = settingsOf(cfg).softTokens5h;
+  return { now: isoformat(until - 1), window: { since: isoformat(until - 1 - 5 * HOUR_MS), hours: 5 },
+    week: { since: isoformat(until - 1 - 7 * DAY_MS), days: 7 }, agents, total, counts: COUNTED, softTokens5h: soft,
+    over: soft !== null && total.window >= soft, limit: activeLimit(t), problems: found.problems };
+}
+
+function windowText(w: WindowReport): void {
+  out(`Claude's limit windows, from this machine's Claude Code logs, counting ${w.counts}.\n`);
+  const width = Math.max(14, ...w.agents.map((a) => a.agent.length));
+  out(`${"agent".padEnd(width)} ${"last 5 hours".padStart(13)} ${"last 7 days".padStart(13)}`);
+  for (const a of w.agents) out(`${a.agent.padEnd(width)} ${commas(a.window).padStart(13)} ${commas(a.week).padStart(13)}`);
+  out(`${"all".padEnd(width)} ${commas(w.total.window).padStart(13)} ${commas(w.total.week).padStart(13)}`);
+  if (w.softTokens5h !== null) {
+    out(`\nSoft budget (claudeLimit.softTokens5h): ${commas(w.softTokens5h)} tokens per 5 hours; the last 5 hours used ` +
+      `${percent(w.total.window, w.softTokens5h)}% of it.` + (w.over ? " The loops start no new task until it is back under." : ""));
+  }
+  if (w.limit) out(`\nClaude limit reached: the loops wait until ${clock(w.limit.until)} (local).`);
+  for (const p of w.problems) out(`\n${p.message} (${p.code})\nFix: ${p.fix}`);
+}
+
 const USAGE = `usage: factory usage [-h] [--since SINCE] [--until UNTIL]
                      [--by {task,agent,model,role,worker,day}] [--json] [--record LABEL]
-                     [--task TASK] [--markdown] [--budget] [--github]
+                     [--task TASK] [--markdown] [--budget] [--github] [--window]
 `;
 
 const HELP = `${USAGE}
@@ -612,6 +673,9 @@ options:
                         --task): used, budget, left, percent; warns at 80%
   --github              this machine's GitHub calls in the last hour, by
                         agent, command and endpoint (with --json too)
+  --window              Claude's limit windows: the tokens of the last 5
+                        hours and the last 7 days per agent, the soft
+                        budget and the limit the loops wait on (with --json)
 `;
 
 interface Args {
@@ -624,6 +688,7 @@ interface Args {
   markdown: boolean;
   budget: boolean;
   github: boolean;
+  window: boolean;
   logs: string | null;
 }
 
@@ -632,13 +697,13 @@ function argError(message: string): never {
   die(2);
 }
 
-const OPTIONS = ["--help", "--since", "--until", "--by", "--json", "--record", "--task", "--markdown", "--budget", "--github", "--logs"];
+const OPTIONS = ["--help", "--since", "--until", "--by", "--json", "--record", "--task", "--markdown", "--budget", "--github", "--window", "--logs"];
 const TAKES_VALUE = new Set(["--since", "--until", "--by", "--record", "--task", "--logs"]);
 
 /** argparse, by hand: the same options, abbreviations, errors (exit 2) and help. */
 export function parseArgs(argv: string[]): Args {
   const a: Args = { since: null, until: null, by: "task", json: false, record: null, task: null, markdown: false, budget: false, github: false,
-    logs: null };
+    window: false, logs: null };
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i] as string;
     let value: string | undefined;
@@ -694,6 +759,9 @@ export function parseArgs(argv: string[]): Args {
       case "--github":
         a.github = true;
         break;
+      case "--window":
+        a.window = true;
+        break;
       case "--record":
         a.record = v;
         break;
@@ -707,6 +775,9 @@ export function parseArgs(argv: string[]): Args {
   }
   if (a.github && (a.task || a.markdown || a.budget || a.record !== null || a.since !== null || a.until !== null)) {
     argError("--github shows the last hour of GitHub calls: use it alone or with --json");
+  }
+  if (a.window && (a.github || a.task || a.markdown || a.budget || a.record !== null || a.since !== null || a.until !== null || a.by !== "task")) {
+    argError("--window shows the last 5 hours and the last 7 days: use it alone or with --json");
   }
   if (a.budget && !a.task) argError("--budget needs --task: factory usage --task <n> --budget");
   return a;
@@ -765,6 +836,12 @@ function costsOf(sessions: Map<string, Session>): { costs: TaskCost[]; from: str
 export function main(argv: string[]): number {
   const a = parseArgs(argv);
   if (a.github) return githubReport(a.json);
+  if (a.window) {
+    const w = windowReport(process.cwd(), clockNow(), a.logs, load());
+    if (a.json) out(pyDumps(w, { indent: 2 }));
+    else windowText(w);
+    return 0;
+  }
   const today = Math.floor(Date.now() / DAY_MS) * DAY_MS;
   const until = a.until ?? today + DAY_MS;
   const since = a.since ?? until - 8 * DAY_MS;
