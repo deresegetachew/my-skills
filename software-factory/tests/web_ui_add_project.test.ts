@@ -911,3 +911,58 @@ test("check: a folder whose origin isn't a GitHub repo is refused with ui_add_no
   const ok = await check(s, body);
   expect(ok.status, JSON.stringify(ok.json)).toBe(200);
 }, T);
+
+// --- Choose your team (#457) -------------------------------------------------------------------------------------------
+
+/** A 1x1 PNG, as a data URL. */
+const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+test("check: a solo team (one builder, no dev manager or product owner) is accepted; only one of the two left out is refused (#457)", async () => {
+  const s = await setup();
+  const solo = await check(s, req(s, { team: { devManager: "", productOwner: "", builders: ["haile"] } }));
+  expect(solo.status, JSON.stringify(solo.json)).toBe(200);
+  for (const team of [{ devManager: "", productOwner: "abebe", builders: ["haile"] }, { devManager: "fasil", productOwner: "", builders: ["haile"] }]) {
+    const r = await check(s, req(s, { team }));
+    expect(r.status, JSON.stringify(team)).toBe(400);
+    expect(r.json.code).toBe("ui_add_team");
+  }
+}, T);
+
+test("check: a picture for a name not on the team, not an image, an SVG, or over 256 KB is refused with ui_add_avatar (#457)", async () => {
+  const s = await setup();
+  const big = `data:image/png;base64,${Buffer.concat([Buffer.from(PNG.split(",")[1] as string, "base64"), Buffer.alloc(256 * 1024)]).toString("base64")}`;
+  const bad = [
+    { nobody: PNG },
+    { menelik: "data:text/plain;base64,aGVsbG8=" },
+    { menelik: "data:image/svg+xml;base64,PHN2Zy8+" },
+    { menelik: "data:image/png;base64,aGVsbG8=" }, // says PNG, isn't one
+    { menelik: big },
+    { menelik: 7 },
+  ];
+  for (const avatars of bad) {
+    const r = await check(s, req(s, { avatars }));
+    expect(r.status, JSON.stringify(avatars).slice(0, 80)).toBe(400);
+    expect(r.json.code).toBe("ui_add_avatar");
+    expect(typeof r.json.fix).toBe("string");
+  }
+  expect((await check(s, req(s, { avatars: { menelik: PNG } }))).status).toBe(200);
+}, T);
+
+test("the team's pictures are written to .claude/factory/avatars, readable by all, and a solo team names no manager (#457)", async () => {
+  const s = await setup();
+  const team = { devManager: "", productOwner: "", builders: ["kebede"] };
+  const run = await waitRun(s.ui, await start(s, req(s, { team, avatars: { kebede: PNG } })));
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  const dest = join(s.folder, "shop");
+  const file = join(dest, ".claude", "factory", "avatars", "kebede.png");
+  expect(readFileSync(file).equals(Buffer.from(PNG.split(",")[1] as string, "base64"))).toBe(true);
+  expect(sh(["stat", "-c", "%a", file]).stdout.trim()).toBe("644");
+  const cfg = readJson<Row>(join(dest, ".claude", "factory.json"));
+  expect(cfg.agents).toEqual(["kebede"]);
+  const roles = cfg.roles as Record<string, Row>;
+  expect(roles["dev-manager"]?.names).toEqual([]);
+  expect(roles["product-owner"]?.names).toEqual([]);
+  expect(String(step(run, "answers").output)).toContain("kebede.png");
+  // the picture is in the setup commit
+  expect(git(dest, "show", "--name-only", "--format=", "factory/setup")).toContain(".claude/factory/avatars/kebede.png");
+}, T);
