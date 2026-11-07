@@ -445,3 +445,84 @@ test("a board that drops while a snapshot without tasks runs: a full snapshot ru
   expect(full, l.join("\n")).toBeGreaterThan(l.indexOf("snapshot end")); // queued behind the busy one, not dropped
   expect(l.indexOf("snapshot end")).toBeGreaterThan(l.indexOf("snapshot start tasks=board"));
 }, T);
+
+// --- the board as the record and down; the snapshot banner (#515) --------------------------------------------------------
+
+test("with tasks.source board and the board down, the tasks are unknown: one notice, no GitHub tasks, no empty board", async () => {
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, "postgres://nobody:secret-pw@127.0.0.1:9/board"); // nothing listens on port 9
+  const json = await tasksUntil(ui, (j) => problemsOf(j).includes("ui_board_down"), 20_000);
+  expect(json.from).toBe("unknown");
+  expect(rowsOf(json)).toEqual([]); // not #99 from GitHub's snapshot
+  expect(problemsOf(json)).toEqual(["ui_board_down"]); // one notice: not "tasks come from GitHub for now" as well
+  const notice = (json.problems as Row[])[0] as Row;
+  expect(notice.message).toBe("The message board can't be reached, so tasks are unknown until it's back.");
+  expect(notice.fix).toBe("On the hub, start it again.");
+  const epics = (await api(ui, "/api/projects/work/epics")).json;
+  expect(epics.from).toBe("unknown");
+  expect(problemsOf(epics)).toEqual(["ui_board_down"]);
+  expect(JSON.stringify(json)).not.toContain("secret-pw");
+  await finish(ui);
+}, T);
+
+test("with tasks.source board and a board with none of the project's tasks yet, the board is empty, from the board", async () => {
+  const url = await boardUrl();
+  const b = await Board.open(url, { as: "system", max: 1 });
+  boards.push(b);
+  await b.migrate();
+  const ui = await started(workProject(0, BOARD_CONFIG), url);
+  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  expect(json.from).toBe("board");
+  expect(rowsOf(json)).toEqual([]);
+  expect(problemsOf(json)).toEqual([]);
+  await finish(ui);
+}, T);
+
+test("tasks from a healthy board show no 'no snapshot yet' banner; the pull requests, still from the snapshot, do", async () => {
+  const url = await boardUrl();
+  await seeded(url);
+  const p = workProject();
+  rmSync(join(p.state, "snapshot.json"));
+  const ui = await started(p, url);
+  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  expect(problemsOf(json)).not.toContain("ui_no_snapshot");
+  expect(problemsOf((await api(ui, "/api/projects/work/epics")).json)).not.toContain("ui_no_snapshot");
+  expect(problemsOf((await api(ui, "/api/projects/work/pulls")).json)).toContain("ui_no_snapshot");
+  await finish(ui);
+}, T);
+
+test("the server logs that the board can't be read, and that it reconnected once it answers again", async () => {
+  const db = await freshDb(pg);
+  drops.push(db.drop);
+  const name = new URL(db.url).pathname.slice(1);
+  await db.drop(); // the board isn't there when the server starts
+  const ui = await started(workProject(), db.url);
+  const reader = (ui.proc.stdout as ReadableStream<Uint8Array>).getReader();
+  let out = "";
+  const until = async (word: string, ms: number): Promise<boolean> => {
+    const deadline = Date.now() + ms;
+    while (!out.includes(word) && Date.now() < deadline) {
+      const next = await Promise.race([reader.read(), Bun.sleep(Math.max(deadline - Date.now(), 1)).then(() => null)]);
+      if (next === null || next.done) break;
+      out += new TextDecoder().decode(next.value);
+    }
+    return out.includes(word);
+  };
+  try {
+    expect(await until("can't be read", 15_000), out).toBe(true);
+    const { SQL } = await import("bun");
+    const admin = new SQL(pg.url, { max: 1 });
+    try {
+      await admin.unsafe(`create database ${name}`);
+    } finally {
+      await admin.close();
+    }
+    await seeded(db.url);
+    expect(await until("reconnected", 30_000), out).toBe(true);
+    expect(out).toContain("message board");
+    expect(out).not.toContain(new URL(pg.url).password);
+  } finally {
+    reader.releaseLock();
+    await finish(ui);
+  }
+}, T);

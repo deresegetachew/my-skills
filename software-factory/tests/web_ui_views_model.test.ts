@@ -54,4 +54,5 @@ test("the tasks say where they come from (#498): the message board, live, or Git
   expect(originText({ from: "github", every: 45 })).toBe("From GitHub, read every 45 s");
   expect(originText({ from: "github", every: 7200 })).toBe("From GitHub, read every 2 h");
   expect(originText({})).toBe(""); // an older server says nothing
+  expect(originText({ from: "unknown", every: null })).toBe(""); // the board is the record and down: one notice says so (#515)
 });
