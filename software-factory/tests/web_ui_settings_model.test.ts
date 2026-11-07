@@ -135,3 +135,47 @@ test("where this machine's agents come from", async () => {
   expect(machineAgentsText({ agents: ["taytu"], from: "env" })).toContain("this terminal");
   expect(machineAgentsText({ agents: [], from: "project" })).toBe("Every agent of the project (none chosen for this machine)");
 });
+
+// --- Bring this machine up to date (#566) -----------------------------------------------------------------------------
+
+const CHECKOUT = { path: "/home/o/code/work", main: "main", branch: "main" as string | null, behind: 2 as number | null, ahead: 0 as number | null,
+  changed: [] as string[], onMain: true, clean: true, canUpdate: true, problem: null as { code: string; message: string; fix: string } | null };
+
+test("how far this machine's checkout is from main, in words", async () => {
+  const { checkoutText } = await mod();
+  expect(checkoutText(CHECKOUT)).toBe("2 commits behind main");
+  expect(checkoutText({ ...CHECKOUT, behind: 1 })).toBe("1 commit behind main");
+  expect(checkoutText({ ...CHECKOUT, behind: 0, canUpdate: false })).toBe("Up to date with main");
+  expect(checkoutText({ ...CHECKOUT, behind: null, canUpdate: false })).toBe("Unknown");
+});
+
+test("bringing this machine up to date: on main, clean, nothing of its own, something new; what moves and what doesn't", async () => {
+  const { syncAsk } = await mod();
+  const ok = syncAsk(CHECKOUT);
+  expect(confirmState(ok, "").ready).toBe(true);
+  expect(ok.action).toBe("Bring this machine up to date");
+  expect(ok.happens).toContain("/home/o/code/work");
+  expect(ok.happens).toContain("2 commits");
+  expect(ok.doesNot).toContain("worktrees");
+  const branch = syncAsk({ ...CHECKOUT, branch: "task/9-login", onMain: false, canUpdate: false,
+    problem: { code: "checkout_not_on_main", message: "x", fix: "y" } });
+  expect(confirmState(branch, "").ready).toBe(false);
+  expect(confirmState(branch, "").unmet.map((c) => c.title)).toEqual(["It is on main"]);
+  expect(String(branch.checks.find((c) => !c.met)?.sub)).toContain("task/9-login");
+  const dirty = syncAsk({ ...CHECKOUT, clean: false, changed: ["README.md"], canUpdate: false, problem: { code: "checkout_dirty", message: "x", fix: "y" } });
+  expect(confirmState(dirty, "").unmet.map((c) => c.title)).toEqual(["It has no uncommitted changes"]);
+  expect(String(dirty.checks.find((c) => !c.met)?.sub)).toContain("README.md");
+  const current = syncAsk({ ...CHECKOUT, behind: 0, canUpdate: false });
+  expect(confirmState(current, "").unmet.map((c) => c.title)).toEqual(["Main on GitHub has something new"]);
+  const offline = syncAsk({ ...CHECKOUT, branch: null, behind: null, ahead: null, onMain: false, clean: false, canUpdate: false,
+    problem: { code: "checkout_fetch_failed", message: "Main can't be read from GitHub.", fix: "Check the network." } });
+  expect(confirmState(offline, "").unmet.map((c) => c.sub)).toEqual(["Main can't be read from GitHub. Check the network."]);
+  for (const s of [ok, branch, dirty, current, offline]) expect(words(s)).not.toMatch(/`|\bgit (fetch|merge|pull|stash|switch)\b|--[a-z]/);
+});
+
+test("the staged-change words say the merge brings this machine up to date, not that someone must pull", async () => {
+  const { addAgentAsk } = await mod();
+  const s = addAgentAsk("haile");
+  expect(s.happens).not.toContain("pulled");
+  expect(s.happens).toContain("up to date");
+});

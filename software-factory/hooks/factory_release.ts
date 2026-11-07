@@ -25,7 +25,7 @@
 // Every error is `[code] message` and `Fix: ...`. Tests point FACTORY_RELEASE_API at a local fake of GitHub's API.
 import { createHash } from "node:crypto";
 import {
-  chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync,
+  chmodSync, closeSync, copyFileSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync,
   realpathSync, renameSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync, writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -440,6 +440,27 @@ async function fetchArchive(repo: string, tag: string, release: Release | null, 
     throw e;
   }
   return [archivePath, rel];
+}
+
+/** Keeps a release archive installed from disk in the download cache, as a download is kept (#537): the web UI's Add
+ * project, a rollback and another project on this machine can then install the same release offline. An archive the
+ * cache already holds for that release is never replaced. A cache that can't be written is only skipped. */
+export function keepInCache(repo: string, tag: string, archive: string): void {
+  const folder = cacheFolder(repo, tag);
+  const name = archiveName(tag);
+  const path = join(folder, name);
+  if (isFile(path)) return;
+  const sha = sha256File(archive);
+  try {
+    mkdirSync(folder, { recursive: true });
+    copyFileSync(archive, path + ".new");
+    writeFileSync(join(folder, "SHA256SUMS.new"), `${sha}  ${name}\n`);
+    renameSync(join(folder, "SHA256SUMS.new"), join(folder, "SHA256SUMS"));
+    renameSync(path + ".new", path);
+  } catch {
+    remove(path + ".new");
+    remove(join(folder, "SHA256SUMS.new"));
+  }
 }
 
 const ARCHIVE_NAME = /^software-factory-(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.]*)?)\.tar\.gz$/;
@@ -1097,7 +1118,31 @@ function refreshHeartbeat(root: string): string[] {
 }
 
 function refreshServices(root: string): string[] {
-  return [...refreshRunners(root), ...refreshHeartbeat(root)];
+  return [...refreshRunners(root), ...refreshHeartbeat(root), ...refreshBoard(root)];
+}
+
+/** The message board's schema after a release (#570): a release may bring migrations that change what the board's rules
+ * mean (004_waits_for), and they don't hold until applied. The release's own `factory board migrate --if-hub` runs: on the
+ * machine that runs the board it applies what is pending, under the board's migrate lock; on a machine that joined it
+ * changes nothing and warns, with the fix. Says nothing when this release has no board. A refusal stops the update with
+ * the board's fix; it is safe to repeat. */
+function refreshBoard(root: string): string[] {
+  const bin = join(root, ".claude", "message-board", "bin.ts");
+  if (!isFile(bin)) return [];
+  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", bin, "migrate", "--if-hub"], { cwd: root, timeoutMs: 300_000 });
+  if (p.code !== 0) {
+    const last = splitLines(p.stderr.trim()).at(-1) ?? "";
+    let why = { message: last || `exit ${p.code}`, fix: "run `factory board status` to see why." };
+    try {
+      const e = JSON.parse(last) as { message?: unknown; fix?: unknown };
+      if (typeof e.message === "string" && typeof e.fix === "string") why = { message: e.message, fix: e.fix };
+    } catch {
+      // not the board's {code, message, fix}: the line as it is
+    }
+    throw new FactoryError("board_migrate_failed", `migrating the message board failed: ${why.message}`,
+      `${why.fix.replace(/[.\s]*$/, "")}; then run \`factory update\` again (it is safe to repeat).`);
+  }
+  return splitLines(p.stdout).map((l) => l.trim()).filter(Boolean);
 }
 
 /** Reinstall the CI runner services when this machine has some and they are older than the checkout. An update never
@@ -1553,6 +1598,7 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
       return [path, ...unpack(path, tag)];
     })();
     const installed = await installFiles(root, files, manifest, tag, sha256File(archive), pin, repo, false, args.tasks);
+    if (local) keepInCache(repo, tag, local);
     const goingBack = oldTag !== null && compareTags(tag, oldTag) < 0;
     if (same) {
       say(`  ${tag} was already installed; ${drift.length} file(s) differed from the pin or were missing, and were repaired:`);
@@ -1594,6 +1640,15 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   say("This machine");
   if (local) { // a file nobody published: its own scripts are not run on this machine
     say("  runner services: not refreshed from a local archive. If they are installed here, run `factory ci install` yourself.");
+    // the board's schema is the exception (#570): a local archive is how a machine off the network (the sandbox) is
+    // updated, and a board left behind its code reads its rules the old way. With --sums named, localArchive() has
+    // checked the archive against it (a mismatch installs nothing), so the release's own migrate runs, as online.
+    if (args.sums) {
+      for (const line of refreshBoard(root)) say("  " + line);
+    } else if (isFile(join(root, ".claude", "message-board", "bin.ts"))) {
+      say("  message board: not migrated from a local archive. If this machine runs the board, run `factory board migrate` yourself " +
+        "(or update again with `--sums SHA256SUMS`).");
+    }
   } else {
     for (const line of refreshServices(root)) say("  " + line);
   }

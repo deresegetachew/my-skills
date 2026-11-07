@@ -58,7 +58,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `board up` | terminal only | Starts the message board's Postgres on one machine, once; the web UI reads the board once it runs | |
 | `board down` | terminal only | Stops the board's Postgres: machine administration | |
 | `board status` | planned | Machines (Machines.dc.html): whether the message board answers | #472 |
-| `board migrate` | terminal only | Run once after an update | |
+| `board migrate` | terminal only | `factory update` runs it on the hub; while migrations are pending the Board page shows a notice with the fix | #570 |
 | `board backup` | terminal only | Machine administration; a nightly backup is a job on the machine | |
 | `board restore` | terminal only | Machine administration: it replaces the board's data, after `--yes` | #515 |
 | `board sweep` | terminal only | Machine administration: the dev manager's loop runs it on each pass (#513); by hand or as a job on the board's machine otherwise | #511, #513 |

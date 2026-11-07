@@ -6,7 +6,7 @@ import { BoardError, LOGIN_REFUSED, LOGIN_REFUSED_FIX, refuse, taskOf } from "./
 import { GRAPH_LOCK, type NewEvent, reaches, recordEvents } from "./graph.ts";
 import { applyImport } from "./import.ts";
 import { addLogin, dropExpiredLogins, listLogins, type Login, redeemLogin, removeLogin, tidyLogins } from "./logins.ts";
-import { applied, migrate } from "./migrate.ts";
+import { applied, migrate, migrationNames } from "./migrate.ts";
 import { CONTEXT_COLS, EVENT_COLS, MESSAGE_COLS, type Row, TASK_SELECT, toContext, toEvent, toMessage, toTask } from "./rows.ts";
 import {
   BLOCKING, type BoardEvent, type Claim, CONTEXT_KINDS, type ContextEntry, type ContextKind, type Delegated, type ImportBatch, type ImportResult, EDGE_KINDS, type EdgeKind,
@@ -176,15 +176,18 @@ export class Board {
     return this.run(() => removeLogin(this.sql, name, options));
   }
 
-  /** The server's version, the migrations applied, and how many tasks there are in each status. */
-  async info(): Promise<{ server: string; migrations: string[]; counts: Record<string, number> | null }> {
+  /** The server's version, the migrations applied, the ones this code has that aren't applied yet (`pending`: the
+   * board's rules from them don't hold until `factory board migrate` runs on the hub), and how many tasks there are in
+   * each status. */
+  async info(): Promise<{ server: string; migrations: string[]; pending: string[]; counts: Record<string, number> | null }> {
     return this.run(async () => {
       const server = `PostgreSQL ${String(rows(await this.sql`SHOW server_version`)[0]?.server_version ?? "?")}`;
       const migrations = await applied(this.sql);
-      if (!migrations.length) return { server, migrations, counts: null };
+      const pending = migrationNames().filter((m) => !migrations.includes(m));
+      if (!migrations.length) return { server, migrations, pending, counts: null };
       const counts: Record<string, number> = {};
       for (const r of rows(await this.sql`SELECT status, count(*)::int AS n FROM tasks GROUP BY status ORDER BY status`)) counts[String(r.status)] = Number(r.n);
-      return { server, migrations, counts };
+      return { server, migrations, pending, counts };
     });
   }
 

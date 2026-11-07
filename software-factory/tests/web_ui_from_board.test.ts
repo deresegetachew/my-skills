@@ -9,7 +9,7 @@ import { SQL } from "bun";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
-import { freshDb, type Pg, startPg } from "./board_pg.ts";
+import { freshDb, migrateUpTo, type Pg, startPg } from "./board_pg.ts";
 import { api, CONFIG, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { CI, copyHookFolders, HOOKS, SF, write, writeExe } from "./support.ts";
 
@@ -453,6 +453,27 @@ test("a project with no task on the board keeps the GitHub path, with no notice"
   expect(json.from).toBe("github");
   expect(Object.keys(byId(json))).toEqual(["99"]);
   expect(problemsOf(json)).toEqual([]);
+}, T);
+
+test("a board older than this machine's code: the Board page warns, with the fix, until the hub migrates it (#570)", async () => {
+  const url = await boardUrl();
+  migrateUpTo(url, "003_leases_values.sql"); // an older release's board: 004_waits_for not applied
+  const b = await Board.open(url, { as: "system", max: 1 });
+  boards.push(b);
+  await b.create({ title: "Import the users", ref: ref(17) });
+  const ui = await started(workProject(), url);
+  const json = await tasksUntil(ui, (j) => problemsOf(j).includes("ui_board_schema_behind"), 20_000);
+  expect(json.from, JSON.stringify(json)).toBe("board"); // the tasks still come from the board
+  expect(Object.keys(byId(json))).toEqual(["17"]);
+  const notice = (json.problems as Row[]).find((x) => x.code === "ui_board_schema_behind") as Row;
+  expect(String(notice.message)).toContain("1 migration pending (004_waits_for.sql)");
+  expect(String(notice.message)).toContain("blocked or ready may be wrong");
+  expect(String(notice.fix)).toContain("On the hub");
+  expect(String(notice.fix)).toContain("factory board migrate");
+  await b.migrate();
+  const after = await tasksUntil(ui, (j) => !problemsOf(j).includes("ui_board_schema_behind"), 20_000);
+  expect(problemsOf(after)).toEqual([]);
+  expect(after.from).toBe("board");
 }, T);
 
 test("an install without the board's code (a release, for now) keeps the GitHub path even with a board set up", async () => {

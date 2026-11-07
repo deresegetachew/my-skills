@@ -135,6 +135,8 @@ software-factory/
 
 Run one test file with `bun tools/run_tests.ts pr_gate` (each file runs in its own process).
 
+The web UI's journeys (#546) run in a real browser against a running `factory ui`, the way a person uses the page: the token gate, the Board (tabs, filter, a card opening its task, Escape and Back), every page rendering, the keyboard, the theme switch and a phone-width layout. They only look and open things, so they are safe on a live project: `UI_TOKEN=<token> bun tools/ui_journeys.ts --base http://127.0.0.1:4747 --project <name>` (`--only board` runs one). Playwright is a dev-only dependency of `software-factory/` (`bun install`, then `bunx playwright install chromium` once); it never ships in a release, and `run_tests.ts` and CI don't run the journeys.
+
 </details>
 
 <br>

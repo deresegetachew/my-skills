@@ -49,8 +49,10 @@ On this page: [what is here](#what-is-here), [setting it up](#setting-it-up), [l
   is never printed. Other machines use the next port (N+1) on the Tailscale address. `factory board down [--purge]`
   stops it (`--purge` also removes its data).
 - **The schema:** `factory board migrate` applies the migrations not applied yet, each in one transaction, recorded
-  in `mb_migrations`. Safe to run twice. `factory board status` says whether it answers, the last migration and the
-  task counts.
+  in `mb_migrations`. Safe to run twice. `factory board status` says whether it answers, the last migration, how many
+  migrations are pending (with the fix) and the task counts. `factory update` runs `factory board migrate --if-hub`
+  (#570): on the machine that runs the board it applies what the release brings; on a machine that joined it changes
+  nothing and warns.
 - **Backups:** `factory board backup [--out FILE]` runs `pg_dump --no-owner --no-privileges` inside the container and
   writes it mode 600; its default name, `backups/board-<date>-<time>-utc.sql`, is in UTC and says so. A nightly backup
   is a job you set up on the machine (cron or a systemd timer) that runs it.

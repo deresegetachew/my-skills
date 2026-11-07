@@ -3,7 +3,7 @@
 // free legend names, search, and the confirms for adding and removing an agent, proposing the staged changes, updating
 // and each clean-up, each with its preconditions and what will and won't happen. No command is shown on screen (the
 // owner's rule), so none is written here. No React here, so tests/web_ui_settings_model.test.ts runs it as it is.
-import type { ConfirmSpec } from "./parts_model.ts";
+import type { Check, ConfirmSpec } from "./parts_model.ts";
 
 export type Staged = { value: unknown } | { unset: true };
 
@@ -100,7 +100,62 @@ export function stagedText(n: number): string {
   return `${n} change${n === 1 ? "" : "s"} staged`;
 }
 
-const AFTER_MERGE = "Propose the staged changes as one pull request; once you merge it and this machine has pulled main, ";
+const AFTER_MERGE = "Propose the staged changes as one pull request; once you merge it here, this machine's checkout is brought up to date " +
+  "(when it is on main with nothing uncommitted; else This machine says what to do), and ";
+
+/** This machine's checkout against main on GitHub, as GET /api/projects/:p/settings/checkout sends it (#566). */
+export interface CheckoutFacts {
+  path: string;
+  main: string;
+  branch: string | null;
+  behind: number | null;
+  ahead: number | null;
+  changed: string[];
+  onMain: boolean;
+  clean: boolean;
+  canUpdate: boolean;
+  problem: { code: string; message: string; fix: string } | null;
+}
+
+const commits = (n: number): string => `${n} commit${n === 1 ? "" : "s"}`;
+
+/** How far the checkout is from main: "2 commits behind main", "Up to date with main", "Unknown". */
+export function checkoutText(c: CheckoutFacts): string {
+  if (c.behind === null) return "Unknown";
+  return c.behind === 0 ? `Up to date with ${c.main}` : `${commits(c.behind)} behind ${c.main}`;
+}
+
+/** What only a look at the checkout can say (it isn't one of the preconditions below). */
+const OWN_CHECKS = ["checkout_not_on_main", "checkout_dirty", "checkout_diverged"];
+
+/** Bring this machine up to date: the checkout moves forward to main, only when that is safe. */
+export function syncAsk(c: CheckoutFacts): ConfirmSpec {
+  const main = c.main;
+  const n = c.behind ?? 0;
+  const odd = c.problem && !OWN_CHECKS.includes(c.problem.code) ? c.problem : null;
+  const checks: Check[] = odd
+    ? [{ title: odd.code === "checkout_agent_worktree" ? "It is the project's own folder, not an agent's" : `${main[0]?.toUpperCase()}${main.slice(1)} can be read from GitHub`,
+      met: false, sub: `${odd.message} ${odd.fix}` }]
+    : [
+      { title: `It is on ${main}`, met: c.onMain,
+        ...(c.onMain ? {} : { sub: `It is on ${c.branch ?? "a commit of its own"}: an agent may be working there. Wait until ${main} is checked out there again.` }) },
+      { title: "It has no uncommitted changes", met: c.clean,
+        ...(c.clean ? {} : { sub: `Changed: ${c.changed.join(", ") || "unknown"}. Commit them on a branch or put them aside first.` }) },
+      { title: `It has nothing ${main} on GitHub lacks`, met: c.ahead === 0,
+        ...(c.ahead === 0 ? {} : { sub: `It has ${commits(c.ahead ?? 0)} of its own: put them in a pull request, or drop them, first.` }) },
+      { title: `${main[0]?.toUpperCase()}${main.slice(1)} on GitHub has something new`, met: n > 0, ...(n > 0 ? {} : { sub: "This machine is up to date already." }) },
+    ];
+  return {
+    title: "Bring this machine up to date?",
+    checks,
+    happens: `Your checkout at ${c.path} moves forward to ${main} as GitHub has it (${commits(n)}). What was merged, such as a new agent or a ` +
+      "changed setting, applies on this machine from then on.",
+    doesNot: "Nothing is committed or pushed, no branch or uncommitted change is touched, and the agents' own worktrees aren't changed: " +
+      "their loops bring themselves up to date.",
+    action: "Bring this machine up to date",
+    tone: "primary",
+  };
+}
 
 /** Adding an agent: it is staged, nothing starts. */
 export function addAgentAsk(name: string): ConfirmSpec {

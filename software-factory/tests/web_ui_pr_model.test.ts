@@ -68,6 +68,14 @@ test("merge: on, once ready and green; it says it merges at the commit shown, an
   expect(confirmState(red, "").unmet.map((c) => c.sub)).toEqual(["Failing: check."]);
 });
 
+test("merge into main says this machine's checkout is brought up to date when safe, and the agents' worktrees aren't (#566)", () => {
+  const ask = mergeAsk(pr({ draft: false }));
+  expect(ask.happens).toContain("checkout on this machine is brought up to date");
+  expect(ask.doesNot).toContain("agents' worktrees");
+  const other = mergeAsk(pr({ draft: false, base: "release" }));
+  expect(other.happens).not.toContain("checkout on this machine");
+});
+
 test("each action asks first, saying what happens and what doesn't; close asks for its number typed", () => {
   for (const a of ["merge", "ready", "comment", "request-changes", "close"] as const) {
     const ask = askOf(a, pr({ draft: false }));

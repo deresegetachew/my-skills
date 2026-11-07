@@ -123,7 +123,7 @@ export const DEFAULTS: Config = {
   goldenPaths: ["(^|/)__snapshots__/", "(^|/)fixtures?/", "(^|/)golden[^/]*/"],
   dependencyManifests: ["(^|/)package\\.json$"],
   maxOpenPRs: 3,
-  // The agents' names, one per loop: the first works in the project folder, the others in <project>-agents/<name>.
+  // The agents' names, one per loop: each works in <project>-agents/<name>, the first too (#572).
   // Labels (`agent:<name>`), claims and logs use them.
   agents: ["menelik", "taytu", "haile", "tewodros", "yohannes", "zewditu", "lalibela", "ezana", "alula", "abebe"],
   // Artifacts and designs kept as reviewed copies in the repo (#104, `factory artifacts`).
@@ -319,7 +319,7 @@ export function safeAgent(name: unknown): string {
   return name;
 }
 
-/** The name of the agent in slot `slot` (1 = the project folder). */
+/** The name of the agent in slot `slot` (1 = the first name in `agents`). */
 export function agentName(cfg: Config, slot: number): string {
   const names = cfg.agents ?? [];
   return slot > 0 && slot <= names.length ? safeAgent(names[slot - 1]) : `agent-${slot}`;

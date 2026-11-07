@@ -10,8 +10,8 @@ import { ROLE_TITLE } from "./model.ts";
 import { channelOf, SETTINGS_TABS } from "./nav_model.ts";
 import { ConfirmDialog, ListRow, StatusDot, Tabs } from "./parts.tsx";
 import type { Check, ConfirmSpec } from "./parts_model.ts";
-import { addAgentAsk, fieldOf, fromText, inputOf, MAINTENANCE, machineAgentsText, maintenanceAsk, nameProblem, proposeAsk, rawOf,
-  removeAgentAsk, searchSettings, type SettingRow, type Staged, stagedText, updateAsk, valueText } from "./settings_model.ts";
+import { addAgentAsk, type CheckoutFacts, checkoutText, fieldOf, fromText, inputOf, MAINTENANCE, machineAgentsText, maintenanceAsk, nameProblem,
+  proposeAsk, rawOf, removeAgentAsk, searchSettings, type SettingRow, type Staged, stagedText, syncAsk, updateAsk, valueText } from "./settings_model.ts";
 import type { Post, Say } from "./views.tsx";
 
 interface Problem {
@@ -62,7 +62,7 @@ const UNREACHABLE: Problem = { code: "unreachable", message: "The server can't b
   fix: "Check that the web UI is still running on its machine, then reload the page." };
 
 function isProblem(x: unknown): x is Problem {
-  return typeof x === "object" && x !== null && "code" in x && "fix" in x && !("team" in x) && !("installed" in x);
+  return typeof x === "object" && x !== null && "code" in x && "fix" in x && !("team" in x) && !("installed" in x) && !("canUpdate" in x);
 }
 
 function Notice({ p, tone = "bad" }: { p: Problem; tone?: "bad" | "quiet" }) {
@@ -109,7 +109,17 @@ export function SettingsPage(p: Props) {
     }).catch(() => setProblem(UNREACHABLE));
   }, [p.get, base]);
   useEffect(load, [load]);
-  const { busy, act } = useAct(p, load);
+  // this machine's checkout against main (#566): read apart, since it fetches main from GitHub
+  const [checkout, setCheckout] = useState<CheckoutFacts | null>(null);
+  const loadCheckout = useCallback(() => {
+    p.get<CheckoutFacts | Problem>(`${base}/checkout`).then((d) => setCheckout(isProblem(d) ? null : d)).catch(() => setCheckout(null));
+  }, [p.get, base]);
+  useEffect(loadCheckout, [loadCheckout]);
+  const reload = useCallback(() => {
+    load();
+    loadCheckout();
+  }, [load, loadCheckout]);
+  const { busy, act } = useAct(p, reload);
   const [ask, setAsk] = useState<{ spec: ConfirmSpec; run: () => Promise<unknown>; fix?: (c: Check) => void } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
 
@@ -164,7 +174,8 @@ export function SettingsPage(p: Props) {
       <ProjectSettings data={data} busy={busy}
         stage={(key, raw) => act("settings/stage", { key, value: raw }, { title: "Staged.", text: "Propose the staged changes when you are ready." })}
         reset={(key) => act("settings/stage", { key, unset: true }, { title: "Staged: back to the default." })} />
-      <MachineSettings data={data} busy={busy}
+      <MachineSettings data={data} busy={busy} checkout={checkout}
+        sync={(c) => setAsk({ spec: syncAsk(c), run: () => act("settings/checkout", { confirm: true }, { title: "This machine is up to date." }) })}
         save={(key, raw) => act("settings/machine", { key, value: raw }, { title: "Saved for this machine." })}
         reset={(key) => act("settings/machine", { key, unset: true }, { title: "Back to the default on this machine." })} />
       <p className="hint">Agents can't change their own rules: a project change is a pull request only you merge. This machine's settings are kept
@@ -319,8 +330,9 @@ function ProjectSettings({ data, busy, stage, reset }: { data: SettingsData; bus
   );
 }
 
-function MachineSettings({ data, busy, save, reset }: { data: SettingsData; busy: boolean; save: (key: string, raw: string) => Promise<unknown>;
-  reset: (key: string) => Promise<unknown> }) {
+function MachineSettings({ data, busy, save, reset, checkout, sync }: { data: SettingsData; busy: boolean;
+  save: (key: string, raw: string) => Promise<unknown>; reset: (key: string) => Promise<unknown>; checkout: CheckoutFacts | null;
+  sync: (c: CheckoutFacts) => void }) {
   const m = data.machine;
   return (
     <section className="card" aria-labelledby="machine-h">
@@ -329,7 +341,17 @@ function MachineSettings({ data, busy, save, reset }: { data: SettingsData; busy
       <dl className="facts">
         <div><dt>Agents that run here</dt><dd>{machineAgentsText(m)}</dd></div>
         <div><dt>Message board</dt><dd><StatusDot state={m.board ? "working" : "idle"} />{m.board ? "Set for this machine" : "Not set on this machine"}</dd></div>
+        <div><dt>The project's checkout</dt><dd>{checkout
+          ? <><StatusDot state={checkout.problem ? "red" : checkout.canUpdate ? "waiting" : "idle"} />{checkoutText(checkout)}</>
+          : "Reading main from GitHub…"}</dd></div>
       </dl>
+      {checkout?.problem && <Notice p={checkout.problem} tone="quiet" />}
+      {checkout && (
+        <div className="actions row-actions">
+          <button className="btn" disabled={busy} onClick={() => sync(checkout)}>Bring this machine up to date</button>
+          <span className="hint">Settings merged on GitHub apply here once this checkout has them; a merge from these pages does it for you.</span>
+        </div>
+      )}
       {m.from === "env" && <p className="hint">The agents above come from the environment the web UI started in; a saved choice below applies the next time it starts without it.</p>}
       <Rows rows={m.rows} busy={busy} save={save} reset={reset} saveLabel="Save" />
     </section>
