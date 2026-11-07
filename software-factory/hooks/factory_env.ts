@@ -1,14 +1,15 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // Per-loop environment, so several loops on one machine don't share ports, databases or queues.
 //
-// Each loop has a slot: 1 for the project folder, N for the worktree `<project>-agents/<name>` of the Nth name in
-// `agents` (menelik, taytu, ...). `agentEnv` in .claude/factory.json maps variable names to templates:
+// Each loop has a slot: N for the worktree `<project>-agents/<name>` of the Nth name in `agents` (menelik, taytu,
+// ...). Every agent has its own worktree, the first one too (#572); a session in the project folder itself is slot 1.
+// `agentEnv` in .claude/factory.json maps variable names to templates:
 //
 //   {slot}        the slot number: 1, 2, 3 ...
 //   {suffix}      "" in slot 1, "_N" in slot N (a database name: remanual, remanual_2 ...)
 //   {port:4101}   4101 in slot 1, 4101 + portStep * (N - 1) in slot N (portStep defaults to 10)
 //
-// Slot 1 gets the project's defaults, so the main folder works exactly as before.
+// Slot 1 (the first agent) gets the project's defaults, the same as the project folder.
 //
 //   eval "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_env.ts)"            in a worktree: the slot comes from the folder name
 //   eval "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_env.ts --agent taytu)"

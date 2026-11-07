@@ -423,8 +423,9 @@ const MORE: Record<string, More> = {
   "reviews.security-reviewer.paths": { long: "A diff touching these paths needs the security reviewer's pass: auth, " +
     "payments, public endpoints, uploads, storage, tenancy, secrets.",
   examples: ['factory settings set reviews.security-reviewer.paths \'["^apps/api/src/auth/"]\''] },
-  agents: { long: "The agents' names, in order. The first works in the project folder, the others in " +
-    "`<project>-agents/<name>`. Names become folder names and `agent:<name>` labels, so use " +
+  agents: { long: "The agents' names, in order. Each works in its own git worktree, `<project>-agents/<name>`, the " +
+    "first one too: the project folder stays on the main branch for you, the web UI and `factory update`. " +
+    "Names become folder names and `agent:<name>` labels, so use " +
     "lowercase letters, digits and dashes. Each name is a slot, which decides its ports.",
   examples: ['factory settings set agents \'["ada", "grace", "haile"]\''] },
   claimStaleHours: { long: "A loop's claim on a task (and a pushed task branch) lapses after this many hours, or " +

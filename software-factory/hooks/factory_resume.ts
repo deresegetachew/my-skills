@@ -50,10 +50,9 @@ export function mainTop(): string {
 
 export { sessionName };
 
-/** Where agent `agent` works: the project folder for the first name, else <project>-agents/<name>. */
+/** Where agent `agent` works: <project>-agents/<name>, the first name too (#572). */
 export function agentPath(cfg: Config, top: string, agent: string): string {
-  const slot = agentSlot(cfg, agent);
-  return slot === 1 ? top : join(top + "-agents", agentName(cfg, slot || 0));
+  return join(top + "-agents", agentName(cfg, agentSlot(cfg, agent) || 0));
 }
 
 function git(path: string, ...a: string[]): string {

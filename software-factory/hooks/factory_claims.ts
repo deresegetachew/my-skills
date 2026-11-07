@@ -4,8 +4,9 @@
 // Two things are claimed, both in a lock-protected JSON file inside the repo's shared git directory
 // (`<git-common-dir>/factory/claims.json`, so every worktree of a clone sees the same file and nothing is committed):
 //
-//   - checkouts: each loop works in its own checkout. The first loop takes the project folder; later loops get a
-//     git worktree next to it (`<project>-agents/<name>`, named from `agents` in factory.json), created on first use and reused afterwards.
+//   - checkouts: each loop works in its own checkout, a git worktree next to the project folder
+//     (`<project>-agents/<name>`, named from `agents` in factory.json), created on first use and reused afterwards. The
+//     first agent too (#572): the project folder stays on the main branch, for the owner, the web UI and `factory update`.
 //   - tasks: a loop claims a task before building it, and other loops skip it.
 //
 // A claim belongs to a live process: when the pid that made it has exited (or the claim is older than
@@ -20,6 +21,10 @@
 //                                                                    `roles.<role>.names`, its folder
 //                                                                    `<project>-agents/<name>`. A name belongs to one
 //                                                                    loop on a clone, whatever its role.
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts relocate --agent taytu --pid $$
+//                                                                 -> a coding agent's loop that restarted itself in the
+//                                                                    project folder (an older loop's layout) takes its
+//                                                                    worktree instead: prints the folder (#572)
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts release [--agent taytu] [--tasks-only]
 //                                                                 -> one line: what was released, or "Nothing to release: ..."
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts list
@@ -185,14 +190,14 @@ function machineAgents(names: string[]): string[] {
 }
 
 /** [[name, folder]] a loop of `role` may take, in order, and whether FACTORY_AGENTS (or the machine's names file)
- * cut the list. The first coding agent works in the project folder, every other name in <project>-agents/<name>.
- * `name` picks one. */
+ * cut the list. Every coding agent works in <project>-agents/<name>, the first one too: the project folder stays on
+ * the main branch (#572). `name` picks one. */
 function candidatesFor(cfg: Config, mainTop: string, role: string, name: string | null): [[string, string][], boolean] {
   const agents = (cfg.agents || []) as string[];
   if (role === "coding-agent") {
     const names: string[] = [];
     for (let n = 1; n <= Math.max(agents.length, 1); n++) names.push(agentName(cfg, n));
-    let found: [string, string][] = [[names[0] as string, mainTop], ...names.slice(1).map((n): [string, string] => [n, join(mainTop + "-agents", n)])];
+    let found = names.map((n): [string, string] => [n, join(mainTop + "-agents", n)]);
     const only = machineAgents(names);
     if (only.length) found = found.filter((c) => only.includes(c[0])); // each keeps its own slot, folder, ports and database
     if (name) {
@@ -225,7 +230,7 @@ function staleOf(cfg: Config): number {
   return toFloat(cfg.claimStaleHours ?? 6) ?? 6;
 }
 
-/** The project folder if no live loop holds it, else this loop's own worktree. Prints and returns it. */
+/** The first name no live loop holds, with its worktree (made if needed). Prints and returns them. */
 export function checkout(pid: string, staleHours: number, role = "coding-agent", name: string | null = null): [string, string] {
   const mainTop = mainTopDir();
   const [agent, path] = locked((data) => {
@@ -335,7 +340,7 @@ export function ensureWorktree(path: string, mainTop: string): void {
   }
 }
 
-/** The folder of agent `who` (a name, or a slot number; 1 is the project folder), created if needed. Prints it. */
+/** The folder of agent `who` (a name, or a slot number), created if needed. Prints it. */
 export function worktree(who: string): void {
   const cfg = load();
   const n = /^\d+$/.test(who) ? Number(who) : agentSlot(cfg, who);
@@ -345,9 +350,40 @@ export function worktree(who: string): void {
     path = join(mainTop + "-agents", who); // a dev manager's or product owner's folder
   } else if (n === null) {
     die(`no agent called ${who}: the agents are ${((cfg.agents || []) as string[]).join(", ")}`);
-  } else path = n === 1 ? mainTop : join(mainTop + "-agents", agentName(cfg, n));
+  } else path = join(mainTop + "-agents", agentName(cfg, n));
   ensureWorktree(path, mainTop);
   console.log(path);
+}
+
+/** A coding agent's loop that restarted itself in the project folder (where older releases put the first agent) moves
+ * to its own worktree (#572): its checkout claim now names that folder, which is made if needed. The project folder
+ * itself is not touched: whatever is left there (a branch, changes) stays. Refused, changing nothing, when another
+ * live loop holds the name. Prints the folder. */
+export function relocate(agent: string, pid: string, staleHours: number): string {
+  const cfg = load();
+  if (!((cfg.agents || []) as string[]).includes(agent)) {
+    refuse("not-a-coding-agent", `${agent} isn't a coding agent in \`agents\` in .claude/factory.json, so it has no ` +
+      "worktree to move to.", "Start the loop again with `factory loop`: it takes a name from `agents`.");
+  }
+  const mainTop = mainTopDir();
+  const path = join(mainTop + "-agents", agent);
+  const held = locked((data) => data.checkouts[agent]);
+  if (held && alive(held, staleHours, true) && !(held.host === HOST && toPid(held.pid ?? 0) === toPid(pid))) {
+    refuse("name-held", `${agent} already has a live loop on this clone (pid ${held.pid ?? "None"}), so this loop ` +
+      "can't move to its folder.", `Stop one of the two loops (factory owner stop ${agent}), then start it again.`);
+  }
+  ensureWorktree(path, mainTop);
+  locked((data) => {
+    data.checkouts[agent] = stamp(agent, pid, { path, role: "coding-agent" });
+  });
+  console.log(path);
+  return path;
+}
+
+/** Stop with {code, message, fix} on stderr. */
+function refuse(code: string, message: string, fix: string): never {
+  process.stderr.write(pyDumps({ code, message, fix }) + "\n");
+  throw new Exit(1);
 }
 
 /** Record that an interactive session (pid) works in this checkout. Returns the other live holder, if any. */
@@ -667,7 +703,7 @@ function reworkClaims(cfg: Config): HeldRework[] {
 
 // ---------------------------------------------------------------------------------------------------- command line
 
-const USAGE = "usage: factory_claims.ts [-h] {checkout,free,release,worktree,list,done,take-done,tidy-branches,clean} ...";
+const USAGE = "usage: factory_claims.ts [-h] {checkout,free,relocate,release,worktree,list,done,take-done,tidy-branches,clean} ...";
 const PROG = "factory_claims.ts";
 
 function usageError(text: string): never {
@@ -685,7 +721,7 @@ function withEnvAgent(cmd: string, rest: string[]): string[] {
 }
 
 function main(argv: string[]): void {
-  const cmds = ["checkout", "free", "release", "worktree", "list", "done", "take-done", "tidy-branches", "clean"];
+  const cmds = ["checkout", "free", "relocate", "release", "worktree", "list", "done", "take-done", "tidy-branches", "clean"];
   const cmd = argv[0];
   if (!cmd) usageError("the following arguments are required: cmd");
   if (!cmds.includes(cmd)) usageError(`argument cmd: invalid choice: '${cmd}' (choose from ${cmds.map((c) => `'${c}'`).join(", ")})`);
@@ -693,6 +729,7 @@ function main(argv: string[]): void {
   const specs: Record<string, ArgSpec> = {
     checkout: { valued: ["--pid", "--role", "--name"], required: ["--pid"] },
     free: { valued: ["--role"] },
+    relocate: { valued: ["--agent", "--pid"], required: ["--agent", "--pid"] },
     release: { valued: ["--agent"], flags: ["--tasks-only"], required: ["--agent"] },
     worktree: { positionals: ["n"] },
     done: { valued: ["--agent", "--task"], required: ["--agent", "--task"] },
@@ -708,6 +745,7 @@ function main(argv: string[]): void {
   else if (cmd === "tidy-branches") console.log(tidyBranches(cfg).join("\n"));
   else if (cmd === "clean") clean(cfg, stale);
   else if (cmd === "checkout") checkout(s("pid"), stale, (a.role as string | undefined) ?? "coding-agent", (a.name as string | undefined) ?? null);
+  else if (cmd === "relocate") relocate(s("agent"), s("pid"), stale);
   else if (cmd === "free") console.log(freeNames((a.role as string | undefined) ?? "coding-agent", stale).join("\n"));
   else if (cmd === "release") {
     const tasksOnly = Boolean(a["tasks-only"]);
