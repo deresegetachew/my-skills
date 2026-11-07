@@ -5,7 +5,7 @@ import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { git, ROOT } from "./support.ts";
 
-// Tailscale hands out addresses in 100.64.0.0/10: 100.64.0.0 to 100.127.255.255.
+// Tailscale hands out addresses in 100.64.0.0/10: second number 64 to 127.
 const TAILNET = /(?<![\d.])100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.(\d{1,3})\.(\d{1,3})(?![\d])/g;
 
 // Addresses that are no machine's: the range's own start (100.64.0.0/10), Tailscale's fixed DNS address, and the two
