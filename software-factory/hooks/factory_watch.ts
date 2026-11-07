@@ -66,6 +66,8 @@ export interface Item {
   target: number | null;
   lease: [kind: string, key: string];
   pr: number | null;
+  /** What the sub-manager needs that GitHub doesn't hold (a question on the board, #565), for its fact sheet. */
+  detail?: string;
 }
 
 /** Seconds since the epoch for an ISO time, else null. */

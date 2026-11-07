@@ -222,3 +222,37 @@ test("factory next in board mode reads a pull request's comments only when it ch
   expect(JSON.parse(rework.stdout)).toMatchObject({ id: "pr-202" });
   expect(calls() - before).toBe(2);
 });
+
+test("a task made on the board (b<n>) goes through review, block, release and show by its id, like an issue's (#544)", () => {
+  const repo = world.repo();
+  const d = gitRepo();
+  writeExe(join(d, "bin", "gh"), FAKE_GH);
+  write(join(d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "board" }, agents: ["haile"] }));
+  git(d, "add", "-A");
+  git(d, "commit", "-q", "-m", "factory.json");
+  const db = write(join(d, "gh-db.json"), JSON.stringify({ issues: [], pulls: [] }));
+  // made with board_create: tagged with the project, no issue behind it
+  const [made] = world.child.call("system", [{ op: "create", args: [{ title: "Slugify", ref: `factory:${repo.toLowerCase()}/0f3c-board-only` }] }]) as BoardTask[];
+  const id = `b${(made as BoardTask).id}`;
+  const env: Env = { ...process.env, PATH: `${d}/bin:${process.env.PATH}`, FAKE_GH_DB: db, MB_URL: world.url, GH_REPO: repo };
+  delete env.FACTORY_AGENT;
+  delete env.FACTORY_PID;
+  const picked = hook(d, env, "next_task", "--claim", "haile", "--pid", "123");
+  expect(picked.stdout, picked.out).toBe(`${id} Slugify`);
+  const shown = hook(d, env, "factory_issues", "show", id);
+  expect(shown.code, shown.out).toBe(0);
+  expect(shown.stdout).toContain("Slugify");
+  // what board.md says after `gh pr create`: it ends the loop's claim, so board_close then works with no token
+  const review = hook(d, env, "factory_issues", "review", id);
+  expect(review.code, review.out).toBe(0);
+  expect(onBoard((made as BoardTask).id)).toMatchObject({ holder: null, status: "in_review" });
+  const blocked = hook(d, env, "factory_issues", "block", id, "waiting on the owner");
+  expect(blocked.code, blocked.out).toBe(0);
+  const released = hook(d, env, "factory_issues", "release", id, "back to ready");
+  expect(released.code, released.out).toBe(0);
+  expect(onBoard((made as BoardTask).id).holder).toBeNull();
+  // an id that is neither a number nor b<n> is still refused, as before
+  const bad = hook(d, env, "factory_issues", "review", "x1");
+  expect(bad.code).toBe(2);
+  expect(bad.stderr).toContain("invalid int value: 'x1'");
+});
