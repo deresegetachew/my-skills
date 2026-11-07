@@ -57,14 +57,14 @@ export function AttentionList({ items, project, post, say, open, startAgent }: {
     if (a.do === "task") setAsk({ task: { id: a.task, title: i.title.replace(/^(#\d+|b\d+) /, ""), holders: i.agent && i.kind === "task-quiet" ? [i.agent] : [] }, action: a.action });
     else if (a.do === "start") (startAgent ? startAgent(a.agent) : open(`agent:${a.agent}`));
     else if (a.do === "say") setSayTo({ agent: a.agent, text: a.text });
-    else open(a.link);
+    else if (a.do === "open") open(a.link);
   };
   return (
     <>
       <ul className="lrows" aria-label="Needs attention">
         {items.map((i, n) => (
           <ListRow key={i.id} lead={<StatusDot state={attentionDot(i)} />} title={i.title} sub={i.reason}
-            action={<button className={`btn small${n === 0 ? " primary" : ""}`} onClick={() => run(i)}>{i.action.label}</button>} />
+            action={i.action.kind === "none" ? undefined : <button className={`btn small${n === 0 ? " primary" : ""}`} onClick={() => run(i)}>{i.action.label}</button>} />
         ))}
       </ul>
       {ask && <AskDialog ask={ask} project={project} post={post} say={say} close={() => setAsk(null)} />}

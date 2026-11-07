@@ -1064,3 +1064,35 @@ test("ls keeps this machine's down row when another machine last said down or we
     expect(taytuRows(w), state).toEqual([["down", "this machine", "local"]]);
   }
 });
+
+// --- Claude's usage limit (#614) ----------------------------------------------------------------------------------
+
+test("the loop's wait on Claude's limit reads as waiting on the Claude limit", () => {
+  const got = H.parseWait("bun --no-env-file --config=/dev/null /p/.claude/hooks/factory_claude_limit.ts wait --name taytu");
+  expect([got?.on, got?.text]).toEqual(["claude-limit", "the Claude limit"]);
+  expect(H.parseWait("bun /p/.claude/hooks/factory_claude_limit.ts check --since 1 --name taytu")).toBeNull();
+  const d = H.derive({ alive: true, task: "issue-42", wait: { on: "claude-limit", text: "the Claude limit until 16:00" } });
+  expect([d.state, d.detail, d.on, d.task]).toEqual(["waiting", "waiting on the Claude limit until 16:00", "claude-limit", "42"]);
+});
+
+test("ls shows a loop waiting on Claude's limit with the reset time from the shared file (#614)", () => {
+  const w = world({ agentIssue: false });
+  const folder = tmp();
+  writeExe(join(folder, "factory_claude_limit.ts"), "#!/bin/sh\nsleep 600\n");
+  const script = writeExe(join(folder, "factory-loop.sh"), `#!/bin/sh\nD=$(dirname "$0")\n"$D/factory_claude_limit.ts" wait --name taytu &\nsleep 600 &\nwait\n`);
+  const p = Bun.spawn([script], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  try {
+    w.claimCheckout("taytu", p.pid);
+    Bun.sleepSync(300); // let the shell start its children
+    const reset = w.clock + 2 * 3600;
+    write(join(w.stateHome, `${w.repo}-factory`, "claude-limit.json"), JSON.stringify({ at: w.clock, reset, until: reset, window: "five_hour",
+      pattern: "quota-rejected", text: "You've hit your limit", by: "taytu" }));
+    const out = w.cli("factory_agents", ["ls", "--json", "--local"], undefined, { TZ: "UTC" });
+    expect(out.code, out.out).toBe(0);
+    const row = (JSON.parse(out.stdout) as { agents: Array<Record<string, unknown>> }).agents.find((r) => r.name === "taytu");
+    expect([row?.state, row?.detail, row?.on]).toEqual(["waiting", `waiting on the Claude limit until ${iso(reset).slice(11, 16)}`, "claude-limit"]);
+  } finally {
+    sh(["pkill", "-P", String(p.pid)]);
+    p.kill(9);
+  }
+});

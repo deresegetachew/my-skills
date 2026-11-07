@@ -9,7 +9,8 @@
 //   the claim          factory_claims.ts: the checkout claim names the agent's loop or Claude process; is that pid
 //                      alive and a loop or Claude process, and does the agent hold a task?
 //   what it waits on   a `factory wait ci|answer <pr>`, `wait slot|ready` or `wait_for_merge.sh <pr>` below that pid, or
-//                      the loop's wait for GitHub's limit (`factory_views_cache.ts limit-wait`, with the time it is back)
+//                      the loop's wait for GitHub's limit (`factory_views_cache.ts limit-wait`, with the time it is back),
+//                      or for Claude's usage limit (`factory_claude_limit.ts wait`: "waiting on the Claude limit until HH:MM", #614)
 //   the tmux session   `<repo>-<agent>` (factory resume starts it): its Remote Control link, read from the pane, and
 //                      when it last showed output. A live agent with no session runs outside tmux (`runs`: tmux or
 //                      nohup, #395), and its log is the file its output goes to, when /proc tells
@@ -80,6 +81,7 @@ import { machineId, machineNames, refuse, repoKey, stateDir } from "./factory_ma
 import { sessionName } from "./factory_resume.ts";
 import { isClaude } from "./factory_session.ts";
 import { limitStatus } from "./factory_views_cache.ts";
+import { activeLimit, clock } from "./factory_claude_limit.ts";
 import { Exit, flock, isoUtc, pyDumps, pyRepr, run as runCmd, runMain, splitLines } from "./factory_lib.ts";
 
 const KIND = "coding-agent";
@@ -100,8 +102,10 @@ const BARE = new RegExp(WAIT + String.raw`\s+(slot|ready)\b`);
 const MERGE = new RegExp(String.raw`(?:wait_for_merge\.sh|` + WAIT + String.raw`)\s+#?(\d+)\b`);
 // The loop's wait for GitHub's hourly limit (#395, factory-loop.sh's github_wait); not limit-idle, its pause between passes.
 const LIMIT = /factory_views_cache\.ts\s+limit-wait\b/;
+// The loop's wait for Claude's usage limit (#614, factory-loop.sh's claude_limit_wait), with the time it resets.
+const CLAUDE_LIMIT = /factory_claude_limit\.ts\s+wait\b/;
 const TEXT: Record<string, string> = { ci: "CI on PR #{n}", answer: "an answer on PR #{n}", merge: "the merge of PR #{n}",
-  slot: "a free PR slot", ready: "a ready task", limit: "the GitHub limit" };
+  slot: "a free PR slot", ready: "a ready task", limit: "the GitHub limit", "claude-limit": "the Claude limit" };
 
 export interface Wait {
   kind: string;
@@ -126,6 +130,9 @@ export function parseWait(args: string): Wait | null {
     pr = m[1] as string;
   } else if (LIMIT.test(args)) {
     kind = "limit";
+    pr = null;
+  } else if (CLAUDE_LIMIT.test(args)) {
+    kind = "claude-limit";
     pr = null;
   } else return null;
   return { kind, pr, on: pr ? `${kind}:${pr}` : kind, text: (TEXT[kind] as string).replace("{n}", String(pr)) };
@@ -276,7 +283,7 @@ export function derive(inp: { alive: boolean; task: string | null; wait: Pick<Wa
   if (!inp.alive) return { state: "down", detail: "down", task: null, on: null };
   const number = taskNumber(inp.task);
   const wait = inp.wait;
-  if (wait) return { state: "waiting", detail: "waiting for " + wait.text, task: number, on: wait.on };
+  if (wait) return { state: "waiting", detail: (wait.on === "claude-limit" ? "waiting on " : "waiting for ") + wait.text, task: number, on: wait.on };
   if (number) {
     const shown = String(inp.task).startsWith("issue-") ? `#${number}` : number;
     return { state: "working", detail: `working on ${shown}`, task: number, on: null };
@@ -498,6 +505,10 @@ function subManagers(cfg: Cfg, ps: Procs, me: string, sessions: Map<string, numb
 /** A wait for GitHub's limit says until when (#395), from the shared limit file (or `gh api rate_limit`, which costs no
  *  call against the limit); any other wait as it is. */
 function limitUntil(wait: Wait | null): Wait | null {
+  if (wait?.kind === "claude-limit") { // the reset in the shared file, in this machine's time, as the loop printed it
+    const s = activeLimit();
+    return s ? { ...wait, text: `${wait.text} until ${clock(s.until)}` } : wait;
+  }
   if (wait?.kind !== "limit") return wait;
   const core = limitStatus();
   const back = core && core.remaining <= 0 && core.reset > clockNow() ? ` until ${isoUtc(core.reset).slice(11, 16)} UTC` : "";

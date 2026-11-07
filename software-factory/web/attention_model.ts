@@ -4,7 +4,8 @@
 // tests/web_ui_attention_model.test.ts runs it as it is. The server's rules are in hooks/factory_ui_attention.ts.
 
 export interface AttentionAction {
-  kind: "release" | "close" | "start" | "say" | "open";
+  /** none: nothing to do, it ends by itself (Claude's usage limit, #614); the row has no button. */
+  kind: "release" | "close" | "start" | "say" | "open" | "none";
   label: string;
   task?: string;
   agent?: string;
@@ -52,8 +53,9 @@ export function attentionLine(items: AttentionItem[]): string {
 /** What the page does for an item's action: a task's confirm (release, close), an agent's start confirm, the confirm
  *  that sends one line to an agent's session (say), or a page. */
 export function actionOf(i: AttentionItem): { do: "task"; action: "release" | "close"; task: string } | { do: "start"; agent: string }
-  | { do: "say"; agent: string; text: string } | { do: "open"; link: string } {
+  | { do: "say"; agent: string; text: string } | { do: "open"; link: string } | { do: "none" } {
   const a = i.action;
+  if (a.kind === "none") return { do: "none" };
   if ((a.kind === "release" || a.kind === "close") && a.task) return { do: "task", action: a.kind, task: a.task };
   if (a.kind === "start" && a.agent) return { do: "start", agent: a.agent };
   if (a.kind === "say" && a.agent && a.text) return { do: "say", agent: a.agent, text: a.text };

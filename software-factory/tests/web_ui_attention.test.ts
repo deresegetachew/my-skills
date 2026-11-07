@@ -319,6 +319,42 @@ test("Close runs after a confirm: a task's and an epic's issue are closed as com
   expect(tasks.find((t) => t.id === "7")?.actions).toEqual(["release", "block", "reassign"]); // Close isn't a card's action
 }, T);
 
+test("Claude's usage limit: one item for the whole team with its reset time and no action; it clears after the reset (#614)", async () => {
+  const p = workProject();
+  p.env.TZ = "UTC"; // the server says the time in its machine's zone
+  const ui = await started(p);
+  const now = Math.floor(Date.now() / 1000);
+  const limit = (at: number): string => write(join(p.state, "claude-limit.json"), JSON.stringify({ at: now, reset: at, until: at, window: "five_hour",
+    pattern: "quota-rejected", text: "You've hit your limit", by: "menelik" }));
+  limit(now + 3600);
+  const x = await until(ui, has("claude-limit:team"));
+  const hm = new Date((now + 3600) * 1000).toISOString().slice(11, 16);
+  expect(x.filter((i) => i.kind === "claude-limit")).toEqual([{ id: "claude-limit:team", kind: "claude-limit", title: "Claude's usage limit is reached",
+    reason: `Claude's 5-hour usage limit is reached: the agents wait until ${hm} (this machine's time), then carry on by themselves.`,
+    task: null, agent: null, pr: null, epic: null, action: { kind: "none", label: "" } }]);
+  limit(now - 10);
+  expect(await until(ui, hasNot("claude-limit:team"))).toEqual([]);
+}, T);
+
+test("the 5-hour soft budget used up: one item with the tokens and no action; none while the budget is off (#614)", async () => {
+  const answer = (used: number): string => `#!/usr/bin/env bash
+echo "$*" >> "$FAKE_FACTORY_LOG"
+if [ "$*" = "usage --window --json" ]; then echo '{"total": {"window": ${used}, "week": 5000}, "agents": [], "softTokens5h": 1000, "over": true, "limit": null}'; else echo '{}'; fi
+`;
+  const p = workProject({ ...CONFIG, claudeLimit: { softTokens5h: 1000 } });
+  write(join(p.d, "factory"), answer(1200));
+  const ui = await started(p);
+  const x = await until(ui, has("claude-budget:team"));
+  expect(one(x, "claude-budget:team")).toMatchObject({ kind: "claude-budget", title: "The 5-hour token budget is used up",
+    reason: "The last 5 hours used 1,200 tokens, past claudeLimit.softTokens5h (1,000). The loops start no new task until it is back under; running sessions finish.",
+    action: { kind: "none", label: "" } });
+  const q = workProject(); // no budget: never read, never shown
+  write(join(q.d, "factory"), answer(1200));
+  const ui2 = await started(q);
+  await Bun.sleep(1500);
+  expect(await items(ui2)).toEqual([]);
+}, T);
+
 test("the thresholds are settings, on the settings page", () => {
   const page = readmeAndWiki("settings.md");
   for (const key of ["attention.taskQuietMinutes", "attention.prWaitHours", "attention.coding-agent.maxMinutes", "attention.dev-manager.maxMinutes",

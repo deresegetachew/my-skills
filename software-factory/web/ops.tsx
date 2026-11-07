@@ -10,7 +10,7 @@ import { type AttentionItem, attentionLine } from "./attention_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
 import { type ActivityItem, activityDot, activitySub, attention, type HealthData, healthLine, type HomeData, homeLine, KIND_LABEL, mergePushed,
-  passed, percentOf, type Problem, teamRow, tokensText, type UsageData, usageBar, usageTiles } from "./ops_model.ts";
+  passed, percentOf, type Problem, teamRow, tokensText, type UsageData, usageBar, usageTiles, windowLine } from "./ops_model.ts";
 import { PageHead } from "./page_head.tsx";
 import { LinkCard } from "./phone.tsx";
 import { inInbox, needsCard } from "./phone_model.ts";
@@ -335,6 +335,17 @@ export function UsagePage(p: OpsProps) {
                 <p className="empty">Tokens count fresh input and output, as a budget does. {data.budget.tokens === null ? "No budget is set, so nothing is compared." :
                   `A dot turns yellow at ${data.budget.warnPercent}% of the budget and red over it; a budget never stops an agent.`}</p>
               </>
+            )}
+            {data.window && (
+              <Section title="Claude's limit windows">
+                <p className="ops-line">{windowLine(data.window)}</p>
+                <ul className="lrows" aria-label="Tokens by agent in Claude's windows">
+                  {data.window.agents.map((a) => (
+                    <ListRow key={a.agent} title={a.agent} status={{ state: data.window?.over ? "waiting" : "idle",
+                      text: `${tokensText(a.window)} in 5 hours · ${tokensText(a.week)} in 7 days` }} />
+                  ))}
+                </ul>
+              </Section>
             )}
             {data.github && (
               <Section title="GitHub calls in the last hour">
