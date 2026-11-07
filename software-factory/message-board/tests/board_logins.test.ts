@@ -567,8 +567,12 @@ test("a remove that waits on a redeem in progress drops the fresh role the redee
   await tx`begin`;
   await tx`select * from mb_redeem_login()`; // holds the login's row
   const remove = Bun.spawn([process.execPath, "--no-env-file", BIN, "login", "remove", "laptop"], { env: w.env, stdout: "pipe", stderr: "pipe" });
-  await Bun.sleep(1500); // the remove reads the row and waits for it
-  await tx`commit`;
+  await Bun.sleep(1500); // the remove reads the row and waits for it, or (since #514 review 6) cuts the code off first
+  try {
+    await tx`commit`; // and ends this session, which rolls the redeem back: then the commit fails
+  } catch {
+    // ended by the remove
+  }
   tx.release();
   const code = await remove.exited;
   expect(code, await new Response(remove.stderr).text()).toBe(0);
