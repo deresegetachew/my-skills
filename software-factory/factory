@@ -88,7 +88,12 @@ Look
   ui [--port N] [--host] the web UI in a browser (decision 0005): each project (this one and ui.projects) with a
                          channel per agent and per view; agents and machines live, start and stop after a confirm.
                          localhost only (port ui.port, 4747); --host adds the Tailscale address. It prints the address
-                         with a token (kept in .git/factory/ui-token) that every API call needs; Ctrl-C stops it
+                         with a token (kept in .git/factory/ui-token) that every API call needs; Ctrl-C stops it.
+                         With mail set up, an allowed address can sign in with a code sent by email instead
+  ui sessions ls|revoke <id|all>
+                         the web UI's sign-in sessions on this machine: list them, end one or all at once
+  ui mail set|show|test  the mail sender for sign-in codes (an HTTP mail API, or SMTP), kept on this machine only
+                         (mode 600); the key or password is asked for, never printed. test <address> sends one
   snapshot               the factory as data, one snapshot read now (what the web UI's views read): sessions on every
                          machine, what needs you, PRs, CI, the tasks, the version and the doctor's summary; a part that
                          can't be read is listed under "missing". Also written to snapshot.json in this machine's state folder

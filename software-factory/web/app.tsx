@@ -29,6 +29,8 @@ import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx"
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
 import { MaintenancePage, ReleasesPage, SETTINGS_CSS, SettingsPage } from "./settings.tsx";
 import { SIGNOFF_CSS, SignoffPage } from "./signoff.tsx";
+import { SignInGate } from "./signin.tsx";
+import { type AuthInfo, authHeaders, SESSION, wsAddress } from "./signin_model.ts";
 import { TEAM_CSS, TeamPage } from "./team.tsx";
 import { PR_CSS, PrPage } from "./pr.tsx";
 import { COSTS_CSS } from "./costs.tsx";
@@ -151,7 +153,7 @@ function initialToken(): string {
 }
 
 async function call<T>(token: string, path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-  const r = await fetch(path, { method: init.method ?? "GET", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  const r = await fetch(path, { method: init.method ?? "GET", headers: { ...authHeaders(token), "content-type": "application/json" },
     body: init.body === undefined ? undefined : JSON.stringify(init.body) });
   if (r.status === 401) throw new Unauthorized();
   return (await r.json()) as T;
@@ -517,24 +519,21 @@ function routeOf(hash: string): { project: string; channel: string; task: string
   return { project: r.project, channel: addressOf(s.channel), task: s.task };
 }
 
-function Gate({ onToken, wrong }: { onToken: (t: string) => void; wrong: boolean }) {
-  const [text, setText] = useState("");
-  return (
-    <main className="gate">
-      <h1>Factory</h1>
-      <p>{wrong ? "That token isn't this server's." : "This page needs the token the server printed when it started."} Open the address it
-        printed (it ends in <code>?token=…</code>), or paste the token kept in <code>.git/factory/ui-token</code>.</p>
-      <form onSubmit={(e) => { e.preventDefault(); if (text.trim()) onToken(text.trim()); }}>
-        <input aria-label="Token" value={text} onChange={(e) => setText(e.target.value)} placeholder="token" autoFocus />
-        <button className="btn primary" type="submit">Open</button>
-      </form>
-    </main>
-  );
+/** What GET /api/auth says (#542): whether this browser has a session, and whether codes can be mailed. */
+async function authInfo(): Promise<AuthInfo> {
+  try {
+    const r = await fetch("/api/auth");
+    if (r.ok) return (await r.json()) as AuthInfo;
+  } catch {
+    // the token is the way in
+  }
+  return { signedIn: false, mail: false, codeMinutes: 10 };
 }
 
 function App() {
   const theme = useTheme();
   const [token, setToken] = useState(initialToken);
+  const [auth, setAuth] = useState<AuthInfo | null>(null); // asked when there is no token (#542)
   const [wrong, setWrong] = useState(false);
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [channelsBy, setChannelsBy] = useState<Record<string, ChannelView[]>>({});
@@ -561,9 +560,24 @@ function App() {
     if (e instanceof Unauthorized) {
       keepToken("");
       setWrong(true);
+      setAuth(null);
       setToken("");
     }
   }, []);
+
+  // no token: a session cookie (#542) opens the page; else the sign-in page says how to get in
+  useEffect(() => {
+    if (token || auth) return;
+    let gone = false;
+    void authInfo().then((info) => {
+      if (gone) return;
+      if (info.signedIn && !wrong) setToken(SESSION);
+      else setAuth(info);
+    });
+    return () => {
+      gone = true;
+    };
+  }, [token, auth, wrong]);
 
   // the projects and their channels
   useEffect(() => {
@@ -596,7 +610,7 @@ function App() {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const open = (): void => {
       const proto = location.protocol === "https:" ? "wss" : "ws";
-      ws = new WebSocket(`${proto}://${location.host}/api/ws?token=${encodeURIComponent(token)}`);
+      ws = new WebSocket(wsAddress(proto, location.host, token));
       ws.onopen = () => {
         wait = 1000;
         setConn("live");
@@ -714,7 +728,11 @@ function App() {
       return { ok: false, message: e instanceof Unauthorized ? "The token was refused." : "The server can't be reached.", fix: "Check that the web UI still runs on this machine." };
     }), [token, signedOut]);
 
-  if (!token) return <Gate wrong={wrong} onToken={(t) => { keepToken(t); setWrong(false); setToken(t); }} />;
+  if (!token) {
+    if (!auth) return <main className="gate"><p>Loading…</p></main>;
+    return <SignInGate info={auth} wrong={wrong} onToken={(t) => { keepToken(t); setWrong(false); setToken(t); }}
+      onSession={() => { setWrong(false); setToken(SESSION); }} />;
+  }
   if (!projects) return <main className="gate"><p>Loading…</p></main>;
   if (adding) {
     return <AddProjectPage get={get} post={postStable} run={addRun} setRun={setAddRun} live={conn === "live"}

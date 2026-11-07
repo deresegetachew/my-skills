@@ -44,11 +44,15 @@
 // out, so they aren't read from GitHub. A board that can't be read gives a notice and that project falls back to GitHub.
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
-// ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
+// ?token=). A browser signed in with a code sent by email (#542, factory_ui_auth.ts: GET /api/auth, POST /api/auth/code,
+// .../verify, .../signout, which need neither) has a session cookie instead, good for the API and the WebSocket from
+// the UI's own page only. Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
 // `ui.pollSeconds` and pushes what changed; with no page open it reads nothing.
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
+import type { Notifier } from "./core/ports/notifications.ts";
 import { AddRuns } from "./factory_ui_add.ts";
+import { type Answer, FOREIGN, foreign, SignIn } from "./factory_ui_auth.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, refreshConfig, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { artifactsApi } from "./factory_ui_artifacts.ts";
@@ -70,6 +74,8 @@ export interface ServeOptions {
   app: string;
   /** The message board's URL (#498); left out, this machine's (MB_URL, else the settings folder's url file), or none. */
   boardUrl?: string | null;
+  /** The mail sender for sign-in codes (#542), asked each time; left out or null: sign-in is by token only. */
+  mail?: () => Notifier | null;
 }
 
 export interface Running {
@@ -109,13 +115,17 @@ const HEADERS = {
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };
 
-function json(status: number, body: unknown): Response {
+function json(status: number, body: unknown, more: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...HEADERS, "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store" } });
+    "cache-control": "no-store", ...more } });
 }
 
 function problem(status: number, code: string, message: string, fix: string): Response {
   return json(status, { code, message, fix } satisfies Problem);
+}
+
+function answer(a: Answer): Response {
+  return json(a.status, a.body, a.headers);
 }
 
 const TOKEN_FIX = "Open the address `factory ui` printed (it ends in ?token=...), or read the token from .git/factory/ui-token.";
@@ -148,6 +158,7 @@ export function serve(o: ServeOptions): Running {
   const servers: Server<undefined>[] = [];
   let clients = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let signIn: SignIn | undefined; // made once the port is known: the cookie is named for it (#542)
   const chat = new ChatHub({ pollSeconds: o.pollSeconds, publish: (m) => {
     const text = JSON.stringify(m);
     for (const s of servers) s.publish(TOPIC, text);
@@ -249,8 +260,19 @@ export function serve(o: ServeOptions): Running {
   }
 
   async function api(req: Request, url: URL, server: Server<undefined>): Promise<Response | undefined> {
-    const refused = refuseToken(req, url, o.token);
-    if (refused) return refused;
+    // signing in with a code sent by email (#542): its own answers, then the session's cookie, else the token
+    const si = signIn as SignIn; // set before the first request can come
+    const asked = await si.api(req, url, server.requestIP(req)?.address ?? "");
+    if (asked) return answer(asked);
+    const session = si.session(req);
+    if (session && foreign(req)) return answer(FOREIGN); // the cookie never opens the API to another page
+    if (!session) {
+      const refused = refuseToken(req, url, o.token);
+      if (refused && si.hasCookie(req) && !req.headers.get("authorization") && !url.searchParams.get("token")) {
+        return problem(401, "ui_session_ended", "This browser's sign-in has ended (it ran out or was revoked).", "Sign in again on the page.");
+      }
+      if (refused) return refused;
+    }
     const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent).slice(1); // after "api"
     if (parts.length === 1 && parts[0] === "ws") {
       if (server.upgrade(req, { data: undefined })) return undefined;
@@ -464,6 +486,7 @@ export function serve(o: ServeOptions): Running {
     const s = Bun.serve<undefined>({ hostname, port, fetch, websocket, idleTimeout: 60 });
     port = s.port ?? port;
     servers.push(s);
+    if (!signIn) signIn = new SignIn({ port, notifier: () => o.mail?.() ?? null, log: (line) => console.log(line) });
   }
   return {
     port,

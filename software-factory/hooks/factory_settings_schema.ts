@@ -331,6 +331,12 @@ export const MACHINE: Record<string, Setting> = table([
   S("autostartReport", "bool", "machine", "Post the boot report on the first started agent's issue (issues mode).", { scope: "machine", default: true }),
   S("maxCodingAgents", "int", "machine", "How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`) is refused. Empty: no limit.", { scope: "machine", default: null, minimum: 1, maximum: 32, read_by: "`factory owner start` (factory_owner.ts) and the web UI's Team page" }),
   S("ci.runners", "int", "machine", "Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's.", { scope: "machine", default: null, minimum: 1, maximum: 16 }),
+  // signing in to the web UI with a code sent by email (#542): this machine's only, never in the repo
+  S("ui.signIn.allowed", "list", "ui", "This machine only (`--local`): the email addresses that may sign in to the web UI with a code sent by email. Empty: nobody, the token only.", { scope: "machine", default: [], read_by: "`factory ui` (factory_ui_auth.ts)" }),
+  S("ui.signIn.sessionDays", "int", "ui", "This machine only (`--local`): how many days a web UI sign-in lasts before the code is asked for again.", { scope: "machine", default: 30, minimum: 1, maximum: 365, read_by: "`factory ui` (factory_ui_auth.ts)" }),
+  S("ui.signIn.codesPerHour", "int", "ui", "This machine only (`--local`): how many sign-in codes one address may ask for in an hour (one IP: four times that).", { scope: "machine", default: 5, minimum: 1, maximum: 60, read_by: "`factory ui` (factory_ui_auth.ts)" }),
+  S("ui.signIn.maxWrongCodes", "int", "ui", "This machine only (`--local`): wrong sign-in codes before an address is locked (one IP: four times that).", { scope: "machine", default: 5, minimum: 1, maximum: 20, read_by: "`factory ui` (factory_ui_auth.ts)" }),
+  S("ui.signIn.lockoutMinutes", "int", "ui", "This machine only (`--local`): how long a lock after too many wrong codes lasts, in minutes.", { scope: "machine", default: 15, minimum: 1, maximum: 1440, read_by: "`factory ui` (factory_ui_auth.ts)" }),
 ]);
 
 function setting(key: string, local = false): Setting {
@@ -602,6 +608,26 @@ const MORE: Record<string, More> = {
     "`FACTORY_REMOTE_CONTROL=0` or `1` overrides it for one run.",
   examples: ["factory settings --local set remoteControl off"],
   needs: "nothing: it is this machine's file, not committed" },
+  "ui.signIn.allowed@machine": { long: "The web UI's sign-in page asks for an email address. An address on this list gets a " +
+    "6-digit code by mail (good for 10 minutes, once), and the code gives the browser a session. Every other address gets " +
+    "the same answer and no mail, so the page never says who is allowed. Codes go through the mail sender set with " +
+    "`factory ui mail set`. There is no default address: with the list empty, or no mail sender, the page explains how to " +
+    "sign in with the token, which always works. Kept in this machine's own file, never in the repo.",
+  examples: ["factory settings --local set ui.signIn.allowed '[\"me@example.com\"]'"] },
+  "ui.signIn.sessionDays@machine": { long: "A session is a random id in an HttpOnly, SameSite=Strict cookie (Secure over HTTPS); " +
+    "only its hash is kept, in the machine settings folder (ui/sessions.json, mode 600). `factory ui sessions ls` lists the " +
+    "sessions and `factory ui sessions revoke <id|all>` ends them at once. A change applies to sessions made after it.",
+  examples: ["factory settings --local set ui.signIn.sessionDays 7"] },
+  "ui.signIn.codesPerHour@machine": { long: "Counted over the last hour for each address asked for, allowed or not (so the limit " +
+    "says nothing about who is allowed), and for each IP at four times this. Past it the page answers that too many codes " +
+    "were asked for.",
+  examples: ["factory settings --local set ui.signIn.codesPerHour 3"] },
+  "ui.signIn.maxWrongCodes@machine": { long: "Wrong codes are counted per address, and per IP at four times this, over " +
+    "`ui.signIn.lockoutMinutes`. At the limit, signing in is locked for that address (or IP) for `ui.signIn.lockoutMinutes`, " +
+    "even with the right code, and the address's code is thrown away.",
+  examples: ["factory settings --local set ui.signIn.maxWrongCodes 3"] },
+  "ui.signIn.lockoutMinutes@machine": { long: "How long a lock lasts, and the time over which wrong codes are counted.",
+  examples: ["factory settings --local set ui.signIn.lockoutMinutes 60"] },
 };
 for (const [key, more] of Object.entries(MORE)) {
   const s = setting(key.split("@")[0] as string, key.endsWith("@machine"));
