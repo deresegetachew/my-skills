@@ -1097,7 +1097,31 @@ function refreshHeartbeat(root: string): string[] {
 }
 
 function refreshServices(root: string): string[] {
-  return [...refreshRunners(root), ...refreshHeartbeat(root)];
+  return [...refreshRunners(root), ...refreshHeartbeat(root), ...refreshBoard(root)];
+}
+
+/** The message board's schema after a release (#570): a release may bring migrations that change what the board's rules
+ * mean (004_waits_for), and they don't hold until applied. The release's own `factory board migrate --if-hub` runs: on the
+ * machine that runs the board it applies what is pending, under the board's migrate lock; on a machine that joined it
+ * changes nothing and warns, with the fix. Says nothing when this release has no board. A refusal stops the update with
+ * the board's fix; it is safe to repeat. */
+function refreshBoard(root: string): string[] {
+  const bin = join(root, ".claude", "message-board", "bin.ts");
+  if (!isFile(bin)) return [];
+  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", bin, "migrate", "--if-hub"], { cwd: root, timeoutMs: 300_000 });
+  if (p.code !== 0) {
+    const last = splitLines(p.stderr.trim()).at(-1) ?? "";
+    let why = { message: last || `exit ${p.code}`, fix: "run `factory board status` to see why." };
+    try {
+      const e = JSON.parse(last) as { message?: unknown; fix?: unknown };
+      if (typeof e.message === "string" && typeof e.fix === "string") why = { message: e.message, fix: e.fix };
+    } catch {
+      // not the board's {code, message, fix}: the line as it is
+    }
+    throw new FactoryError("board_migrate_failed", `migrating the message board failed: ${why.message}`,
+      `${why.fix.replace(/[.\s]*$/, "")}; then run \`factory update\` again (it is safe to repeat).`);
+  }
+  return splitLines(p.stdout).map((l) => l.trim()).filter(Boolean);
 }
 
 /** Reinstall the CI runner services when this machine has some and they are older than the checkout. An update never
@@ -1594,6 +1618,9 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   say("This machine");
   if (local) { // a file nobody published: its own scripts are not run on this machine
     say("  runner services: not refreshed from a local archive. If they are installed here, run `factory ci install` yourself.");
+    if (isFile(join(root, ".claude", "message-board", "bin.ts"))) {
+      say("  message board: not migrated from a local archive. If this machine runs the board, run `factory board migrate` yourself.");
+    }
   } else {
     for (const line of refreshServices(root)) say("  " + line);
   }

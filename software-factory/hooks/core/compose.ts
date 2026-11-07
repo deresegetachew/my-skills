@@ -223,8 +223,9 @@ function checkedBoardBus(): { port: (Leases & Wakes & PrFeed) | null; error: Cor
   return { port: new BoardBus({ child, project: messagingProject() }), error: null };
 }
 
-/** What `factory doctor` asks of this machine's message board: its server, the migrations applied and its task counts
- * (null before the first migrate). Throws the CoreError that says why it can't be reached. */
-export function boardInfo(): { server: string; migrations: string[]; counts: Record<string, number> | null } {
-  return boardChild().one("factory", "info") as { server: string; migrations: string[]; counts: Record<string, number> | null };
+/** What `factory doctor` asks of this machine's message board: its server, the migrations applied, those this code has
+ * that aren't (`pending`, #570) and its task counts (null before the first migrate). Throws the CoreError that says why
+ * it can't be reached. */
+export function boardInfo(): { server: string; migrations: string[]; pending?: string[]; counts: Record<string, number> | null } {
+  return boardChild().one("factory", "info") as { server: string; migrations: string[]; pending?: string[]; counts: Record<string, number> | null };
 }
