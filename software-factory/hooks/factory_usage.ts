@@ -5,6 +5,8 @@
 //   factory usage                       the last 7 days, per task, then the totals
 //   factory usage --since 2026-10-20 --until 2026-10-24
 //   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
+//   factory usage --by worker           per agent: the folder each session ran in (`<project>-agents/<name>` is <name>,
+//                                       the project folder itself "(project folder)": the first builder and your own sessions)
 //   factory usage --by role             manager (sessions that start with /manage-pass, or end with a `factory-role` line naming
 //                                       the dev manager), product-owner (that line names it) against builder (all others)
 //   factory usage --json                the same as JSON
@@ -150,12 +152,22 @@ export interface Session {
   task: string;
   rows: [kind: string, model: string, tokens: Tokens][];
   role: string;
+  /** The agent whose folder the session ran in (`<root>-agents/<name>`), or "(project folder)". */
+  worker: string;
+}
+
+export const PROJECT_FOLDER = "(project folder)";
+
+/** The agent a reply's folder belongs to: <name> for <root>-agents/<name>[/...], else the project folder. */
+function workerOf(root: string, cwd: string): string {
+  const agents = root + "-agents" + sep;
+  return cwd.startsWith(agents) ? cwd.slice(agents.length).split(sep)[0] || PROJECT_FOLDER : PROJECT_FOLDER;
 }
 
 /** {session: {task, rows: [(kind, model, tokens)], role}} for replies between since and until (ms since the epoch). */
 export function collect(root: string, base: string, since: number, until: number): Map<string, Session> {
   const seen = new Set<unknown>();
-  const sessions = new Map<string, { branches: Map<string, number>; rows: Session["rows"]; role: string }>();
+  const sessions = new Map<string, { branches: Map<string, number>; rows: Session["rows"]; role: string; worker: string | null }>();
   for (const d of projectDirs(root, base)) {
     for (const f of listDir(d).filter((n) => n.endsWith(".jsonl"))) {
       const main = join(d, f);
@@ -181,7 +193,8 @@ export function collect(root: string, base: string, since: number, until: number
           if (r.cwd && !(r.cwd === root || r.cwd.startsWith(root + sep) || r.cwd.startsWith(root + "-agents"))) continue;
           seen.add(r.id);
           let s = sessions.get(sid);
-          if (!s) sessions.set(sid, (s = { branches: new Map(), rows: [], role: "builder" }));
+          if (!s) sessions.set(sid, (s = { branches: new Map(), rows: [], role: "builder", worker: null }));
+          if (s.worker === null && r.cwd && kind === "main") s.worker = workerOf(root, r.cwd);
           s.role = role;
           const m = TASK.exec(r.branch);
           if (m && kind === "main") {
@@ -194,7 +207,7 @@ export function collect(root: string, base: string, since: number, until: number
     }
   }
   const out = new Map<string, Session>();
-  for (const [sid, s] of sessions) out.set(sid, { task: mostCommon(s.branches)[0]?.[0] ?? "-", rows: s.rows, role: s.role });
+  for (const [sid, s] of sessions) out.set(sid, { task: mostCommon(s.branches)[0]?.[0] ?? "-", rows: s.rows, role: s.role, worker: s.worker ?? PROJECT_FOLDER });
   return out;
 }
 
@@ -229,7 +242,7 @@ export function summarise(sessions: Map<string, Session>, by: string): [Map<stri
   const total: Total = { tokens: zero(), replies: 0, tasks: new Set(), models: new Map() };
   for (const [sid, s] of sessions) {
     for (const [kind, model, t] of s.rows) {
-      const key = by === "task" ? s.task : by === "agent" ? kind : by === "role" ? s.role || "builder" : model;
+      const key = by === "task" ? s.task : by === "agent" ? kind : by === "role" ? s.role || "builder" : by === "worker" ? s.worker : model;
       let g = groups.get(key);
       if (!g) groups.set(key, (g = { tokens: zero(), replies: 0, sessions: new Set() }));
       add(g.tokens, t);
@@ -413,7 +426,7 @@ function isoformat(ms: number): string {
 }
 
 const USAGE = `usage: factory usage [-h] [--since SINCE] [--until UNTIL]
-                     [--by {task,agent,model,role}] [--json] [--record LABEL]
+                     [--by {task,agent,model,role,worker}] [--json] [--record LABEL]
                      [--task TASK] [--markdown] [--budget] [--github]
 `;
 
@@ -424,7 +437,7 @@ options:
   -h, --help            show this help message and exit
   --since SINCE         first day (YYYY-MM-DD, UTC); default 7 days ago
   --until UNTIL         day after the last (YYYY-MM-DD, UTC); default tomorrow
-  --by {task,agent,model,role}
+  --by {task,agent,model,role,worker}
   --json
   --record LABEL        append a summary row to the usage log
   --task TASK           only the sessions of this task (its id or issue
@@ -499,8 +512,8 @@ export function parseArgs(argv: string[]): Args {
         break;
       }
       case "--by":
-        if (!["task", "agent", "model", "role"].includes(v)) {
-          argError(`argument --by: invalid choice: ${pyRepr(v)} (choose from 'task', 'agent', 'model', 'role')`);
+        if (!["task", "agent", "model", "role", "worker"].includes(v)) {
+          argError(`argument --by: invalid choice: ${pyRepr(v)} (choose from 'task', 'agent', 'model', 'role', 'worker')`);
         }
         a.by = v;
         break;
