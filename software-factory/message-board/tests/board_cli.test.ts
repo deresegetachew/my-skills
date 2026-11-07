@@ -32,6 +32,8 @@ echo "$*" >>"$FAKE_LOG"
 case " $* " in *" up "*) [ "\${FAKE_COMPOSE_FAIL:-0}" = 1 ] && { echo "Error: port is already allocated" >&2; exit 1; } ;; esac
 case " $* " in *" pg_dump "*) echo "-- PostgreSQL database dump"; echo "CREATE TABLE tasks ();" ;; esac
 case " $* " in *" volume inspect "*) [ "\${FAKE_VOLUME:-0}" = 1 ] && exit 0; exit 1 ;; esac
+case " $* " in *" ps "*) [ "\${FAKE_RUNNING:-0}" = 1 ] && echo 0123abcd; exit 0 ;; esac
+case " $* " in *" psql "*) cat >"\$FAKE_LOG.psql"; [ "\${FAKE_PSQL_FAIL:-0}" = 1 ] && { echo "ERROR:  syntax error at or near \"oops\"" >&2; exit 3; }; exit 0 ;; esac
 exit 0
 `;
 const FAKE_TAILSCALE = `#!/usr/bin/env bash
@@ -288,10 +290,14 @@ test("backup runs pg_dump inside the container and writes a mode 600 file", () =
   expect(r.stdout).toContain(out);
   expect(readFileSync(out, "utf8")).toContain("PostgreSQL database dump");
   expect(mode(out)).toBe(0o600);
-  expect(dockerLog(w)).toMatch(/exec -T db pg_dump -U factory -d board/);
+  // no owner and no grants in the dump, so a restore has no role errors (#515)
+  expect(dockerLog(w)).toMatch(/exec -T db pg_dump -U factory -d board --no-owner --no-privileges\n/);
   const def = board(w, ["backup"]);
   expect(def.code, def.stderr).toBe(0);
   expect(def.stdout).toContain(join(w.dir, "backups"));
+  // the time in the name is UTC, and the name says so (#515)
+  expect(def.stdout).toMatch(/board-\d{8}-\d{6}-utc\.sql/);
+  expect(def.stdout).toContain("UTC");
 });
 
 test("a url file that others can read is fixed to mode 600 when read", () => {
@@ -382,4 +388,52 @@ test("tasks, ready, show and prime name a task by its issue number (#7) or b<id>
   } finally {
     await fresh.drop();
   }
+});
+
+test("up on a stopped container says it started it; on a running one, that it is up to date (#515)", async () => {
+  const target = await boardDatabase();
+  try {
+    const w = world();
+    mkdirSync(w.dir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(w.dir, "password"), target.password + "\n", { mode: 0o600 });
+    const first = board(w, ["up", "--port", target.port]);
+    expect(first.code, first.stdout + first.stderr).toBe(0);
+    expect(first.stdout).toContain("Started the message board");
+    const stopped = board(w, ["up", "--port", target.port]); // nothing changed, and the container isn't running
+    expect(stopped.code, stopped.stdout + stopped.stderr).toBe(0);
+    expect(stopped.stdout).toContain("Started the message board");
+    expect(stopped.stdout).not.toContain("up to date (");
+    const running = board(w, ["up", "--port", target.port], { FAKE_RUNNING: "1" });
+    expect(running.code, running.stdout + running.stderr).toBe(0);
+    expect(running.stdout).toContain("The message board is up to date");
+  } finally {
+    await target.drop();
+  }
+});
+
+test("restore refuses without --yes, without a file or a board, and changes nothing; a failed restore says nothing changed (#515)", () => {
+  const w = world();
+  const file = join(w.root, "b.sql");
+  writeFileSync(file, "-- PostgreSQL database dump\n", { mode: 0o600 });
+  expect(err(board(w, ["restore", file, "--yes"])).code).toBe("no-board");
+  mkdirSync(w.dir, { recursive: true });
+  writeFileSync(join(w.dir, "compose.yaml"), "name: factory-message-board\n");
+  const noFile = board(w, ["restore", join(w.root, "nope.sql"), "--yes"]);
+  expect(err(noFile).code).toBe("no-file");
+  expect(err(board(w, ["restore"])).code).toBe("bad-input");
+  const ask = board(w, ["restore", file]);
+  expect(ask.code).toBe(1);
+  const e = err(ask);
+  expect(e.code).toBe("needs-yes");
+  expect(e.message).toContain("replaces everything on the board");
+  expect(e.fix).toContain(`factory board restore ${file} --yes`);
+  expect(e.fix).toContain("factory board backup");
+  expect(dockerLog(w)).not.toContain("psql");
+  const failed = board(w, ["restore", file, "--yes"], { FAKE_PSQL_FAIL: "1" });
+  expect(failed.code).toBe(1);
+  expect(err(failed).code).toBe("restore-failed");
+  expect(err(failed).message).toContain("oops");
+  expect(err(failed).fix).toContain("Nothing was changed");
+  expect(dockerLog(w)).toMatch(/exec -T db psql -U factory -d board .*--single-transaction/);
+  expect(readFileSync(`${w.env.FAKE_LOG}.psql`, "utf8")).toBe("-- PostgreSQL database dump\n");
 });
