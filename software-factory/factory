@@ -76,10 +76,11 @@ Build
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
                          start; install --agents haile,tewodros turns it on (systemd user unit with linger, or a LaunchAgent)
   resume [--dry-run]     what autostart runs at boot: stack, then agents; safe to run by hand (running agents are left alone)
-  heartbeat [status|install|uninstall|restart|once|run]
+  heartbeat [status|install|ensure|uninstall|restart|once|run]
                          the per-machine daemon that knows what each agent here is really doing (working, waiting in a
                          wait, idle, down) and tells GitHub on a change plus a keepalive. install keeps it running
-                         (autostart install does it too); status shows what it sees
+                         (autostart install does it too); ensure installs it if missing and starts it if stopped (init
+                         and owner start do it); status shows what it sees
 
 Look
   status [--json]        the whole factory at a glance, across machines: agents, open PRs (CI, reviews, holds),
