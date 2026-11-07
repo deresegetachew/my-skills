@@ -7,6 +7,31 @@
 // Without Postgres or Docker, the tests fail and say how to fix it.
 import { SQL } from "bun";
 import { randomBytes } from "node:crypto";
+import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+const BOARD_SRC = join(import.meta.dir, "..", "message-board");
+
+/** The board's files as an older release shipped them (#570): a copy of message-board (no tests) whose migrations stop
+ *  at `last` (for example "003_leases_values.sql"). Its folder; `bin` is its `factory board`. */
+export function olderBoard(last: string): { dir: string; bin: string } {
+  const dir = join(mkdtempSync(join(process.env.TMPDIR || tmpdir(), "mb-older-")), "message-board");
+  cpSync(BOARD_SRC, dir, { recursive: true, filter: (src) => !src.startsWith(join(BOARD_SRC, "tests")) });
+  const migrations = join(dir, "src", "migrations");
+  for (const f of readdirSync(migrations)) if (f > last) rmSync(join(migrations, f));
+  return { dir, bin: join(dir, "bin.ts") };
+}
+
+/** Database `url` migrated by an older release's board code, up to migration `last` and no further (#570). */
+export function migrateUpTo(url: string, last: string): void {
+  const { bin } = olderBoard(last);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined && !k.startsWith("MB_") && !k.startsWith("FACTORY_")) env[k] = v;
+  const p = Bun.spawnSync([process.execPath, "--no-env-file", bin, "migrate"], { env: { ...env, MB_URL: url, FACTORY_CONFIG_DIR: join(bin, "..", "cfg") },
+    stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout: 120_000 });
+  if (p.exitCode !== 0) throw new Error(`the older board's migrate failed: ${p.stderr.toString()}`);
+}
 
 const IMAGE = "postgres:17-alpine";
 const LABEL = "factory-message-board-test";

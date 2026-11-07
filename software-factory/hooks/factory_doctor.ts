@@ -742,6 +742,13 @@ export function board(r: Reporter, cfg: Config): void {
   }
   if (!info.counts) r.fix("message board tables", "the board answers but has none yet: run `factory board migrate`");
   else r.ok(`message board answers (${info.server}, ${info.migrations.length} migrations)`);
+  // #570: a release's migrations that the board hasn't had: its newer rules (004: waits_for's direction) don't hold yet
+  const pending = info.pending ?? [];
+  if (info.counts && pending.length) {
+    r.fix("message board schema", `${pending.length} migration${pending.length === 1 ? "" : "s"} pending (${pending.join(", ")}), so the ` +
+      "board's newer rules don't apply yet. Fix: run `factory board migrate` on the hub, the machine that runs the board " +
+      "(`factory update` there does it too)");
+  }
 }
 
 /** The artifact copies in the repo (#104): each one exists, is not edited by hand, and is not older than its artifact

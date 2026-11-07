@@ -85,6 +85,16 @@ function unreachable(why: string): Problem {
     fix: "Start the message board on the machine that keeps it (or check its address in this machine's settings); the page switches back by itself." };
 }
 
+/** The Board page's notice when the board's schema is older than this machine's code (#570): a release brought
+ *  migrations the hub hasn't applied, so the board's newer rules (004: which way waits_for points) don't hold yet and
+ *  blocked and ready may be shown wrong. */
+export function behindProblem(pending: string[]): Problem {
+  const n = pending.length;
+  return { code: "ui_board_schema_behind", message: `The message board is older than this machine's factory: ${n} migration${n === 1 ? "" : "s"} ` +
+    `pending (${pending.join(", ")}), so its newer rules don't apply yet and which tasks are blocked or ready may be wrong.`,
+    fix: "On the hub, the machine that runs the board, run `factory board migrate` (`factory update` there does it too); this notice goes by itself." };
+}
+
 /** `github:<owner>/<repo>#` in lower case, as the import writes refs; "" when the repo isn't known. */
 function prefixOf(repo: string): string {
   return repo ? `github:${repo.toLowerCase()}#` : "";
@@ -176,6 +186,8 @@ export class BoardFeed {
   private all: Task[] = [];
   private parts = new Map<string, string>();
   private down: Problem | null = null;
+  /** The notice while the board's schema is behind this code (#570), else null. */
+  private behind: Problem | null = null;
   private busy: Promise<void> | null = null;
   private again = false;
   private stopped = false;
@@ -224,6 +236,7 @@ export class BoardFeed {
       let failed: { e: unknown } | null = null;
       try {
         const all = await board.tasks({ all: true, limit: MOST });
+        await this.checkSchema(board);
         listener = await board.listen((e: BoardEvent) => {
           this.schedule();
           if (SHOWN.has(e.kind)) this.o.event?.();
@@ -268,7 +281,7 @@ export class BoardFeed {
     if (!this.url) return { part: null, problem: null, state: this.url === null ? "none" : "opening" };
     const text = this.down ? undefined : this.parts.get(p.id);
     const state: BoardState = this.down ? "down" : this.board ? "live" : "opening";
-    return { part: text ? (JSON.parse(text) as Obj) : null, problem: this.down, state };
+    return { part: text ? (JSON.parse(text) as Obj) : null, problem: this.down ?? (text ? this.behind : null), state };
   }
 
   /** False while the board is being opened the first time: whether tasks come from it isn't known yet. */
@@ -378,10 +391,21 @@ export class BoardFeed {
     if (!board) return;
     try {
       this.all = await board.tasks({ all: true, limit: MOST });
-      this.publish(false);
+      const changed = await this.checkSchema(board);
+      this.publish(changed);
     } catch (e) {
       await this.fail(e);
     }
+  }
+
+  /** Reads which migrations the board hasn't had (#570) and keeps the notice; true when the notice changed. */
+  private async checkSchema(board: Board): Promise<boolean> {
+    const pending = (await board.info()).pending ?? [];
+    const next = pending.length ? behindProblem(pending) : null;
+    const changed = JSON.stringify(next) !== JSON.stringify(this.behind);
+    this.behind = next;
+    if (changed && next) this.o.log?.(`message board: ${next.message} ${next.fix}`);
+    return changed;
   }
 
   /** Works out each project's part and tells the server about each one that changed (`all`: every project). */

@@ -21,7 +21,9 @@ events on Postgres.
                                      (default ${DEFAULT_PORT}) and the Tailscale address (port N+1), then migrate it
   factory board down [--purge]       stop it; --purge also removes its data
   factory board status               whether the board answers, its schema and its counts
-  factory board migrate              apply the schema migrations not applied yet (safe to run twice)
+  factory board migrate [--if-hub]   apply the schema migrations not applied yet (safe to run twice). --if-hub (what
+                                     \`factory update\` runs): only on the machine that runs the board; elsewhere it
+                                     says what is pending, with the fix
   factory board backup [--out FILE]  a pg_dump from inside the container (no owner, no grants), mode 600; its default
                                      name, backups/board-<date>-<time>-utc.sql, is in UTC
   factory board restore <file> --yes replace the board's data with a backup's, in one transaction, then migrate it;
@@ -369,22 +371,75 @@ async function status(argv: string[]): Promise<number> {
   try {
     const info = await b.info();
     print(`answers   ${info.server}`);
-    const want = migrationNames();
-    const missing = want.filter((m) => !info.migrations.includes(m));
-    print(`schema    ${info.migrations.at(-1) ?? "none"}` + (missing.length ? ` (${missing.length} to apply: \`factory board migrate\`)` : ""));
+    print(`schema    ${info.migrations.at(-1) ?? "none"}` + (info.pending.length ? `: ${pendingText(info.pending, s !== null)}` : ""));
     if (info.counts) print(`tasks     ${Object.entries(info.counts).map(([k, v]) => `${v} ${k}`).join(", ") || "none"}`);
-    return missing.length ? 1 : 0;
+    return info.pending.length ? 1 : 0;
   } finally {
     await b.end().catch(() => {});
   }
 }
 
+/** What `pending` migrations mean, and the fix: on the machine that runs the board (`hub`), `factory board migrate`
+ * here; elsewhere, on the hub (a joined machine's login may not change the schema). */
+function pendingText(pending: string[], hub: boolean): string {
+  const n = pending.length;
+  return `${n} migration${n === 1 ? "" : "s"} pending (${pending.join(", ")}), so the board's newer rules don't apply yet. ` +
+    (hub ? "Run `factory board migrate`." : "Run `factory board migrate` on the hub, the machine that runs the board.");
+}
+
 // ---------- board verbs ----------
+const MIGRATE_USAGE = "factory board migrate [--if-hub]";
+
 async function migrateVerb(argv: string[]): Promise<number> {
-  leftovers([...argv], "factory board migrate");
+  const args = [...argv];
+  const ifHub = flag(args, "--if-hub");
+  leftovers(args, MIGRATE_USAGE);
+  if (ifHub) return migrateIfHub();
   const applied = await withBoard((b) => b.migrate());
   print(applied.length ? `Applied ${applied.join(", ")}.` : `The schema is up to date (${migrationNames().at(-1)}).`);
   return 0;
+}
+
+/** `factory board migrate --if-hub`, what `factory update` runs after it installs a release: on the machine that runs
+ * the board (`factory board up` ran here) the pending migrations are applied, under the board's migrate lock, so two
+ * machines can't apply one twice; on a machine that joined, nothing is changed and what is pending is said loudly with
+ * the fix (its login may not change the schema). With no board here, or one that doesn't answer, it says so: `factory
+ * board up` migrates when it starts. Every line starts with "message board:". Safe to run twice. */
+async function migrateIfHub(): Promise<number> {
+  const url = boardUrl();
+  if (!url) {
+    print("message board: none on this machine.");
+    return 0;
+  }
+  const hub = readState() !== null;
+  let b: Board;
+  try {
+    b = await Board.open(url, { as: "system", max: 2 });
+  } catch (e) {
+    if (e instanceof BoardError && e.code === "no-answer") {
+      print(hub ? "message board: doesn't answer here, so nothing was migrated; `factory board up` applies the migrations when it starts it."
+        : "message board: the hub doesn't answer, so its schema wasn't checked; `factory board status` checks it later.");
+      return 0;
+    }
+    // a joined machine changes nothing on the board, so its update isn't stopped for it: what is wrong is said, with the fix
+    if (e instanceof BoardError && !hub) {
+      print(`message board: warning: its schema wasn't checked: ${e.message} ${e.fix}`);
+      return 0;
+    }
+    throw e;
+  }
+  try {
+    if (!hub) {
+      const { pending } = await b.info();
+      print(pending.length ? `message board: warning: ${pendingText(pending, false)}` : `message board: the schema is up to date (${migrationNames().at(-1)}, on the hub).`);
+      return 0;
+    }
+    const applied = await b.migrate();
+    print(applied.length ? `message board: applied ${applied.join(", ")}.` : `message board: the schema is up to date (${migrationNames().at(-1)}).`);
+    return 0;
+  } finally {
+    await b.end().catch(() => {});
+  }
 }
 
 async function sweep(argv: string[]): Promise<number> {
