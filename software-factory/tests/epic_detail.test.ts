@@ -94,3 +94,20 @@ test("the epics API gives each epic's summary and citations (none when the cache
   expect(got[0]).toMatchObject({ summary: "Sign in.", cites: ["decision 0004"] });
   expect(got[1]).toMatchObject({ summary: "", cites: [] });
 }, T);
+
+test("opening #n when the epics could not be read shows the problems, never 'not found' (#464 review)", async () => {
+  const { epicsRead } = await import("../web/epics_model.ts");
+  const all: { id: string }[] = [];
+  const unreadable = { code: "ui_epics_unreadable", message: "The epics can't be read (boom).", fix: "Run `factory snapshot`." };
+  const failed = { problems: [], epics: { from: "github", problems: [unreadable] } };
+  expect(epicsRead(failed)).toBe(false);
+  expect(epicChoice(all, "40", epicsRead(failed))).toEqual({ show: "list" });
+  const tasksFailed = { problems: [unreadable], epics: { from: "github", problems: [] } };
+  expect(epicChoice(all, "40", epicsRead(tasksFailed))).toEqual({ show: "list" });
+  const notYet = { problems: [], epics: { from: "unknown", problems: [] } };
+  expect(epicChoice(all, "40", epicsRead(notYet))).toEqual({ show: "list" });
+  const fine = { problems: [], epics: { from: "github", problems: [] } };
+  expect(epicsRead(fine)).toBe(true);
+  expect(epicChoice(all, "40", epicsRead(fine))).toEqual({ show: "missing", id: "40" });
+  expect(epicChoice([{ id: "40" }], "40", epicsRead(failed))).toEqual({ show: "page", epic: { id: "40" } });
+});
