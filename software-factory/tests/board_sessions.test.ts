@@ -244,6 +244,42 @@ test("the configured server answers as the agent, with its role's tools", async 
   expect(manager.tools).toEqual([...MANAGER_TOOLS].sort());
 }, 300_000);
 
+/** Run the board's MCP server with `args`, call each tool in turn, and return each call's structured result. */
+async function callTools(args: string[], url: string, calls: [string, Record<string, unknown>][]): Promise<Record<string, unknown>[]> {
+  const p = Bun.spawn(["bun", BIN, "mcp", ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, MB_URL: url } });
+  const send = (m: unknown): void => {
+    p.stdin.write(JSON.stringify(m) + "\n");
+  };
+  send({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+  send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  calls.forEach(([name, a], i) => send({ jsonrpc: "2.0", id: i + 1, method: "tools/call", params: { name, arguments: a } }));
+  await p.stdin.end();
+  const timer = setTimeout(() => p.kill(9), 60_000);
+  const out = await new Response(p.stdout).text();
+  await p.exited;
+  clearTimeout(timer);
+  const replies = out.split("\n").filter(Boolean).map((l) => JSON.parse(l) as { id: number; result: { structuredContent: Record<string, unknown>; isError?: boolean } });
+  return calls.map((_, i) => {
+    const r = replies.find((x) => x.id === i + 1);
+    expect(r?.result.isError, out).toBeFalsy();
+    return r?.result.structuredContent as Record<string, unknown>;
+  });
+}
+
+test("a card the owner or the manager makes with board_create is the project's task: next and the task list find it (#528)", async () => {
+  world ??= await boardWorld();
+  const fx = world.tracker([]);
+  const [made] = await callTools(["--as", "owner", "--role", "owner", "--repo", fx.repo], world.url,
+    [["board_create", { title: "Made on the board", kind: "task", priority: 1 }]]);
+  const id = String((made?.task as { id: string }).id);
+  expect(id).toMatch(/^b\d+$/);
+  expect(fx.port.list().map((t) => t.id)).toEqual([id]);
+  expect(fx.port.next()?.id).toBe(id);
+  // another project on the same board doesn't get it
+  const other = world.tracker([]);
+  expect(other.port.list()).toEqual([]);
+}, 300_000);
+
 /** Run the board's MCP server with `args` and call one tool; its result, refused or not. */
 async function callTool(args: string[], url: string, name: string, a: Record<string, unknown>): Promise<{ isError?: boolean; text: string }> {
   const p = Bun.spawn(["bun", BIN, "mcp", ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, MB_URL: url } });

@@ -544,7 +544,8 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
       "Start the message board on the machine that keeps it (or check its address in this machine's settings), then try again.");
   }
   const tasksPart = part ?? obj(cacheOf(p)?.tasks);
-  const task = /^\d+$/.test(id) ? list(tasksPart.tasks).find((t) => str(t.id) === id) : undefined; // an issue number, never an option
+  // an issue number, or with the board as the record a task made on it (b<id>, #528); never an option
+  const task = /^\d+$/.test(id) || (onBoard && /^b\d+$/.test(id)) ? list(tasksPart.tasks).find((t) => str(t.id) === id) : undefined;
   if (!task) {
     return refusal(404, "ui_task_unknown", `#${id} isn't one of ${p.name}'s tasks in the last snapshot.`, "Read the board again, then pick a task it shows.");
   }

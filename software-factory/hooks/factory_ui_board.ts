@@ -4,7 +4,8 @@
 // which projects changed, so the server pushes only those over the WebSocket.
 //
 // A project's tasks are the board's tasks whose ref is its GitHub repo's (`github:<owner>/<repo>#<n>`, as `factory board
-// import github` writes them); the card keeps the issue number as its id. A project with none on the board, or a board
+// import github` writes them); the card keeps the issue number as its id. A task made on the board for the project (ref
+// `factory:<owner>/<repo>/<uuid>`, by the task tracker or the MCP server's board_create, #528) is its task too, as b<board id>. A project with none on the board, or a board
 // that isn't set up, keeps the GitHub path (the snapshot's cache). A board that can't be read gives a notice and every
 // project falls back to GitHub until it answers again (tried every few seconds).
 //
@@ -87,10 +88,16 @@ function prefixOf(repo: string): string {
   return repo ? `github:${repo.toLowerCase()}#` : "";
 }
 
+/** A task's id on the page: its issue number for the project's issues, `b<board id>` for a task made on the board for
+ *  the project (ref `factory:<owner>/<repo>/<uuid>`, #528), as the task tracker names them; null for another project's. */
 function numberOf(t: Task, prefix: string): string | null {
-  if (!prefix || !t.ref || !t.ref.toLowerCase().startsWith(prefix)) return null;
-  const n = t.ref.slice(prefix.length);
-  return /^\d+$/.test(n) ? n : null;
+  if (!prefix || !t.ref) return null;
+  const ref = t.ref.toLowerCase();
+  if (ref.startsWith(prefix)) {
+    const n = t.ref.slice(prefix.length);
+    return /^\d+$/.test(n) ? n : null;
+  }
+  return ref.startsWith(`factory:${prefix.slice("github:".length, -1)}/`) ? `b${t.id}` : null;
 }
 
 /** The factory's state words for a board task: done, in review, in progress, blocked (the board's blocking edges, or
