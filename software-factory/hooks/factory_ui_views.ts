@@ -512,6 +512,11 @@ async function runSteps(p: UiProject, steps: string[][], ms: number): Promise<Ac
 
 export type Answer = ActionResult;
 
+/** How a task is named in an answer (#546): `#7` for an issue, `b3` for a task made on the message board. */
+export function taskName(id: string): string {
+  return /^\d+$/.test(id) ? `#${id}` : id;
+}
+
 function refusal(status: number, code: string, message: string, fix: string): Answer {
   return { status, body: { code, message, fix } };
 }
@@ -576,11 +581,11 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
   // an issue number, or with the board as the record a task made on it (b<id>, #528); never an option
   const task = /^\d+$/.test(id) || (onBoard && /^b\d+$/.test(id)) ? list(tasksPart.tasks).find((t) => str(t.id) === id) : undefined;
   if (!task) {
-    return refusal(404, "ui_task_unknown", `#${id} isn't one of ${p.name}'s tasks in the last snapshot.`, "Read the board again, then pick a task it shows.");
+    return refusal(404, "ui_task_unknown", `${taskName(id)} isn't one of ${p.name}'s tasks in the last snapshot.`, "Read the board again, then pick a task it shows.");
   }
   if (!actionsFor(str(task.state), str(tasksPart.source)).includes(action)) {
-    const why = str(tasksPart.source) !== "issues" ? "only a task kept as a GitHub issue can be changed from here" : `#${id} is ${taskStateText(str(task.state))}`;
-    return refusal(400, "ui_action_unavailable", `#${id} can't be ${action === "block" ? "blocked" : `${action}d`}: ${why}.`,
+    const why = str(tasksPart.source) !== "issues" ? "only a task kept as a GitHub issue can be changed from here" : `${taskName(id)} is ${taskStateText(str(task.state))}`;
+    return refusal(400, "ui_action_unavailable", `${taskName(id)} can't be ${action === "block" ? "blocked" : `${action}d`}: ${why}.`,
       "Read the board again; a card shows only the actions it can take.");
   }
   const reason = reasonOf(b.reason);
@@ -602,7 +607,7 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
       // task when it starts, so that isn't a failure (#546)
       const told = await runSteps(p, [["factory", "say", to, `/next-task issue-${id}`]], TASK_ACTION_TIMEOUT_MS);
       if (told.status === 200) return told;
-      const named = /^\d+$/.test(id) ? `#${id}` : id; // #7 for an issue, b3 for a task made on the board
+      const named = taskName(id);
       return { status: 200, body: { ok: true, command: `reassign ${named} to ${to} on the message board`,
         output: `${named} is handed to ${to} on the message board. ${to} isn't running on this machine now, so it takes ${named} when it starts.` } };
     }
@@ -611,7 +616,7 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
   }
   if (onBoard) {
     return (await onTheBoard(board as TaskBoard, p, id, action, action === "block" ? reason : reason || "released from the web UI")) ??
-      { status: 200, body: { ok: true, command: `${action} #${id} on the message board`, output: `#${id}: ${action === "block" ? "blocked" : "released"} on the message board.` } };
+      { status: 200, body: { ok: true, command: `${action} ${taskName(id)} on the message board`, output: `${taskName(id)}: ${action === "block" ? "blocked" : "released"} on the message board.` } };
   }
   const step = action === "block" ? ["factory", "issues", "block", id, reason] : ["factory", "issues", "release", id, reason || "released from the web UI"];
   return runSteps(p, [step], TASK_ACTION_TIMEOUT_MS);

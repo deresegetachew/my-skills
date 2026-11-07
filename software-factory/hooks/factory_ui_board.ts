@@ -113,6 +113,11 @@ function stateOf(t: Task): string {
 
 const WORK = new Set(["task", "bug"]);
 
+/** How a task is named in an answer (#546): `#7` for an issue, `b3` for a task made on the message board. */
+function taskName(id: string): string {
+  return /^\d+$/.test(id) ? `#${id}` : id;
+}
+
 /** How long a done task stays on the Board page's Done column (#545: finished work mustn't vanish at once). */
 export const DONE_DAYS = 7;
 
@@ -276,7 +281,7 @@ export class BoardFeed {
     const task = this.board && this.live(p) ? this.all.find((t) => numberOf(t, prefix) === id) : undefined;
     if (!this.board || !task) {
       return { status: 404, body: this.live(p)
-        ? { code: "ui_task_unknown", message: `#${id} isn't one of ${p.name}'s tasks on the message board.`, fix: "Pick a task the board shows." }
+        ? { code: "ui_task_unknown", message: `${taskName(id)} isn't one of ${p.name}'s tasks on the message board.`, fix: "Pick a task the board shows." }
         : { code: "ui_board_absent", message: `${p.name}'s tasks aren't read from a message board, so a task's thread isn't shown here.`,
           fix: "Bring the project's issues into the message board on the machine that keeps it; its threads then show here." } };
     }
@@ -300,7 +305,7 @@ export class BoardFeed {
     const board = this.board;
     if (!board || !this.live(p)) throw this.down ?? unreachable("it isn't open on this server");
     const task = this.all.find((t) => numberOf(t, prefix) === id);
-    if (!task) throw { code: "ui_task_unknown", message: `#${id} isn't one of ${p.name}'s tasks on the message board.`, fix: "Read the board again, then pick a task it shows." };
+    if (!task) throw { code: "ui_task_unknown", message: `${taskName(id)} isn't one of ${p.name}'s tasks on the message board.`, fix: "Read the board again, then pick a task it shows." };
     if (action === "reassign") return board.assign(task.id, to, { reason });
     return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
   }
