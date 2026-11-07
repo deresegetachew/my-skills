@@ -59,7 +59,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `board status` | planned | Machines (Machines.dc.html): whether the message board answers | #472 |
 | `board migrate` | terminal only | Run once after an update | |
 | `board backup` | terminal only | Machine administration; a nightly backup is a job on the machine | |
-| `board sweep` | agents only | The dev manager's loop releases stale claims | |
+| `board sweep` | terminal only | Machine administration: run by hand or as a job on the board's machine; nothing runs it by itself yet | #511 |
 | `board login add` | terminal only | `machine add` and `machine remove` make and drop a machine's board login; by hand it is machine administration | |
 | `heartbeat` | planned | Machines (Machines.dc.html) | #455 |
 | `autostart` | planned | Machines (Machines.dc.html), Team setup (TeamSetup.dc.html) | #455 |
@@ -95,12 +95,12 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `review-pass arch` | agents only | PR (PR.dc.html): reviews | |
 | `claims` | planned | Maintenance (Maintenance.dc.html); Agent: its task | #456 |
 | `release` | planned | Maintenance (Maintenance.dc.html): drop an agent's claims, after a confirm | #456 |
-| `board tasks` | planned | Tasks read from the message board (decision 0007, build step 6) | #472 |
-| `board ready` | planned | Tasks read from the message board: the ready queue | #472 |
-| `board show` | planned | Task (Task.dc.html), read from the message board | #472 |
+| `board tasks` | built | Board (Board.dc.html): a project's tasks read from the message board, live, when its issues are on it | #498 |
+| `board ready` | built | Board (Board.dc.html): ready and blocked as the message board works them out | #498 |
+| `board show` | built | Task (Task.dc.html): its thread and context entries read from the message board | #498 |
 | `board prime` | agents only | An agent's start of task; the web UI's first read has the same shape | #472 |
 | `board mcp --as` | agents only | An agent's session reaches the message board through it, and with `--role owner` the owner's own Claude Code session moves, creates, assigns and links cards (#503); the owner sees what they wrote on Task (Task.dc.html) and the board, live | #495 |
-| `board mirror` | agents only | Runs beside the loops (`--watch`), so GitHub follows the board; the web UI's own writes are carried by it | #502 |
+| `board mirror` | agents only | The dev manager's loop runs it before each pass (`--max-seconds 300`), and `--watch` runs it beside the loops, so GitHub follows the board; the web UI's own writes are carried by it | #502 |
 | `board ask` | agents only | The dev manager's asks to the owner; the owner answers them in the owner-queue channel | #502 |
 | `board import github` | planned | First launch (decision 0007 step 2): import the issues when a new factory connects GitHub | #457 |
 

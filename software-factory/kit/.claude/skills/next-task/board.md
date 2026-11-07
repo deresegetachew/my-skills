@@ -1,7 +1,7 @@
 # When the board is on
 
-With `tasks.source` or `messaging.transport` set to `board`, your session has one MCP server, `board`, and you use
-its tools for tasks and messages. Everything else in `SKILL.md` stays the same. With the board off, use `SKILL.md`'s
+With `tasks.source` or `messaging.transport` set to `board` (or no transport set, on a machine with a board), your
+session has one MCP server, `board`, and you use its tools for tasks and messages. Everything else in `SKILL.md` stays the same. With the board off, use `SKILL.md`'s
 commands: nothing changes.
 
 - **Start** with `board_prime`: what you hold, what is ready, what is blocked, recent events.

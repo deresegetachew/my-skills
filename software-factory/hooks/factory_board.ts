@@ -2,12 +2,13 @@
 // The factory's side of the message board as the record (#502, decision 0007 points 5 and 9). `factory board <verb>`
 // runs the board's own command (message-board/bin.ts), except these, which need the project's settings:
 //
-//   factory board mirror [--watch] [--every <seconds>]
+//   factory board mirror [--watch] [--every <seconds>] [--max-seconds <n>]
 //       carries the board to GitHub, one way (message-board/src/github/mirror.ts): a task's state change sets its issue's
 //       labels with one short line, owner asks and answers go to the owner-queue issue once, and the owner's answers there
 //       come back once. Its place is kept on the board, so it is safe to run twice and goes on after downtime. `board.mirror`
 //       false turns it off. --watch keeps running: a pass on each change on the board, and at least every --every seconds
-//       (300) for the owner's answers on GitHub.
+//       (300) for the owner's answers on GitHub. --max-seconds stops a one-off pass that runs longer than n seconds (a hung
+//       `gh`, a board that doesn't answer), so it can't stall the dev manager's pass in factory-loop.sh (#511).
 //   factory board ask <id> <text>
 //       an owner-queue ask: with the owner queue on the board (`tasks.source` board, or ask in `messaging.kinds`), written to
 //       the board (kind ask, to the owner, on the owner-queue issue's task) and mirrored; otherwise a comment on the
@@ -18,7 +19,7 @@
 //
 // `factory owner answer` (factory_owner.ts) calls answerOnBoard: with the owner queue on the board, the answer goes to the
 // board first, then the mirror posts it. Errors are one JSON line `{code, message, fix}` on stderr.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { boardRepo, ownerQueueOnBoard } from "./core/compose.ts";
 import { boardMirror, type Config, load, taskSource } from "./factory_config.ts";
@@ -31,7 +32,7 @@ import { Board, BoardError, boardUrl, GithubError, type Message, type MirrorSumm
 const BIN = join(import.meta.dir, "..", "message-board", "bin.ts");
 const MIRROR_ACTOR = "github-mirror";
 const OWNER = "owner";
-const USAGE = `factory board mirror [--watch] [--every <seconds>]
+const USAGE = `factory board mirror [--watch] [--every <seconds>] [--max-seconds <n>]
 factory board ask <id> <text>      (or --body - with the whole comment on stdin)
 factory board import github [--closed] [--dry-run] [--repo owner/name]`;
 
@@ -90,7 +91,54 @@ function report(s: MirrorSummary): void {
 
 const OFF = "The mirror is off (board.mirror is false): nothing was sent to GitHub. `factory settings set board.mirror true` turns it on.";
 
+/** A one-off mirror pass (`args`) in a child process with a group of its own, stopped with whatever it started (a hung
+ * `gh`) when it runs longer than `seconds`. A stopped pass loses nothing: its place is kept on the board and the next run
+ * sends the rest. */
+async function mirrorWithin(seconds: number, args: string[]): Promise<number> {
+  const child = spawn(process.execPath, ["--no-env-file", "--config=/dev/null", import.meta.path, "mirror", ...args], { stdio: "inherit", detached: true });
+  const stop = (): void => {
+    try {
+      process.kill(-(child.pid as number), "SIGKILL");
+    } catch {
+      // already gone
+    }
+  };
+  const onSignal = (): void => {
+    stop();
+    process.exit(130);
+  };
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const ended = new Promise<number>((resolve) => child.on("exit", (code) => resolve(code ?? 1)));
+  const late = new Promise<"late">((resolve) => {
+    timer = setTimeout(() => resolve("late"), seconds * 1000);
+  });
+  try {
+    const r = await Promise.race([ended, late]);
+    if (r !== "late") return r;
+    stop();
+    return refuse("mirror_timeout", `factory board mirror ran longer than ${seconds} seconds and was stopped. What it sent stays sent; the next run sends the rest.`,
+      "Run `factory board mirror` by hand to see where it waits, and check `gh auth status` and `factory board status`.");
+  } finally {
+    clearTimeout(timer);
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
+}
+
 async function mirror(cfg: Config, args: string[]): Promise<number> {
+  const lim = args.indexOf("--max-seconds");
+  if (lim >= 0) {
+    const seconds = Number(args[lim + 1]);
+    if (!Number.isFinite(seconds) || seconds < 1) refuse("bad_args", "--max-seconds takes a number of seconds, 1 or more.", "factory board mirror --max-seconds 300");
+    if (args.includes("--watch")) refuse("bad_args", "--max-seconds is for a one-off pass; --watch keeps running.", "factory board mirror --max-seconds 300");
+    if (!boardMirror(cfg)) {
+      console.log(OFF);
+      return 0;
+    }
+    return mirrorWithin(seconds, args.filter((_, i) => i !== lim && i !== lim + 1));
+  }
   const watch = args.includes("--watch");
   const at = args.indexOf("--every");
   const every = at >= 0 ? Number(args[at + 1]) : 300;

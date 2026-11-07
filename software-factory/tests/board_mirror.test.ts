@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { Board, type Message, type Task } from "../message-board/src/index.ts";
 import { freshDb, type Pg, startPg } from "./board_pg.ts";
 import { installFakeGh } from "./fakegh.ts";
-import { gitRepo, HOOKS, type Proc, runBun, SF, sh, tmp, write } from "./support.ts";
+import { gitRepo, HOOKS, type Proc, runBun, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 setDefaultTimeout(120_000);
 
@@ -248,6 +248,37 @@ test("--watch sends a change soon after it lands on the board, without being run
   }
 });
 
+test("--max-seconds stops a pass whose gh hangs, with the gh it started; a pass within the limit runs as before", async () => {
+  const w = await world();
+  const t = await w.board.create({ title: "Add login", ref: ref(101) });
+  await (await w.as("haile")).claim(t.id);
+
+  // a gh that never answers, first on the PATH; it writes its pid so the test can see it was stopped too
+  const hung = tmp("factory-hung-gh-");
+  const pids = join(hung, "pids");
+  writeExe(join(hung, "gh"), `#!/bin/bash\necho $$ >> "${pids}"\nexec sleep 600\n`);
+  const started = Date.now();
+  const r = hook(w, "factory_board", ["mirror", "--max-seconds", "3"], { PATH: `${hung}:${w.env.PATH}` });
+  expect(Date.now() - started).toBeLessThan(30_000);
+  expect(r.code).toBe(1);
+  const e = err(r);
+  expect(e.code).toBe("mirror_timeout");
+  expect(e.message).toContain("3 seconds");
+  expect(e.fix).toContain("factory board mirror");
+  expect(posted(w)).toEqual([]);
+  for (const pid of readFileSync(pids, "utf8").trim().split("\n")) expect(sh(["kill", "-0", pid]).code).not.toBe(0);
+
+  // the next pass, with GitHub answering, sends the change once
+  const ok = hook(w, "factory_board", ["mirror", "--max-seconds", "60"]);
+  expect(ok.code, ok.stderr).toBe(0);
+  expect(ok.stdout).toContain("Mirrored the message board");
+  expect(posted(w).map((p) => [p.kind, p.issue])).toEqual([["patch", 101], ["comment", 101]]);
+
+  const both = hook(w, "factory_board", ["mirror", "--watch", "--max-seconds", "60"]);
+  expect(both.code).toBe(1);
+  expect(err(both).code).toBe("bad_args");
+});
+
 test("the first pass sends only to issues whose labels differ from the board; the rest are taken as they are", async () => {
   const w = await world({ tasks: { source: "board" } }, [issue(101, "Add login", ["factory:ready"]), issue(102, "Pay by card", ["factory:ready"]),
     issue(105, "Sign out", ["factory:in-review"])]);
@@ -454,5 +485,6 @@ test("factory help lists board mirror and board ask", () => {
   const p = sh(["bash", join(SF, "factory"), "help"], { cwd: SF });
   expect(p.code).toBe(0);
   expect(p.stdout).toMatch(/^ {2}board mirror \[--watch\]/m);
+  expect(p.stdout).toContain("--max-seconds");
   expect(p.stdout).toMatch(/^ {2}board ask <id> <text>/m);
 });

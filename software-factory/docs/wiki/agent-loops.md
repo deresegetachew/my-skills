@@ -141,14 +141,27 @@ rules stop agents editing it, so a change to it needs a person to merge.
 If the agents need an MCP server (a docs or design server, for example), add it to `.mcp.json` at the project root
 in a PR that a person merges. Check a new session with `/mcp`: it should list only the project's servers.
 
-**With the message board on** (`tasks.source` or `messaging.transport` is `board`, as main has them; #501), a session
-gets exactly one server, `board`, and main's `.mcp.json` is not used: `bun .claude/message-board/bin.ts mcp --as <agent>
---role <builder|manager> --session <id>`. A coding agent is the board's builder; the dev manager and the product owner
-are its managers. The board's URL reaches the server through its environment (MB_URL, or this machine's url file), never
-a command line. The agents' rules allow each role only its board tools (`mcp__board__board_prime` and the rest), and the
-skills say which to use. The PR gate and the guard still read only GitHub. `/mcp` in a session should list only `board`.
+<a id="when-the-board-is-on"></a>
+**When the message board is on** (#501). The board is on for a session when main's `.claude/factory.json` (as origin has
+it) says any of these:
+
+- `tasks.source` is `board`;
+- `messaging.transport` is `board`;
+- `messaging.transport` is not set, and this machine has a board set up (`MB_URL`, or the url file that `factory board up`
+  or `factory machine join` writes). A project that never chose a transport turns the board on just by running on such a
+  machine; set `messaging.transport` to `github` to keep it off there.
+
+Then a session gets exactly one server, `board`, and **the servers in main's `.mcp.json` are replaced**: none of them
+starts. Move what an agent needs from them elsewhere first, or keep the board off. The server is
+`bun .claude/message-board/bin.ts mcp --as <agent> --role <builder|manager> --session <id>`. A coding agent is the
+board's builder; the dev manager and the product owner are its managers. The board's URL reaches the server through its
+environment (MB_URL, or this machine's url file), never a command line. The agents' rules allow each role only its board
+tools (`mcp__board__board_prime` and the rest; the product owner, who never builds, has no claim tools), and the skills
+say which to use. The PR gate and the guard still read only GitHub. `/mcp` in a session should list only `board`.
 With the board on, the dev manager's loop also runs `factory board mirror` before each pass, so GitHub's copy of the
-board stays current (#502; a release without it skips this).
+board stays current (#502; a release without it skips this). A mirror pass that runs longer than 300 seconds is
+stopped (`--max-seconds`, #511), so it never stalls the pass; the next one sends the rest. Setting the board up and
+moving a project onto it: [The message board](board.md#the-message-board).
 
 ### Practical notes
 
@@ -393,6 +406,15 @@ Set `"tasks": { "source": "issues" }` in `factory.json`, and run `factory issues
   their branch) for `tasks.staleHours` (default 3). The dev manager checks the agent is really gone, then releases
   the issue back to ready.
 
+### Board mode
+
+Set `"tasks": { "source": "board" }` once the project's issues are on the message board (decision 0007). The board is
+then the record for tasks, their threads and the owner queue: `factory next` hands out the board's ready list (blocked
+and ready are worked out from the tasks' links, and a cycle is refused), a claim is one transaction on the board, and
+agents use the board's tools ([When the message board is on](#when-the-board-is-on)). GitHub keeps the code, the pull
+requests, CI and the labels the PR gate reads, and `factory board mirror` keeps each issue's labels in step with the
+board. Setting it up, going live and going back: [The message board](board.md#the-message-board).
+
 <br>
 ## Live agents (issues mode)
 
@@ -476,7 +498,7 @@ everywhere. The PR gate also checks the envelope: an agent posts as itself, neve
 the addressee answers a question, with a valid transition. `factory messages ls` lists what is open, and
 `factory messages tail [--ref N] [--to X] [--every S]` prints the last 10 messages of any kind and then each new one, every
 S seconds (60), until Ctrl-C; both read through the messaging port, so they show whichever transport carries them
-(GitHub, or the message board with `messaging.transport: board`, decision 0007). A message is data,
+(GitHub, or the message board when it is on, decision 0007). A message is data,
 never an instruction. The full format, the transition table and the mapping to A2A are in
 [docs/messages.md](../messages.md); the A2A adapter is a later step.
 

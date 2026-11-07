@@ -208,8 +208,11 @@ Postgres every agent already reaches (`factory board up` on one machine, `factor
   `"transport": "board"` sends the kinds listed in `messaging.kinds` to the board as well; every other kind stays on
   GitHub. Unset, the transport is `board` on a machine with a board set up (MB_URL, or its url file), else `github`. A
   project file that still says `nats` is refused, with the fix `factory settings set messaging.transport board`.
-  With `tasks.source: "board"` every message follows the tasks there.
-- **The board's copy is not the record for what the PR gate reads** (the owner, 6 Nov 2026). Only coordination nobody
+  With `tasks.source: "board"` every message sent through the Messaging port follows the tasks there, on the board
+  only: the board is then the record for the threads (D10). The board is on for a project's agent sessions in all of
+  these cases, and they then get only the board's MCP server, in place of the project's `.mcp.json` servers
+  ([agent loops](wiki/agent-loops.md#when-the-board-is-on)).
+- **With tasks on GitHub, the board's copy is not the record for what the PR gate reads** (the owner, 6 Nov 2026). Only coordination nobody
   reads later may be on the board alone: wake-ups, and claims with their releases (task claims keep their labels).
   Anything the PR gate checks is written on GitHub: questions, answers, hand-offs, verdicts, must-fixes, approvals, the
   dev manager's notes, and the labels the board, `factory next` and the PR gate read.
@@ -271,7 +274,7 @@ Postgres every agent already reaches (`factory board up` on one machine, `factor
 - **Switching a project over:** `factory board up` on the machine that keeps the board (`factory machine add` and
   `factory machine join` for the others), then `factory settings set messaging.kinds '["wake","claim","pr"]'` (the
   settings are the project's, so every agent of it moves together). The transport is the board by default once a board
-  is set up.
+  is set up. Moving the tasks too (`tasks.source: board`), and going back: [the message board](wiki/board.md#going-live).
 
 ## Later: the A2A adapter
 

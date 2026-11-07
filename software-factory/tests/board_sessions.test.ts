@@ -19,6 +19,8 @@ const URL_WITH_PASSWORD = `postgres://factory:${SECRET}@127.0.0.1:1/board`;
 const BUILDER_TOOLS = ["board_prime", "board_ready", "board_claim", "board_heartbeat", "board_release", "board_close",
   "board_show", "board_post", "board_thread", "board_note", "board_on_me", "board_delegated"];
 const MANAGER_TOOLS = [...BUILDER_TOOLS, "board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment"];
+// The product owner never builds (#511): no claim, heartbeat, release or close; a task dropped is moved to done as wont_do.
+const PO_TOOLS = MANAGER_TOOLS.filter((t) => !["board_claim", "board_heartbeat", "board_release", "board_close"].includes(t));
 
 /** A clone whose origin main has `factoryJson` as .claude/factory.json (and `mcp` as .mcp.json). */
 function project(factoryJson: unknown, mcp?: unknown): string {
@@ -153,9 +155,9 @@ test("a builder's rules allow the builder's board tools and no more", () => {
   expect(boardAllows(KIT_AGENT_SETTINGS)).toEqual(asRules(BUILDER_TOOLS));
 });
 
-test("the dev manager's and the product owner's rules allow the manager's board tools and no more", () => {
+test("the dev manager's rules allow the manager's board tools; the product owner's the same but those for building", () => {
   expect(boardAllows(join(KIT, ".claude", "manager", "settings.json"))).toEqual(asRules(MANAGER_TOOLS));
-  expect(boardAllows(join(KIT, ".claude", "product-owner", "settings.json"))).toEqual(asRules(MANAGER_TOOLS));
+  expect(boardAllows(join(KIT, ".claude", "product-owner", "settings.json"))).toEqual(asRules(PO_TOOLS));
 });
 
 // --- the skills ------------------------------------------------------------------------------------------------
@@ -184,7 +186,7 @@ test("the skills name the board tools to use when the board is on", () => {
     for (const t of ["board_prime", "board_post", "board_note", "board_thread"]) expect(s, `${skill}: ${t}`).toContain(`\`${t}\``);
   }
   // only tools the role's server offers
-  for (const [skill, tools] of [["next-task", BUILDER_TOOLS], ["manage-pass", MANAGER_TOOLS], ["product-pass", MANAGER_TOOLS]] as const) {
+  for (const [skill, tools] of [["next-task", BUILDER_TOOLS], ["manage-pass", MANAGER_TOOLS], ["product-pass", PO_TOOLS]] as const) {
     for (const named of boardSection(skill).match(/board_[a-z_]+/g) ?? []) expect(tools, `${skill}: ${named}`).toContain(named);
   }
   // board off: today's commands stay
@@ -255,12 +257,14 @@ function managerPass(factoryJson: unknown, role = "dev-manager"): string {
   return existsSync(join(d, "log")) ? read(join(d, "log")) : "";
 }
 
-const mirrors = (log: string): number => log.split("\n").filter((l) => l === "factory_board.ts mirror").length;
+// The loop runs it with a time limit (#511), so a hung mirror can't stall the pass: board_mirror.test.ts stops a hung gh.
+const mirrors = (log: string): number => log.split("\n").filter((l) => l.startsWith("factory_board.ts mirror")).length;
 
 test("with the board on, each dev manager pass runs factory board mirror once", () => {
   const log = managerPass(BOARD_TASKS);
   expect(log).toContain("factory_orchestrator.ts cycle");
   expect(mirrors(log)).toBe(1);
+  expect(log).toContain("factory_board.ts mirror --max-seconds 300\n");
   expect(mirrors(managerPass({ tasks: { source: "issues" }, messaging: { transport: "board" } }))).toBe(1);
 }, 120_000);
 

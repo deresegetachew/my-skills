@@ -106,6 +106,11 @@ Pick the mode from the request: **set up** a project, or **act as dev manager** 
    shared lock file, so no two loops build the same task; loops on other machines skip tasks whose
    `task/<id>-...` branch is on the remote. It helps only when the plan has tasks that don't build on each other,
    and costs tokens per loop. Raise `maxOpenPRs` to about loops + 1.
+   **The message board (decision 0007):** a project whose GitHub account runs out of calls can keep its tasks, threads,
+   claims and owner queue on the factory's own Postgres instead (`tasks.source: board`). It is the owner's choice and
+   has its own steps (`factory board up`, the import, the setting, the mirror): point the owner to the wiki's message
+   board page, `docs/wiki/board.md`, "Going live". With the board on, the project's `.mcp.json` servers don't start
+   in agent sessions.
    **Ports and databases for parallel loops:** during setup, find every fixed port and database or queue name the
    tests and dev scripts use (docker-compose, vite/playwright configs, `DATABASE_URL`). Make each one read an
    environment variable with today's value as the default, then list them in `agentEnv` and add an `agentSetup`

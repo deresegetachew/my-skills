@@ -53,7 +53,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 | D7 | **The dev manager is an orchestrator**: a loop script with no model that starts one-item sub-managers. The long cloud session stops managing and goes back to building my-skills and its factory. Scheduled tasks are paused by the owner and are not part of the design. | #97, #109, #95, #100 |
 | D8 | **Roles are factory commands run in a terminal**, on any machine, several of each, one fresh pass each: `factory coding-agent\|dev-manager\|product-owner [name] loop [-i]`. The role folder is committed in the project at `.claude/factory/roles/`; the PRD, designs and research stay in `docs/` and `design/`. The product owner role is generic, not Remanual-specific. | #95, #102 |
 | D9 | **All roles share one GitHub account.** A marker or claim names the role and name inside its body. `trustedReviewers` cannot tell roles apart. | #95, wiki/roles.md "Roles" |
-| D10 | **The factory's own database, the message board, is the record for tasks and the agents' messages; GitHub holds the code, the pull requests, CI and what the PR gate trusts.** Reviewer passes, `factory-approved`, `factory-mustfix`, holds, the review labels, the issues and PRs stay on GitHub, and nothing written on the board changes what may merge. Messages go through a setting: `messaging.transport` is `board` on a machine with a board (`factory board up`, or `factory machine join` on another machine), else `github`; the kinds in `messaging.kinds` (claims, wake-ups, the pull request feed, questions between agents) go to the board, one kind at a time, and a send the board doesn't take falls back to GitHub. With `tasks.source: board` the tasks and every message are on the board. **NATS was removed** (owner, 6 Nov 2026; #504): it was the second transport (decision 0004) until the board carried wake-ups, claims and the pull request feed (#500). Earlier forms of this row: "GitHub is the record; agents' messages go through a setting, GitHub by default, NATS as a plugin" (decision 0004), and before that "GitHub is the state and the transport; nothing opens a port or adds a service". *Being built: the kinds move one at a time (0007 point 9). With `tasks.source: board` the board is the record for tasks: the web UI's Release, Block and Reassign write to it, a re-import keeps the board's status, and `factory board mirror` carries each change to the issue (#502); the owner queue moves with `tasks.source: board` or ask in `messaging.kinds` (#502).* | #97, [decisions/0007](decisions/0007-own-record.md) (owner, 6 Nov 2026), [decisions/0004](decisions/0004-agent-messaging-nats.md) (superseded), [messages.md](messages.md), wiki/agent-loops.md "Messages between agents" |
+| D10 | **The factory's own database, the message board, is the record for tasks, the agents' messages and the owner queue; GitHub holds the code, the pull requests, CI, what the PR gate trusts (its labels and markers), and a mirror of the board.** Reviewer passes, `factory-approved`, `factory-mustfix`, holds, the review labels, the issues and PRs stay on GitHub, and nothing written on the board changes what may merge. Messages go through a setting: `messaging.transport` is `board` on a machine with a board (`factory board up`, or `factory machine join` on another machine), else `github`; the kinds in `messaging.kinds` (claims, wake-ups, the pull request feed, questions between agents) go to the board, one kind at a time, and a send the board doesn't take falls back to GitHub. With `tasks.source: board` the tasks and every message are on the board. **NATS was removed** (owner, 6 Nov 2026; #504): it was the second transport (decision 0004) until the board carried wake-ups, claims and the pull request feed (#500). Earlier forms of this row: "GitHub is the record; agents' messages go through a setting, GitHub by default, NATS as a plugin" (decision 0004), and before that "GitHub is the state and the transport; nothing opens a port or adds a service". *Built (decision 0007's build: #489, #494, #495, #498, #500, #501, #502, #503, #504). With `tasks.source: board` the board is the record for tasks, their threads and the owner queue: the task tracker, the web UI's Release, Block and Reassign and the agents' board tools write to it, a re-import keeps the board's status, and `factory board mirror` (run before each dev manager pass) carries each state change to the issue and each owner ask to the owner-queue issue (#502). The board is on for a project when `tasks.source` or `messaging.transport` is `board`, or no transport is set on a machine with a board; its agents' sessions then get only the board's MCP server, in place of the project's `.mcp.json` servers (#501, [wiki/agent-loops.md](wiki/agent-loops.md#when-the-board-is-on)). A project moves when the owner sets `tasks.source: board` ([wiki/board.md](wiki/board.md#going-live), which also says how to go back).* | #97, [decisions/0007](decisions/0007-own-record.md) (owner, 6 Nov 2026), [decisions/0004](decisions/0004-agent-messaging-nats.md) (superseded), [messages.md](messages.md), wiki/agent-loops.md "Messages between agents", [wiki/board.md](wiki/board.md) |
 | D11 | **Agents run the agreed process and do not change it** (owner's rule, 21 Oct 2026). Agents cannot edit what governs them: the PR gate, the guard, the agents' rules (`.claude/factory/settings.json`), agent definitions, `.claude/factory.json`, `factory` and `factory-loop.sh` are protected. | DEV-MANAGER.md, my-skills `CLAUDE.md`, `.claude/factory.json`, #263 |
 | D12 | **Owner-only actions** (the list below). | #150, #114, `manage-pass` skill, `CLAUDE.md` |
 | D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash. The one exception is build time: the web UI's React and react-dom are bundled into one JavaScript file at release (decision 0005, as decision 0002 first did for the cockpit's Ink and React), so a project installs nothing and gets no `node_modules`; no package is added this way without the owner. The plugin mechanism of decision 0004 (an npm package inside `software-factory/plugins/<name>/`, bundled at release) existed only for the NATS client and went with it (#504). There is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), decisions 0002 and 0005, `CLAUDE.md` |
@@ -464,13 +464,15 @@ web UI section proposed on #293 (US-14 onward) keeps its range. The owner accept
   answers, hand-offs, the PO's proposals, the owner queue, the dev manager's notes, a pull request's back-and-forth) are
   kept in the factory's own database, so agents stop reading GitHub as a database and the shared account's hourly limit
   stops running out. GitHub keeps the code, the pull requests, CI, the dev manager's final verdict and the labels the PR
-  gate and the Factory guard read. *Being built: the framework (#489) and its adapters (#500): with `tasks.source: board`
-  the tasks, claims and messages are on the board, and with `messaging.transport: board` claims, wake-ups and the pull
-  request feed; NATS was removed (#504).* (#472; 0007 point 2)
+  gate and the Factory guard read. *Built: the framework (#489), its adapters (#500) and the board as the record (#502):
+  with `tasks.source: board` the tasks, their dependencies, claims, threads and the owner queue are on the board, and
+  with `messaging.transport: board` the kinds listed in `messaging.kinds` (claims, wake-ups, the pull request feed);
+  NATS was removed (#504). A pull request's back-and-forth that the PR gate reads (must-fixes, approvals) stays on GitHub.
+  A project moves when the owner sets `tasks.source: board` (wiki/board.md "Going live").* (#472; 0007 point 2)
 - **US-41.** As the owner, setting up a new factory and connecting GitHub, I can import the repo's issues and their
   comments as tasks, from the first-launch screens and from the command line. A dry run says first what it will bring
   and what it skips. Running it twice updates and never duplicates. *Built from the command line (`factory board import
-  github`, #494); the first-launch screens are #457.* (#472; #457; 0007 point 4)
+  github`, #494, with `--dry-run`); the first-launch screens are #457, still open.* (#472; #457; 0007 point 4)
 - **US-42.** As the owner, I can still follow the work on GitHub: a task's issue is updated when its state changes, one
   way, on by default and off with a setting. Each new owner ask also appears on the owner-queue issue, so GitHub's
   notifications still reach my phone, and my answer there is read back. *Built (#502): `factory board mirror` reads the
@@ -480,21 +482,27 @@ web UI section proposed on #293 (US-14 onward) keeps its range. The owner accept
   the board (`tasks.source: board`, or ask in `messaging.kinds`), asks (`factory board ask`, the dev manager's pass,
   `factory prd --stage --ask`) are written to the board and posted once to the owner-queue issue, an answer given there is
   read back once, and `factory owner answer` and the web UI write to the board first. With `tasks.source: board`,
-  `factory board import github` keeps a status the board changed since the last import. Running the mirror from the
-  loops is a follow-up; `factory board mirror --watch` runs it meanwhile.* (#472; M6; 0007 point 5)
+  `factory board import github` keeps a status the board changed since the last import. The dev manager's loop runs
+  the mirror before each pass, stopped after 300 seconds (#502, #511); `factory board mirror --watch` runs it all the
+  time. Threads between agents are not mirrored.* (#472; M6; 0007 point 5)
 - **US-43.** As the owner, the web UI shows tasks, threads and the owner queue from the database, updated live, with no
-  GitHub calls for them; `factory status`, `prd`, `next` and `messages` give the same answers. *Being built: the web UI
-  reads tasks from the board, live (#498); `factory next` and `messages` read it with `tasks.source: board` (#500).*
-  (#472; 0007 point 6)
+  GitHub calls for them; `factory status`, `prd`, `next` and `messages` give the same answers. *Built in part: the web UI
+  reads tasks and a task's thread from the board, live (#498), and writes the owner's answers there first (#502);
+  `factory next`, `factory status` (its next task) and `factory messages` read it with `tasks.source: board` (#500).
+  Not yet: `factory prd` still reads the task issues on GitHub (the mirror keeps their labels current), and the web UI's
+  inbox reads the owner queue from GitHub, where the mirror posts it.* (#472; 0007 point 6)
 - **US-44.** As the owner, the database runs on the hub machine in Docker, reached over Tailscale only, with `up`,
   `down`, `status` and `backup` commands, a nightly backup, and `factory doctor` saying when it can't be reached and the
   fix. Another machine joins with a login of its own (`factory machine add` and `join`), which `machine remove` drops.
   Moving to a hosted Postgres later is a change of address. *Built: `factory board up|down|status|backup` (#489), the
-  doctor's check (#500), and machines joining with board logins (#504); the nightly backup is a job set up on the
-  machine.* (#472; 0007 points 3 and 8)
+  doctor's check (#500), and machines joining with board logins (#504). The nightly backup is a job the owner sets up on
+  the hub that runs `factory board backup`; the factory doesn't install it.* (#472; 0007 points 3 and 8)
 - **US-45.** As the owner, the move happens one kind at a time with both copies kept: for a period each moved kind is
   written to the database and to GitHub, misses are counted, and I stop the GitHub copy when nothing was missed.
-  *Decided (0007, 6 Nov).* (#472; 0007 point 9)
+  *Built differently (#500, #502):* `messaging.kinds` moves the kinds one at a time, and a moved kind is written to the
+  board and to GitHub while it is in `messaging.githubCopy`; a read gives what either holds. Only claims and wake-ups
+  may drop their GitHub copy; every other kind is always written to GitHub. Misses are not counted. Tasks and the owner
+  queue move together with `tasks.source: board`, with the mirror as GitHub's copy, not kind by kind. (#472; 0007 point 9)
 - **US-46.** As the author of another agent system, I can use the task and messaging layer without the factory: it has
   a generic model (agents and people, tasks, claims, threads, verdicts), its own docs, tests, settings and run
   commands, and imports nothing from the factory. The factory is one user of it, through its ports. Where it lives and
@@ -502,9 +510,14 @@ web UI section proposed on #293 (US-14 onward) keeps its range. The owner accept
   folder and the name on #481).* (#472, owner's direction 6 Nov; 0007 point 1)
 - **US-47.** As a builder or a manager, a task can hold subtasks to any depth and typed dependencies to tasks at any
   level (blocks, waits-for, discovered-from, supersedes, duplicates); a cycle is refused, and "blocked" and the ready
-  list that `factory next` reads are computed from them, never from prose. *Decided (0007, 6 Nov).* (#472, #469; 0007 point 7)
+  list that `factory next` reads are computed from them, never from prose. *Built on the board (#489, #500): typed edges
+  and parents, a cycle refused with `cycle`, blocked and ready computed when read, and `factory next` hands out the
+  board's ready list with `tasks.source: board`; the import turns `Depends on #n` lines into edges (#494). In issues
+  mode dependencies are still the `Depends on` lines. #485 is still open.* (#472, #469; 0007 point 7)
 - **US-48.** As a builder, when I take a task I see the discoveries, blockers and decisions other agents recorded on the
-  tasks linked to it, without searching for them. *Decided (0007, 6 Nov).* (#469, plandb's context entries; 0007 point 7)
+  tasks linked to it, without searching for them. *Built on the board (#489, #495, #501): a task's context entries and
+  those of every task linked to it come with `board_prime` (for the tasks I hold) and `board_show`, which next-task's
+  board steps start with. Only with the board on; #486 is still open.* (#469, plandb's context entries; 0007 point 7)
 
 ### 4.12 Agents' prompts, skills and workflows
 
@@ -557,8 +570,8 @@ also gives versions and diffs.
 
 ## 6. Later / open
 
-Nothing in this section is decided or scheduled. It is the owner's brainstorm of 25 Oct 2026, recorded as he gave it in
-the second comment on #150.
+Nothing in this section is decided or scheduled. Sections A, B and D are the owner's brainstorm of 25 Oct 2026, recorded
+as he gave it in the second comment on #150; section C also lists follow-ups named since, each with its source.
 
 ### A. Agents and the owner work together in a chat tool (Slack or Mattermost)
 
@@ -571,7 +584,8 @@ What was discussed:
   an issue is claimed it creates the channel once (named from the issue number and title), adds the owner, the dev manager
   and the PO, posts the fact sheet, then mirrors progress, questions, reviews and CI results and tags the right person.
   Chat to GitHub: only explicit things: a reply under a question becomes the `factory-answer` marker, a few commands
-  ("merge", "hold") become labels or comments. GitHub stays the record and the source the loop reads.
+  ("merge", "hold") become labels or comments. GitHub stays the record and the source the loop reads. (Written before
+  D10 made the message board the record for tasks and messages; a bridge would now read the board.)
 - **Agents never touch the chat tool.** Only the bridge holds the token. One app can post under per-role names and icons
   (believed to need Slack's `chat:write.customize`; not verified).
 - **A mention does not wake an agent.** The bridge turns a mention or handoff into the existing GitHub signal (label or
@@ -599,12 +613,21 @@ processes per test) still apply.
 ### C. Other things that are later or not agreed
 
 - **A VS Code extension on stable APIs**, as a second screen on the same core as the web UI. (#295)
-- **An A2A adapter** for the message envelope, in the heartbeat daemon. GitHub stays the transport; the adapter is a later
+- **An A2A adapter** for the message envelope, in the heartbeat daemon, beside the GitHub and board transports; a later
   step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)
 - **The PO testing the running app**, scripted or Claude-driven browser: needs a spike. (#101)
 - **Ideas in the PR #39 draft that no issue or decision picked up.** They were proposals in that draft and are not
   scope: a `priority:high` label the picker honours (its story 9), a task board kept in step with the labels (55), the dev manager building a small task when no agent runs (51), a duplicate-task check
   before a claim (54), a notice when a reviewer is unavailable (53).
+- **Follow-ups of the message board (decision 0007, #472), not scheduled:**
+  - the first-launch screens' import (#457), and the open board ideas #483, #485 and #486;
+  - from the review of #510 (#511): run the board's MCP server from main's copy, not the worktree's, and check by hand,
+    in the fresh-install test, that `MB_URL`, `FACTORY_CONFIG_DIR` and `XDG_CONFIG_HOME` reach it under a real `claude`;
+  - with `tasks.source: board`: a sweep of stale claims that runs by itself and a heartbeat from the loop (today the
+    owner runs `factory board sweep`, and only a tick sends a heartbeat), agent liveness (agent issues and
+    `factory agents sweep` work in issues mode only), and `factory prd` and the web UI's inbox reading the board;
+  - counting what one copy has and the other misses, for a kind written both ways (US-45);
+  - the factory's ports made async, and a hosted Postgres, which is a change of address (0007 points 3 and 10).
 
 ### D. Open questions
 

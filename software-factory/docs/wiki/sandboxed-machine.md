@@ -120,4 +120,4 @@ Not in this version: macOS, a VM mode, creating the GitHub account.
 
 <br>
 
-Previous: [CI and the build cache](ci.md) | Next: [Settings and style guides](settings.md)
+Previous: [CI and the build cache](ci.md) | Next: [The message board](board.md)

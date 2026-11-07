@@ -11,7 +11,9 @@ What is here (read the part your task is about, not everything):
    `software-factory/README.md`: the front page and the wiki's contents; the pages in `software-factory/docs/wiki/` say how the factory works and list every setting. `software-factory/SKILL.md` and
    `software-factory/DEV-MANAGER.md`: the skill for setting up a project and the dev manager's rules.
 2. `software-factory/hooks/` (the `factory_*.ts` commands and the hooks), `ci/` (runner services), `factory`,
-   `factory-loop.sh`, `install.sh`: the factory's code. `software-factory/kit/` holds only what a project gets
+   `factory-loop.sh`, `install.sh`: the factory's code. `software-factory/message-board/` is factory-message-board, the factory's
+   own record on Postgres (decision 0007): a framework that imports nothing from the factory (`check_skills.ts` checks);
+   its README describes it, and `docs/wiki/board.md` how a project moves onto it. `software-factory/kit/` holds only what a project gets
    copied or linked: agents, skills, the agents' rules (`.claude/factory/settings.json`, passed when the factory starts an agent, #258), templates. It has no symlinks: the forwarders
    from the move (#112) were removed (#176); do not add new ones.
 3. `tools/`: `run_tests.ts`, `check_skills.ts`, `build_release.ts` (the release archive).
