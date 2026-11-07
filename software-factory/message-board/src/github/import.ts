@@ -391,6 +391,7 @@ export function buildBatch(read: Read, map: GithubMapping, options: Record<strin
       notes.push({ ref: `${r}/in-progress`, kind: "discovery",
         body: `Was in progress on GitHub${agent ? `, claimed by ${agent}` : ""}. Claims start fresh on the board: claim it again here.` });
     } else if (labels.includes(map.labels.blocked)) {
+      status = "deferred"; // blocked on GitHub is blocked on the board: never ready, so no agent claims it (#616)
       notes.push({ ref: `${r}/blocked`, kind: "blocker", body: `Blocked on GitHub: ${blockedWhy.get(i.number) ?? "no reason given"}.` });
     }
     let body = i.body ?? "";
