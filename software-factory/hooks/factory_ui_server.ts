@@ -316,20 +316,21 @@ export function serve(o: ServeOptions): Running {
       if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
       refresher.ifStale(p);
       const v = viewsOf(p, refresher.running(p), Date.now(), feed.view(p));
-      const meta = { project: p.id, generatedAt: v.generatedAt, age: v.age, refreshing: v.refreshing };
+      const meta = { project: p.id, generatedAt: v.generatedAt, age: v.age, refreshing: v.refreshing, reads: refresher.reads(p) };
       return json(200, view === "ci" ? { ...v.ci, ...meta, problems: [...v.problems, ...v.ci.problems] } // the verdict first
         : { ...meta, ...v[view], problems: [...v.problems, ...v[view].problems] });
     }
     if (rest[0] === "ci" && rest[1] === "actions" && rest.length === 3) {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
       const r = await ciAction(p, rest[2] as string, await req.json().catch(() => null));
-      if (rest[2] !== "log" && (r.status === 200 || r.status === 500)) refresher.start(p, true); // read again: the next look shows what changed
+      if (rest[2] !== "log" && (r.status === 200 || r.status === 500)) void refresher.readAgain(p); // read again: the next look shows what changed
       return json(r.status, r.body);
     }
     if (rest[0] === "tasks" && rest[2] === "actions" && rest.length === 4) {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
       const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null), feed.view(p).part, feed);
-      if (r.status === 200 || r.status === 500) refresher.start(p, true); // read again: the board shows what changed
+      // read again, started (or queued after a running read) before the answer, which comes at once (#519)
+      if (r.status === 200 || r.status === 500) void refresher.readAgain(p);
       return json(r.status, r.body);
     }
     if (rest[0] === "tasks" && rest.length === 2) { // a task's page from the message board (#498)
