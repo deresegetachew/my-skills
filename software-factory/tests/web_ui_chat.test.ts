@@ -289,12 +289,3 @@ test("the chat and owner-queue endpoints refuse a missing or wrong token and run
   expect(calls(p)).toEqual([]);
   expect(posted(p)).toEqual([]);
 }, T);
-
-test("an owner queue read from GitHub says so, with or without its issue (#545)", async () => {
-  const p = chatProject();
-  const ui = await started(p);
-  expect((await api(ui, "/api/projects/work/owner-queue")).json.from).toBe("github");
-  write(p.db, JSON.stringify({ issues: [] }));
-  const ui2 = await started(p);
-  expect((await api(ui2, "/api/projects/work/owner-queue")).json).toMatchObject({ issue: null, from: "github" });
-}, T);

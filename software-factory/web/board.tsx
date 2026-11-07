@@ -6,7 +6,7 @@
 // taskAction); the board is live through the views message. Colours are the palette's (theme.ts) only.
 import { useContext, useEffect, useState } from "react";
 import { Avatar, AgentsContext } from "./avatar_view.tsx";
-import { blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, type TaskAction, taskAsk, taskLabel, unheldText } from "./board_model.ts";
+import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, type TaskAction, taskAsk, taskLabel, unheldText } from "./board_model.ts";
 import { Chips } from "./parts.tsx";
 import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
@@ -218,7 +218,8 @@ export function Board({ tasks, all, epics, pulls, by, project, open, post, say, 
   const [ask, setAsk] = useState<Ask | null>(null);
   const columns = columnsOf(all);
   const lanes = boardOf(tasks, by, epics);
-  const colours = laneColours(lanes, by, epics, useContext(AgentsContext));
+  const agents = useContext(AgentsContext);
+  const colours = laneColours(lanes, by, epics, agents);
   const pullOf = new Map(pulls.map((p) => [p.number, p]));
   const grid = { gridTemplateColumns: `repeat(${columns.length}, minmax(150px, 1fr))` };
   return (
@@ -232,11 +233,12 @@ export function Board({ tasks, all, epics, pulls, by, project, open, post, say, 
       {lanes.map((l, i) => (
         <section key={l.key || "-"} className="blane" aria-label={l.title} data-colour={colours[i]}>
           <div className="blane-head">
-            <span className="blane-dot" aria-hidden="true" style={{ background: `var(--${colours[i]}-dot)` }} />
-            {by === "agent" && l.key ? <button className="blink bagent" onClick={() => open(`agent:${l.key}`)}><Avatar name={l.key} size={22} />{l.title}</button>
+            {/* an agent's lane has its avatar with its state's dot (#545: a role colour read as "working"); the others a colour dot */}
+            {!(by === "agent" && l.key) && <span className="blane-dot" aria-hidden="true" style={{ background: `var(--${colours[i]}-dot)` }} />}
+            {by === "agent" && l.key ? <button className="blink bagent" onClick={() => open(`agent:${l.key}`)}><Avatar name={l.key} size={22} tone={agents[l.key]?.tone} />{l.title}</button>
               : by === "epic" && l.key.startsWith("#") ? <button className="blink" onClick={() => open("view:epics", l.key)}>{l.title}</button>
               : <h2>{l.title}</h2>}
-            <span className="bsub">{laneSub(l.key, l.count, by, epics)}</span>
+            <span className="bsub">{by === "agent" && l.key ? agentLaneSub(l.count, agents[l.key]?.state) : laneSub(l.key, l.count, by, epics)}</span>
           </div>
           <div className="bgrid" style={grid}>
             {columns.map((c) => (

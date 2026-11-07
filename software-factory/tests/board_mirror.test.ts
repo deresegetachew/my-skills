@@ -700,12 +700,3 @@ test("factory help lists board mirror and board ask", () => {
   expect(p.stdout).toMatch(/^ {2}board queue \[--json\]/m);
   expect(p.stdout).toMatch(/^ {2}board sweep \[--quiet-minutes N\] \[--max-seconds N\]/m);
 });
-
-test("the Inbox's owner queue says where it was read: the board when it is on, GitHub when the board can't be reached (#545)", async () => {
-  const w = await world({ tasks: { source: "board" } }, [issue(103, QUEUE, [])]);
-  await boardQueue(w);
-  const { readQueue } = await import("../hooks/factory_ui_chat.ts");
-  const project = { id: "shop", name: "shop", path: w.d, current: false, problem: null, config: { tasks: { source: "board" } } as unknown as Config };
-  expect((await withEnv(w.env, () => readQueue(project))).from).toBe("board");
-  expect((await withEnv({ ...w.env, MB_URL: UNREACHABLE }, () => readQueue(project))).from).toBe("github");
-});

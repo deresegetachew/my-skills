@@ -9,8 +9,11 @@
 // - An ask addressed to the mapping's `asksTo` (the owner), and an answer to one, posted on the board on a task with an
 //   issue (the factory puts them on the owner queue's), is posted there once, as it is, so GitHub notifies the owner;
 //   the board's message is then linked to that comment (Board.linkMessage).
-// - An answer given on GitHub under an open ask the board mirrored (a `factory-owner-answer id=<ask>` comment, or a plain
-//   one after the ask) is read back once, as an import keyed by the comment's id.
+// - A question an agent asks `asksTo` on the board (#549), with or without a task, and an answer to it, is posted once on
+//   the owner-queue issue (MirrorOptions.ownerQueue), marked as ask `m<id>` and its answer, so the owner queue's
+//   readers on GitHub find it. Only this repo's project's questions (isProjects).
+// - An answer given on GitHub under an open ask or question the board mirrored (a `factory-owner-answer id=<ask>`
+//   comment, or a plain one after it) is read back once, as an import keyed by the comment's id.
 // Every comment it writes carries `<!-- factory-mirror ... -->`, which the importer skips (no loop).
 //
 // Its place is a value on the board (`mirror:github:<owner>/<repo>`): the last event it read and the state it last sent
@@ -19,6 +22,7 @@
 // or answer are recorded as pending in the place before they are posted, each with a marker of its own, so a pass killed
 // after the post and before it saved finds that comment by its marker on the next run and doesn't post it again (#513).
 import type { Board } from "../board.ts";
+import { isProjects, Numbers } from "../numbers.ts";
 import type { BoardEvent, ImportMessage, Message, Task } from "../types.ts";
 import { commentRef, FACTORY_MAPPING, type GhComment, type GhIssue, type Gh, ghCli, GithubError, type GithubMapping, MIRRORED, pages } from "./import.ts";
 
@@ -38,6 +42,10 @@ export interface MirrorOptions {
   readBack?: boolean;
   /** How long a pass waits while another holds this mirror (default 15 s); then it sends nothing (`busy`). */
   waitMs?: number;
+  /** The owner-queue issue (#549): where a question to `asksTo` and its answer go, as such a question has no issue of its
+   * own. Called once a pass at most, and only when one is to be posted or read back. Left out, or null: those questions
+   * stay on the board. */
+  ownerQueue?: () => Promise<number | null>;
 }
 
 export interface MirrorSummary {
@@ -115,6 +123,8 @@ function isMove(e: BoardEvent): boolean {
 
 const labelNames = (i: GhIssue): string[] => (i.labels ?? []).map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean);
 const askIds = (body: string): string[] => [...body.matchAll(ASK_ID)].map((m) => m[1] as string);
+/** An agent's words with every `<!--` broken, so none of them reads as one of the factory's markers on GitHub. */
+const breakMarkers = (text: string): string => text.replace(/<!--/g, "&lt;!--");
 
 /** The one short line under the marker. */
 function line(t: Task, state: string, reason: string | null): string {
@@ -231,18 +241,54 @@ class Run {
     }
   }
 
+  /** The owner-queue issue, asked for once a pass. */
+  private queue(): Promise<number | null> {
+    this.queueIssue ??= this.o.ownerQueue ? this.o.ownerQueue() : Promise.resolve(null);
+    return this.queueIssue;
+  }
+
+  private queueIssue: Promise<number | null> | undefined;
+
+  /** Whether `m` is a question to the owner from this repo's project (#549). */
+  private async ownerQuestion(m: Message): Promise<boolean> {
+    if (m.kind !== "question" || m.to !== this.map.asksTo) return false;
+    return isProjects(this.o.repo, m, m.taskId === null ? null : await this.board.get(m.taskId));
+  }
+
+  /** Where message `m` goes on GitHub and what it says there, or null when it isn't mirrored: an ask to the owner and its
+   * answer on their task's issue, as they are; a question to the owner and its answer on the owner-queue issue, marked as
+   * an ask (`m<id>`) and its answer, so the owner queue's readers find them. */
+  private async target(m: Message): Promise<{ issue: number; body: string } | null> {
+    const onTask = async (): Promise<{ issue: number; body: string } | null> => {
+      const n = m.taskId === null ? null : this.issueOf(await this.board.get(m.taskId));
+      return n === null ? null : { issue: n, body: m.body };
+    };
+    if (m.kind === "ask") return m.to === this.map.asksTo ? onTask() : null;
+    if (await this.ownerQuestion(m)) {
+      const n = await this.queue();
+      if (n === null) return null;
+      const t = m.taskId === null ? null : await this.board.get(m.taskId);
+      const about = t ? ` (task ${new Numbers(this.o.repo).label(t)})` : "";
+      return { issue: n, body: `<!-- factory-owner-ask id=m${m.id} -->\n**${m.from}** asks the owner${about}:\n\n${breakMarkers(m.body.trim())}` };
+    }
+    if (m.kind !== "answer" || m.inReplyTo === null) return null;
+    const p = await this.board.message(m.inReplyTo);
+    if (p.kind === "ask") return onTask();
+    // only `asksTo` (the owner) answers a question to it: another actor's reply stays on the board (#549)
+    if (m.from !== this.map.asksTo || !(await this.ownerQuestion(p))) return null;
+    const n = await this.queue();
+    if (n === null) return null;
+    return { issue: n, body: ANSWER_ID.test(m.body) ? m.body : `<!-- factory-owner-answer id=m${p.id} -->\n\n${breakMarkers(m.body.trim())}` };
+  }
+
   async message(id: number, pending: Set<number>, save: () => Promise<void>): Promise<void> {
     const m = await this.board.message(id);
-    if (m.ref !== null || m.taskId === null) {
+    const to = m.ref === null ? await this.target(m) : null;
+    if (to === null) {
       pending.delete(id);
       return;
     }
-    if (m.kind === "ask" && m.to !== this.map.asksTo) return;
-    if (m.kind === "answer") {
-      if (m.inReplyTo === null || (await this.board.message(m.inReplyTo)).kind !== "ask") return;
-    } else if (m.kind !== "ask") return;
-    const n = this.issueOf(await this.board.get(m.taskId));
-    if (n === null) return;
+    const n = to.issue;
     const marker = `<!-- ${MIRROR_MARK} v=1 message=${m.id} -->`;
     const path = `repos/${this.o.repo}/issues/${n}/comments`;
     let made: number | null = null;
@@ -254,7 +300,7 @@ class Run {
     if (made === null) {
       pending.add(id);
       await save(); // recorded before the post, so a crash after it is found on the next pass
-      const c = this.gh.send("POST", path, { body: `${m.body.trimEnd()}\n\n${marker}` }) as { id?: unknown } | null;
+      const c = this.gh.send("POST", path, { body: `${to.body.trimEnd()}\n\n${marker}` }) as { id?: unknown } | null;
       if (typeof c?.id !== "number") throw new GithubError("gh-failed", "GitHub didn't say which comment it made.", "Run `factory board mirror` again.");
       made = c.id;
       this.summary.messages++;
@@ -269,18 +315,23 @@ class Run {
 
   /** The owner's answers on GitHub under the open asks the board mirrored, read back once. */
   async readBack(): Promise<void> {
-    const open = (await this.board.onMe(this.map.asksTo)).messages.filter((m) => m.kind === "ask" && m.state === "open" && m.taskId !== null &&
-      (m.ref ?? "").startsWith(`github:${this.o.repo}/comments/`));
-    const byTask = new Map<number, Message[]>();
-    for (const m of open) byTask.set(m.taskId as number, [...(byTask.get(m.taskId as number) ?? []), m]);
+    // the asks on their task's issue; the questions (#549) on the owner-queue issue, where the mirror posted them
+    const open = (await this.board.onMe(this.map.asksTo)).messages.filter((m) => (m.kind === "ask" ? m.taskId !== null : m.kind === "question") &&
+      m.state === "open" && (m.ref ?? "").startsWith(`github:${this.o.repo}/comments/`));
+    const byIssue = new Map<number, { ref: string; asks: Message[] }>();
+    for (const m of open) {
+      const t = m.kind === "ask" ? await this.board.get(m.taskId as number) : null;
+      const n = t ? this.issueOf(t) : await this.queue();
+      if (n === null) continue;
+      const at = byIssue.get(n) ?? { ref: t?.ref ?? `${this.prefix}${n}`, asks: [] };
+      at.asks.push(m);
+      byIssue.set(n, at);
+    }
     const trusted = new Set(this.o.trusted ?? []);
     const messages: ImportMessage[] = [];
-    for (const [taskId, asks] of byTask) {
-      const t = await this.board.get(taskId);
-      const n = this.issueOf(t);
-      if (n === null) continue;
+    for (const [n, { ref, asks }] of byIssue) {
       const bySlug = new Map<string, Message>();
-      for (const a of asks) for (const slug of askIds(a.body)) bySlug.set(slug, a);
+      for (const a of asks) for (const slug of a.kind === "question" ? [`m${a.id}`] : askIds(a.body)) bySlug.set(slug, a);
       const since = new Date(Math.min(...asks.map((a) => a.createdAt.getTime())) - SINCE_MARGIN_MS).toISOString();
       const comments = pages<GhComment>(this.gh, `repos/${this.o.repo}/issues/${n}/comments?per_page=100&since=${since}`, (c) => c.id)
         .sort((a, b) => (Date.parse(a.created_at ?? "") || 0) - (Date.parse(b.created_at ?? "") || 0) || a.id - b.id);
@@ -300,7 +351,7 @@ class Run {
         const ask = bySlug.get(marked ?? lastAsk ?? "");
         if (!ask || answered.has(ask.id)) continue;
         answered.add(ask.id);
-        messages.push({ ref: commentRef(this.o.repo, c.id), task: t.ref as string, kind: "answer", tag: marked ? "owner-answer" : "comment",
+        messages.push({ ref: commentRef(this.o.repo, c.id), task: ref, kind: "answer", tag: marked ? "owner-answer" : "comment",
           from: this.map.asksTo, body, inReplyTo: ask.ref, createdAt: c.created_at ? new Date(c.created_at) : undefined });
       }
     }
@@ -357,7 +408,7 @@ async function onePass(board: Board, gh: Gh, o: MirrorOptions, map: GithubMappin
         touched.set(Number(id), e);
       }
       const mid = /^message:(\d+)$/.exec(e.subject)?.[1];
-      if (mid && e.kind === "message.posted" && (e.payload.kind === "ask" || e.payload.kind === "answer") && !posted.includes(Number(mid))) posted.push(Number(mid));
+      if (mid && e.kind === "message.posted" && (e.payload.kind === "ask" || e.payload.kind === "answer" || e.payload.kind === "question") && !posted.includes(Number(mid))) posted.push(Number(mid));
     }
     if (page.length < 500) break;
     after = (page.at(-1) as BoardEvent).seq;
