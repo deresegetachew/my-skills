@@ -5,10 +5,11 @@
 // keeps its remotes as local bare repos; `factory` is a fake script (committed in each "cloned" repo) that logs what it
 // was asked. Nothing here reaches the network.
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { api, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
-import { git, gitRepo, read, readJson, sh, write, writeExe } from "./support.ts";
+import { buildRelease, sha256 } from "./release_support.ts";
+import { git, gitRepo, read, readJson, SF, sh, write, writeExe } from "./support.ts";
 
 const T = 90_000;
 const running: Running[] = [];
@@ -88,7 +89,8 @@ interface Setup {
   prs: string;
 }
 
-async function setup(cfg: Row | null = null, env: Record<string, string> = {}): Promise<Setup> {
+async function setup(cfg: Row | null = null, env: Record<string, string> = {},
+  serve: ((p: Project) => string[]) | null = null): Promise<Setup> {
   const p = cfg ? project(cfg) : project();
   roots.push(p.root);
   const bin = join(p.root, "fakebin");
@@ -107,9 +109,10 @@ async function setup(cfg: Row | null = null, env: Record<string, string> = {}): 
     FAKE_PRS: prs });
   // the serving project is clean and has a remote, so it can be told apart from a new one
   git(p.d, "remote", "add", "origin", "https://github.com/acme/work.git");
+  const cmd = serve ? serve(p) : null;
   git(p.d, "add", "-A");
   git(p.d, "commit", "-q", "-m", "setup");
-  const ui = await startUi(p, ["--port", "0"], null, env);
+  const ui = await startUi(p, ["--port", "0"], cmd, env);
   running.push(ui);
   return { p, ui, folder: p.root, doctorFile, hold, remotes, prs };
 }
@@ -710,6 +713,66 @@ test("a second start while one is running is 409 ui_add_busy, and the first stil
   expect(run.state, JSON.stringify(run)).toBe("done");
   expect(ghCalls(s.p).filter((l) => l.startsWith("gh repo clone")).length).toBe(1);
   expect(sh(["ls", s.folder]).stdout).not.toContain("other");
+}, T);
+
+// --- served from a release install (#537) ------------------------------------------------------------------------------
+
+/** Make `p` a project installed from a release: the factory's hooks, ci and message board under .claude/ with no
+ * install.sh anywhere, the page bundle beside the hooks, and a pin for v1.0.0 of the release built in `dist`. With
+ * `cache`, the archive is in this machine's download cache, as `factory update --archive` leaves it. Returns the command
+ * that serves the page from that install. */
+function releaseInstall(dist: string, cacheDir: string, cache: boolean): (p: Project) => string[] {
+  return (p: Project): string[] => {
+    for (const part of ["hooks", "ci", "message-board"]) cpSync(join(SF, part), join(p.d, ".claude", part), { recursive: true });
+    write(join(p.d, ".claude", "hooks", "factory_ui_app.js"), "// the page\n");
+    const archive = join(dist, "software-factory-1.0.0.tar.gz");
+    const sha = sha256(readFileSync(archive));
+    write(join(p.d, ".claude", "factory", "release.json"), JSON.stringify({ schema: "factory-pin/1", repo: "deresegetachew/my-skills",
+      tag: "v1.0.0", version: "1.0.0", sha256: sha, files: {} }));
+    if (cache) {
+      const folder = join(cacheDir, "deresegetachew__my-skills", "v1.0.0");
+      mkdirSync(folder, { recursive: true });
+      copyFileSync(archive, join(folder, "software-factory-1.0.0.tar.gz"));
+      copyFileSync(join(dist, "SHA256SUMS"), join(folder, "SHA256SUMS"));
+    }
+    expect(existsSync(join(p.d, ".claude", "install.sh")) || existsSync(join(p.d, "install.sh"))).toBe(false);
+    return [process.execPath, "--no-env-file", join(p.d, ".claude", "hooks", "factory_ui.ts")];
+  };
+}
+
+test("served from a release install: check passes, and the kit step installs that same release with its client (#537)", async () => {
+  const dist = buildRelease("1.0.0");
+  const cacheDir = join(dist, "cache");
+  roots.push(dist);
+  const s = await setup(null, { FACTORY_CACHE_DIR: cacheDir, FACTORY_RELEASE_API: "http://127.0.0.1:9" }, releaseInstall(dist, cacheDir, true));
+  const c = await check(s, req(s));
+  expect(c.status, JSON.stringify(c.json)).toBe(200);
+  const id = await start(s, req(s));
+  const run = await waitRun(s.ui, id);
+  const kit = step(run, "kit");
+  expect(kit.state, JSON.stringify(run)).toBe("done");
+  expect(String(kit.command)).toContain("factory_release.ts update --archive");
+  const dest = join(s.folder, "shop");
+  const pinned = JSON.parse(readFileSync(join(dest, ".claude", "factory", "release.json"), "utf8")) as Row;
+  expect(pinned.tag).toBe("v1.0.0");
+  expect(pinned.sha256).toBe(sha256(readFileSync(join(dist, "software-factory-1.0.0.tar.gz"))));
+  expect(readFileSync(join(dest, ".claude", "hooks", "factory_x.ts"), "utf8")).toBe('export const VERSION = "1.0.0";\n');
+}, T);
+
+test("served from a release install whose archive can't be had: the kit step fails with the update --archive fix (#537)", async () => {
+  const dist = buildRelease("1.0.0");
+  const cacheDir = join(dist, "cache");
+  roots.push(dist);
+  const s = await setup(null, { FACTORY_CACHE_DIR: cacheDir, FACTORY_RELEASE_API: "http://127.0.0.1:9" }, releaseInstall(dist, cacheDir, false));
+  const id = await start(s, req(s));
+  const run = await waitRun(s.ui, id);
+  expect(run.state).toBe("failed");
+  const kit = step(run, "kit");
+  expect(kit.state).toBe("failed");
+  const fix = String((kit.problem as Row).fix);
+  expect(fix).toContain("factory update --archive");
+  expect(fix).toContain("v1.0.0");
+  expect(existsSync(join(s.folder, "shop", ".claude", "factory", "release.json"))).toBe(false);
 }, T);
 
 test("check: a folder with no origin is refused with ui_add_no_remote, before anything runs (#546)", async () => {

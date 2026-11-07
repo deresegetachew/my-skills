@@ -25,7 +25,7 @@
 // Every error is `[code] message` and `Fix: ...`. Tests point FACTORY_RELEASE_API at a local fake of GitHub's API.
 import { createHash } from "node:crypto";
 import {
-  chmodSync, closeSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync,
+  chmodSync, closeSync, copyFileSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readlinkSync,
   realpathSync, renameSync, rmdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync, writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
@@ -440,6 +440,27 @@ async function fetchArchive(repo: string, tag: string, release: Release | null, 
     throw e;
   }
   return [archivePath, rel];
+}
+
+/** Keeps a release archive installed from disk in the download cache, as a download is kept (#537): the web UI's Add
+ * project, a rollback and another project on this machine can then install the same release offline. An archive the
+ * cache already holds for that release is never replaced. A cache that can't be written is only skipped. */
+export function keepInCache(repo: string, tag: string, archive: string): void {
+  const folder = cacheFolder(repo, tag);
+  const name = archiveName(tag);
+  const path = join(folder, name);
+  if (isFile(path)) return;
+  const sha = sha256File(archive);
+  try {
+    mkdirSync(folder, { recursive: true });
+    copyFileSync(archive, path + ".new");
+    writeFileSync(join(folder, "SHA256SUMS.new"), `${sha}  ${name}\n`);
+    renameSync(join(folder, "SHA256SUMS.new"), join(folder, "SHA256SUMS"));
+    renameSync(path + ".new", path);
+  } catch {
+    remove(path + ".new");
+    remove(join(folder, "SHA256SUMS.new"));
+  }
 }
 
 const ARCHIVE_NAME = /^software-factory-(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.]*)?)\.tar\.gz$/;
@@ -1577,6 +1598,7 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
       return [path, ...unpack(path, tag)];
     })();
     const installed = await installFiles(root, files, manifest, tag, sha256File(archive), pin, repo, false, args.tasks);
+    if (local) keepInCache(repo, tag, local);
     const goingBack = oldTag !== null && compareTags(tag, oldTag) < 0;
     if (same) {
       say(`  ${tag} was already installed; ${drift.length} file(s) differed from the pin or were missing, and were repaired:`);
