@@ -14,7 +14,7 @@ import { type Claimant, isMe } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
 import { type Epic, parseEpic } from "../../domain/epic.ts";
 import { checkClaim, dependencies, prdSkipNote, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
-import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
+import type { Filed, NewTask, Picked, SkippedForPrd, TaskTracker } from "../../ports/task_tracker.ts";
 
 /** How long a task claim on the board lasts when nothing releases it (#412): a week. A release, a block, giving it back and
  * the dev manager's sweep of a silent agent end it sooner. */
@@ -47,9 +47,11 @@ export class GithubTaskTracker implements TaskTracker {
     return text;
   }
 
-  next(): Task | null {
+  next(skipped: SkippedForPrd[] = []): Task | null {
     const prds = new Map<number, boolean>();
-    const i = readyIssues(this.cfg, taskIssues(), [], prds)[0];
+    const held: { issue: Issue; pr: string }[] = [];
+    const i = readyIssues(this.cfg, taskIssues(), held, prds)[0];
+    for (const h of held) skipped.push({ name: `#${h.issue.number}`, pr: h.pr });
     return i ? this.task(i, prds) : null;
   }
 

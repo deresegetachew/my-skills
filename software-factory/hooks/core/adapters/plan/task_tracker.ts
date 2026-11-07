@@ -16,7 +16,7 @@ import type { Claimant } from "../../domain/claim.ts";
 import type { Epic } from "../../domain/epic.ts";
 import { CoreError } from "../../domain/error.ts";
 import { checkClaim, dependencies, prdSkipNote, type Task, tickTodo, todos } from "../../domain/task.ts";
-import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
+import type { Filed, NewTask, Picked, SkippedForPrd, TaskTracker } from "../../ports/task_tracker.ts";
 
 const LINE = /^[^\S\n]*- \[( |x|X)\] \*\*(\d+(?:\.\d+)*)\s*([^*]*)\*\*/;
 const HEADING = /^#+\s*(.*)$/;
@@ -45,9 +45,11 @@ export class PlanTaskTracker implements TaskTracker {
     return `${id} ${t.title}  [${t.state}]\n\n${lines.slice(l.at, l.end).join("\n").trimEnd()}`;
   }
 
-  next(): Task | null {
+  next(skipped: SkippedForPrd[] = []): Task | null {
     const all = this.all();
-    return all.find((t) => t.state === "ready" && !t.waitsForPrd && !waiting(t, all).length) ?? null;
+    const ready = all.filter((t) => t.state === "ready" && !waiting(t, all).length);
+    for (const t of ready) if (t.waitsForPrd) skipped.push({ name: t.id, pr: t.waitsForPrd });
+    return ready.find((t) => !t.waitsForPrd) ?? null;
   }
 
   pick(who: Claimant): Picked {

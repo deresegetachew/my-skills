@@ -47,7 +47,7 @@ import { type Config, load, taskSource, toFloat } from "./factory_config.ts";
 import { compose } from "./core/compose.ts";
 import { CoreError } from "./core/domain/error.ts";
 import { prdSkipNote, type Task } from "./core/domain/task.ts";
-import type { TaskTracker } from "./core/ports/task_tracker.ts";
+import type { SkippedForPrd, TaskTracker } from "./core/ports/task_tracker.ts";
 import { staleClaims } from "./factory_agents.ts";
 import { claimRework, claimTask, describeRework, isMine, release, reworkHolder } from "./factory_claims.ts";
 import type { Comment } from "./factory_issues.ts";
@@ -292,10 +292,13 @@ function sayPrdSkips(tasks: Task[]): void {
   if (note) process.stderr.write(note + "\n");
 }
 
-/** `factory next` only looks (`next()`), which says nothing of what it passed over: the open tasks' list does (#578). */
+/** `factory next` only looks: the next task, and a line on stderr for each ready one it passed over for its PRD change
+ * (#578), from the same look, so each pull request is asked about once. */
 function lookAndSay(tracker: TaskTracker): Task | null {
-  const t = tracker.next();
-  sayPrdSkips(tracker.list());
+  const skipped: SkippedForPrd[] = [];
+  const t = tracker.next(skipped);
+  const note = prdSkipNote(skipped);
+  if (note) process.stderr.write(note + "\n");
   return t;
 }
 

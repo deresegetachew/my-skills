@@ -4,7 +4,7 @@ import { type Claimant, type ClaimEvent, isMe, winner } from "../../domain/claim
 import { CoreError } from "../../domain/error.ts";
 import type { Epic } from "../../domain/epic.ts";
 import { checkClaim, prdSkipNote, type Task, type TaskState, tickTodo, type Todo } from "../../domain/task.ts";
-import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
+import type { Filed, NewTask, Picked, SkippedForPrd, TaskTracker } from "../../ports/task_tracker.ts";
 
 interface Held {
   task: Task;
@@ -55,9 +55,10 @@ export class MemoryTaskTracker implements TaskTracker {
     return `${id} ${h.task.title}  [${h.task.state}]\n\n${h.text}` + (h.why ? `\n\nBlocked: ${h.why}` : "");
   }
 
-  next(): Task | null {
-    const t = [...this.tasks.values()].find((h) => h.task.state === "ready" && !h.task.holders.length && !h.task.waitsForPrd &&
-      !this.waitingFor(h.task).length);
+  next(skipped: SkippedForPrd[] = []): Task | null {
+    const ready = [...this.tasks.values()].filter((h) => h.task.state === "ready" && !h.task.holders.length && !this.waitingFor(h.task).length);
+    for (const h of ready) if (h.task.waitsForPrd) skipped.push({ name: h.task.id, pr: h.task.waitsForPrd });
+    const t = ready.find((h) => !h.task.waitsForPrd);
     return t ? copy(t.task) : null;
   }
 

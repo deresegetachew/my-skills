@@ -222,6 +222,18 @@ export function taskTrackerContract(name: string, make: (specs: Spec[]) => Fixtu
     expect(port.claim(ids[0] as string, taytu).id).toBe(ids[0] as string);
   });
 
+  test(`${name}: next says which ready tasks it passed over for their PRD change, and nothing once it merged (#578)`, () => {
+    const { port, prd, mergePrd } = make([{ title: "Waits", prd: true }, { title: "Free" }]);
+    const skipped: { name: string; pr: string }[] = [];
+    expect(titled(port.next(skipped))).toBe("Free");
+    expect(skipped.map((s) => s.pr)).toEqual([prd]);
+    expect(skipped[0]?.name).toBeTruthy();
+    mergePrd();
+    const after: { name: string; pr: string }[] = [];
+    expect(titled(port.next(after))).toBe("Waits");
+    expect(after).toEqual([]);
+  });
+
   test(`${name}: a task with no PRD change is picked as before, with no note (#578)`, () => {
     const { port, ids } = make([{ title: "One" }]);
     expect(port.list()[0]?.waitsForPrd).toBeUndefined();

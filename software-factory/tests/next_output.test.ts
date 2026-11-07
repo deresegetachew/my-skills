@@ -1,9 +1,9 @@
 // `factory next` says it does not claim and shows the claim command (#155).
 import { expect, test } from "bun:test";
-import { symlinkSync } from "node:fs";
+import { renameSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type Env, issue, type IssueRow, setup } from "./issues_support.ts";
-import { HOOKS, read, readmeAndWiki, runHook, SF, sh } from "./support.ts";
+import { HOOKS, read, readmeAndWiki, runHook, SF, sh, writeExe } from "./support.ts";
 
 // The command a person runs to claim (the .ts since #252; it was python3 .claude/hooks/next_task.py before).
 const CLAIM = "bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --pid $$";
@@ -130,4 +130,19 @@ test("factory next skips a task whose PRD change hasn't merged and says why; a c
   expect(p.code).toBe(1);
   expect(p.stdout.trim()).toBe("none");
   expect(p.stderr).toContain("PR #62");
+});
+
+test("factory next asks GitHub about a PRD change's pull request once, and says the skip once (#578)", () => {
+  const [d, env] = project([issue(5, ["factory:ready"], "PRD change: #62"), issue(6, ["factory:ready"], "PRD change: #62"), issue(7),
+    prdPull(62, null)]);
+  // the fake gh, with every call it is asked written to a log first
+  const bin = join(d, "bin");
+  renameSync(join(bin, "gh"), join(bin, "gh-fake"));
+  writeExe(join(bin, "gh"), `#!/bin/sh\necho "$*" >> "${join(d, "gh.log")}"\nexec "${join(bin, "gh-fake")}" "$@"\n`);
+  const p = runHook("next_task", ["--no-rework"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.trim()).toBe("issue-7 Task 7");
+  expect(p.stderr.split("\n").filter((l) => l.startsWith("Skipped"))).toEqual([
+    "Skipped #5: it waits for its PRD change, PR #62, to merge.", "Skipped #6: it waits for its PRD change, PR #62, to merge."]);
+  expect(read(join(d, "gh.log")).split("\n").filter((l) => l.includes("issues/62")).length).toBe(1);
 });

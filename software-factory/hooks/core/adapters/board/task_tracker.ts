@@ -29,7 +29,7 @@ import type { Claimant } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
 import { type Epic, parseEpic } from "../../domain/epic.ts";
 import { checkClaim, prdChangeIn, prdSkipNote, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
-import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
+import type { Filed, NewTask, Picked, SkippedForPrd, TaskTracker } from "../../ports/task_tracker.ts";
 import type { BoardChild } from "./child.ts";
 import type { ClaimTokens } from "./tokens.ts";
 
@@ -169,9 +169,14 @@ export class BoardTaskTracker implements TaskTracker {
     return text;
   }
 
-  next(): Task | null {
+  next(skipped: SkippedForPrd[] = []): Task | null {
     const v = this.view();
-    const t = this.candidates(v, null).find((x) => v.prdOf(x) === null);
+    const ready = this.candidates(v, null);
+    for (const x of ready) {
+      const pr = v.prdOf(x);
+      if (pr !== null) skipped.push({ name: label(v.idOf(x)), pr });
+    }
+    const t = ready.find((x) => v.prdOf(x) === null);
     return t ? v.task(t) : null;
   }
 
