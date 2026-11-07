@@ -9,6 +9,9 @@
 // The cases, in the order the list shows them:
 //   board-down      the message board can't be reached
 //   runners-down    every CI runner is offline
+//   claude-limit    Claude's usage limit is reached: every agent waits for its reset, one item for the team (#614)
+//                                                                                          (no action: it ends by itself)
+//   claude-budget   the last 5 hours passed claudeLimit.softTokens5h: the loops start no new task (#614)   (no action)
 //   agent-down      an agent is down while it holds a task                                 Start
 //   role-down       no dev manager or product owner runs while its queue has items        Start
 //   task-pr-gone    a task whose PR is no longer open (merged or closed) isn't done        Close
@@ -34,14 +37,14 @@ import { SETTINGS } from "./factory_settings_schema.ts";
 import type { Views } from "./factory_ui_views.ts";
 import { type Medians, spinReason, type TaskCost } from "./factory_task_cost.ts";
 
-export const ATTENTION_KINDS = ["board-down", "runners-down", "agent-down", "role-down", "task-pr-gone", "task-quiet", "session-long", "task-spinning", "idle-ready",
+export const ATTENTION_KINDS = ["board-down", "runners-down", "claude-limit", "claude-budget", "agent-down", "role-down", "task-pr-gone", "task-quiet", "session-long", "task-spinning", "idle-ready",
   "epic-done", "prd-open", "pr-waiting"] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 
 /** The one thing an item offers. A task action (release, close) runs on `task`; start on `agent`; say sends `text` to
- *  `agent`'s session; open goes to `link`. */
+ *  `agent`'s session; open goes to `link`; none: nothing to do, it ends by itself (Claude's limit). */
 export interface AttentionAction {
-  kind: "release" | "close" | "start" | "say" | "open";
+  kind: "release" | "close" | "start" | "say" | "open" | "none";
   label: string;
   task?: string;
   agent?: string;
@@ -92,6 +95,10 @@ export interface AttentionInput {
   productAsks: number;
   /** What each task took (#580) and the done tasks' medians; null or left out while not read (no spinning is judged). */
   costs?: { tasks: TaskCost[]; medians: Medians } | null;
+  /** Claude's usage limit while the loops wait on it (#614): the words to show; null or left out when it doesn't hold. */
+  claudeLimit?: { message: string } | null;
+  /** The last 5 hours against claudeLimit.softTokens5h (#614), as kept from `factory usage --window`; null when off or not read. */
+  softBudget?: { used: number; budget: number } | null;
   now?: number;
 }
 
@@ -167,6 +174,18 @@ export function attentionOf(i: AttentionInput): AttentionItem[] {
   if (v.ci.mode !== "github" && runners.length && runners.every((r) => r.state === "offline")) {
     item("runners-down", "ci", { title: "Every CI runner is offline", reason: `${plural(runners.length, "runner")} and none online, so the checks can't run.`,
       action: { kind: "open", label: "Open CI", link: "view:ci" } });
+  }
+
+  // Claude's usage limit or the soft budget: one item for the whole team, nothing to do but wait (#614)
+  if (i.claudeLimit) {
+    item("claude-limit", "team", { title: "Claude's usage limit is reached", reason: i.claudeLimit.message, action: { kind: "none", label: "" } });
+  }
+  const soft = i.softBudget;
+  if (soft && soft.used >= soft.budget) {
+    item("claude-budget", "team", { title: "The 5-hour token budget is used up",
+      reason: `The last 5 hours used ${soft.used.toLocaleString("en-US")} tokens, past claudeLimit.softTokens5h (${soft.budget.toLocaleString("en-US")}). ` +
+        "The loops start no new task until it is back under; running sessions finish.",
+      action: { kind: "none", label: "" } });
   }
 
   const agents = i.agents;

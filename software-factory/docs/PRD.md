@@ -401,6 +401,11 @@ run as `factory hook <name>`. *Decided (owner, 7 Nov 2026); decision 0008, not w
   (a warning from 80%), the PR's usage comment shows used against budget and the top subagent, and `factory report` shows
   budget against used per merged task and the median ratio. Advisory: nothing stops and CI never fails on it; the dev
   manager decides about an overrun. *Built.* (D15; #183, wiki/agent-loops.md "Token budgets")
+- **T4.** As the owner, when Claude's usage limit (5-hour or weekly) ends a session, the loops wait once for its reset
+  instead of starting a session every 10 s: the reset time is read from the transcript and shared by every loop of the
+  project on the machine, the agents show "waiting on the Claude limit until HH:MM", Needs attention has one item for the
+  team, Usage and `factory usage --window` show the tokens of the last 5 hours and 7 days per agent, and an optional soft
+  budget (`claudeLimit.softTokens5h`) stops new tasks before the limit. *Built.* (#614, wiki/agent-loops.md "Claude's limit")
 
 ### 4.10 The cockpit and the core it needs
 

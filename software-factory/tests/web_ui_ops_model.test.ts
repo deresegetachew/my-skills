@@ -2,7 +2,16 @@
 // head lines, what needs attention, the usage bars against the budget, an event's grey line, and a team member's row.
 import { expect, test } from "bun:test";
 import { type ActivityItem, activityDot, activitySub, attention, costText, type HealthData, healthLine, type HomeData, homeLine, passed, percentOf,
-  rangeText, teamRow, mergePushed, tokensText, type UsageData, type UsageRow, usageBar, usageTiles } from "../web/ops_model.ts";
+  rangeText, teamRow, mergePushed, tokensText, type UsageData, type UsageRow, usageBar, usageTiles, type UsageWindow, windowLine } from "../web/ops_model.ts";
+
+test("Claude's limit windows on Usage (#614): the 5-hour and 7-day totals, the soft budget and the limit in one line", () => {
+  const w: UsageWindow = { since5h: null, since7d: null, agents: [{ agent: "taytu", window: 1_240_000, week: 8_000_000 }],
+    total: { window: 1_240_000, week: 8_000_000 }, softTokens5h: null, over: false, limitUntil: null };
+  expect(windowLine(w)).toBe("1.2M in the last 5 hours, 8M in the last 7 days.");
+  expect(windowLine({ ...w, softTokens5h: 1_000_000, over: true, limitUntil: 1_800_000_000 }, () => "16:00")).toBe(
+    "1.2M in the last 5 hours, 8M in the last 7 days; soft budget 1M per 5 hours, used up: the loops start no new task; " +
+    "Claude's usage limit is reached: the agents wait until 16:00.");
+});
 
 const NOW = Date.parse("2026-11-07T10:00:00Z");
 
