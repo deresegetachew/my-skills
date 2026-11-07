@@ -235,7 +235,11 @@ test("the preview's line: what it runs on, its state, and whether the page shoul
   expect(failed).toMatchObject({ text: "The app stopped before it answered (exit 3).", fix: "Read its output.", busy: false, open: false });
 });
 
-test("the preview's link carries the token once; the server sets its cookie and takes the token out", async () => {
+test("the preview's link is on its own origin: the page's host on the previews' port, never with the UI's token", async () => {
   const { previewLink } = await mod();
-  expect(previewLink("/preview/work/label-check/", "t0k/en")).toBe("/preview/work/label-check/?token=t0k%2Fen");
+  const path = "/preview/work/label-check/?code=abc";
+  expect(previewLink({ protocol: "http:", hostname: "127.0.0.1" }, 4748, path)).toBe("http://127.0.0.1:4748/preview/work/label-check/?code=abc");
+  expect(previewLink({ protocol: "http:", hostname: "100.64.0.7" }, 4748, path)).toBe("http://100.64.0.7:4748/preview/work/label-check/?code=abc");
+  expect(previewLink({ protocol: "http:", hostname: "::1" }, 4748, path)).toBe("http://[::1]:4748/preview/work/label-check/?code=abc");
+  expect(previewLink({ protocol: "http:", hostname: "127.0.0.1" }, 4748, path)).not.toContain("token");
 });

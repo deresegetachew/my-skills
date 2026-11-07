@@ -4,41 +4,50 @@
 //                                                 reason}; state is none, starting, running, stopping, failed or stopped
 //   POST   /api/projects/:p/signoff/:id/preview   starts it (202), or answers with the one already running (200)
 //   DELETE /api/projects/:p/signoff/:id/preview   stops it
-//   *      /preview/:p/:id/...                    the running app, through this server (HTTP, and WebSockets)
+//   POST   /api/projects/:p/signoff/:id/preview/link
+//                                                 a one-time link to the running preview: {port, path} (path ends in
+//                                                 ?code=..., good once, for a minute)
+//
+// The previews are served on their own origin (#582): a second listener, on `preview.listenPort` (the UI's port + 1)
+// on the same addresses as the UI, answers only /preview/:p/:id/... (HTTP and WebSockets) and never /api/. Each preview
+// has its own random token, for that one item, dead when the preview stops. The one-time link's code is swapped for it
+// as an HttpOnly, SameSite=Strict cookie (factory_preview) for /preview/:p/:id/ on the preview origin. The web UI's token
+// is never accepted, set or sent there, and the UI's API refuses requests from another origin, so a preview's page can
+// neither read the UI's token nor act with it.
 //
 // Starting: the command, port, health path and limits are `preview.*` in .claude/factory.json as committed on the main
 // branch (never from the request, nor from the pull request under test). The item's commit is the head of its task's
 // open pull request (a `task/<task>-...` branch in the views' snapshot), else the main branch. It is checked out in a
 // temporary worktree under the project's state folder (previews/), and the command runs there with `bash -c`, in its own
-// process group, with PORT (a free port, or preview.port) and HOST=127.0.0.1. The preview counts as running once
-// preview.health answers below 400 within preview.startSeconds, and only if the app can't be reached on this machine's
-// other addresses. Otherwise it fails with its output and a fix.
+// process group, with a small environment: PATH, HOME, PORT (a free port, or preview.port), HOST=127.0.0.1 and the
+// project's agentEnv (as for the first agent), never GitHub, Anthropic, board or UI secrets. The preview counts as running
+// once preview.health answers below 400 within preview.startSeconds, and only if the app can't be reached on this
+// machine's other addresses. Otherwise it fails with its output and a fix.
 //
 // Stopping (Stop, a result on the item, preview.idleMinutes with no request, or the web UI stopping) kills the whole
 // process group (TERM, then KILL) and removes the worktree. At most one preview per item, and preview.max at once.
-//
-// The proxy takes the web UI's token as `Authorization: Bearer`, as the factory_ui cookie (HttpOnly, SameSite=Strict,
-// for /preview/ only), or once as ?token=, which sets the cookie and sends the browser on without it. The token is taken
-// out of what the app gets: no Authorization header, no factory_ui cookie, no token in the query.
 import { type ChildProcess, spawn as spawnChild, spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { createConnection, createServer } from "node:net";
 import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { SETTINGS } from "./factory_settings_schema.ts";
-import { type ActionResult, envFor, type Obj, type Problem, readJson, stateDirOf, type UiProject } from "./factory_ui_data.ts";
+import { type ActionResult, type Obj, type Problem, readJson, stateDirOf, type UiProject } from "./factory_ui_data.ts";
 import { signoffOf } from "./factory_ui_signoff.ts";
 
-export const COOKIE = "factory_ui";
+export const COOKIE = "factory_preview";
+const CODE_MS = 60_000;
+/** Never passed to a preview, even when agentEnv names them. */
+const SECRET = /^(GH_TOKEN|GITHUB_TOKEN|GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN|MB_URL|ANTHROPIC_.*|CLAUDE_CODE_OAUTH_TOKEN|FACTORY_UI_.*|.*_UI_TOKEN)$/;
 const ID = /^[A-Za-z0-9][\w.-]{0,63}$/;
 const OUTPUT_LINES = 200;
 const GIT_MS = 120_000;
 const KILL_WAIT_MS = 3000;
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*\u0007/g;
 const HOP = ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade",
-  "host", "authorization", "cookie", "accept-encoding", "content-length"];
+  "host", "cookie", "accept-encoding", "content-length", "origin", "referer"];
 
 export interface PreviewSettings {
   command: string;
@@ -47,6 +56,8 @@ export interface PreviewSettings {
   startSeconds: number;
   idleMinutes: number;
   max: number;
+  /** The project's agentEnv as the first agent gets it (secrets left out). */
+  env: Record<string, string>;
 }
 
 type State = "starting" | "running" | "stopping" | "failed" | "stopped";
@@ -70,6 +81,11 @@ interface Preview {
   error: Problem | null;
   reason: string;
   path: string;
+  /** The preview's own token (its cookie's value): "" once it stops. */
+  token: string;
+  /** The one-time link's code and until when it is good. */
+  code: string;
+  codeUntil: number;
 }
 
 /** What the WebSocket proxy keeps for one browser socket. */
@@ -81,7 +97,31 @@ export interface PreviewSocket {
   queue: Array<string | Uint8Array<ArrayBuffer>>;
 }
 
-export type WsData = { preview: PreviewSocket } | undefined;
+function sameText(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && x.length > 0 && timingSafeEqual(x, y);
+}
+
+/** agentEnv as slot 1 renders it ({slot} 1, {suffix} "", {port:N} N); a template with another placeholder, or a
+ * secret's name, is left out. */
+function agentEnvOf(cfg: unknown): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(obj(obj(cfg).agentEnv))) {
+    if (k.startsWith("_") || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(k) || SECRET.test(k)) continue;
+    const t = typeof v === "string" ? v : JSON.stringify(v);
+    let ok = true;
+    const out = t.replace(/\{([a-z]+)(?::(\d+))?\}/g, (_all, key: string, arg?: string) => {
+      if (key === "slot") return "1";
+      if (key === "suffix") return "";
+      if (key === "port" && arg) return arg;
+      ok = false;
+      return "";
+    });
+    if (ok) env[k] = out;
+  }
+  return env;
+}
 
 function obj(v: unknown): Obj {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Obj) : {};
@@ -107,7 +147,7 @@ export function previewSettingsOf(cfg: unknown): PreviewSettings {
   const health = typeof p.health === "string" && p.health.startsWith("/") ? p.health : "/";
   return { command: typeof p.command === "string" ? p.command.trim() : "", port, health,
     startSeconds: whole(p.startSeconds, dflt("preview.startSeconds")), idleMinutes: whole(p.idleMinutes, dflt("preview.idleMinutes")),
-    max: whole(p.max, dflt("preview.max")) };
+    max: whole(p.max, dflt("preview.max")), env: agentEnvOf(cfg) };
 }
 
 function git(root: string, args: string[], ms = GIT_MS): { code: number; out: string } {
@@ -245,6 +285,31 @@ export class Previews {
   private swept = new Set<string>();
   private timer: ReturnType<typeof setInterval> | null = null;
 
+  private servers: Server<PreviewSocket>[] = [];
+  private byId: (id: string) => UiProject | undefined = () => undefined;
+  /** The preview origin's port (0 until listen). */
+  port = 0;
+
+  /** Starts the preview origin on `hosts` at `port` (0: a free one); returns the port. */
+  listen(hosts: string[], port: number, byId: (id: string) => UiProject | undefined): number {
+    this.byId = byId;
+    let at = port;
+    try {
+      for (const hostname of hosts) {
+        const s = Bun.serve<PreviewSocket>({ hostname, port: at, idleTimeout: 60, fetch: (req, server) => this.originFetch(req, server),
+          websocket: { open: (ws) => this.wsOpen(ws), message: (ws, m) => this.wsMessage(ws, m), close: (ws) => this.wsClose(ws) } });
+        at = s.port ?? at;
+        this.servers.push(s);
+      }
+    } catch (e) {
+      for (const s of this.servers) s.stop(true);
+      this.servers = [];
+      throw e;
+    }
+    this.port = at;
+    return at;
+  }
+
   private keyOf(p: UiProject, id: string): string {
     return `${p.id}\n${id}`;
   }
@@ -256,14 +321,28 @@ export class Previews {
   private view(p: UiProject, id: string): Obj {
     const x = this.all.get(this.keyOf(p, id));
     const configured = committedSettings(p).command !== "";
-    if (!x) return { state: "none", configured, path: null, output: [], error: null };
-    return { state: x.state, configured, commit: x.commit, pr: x.pr, path: x.state === "running" ? x.path : null,
+    if (!x) return { state: "none", configured, port: this.port, path: null, output: [], error: null };
+    return { state: x.state, configured, port: this.port, commit: x.commit, pr: x.pr, path: x.state === "running" ? x.path : null,
       output: [...x.output, ...(x.partial ? [x.partial] : [])], error: x.error, reason: x.reason };
   }
 
-  /** The answer to `/api/projects/:p/signoff/:id/preview`. */
-  async api(req: Request, p: UiProject, id: string): Promise<ActionResult> {
+  /** A one-time link to the running preview: a fresh code, good once for a minute (an older one is dead). */
+  private link(p: UiProject, id: string): ActionResult {
+    const x = this.all.get(this.keyOf(p, id));
+    if (!x || x.state !== "running") {
+      return problem(409, "preview_not_running", "This item's preview isn't running.", "Use Open preview on the item, then open the app when it runs.");
+    }
+    x.code = randomBytes(24).toString("base64url");
+    x.codeUntil = Date.now() + CODE_MS;
+    return { status: 200, body: { port: this.port, path: `${x.path}?code=${x.code}` } };
+  }
+
+  /** The answer to `/api/projects/:p/signoff/:id/preview[/link]`. */
+  async api(req: Request, p: UiProject, id: string, sub?: string): Promise<ActionResult> {
     if (!ID.test(id)) return problem(400, "signoff_bad_input", `'${id.slice(0, 64)}' is not an item's id.`, "Open the item from the sign-off list.");
+    if (sub === "link") {
+      return req.method === "POST" ? this.link(p, id) : problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST.");
+    }
     if (req.method === "GET") return { status: 200, body: { project: p.id, item: id, ...this.view(p, id) } };
     if (req.method === "POST") return this.start(p, id);
     if (req.method === "DELETE") {
@@ -305,7 +384,7 @@ export class Previews {
     }
     const x: Preview = { key, project: p.id, item: id, root: p.path, state: "starting", commit: "", pr: null, port: 0, dir: "", child: null,
       pgid: null, output: [], partial: "", lastUsed: Date.now(), idleMs: idleMsOf(s), error: null, reason: "",
-      path: `/preview/${encodeURIComponent(p.id)}/${encodeURIComponent(id)}/` };
+      path: `/preview/${encodeURIComponent(p.id)}/${encodeURIComponent(id)}/`, token: randomBytes(32).toString("base64url"), code: "", codeUntil: 0 };
     this.all.set(key, x);
     const refuse = (r: ActionResult): ActionResult => {
       this.all.delete(key);
@@ -341,7 +420,9 @@ export class Previews {
 
   /** Runs the command in the worktree, in its own process group, and waits for it to answer. */
   private run(p: UiProject, x: Preview, s: PreviewSettings): void {
-    const env = { ...envFor(p), PORT: String(x.port), HOST: "127.0.0.1" };
+    // a small environment: no GitHub, Anthropic, board or UI secrets reach the app under test
+    const env: Record<string, string> = { ...s.env, PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: process.env.HOME ?? x.dir,
+      PORT: String(x.port), HOST: "127.0.0.1" };
     let child: ChildProcess;
     try {
       child = spawnChild("bash", ["-c", s.command], { cwd: x.dir, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -414,6 +495,8 @@ export class Previews {
   private async end(x: Preview, state: "failed" | "stopped", error: Problem | null, reason: string): Promise<void> {
     if (x.state === "stopping" || x.state === "failed" || x.state === "stopped") return;
     x.state = "stopping";
+    x.token = ""; // its cookie and link are dead from now on
+    x.code = "";
     if (x.pgid !== null) {
       killGroup(x.pgid, "SIGTERM");
       const until = Date.now() + KILL_WAIT_MS;
@@ -478,14 +561,18 @@ export class Previews {
       if (x.pgid !== null) killGroup(x.pgid, "SIGKILL");
       this.removeWorktree(x);
       x.state = "stopped";
+      x.token = "";
+      x.code = "";
       x.reason = "The web UI stopped.";
     }
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    for (const s of this.servers) s.stop(true);
+    this.servers = [];
   }
 
   /** The running preview `/preview/<project>/<item>/` names, or the answer when there is none. */
-  private target(url: URL, byId: (id: string) => UiProject | undefined): { x: Preview; prefix: string; rest: string } | ActionResult {
+  private target(url: URL): { x: Preview; prefix: string; rest: string } | ActionResult {
     const m = /^\/preview\/([^/]+)\/([^/]+)(\/.*)?$/.exec(url.pathname);
     const notRunning = problem(404, "preview_not_running", "This preview isn't running (it stopped, or was never started).",
       "Open the sign-off item and use Open preview again.");
@@ -498,32 +585,40 @@ export class Previews {
     } catch {
       return notRunning;
     }
-    const p = byId(pid);
+    const p = this.byId(pid);
     const x = p ? this.all.get(this.keyOf(p, id)) : undefined;
     if (!x || x.state !== "running") return notRunning;
     return { x, prefix: `/preview/${m[1]}/${m[2]}`, rest: m[3] ?? "" };
   }
 
-  /** Answers a request under /preview/: the token first, then the app. `refuse` is the server's own token check. */
-  async proxy(req: Request, url: URL, server: Server<WsData>, byId: (id: string) => UiProject | undefined,
-    refuse: (given: string) => Response | null): Promise<Response | undefined> {
-    const header = req.headers.get("authorization") ?? "";
-    const cookie = cookieOf(req.headers.get("cookie"), COOKIE);
-    const query = url.searchParams.get("token");
-    const given = header.startsWith("Bearer ") ? header.slice(7).trim() : query ?? cookie.value;
-    const refused = refuse(given);
-    if (refused) return refused;
-    const clean = new URL(url);
-    clean.searchParams.delete("token");
-    if (query !== null && (req.method === "GET" || req.method === "HEAD")) {
-      // the link: keep the token as a cookie for the previews only, and take it out of the address
-      return new Response(null, { status: 303, headers: { location: clean.pathname + clean.search, "cache-control": "no-store", "referrer-policy": "no-referrer",
-        "set-cookie": `${COOKIE}=${given}; Path=/preview/; HttpOnly; SameSite=Strict` } });
+  /** Everything the preview origin answers: /preview/<project>/<item>/... with that preview's own cookie, else nothing. */
+  private async originFetch(req: Request, server: Server<PreviewSocket>): Promise<Response | undefined> {
+    const url = new URL(req.url);
+    const answer = (r: ActionResult): Response => new Response(JSON.stringify(r.body), { status: r.status,
+      headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    if (!url.pathname.startsWith("/preview/")) {
+      return answer(problem(404, "preview_not_found", "This address serves sign-off previews only.", "Open the web UI on its own port."));
     }
-    const t = this.target(url, byId);
-    if (!("x" in t)) return new Response(JSON.stringify(t.body), { status: t.status, headers: { "content-type": "application/json; charset=utf-8" } });
-    if (!t.rest) return new Response(null, { status: 308, headers: { location: `${t.prefix}/${clean.search}` } });
-    t.x.lastUsed = Date.now();
+    const t = this.target(url);
+    if (!("x" in t)) return answer(t);
+    const x = t.x;
+    if (!t.rest) return new Response(null, { status: 308, headers: { location: `${t.prefix}/${url.search}` } }); // the cookie's path ends in /
+    const refused = problem(401, "preview_token_wrong", "This needs this preview's own link.",
+      "Open the app from its sign-off item (Open the app): each link works once, and only for that item's preview.");
+    const code = url.searchParams.get("code");
+    if (code !== null) {
+      // the one-time link: its code is swapped for the preview's own cookie, for this item's path, and taken out of the address
+      if (!x.code || Date.now() > x.codeUntil || !sameText(code, x.code)) return answer(refused);
+      x.code = "";
+      const clean = new URL(url);
+      clean.searchParams.delete("code");
+      return new Response(null, { status: 303, headers: { location: clean.pathname + clean.search, "cache-control": "no-store", "referrer-policy": "no-referrer",
+        "set-cookie": `${COOKIE}=${x.token}; Path=${x.path}; HttpOnly; SameSite=Strict` } });
+    }
+    const cookie = cookieOf(req.headers.get("cookie"), COOKIE);
+    if (!sameText(cookie.value, x.token)) return answer(refused);
+    const clean = new URL(url);
+    x.lastUsed = Date.now();
     const path = t.rest + clean.search;
     const headers = new Headers();
     req.headers.forEach((v, k) => {
@@ -537,7 +632,7 @@ export class Previews {
     if ((req.headers.get("upgrade") ?? "").toLowerCase() === "websocket") {
       const protocols = (req.headers.get("sec-websocket-protocol") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
       const sock: PreviewSocket = { target: `ws://127.0.0.1:${t.x.port}${path}`, protocols, key: t.x.key, upstream: null, queue: [] };
-      if (server.upgrade(req, { data: { preview: sock } })) return undefined;
+      if (server.upgrade(req, { data: sock })) return undefined;
       return new Response("WebSocket upgrade failed\n", { status: 400 });
     }
     let r: Response;
@@ -561,9 +656,8 @@ export class Previews {
 
   // --- WebSockets: the browser's socket and one to the app, each passing on what the other sends --------------------
 
-  wsOpen(ws: ServerWebSocket<WsData>): void {
-    const sock = ws.data?.preview;
-    if (!sock) return;
+  private wsOpen(ws: ServerWebSocket<PreviewSocket>): void {
+    const sock = ws.data;
     let up: WebSocket;
     try {
       up = new WebSocket(sock.target, sock.protocols);
@@ -585,17 +679,16 @@ export class Previews {
     up.onerror = () => ws.close(1011, "preview error");
   }
 
-  wsMessage(ws: ServerWebSocket<WsData>, message: string | Buffer): void {
-    const sock = ws.data?.preview;
-    if (!sock) return;
+  private wsMessage(ws: ServerWebSocket<PreviewSocket>, message: string | Buffer): void {
+    const sock = ws.data;
     this.touch(sock.key);
     const m = typeof message === "string" ? message : new Uint8Array(message);
     if (sock.upstream?.readyState === WebSocket.OPEN) sock.upstream.send(m);
     else sock.queue.push(m);
   }
 
-  wsClose(ws: ServerWebSocket<WsData>): void {
-    const up = ws.data?.preview?.upstream;
+  private wsClose(ws: ServerWebSocket<PreviewSocket>): void {
+    const up = ws.data.upstream;
     if (up && (up.readyState === WebSocket.OPEN || up.readyState === WebSocket.CONNECTING)) up.close();
   }
 

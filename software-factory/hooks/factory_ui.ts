@@ -61,6 +61,13 @@ function intSetting(cfg: Config, key: "port" | "pollSeconds", dflt: number): num
   return n !== null && Number.isInteger(n) && n >= 0 ? n : dflt;
 }
 
+/** The port the previews are served on (#582): preview.listenPort, else the UI's port + 1 (0, a free one, with port 0). */
+function previewListenPort(cfg: Config, port: number): number {
+  const v = toFloat((cfg.preview as { listenPort?: unknown } | undefined)?.listenPort);
+  if (v !== null && Number.isInteger(v) && v > 0 && v < 65536 && v !== port) return v;
+  return port === 0 ? 0 : port + 1;
+}
+
 function top(): string {
   const p = run(["git", "rev-parse", "--show-toplevel"]);
   if (p.code !== 0 || !p.stdout.trim()) fail("not_a_project", "factory ui runs inside a project's git repo.", "cd into the project, then run it again.");
@@ -134,11 +141,17 @@ async function main(argv: string[]): Promise<number> {
   const t = token(root);
   const list = projects(cfg, root);
   const port = args.port ?? intSetting(cfg, "port", DEFAULT_PORT);
+  const previewPort = previewListenPort(cfg, port);
   let server: ReturnType<typeof serve>;
   try {
-    server = serve({ hosts, port, token: t, pollSeconds: Math.max(intSetting(cfg, "pollSeconds", DEFAULT_POLL), 1), projects: list, app: new TextDecoder().decode(script) });
+    server = serve({ hosts, port, previewPort, token: t, pollSeconds: Math.max(intSetting(cfg, "pollSeconds", DEFAULT_POLL), 1), projects: list,
+      app: new TextDecoder().decode(script) });
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
+    if (why.startsWith("preview listener:")) { // the previews' own origin (#582)
+      fail("ui_preview_port_busy", `factory ui could not listen for previews on port ${previewPort} (${why.slice(17, 200).trim()}).`,
+        `Set preview.listenPort to a free port (factory settings set preview.listenPort ${previewPort + 1}), or pick another --port.`);
+    }
     if (/EADDRINUSE|in use/i.test(why)) {
       fail("ui_port_busy", `Port ${port} is in use on this machine.`, `Pick another: factory ui --port ${port + 1} (or set ui.port).`);
     }
@@ -149,6 +162,7 @@ async function main(argv: string[]): Promise<number> {
   // one write, so a reader that waits for the token line has the whole message
   process.stdout.write([`factory ui: serving ${list[0]?.name}${others ? ` and ${others} other project${others > 1 ? "s" : ""}` : ""}`,
     `  open: ${link("127.0.0.1", server.port, t)}`, ...(tail ? [`  tailscale: ${link(tail, server.port, t)}`] : []),
+    `  previews: port ${server.previewPort} (their own origin; each sign-off item gives its link)`,
     `  token: ${t} (kept in .git/factory/ui-token)`, "Ctrl-C stops it.", ""].join("\n"));
   await new Promise<void>((done) => {
     const stop = (): void => {

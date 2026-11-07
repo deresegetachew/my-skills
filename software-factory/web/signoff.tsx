@@ -218,6 +218,22 @@ function PreviewBox({ path, token, get, post, say, tick }: { path: string; token
     setBusy(false);
     load();
   };
+  // the app is on its own origin (another port of this machine): a one-time link, opened in a new tab
+  const openApp = async (): Promise<void> => {
+    const tab = window.open("about:blank", "_blank");
+    const r = await post(`${path}/link`, {});
+    if (typeof r.path !== "string" || typeof r.port !== "number") {
+      tab?.close();
+      say({ title: String(r.message ?? "The preview can't be opened."), text: String(r.fix ?? ""), tone: "bad" });
+      load();
+      return;
+    }
+    const url = previewLink(location, r.port, r.path);
+    if (tab) {
+      tab.opener = null;
+      tab.location.href = url;
+    } else window.location.assign(url);
+  };
   const l = line as NonNullable<typeof line>;
   const live = s.state === "starting" || s.state === "running";
   return (
@@ -226,7 +242,7 @@ function PreviewBox({ path, token, get, post, say, tick }: { path: string; token
       <p className="muted"><StatusDot state={s.state === "running" ? "working" : s.state === "failed" ? "red" : l.busy ? "waiting" : "idle"} /> {l.text}</p>
       {l.fix && <p className="hint">{l.fix}</p>}
       <div className="actions">
-        {l.open && s.path && <a className="btn primary" href={previewLink(s.path, token)} target="_blank" rel="noopener noreferrer">Open the app</a>}
+        {l.open && <button className="btn primary" disabled={busy} onClick={() => void openApp()}>Open the app</button>}
         {!live && s.state !== "stopping" && <button className="btn" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : "Open preview"}</button>}
         {live && <button className="btn plain" disabled={busy} onClick={() => void stop()}>Stop preview</button>}
       </div>

@@ -201,10 +201,11 @@ export function previewLine(s: PreviewStatus): { text: string; fix: string; busy
   return { text: "Not running.", fix: "", busy: false, open: false };
 }
 
-/** The preview's link: the token goes once in the address; the server keeps it as a cookie for /preview/ only and
- * sends the browser on without it. */
-export function previewLink(path: string, token: string): string {
-  return `${path}?token=${encodeURIComponent(token)}`;
+/** The preview's address (#582): its own origin, the page's host on the previews' port, with the one-time link's path
+ * (it ends in ?code=...). The web UI's token never goes there. */
+export function previewLink(here: { protocol: string; hostname: string }, port: number, path: string): string {
+  const host = here.hostname.includes(":") ? `[${here.hostname}]` : here.hostname;
+  return `${here.protocol}//${host}:${port}${path}`;
 }
 
 /** The grey line under a row's title. */
