@@ -584,8 +584,9 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
       // task when it starts, so that isn't a failure (#546)
       const told = await runSteps(p, [["factory", "say", to, `/next-task issue-${id}`]], TASK_ACTION_TIMEOUT_MS);
       if (told.status === 200) return told;
-      return { status: 200, body: { ok: true, command: `reassign #${id} to ${to} on the message board`,
-        output: `#${id} is handed to ${to} on the message board. ${to} isn't running on this machine now, so it takes #${id} when it starts.` } };
+      const named = /^\d+$/.test(id) ? `#${id}` : id; // #7 for an issue, b3 for a task made on the board
+      return { status: 200, body: { ok: true, command: `reassign ${named} to ${to} on the message board`,
+        output: `${named} is handed to ${to} on the message board. ${to} isn't running on this machine now, so it takes ${named} when it starts.` } };
     }
     return runSteps(p, [["factory", "issues", "release", id, `reassigned to ${to} from the web UI`], ["factory", "say", to, `/next-task issue-${id}`]],
       TASK_ACTION_TIMEOUT_MS);
