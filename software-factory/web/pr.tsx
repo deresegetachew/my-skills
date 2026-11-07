@@ -47,6 +47,8 @@ export function PrPage(p: Props) {
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState("");
   const [again, setAgain] = useState(0);
+  // after a merge here: why this machine's checkout was left as it is (#566), until the page is left
+  const [leftAlone, setLeftAlone] = useState<Problem | null>(null);
   const base = `/api/projects/${encodeURIComponent(p.project.id)}/pull-requests/${encodeURIComponent(p.number)}`;
   const load = useCallback((fresh: boolean) => {
     p.get<PrPageData | Problem>(`${base}${fresh ? "?fresh=1" : ""}`).then(setPr)
@@ -79,6 +81,9 @@ export function PrPage(p: Props) {
     if (r.ok === true) {
       p.say({ title: done[ask], text: String(r.output ?? "").split("\n").filter((l) => !l.startsWith("$ ")).join("\n").trim(), tone: "good" });
       if (ask !== "merge" && ask !== "ready") setText("");
+      const co = r.checkout;
+      const why = typeof co === "object" && co !== null ? (co as { problem?: unknown }).problem : null;
+      if (ask === "merge") setLeftAlone(typeof why === "object" && why !== null && "fix" in why ? why as Problem : null);
     } else p.say({ title: String(r.message ?? "It didn't run."), text: String(r.fix ?? ""), tone: "bad" });
     setAsk(null);
     setAgain((n) => n + 1);
@@ -95,6 +100,13 @@ export function PrPage(p: Props) {
         </>} />
       <div className="body pr-page">
         <p className="pr-status"><StatusDot state={status.needsYou ? "red" : "idle"} />{status.text}</p>
+        {leftAlone && (
+          <div className="notice" role="status">
+            <StatusDot state="waiting" />
+            <div><strong>Merged, but this machine's checkout wasn't brought up to date. {leftAlone.message}</strong><p>{leftAlone.fix}</p></div>
+            <button className="btn small" onClick={() => p.open("page:settings")}>Factory settings</button>
+          </div>
+        )}
         <Tabs label="Pull request views" value={tab} onChange={setTab} tabs={[{ id: "overview", label: "Overview" },
           { id: "checks", label: "Checks", count: pr.checks.list.length }, { id: "files", label: "Files", count: pr.files.length },
           { id: "conversation", label: "Conversation", count: pr.comments.length }]} />

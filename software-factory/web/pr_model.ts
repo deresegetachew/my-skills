@@ -36,6 +36,8 @@ export interface PrPageData {
   draft: boolean;
   branch: string;
   base: string;
+  /** It goes into the project's main branch (#566); without it, a base named main does. */
+  intoMain?: boolean;
   head: string;
   body: string;
   author: PrAuthor;
@@ -127,6 +129,7 @@ export function mergeAsk(pr: PrPageData): ConfirmSpec {
   const open = pr.state === "open";
   const green = pr.checks.state === "green";
   const short = pr.head.slice(0, 7);
+  const intoMain = pr.intoMain ?? pr.base === "main";
   return {
     title: `Merge #${pr.number}?`,
     checks: [
@@ -137,8 +140,11 @@ export function mergeAsk(pr: PrPageData): ConfirmSpec {
           : "They are still running." }) },
     ],
     happens: `#${pr.number} is merged into ${pr.base || "the main branch"} at ${short}, the commit on this page. ` +
-      `Its branch is deleted${pr.tasks.length ? `, and #${pr.tasks[0]} is done` : ""}.`,
+      `Its branch is deleted${pr.tasks.length ? `, and #${pr.tasks[0]} is done` : ""}.` +
+      (intoMain ? " Then the project's checkout on this machine is brought up to date, so what it changes applies here at once, " +
+        "when that checkout is on main with nothing uncommitted; else the page says what to do." : ""),
     doesNot: `If a new commit lands first, nothing is merged and you are asked again. ` +
+      (intoMain ? "The agents' worktrees aren't touched: their loops bring themselves up to date. " : "") +
       (pr.protected.personOnly ? `${who(pr)} can't merge it: ${pr.protected.why.charAt(0).toLowerCase()}${pr.protected.why.slice(1)}` : "Nothing else changes."),
     action: `Merge #${pr.number}`,
     tone: "primary",

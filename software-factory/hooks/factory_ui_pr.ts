@@ -19,11 +19,14 @@
 //
 // Every action is the owner's: in a factory session (FACTORY_AGENT or FACTORY_LOOP) it is refused with `owner_only`.
 // Merge runs `factory owner merge <n> --head <sha>`, a merge commit as the factory's own merges (it checks again and pins the merge to the head the page
-// showed); it is refused here first for a draft (`pr_draft`, mark it ready first) or checks that aren't green. Ready is
+// showed); it is refused here first for a draft (`pr_draft`, mark it ready first) or checks that aren't green. After a
+// merge into main the project's checkout is brought up to date when that is safe (factory_ui_checkout.ts, #566), and
+// the answer's `checkout` says how that went (or why it was left as it is). Ready is
 // `gh pr ready <n>`. Comment, request changes and close go through `gh api`. Request changes posts the factory's
 // must-fix marker on the head (`<!-- factory-mustfix sha=<head> -->`, as the dev manager's verdicts do, so the author
 // reworks it) and, with the message board, a verdict message to the author on its task's thread.
 import { branchTask, type Config, DEFAULTS } from "./factory_config.ts";
+import { bringUpToDate, mainBranchOf, mainOf } from "./factory_ui_checkout.ts";
 import { type ActionResult, envFor, factoryScript, type Obj, resultOf, spawn, type UiProject } from "./factory_ui_data.ts";
 
 const READ_MS = 30_000;
@@ -182,6 +185,8 @@ export interface PrPage {
   draft: boolean;
   branch: string;
   base: string;
+  /** It goes into the project's main branch, so merging it here brings this machine's checkout up to date (#566). */
+  intoMain: boolean;
   head: string;
   login: string;
   body: string;
@@ -302,7 +307,7 @@ export function pageOf(cfg: Config | null, pr: Obj, files: Obj[], runs: Obj[], r
   const truth = open ? truthOf(listed ?? fallback, author) : { next: fallback, needsYou: false };
   return {
     number: Number(pr.number), title: str(pr.title), url: str(pr.html_url) || null, state: merged ? "merged" : str(pr.state) || "open", merged,
-    draft: pr.draft === true, branch, base: str(obj(pr.base).ref), head, login: str(obj(pr.user).login), body, author, tasks: tasksOf(branch, body),
+    draft: pr.draft === true, branch, base: str(obj(pr.base).ref), intoMain: str(obj(pr.base).ref) === mainBranchOf(cfg), head, login: str(obj(pr.user).login), body, author, tasks: tasksOf(branch, body),
     checks: { state: word, failing: checkRows.filter((c) => c.state === "failed").map((c) => c.name), list: checkRows },
     review: { ...reviewLine(markers, github), markers, github },
     protected: { files: prot, personOnly, why },
@@ -508,7 +513,12 @@ export async function prAction(p: UiProject, n: string, name: string, body: unkn
     if (word !== "green") {
       return refusal(409, "checks_pending", `The checks on #${n} ${word === "none" ? "haven't run yet" : "are still running"}.`, "Wait for them to pass, then merge.");
     }
-    return runAll(p, [["factory", "owner", "merge", n, "--head", head]]);
+    const merged = await runAll(p, [["factory", "owner", "merge", n, "--head", head]]);
+    if (merged.status !== 200 || str(obj(pr.base).ref) !== mainOf(p)) return merged;
+    // what was merged applies on this machine once its checkout has it (#566): moved forward when that is safe
+    const checkout = await bringUpToDate(p);
+    const said = [str(merged.body.output), checkout.message, checkout.problem?.fix ?? ""].filter(Boolean).join("\n");
+    return { status: 200, body: { ...merged.body, output: said, checkout } };
   }
   if (action === "ready") {
     if (pr.draft !== true) return refusal(409, "pr_not_draft", `#${n} is already ready for review.`, "Read the page again.");
