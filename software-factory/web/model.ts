@@ -81,6 +81,12 @@ export function taskChannel(channel: string, id: string): string {
   return `${channel}/task:${id}`;
 }
 
+/** The project to show (#545): the one the address names, else the one last opened on this browser, else the first
+ *  listed. So a page opened with no address lands where you were, not on the serving project by default. */
+export function pickProject<P extends { id: string }>(projects: P[], named: string | null | undefined, last: string | null | undefined): P | undefined {
+  return projects.find((p) => p.id === named) ?? projects.find((p) => p.id === last) ?? projects[0];
+}
+
 /** The project and channel a hash names, or null. */
 export function parseHash(hash: string): { project: string; channel: string } | null {
   const m = /^#\/([^/]+)\/(.+)$/.exec(hash);
