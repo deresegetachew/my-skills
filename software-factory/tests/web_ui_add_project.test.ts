@@ -541,7 +541,10 @@ function folderRepo(s: Setup, name: string): string {
   const bare = join(s.remotes, "acme", `${name}.git`);
   mkdirSync(dirname(bare), { recursive: true });
   git(dir, "init", "-q", "--bare", "-b", "main", bare);
-  git(dir, "remote", "add", "origin", bare);
+  // origin names the GitHub repo, as a real checkout would (#605); git sends it to the local bare repo
+  const url = `https://github.com/acme/${name}.git`;
+  git(dir, "config", `url.${bare}.insteadOf`, url);
+  git(dir, "remote", "add", "origin", url);
   git(dir, "push", "-q", "origin", "main");
   return dir;
 }
@@ -650,7 +653,9 @@ test("folder: a subfolder of a checkout is refused with ui_add_not_top; a symlin
 test("the setup pull request step fails when the main branch can't be fetched, and nothing is pushed", async () => {
   const s = await setup();
   const dir = folderRepo(s, "mine");
-  git(dir, "remote", "set-url", "origin", join(s.remotes, "acme", "gone.git"));
+  // a GitHub origin (#605) that git sends to a repo that isn't there, so main can't be fetched
+  git(dir, "config", `url.${join(s.remotes, "acme", "gone.git")}.insteadOf`, "https://github.com/acme/gone.git");
+  git(dir, "remote", "set-url", "origin", "https://github.com/acme/gone.git");
   const run = await waitRun(s.ui, await start(s, req(s, { source: "folder", repo: "", path: dir })));
   expect(run.state).toBe("failed");
   expect(step(run, "commit").state).toBe("failed");
@@ -882,4 +887,27 @@ test("doctor finds something the setup should have fixed: the step still fails, 
   const run = await waitRun(s.ui, await start(s, req(s)));
   expect(run.state).toBe("failed");
   expect(step(run, "doctor").todos).toEqual([]);
+}, T);
+
+test("check: a folder whose origin isn't a GitHub repo is refused with ui_add_not_github, before anything runs (#605)", async () => {
+  const s = await setup();
+  const dir = mkRepo(join(s.folder, "local"));
+  const bare = join(s.remotes, "local.git");
+  mkdirSync(dirname(bare), { recursive: true });
+  git(s.folder, "init", "-q", "--bare", "-b", "main", bare);
+  git(dir, "remote", "add", "origin", bare);
+  const body = req(s, { source: "folder", repo: "", path: dir });
+  const r = await check(s, body);
+  expect(r.status, JSON.stringify(r.json)).toBe(400);
+  expect(r.json.code).toBe("ui_add_not_github");
+  expect(String(r.json.message)).toContain("isn't a GitHub repo");
+  expect(String(r.json.fix)).toContain("git remote set-url origin");
+  const started = await api(s.ui, "/api/add-project", { method: "POST", body: { confirm: true, ...body } });
+  expect(started.status).toBe(400);
+  expect(started.json.code).toBe("ui_add_not_github");
+  expect(existsSync(join(dir, ".claude", "hooks"))).toBe(false);
+  // an ssh-style GitHub origin passes the check
+  git(dir, "remote", "set-url", "origin", "git@github.com:acme/local.git");
+  const ok = await check(s, body);
+  expect(ok.status, JSON.stringify(ok.json)).toBe(200);
 }, T);
