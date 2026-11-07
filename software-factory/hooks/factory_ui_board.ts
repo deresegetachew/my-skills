@@ -184,7 +184,7 @@ export class BoardFeed {
       (this.check as { unref?: () => void }).unref?.();
     }
     try {
-      const board = await this.api.Board.open(this.url, { as: ACTOR, session: `ui-${process.pid}`, max: 3 });
+      const board = await this.api.Board.open(this.url, { as: ACTOR, session: `ui-${process.pid}`, max: 2 });
       if (this.stopped) {
         await board.end();
         return;

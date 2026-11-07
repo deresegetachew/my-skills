@@ -4,7 +4,7 @@
 // a second, and the tasks aren't read from GitHub. A task's thread and context come from the board. Without a board the
 // GitHub path is as before; a board that can't be reached shows a notice and that project falls back to GitHub.
 // A real Postgres (board_pg.ts), the real server (startUi), a fake gh and a fake `factory` that logs what it was asked.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
@@ -23,6 +23,12 @@ const boards: Board[] = [];
 beforeAll(async () => {
   pg = await startPg();
 }, 600_000);
+
+// Each test's servers and connections end with it: CI runs many files at once against one Postgres (max_connections 100).
+afterEach(async () => {
+  for (const r of running.splice(0)) await r.stop().catch(() => {});
+  for (const b of boards.splice(0)) await b.end().catch(() => {});
+}, 120_000);
 
 afterAll(async () => {
   for (const r of running) await r.stop();
@@ -62,7 +68,7 @@ const ref = (n: number) => `github:${REPO}#${n}`;
 /** A board with: epic #1 (tasks #7, #9, #10 under it), #7 held by menelik, #11 blocks #9, #10 done, #12 in no epic, and a
  *  thread and a context entry on #7. Returns the board (as system) and the ids by issue number. */
 async function seeded(url: string): Promise<{ board: Board; id: Record<number, number> }> {
-  const board = await Board.open(url, { as: "system" });
+  const board = await Board.open(url, { as: "system", max: 1 });
   boards.push(board);
   await board.migrate();
   const epic = await board.create({ title: "Sign in", kind: "epic", ref: ref(1), body: "Let people sign in.\n\nPRD: docs/PRD.md\n- [ ] #7\n- [ ] #9" });
@@ -74,7 +80,7 @@ async function seeded(url: string): Promise<{ board: Board; id: Record<number, n
   await board.create({ title: "Another repo's task", ref: "github:x/other#3", priority: 0 });
   await board.link(t11.id, t9.id, "blocks");
   await board.close(t10.id, { outcome: "done" });
-  const menelik = await Board.open(url, { as: "menelik" });
+  const menelik = await Board.open(url, { as: "menelik", max: 1 });
   boards.push(menelik);
   await menelik.claim(t7.id);
   await menelik.post({ task: t7.id, kind: "question", to: "fasil", body: "Which provider do we use for sign in?" });

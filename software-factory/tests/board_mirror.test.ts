@@ -6,7 +6,7 @@
 //   owner gives there is read back once; `factory owner answer` writes to the board first, then mirrors it;
 // - `factory board import github` keeps a status the board changed since the last import when tasks.source is board.
 // A real Postgres (board_pg.ts) and the stateful fake gh (fakegh.ts), whose file says what was written to GitHub.
-import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Board, type Message, type Task } from "../message-board/src/index.ts";
@@ -28,6 +28,12 @@ const boards: Board[] = [];
 beforeAll(async () => {
   pg = await startPg();
 }, 600_000);
+
+// Each test's connections end with it: CI runs many files at once against one Postgres (max_connections 100).
+afterEach(async () => {
+  for (const b of boards.splice(0)) await b.end().catch(() => {});
+  for (const d of drops.splice(0)) await d().catch(() => {});
+}, 120_000);
 
 afterAll(async () => {
   for (const b of boards) await b.end().catch(() => {});
@@ -69,11 +75,11 @@ async function world(cfg: Row = { tasks: { source: "board" } }, issues: Row[] = 
   }
   Object.assign(env, { PATH: `${bin}:${process.env.PATH}`, FAKE_DB: dbFile, LOOP_LOG: log, MB_URL: db.url, GH_REPO: REPO,
     FACTORY_CONFIG_DIR: join(root, "cfg"), HOME: root });
-  const board = await Board.open(db.url, { as: "system" });
+  const board = await Board.open(db.url, { as: "system", max: 1 });
   boards.push(board);
   await board.migrate();
   const as = async (actor: string): Promise<Board> => {
-    const b = await Board.open(db.url, { as: actor });
+    const b = await Board.open(db.url, { as: actor, max: 1 });
     boards.push(b);
     return b;
   };
