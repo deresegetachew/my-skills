@@ -19,6 +19,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { type Config, taskSource } from "../factory_config.ts";
 import { GithubMessaging } from "./adapters/github/messaging.ts";
 import { GithubTaskTracker } from "./adapters/github/task_tracker.ts";
+import { BoardAgentRoster } from "./adapters/board/agents.ts";
 import { BoardBus } from "./adapters/board/bus.ts";
 import { BoardChild } from "./adapters/board/child.ts";
 import { BoardMessaging } from "./adapters/board/messaging.ts";
@@ -27,6 +28,7 @@ import { ClaimTokens } from "./adapters/board/tokens.ts";
 import { PlanTaskTracker } from "./adapters/plan/task_tracker.ts";
 import { RoutedMessaging } from "./adapters/routed/messaging.ts";
 import { CoreError } from "./domain/error.ts";
+import type { AgentRoster } from "./ports/agents.ts";
 import type { Leases, Messaging, PrFeed, Wakes } from "./ports/messaging.ts";
 import type { TaskTracker } from "./ports/task_tracker.ts";
 
@@ -189,7 +191,21 @@ export function boardTokensFile(cwd: string = process.cwd()): string {
 let boardBusState: { port: (Leases & Wakes & PrFeed) | null; error: CoreError | null } | null = null; // one per process
 
 function boardTracker(): TaskTracker {
-  return new BoardTaskTracker({ child: boardChild(), repo: boardRepo(), tokens: new ClaimTokens(boardTokensFile()) });
+  return new BoardTaskTracker({ child: boardChild(), repo: boardRepo(), tokens: new ClaimTokens(boardTokensFile()), claimSeconds: boardClaimSeconds() });
+}
+
+/** How long a board claim lasts before it needs a heartbeat: FACTORY_BOARD_CLAIM_SECONDS (for tests, and to tune it),
+ * else the board's own 30 minutes. */
+export function boardClaimSeconds(): number {
+  const n = Number(process.env.FACTORY_BOARD_CLAIM_SECONDS);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : 30 * 60; // the board's CLAIM_SECONDS
+}
+
+/** Where the agents say they are alive (#513): the message board's roster with `tasks.source` board, else null (issues
+ * mode keeps an agent issue each on GitHub, factory_agents.ts; plan mode tracks none). */
+export function agentRoster(config: Config): AgentRoster | null {
+  if (taskSource(config) !== "board") return null;
+  return new BoardAgentRoster({ child: boardChild(), project: messagingProject() });
 }
 
 function boardMessaging(): Messaging {

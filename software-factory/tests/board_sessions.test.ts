@@ -275,11 +275,57 @@ test("with the board off, or for another role, no pass runs the mirror", () => {
   expect(mirrors(managerPass(BOARD_TASKS, "product-owner"))).toBe(0);
 }, 120_000);
 
-test("the dev manager may post owner asks and run the mirror with factory board", () => {
+// ... and `factory board sweep` (#513), with a time limit of its own, so a claim whose agent went quiet is freed without
+// a job on the hub.
+const sweeps = (log: string): number => log.split("\n").filter((l) => l.startsWith("factory_board.ts sweep")).length;
+
+test("with the board on, each dev manager pass runs factory board sweep once, with a time limit", () => {
+  const log = managerPass(BOARD_TASKS);
+  expect(sweeps(log)).toBe(1);
+  expect(log).toContain("factory_board.ts sweep --max-seconds 60\n");
+  expect(sweeps(managerPass({ tasks: { source: "issues" }, messaging: { transport: "board" } }))).toBe(1);
+}, 120_000);
+
+test("with the board off, or for another role, no pass runs the sweep", () => {
+  expect(sweeps(managerPass({ tasks: { source: "issues" }, messaging: { transport: "github" } }))).toBe(0);
+  expect(sweeps(managerPass(BOARD_TASKS, "product-owner"))).toBe(0);
+}, 120_000);
+
+test("the dev manager may post owner asks, run the mirror and the sweep with factory board", () => {
   const allow = (JSON.parse(read(join(KIT, ".claude", "manager", "settings.json"))) as { permissions: { allow: string[] } }).permissions.allow;
-  for (const r of ["Bash(factory board ask*)", "Bash(./factory board ask*)", "Bash(factory board mirror*)", "Bash(./factory board mirror*)"]) {
+  for (const r of ["Bash(factory board ask*)", "Bash(./factory board ask*)", "Bash(factory board mirror*)", "Bash(./factory board mirror*)",
+    "Bash(factory board sweep*)", "Bash(./factory board sweep*)"]) {
     expect(allow).toContain(r);
   }
-  expect(allow.filter((a) => a.includes("factory board")).length).toBe(4); // nothing else of the board's command
+  expect(allow.filter((a) => a.includes("factory board")).length).toBe(6); // nothing else of the board's command
   expect(boardSection("manage-pass")).toContain("`factory board ask");
 });
+
+// --- a builder's claim is kept alive while its session runs (#513) -----------------------------------------------------
+
+/** factory_agents.ts that, for `keep`, writes a beat to <LOOP_LOG>.beats every 100 ms until it is stopped, and logs
+ * every call like the other stubs. */
+const KEEPER_STUB = LOGGING_STUB.replace('if (name === "next_task.ts") {',
+  'if (name === "factory_agents.ts" && args[0] === "keep") { setInterval(() => appendFileSync(process.env.LOOP_LOG + ".beats", "beat\\n"), 100); await new Promise(() => {}); }\n' +
+  'if (name === "next_task.ts") {');
+
+test("while a builder's session runs, the loop keeps its claim alive, and stops when the session ends", async () => {
+  const [d, work] = loopRepo();
+  writeExe(join(work, ".claude", "hooks", "factory_agents.ts"), KEEPER_STUB);
+  commitAll(work, "keeper stub");
+  push(work);
+  // the session: a second and a half of nothing, as a long quiet build is
+  writeExe(join(d, "bin", "claude"), '#!/usr/bin/env bash\necho "claude $*" >> "$LOOP_LOG"\nsleep 1.5\n');
+  const env: Record<string, string | undefined> = { ...process.env, PATH: `${d}/bin:${process.env.PATH}`, LOOP_LOG: join(d, "log"),
+    LOOP_STATE: join(d, "state"), STUB_TASK: "101 Add login", STUB_AGENT: "haile" };
+  for (const k of ["FACTORY_AGENT", "FACTORY_RELOAD_AGENT", "FACTORY_RELOAD_DIR", "FACTORY_NAME", "MB_URL", "FACTORY_ROLE"]) delete env[k];
+  const p = sh(["bash", "./factory-loop.sh", "1"], { cwd: work, env, timeoutMs: 60_000 });
+  expect(p.code, p.out).toBe(0);
+  const log = read(join(d, "log"));
+  expect(log).toMatch(/^factory_agents\.ts keep --agent haile --task 101 --pid \d+$/m);
+  const beats = (): number => (existsSync(join(d, "log.beats")) ? read(join(d, "log.beats")).split("\n").filter(Boolean).length : 0);
+  expect(beats()).toBeGreaterThan(3); // it ran while the session did
+  const after = beats();
+  await Bun.sleep(600);
+  expect(beats()).toBe(after); // and stopped with it
+}, 120_000);

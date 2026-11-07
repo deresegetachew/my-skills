@@ -47,8 +47,8 @@ factory doctor            # checks the board for a project that uses it
 set up on the hub (cron or a systemd timer) that runs it.
 
 With tasks on the board, a claim whose agent went quiet is freed by `factory board sweep` (its time passed and its agent
-sent no heartbeat for 30 minutes). Nothing runs it by itself yet, and the agents' rules don't allow it: run it on the
-hub as a job too (every few minutes), or by hand.
+sent no heartbeat for 30 minutes). The dev manager's loop runs it on each pass (below); with no dev manager running, run
+it by hand or as a job on the hub.
 
 **Each other machine** gets a login of its own:
 
@@ -87,9 +87,22 @@ Then:
   starts. If the agents need one of those servers, keep the board off until that is solved.
 - Each role is allowed only its board tools: a coding agent the builder's, the dev manager the manager's, the product
   owner the manager's without the claim tools (it never builds). The skills say which tool to use when.
-- The dev manager's loop runs `factory board mirror` before each pass (below).
-- With `tasks.source: board`, agent issues (`Agent: <name>`), `factory agents sweep` and the agents part of
-  `factory status` stop: they work in issues mode only. `factory board sweep` frees a quiet agent's claim instead.
+- The dev manager's loop runs `factory board mirror` before each pass (below), then `factory board sweep`, stopped after
+  60 seconds so a board that doesn't answer can't stall the pass.
+- With `tasks.source: board` the agents keep no issue (`Agent: <name>`): each agent's liveness (working, waiting, idle
+  or down, its task, its machine, its last ping) is a value on the board, `<project>:agent:<name>`, with a
+  `signal.agent` event per change. The loop, the agent's hooks and the claim's keeper write it; `factory agents list`,
+  `factory agents sweep` and the agents part of `factory status` read it, with the same rules as in issues mode (an
+  agent with no ping for `tasks.downMinutes` is silent; another machine's live agent of the same name is refused at
+  start). `factory agents sweep` marks silent agents down and runs the board's sweep, which frees their claims once
+  their time has passed.
+- While a builder's session runs, the loop keeps its claim alive: a heartbeat on the claimed task every 10 minutes (a
+  third of the claim's 30), so a long quiet build isn't swept. It stops when the session ends; a claim left by a session
+  that crashed runs out and the next sweep frees it. `FACTORY_BOARD_CLAIM_SECONDS` and `FACTORY_BOARD_HEARTBEAT_SECONDS`
+  change the two times (the tests use them).
+- `factory prd --stage` and the web UI's Inbox read the owner queue from the board (`factory board queue`): each ask to
+  the owner and the owner's answers. When the board can't be reached they read the owner-queue issue on GitHub, as
+  before.
 - The PR gate and the Factory guard still read only GitHub. Nothing on the board changes what may merge.
 
 More: [Agent loops](agent-loops.md#when-the-board-is-on).
@@ -103,7 +116,8 @@ Its place is kept on the board, so it is safe to run twice and goes on after dow
 off.
 
 It runs by itself before each dev manager pass, stopped after 300 seconds so a hung `gh` can't stall the pass (the next
-pass sends the rest). `factory board mirror --watch` on the hub runs it all the time: a pass on each change, and every
+pass sends the rest). A task's line and an ask or answer are recorded as pending before they are posted, so a pass that
+is killed after posting one finds it by its marker on the next run instead of posting it twice. `factory board mirror --watch` on the hub runs it all the time: a pass on each change, and every
 300 seconds for your answers on GitHub.
 
 What it does not carry: the threads (questions, answers and notes between agents), and tasks made on the board that
@@ -116,7 +130,7 @@ have no issue (`board_create`): they stay on the board. Read them in the web UI,
 Moving an existing factory, whose tasks are GitHub issues, onto the board:
 
 1. **Start the board on the hub** and check it: `factory board up`, `factory board status`, `factory doctor`. Set up
-   the backup and sweep jobs ([Set it up](#set-it-up)), and take a first `factory board backup`.
+   the backup job ([Set it up](#set-it-up)), and take a first `factory board backup`.
 2. **Bring the issues in:** `factory board import github --dry-run`, read what it says, then `factory board import github`.
    Check a few tasks with `factory board tasks` and `factory board show <id>`.
 3. **Turn the board on for the project:** `factory settings set --stage tasks.source board`, then `factory settings pr`.
@@ -131,8 +145,8 @@ Moving an existing factory, whose tasks are GitHub issues, onto the board:
    `factory owner start <role> <name>`), so every new session starts with the board's server. A session that is already
    running keeps what it started with.
 
-Then check that `factory next` hands out a task, that `/mcp` in an agent's session lists only `board`, and that a task's
-issue on GitHub follows its card.
+Then check that `factory next` hands out a task, that `/mcp` in an agent's session lists only `board`, that a task's
+issue on GitHub follows its card, and that `factory agents list` shows the agents you restarted.
 
 <br>
 ## Going back

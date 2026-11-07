@@ -174,8 +174,9 @@ function argError(text: string): never {
   throw new Exit(2);
 }
 
-function ping(agent: string, n: number): void {
-  run([...bunCmd(join(import.meta.dir, "factory_agents.ts")), "ping", "--agent", agent, "--status", `working on #${n}`],
+function ping(agent: string, n: number | string): void {
+  const what = /^\d+$/.test(String(n)) ? `#${n}` : String(n);
+  run([...bunCmd(join(import.meta.dir, "factory_agents.ts")), "ping", "--agent", agent, "--status", `working on ${what}`],
     { timeoutMs: 60_000 });
 }
 
@@ -340,6 +341,7 @@ function boardMode(cfg: Config, tracker: TaskTracker, a: Args): number {
     console.log(a.json ? pyDumps({ id: null, remaining: 0 }) : "none");
     return 1;
   }
+  if (a.claim) ping(a.claim, t.id); // the agent's liveness on the board says what it works on (#513)
   console.log(a.json ? pyDumps({ id: t.id, title: t.title }) : `${t.id} ${t.title}`);
   if (!a.json && !a.issue) note(a);
   return 0;

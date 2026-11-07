@@ -49,4 +49,8 @@ export interface TaskTracker {
   epics(): Epic[];
   /** A new ready task, after the others. */
   file(task: NewTask): Filed;
+  /** Keep this machine's claim on `id` alive while its agent works (a heartbeat, #513): true when it moved the claim's
+   * time on, false when there is nothing to keep (this tracker's claims don't run out, or this machine holds no claim on
+   * it). A claim the tracker gave to someone else meanwhile is refused (`claim-lost`). */
+  keep(id: string): boolean;
 }

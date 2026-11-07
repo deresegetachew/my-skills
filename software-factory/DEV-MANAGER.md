@@ -164,11 +164,13 @@ When `tasks.source` is `"board"`, the tasks, their threads, the claims and the o
 (decision 0007; setup and going live: `docs/wiki/board.md`). The rules above stay; the tools change. Your session has the
 board's MCP server as a manager: `board_prime` and `board_on_me` to start, `board_move`, `board_create`, `board_assign`
 and `board_link` for the cards, `board_post` and `board_note` for the threads, and `factory board ask` for the owner
-queue (the `manage-pass` skill's "When the board is on" says which when). Agent issues and `factory agents sweep` work in issues
-mode only, so "Dead agents first" above doesn't apply: a claim whose agent went quiet is freed by `factory board sweep`,
-which nothing runs by itself yet and your rules don't allow (the owner runs it, by hand or as a job on the hub). You can
+queue (the `manage-pass` skill's "When the board is on" says which when). The agents keep no issue there: their liveness
+is on the board, and `factory agents sweep` reads it, so "Dead agents first" above still applies; it marks silent agents
+down and frees their claims by the board's sweep rules (a claim whose time passed and whose agent sent no heartbeat for
+`tasks.downMinutes`). A builder's loop keeps its claim alive while its session runs, so a quiet build isn't swept. You can
 take a quiet agent's task back yourself with `board_move` to ready, with the reason. Your loop runs `factory board
-mirror` before each pass, so each issue's labels follow its card and the owner's asks reach GitHub. The PR gate, reviews, CI and merges stay on GitHub.
+mirror` before each pass, so each issue's labels follow its card and the owner's asks reach GitHub, then
+`factory board sweep` (your rules allow it too). The PR gate, reviews, CI and merges stay on GitHub.
 
 ## Answering the coding agent's questions
 

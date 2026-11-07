@@ -9,6 +9,7 @@
 import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { Config } from "../hooks/factory_config.ts";
 import { Board, type Message, type Task } from "../message-board/src/index.ts";
 import { freshDb, type Pg, startPg } from "./board_pg.ts";
 import { installFakeGh } from "./fakegh.ts";
@@ -481,10 +482,126 @@ test("a comment the mirror wrote is not imported back as a message", async () =>
   expect((await task(w, 101))?.status).toBe("in_progress");
 });
 
+// --- a pass killed between a task's line and its place (#513) -------------------------------------------------------------
+
+test("a pass killed after posting a task's line and before saving its place: the next pass finds that line and doesn't post it again", async () => {
+  const w = await world();
+  const t = await w.board.create({ title: "Add login", ref: ref(101) });
+  expect(mirror(w).code).toBe(0); // the first pass takes the board as it is
+  const haile = await w.as("haile");
+  await haile.claim(t.id);
+  // a gh in front of the fake one that kills its caller right after the first comment it posts
+  const fake = (w.env.PATH as string).split(":")[0] as string;
+  const killer = join(w.d, "..", "killer");
+  const once = join(w.d, "..", "die-once");
+  writeFileSync(once, "");
+  writeExe(join(killer, "gh"), `#!/usr/bin/env bash\n"${fake}/gh" "$@"\nrc=$?\n` +
+    `if [ -f "$DIE_ONCE" ] && [[ " $* " == *" POST "* ]] && [[ "$*" == */comments* ]]; then rm -f "$DIE_ONCE"; kill -9 $PPID; fi\nexit $rc\n`);
+  const killed = mirror(w, { PATH: `${killer}:${w.env.PATH}`, DIE_ONCE: once });
+  expect(killed.code).not.toBe(0);
+  const lines = (): Row[] => posted(w).filter((p) => p.kind === "comment" && p.issue === 101);
+  expect(lines()).toHaveLength(1);
+
+  const again = mirror(w);
+  expect(again.code, again.stderr).toBe(0);
+  expect(lines()).toHaveLength(1);
+  // the next change still sends its own line
+  await w.board.move(t.id, { to: "ready", reason: "handed back" });
+  expect(mirror(w).code).toBe(0);
+  expect(lines()).toHaveLength(2);
+  expect(String(lines()[1]?.body)).toContain("Ready (on the board)");
+});
+
+// --- the owner queue read from the board (#513) --------------------------------------------------------------------------
+
+/** An owner-queue task on the board with an ask the owner answered (palette, with options) and one still open (deploy). */
+async function boardQueue(w: World): Promise<void> {
+  const q = await w.board.create({ title: QUEUE, kind: "note", ref: ref(103) });
+  const fasil = await w.as("fasil");
+  const ask = await fasil.post({ task: q.id, kind: "ask", tag: "owner-ask", to: "owner", body: "<!-- factory-owner-ask id=palette -->\nWhich colour?\n- Blue\n- Green" });
+  const owner = await w.as("owner");
+  await owner.post({ task: q.id, kind: "answer", tag: "owner-answer", to: "fasil", inReplyTo: ask.id, body: "<!-- factory-owner-answer id=palette -->\n\nBlue" });
+  await fasil.post({ task: q.id, kind: "ask", tag: "owner-ask", to: "owner", body: "<!-- factory-owner-ask id=deploy -->\nDeploy on Friday?" });
+}
+
+/** Run `fn` with this process's environment set to the world's (the web UI's reads take the server's environment). */
+async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+  const before = { ...process.env };
+  for (const k of Object.keys(process.env)) if (!(k in env)) delete process.env[k];
+  Object.assign(process.env, env);
+  try {
+    return await fn();
+  } finally {
+    for (const k of Object.keys(process.env)) if (!(k in before)) delete process.env[k];
+    Object.assign(process.env, before);
+  }
+}
+
+const UNREACHABLE = "postgres://nobody:pw@127.0.0.1:1/none";
+
+test("factory board queue lists the owner queue from the board, oldest first, without asking GitHub", async () => {
+  const w = await world({ tasks: { source: "board" } }, [issue(103, QUEUE, [])]);
+  await boardQueue(w);
+  const p = hook(w, "factory_board", ["queue", "--json"]);
+  expect(p.code, p.stderr).toBe(0);
+  const q = JSON.parse(p.stdout) as { issue: number; url: string; comments: { body: string; user: { login: string } }[] };
+  expect(q.issue).toBe(103);
+  expect(q.url).toBe(`https://github.com/${REPO}/issues/103`);
+  expect(q.comments.map((c) => [c.user.login, c.body.split("\n")[0]])).toEqual([["fasil", "<!-- factory-owner-ask id=palette -->"],
+    ["owner", "<!-- factory-owner-answer id=palette -->"], ["fasil", "<!-- factory-owner-ask id=deploy -->"]]);
+  expect(calls(w).all).toEqual([]);
+  const off = hook(w, "factory_board", ["queue", "--json"], { MB_URL: UNREACHABLE });
+  expect(off.code).toBe(3); // the board can't be had: a caller falls back to GitHub
+});
+
+test("the web UI's Inbox reads the owner queue from the board when it is on, and from GitHub when it can't be reached", async () => {
+  const w = await world({ tasks: { source: "board" } }, [issue(103, QUEUE, [])]);
+  await boardQueue(w);
+  const db = gh(w);
+  (db.comments as Record<string, unknown[]>)["103"] = ["<!-- factory-owner-ask id=old -->\nFrom GitHub"];
+  writeFileSync(w.dbFile, JSON.stringify(db));
+  const { readQueue } = await import("../hooks/factory_ui_chat.ts");
+  const project = { id: "shop", name: "shop", path: w.d, current: false, problem: null, config: { tasks: { source: "board" } } as unknown as Config };
+  const q = await withEnv(w.env, () => readQueue(project));
+  expect(q.problem).toBeNull();
+  expect(q.issue).toBe(103);
+  expect(q.asks.map((a) => [a.id, a.state, a.answer, a.options])).toEqual([["palette", "answered", "Blue", ["Blue", "Green"]], ["deploy", "open", null, []]]);
+  expect(calls(w).all).toEqual([]);
+
+  const back = await withEnv({ ...w.env, MB_URL: UNREACHABLE }, () => readQueue(project));
+  expect(back.asks.map((a) => [a.id, a.state])).toEqual([["old", "open"]]);
+});
+
+test("factory prd --stage reads the owner's approvals from the board when it is on, and from GitHub when it can't be reached", async () => {
+  const w = await world({ tasks: { source: "board" } }, [issue(103, QUEUE, [])]);
+  write(join(w.d, "docs", "PRD.md"), "# PRD\n\n- US-1: Sign in\n");
+  const q = await w.board.create({ title: QUEUE, kind: "note", ref: ref(103) });
+  const pia = await w.as("pia");
+  const ask = await pia.post({ task: q.id, kind: "ask", tag: "owner-ask", to: "owner", body: "<!-- factory-owner-ask id=stage-vision -->\nPlease approve the vision." });
+  await (await w.as("owner")).post({ task: q.id, kind: "answer", tag: "owner-answer", to: "pia", inReplyTo: ask.id,
+    body: "<!-- factory-owner-answer id=stage-vision -->\n\nyes" });
+  const stages = (extra: Record<string, string> = {}): Row[] => {
+    const p = hook(w, "factory_prd", ["--stage", "--json"], extra);
+    expect(p.code, p.stderr).toBe(0);
+    return JSON.parse(p.stdout) as Row[];
+  };
+  expect(stages()[0]).toMatchObject({ stage: "vision", done: true, approval: "approved" });
+  expect(calls(w).all.filter((l) => l.includes("issues/103/comments"))).toEqual([]);
+
+  // GitHub has the ask with no answer yet: with the board out of reach, that is what counts
+  const db = gh(w);
+  (db.comments as Record<string, unknown[]>)["103"] = ["<!-- factory-owner-ask id=stage-vision -->\nPlease approve the vision."];
+  writeFileSync(w.dbFile, JSON.stringify(db));
+  expect(stages({ MB_URL: UNREACHABLE })[0]).toMatchObject({ stage: "vision", approval: "asked" });
+  expect(calls(w).all.filter((l) => l.includes("issues/103/comments")).length).toBeGreaterThan(0);
+});
+
 test("factory help lists board mirror and board ask", () => {
   const p = sh(["bash", join(SF, "factory"), "help"], { cwd: SF });
   expect(p.code).toBe(0);
   expect(p.stdout).toMatch(/^ {2}board mirror \[--watch\]/m);
   expect(p.stdout).toContain("--max-seconds");
   expect(p.stdout).toMatch(/^ {2}board ask <id> <text>/m);
+  expect(p.stdout).toMatch(/^ {2}board queue \[--json\]/m);
+  expect(p.stdout).toMatch(/^ {2}board sweep \[--quiet-minutes N\] \[--max-seconds N\]/m);
 });

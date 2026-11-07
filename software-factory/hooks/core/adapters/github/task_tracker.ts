@@ -130,6 +130,11 @@ export class GithubTaskTracker implements TaskTracker {
     comment(n, `<!-- factory-release agent=${held[0] ?? "none"} -->\n**Blocked:** ${reason}`);
   }
 
+  /** Its claims don't run out: nothing to keep. */
+  keep(_id: string): boolean {
+    return false;
+  }
+
   file(task: NewTask): Filed {
     const L = taskLabels(this.cfg);
     const data: Record<string, unknown> = { title: task.title, body: task.body, labels: [L.ready, ...(task.tags ?? [])] };

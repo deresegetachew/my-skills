@@ -159,3 +159,22 @@ test("board: a corrupt token file is a refusal with code, message and fix, and i
   expect(readFileSync(f.tokens, "utf8")).toBe("{not json");
   expect(onBoard(f.boardIds[0] as number).holder).toBeNull();
 });
+
+test("board: keep moves this machine's claim's time on by the claim time; a claim taken back is refused as lost (#513)", async () => {
+  const f = world.tracker([{ title: "One" }]);
+  const port = new BoardTaskTracker({ child: world.child, repo: f.repo, tokens: new ClaimTokens(f.tokens), actor: "factory", claimSeconds: 60 });
+  port.claim("101", haile);
+  const id = f.boardIds[0] as number;
+  const until = (): number => new Date(onBoard(id).claimUntil as unknown as string).getTime();
+  const first = until();
+  expect(first - Date.now()).toBeLessThan(65_000); // the claim time set, not the board's 30 minutes
+  await Bun.sleep(1100);
+  expect(port.keep("101")).toBe(true);
+  expect(until()).toBeGreaterThan(first);
+  expect(port.keep("102")).toBe(false); // no such task here
+  // the claim ends behind this machine's back and another agent takes the task: the token kept here no longer holds it
+  const token = (JSON.parse(readFileSync(f.tokens, "utf8")) as Record<string, { token: string }>)[String(id)]?.token as string;
+  world.child.call("haile", [{ op: "release", args: [id, token, { next: "ready", reason: "taken back" }] }]);
+  world.child.call("taytu", [{ op: "claim", args: [id] }]);
+  expect(refusal(() => port.keep("101")).code).toBe("claim-lost");
+});

@@ -124,6 +124,20 @@ export function askOnBoard(askId: string, body: string): "board" | "unavailable"
   return p.code === 3 ? "unavailable" : "failed";
 }
 
+/** The owner queue as the message board has it (`factory board queue --json`, #513), or null when the board can't be had
+ * (none set up, it doesn't answer, or this install has no board): the caller reads GitHub then. Its comments have the
+ * shape of the issue's, and the board's `owner` actor is the owner. */
+export function queueOnBoard(): { issue: number | null; comments: Comment[] } | null {
+  const p = run([process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_board.ts"), "queue", "--json"]);
+  if (p.code !== 0) return null;
+  try {
+    const q = JSON.parse(p.stdout) as { issue?: unknown; comments?: unknown };
+    return Array.isArray(q.comments) ? { issue: typeof q.issue === "number" ? q.issue : null, comments: q.comments as Comment[] } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Posts a report to the owner queue once per id. Returns true when it posted (or would, in a dry run). With the owner
  * queue on the message board (#502) it is written there and mirrored to the issue. */
 export function postAsk(cfg: Config, name: string, askId: string, line: string, out: Out): boolean {

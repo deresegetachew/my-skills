@@ -184,4 +184,14 @@ export function taskTrackerContract(name: string, make: (specs: Spec[]) => Fixtu
     port.claim(ids[0] as string, haile);
     expect(port.next()?.id).toBe(filed.id);
   });
+
+  test(`${name}: keeping a claim alive never changes who holds the task (#513)`, () => {
+    const { port, ids } = make([{ title: "One" }]);
+    const id = ids[0] as string;
+    expect(port.keep(id)).toBe(false); // nobody holds it: nothing to keep
+    port.claim(id, haile);
+    port.keep(id);
+    expect(port.list().map((t) => [t.id, t.state, t.holders])).toEqual([[id, "in-progress", ["haile"]]]);
+    expect(port.pick(taytu).task).toBeNull();
+  });
 }

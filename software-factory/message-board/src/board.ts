@@ -726,6 +726,18 @@ export class Board {
     });
   }
 
+  /** Every value whose key starts with `prefix`, by key: its value, who wrote it last and when. */
+  async values(prefix: string): Promise<{ key: string; value: unknown; updatedBy: string; updatedAt: Date }[]> {
+    named("A value's key prefix", prefix);
+    return this.run(async () => {
+      const like = `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+      return rows(await this.sql`SELECT key, value, updated_by, updated_at FROM "values" WHERE key LIKE ${like} ORDER BY key`).map((r) => ({
+        key: String(r.key), value: typeof r.value === "string" ? (JSON.parse(r.value) as unknown) : r.value, updatedBy: String(r.updated_by),
+        updatedAt: new Date(r.updated_at as string | Date),
+      }));
+    });
+  }
+
   // ---------- signals ----------
   /** Record a signal: an event and nothing else (kind `signal.<name>`), for listeners such as a waiting agent. */
   async signal(name: string, payload: Record<string, unknown> = {}): Promise<void> {

@@ -44,7 +44,10 @@ commands below and nothing changes.
 - **Questions and answers:** read the thread with `board_thread`; answer with `board_post`, replying on that thread.
 - **What you decide** on a task (a must-fix's reason, a hold, a blocker) goes on it with `board_note`.
 - **Owner asks** go with `factory board ask <id> <text>` (or `--body -` with the text on stdin), never as a
-  hand-written comment. The loop runs `factory board mirror` before each pass, so GitHub's copy stays current.
+  hand-written comment. The loop runs `factory board mirror` before each pass, so GitHub's copy stays current, then
+  `factory board sweep`, which frees the claims of agents that went quiet.
+- **Dead agents:** `factory agents sweep` reads the agents' liveness on the board and marks silent ones down; their
+  claims go back to ready by the board's sweep rules.
 - **Cards:** `board_move` (with a reason when it takes a claim back), `board_assign`, `board_link` and `board_unlink`,
   only for what this skill already lets you do on your own; `board_create` for a review follow-up task.
 
