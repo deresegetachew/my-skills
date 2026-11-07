@@ -1,7 +1,8 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
 // `factory status`: one read-only view of the whole factory, across machines (#64).
 //
-//   Agents     every agent on every machine (issues mode: their agent issues): working, idle, silent or down
+//   Agents     every agent on every machine (issues mode: their agent issues; with tasks.source board, their values on the
+//              message board, #513): working, idle, silent or down
 //   Here       this machine's claims (which local agent holds which folder and task)
 //   PRs        open pull requests: draft, CI, the reviewer's pass for the head (when the marker is on this machine),
 //              the dev manager's hold, must-fix or approval, which dev manager has claimed the head for review
@@ -18,7 +19,7 @@
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_status.ts [--json]
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { agentIssues, current, stateOf } from "./factory_agents.ts";
+import { agentIssues, boardAgentIssues, current, onBoard, stateOf } from "./factory_agents.ts";
 import { type Config, load, loadFromMain, taskLabels, taskSource } from "./factory_config.ts";
 import { names, taskIssues } from "./factory_issues.ts";
 import { bunCmd, githubCallsLastHour, isoUtc, parseArgs, parseIso, pyDumps, run, runMain } from "./factory_lib.ts";
@@ -61,8 +62,9 @@ function round(x: number): number {
 type Agents = { note: string } | { agents: { name: string; status: string; lastPing: string; minutesAgo: number }[] };
 
 function agents(cfg: Config): Agents {
-  if (taskSource(cfg) !== "issues") return { note: "agents report on GitHub in issues mode only (tasks.source \"issues\")" };
-  const rows = current(agentIssues()).map((i) => stateOf(cfg, i)).filter((r) => r !== null);
+  const board = onBoard(cfg);
+  if (taskSource(cfg) !== "issues" && !board) return { note: "agents report in issues mode or on the message board only (tasks.source \"issues\" or \"board\")" };
+  const rows = current(board ? boardAgentIssues(cfg) : agentIssues()).map((i) => stateOf(cfg, i)).filter((r) => r !== null);
   rows.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : a[2] - b[2]));
   return { agents: rows.map(([n, s, t, q]) => ({ name: n, status: s, lastPing: isoUtc(t), minutesAgo: round(q) })) };
 }

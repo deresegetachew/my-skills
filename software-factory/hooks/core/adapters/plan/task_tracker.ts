@@ -109,6 +109,11 @@ export class PlanTaskTracker implements TaskTracker {
     return [];
   }
 
+  /** Its claims don't run out: nothing to keep. */
+  keep(_id: string): boolean {
+    return false;
+  }
+
   file(task: NewTask): Filed {
     const lines = this.working(this.cfg.plan).split("\n");
     const found = parse(lines);

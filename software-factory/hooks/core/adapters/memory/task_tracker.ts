@@ -106,6 +106,11 @@ export class MemoryTaskTracker implements TaskTracker {
     return [];
   }
 
+  /** Its claims don't run out: nothing to keep. */
+  keep(_id: string): boolean {
+    return false;
+  }
+
   file(task: NewTask): Filed {
     const id = this.add({ title: task.title, group: task.group });
     return { id, url: `memory:${id}` };

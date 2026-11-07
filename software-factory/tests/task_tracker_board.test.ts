@@ -172,6 +172,9 @@ test("board: keep moves this machine's claim's time on by the claim time; a clai
   expect(port.keep("101")).toBe(true);
   expect(until()).toBeGreaterThan(first);
   expect(port.keep("102")).toBe(false); // no such task here
-  world.child.call("system", [{ op: "move", args: [id, { to: "ready", reason: "taken back" }] }]);
+  // the claim ends behind this machine's back and another agent takes the task: the token kept here no longer holds it
+  const token = (JSON.parse(readFileSync(f.tokens, "utf8")) as Record<string, { token: string }>)[String(id)]?.token as string;
+  world.child.call("haile", [{ op: "release", args: [id, token, { next: "ready", reason: "taken back" }] }]);
+  world.child.call("taytu", [{ op: "claim", args: [id] }]);
   expect(refusal(() => port.keep("101")).code).toBe("claim-lost");
 });
