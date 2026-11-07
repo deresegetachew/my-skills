@@ -305,6 +305,12 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `ui.projects` | list | `[]` | Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout. |
 | `ui.port` | int | `4747` | The port `factory ui` listens on (`--port` wins for one run). |
 | `ui.pollSeconds` | int | `5` | How often `factory ui` reads the agents and machines again and pushes what changed to the open pages. |
+| `preview.command` | str | `""` | Open preview on a sign-off item: the command that runs the app, for example `bun run src/server.ts`. It runs in a temporary worktree of the item's commit with PORT set and should listen on HOST (127.0.0.1) only. Read from the settings committed on the main branch. Empty: no preview. |
+| `preview.port` | int | `null` | The port the preview listens on, for an app that can't take PORT. Unset: a free port, given in PORT. |
+| `preview.health` | str | `"/"` | The path the web UI asks until the preview answers (below 400) before it shows the link, for example /healthz. |
+| `preview.startSeconds` | int | `60` | How long a preview may take to answer its health path before it counts as failed and is stopped. |
+| `preview.idleMinutes` | int | `30` | A preview stops after this many minutes with no request through its link. It also stops when its item gets a result. |
+| `preview.max` | int | `3` | At most this many previews run at once on the machine that runs the web UI. |
 | `attention.taskQuietMinutes` | int | `60` | Needs attention: a task in progress shows when nothing has moved on it (no heartbeat from a holder working on it, no change on the board) for this many minutes. |
 | `attention.prWaitHours` | int | `24` | Needs attention: a pull request shows when it has been open this many hours with red checks, no review, a must-fix nobody picked up, or a merge only a person can do. |
 | `attention.coding-agent.maxMinutes` | int | `120` | Needs attention: a coding agent's session shows when it has been working this many minutes without a pause. |

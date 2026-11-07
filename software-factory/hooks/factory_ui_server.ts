@@ -46,8 +46,13 @@
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
 // ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
 // `ui.pollSeconds` and pushes what changed; with no page open it reads nothing.
+//
+// GET|POST|DELETE /api/projects/:p/signoff/:id/preview and /preview/:p/:id/...: a sign-off item's preview, the app run
+// from the item's commit and served through this server behind the same token (factory_ui_preview.ts, #582). A result on
+// the item stops it, and so does stopping the server.
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
+import { Previews, type WsData } from "./factory_ui_preview.ts";
 import { AddRuns } from "./factory_ui_add.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, refreshConfig, roleOf, type UiProject } from "./factory_ui_data.ts";
@@ -123,7 +128,11 @@ const TOKEN_FIX = "Open the address `factory ui` printed (it ends in ?token=...)
 /** Null when the request carries the token, else the 401 to answer. */
 function refuseToken(req: Request, url: URL, token: string): Response | null {
   const header = req.headers.get("authorization") ?? "";
-  const given = header.startsWith("Bearer ") ? header.slice(7).trim() : url.pathname === "/api/ws" ? url.searchParams.get("token") ?? "" : "";
+  return refuseGiven(header.startsWith("Bearer ") ? header.slice(7).trim() : url.pathname === "/api/ws" ? url.searchParams.get("token") ?? "" : "", token);
+}
+
+/** Null when `given` is the token, else the 401 to answer (the API's and the previews', #582). */
+function refuseGiven(given: string, token: string): Response | null {
   if (!given) return problem(401, "ui_token_missing", "This needs the web UI's token.", TOKEN_FIX);
   const a = Buffer.from(given);
   const b = Buffer.from(token);
@@ -145,9 +154,10 @@ export function serve(o: ServeOptions): Running {
   const byId = new Map(list.map((p) => [p.id, p]));
   const kept = new Map<string, Kept>();
   const reading = new Map<string, Promise<Kept>>();
-  const servers: Server<undefined>[] = [];
+  const servers: Server<WsData>[] = [];
   let clients = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
+  const previews = new Previews(); // a sign-off item's preview (#582)
   const chat = new ChatHub({ pollSeconds: o.pollSeconds, publish: (m) => {
     const text = JSON.stringify(m);
     for (const s of servers) s.publish(TOPIC, text);
@@ -248,7 +258,7 @@ export function serve(o: ServeOptions): Running {
     return kept.get(p.id)?.data.agents ?? [];
   }
 
-  async function api(req: Request, url: URL, server: Server<undefined>): Promise<Response | undefined> {
+  async function api(req: Request, url: URL, server: Server<WsData>): Promise<Response | undefined> {
     const refused = refuseToken(req, url, o.token);
     if (refused) return refused;
     const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent).slice(1); // after "api"
@@ -284,8 +294,19 @@ export function serve(o: ServeOptions): Running {
       }
       if (rest[1] === "search") return json(200, { project: p.id, q: url.searchParams.get("q") ?? "", hits: searchDocs(p, url.searchParams.get("q") ?? "") });
     }
+    if (rest[0] === "signoff" && rest.length === 3 && rest[2] === "preview") { // Open preview (#582)
+      const r = await previews.api(req, p, rest[1] as string);
+      return json(r.status, r.body);
+    }
     if (rest[0] === "signoff") { // the sign-off and testing page (#454)
+      const result = rest.length === 3 && rest[2] === "result" && req.method === "POST"
+        ? ((await req.clone().json().catch(() => null)) as { outcome?: unknown } | null) : null;
       const r = await signoffApi(req, p, rest);
+      if (result && r.status === 200) { // signed off or sent back: its preview stops (#582)
+        const outcome = result.outcome;
+        void previews.stop(p, rest[1] as string, outcome === "pass" ? "Stopped: the item was signed off."
+          : outcome === "fail" ? "Stopped: the item was sent back." : "Stopped: a result was recorded.");
+      }
       return json(r.status, r.body);
     }
     if (rest[0] === "settings") { // Factory settings, releases and updates, maintenance (#456)
@@ -418,9 +439,12 @@ export function serve(o: ServeOptions): Running {
     return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
   }
 
-  async function fetch(req: Request, server: Server<undefined>): Promise<Response | undefined> {
+  async function fetch(req: Request, server: Server<WsData>): Promise<Response | undefined> {
     const url = new URL(req.url);
     if (url.pathname.startsWith("/api/") || url.pathname === "/api") return api(req, url, server);
+    if (url.pathname.startsWith("/preview/")) { // a sign-off item's preview, behind the same token (#582)
+      return previews.proxy(req, url, server, (id) => byId.get(id), (given) => refuseGiven(given, o.token));
+    }
     if (req.method !== "GET" && req.method !== "HEAD") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
     if (url.pathname === "/app.js") {
       return new Response(o.app, { headers: { ...HEADERS, "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" } });
@@ -433,7 +457,8 @@ export function serve(o: ServeOptions): Running {
   }
 
   const websocket = {
-    async open(ws: ServerWebSocket<undefined>): Promise<void> {
+    async open(ws: ServerWebSocket<WsData>): Promise<void> {
+      if (ws.data?.preview) return previews.wsOpen(ws); // a preview's own socket (#582)
       clients++;
       ws.subscribe(TOPIC);
       ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: list.map((p) => p.id) }));
@@ -447,10 +472,12 @@ export function serve(o: ServeOptions): Running {
         if (ws.readyState === 1) ws.send(attentionMessage(p));
       }
     },
-    message(): void {
-      // the page only listens; what it does goes through the API
+    message(ws: ServerWebSocket<WsData>, m: string | Buffer): void {
+      // the page only listens; what it does goes through the API. A preview's socket passes on to the app.
+      if (ws.data?.preview) previews.wsMessage(ws, m);
     },
-    close(): void {
+    close(ws: ServerWebSocket<WsData>): void {
+      if (ws.data?.preview) return previews.wsClose(ws);
       clients = Math.max(clients - 1, 0);
       if (!clients && timer) {
         clearInterval(timer);
@@ -461,13 +488,14 @@ export function serve(o: ServeOptions): Running {
 
   let port = o.port;
   for (const hostname of o.hosts) {
-    const s = Bun.serve<undefined>({ hostname, port, fetch, websocket, idleTimeout: 60 });
+    const s = Bun.serve<WsData>({ hostname, port, fetch, websocket, idleTimeout: 60 });
     port = s.port ?? port;
     servers.push(s);
   }
   return {
     port,
     stop: () => {
+      previews.stopAll(); // their processes and worktrees go with the server (#582)
       feed.stop();
       if (timer) clearInterval(timer);
       for (const s of servers) s.stop(true);

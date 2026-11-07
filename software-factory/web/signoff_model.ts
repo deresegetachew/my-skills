@@ -176,6 +176,37 @@ export function failedAsk(it: SignoffItem, note: string): string {
   return `It failed. Please make it a task for the builders${link}.${note ? `\n${note}` : ""}`;
 }
 
+/** An item's preview as GET /api/projects/:p/signoff/:id/preview sends it (#582). */
+export interface PreviewStatus {
+  state: "none" | "starting" | "running" | "stopping" | "failed" | "stopped";
+  /** Whether the project says how to run its app (preview.command on its main branch). */
+  configured: boolean;
+  path: string | null;
+  output: string[];
+  error: { code: string; message: string; fix: string } | null;
+  pr?: number | null;
+  commit?: string;
+  reason?: string;
+}
+
+/** The preview's line on the item: what it says, the fix when it failed, whether the page keeps asking (busy) and
+ * whether the link can be opened. */
+export function previewLine(s: PreviewStatus): { text: string; fix: string; busy: boolean; open: boolean } {
+  const what = s.pr ? `pull request #${s.pr}` : `main${s.commit ? ` (${s.commit.slice(0, 7)})` : ""}`;
+  if (s.state === "starting") return { text: `Starting ${what}…`, fix: "", busy: true, open: false };
+  if (s.state === "running") return { text: `Running ${what}.`, fix: "", busy: false, open: Boolean(s.path) };
+  if (s.state === "stopping") return { text: "Stopping…", fix: "", busy: true, open: false };
+  if (s.state === "failed") return { text: s.error?.message ?? "The preview failed.", fix: s.error?.fix ?? "", busy: false, open: false };
+  if (s.state === "stopped") return { text: s.reason || "Stopped.", fix: "", busy: false, open: false };
+  return { text: "Not running.", fix: "", busy: false, open: false };
+}
+
+/** The preview's link: the token goes once in the address; the server keeps it as a cookie for /preview/ only and
+ * sends the browser on without it. */
+export function previewLink(path: string, token: string): string {
+  return `${path}?token=${encodeURIComponent(token)}`;
+}
+
 /** The grey line under a row's title. */
 function subOf(it: SignoffItem, now: Date): string {
   const task = it.task ? `For task ${taskLabel(it.task)} · ` : "";

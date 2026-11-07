@@ -9,8 +9,8 @@ import { itemLabel } from "./chat_model.ts";
 import { PageHead, PlusIcon } from "./page_head.tsx";
 import { type DotState, ListRow, StatusDot, type Talker, Tabs, TalkBox } from "./parts.tsx";
 import { itemThread, talkText } from "./parts_model.ts";
-import { addOutcome, type Dot, filterGroups, groupOf, historyOf, listOf, type Mark, noteOf, outcomeOf, passWhen, type SignoffItem, statusOf, stepsOf, type Tab, taskInputOk, taskLabel, failedAsk,
-  titleOf, whenText } from "./signoff_model.ts";
+import { addOutcome, type Dot, filterGroups, groupOf, historyOf, listOf, type Mark, noteOf, outcomeOf, passWhen, previewLine, previewLink, type PreviewStatus,
+  type SignoffItem, statusOf, stepsOf, type Tab, taskInputOk, taskLabel, failedAsk, titleOf, whenText } from "./signoff_model.ts";
 import type { Post, Say } from "./views.tsx";
 
 interface Problem {
@@ -187,6 +187,60 @@ function AddDialog({ base, post, say, close }: { base: string; post: Post; say: 
   );
 }
 
+// --- Open preview (#582) ----------------------------------------------------------------------------------------------
+
+/** The app as built, run from the item's commit and opened in a new tab through the web UI. The page asks again every
+ * two seconds while the preview starts or stops. */
+function PreviewBox({ path, token, get, post, say, tick }: { path: string; token: string; get: Props["get"]; post: Post; say: Say; tick: number }) {
+  const [s, setS] = useState<PreviewStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    get<PreviewStatus>(path).then(setS).catch(() => setS(null));
+  }, [get, path]);
+  useEffect(load, [load, tick]);
+  const line = s ? previewLine(s) : null;
+  useEffect(() => {
+    if (!line?.busy) return;
+    const t = setTimeout(load, 2000);
+    return () => clearTimeout(t);
+  }, [s, line?.busy, load]);
+  if (!s || (!s.configured && s.state === "none")) return null;
+  const start = async (): Promise<void> => {
+    setBusy(true);
+    const r = await post(path, {});
+    setBusy(false);
+    if (typeof r.code === "string") say({ title: String(r.message ?? "The preview didn't start."), text: String(r.fix ?? ""), tone: "bad" });
+    load();
+  };
+  const stop = async (): Promise<void> => {
+    setBusy(true);
+    await fetch(path, { method: "DELETE", headers: { authorization: `Bearer ${token}` } }).catch(() => null);
+    setBusy(false);
+    load();
+  };
+  const l = line as NonNullable<typeof line>;
+  const live = s.state === "starting" || s.state === "running";
+  return (
+    <section aria-labelledby="preview-h" className="spreview">
+      <h2 id="preview-h">Try it</h2>
+      <p className="muted"><StatusDot state={s.state === "running" ? "working" : s.state === "failed" ? "red" : l.busy ? "waiting" : "idle"} /> {l.text}</p>
+      {l.fix && <p className="hint">{l.fix}</p>}
+      <div className="actions">
+        {l.open && s.path && <a className="btn primary" href={previewLink(s.path, token)} target="_blank" rel="noopener noreferrer">Open the app</a>}
+        {!live && s.state !== "stopping" && <button className="btn" disabled={busy} onClick={() => void start()}>{busy ? "Starting…" : "Open preview"}</button>}
+        {live && <button className="btn plain" disabled={busy} onClick={() => void stop()}>Stop preview</button>}
+      </div>
+      {s.output.length > 0 && (
+        <details open={s.state === "failed"}>
+          <summary>Its output</summary>
+          <pre className="sout">{s.output.join("\n")}</pre>
+        </details>
+      )}
+      <span className="hint">It stops when you record a result, after a while with nothing opened, or with Stop preview.</span>
+    </section>
+  );
+}
+
 // --- an item ------------------------------------------------------------------------------------------------------------
 
 const HEAD: Record<string, string> = {
@@ -208,6 +262,7 @@ function ItemPage(p: Props & { item: SignoffItem; base: string; reload: () => vo
   const [done, setDone] = useState<boolean[]>(() => steps.map(() => false));
   const [extra, setExtra] = useState("");
   const [busy, setBusy] = useState(false);
+  const [tick, setTick] = useState(0);
   const [to, setTo] = useState(p.talkers[0]?.name ?? "");
   const chat = useChat(p.token, p.project.id, to);
   const po = p.talkers.find((t) => t.role === "product-owner");
@@ -232,7 +287,10 @@ function ItemPage(p: Props & { item: SignoffItem; base: string; reload: () => vo
     const r = await p.post(`${p.base}/${encodeURIComponent(item.id)}/${path}`, body);
     setBusy(false);
     const ok = told(r, p.say, doneText);
-    if (ok) p.reload();
+    if (ok) {
+      p.reload();
+      setTick((n) => n + 1); // a result stops the preview: show it
+    }
     return ok;
   };
   const note = noteOf(steps, marks, extra);
@@ -268,6 +326,8 @@ function ItemPage(p: Props & { item: SignoffItem; base: string; reload: () => vo
           </header>
           <TalkBox item={talkItem} talkers={p.talkers} to={to} setTo={setTo} chat={chat} />
         </div>
+
+        <PreviewBox path={`${p.base}/${encodeURIComponent(item.id)}/preview`} token={p.token} get={p.get} post={p.post} say={p.say} tick={tick} />
 
         <div className="scols">
           <section aria-labelledby="plan-h" className="splan">
@@ -321,9 +381,10 @@ function ItemPage(p: Props & { item: SignoffItem; base: string; reload: () => vo
                 <div className="actions">
                   <button className="btn primary" disabled={busy || outcomeOf(marks) === "fail"}
                     onClick={() => void act("result", { outcome: "pass", ...(note ? { note } : {}) }, "Recorded as passed.")}>Passed</button>
-                  <button className="btn" disabled={busy} onClick={() => void failed()}>{po ? "Failed: make it a task" : "Failed"}</button>
+                  <button className="btn" disabled={busy} onClick={() => void failed()}>{po ? "Send back: make it a task" : "Send back"}</button>
                 </div>
-                <span className="hint">{po ? `Failed records your notes and asks ${po.name} to make it a task for the builders.` : "Failed records your notes."}</span>
+                <span className="hint">{po ? `Send back records it as failed with your notes and asks ${po.name} to make it a task for the builders.`
+                  : "Send back records it as failed with your notes."}</span>
               </>
             )}
             {group === "results" && last && (
@@ -402,5 +463,12 @@ export const SIGNOFF_CSS = String.raw`
 .shist li .sdot { margin-top: 6px; }
 .shist li > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .shist .muted { font-size: 12px; color: var(--text-3); }
+.spreview { display: flex; flex-direction: column; gap: 8px; max-width: 700px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+.spreview h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.spreview p { margin: 0; display: flex; gap: 8px; align-items: center; }
+.spreview .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.spreview summary { cursor: pointer; font-size: 13px; color: var(--text-2); }
+.sout { margin: 8px 0 0; max-height: 280px; overflow: auto; padding: 10px 12px; border-radius: 10px; background: var(--bg-subtle);
+  border: 1px solid var(--border); font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 760px) { .smark { padding-left: 0; } .scols { gap: 28px; } }
 `;

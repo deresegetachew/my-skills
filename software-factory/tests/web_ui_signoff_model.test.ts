@@ -219,3 +219,23 @@ test("an add that fails keeps the dialog open with the error and its fix; one th
   expect(bare.error?.message).not.toBe("");
   expect(bare.error?.fix).not.toBe("");
 });
+
+// --- Open preview (#582) ----------------------------------------------------------------------------------------------
+
+test("the preview's line: what it runs on, its state, and whether the page should keep asking", async () => {
+  const { previewLine } = await mod();
+  const base = { configured: true, path: null, output: [], error: null };
+  expect(previewLine({ ...base, state: "none" })).toMatchObject({ text: "Not running.", busy: false, open: false });
+  expect(previewLine({ ...base, state: "starting", pr: 7 })).toMatchObject({ text: "Starting pull request #7…", busy: true });
+  expect(previewLine({ ...base, state: "starting", pr: null, commit: "0123456789abcdef" })).toMatchObject({ text: "Starting main (0123456)…", busy: true });
+  expect(previewLine({ ...base, state: "running", path: "/preview/work/a/", pr: 7 })).toMatchObject({ text: "Running pull request #7.", busy: false, open: true });
+  expect(previewLine({ ...base, state: "stopping" })).toMatchObject({ busy: true, open: false });
+  expect(previewLine({ ...base, state: "stopped", reason: "Stopped: the item was signed off." })).toMatchObject({ text: "Stopped: the item was signed off." });
+  const failed = previewLine({ ...base, state: "failed", error: { code: "preview_start_failed", message: "The app stopped before it answered (exit 3).", fix: "Read its output." } });
+  expect(failed).toMatchObject({ text: "The app stopped before it answered (exit 3).", fix: "Read its output.", busy: false, open: false });
+});
+
+test("the preview's link carries the token once; the server sets its cookie and takes the token out", async () => {
+  const { previewLink } = await mod();
+  expect(previewLink("/preview/work/label-check/", "t0k/en")).toBe("/preview/work/label-check/?token=t0k%2Fen");
+});
