@@ -70,7 +70,8 @@ interface Tool {
   title: string;
   description: string;
   inputSchema: InputSchema;
-  run(board: Board, args: Args): Promise<Out>;
+  /** `numbers`: how the project names tasks, and the ref a card made for it gets (#528). */
+  run(board: Board, args: Args, numbers: Numbers): Promise<Out>;
 }
 
 const ID_MAX = Number.MAX_SAFE_INTEGER;
@@ -343,9 +344,9 @@ export const OWNER_TOOLS: Tool[] = [
       parent: taskId("The parent, such as its epic (optional)."),
       priority: { type: "integer", minimum: 0, maximum: 1000, description: "Lower is claimed first (default 2)." },
     }, ["title", "kind"]),
-    run: async (b, a) => ({
+    run: async (b, a, numbers) => ({
       task: await b.create({ title: str(a, "title"), kind: str(a, "kind") as (typeof CREATE_KINDS)[number], body: optStr(a, "body"),
-        parentId: optNum(a, "parent"), priority: optNum(a, "priority") }),
+        parentId: optNum(a, "parent"), priority: optNum(a, "priority"), ref: numbers.newRef() ?? undefined }),
     }),
   },
   {
@@ -607,7 +608,7 @@ export class McpSession {
     const labels = new Map<number, string>();
     try {
       const args = await this.resolve(tool, checkInput(tool, params.arguments), labels);
-      const raw = JSON.parse(JSON.stringify(await tool.run(this.o.board, args))) as Out;
+      const raw = JSON.parse(JSON.stringify(await tool.run(this.o.board, args, this.numbers))) as Out;
       const out = await present(this.o.board, this.numbers, raw, labels);
       return ok(id, { content: [{ type: "text", text: JSON.stringify(out) }], structuredContent: out });
     } catch (e) {

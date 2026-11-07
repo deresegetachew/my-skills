@@ -8,6 +8,7 @@
 //
 // The board's own API keeps taking board ids: this is the lookup in front of it, for the CLI (bin.ts) and the MCP
 // server (mcp.ts). The mirror keeps the board id in its HTML marker, where nobody reads it.
+import { randomUUID } from "node:crypto";
 import type { Board } from "./board.ts";
 import { refuse } from "./errors.ts";
 import type { Task } from "./types.ts";
@@ -33,6 +34,12 @@ export class Numbers {
     if (!m) return `b${t.id}`;
     const repo = (m[1] as string).toLowerCase();
     return this.repo === null || repo === this.repo ? `#${m[2]}` : `${repo}#${m[2]}`;
+  }
+
+  /** The ref for a task made on the board for the project (#528): `factory:<owner>/<repo>/<uuid>`, as the factory's task
+   *  tracker files them, so the project's `factory next` and the web UI count it as theirs. Null when no repo is known. */
+  newRef(): string | null {
+    return this.repo ? `factory:${this.repo}/${randomUUID()}` : null;
   }
 
   /** Whether `text` reads as a task's number. */
