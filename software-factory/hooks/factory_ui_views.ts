@@ -24,6 +24,7 @@ import { CI_ACTIONS, type CiActionName, ciActionOf, type CiSettingsSeen, ciVerdi
   waitingPulls } from "./factory_ci_view.ts";
 import { prText, taskStateText, taskText } from "./factory_match.ts";
 import { run } from "./factory_lib.ts";
+import { type Author, authorOf, truthOf } from "./factory_ui_pr.ts";
 import { type ActionResult, envFor, factoryScript, type Obj, type Problem, readJson, resultOf, spawn, stateDirOf,
   type UiProject } from "./factory_ui_data.ts";
 
@@ -133,11 +134,17 @@ export interface PullView {
   branch: string;
   draft: boolean;
   agent: string | null;
+  /** Who opened it (#453): the agent from its label or branch, the product owner, the dev manager or a person. */
+  author: Author;
+  /** Its head commit, when the snapshot has it. */
+  head: string | null;
   task: string | null;
   checks: { state: string; failing: string[] };
   review: { state: "approved" | "changes-asked" | "watching" | "none"; text: string; claim: string | null };
   protected: boolean | null;
   next: { action: string; text: string };
+  /** It waits for the owner (#453): only a person merges it, or the product owner opened it for the owner. */
+  needsYou: boolean;
   rework: string | null;
   cites: string[];
   find: string;
@@ -211,6 +218,11 @@ export interface Views {
 function cacheOf(p: UiProject): Obj | null {
   const c = readJson(join(stateDirOf(p), "snapshot.json"));
   return typeof c === "object" && c !== null && !Array.isArray(c) ? (c as Obj) : null;
+}
+
+/** The snapshot's row for pull request `n` (its head and checks keep its page, #453), or null. */
+export function pullRowOf(p: UiProject, n: string): Obj | null {
+  return list(cacheOf(p)?.pulls).find((x) => String(x.number) === n) ?? null;
 }
 
 const repos = new Map<string, string>();
@@ -305,16 +317,18 @@ function reviewOf(p: Obj): PullView["review"] {
   return { state: "none", text: claim ? `being reviewed by ${claim}` : "not reviewed yet", claim };
 }
 
-function pullsView(cache: Obj): PullsView {
+function pullsView(p: UiProject, cache: Obj): PullsView {
   const problems = missingOf(cache, /^pulls_/);
   const pulls = list(cache.pulls).filter((x) => typeof x.number === "number").map((x): PullView => {
     const branch = str(x.branch);
+    const author = authorOf(p.config, { branch, agent: str(x.agent) || null });
+    const truth = truthOf({ action: str(x.next) || "none", text: str(x.nextText) || str(x.next) || "none" }, author);
     return { number: num(x.number), title: str(x.title), url: str(x.url) || null, branch, draft: x.draft === true,
-      agent: str(x.agent) || null, task: branchTask(branch), checks: { state: str(x.ci) || "unknown",
+      agent: str(x.agent) || null, author, head: str(x.head) || null, task: branchTask(branch), checks: { state: str(x.ci) || "unknown",
         failing: list(x.notGreen).filter((j) => str(j.state) === "red").map((j) => str(j.name)) },
       review: reviewOf(x), protected: typeof x.protected === "boolean" ? x.protected : null,
-      next: { action: str(x.next) || "none", text: str(x.nextText) || str(x.next) || "none" }, rework: str(x.rework) || null,
-      cites: strings(x.cites), find: prText(x) };
+      ...truth, rework: str(x.rework) || null,
+      cites: strings(x.cites), find: prText({ ...x, agent: str(x.agent) || author.name || "" }) };
   });
   return { pulls, problems };
 }
@@ -425,7 +439,7 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now(), boar
   const cache = cacheOf(p);
   const c = cache ?? {};
   const repo = repoOf(p, obj(c.ci));
-  const pulls = pullsView(c);
+  const pulls = pullsView(p, c);
   const at = Date.parse(str(c.generatedAt));
   const limit = list(c.missing).filter((m) => str(m.code) === "github_limit").map((m) => ({ code: str(m.code), message: str(m.message), fix: str(m.fix) }));
   const { origin, part, problem } = tasksFrom(p, board, obj(c.tasks));

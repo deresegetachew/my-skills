@@ -78,11 +78,17 @@ export interface PullRow {
   branch: string;
   draft: boolean;
   agent: string | null;
+  /** Who opened it (#453): an agent, the product owner, the dev manager or a person. */
+  author?: { name: string | null; role: string; text: string };
+  /** Its head commit, when the snapshot has it. */
+  head?: string | null;
   task: string | null;
   checks: { state: string; failing: string[] };
   review: { state: "approved" | "changes-asked" | "watching" | "none"; text: string; claim: string | null };
   protected: boolean | null;
   next: { action: string; text: string };
+  /** It waits for the owner (#453); Home's "Needs you" reads it. */
+  needsYou?: boolean;
   rework: string | null;
   cites?: string[]; // the decisions and PRD stories its body cites
   find: string;

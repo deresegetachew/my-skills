@@ -267,16 +267,16 @@ function PullCard({ pr, open, docs }: { pr: PullRow; open: ViewProps["open"]; do
     <li className="card pr">
       <div className="prhead">
         <span className="vid"><Ext href={pr.url}>#{pr.number}</Ext></span>
-        <span className="vtitle"><Cited text={pr.title} docs={docs} open={open} /></span>
+        <span className="vtitle"><button className="link" onClick={() => open(`pr:${pr.number}`)} aria-label={`Open #${pr.number}: ${pr.title}`}>{pr.title}</button></span>
         {pr.draft && <span className="tag quiet">draft</span>}
       </div>
       <dl className="facts">
         <div><dt>Checks</dt><dd><Dot tone={checksTone(pr.checks.state)} />{checksText(pr.checks)}</dd></div>
         <div><dt>Review</dt><dd><Dot tone={reviewTone(pr.review.state)} />{pr.review.text}{pr.review.claim && pr.review.state !== "none" ? ` · ${pr.review.claim} holds it` : ""}</dd></div>
         <div><dt>Protected files</dt><dd><Dot tone={pr.protected ? "warn" : pr.protected === false ? "good" : "quiet"} />{protectedText(pr.protected)}</dd></div>
-        <div><dt>Agent</dt><dd>{pr.agent ? <AgentLink name={pr.agent} open={open} /> : <span className="empty">a person</span>}{pr.rework && <span className="tag">{pr.rework} reworking</span>}</dd></div>
+        <div><dt>Opened by</dt><dd>{pr.author?.name ? <AgentLink name={pr.author.name} open={open} /> : <span className="empty">{pr.author?.text ?? pr.agent ?? "a person"}</span>}{pr.rework && <span className="tag">{pr.rework} reworking</span>}</dd></div>
         <div><dt>Task</dt><dd>{pr.task ? <button className="link" onClick={() => open("view:tasks", `#${pr.task}`)}>#{pr.task}</button> : <span className="empty">—</span>}</dd></div>
-        <div><dt>Next</dt><dd>{pr.next.text}</dd></div>
+        <div><dt>Next</dt><dd>{pr.needsYou && <Dot tone="bad" />}{pr.next.text}</dd></div>
       </dl>
       <p className="vsub"><span className="mono">{pr.branch}</span><Cites cites={pr.cites} title={pr.title} docs={docs} open={open} /></p>
     </li>

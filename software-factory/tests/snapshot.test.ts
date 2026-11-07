@@ -288,6 +288,13 @@ test("a pull row carries what the web UI's pull requests channel shows: review, 
     nextText: "owner merges (protected)", claim: null });
 }, T);
 
+test("a pull row carries its head commit, which keeps the web UI's pull request page until it changes (#453)", () => {
+  const p = setup(scenario());
+  const j = snapshot(p);
+  const row = (j.pulls as Row[]).find((r) => r.number === 12);
+  expect(row, JSON.stringify(j.pulls)).toMatchObject({ head: SHA });
+}, T);
+
 test("a pull row carries the decisions and PRD stories its body cites, [] when it cites none (#438, #425)", () => {
   const base = scenario();
   const pulls = base.pulls as Row[];

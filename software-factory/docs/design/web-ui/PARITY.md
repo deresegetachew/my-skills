@@ -86,8 +86,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `prs` | built | The pull requests channel | #452 |
-| `owner merge` | planned | PR (PR.dc.html): merge pinned to the head, after a confirm; Inbox | #452 |
+| `prs` | built | The pull requests channel, and each pull request's page (PR.dc.html) | #453 |
+| `owner merge` | built | PR (PR.dc.html): Merge, squashed and pinned to the head, after a confirm with its preconditions | #453 |
 | `owner label` | planned | Task (Task.dc.html), PR (PR.dc.html) | #452 |
 | `reviews` | agents only | PR (PR.dc.html): checks and reviews | |
 | `rereview plan` | agents only | PR (PR.dc.html): reviews | |
