@@ -798,3 +798,14 @@ test("login changes at the same moment don't trip over each other", async () => 
   }
   expect(ls(w)).toEqual([]);
 });
+
+test("login add on several boards of one server at once: all succeed (shared catalog rows are written only when needed)", async () => {
+  for (let round = 0; round < 3; round++) {
+    const hubs = await Promise.all([1, 2, 3, 4, 5, 6].map(() => hub()));
+    const runs = hubs.flatMap((w) => [["login", "add", "laptop", "--valid-for", "60"], ["login", "add", "desktop"]]
+      .map((args) => Bun.spawn([process.execPath, "--no-env-file", BIN, ...args], { env: w.env, stdout: "pipe", stderr: "pipe" })));
+    for (const p of runs) expect(await p.exited, await new Response(p.stderr).text()).toBe(0);
+    const removes = hubs.map((w) => Bun.spawn([process.execPath, "--no-env-file", BIN, "login", "remove", "laptop"], { env: w.env, stdout: "pipe", stderr: "pipe" }));
+    for (const p of removes) expect(await p.exited, await new Response(p.stderr).text()).toBe(0);
+  }
+});
