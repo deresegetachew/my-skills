@@ -830,7 +830,13 @@ export function mergeAllow(root: string): string[] {
   writeFileSync(path, merged);
   if (pin && pin.files[SETTINGS_REL] === sha256Bytes(data)) {
     pin.files[SETTINGS_REL] = sha256Bytes(merged);
-    writeFileSync(join(root, PIN_PATH), pyDumps(pin, { indent: 2, sortKeys: true }) + "\n");
+    try {
+      writeFileSync(join(root, PIN_PATH), pyDumps(pin, { indent: 2, sortKeys: true }) + "\n");
+    } catch (e) {
+      writeFileSync(path, data); // nothing half done: the settings go back to the bytes the pin still names
+      throw new FactoryError("pin_write_failed", `${PIN_PATH} couldn't be written (${errText(e)}), so ${SETTINGS_REL} was put back as it was.`,
+        `Make ${PIN_PATH} writable, then run it again (or run \`factory update\`, which adds the allow rules too).`);
+    }
   }
   return [...new Set(extras)].filter((e) => !had.includes(e));
 }

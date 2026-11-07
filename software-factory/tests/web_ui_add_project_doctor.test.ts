@@ -48,7 +48,8 @@ case "$1 $2" in
     else echo '[]'; fi
     exit 0 ;;
   "api repos/{owner}/{repo}")
-    echo '{"owner":{"login":"acme","type":"User"},"permissions":{"admin":false,"push":true}}'; exit 0 ;;
+    admin=false; [ -f "$FAKE_ADMIN" ] && admin=true
+    echo '{"owner":{"login":"acme","type":"User"},"permissions":{"admin":'"$admin"',"push":true}}'; exit 0 ;;
 esac
 exec "$FAKE_GH_API" "$@"
 `;
@@ -70,6 +71,7 @@ async function setup(): Promise<Setup> {
   const rulesOk = join(p.root, "rules-ok");
   p.env.PATH = `${bin}:${p.env.PATH ?? ""}`;
   Object.assign(p.env, { FAKE_GH_API: join(api, "gh"), FAKE_REMOTES: join(p.root, "remotes"), FAKE_RULES_OK: rulesOk,
+    FAKE_ADMIN: join(p.root, "admin"),
     FACTORY_SETUP_HEARTBEAT: "off", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t",
     GIT_COMMITTER_EMAIL: "t@example.com" });
   git(p.d, "remote", "add", "origin", "https://github.com/acme/work.git");
@@ -159,6 +161,19 @@ test("what only the owner can set on GitHub is a to-do with its fix on the last 
   expect(String(todos[0]?.what)).toContain("main requires");
   expect(String(todos[0]?.fix)).toContain("Rulesets");
   expect(String(doctorStep.output)).toContain("To do");
+}, T);
+
+test("an agents' login with admin rights is a to-do that says plainly it gets round the merge gate", async () => {
+  const s = await setup();
+  writeFileSync(s.rulesOk, "");
+  writeFileSync(join(s.root, "admin"), "");
+  const r = await api(s.ui, "/api/add-project", { method: "POST", body: request(s) });
+  const run = await waitRun(s.ui, String((r.json.run as Row).id));
+  expect(run.state, JSON.stringify(run, null, 1)).toBe("done");
+  const todos = stepOf(run, "doctor").todos as Row[];
+  expect(todos.map((t) => t.what)).toEqual(["gh login has admin rights"]);
+  expect(String(todos[0]?.fix)).toStartWith("This lets the agents get round the merge gate");
+  expect(String(todos[0]?.fix)).toContain("Collaborators");
 }, T);
 
 test("the message board is a task source only on a machine with a board, and writes tasks.source and the transport", async () => {

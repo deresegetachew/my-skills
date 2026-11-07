@@ -274,11 +274,13 @@ function CiTab({ form }: { form: Form }) {
   );
 }
 
-function ReviewTab({ steps, problem, checking }: { steps: { id: string; title: string; detail: string }[]; problem: Problem | null; checking: boolean }) {
+function ReviewTab({ steps, problem, checking, warnings }: { steps: { id: string; title: string; detail: string }[]; problem: Problem | null;
+  checking: boolean; warnings: string[] }) {
   return (
     <div className="ap-section">
       {checking && <p className="ap-hint">Checking…</p>}
       {problem && <div className="ap-problem" role="alert"><StatusDot state="down" /><span><strong>{problem.message}</strong> <span className="ap-hint">{problem.fix}</span></span></div>}
+      {warnings.map((w) => <div key={w} className="ap-problem" role="status"><StatusDot state="waiting" /><span>{w}</span></div>)}
       {steps.length > 0 && (
         <>
           <h2 className="ap-h2">What Create will do</h2>
@@ -339,6 +341,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
   const [stage, setStage] = useState<"source" | "setup">("source");
   const [tab, setTab] = useState(0);
   const [steps, setSteps] = useState<{ id: string; title: string; detail: string }[]>([]);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -359,6 +362,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
     post("/api/add-project/check", requestOf(form)).then((r) => {
       if (gone) return;
       setSteps(r.ok ? (r.steps as typeof steps) : []);
+      setWarnings(r.ok && Array.isArray(r.warnings) ? r.warnings.filter((w): w is string => typeof w === "string") : []);
       setProblem(r.ok ? null : { code: String(r.code ?? ""), message: String(r.message ?? "It can't be added."), fix: String(r.fix ?? "") });
     }).finally(() => { if (!gone) setBusy(false); });
     return () => {
@@ -446,7 +450,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
                 {tab === 1 && <TasksTab form={form} set={setForm} board={info?.board === true} />}
                 {tab === 2 && <TeamTab form={form} set={setForm} />}
                 {tab === 3 && <CiTab form={form} />}
-                {last && <ReviewTab steps={steps} problem={problem} checking={busy && !steps.length} />}
+                {last && <ReviewTab steps={steps} problem={problem} checking={busy && !steps.length} warnings={warnings} />}
                 <div className="ap-foot">
                   <button className="btn" onClick={() => (tab ? setTab(tab - 1) : setStage("source"))}>Back</button>
                   {!last && <button className="btn primary" onClick={() => setTab(tab + 1)}>Next: {WIZARD[tab + 1]}</button>}

@@ -833,6 +833,34 @@ test("check: a reviewer that isn't a GitHub login is refused with ui_add_reviewe
   expect(typeof r.json.fix).toBe("string");
 }, T);
 
+test("check: a command with a line break or a control character, or over 200 characters, is refused with ui_add_command (#540)", async () => {
+  const s = await setup();
+  for (const over of [{ test: "bun test\nrm -rf ~" }, { lint: "bun x tsc\u0007" }, { build: `echo ${"x".repeat(200)}` }]) {
+    const r = await check(s, req(s, over));
+    expect(r.status, JSON.stringify(over)).toBe(400);
+    expect(r.json.code).toBe("ui_add_command");
+    expect(typeof r.json.message).toBe("string");
+    expect(String(r.json.fix).length).toBeGreaterThan(0);
+  }
+  const started = await api(s.ui, "/api/add-project", { method: "POST", body: { confirm: true, ...req(s, { test: "a\nb" }) } });
+  expect(started.status).toBe(400);
+  expect(started.json.code).toBe("ui_add_command");
+  expect(existsSync(join(s.folder, "shop"))).toBe(false);
+  expect((await check(s, req(s, { build: `echo ${"x".repeat(195)}` }))).status, "200 characters are taken").toBe(200);
+}, T);
+
+test("check: a command that is only a runner gets a warning on Review, and a whole command none (#540)", async () => {
+  const s = await setup();
+  const r = await check(s, req(s, { test: "bun", lint: "npx" }));
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const warnings = r.json.warnings as string[];
+  expect(warnings.length).toBe(2);
+  expect(warnings.some((w) => w.includes("test command is only `bun`") && w.includes("Bash(bun*)"))).toBe(true);
+  expect(warnings.some((w) => w.includes("lint command is only `npx`"))).toBe(true);
+  expect(warnings.join("\n")).toContain("almost anything");
+  expect((await check(s, req(s))).json.warnings).toEqual([]);
+}, T);
+
 test("a project with a package.json keeps CI's Node setup, and its steps run the commands from the settings (#540)", async () => {
   const s = await setup();
   const dir = folderRepo(s, "node");

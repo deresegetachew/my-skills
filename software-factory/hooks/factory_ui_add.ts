@@ -77,12 +77,30 @@ export interface AddRequest {
 /** The commands a request gives, in the order factory.json keeps them. */
 export const COMMANDS = ["install", "typecheck", "lint", "test", "build"] as const;
 
+/** The longest command the setup takes: an allow rule is the command itself, so it stays short and readable. */
+export const MAX_COMMAND = 200;
+
+/** Programs that run whatever follows them: a command that is only one of these gets an allow rule that lets an agent
+ * run almost anything (`Bash(bun*)`), so Review warns about it. */
+export const RUNNERS = ["bun", "bunx", "npx", "sh", "bash", "node", "pnpm", "npm", "yarn", "python", "python3"];
+
+/** Review's warnings for a request: each command that is only a runner. */
+export function commandWarnings(req: Pick<AddRequest, (typeof COMMANDS)[number]>): string[] {
+  return COMMANDS.filter((c) => RUNNERS.includes(req[c].trim())).map((c) => `The ${c} command is only \`${req[c].trim()}\`, so its ` +
+    `allow rule (\`Bash(${req[c].trim()}*)\`) lets an unattended agent run almost anything with it. Type the whole command, ` +
+    `for example \`${req[c].trim()} test\`.`);
+}
+
 /** A doctor finding only the owner can clear (GitHub's settings, Claude Code's trust question): the last step lists it
  * as a to-do with its fix instead of failing (#540). */
 export interface Todo {
   what: string;
   fix: string;
 }
+
+/** What an admin login means, said plainly before doctor's fix (#540 review). */
+export const ADMIN_WARNING = "This lets the agents get round the merge gate: with an admin login, an agent can merge its own " +
+  "pull request past main's rules and your review. ";
 
 const OWNER_ONLY = [/^main requires /, /^gh login has admin rights$/, /^Claude Code does not trust /];
 
@@ -230,6 +248,17 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
   if (tasks === "board" && !boardSetUp()) {
     return problem("ui_add_no_board", "This machine has no message board, so tasks can't come from it.",
       "Start one with `factory board up` (or `factory machine join <code>` to join the hub's), then add the project again; or pick GitHub issues.");
+  }
+  for (const c of COMMANDS) {
+    const raw = typeof b[c] === "string" ? (b[c] as string) : "";
+    if (/[\u0000-\u001f\u007f]/.test(raw.trim())) {
+      return problem("ui_add_command", `The ${c} command has a control character or a line break in it.`,
+        `Type the ${c} command on one line, as you would run it in a terminal.`);
+    }
+    if (raw.trim().length > MAX_COMMAND) {
+      return problem("ui_add_command", `The ${c} command is ${raw.trim().length} characters long; at most ${MAX_COMMAND} are taken.`,
+        `Put the long ${c} command in a script in the repo (for example scripts/${c}.sh) and type the command that runs it.`);
+    }
   }
   const reviewer = str(b.reviewer);
   if (reviewer && !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(reviewer)) {
@@ -589,7 +618,8 @@ async function stepHeartbeat(req: AddRequest, step: AddStep, host: AddHost): Pro
 export function doctorFixes(text: string): Todo[] {
   return text.split("\n").filter((l) => l.startsWith("fix   ")).map((l) => {
     const rest = l.slice(6);
-    const at = OWNER_ONLY.some((re) => re.test(rest)) ? rest.indexOf(": ") : -1;
+    const first = rest.indexOf(": ");
+    const at = first >= 0 && OWNER_ONLY.some((re) => re.test(rest.slice(0, first))) ? first : -1;
     return at < 0 ? { what: rest, fix: "" } : { what: rest.slice(0, at), fix: rest.slice(at + 2) };
   });
 }
@@ -612,7 +642,7 @@ async function stepDoctor(req: AddRequest, step: AddStep, host: AddHost): Promis
     throw new StepFailed(problem("ui_add_step_failed", `${step.title} didn't work (${(last || `exit ${r.code}`).slice(0, 200)}).`,
       "Fix what it says (each failed check has its own fix), then press Retry."), out);
   }
-  step.todos = owners;
+  step.todos = owners.map((t) => (t.what === "gh login has admin rights" ? { what: t.what, fix: ADMIN_WARNING + t.fix } : t));
   return { state: "done", output: `${out}\n\nTo do (only you can): ${owners.map((t) => t.what).join("; ")}.` };
 }
 
@@ -749,7 +779,7 @@ export class AddRuns {
     }
     if (rest.length === 1 && rest[0] === "check" && req.method === "POST") {
       const r = await validate(await body(), this.host);
-      return isProblem(r) ? { status: 400, body: { ...r } } : { status: 200, body: { ok: true, steps: plan(r, this.host) } };
+      return isProblem(r) ? { status: 400, body: { ...r } } : { status: 200, body: { ok: true, steps: plan(r, this.host), warnings: commandWarnings(r) } };
     }
     if (rest[0] === "runs" && rest.length === 2 && req.method === "GET") {
       const run = this.get(rest[1] as string);
