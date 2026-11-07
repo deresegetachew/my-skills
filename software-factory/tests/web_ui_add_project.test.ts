@@ -966,3 +966,48 @@ test("the team's pictures are written to .claude/factory/avatars, readable by al
   // the picture is in the setup commit
   expect(git(dest, "show", "--name-only", "--format=", "factory/setup")).toContain(".claude/factory/avatars/kebede.png");
 }, T);
+
+/** A folder repo whose committed avatars path holds a link to a private file outside it (#457 must-fix). */
+function linkedAvatarRepo(s: Setup, name: string, link: "file" | "folder"): { dir: string; secret: string } {
+  const dir = folderRepo(s, name);
+  const outside = join(s.folder, `${name}-outside`);
+  mkdirSync(outside, { recursive: true });
+  const secret = join(outside, link === "file" ? "secret.png" : "menelik.png");
+  writeFileSync(secret, "private\n", { mode: 0o600 });
+  const avatars = join(dir, ".claude", "factory", "avatars");
+  if (link === "file") {
+    mkdirSync(avatars, { recursive: true });
+    symlinkSync(secret, join(avatars, "menelik.png"));
+  } else {
+    mkdirSync(dirname(avatars), { recursive: true });
+    symlinkSync(outside, avatars);
+  }
+  git(dir, "add", "-A");
+  git(dir, "commit", "-q", "-m", "a link");
+  git(dir, "push", "-q", "origin", "main");
+  return { dir, secret };
+}
+
+test("a picture whose file in the repo is a link replaces the link and never writes or chmods what it points to (#457)", async () => {
+  const s = await setup();
+  const { dir, secret } = linkedAvatarRepo(s, "linkfile", "file");
+  const run = await waitRun(s.ui, await start(s, req(s, { source: "folder", repo: "", path: dir, avatars: { menelik: PNG } })));
+  expect(read(secret)).toBe("private\n");
+  expect(sh(["stat", "-c", "%a", secret]).stdout.trim()).toBe("600");
+  expect(run.state, JSON.stringify(run)).toBe("done");
+  const file = join(dir, ".claude", "factory", "avatars", "menelik.png");
+  expect(sh(["stat", "-c", "%F %a", file]).stdout.trim()).toBe("regular file 644");
+  expect(readFileSync(file).equals(Buffer.from(PNG.split(",")[1] as string, "base64"))).toBe(true);
+}, T);
+
+test("a repo whose avatars folder is a link: the pictures are refused with ui_add_avatar_link and nothing is written through it (#457)", async () => {
+  const s = await setup();
+  const { dir, secret } = linkedAvatarRepo(s, "linkdir", "folder");
+  const run = await waitRun(s.ui, await start(s, req(s, { source: "folder", repo: "", path: dir, avatars: { menelik: PNG } })));
+  expect(read(secret)).toBe("private\n");
+  expect(sh(["stat", "-c", "%a", secret]).stdout.trim()).toBe("600");
+  expect(run.state, JSON.stringify(run)).toBe("failed");
+  const answers = step(run, "answers");
+  expect((answers.problem as Row).code).toBe("ui_add_avatar_link");
+  expect(typeof (answers.problem as Row).fix).toBe("string");
+}, T);
