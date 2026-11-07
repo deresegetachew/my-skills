@@ -286,3 +286,25 @@ test("usage.logFolders reads the Claude Code folder of the user that runs the ag
   expect(data.looked.map((l) => l.dir)).toEqual([join(mine, ".claude", "projects"), logs]);
   expect(data.problems).toEqual([]);
 });
+
+test("a board task (b<n>) gets its sessions: from a task/b<n>- branch, or from its first prompt (#604)", () => {
+  const [root, logs] = setup();
+  const dir = join(logs, slugOf(root) + "-agents-menelik");
+  mkdirSync(dir, { recursive: true });
+  const wt = root + "-agents/menelik";
+  // A coding agent on a board task's branch.
+  write(join(dir, "b1.jsonl"), reply("b1", "task/b27-reading-goal", wt) + "\n" + reply("b2", "task/b27-reading-goal", wt) + "\n");
+  // A helper still on HEAD whose first prompt names the board task.
+  const prompt = "/manage-pass pr-41\n\nPR #41 on branch task/b31-docs into main.\nTask issue: b31.\n";
+  write(join(dir, "b3.jsonl"), [JSON.stringify({ type: "user", cwd: wt, message: { role: "user", content: prompt } }),
+    reply("b3", "HEAD", wt)].join("\n") + "\n");
+  write(join(dir, "b4.jsonl"), [JSON.stringify({ type: "user", cwd: wt, message: { role: "user", content: "/next-task issue-b40" } }),
+    reply("b4", "HEAD", wt)].join("\n") + "\n");
+  const p = usage(root, logs, "--json");
+  expect(p.code, p.out).toBe(0);
+  const data = JSON.parse(p.stdout) as Data;
+  expect(data.groups.b27?.replies).toBe(2);
+  expect(data.groups.b31?.replies).toBe(1);
+  expect(data.groups.b40?.replies).toBe(1);
+  expect(data.total.tasks).toEqual(["7", "8", "b27", "b31", "b40"]);
+});
