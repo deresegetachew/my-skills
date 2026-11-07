@@ -21,6 +21,7 @@ import type { DocSection } from "./docs_model.ts";
 import { addMachineAsk, agentArgs, plainProblem } from "./machines_model.ts";
 import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
 import { ARTIFACTS_CSS, ArtifactsPage } from "./artifacts.tsx";
+import { ActivityPage, HealthPage, HomePage, OPS_CSS, type OpsProps, UsagePage } from "./ops.tsx";
 import { MenuIcon } from "./page_head.tsx";
 import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx";
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
@@ -87,6 +88,10 @@ const UNREACHABLE_FIX = "Check that the web UI still runs on the machine that se
 
 const TOKEN_KEY = "factory-ui-token";
 const ADD_HASH = "#/add-project";
+
+/** The pages built from the server's own reads (#455, #451), and the WebSocket messages that make them read again. */
+const OPS_PAGES: Record<string, (p: OpsProps) => ReactNode> = { home: HomePage, activity: ActivityPage, health: HealthPage, usage: UsagePage };
+const OPS_PULSE = ["state", "views", "health", "activity", "owner-queue"];
 
 function storedToken(): string {
   try {
@@ -514,6 +519,7 @@ function App() {
   const [adding, setAdding] = useState(() => location.hash === ADD_HASH); // Add a project (#447)
   const [addRun, setAddRun] = useState<AddRun | null>(null);
   const [listed, setListed] = useState(0); // goes up when the server's project list changes
+  const [pulseBy, setPulseBy] = useState<Record<string, number>>({}); // Home, Activity, Health read again (#455)
   const search = useRef<HTMLInputElement>(null);
 
   const signedOut = useCallback((e: unknown) => {
@@ -562,6 +568,7 @@ function App() {
       };
       ws.onmessage = (e) => {
         const m = JSON.parse(String(e.data)) as { type: string; project?: string } & Live;
+        if (m.project && OPS_PULSE.includes(m.type)) setPulseBy((before) => ({ ...before, [m.project as string]: (before[m.project as string] ?? 0) + 1 }));
         if (m.type === "state" && m.project) {
           const { type: _t, project, ...data } = m;
           setLiveBy((before) => ({ ...before, [project as string]: data }));
@@ -686,7 +693,8 @@ function App() {
   const page = channel || docRoute ? pageOf(route?.channel ?? "") : pageOf(pageRoute ? route?.channel ?? "" : "page:home");
   const signoffId = route?.channel?.startsWith("signoff:") ? route.channel.slice("signoff:".length) : null;
   // the pages that write their own header from their data (#454)
-  const ownHead = !project.problem && !docRoute && !channel && (page === "signoff" || page === "artifacts");
+  const ownHead = !project.problem && !docRoute && !channel && (page === "signoff" || page === "artifacts" || page in OPS_PAGES);
+  const OpsPage = OPS_PAGES[page];
   const live = liveBy[project.id];
   const agentOf = (name: string): Agent | undefined => live?.agents.find((a) => a.name === name);
   const go = (p: string, c: string, f = ""): void => {
@@ -871,6 +879,8 @@ function App() {
             talkers={talkTargets(view.channels.filter((c) => c.kind === "agent"))} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} />
           : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
+          : ownHead && OpsPage ? <OpsPage key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} pulse={pulseBy[project.id] ?? 0}
+            open={(c, f) => go(project.id, addressOf(c), f)} onMenu={() => setMenu(true)} />
           : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
           : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} post={post} />
@@ -891,6 +901,6 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS;
+style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + OPS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

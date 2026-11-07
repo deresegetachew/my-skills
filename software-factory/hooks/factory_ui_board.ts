@@ -29,6 +29,7 @@ import { citesIn } from "./core/domain/cites.ts";
 import { parseEpic } from "./core/domain/epic.ts";
 import { todos } from "./core/domain/task.ts";
 import type { Obj, Problem, UiProject } from "./factory_ui_data.ts";
+import type { ActivityItem, ActivityKind } from "./factory_ui_ops.ts";
 
 /** The actor the web UI reads and writes as. It writes only a card's Release, Block and Reassign, and only for a project
  *  whose tasks.source is board (#502); otherwise those go through GitHub (0007 point 9). */
@@ -171,7 +172,9 @@ export class BoardFeed {
 
   /** `url`: the board's; left out, this machine's (MB_URL, else the settings folder's url file, as `factory board`). */
   constructor(private readonly projects: UiProject[], private readonly o: { url?: string | null; repoOf: (p: UiProject) => string;
-    changed: (p: UiProject) => void; fellBack?: (p: UiProject, wasLive: boolean) => void; log?: (line: string) => void }) {
+    changed: (p: UiProject) => void; fellBack?: (p: UiProject, wasLive: boolean) => void; log?: (line: string) => void;
+    /** An event Activity shows was recorded (#455). */
+    event?: () => void }) {
     // fellBack(p, wasLive): p's tasks come from GitHub again (wasLive), or turned out not to come from the board
     // known at once when there is no board, so a project without one waits for nothing
     this.url = o.url !== undefined ? o.url : maybeBoard() ? undefined : null;
@@ -205,7 +208,10 @@ export class BoardFeed {
       let failed: { e: unknown } | null = null;
       try {
         const all = await board.tasks({ all: true, limit: MOST });
-        listener = await board.listen((_e: BoardEvent) => this.schedule(), {
+        listener = await board.listen((e: BoardEvent) => {
+          this.schedule();
+          if (SHOWN.has(e.kind)) this.o.event?.();
+        }, {
           onError: (e) => {
             if (starting) failed = { e };
             else void this.fail(e);
@@ -292,6 +298,28 @@ export class BoardFeed {
     return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
   }
 
+  /** Activity (#455): the board's events about project `p`'s tasks, newest first, from the last `most` events: claims,
+   *  moves, comments, closes, hand-offs, new tasks and notes. Null while `p`'s tasks aren't read from the board. */
+  async activity(p: UiProject, most = 400): Promise<ActivityItem[] | null> {
+    const board = this.board;
+    if (!board || !this.live(p)) return null;
+    const prefix = prefixOf(this.o.repoOf(p));
+    const ids = new Map<number, string>();
+    for (const t of this.all) {
+      const n = numberOf(t, prefix);
+      if (n !== null) ids.set(t.id, n);
+    }
+    const titles = new Map(this.all.map((t) => [t.id, t.title]));
+    try {
+      const last = await board.lastSeq();
+      const events = await board.events(Math.max(0, last - most), most);
+      return events.map((e) => itemOf(e, ids, titles)).filter((x): x is ActivityItem => x !== null).reverse();
+    } catch (e) {
+      await this.fail(e);
+      return null;
+    }
+  }
+
   stop(): void {
     this.stopped = true;
     if (this.retry) clearTimeout(this.retry);
@@ -368,6 +396,45 @@ export class BoardFeed {
     await listener?.close().catch(() => {});
     await board?.end().catch(() => {});
   }
+}
+
+/** The board's event kinds Activity shows, and the kind of item each is. */
+const KIND: Record<string, ActivityKind> = { "task.claimed": "claim", "task.moved": "move", "task.closed": "close", "task.released": "handoff",
+  "task.assigned": "handoff", "task.swept": "handoff", "task.created": "new", "message.posted": "comment", "context.noted": "note" };
+const SHOWN = new Set(Object.keys(KIND));
+
+function text(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+/** One board event as an Activity item, or null when it isn't about one of the project's tasks (`ids`: board id to the
+ *  task's id on the page) or isn't a kind Activity shows. */
+function itemOf(e: BoardEvent, ids: Map<number, string>, titles: Map<number, string>): ActivityItem | null {
+  const kind = KIND[e.kind];
+  if (!kind) return null;
+  const board = e.subject.startsWith("task:") ? Number(e.subject.slice(5)) : typeof e.payload.task === "number" ? e.payload.task : NaN;
+  const id = ids.get(board);
+  if (id === undefined) return null;
+  const pay = e.payload;
+  const n = /^\d+$/.test(id) ? `#${id}` : id;
+  const why = text(pay.reason) ? `: ${text(pay.reason).slice(0, 200)}` : "";
+  const words: Record<string, () => string> = {
+    "task.claimed": () => `claimed ${n} ${titles.get(board) ?? ""}`.trim(),
+    "task.moved": () => `moved ${n} to ${text(pay.to).replace(/_/g, " ")}${why}`,
+    "task.closed": () => `closed ${n} (${text(pay.outcome) || "done"})${why}`,
+    "task.released": () => `released ${n}${why}`,
+    "task.assigned": () => `handed ${n} to ${text(pay.to) || "nobody"}${why}`,
+    "task.swept": () => `${n} was freed: ${text(pay.holder) || "its holder"} went quiet`,
+    "task.created": () => `filed ${n}: ${text(pay.title) || titles.get(board) || ""}`,
+    "message.posted": () => {
+      const to = Array.isArray(pay.to) ? pay.to.map(text).filter(Boolean).join(", ") : text(pay.to);
+      const verb = pay.kind === "question" ? "asked" : pay.kind === "answer" ? "answered" : "wrote to";
+      return `${verb} ${to || "the team"} on ${n}`;
+    },
+    "context.noted": () => `noted a ${text(pay.kind) || "note"} on ${n}`,
+  };
+  return { id: `board-${e.seq}`, at: e.at.toISOString(), agent: e.actor || null, kind, text: (words[e.kind] as () => string)(), task: id, pr: null,
+    link: "view:tasks", find: n };
 }
 
 function messageOf(m: Message): Obj {

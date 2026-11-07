@@ -122,6 +122,14 @@ test("a failed newest run is red and names the job", () => {
   expect(p.ci.notGreen).toEqual([{ name: "test", state: "red" }]);
 });
 
+test("each pull request says when it was opened, for the web UI's Activity (#455)", () => {
+  const sc = scenario({ 1: run(1), 2: run(2) });
+  sc.pulls[0].created_at = "2026-11-05T09:30:00Z";
+  const [rows] = pullsJson(sc);
+  expect(rows.get(1)?.createdAt).toBe("2026-11-05T09:30:00Z");
+  expect(rows.get(2)?.createdAt).toBeNull(); // GitHub didn't say
+});
+
 test("running and queued and no runs", () => {
   const running = [check("a", "success", "completed", 1), check("b", null, "in_progress", 2), check("c", null, "queued", 3)];
   const queued = [check("a", "success", "completed", 1), check("c", null, "queued", 3)];

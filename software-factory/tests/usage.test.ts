@@ -61,6 +61,17 @@ test("by agent names the subagent types", () => {
   expect(data.groups.main?.replies).toBe(3);
 });
 
+test("by worker names the agent whose folder each session ran in (#455)", () => {
+  const [root, logs] = setup();
+  const p = usage(root, logs, "--json", "--by", "worker");
+  expect(p.code, p.out).toBe(0);
+  const data = JSON.parse(p.stdout) as Data & { by: string };
+  expect(data.by).toBe("worker");
+  expect(Object.keys(data.groups).sort()).toEqual(["(project folder)", "taytu"]);
+  expect(data.groups.taytu?.replies).toBe(1); // m3 in <root>-agents/taytu
+  expect(data.groups["(project folder)"]?.replies).toBe(3); // m1, m2 and the reviewer's r1
+});
+
 test("record appends a row to the usage log", () => {
   const [root, logs] = setup();
   expect(usage(root, logs, "--record", "baseline | before").code).toBe(0);

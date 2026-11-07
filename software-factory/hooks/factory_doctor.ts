@@ -5,7 +5,11 @@
 // `ok`, `fix` (the factory won't work until it's fixed, with the fix) or `note` (worth a look). Exit 1 when any `fix`.
 // Checks that don't apply to the project (Node without a package.json, sops without a .sops.yaml) are left out.
 //
-//   bun --no-env-file --config=/dev/null .claude/hooks/factory_doctor.ts [--sandbox]
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_doctor.ts [--sandbox] [--json]
+//
+// `--json` (#455, the web UI's Health page) prints the same checks as one JSON object instead of the lines:
+// {ok, fixes, checks: [{group, level, what, how}]}, `level` ok, fix or note, `group` the part checked: machine (this
+// machine's tools and services), project, board (the message board), github, ci (CI and its runners). Same exit code.
 //
 // `--sandbox` adds the checks of a sandboxed factory machine (factory_sandbox.ts): run it as the dedicated user that
 // `factory bootstrap` made. It runs a few network probes and one container, so it takes longer.
@@ -38,23 +42,48 @@ export interface Reporter {
   ok(what: string): void;
   fix(what: string, how: string): void;
   note(what: string, how: string): void;
+  /** The part the next checks are about (--json's `group`); the text doesn't show it. */
+  section?(group: Group): void;
 }
 
-/** The doctor's report: one line per check. */
+/** The parts the checks are grouped in (--json, #455). */
+export type Group = "machine" | "project" | "board" | "github" | "ci";
+
+export interface CheckLine {
+  group: Group;
+  level: "ok" | "fix" | "note";
+  what: string;
+  how: string;
+}
+
+/** The doctor's report: one line per check, or with `json` kept to print as one object at the end. */
 export class Report implements Reporter {
   fixes = 0;
+  readonly checks: CheckLine[] = [];
+  private group: Group = "machine";
+
+  constructor(private readonly json = false) {}
+
+  section(group: Group): void {
+    this.group = group;
+  }
+
+  private line(level: CheckLine["level"], what: string, how: string, text: string): void {
+    if (this.json) this.checks.push({ group: this.group, level, what, how });
+    else console.log(text);
+  }
 
   ok(what: string): void {
-    console.log(`ok    ${what}`);
+    this.line("ok", what, "", `ok    ${what}`);
   }
 
   fix(what: string, how: string): void {
     this.fixes += 1;
-    console.log(`fix   ${what}: ${how}`);
+    this.line("fix", what, how, `fix   ${what}: ${how}`);
   }
 
   note(what: string, how: string): void {
-    console.log(`note  ${what}: ${how}`);
+    this.line("note", what, how, `note  ${what}: ${how}`);
   }
 }
 
@@ -117,8 +146,10 @@ export function tools(r: Reporter): void {
     const words = run(["claude", "--version"])[1].split(/\s+/).filter(Boolean);
     r.ok("Claude Code " + (words[0] ?? "(version unknown)"));
   }
+  r.section?.("github");
   if (!which("gh")) r.fix("GitHub CLI", "install gh (https://cli.github.com), then `gh auth login`");
   else ghAccess(r);
+  r.section?.("machine");
 }
 
 /** Why a `gh api` call failed, in a few words, from what gh printed. */
@@ -817,41 +848,62 @@ export async function main(argv: string[]): Promise<number> {
     return 1;
   }
   process.chdir(run(["git", "rev-parse", "--show-toplevel"])[1]);
-  const r = new Report();
+  const json = argv.includes("--json");
+  const r = new Report(json);
+  r.section("machine");
   tools(r);
   let cfg: Config | null;
   try {
     cfg = load();
   } catch (e) {
+    r.section("project");
     r.fix(".claude/factory.json", `can't read it (${errText(e)})`);
+    r.section("machine");
     cfg = null;
   }
   node(r);
   docker(r);
   if (cfg) {
+    r.section("project");
     project(r, cfg);
+    r.section("github");
     originMain(r, cfg);
     mainBranch(r, cfg);
+    r.section("machine");
     factory(r, cfg);
+    r.section("project");
     models(r, cfg);
     permissions(r, cfg);
     testAllowed(r, cfg);
     trust(r, cfg);
+    r.section("ci");
     ci(r, cfg);
     workflows(r);
+    r.section("project");
     testCommand(r, cfg);
     roles(r, cfg);
     manager(r, cfg);
+    r.section("github");
     trustedReviewers(r, cfg);
+    r.section("project");
     await turbo(r, cfg);
+    r.section("board");
     board(r, cfg);
+    r.section("project");
     artifacts(r, cfg);
     release(r);
   }
   if (argv.includes("--sandbox")) {
-    console.log();
-    console.log("Sandbox (#105)");
+    if (!json) {
+      console.log();
+      console.log("Sandbox (#105)");
+    }
+    r.section("machine");
     sandbox(r, cfg);
+  }
+  if (json) {
+    console.log(JSON.stringify({ ok: r.fixes === 0, fixes: r.fixes, checks: r.checks }, null, 1));
+    return r.fixes ? 1 : 0;
   }
   console.log();
   console.log(r.fixes ? `${r.fixes} to fix.` : "All the checks pass.");

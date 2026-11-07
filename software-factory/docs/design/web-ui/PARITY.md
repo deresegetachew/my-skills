@@ -21,7 +21,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 |---|---|---|---|
 | `ui` | terminal only | Starts the web UI itself | |
 | `install-shim` | terminal only | Puts `factory` on the PATH, before there is a UI to open; Welcome (Welcome.dc.html) says how | #457 |
-| `doctor` | planned | Health (Health.dc.html): each check with its fix, run again; Machine check (MachineCheck.dc.html) | #455 |
+| `doctor` | built | Health (Health.dc.html): each check grouped, with its fix, and Check again (`factory doctor --json`); Machine check (MachineCheck.dc.html) is #457 | #455 |
 | `bootstrap machine` | terminal only | Needs sudo; Machine check (MachineCheck.dc.html) shows the one admin step to type | #457 |
 | `bootstrap all` | terminal only | Needs sudo, as bootstrap machine | #457 |
 | `bootstrap uninstall` | terminal only | Needs sudo; removes the sandbox user and its guard | |
@@ -72,13 +72,13 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `status` | planned | Home (Main.dc.html) | #451 |
+| `status` | built | Home (Main.dc.html): needs you, the team, progress by epic, recent activity | #451 |
 | `snapshot` | built | What the UI reads; refresh asks for it again | |
 | `talk` | built | An agent channel's talk box for the dev manager and the product owner: one turn, answer in the chat | |
 | `owner answer` | built | The owner queue channel: answer, after a confirm | |
 | `alerts check` | planned | Inbox (Inbox.dc.html): notify me | #451 |
 | `alerts watch` | planned | Inbox (Inbox.dc.html): notify me | #451 |
-| `messages` | planned | Activity (Activity.dc.html): the feed and open questions | #451 |
+| `messages` | planned | Activity (Activity.dc.html): the feed and open questions (the board's events show who asked whom; the messages themselves are next) | #451 |
 | `issues` | built | The tasks channel; issues setup is in the Project wizard (ProjectWizard.dc.html) | #452 |
 | `next` | planned | Task (Task.dc.html): next in line | #452 |
 
@@ -143,7 +143,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | Command | In the UI | Where | Task |
 |---|---|---|---|
 | `reset-run` | planned | Health (Health.dc.html), Maintenance (Maintenance.dc.html): list, then clean after a confirm | #455 |
-| `usage` | planned | Usage and cost (Usage.dc.html) | #455 |
+| `usage` | built | Usage and cost (Usage.dc.html): tokens per task and per agent against the budget, GitHub calls | #455 |
 | `usage --task` | planned | Usage and cost (Usage.dc.html); Task (Task.dc.html): its budget | #455 |
 | `report` | planned | Usage and cost (Usage.dc.html) | #455 |
 | `lessons` | planned | Maintenance (Maintenance.dc.html); Usage (Usage.dc.html) | #456 |

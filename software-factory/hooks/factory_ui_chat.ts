@@ -350,6 +350,11 @@ export class ChatHub {
     return queue;
   }
 
+  /** The project's owner queue as the Inbox reads it (kept for its cache time), for Home's "Needs you" (#451). */
+  ownerQueue(p: UiProject): Promise<Queue> {
+    return this.queue(p);
+  }
+
   /** One turn of the poll loop for project `p` (only while a page is open). */
   async tick(p: UiProject): Promise<void> {
     if (p.problem) return;
