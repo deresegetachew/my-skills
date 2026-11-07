@@ -127,6 +127,8 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `artifacts.info` | str | `""` | A command that prints JSON {title, updated, version} for the artifact `{url}`, for `factory artifacts status` and `factory doctor`. Empty: they say they can't tell whether a copy is older. |
 | `notes` | str | `".claude/factory/notes"` | The folder of project notes for the shared agents and skills. |
 | `usageLog` | str | `"docs/factory-usage.md"` | Where `factory usage --record` appends its rows (commit it to keep the history). |
+| `usage.logFolders` | list | `[]` | More Claude Code projects folders `factory usage` reads (for example the agents' user's `/home/factory/.claude/projects`), besides yours and the project folder's owner's. |
+| `usage.prices` | dict | `{}` | Prices `factory usage` adds or corrects, in US dollars per million tokens: {"<model id>": {"input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 5}}; cacheWrite defaults to 1.25 x input. |
 | `release.repo` | str | `"deresegetachew/my-skills"` | The GitHub repository whose releases `factory update` installs (owner/name). Default: the factory's own, deresegetachew/my-skills. |
 
 **Commands**

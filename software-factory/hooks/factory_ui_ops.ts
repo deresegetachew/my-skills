@@ -7,8 +7,10 @@
 //                                         Kept in the state folder (ui-health.json); one run is started when there is
 //                                         none, never on a poll: a run costs GitHub calls (about 70 seen in one)
 //   POST /api/projects/:p/health/check    runs `factory doctor --json` now (one at a time per project) and answers with it
-//   GET  /api/projects/:p/usage           tokens per task and per agent against the budget (`factory usage --json`, by
-//                                         task and by worker), and this machine's GitHub calls in the last hour
+//   GET  /api/projects/:p/usage           tokens and cost per task, per agent and per day against the budget (`factory
+//                                         usage --json`, by task and by worker), the problems it reported (no logs found:
+//                                         where it looked), or its own error when it failed (#571), and this machine's
+//                                         GitHub calls in the last hour
 //                                         (`factory usage --github --json`); kept for FACTORY_SNAPSHOT_CACHE_SECONDS
 //   GET  /api/projects/:p/activity        everything that happened, newest first, one line each with who, what, when and
 //                                         the page it opens (#583): the message board's events (claims, moves, comments,
@@ -177,6 +179,10 @@ interface UsageRow {
   percent: number | null;
   /** ok, warn (80% of the budget or more), over (more than the budget), none (no budget to compare). */
   tone: "ok" | "warn" | "over" | "none";
+  /** US dollars at Anthropic's API prices, of the replies whose model has a known price (null: none had one). */
+  cost: number | null;
+  /** Replies of a model without a known price. */
+  unpriced: number;
 }
 
 /** What a budget counts (factory_budget.ts): fresh input (input + cache writes) + output. */
@@ -193,9 +199,35 @@ function usageRows(groups: Obj, budget: number | null, title: (key: string) => s
   return Object.entries(groups).map(([key, g]): UsageRow => {
     const t = obj(obj(g).tokens);
     const used = counted(t);
+    const replies = num(obj(g).replies);
+    const unpriced = num(obj(g).unpriced_replies);
     return { key, title: title(key), used, tokens: { input: num(t.input), cache_write: num(t.cache_write), cache_read: num(t.cache_read), output: num(t.output) },
-      replies: num(obj(g).replies), budget, percent: budget ? Math.round((used / budget) * 100) : null, tone: toneOf(used, budget) };
+      replies, budget, percent: budget ? Math.round((used / budget) * 100) : null, tone: toneOf(used, budget),
+      cost: typeof obj(g).cost_usd === "number" && replies > unpriced ? num(obj(g).cost_usd) : null, unpriced };
   }).sort((a, b) => b.used - a.used || a.key.localeCompare(b.key));
+}
+
+/** Why `factory usage` gave no JSON: its own {code, message, fix} when its last line on stderr is one, else its first
+ * error line (an older factory that doesn't know `--by worker` says so there). */
+function usageFailure(p: UiProject, r: { code: number; stderr: string }): Problem {
+  const lines = r.stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+  try {
+    const own = JSON.parse(lines.at(-1) ?? "") as unknown;
+    const o = obj(own);
+    if (typeof o.code === "string" && typeof o.message === "string") return { code: o.code, message: o.message, fix: str(o.fix) };
+  } catch {
+    // not JSON: say what it printed
+  }
+  const said = lines.find((l) => /error/i.test(l)) ?? lines[0] ?? (r.code === 0 ? "it printed no JSON" : `it ended with exit ${r.code}`);
+  return { code: "ui_usage_unreadable", message: `The token counts can't be read from this machine's Claude Code logs: \`factory usage --json\` said: ${said}`,
+    fix: `Run \`factory usage --json\` in ${p.path} to see the whole error. When it doesn't know an option, that folder runs an older factory: ` +
+      "bring it up to date (Bring this machine up to date on Factory settings, or `factory update`)." };
+}
+
+/** Problems `factory usage --json` reported itself (no logs found, a folder it can't read). */
+function usageProblems(report: Obj | null): Problem[] {
+  return list(report?.problems).filter((x) => typeof x.code === "string" && typeof x.message === "string")
+    .map((x) => ({ code: str(x.code), message: str(x.message), fix: str(x.fix) }));
 }
 
 /** budget.builder from the project's factory.json: a task's budget when its issue has no Budget: line. */
@@ -206,7 +238,7 @@ function builderBudget(p: UiProject): number | null {
 
 /** What the Usage page says isn't measured (yet). */
 export const NOT_MEASURED = [
-  "Money: prices differ per model, so this page counts tokens, not cost.",
+  "Money: cost is at Anthropic's API prices, only for models whose prices the factory knows (add one with usage.prices); a subscription isn't billed per token.",
   "Other machines: each machine reads only its own Claude Code logs, so an agent on another machine isn't counted here.",
   "A task's own Budget: line: reading it costs GitHub calls per task, so every task is compared with budget.builder.",
   "An agent's own budget: budgets are per task; an agent's total is shown without one.",
@@ -468,10 +500,9 @@ export class Ops {
     const tasks = parse(byTask);
     const workers = parse(byWorker);
     const calls = parse(github);
-    if (!tasks || !workers) {
-      problems.push({ code: "ui_usage_unreadable", message: "The token counts can't be read from this machine's Claude Code logs.",
-        fix: `Run the factory's usage report in ${p.path} to see why.` });
-    }
+    if (!tasks) problems.push(usageFailure(p, byTask));
+    else if (!workers) problems.push(usageFailure(p, byWorker));
+    problems.push(...usageProblems(tasks));
     if (!calls) problems.push({ code: "ui_github_calls_unreadable", message: "The GitHub calls of the last hour can't be read.", fix: `Check the state folder ${stateDirOf(p)} is readable.` });
     const budget = builderBudget(p);
     const titles = new Map<string, string>();
@@ -479,10 +510,15 @@ export class Ops {
     for (const t of list(obj(snapshotOf(p).tasks).tasks)) if (!titles.has(str(t.id))) titles.set(str(t.id), str(t.title));
     const taskRows = usageRows(obj(tasks?.groups), budget, (k) => (k === "-" ? "No task" : titles.get(k) ?? ""));
     const agentRows = usageRows(obj(workers?.groups), null, (k) => k);
+    const dayRows = usageRows(obj(tasks?.days), null, (k) => k).sort((a, b) => a.key.localeCompare(b.key));
     const total = obj(tasks?.total);
     const replies = num(total.replies);
+    const unpriced = num(total.unpriced_replies);
     return { since: str(tasks?.since) || null, until: str(tasks?.until) || null, measured: replies > 0,
-      total: { used: counted(obj(total.tokens)), replies, tasks: Array.isArray(total.tasks) ? total.tasks.length : 0 },
+      total: { used: counted(obj(total.tokens)), replies, tasks: Array.isArray(total.tasks) ? total.tasks.length : 0,
+        cost: typeof total.cost_usd === "number" && replies > unpriced ? total.cost_usd : null, unpriced },
+      pricesAsOf: str(tasks?.prices_as_of) || null, days: dayRows,
+      looked: list(tasks?.looked).map((l) => ({ dir: str(l.dir), why: str(l.why), state: str(l.state), folders: Array.isArray(l.folders) ? l.folders.length : 0 })),
       budget: { tokens: budget, source: budget ? "budget.builder in .claude/factory.json" : null, warnPercent: 80 },
       tasks: taskRows, agents: agentRows,
       github: calls ? { total: num(calls.total), since: str(calls.since) || null, agents: obj(calls.agents), commands: obj(calls.commands),

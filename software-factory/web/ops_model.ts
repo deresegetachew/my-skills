@@ -89,16 +89,21 @@ export interface UsageRow {
   budget: number | null;
   percent: number | null;
   tone: "ok" | "warn" | "over" | "none";
+  /** US dollars at the API's prices, of the replies whose model's price is known; null when none had one. */
+  cost?: number | null;
+  unpriced?: number;
 }
 
 export interface UsageData {
   since: string | null;
   until: string | null;
   measured: boolean;
-  total: { used: number; replies: number; tasks: number };
+  total: { used: number; replies: number; tasks: number; cost?: number | null; unpriced?: number };
   budget: { tokens: number | null; source: string | null; warnPercent: number };
   tasks: UsageRow[];
   agents: UsageRow[];
+  days?: UsageRow[];
+  pricesAsOf?: string | null;
   github: { total: number; agents: Record<string, number>; commands: Record<string, number>; account: { used: number; limit: number; reset: string } | null } | null;
   notMeasured: string[];
   problems: Problem[];
@@ -115,7 +120,8 @@ export function tokensText(n: number): string {
 export function usageBar(r: UsageRow, max: number): { width: string; dot: DotState; text: string } {
   const width = `${max > 0 ? Math.max(Math.round((r.used / max) * 100), r.used > 0 ? 1 : 0) : 0}%`;
   const dot: DotState = r.tone === "over" ? "red" : r.tone === "warn" ? "waiting" : "idle";
-  const text = r.budget === null ? tokensText(r.used) : `${tokensText(r.used)} of ${tokensText(r.budget)}`;
+  const tokens = r.budget === null ? tokensText(r.used) : `${tokensText(r.used)} of ${tokensText(r.budget)}`;
+  const text = typeof r.cost === "number" ? `${tokens} · ${costText(r.cost)}` : tokens;
   return { width, dot, text };
 }
 
@@ -129,12 +135,26 @@ export function rangeText(since: string | null, until: string | null): string {
   return `${day(since)} to ${day(until, 86_400_000)}`;
 }
 
+/** Dollars for a cost: "$29.20", "<$0.01" for a little, "-" when nothing had a known price. */
+export function costText(cost: number | null | undefined): string {
+  if (cost === null || cost === undefined) return "-";
+  return cost > 0 && cost < 0.005 ? "<$0.01" : `$${cost.toFixed(2)}`;
+}
+
+/** The line under the cost tile: the prices' date, and how many replies had no known price. */
+function costLine(u: UsageData): string {
+  const unpriced = u.total.unpriced ?? 0;
+  if (unpriced) return `${plural(unpriced, "reply", "replies")} without a known price`;
+  return u.pricesAsOf ? `API prices of ${u.pricesAsOf}` : "at API prices";
+}
+
 /** The tiles above the bars. */
 export function usageTiles(u: UsageData): Array<{ label: string; value: string; line: string }> {
   const over = u.tasks.filter((t) => t.tone === "over").length;
   const warn = u.tasks.filter((t) => t.tone === "warn").length;
   return [
     { label: "Tokens", value: tokensText(u.total.used), line: rangeText(u.since, u.until) },
+    { label: "Cost", value: costText(u.total.cost), line: costLine(u) },
     { label: "Tasks", value: String(u.total.tasks), line: `${plural(u.total.replies, "reply", "replies")} counted` },
     { label: "Budget", value: u.budget.tokens === null ? "None" : tokensText(u.budget.tokens),
       line: u.budget.tokens === null ? "No budget set" : over || warn ? `${over} over, ${warn} near it` : "Every task within it" },

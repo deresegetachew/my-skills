@@ -1,8 +1,8 @@
 // The words of Health, Usage and cost, Activity and Home (#455, #451), from web/ops_model.ts as it is (no React): the
 // head lines, what needs attention, the usage bars against the budget, an event's grey line, and a team member's row.
 import { expect, test } from "bun:test";
-import { type ActivityItem, activityDot, activitySub, attention, type HealthData, healthLine, type HomeData, homeLine, passed, percentOf, rangeText, teamRow,
-  mergePushed, tokensText, type UsageRow, usageBar } from "../web/ops_model.ts";
+import { type ActivityItem, activityDot, activitySub, attention, costText, type HealthData, healthLine, type HomeData, homeLine, passed, percentOf,
+  rangeText, teamRow, mergePushed, tokensText, type UsageData, type UsageRow, usageBar, usageTiles } from "../web/ops_model.ts";
 
 const NOW = Date.parse("2026-11-07T10:00:00Z");
 
@@ -46,6 +46,18 @@ test("usage: a bar's length is the tokens used; its dot turns yellow near the bu
   expect(usageBar(row(300_000, null, "none"), 2_400_000)).toEqual({ width: "13%", dot: "idle", text: "300k" });
   expect(tokensText(950)).toBe("950");
   expect(rangeText("2026-10-30T00:00:00+00:00", "2026-11-07T00:00:00+00:00")).toBe("30 Oct to 6 Nov");
+});
+
+test("usage: a bar with a known cost shows it beside the tokens; the cost tile says what it covers (#571)", () => {
+  expect(usageBar({ ...row(300_000, null, "none"), cost: 29.2 }, 300_000).text).toBe("300k · $29.20");
+  expect(usageBar({ ...row(300_000, null, "none"), cost: null }, 300_000).text).toBe("300k");
+  expect(costText(0.001)).toBe("<$0.01");
+  expect(costText(null)).toBe("-");
+  const data: UsageData = { since: null, until: null, measured: true, total: { used: 1, replies: 3, tasks: 1, cost: 1.5, unpriced: 2 },
+    budget: { tokens: null, source: null, warnPercent: 80 }, tasks: [], agents: [], days: [], pricesAsOf: "2026-10-06", github: null,
+    notMeasured: [], problems: [] };
+  expect(usageTiles(data).find((t) => t.label === "Cost")).toEqual({ label: "Cost", value: "$1.50", line: "2 replies without a known price" });
+  expect(usageTiles({ ...data, total: { ...data.total, unpriced: 0 } }).find((t) => t.label === "Cost")?.line).toBe("API prices of 2026-10-06");
 });
 
 test("activity: an event's grey line is its kind, its task or PR, and when", () => {

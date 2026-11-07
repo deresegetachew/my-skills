@@ -291,14 +291,24 @@ sub-manager only when `precheck` finds an item.
 
 ### Measuring it
 
-`factory usage` reads Claude Code's own session logs on this machine (`~/.claude/projects/`, the project folder
-and every agent worktree, with their subagents) and prints tokens per task: fresh input (what missed the cache),
-cache reads, output and the cache hit rate. Each reply counts once; a session belongs to the task branch it spent
-most replies on.
+`factory usage` reads Claude Code's own session logs on this machine and prints tokens per task: fresh input (what
+missed the cache), cache reads, output, the cache hit rate and the cost. Claude Code keeps a session's log in the home
+folder of the user that runs it, under `.claude/projects/<the session's folder with / and . as ->`; `factory usage`
+reads those of the project folder, every agent's worktree (`<project>-agents/<name>`) and every other worktree of the
+repository, with their subagents, the same from the project folder or a worktree (#571). It looks in your Claude Code
+folder (`~/.claude/projects`, or `$CLAUDE_CONFIG_DIR/projects`), in the project folder owner's when that is another
+user (a sandbox's `factory` user), and in each folder of `usage.logFolders`. When it finds none it says where it
+looked and why (`usage_no_logs`), with the fix. Each reply counts once; a session belongs to the task branch it spent
+most replies on, else to the task its first prompt names (a dev manager's sub-manager: `Task issue: #n`). Cost is at
+Anthropic's API prices, for the models whose prices are known (`usage.prices` adds one); a subscription isn't billed
+per token. `--json` keeps each session too (id, task, agent, role, first and last reply, tokens, cost), to join to a
+task.
 
 ```sh
 factory usage                                # the last 7 days, per task
 factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
+factory usage --by worker                    # per agent: the folder each session ran in
+factory usage --by day                       # per day (UTC)
 factory usage --by role                      # manager (/manage-pass, or the dev manager marker), product-owner (its marker), builder (all others)
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```
@@ -309,8 +319,8 @@ what the task cost.
 
 `--record` appends one row of per-task averages to `docs/factory-usage.md` (`usageLog`). Commit it, so every
 factory change has a before and after row and the next saving can be aimed where the tokens are. Run it on each
-machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size), and use `/usage`
-or the console for money, since prices differ per model.
+machine that runs agents: the logs stay local. Compare like with like (tasks of a similar size); for what was
+actually billed, use `/usage` or the console.
 
 `factory report` adds what GitHub knows, the same on every machine: per task pull request opened in the last 7 days
 (`--since 2026-10-20` or `--since 30d`), the hours from the agent's claim to the PR (issues mode) and from the PR to

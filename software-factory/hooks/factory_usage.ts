@@ -10,7 +10,10 @@
 //                                       builder's from releases before #572)
 //   factory usage --by role             manager (sessions that start with /manage-pass, or end with a `factory-role` line naming
 //                                       the dev manager), product-owner (that line names it) against builder (all others)
-//   factory usage --json                the same as JSON
+//   factory usage --by day              per day (UTC) of each reply
+//   factory usage --json                the same as JSON, with each group's cost, the days, each session (its id, task,
+//                                       where the task came from, agent, role, first and last reply, tokens, cost: the
+//                                       shape a cost per task joins on), the folders looked in and any problem
 //   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it);
 //                                       with a budget (#183) it adds used against budget and the top subagent
 //   factory usage --task 96 --budget    the checkpoint: used, budget, what is left and the percent; a warning from 80%.
@@ -21,20 +24,28 @@
 //   factory usage --record "label"      also append a dated summary row to the usage log (`usageLog` in
 //                                       factory.json, default docs/factory-usage.md), to commit in a PR
 //
-// Reads ~/.claude/projects/<this project's folders>/*.jsonl (the main sessions, including each agent worktree) and
-// their subagents/*.jsonl. Each model reply is counted once (by message id). A session belongs to the task whose
-// branch (`task/<n>-...`) it spent most replies on. Nothing leaves the machine; the log row holds only totals.
+// Reads Claude Code's logs of the project folder, every agent's worktree and every other worktree of the repository
+// (factory_usage_logs.ts says where it looks: yours, the project folder's owner's and `usage.logFolders`), the same
+// from the project folder or an agent's worktree: <log folder>/*.jsonl and their subagents/*.jsonl. Each model reply
+// is counted once (by message id). A session belongs to the task whose branch (`task/<n>-...`) it spent most replies
+// on, else the task its first prompt names (a dev manager's sub-manager: `Task issue: #n`, `on branch task/<n>-`,
+// `/manage-pass issue-<n>`). When no log is found it says where it looked and why (`usage_no_logs`). Nothing leaves the
+// machine; the log row holds only totals.
 //
 // Tokens are reported as Claude reports them: input (not cached), cache writes, cache reads, output. "Fresh input"
-// is input + cache writes: what had to be read without a cache hit. Prices differ per model, so use `/usage` or the
-// console for money; this command is for comparing like with like.
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, sep } from "node:path";
+// is input + cache writes: what had to be read without a cache hit. Cost is in US dollars at Anthropic's API prices,
+// for the models whose prices are known (factory_usage_logs.ts, plus `usage.prices`); replies of other models are
+// counted as unpriced. A subscription isn't billed per token, so the cost is what the same work costs on the API.
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { COUNTED, short, taskBudget, WARN_PERCENT } from "./factory_budget.ts";
 import { type Config, load } from "./factory_config.ts";
 import { die, githubCallsLastHour, pyDumps, pyRepr, runMain, splitLines } from "./factory_lib.ts";
+import { costOf, findLogs, listLogs, logBases, type Looked, type Price, PRICES_AS_OF, pricesFrom, type Problem, problemsOf,
+  PROJECT_FOLDER, type Scope, scopeOf, belongs, workerOf } from "./factory_usage_logs.ts";
 import { limitStatus } from "./factory_views_cache.ts";
+
+export { PROJECT_FOLDER };
 
 const TASK = /^task\/(\d+(?:[.-]\d+)*?)-/;
 export const FIELDS = ["input", "cache_write", "cache_read", "output"] as const;
@@ -43,29 +54,6 @@ type Obj = Record<string, unknown>;
 
 function isObj(v: unknown): v is Obj {
   return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function isDir(p: string): boolean {
-  try {
-    return statSync(p).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-function listDir(p: string): string[] {
-  try {
-    return readdirSync(p);
-  } catch {
-    return [];
-  }
-}
-
-/** Claude Code keeps a project's logs in ~/.claude/projects/<its path with / and . as ->. Agent worktrees live
- * in <root>-agents/<name>, so their folders start with the same prefix. */
-export function projectDirs(root: string, base: string): string[] {
-  const slug = root.replace(/[^A-Za-z0-9]/g, "-");
-  return listDir(base).filter((n) => n.startsWith(slug)).map((n) => join(base, n)).filter(isDir);
 }
 
 interface Reply {
@@ -77,7 +65,9 @@ interface Reply {
   cwd: string;
 }
 
-function jsonLines(path: string): unknown[] {
+/** The lines of a log that are JSON objects; with `only`, only the lines holding that text are parsed (a log's tool
+ * results can be large, and most lines are not replies). */
+function jsonLines(path: string, only = ""): unknown[] {
   let text: string;
   try {
     text = readFileSync(path, "utf8");
@@ -86,6 +76,7 @@ function jsonLines(path: string): unknown[] {
   }
   const out: unknown[] = [];
   for (const line of splitLines(text)) {
+    if (only && !line.includes(only)) continue;
     try {
       out.push(JSON.parse(line));
     } catch {
@@ -95,6 +86,30 @@ function jsonLines(path: string): unknown[] {
   return out;
 }
 
+/** The first user message of a log, as text ("" when there is none). Parses lines only until it is found. */
+function firstPrompt(path: string): string {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return "";
+  }
+  for (const line of splitLines(text)) {
+    if (!line.includes('"user"')) continue;
+    let d: unknown;
+    try {
+      d = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isObj(d) || d.type !== "user") continue;
+    let c: unknown = isObj(d.message) ? d.message.content : undefined;
+    if (Array.isArray(c)) c = c.filter(isObj).map((b) => str(b.text)).join(" ");
+    return typeof c === "string" ? c : "";
+  }
+  return "";
+}
+
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
@@ -102,7 +117,7 @@ function str(v: unknown): string {
 /** (message id, timestamp, branch, model, usage, cwd) for each assistant reply in one log file. */
 export function replies(path: string): Reply[] {
   const out: Reply[] = [];
-  for (const d of jsonLines(path)) {
+  for (const d of jsonLines(path, '"assistant"')) {
     if (!isObj(d) || d.type !== "assistant") continue;
     const m = isObj(d.message) ? d.message : {};
     const u = isObj(m.usage) ? m.usage : {};
@@ -121,16 +136,23 @@ const ROLE_LABEL: Record<string, string> = { "coding-agent": "builder", "dev-man
 
 /** 'manager' when the session's first prompt is the dev manager's `/manage-pass` (how `factory manage-tick` and the
  * manager loop start it), else 'builder': every other session on this project, builders and people alike. */
-export function sessionRole(path: string): string {
-  for (const d of jsonLines(path)) {
-    if (!isObj(d) || d.type !== "user") continue;
-    let c: unknown = isObj(d.message) ? d.message.content : undefined;
-    if (Array.isArray(c)) c = c.filter(isObj).map((b) => str(b.text)).join(" ");
-    const marked = typeof c === "string" ? ROLE.exec(c) : null;
-    if (marked) return ROLE_LABEL[marked[1] as string] ?? (marked[1] as string);
-    return typeof c === "string" && MANAGER_PASS.test(c.replace(/^\s*<command-(?:message|name)>\s*/, "")) ? "manager" : "builder";
+export function sessionRole(prompt: string): string {
+  const marked = ROLE.exec(prompt);
+  if (marked) return ROLE_LABEL[marked[1] as string] ?? (marked[1] as string);
+  return MANAGER_PASS.test(prompt.replace(/^\s*<command-(?:message|name)>\s*/, "")) ? "manager" : "builder";
+}
+
+// A session not on a task branch (a dev manager's sub-manager runs on the manager's) names its task in its first prompt:
+// the item (`/manage-pass issue-31`, `/next-task issue-31`) or the fact sheet (`Task issue: #31.`, `on branch task/31-x`).
+const PROMPT_TASK = [/\/(?:manage-pass|next-task)\s+issue-(\d+)\b/, /\bTask issue: #(\d+)\b/, /\bon branch task\/(\d+(?:[.-]\d+)*?)-/];
+
+/** The task a session's first prompt names, or null. */
+export function promptTask(prompt: string): string | null {
+  for (const re of PROMPT_TASK) {
+    const m = re.exec(prompt);
+    if (m) return (m[1] as string).replace(/-/g, ".");
   }
-  return "builder";
+  return null;
 }
 
 function int(v: unknown): number {
@@ -149,66 +171,112 @@ function when(ts: string): number | null {
   return Number.isNaN(t) ? null : t;
 }
 
+/** One reply counted: the subagent type (or main), the model, its tokens, its day (UTC) and its cost (null: no price). */
+export interface Row {
+  kind: string;
+  model: string;
+  tokens: Tokens;
+  day: string;
+  cost: number | null;
+}
+
 export interface Session {
   task: string;
-  rows: [kind: string, model: string, tokens: Tokens][];
+  /** Where the task came from: the session's branch, its first prompt, or nowhere (task "-"). */
+  taskFrom: "branch" | "prompt" | null;
+  rows: Row[];
   role: string;
-  /** The agent whose folder the session ran in (`<root>-agents/<name>`), or "(project folder)". */
+  /** The agent whose folder the session ran in (`<root>-agents/<name>`), another worktree's folder name, or
+   * "(project folder)". */
   worker: string;
+  /** The first and last reply counted, as logged. */
+  first: string;
+  last: string;
 }
 
-export const PROJECT_FOLDER = "(project folder)";
-
-/** The agent a reply's folder belongs to: <name> for <root>-agents/<name>[/...], else the project folder. */
-function workerOf(root: string, cwd: string): string {
-  const agents = root + "-agents" + sep;
-  return cwd.startsWith(agents) ? cwd.slice(agents.length).split(sep)[0] || PROJECT_FOLDER : PROJECT_FOLDER;
+/** Where the logs were looked for and what was found: the log folders, each Claude Code folder looked in, problems. */
+export interface Found {
+  scope: Scope;
+  folders: string[];
+  looked: Looked[];
+  problems: Problem[];
 }
 
-/** {session: {task, rows: [(kind, model, tokens)], role}} for replies between since and until (ms since the epoch). */
-export function collect(root: string, base: string, since: number, until: number): Map<string, Session> {
+/** This project's log folders (factory_usage_logs.ts): from `cwd`, in `logs` (the hidden --logs) or the usual places,
+ * and each of `usage.logFolders`. `given` are the project folder's paths as given (a symlinked one is an alias). */
+export function findAll(cwd: string, logs: string | null, extra: string[], given: string[] = []): Found {
+  const scope = scopeOf(cwd, given);
+  const looked = logBases(scope, extra, logs).map((b) => findLogs(b, scope));
+  return { scope, folders: [...new Set(looked.flatMap((l) => l.folders))], looked, problems: problemsOf(looked, scope) };
+}
+
+/** The session logs of one log folder: each main log with its subagents' logs, by kind (`main`, or the subagent type). */
+function sessionFiles(d: string, f: string): [string, string][] {
+  const sid = f.slice(0, -6);
+  const files: [string, string][] = [[join(d, f), "main"]];
+  const subDir = join(d, sid, "subagents");
+  for (const s of listLogs(subDir)) {
+    const sub = join(subDir, s);
+    let kind = "subagent";
+    try {
+      const meta: unknown = JSON.parse(readFileSync(sub.slice(0, -6) + ".meta.json", "utf8"));
+      if (isObj(meta) && meta.agentType) kind = String(meta.agentType);
+    } catch {
+      // no meta file: a plain subagent
+    }
+    files.push([sub, kind]);
+  }
+  return files;
+}
+
+interface Building {
+  branches: Map<string, number>;
+  rows: Row[];
+  role: string;
+  prompt: string;
+  worker: string | null;
+  first: [number, string] | null;
+  last: [number, string] | null;
+}
+
+/** {session id: Session} for the replies between since and until (ms since the epoch) in `folders`. */
+export function collect(found: Pick<Found, "scope" | "folders">, since: number, until: number, prices: Record<string, Price> = {}): Map<string, Session> {
+  const { scope } = found;
   const seen = new Set<unknown>();
-  const sessions = new Map<string, { branches: Map<string, number>; rows: Session["rows"]; role: string; worker: string | null }>();
-  for (const d of projectDirs(root, base)) {
-    for (const f of listDir(d).filter((n) => n.endsWith(".jsonl"))) {
-      const main = join(d, f);
+  const sessions = new Map<string, Building>();
+  for (const d of found.folders) {
+    for (const f of listLogs(d)) {
       const sid = f.slice(0, -6);
-      const role = sessionRole(main);
-      const files: [string, string][] = [[main, "main"]];
-      const subDir = join(d, sid, "subagents");
-      for (const s of listDir(subDir).filter((n) => n.endsWith(".jsonl"))) {
-        const sub = join(subDir, s);
-        let kind = "subagent";
-        try {
-          const meta: unknown = JSON.parse(readFileSync(sub.slice(0, -6) + ".meta.json", "utf8"));
-          if (isObj(meta) && meta.agentType) kind = String(meta.agentType);
-        } catch {
-          // no meta file: a plain subagent
-        }
-        files.push([sub, kind]);
-      }
-      for (const [path, kind] of files) {
+      let prompt: string | null = null;
+      for (const [path, kind] of sessionFiles(d, f)) {
         for (const r of replies(path)) {
           const t = when(r.ts);
           if (seen.has(r.id) || t === null || t < since || t >= until) continue;
-          if (r.cwd && !(r.cwd === root || r.cwd.startsWith(root + sep) || r.cwd.startsWith(root + "-agents"))) continue;
+          if (r.cwd && !belongs(r.cwd, scope)) continue;
           seen.add(r.id);
+          if (prompt === null) prompt = firstPrompt(join(d, f));
           let s = sessions.get(sid);
-          if (!s) sessions.set(sid, (s = { branches: new Map(), rows: [], role: "builder", worker: null }));
-          if (s.worker === null && r.cwd && kind === "main") s.worker = workerOf(root, r.cwd);
-          s.role = role;
+          if (!s) sessions.set(sid, (s = { branches: new Map(), rows: [], role: sessionRole(prompt), prompt, worker: null, first: null, last: null }));
+          if (s.worker === null && r.cwd && kind === "main") s.worker = workerOf(r.cwd, scope);
           const m = TASK.exec(r.branch);
           if (m && kind === "main") {
             const k = (m[1] as string).replace(/-/g, ".");
             s.branches.set(k, (s.branches.get(k) ?? 0) + 1);
           }
-          s.rows.push([kind, r.model, tokens(r.usage)]);
+          if (!s.first || t < s.first[0]) s.first = [t, r.ts];
+          if (!s.last || t > s.last[0]) s.last = [t, r.ts];
+          s.rows.push({ kind, model: r.model, tokens: tokens(r.usage), day: new Date(t).toISOString().slice(0, 10), cost: costOf(r.model, r.usage, prices) });
         }
       }
     }
   }
   const out = new Map<string, Session>();
-  for (const [sid, s] of sessions) out.set(sid, { task: mostCommon(s.branches)[0]?.[0] ?? "-", rows: s.rows, role: s.role, worker: s.worker ?? PROJECT_FOLDER });
+  for (const [sid, s] of sessions) {
+    const branch = mostCommon(s.branches)[0]?.[0] ?? null;
+    const fromPrompt = branch === null ? promptTask(s.prompt) : null;
+    out.set(sid, { task: branch ?? fromPrompt ?? "-", taskFrom: branch !== null ? "branch" : fromPrompt !== null ? "prompt" : null,
+      rows: s.rows, role: s.role, worker: s.worker ?? PROJECT_FOLDER, first: s.first?.[1] ?? "", last: s.last?.[1] ?? "" });
+  }
   return out;
 }
 
@@ -229,6 +297,10 @@ export interface Group {
   tokens: Tokens;
   replies: number;
   sessions: Set<string>;
+  /** US dollars of the replies whose model has a known price. */
+  cost: number;
+  /** Replies of a model without a known price (their tokens are counted, their cost isn't). */
+  unpriced: number;
 }
 
 export interface Total {
@@ -236,26 +308,69 @@ export interface Total {
   replies: number;
   tasks: Set<string>;
   models: Map<string, number>;
+  cost: number;
+  unpriced: number;
+}
+
+function group(): Group {
+  return { tokens: zero(), replies: 0, sessions: new Set(), cost: 0, unpriced: 0 };
+}
+
+function count(g: { tokens: Tokens; replies: number; cost: number; unpriced: number }, r: Row): void {
+  add(g.tokens, r.tokens);
+  g.replies += 1;
+  if (r.cost === null) g.unpriced += 1;
+  else g.cost += r.cost;
+}
+
+function keyOf(by: string, s: Session, r: Row): string {
+  switch (by) {
+    case "task": return s.task;
+    case "agent": return r.kind;
+    case "role": return s.role || "builder";
+    case "worker": return s.worker;
+    case "day": return r.day;
+    default: return r.model;
+  }
 }
 
 export function summarise(sessions: Map<string, Session>, by: string): [Map<string, Group>, Total] {
   const groups = new Map<string, Group>();
-  const total: Total = { tokens: zero(), replies: 0, tasks: new Set(), models: new Map() };
+  const total: Total = { tokens: zero(), replies: 0, tasks: new Set(), models: new Map(), cost: 0, unpriced: 0 };
   for (const [sid, s] of sessions) {
-    for (const [kind, model, t] of s.rows) {
-      const key = by === "task" ? s.task : by === "agent" ? kind : by === "role" ? s.role || "builder" : by === "worker" ? s.worker : model;
+    for (const r of s.rows) {
+      const key = keyOf(by, s, r);
       let g = groups.get(key);
-      if (!g) groups.set(key, (g = { tokens: zero(), replies: 0, sessions: new Set() }));
-      add(g.tokens, t);
-      g.replies += 1;
+      if (!g) groups.set(key, (g = group()));
+      count(g, r);
       g.sessions.add(sid);
-      add(total.tokens, t);
-      total.replies += 1;
-      total.models.set(model, (total.models.get(model) ?? 0) + t.input + t.cache_write + t.cache_read + t.output);
+      count(total, r);
+      const t = r.tokens;
+      total.models.set(r.model, (total.models.get(r.model) ?? 0) + t.input + t.cache_write + t.cache_read + t.output);
     }
     if (s.task !== "-") total.tasks.add(s.task);
   }
   return [groups, total];
+}
+
+/** Dollars to the cent for people ("$29.20", "$0.00"); "-" when nothing had a price. */
+export function dollars(cost: number, replies: number, unpriced: number): string {
+  return replies > unpriced || cost > 0 ? `$${cost.toFixed(2)}` : "-";
+}
+
+/** A group as JSON: its tokens, replies, cost (US dollars, rounded to a millionth) and unpriced replies. */
+function groupJson(g: Group | Total): { tokens: Tokens; replies: number; cost_usd: number; unpriced_replies: number } {
+  return { tokens: g.tokens, replies: g.replies, cost_usd: Math.round(g.cost * 1e6) / 1e6, unpriced_replies: g.unpriced };
+}
+
+/** Each session as JSON, oldest first: what a cost per task joins on (its task, and where the task came from). */
+export function sessionsJson(sessions: Map<string, Session>): Array<Record<string, unknown>> {
+  return [...sessions].map(([id, s]) => {
+    const g = group();
+    for (const r of s.rows) count(g, r);
+    return { id, task: s.task, task_from: s.taskFrom, worker: s.worker, role: s.role, first: s.first, last: s.last,
+      models: [...new Set(s.rows.map((r) => r.model))].sort(), subagents: s.rows.filter((r) => r.kind !== "main").length, ...groupJson(g) };
+  }).sort((a, b) => String(a.first).localeCompare(String(b.first)) || String(a.id).localeCompare(String(b.id)));
 }
 
 function fresh(t: Tokens): number {
@@ -345,13 +460,15 @@ function out(line = ""): void {
   process.stdout.write(line + "\n");
 }
 
-export function report(groups: Map<string, Group>, total: Total, by: string, since: number, until: number): void {
+export function report(groups: Map<string, Group>, total: Total, by: string, since: number, until: number, problems: Problem[] = []): void {
   out(`Token use ${ymd(since)} to ${ymd(until)} (from this machine's Claude Code logs), per ${by}.\n`);
-  out(`${by.padEnd(14)} ${"replies".padStart(8)} ${"fresh in".padStart(10)} ${"cache read".padStart(11)} ${"output".padStart(9)} ${"cache hit".padStart(10)}`);
-  for (const [key, g] of byFresh(groups)) {
+  out(`${by.padEnd(14)} ${"replies".padStart(8)} ${"fresh in".padStart(10)} ${"cache read".padStart(11)} ${"output".padStart(9)} ` +
+    `${"cache hit".padStart(10)} ${"cost".padStart(10)}`);
+  const rows = by === "day" ? [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])) : byFresh(groups);
+  for (const [key, g] of rows) {
     const t = g.tokens;
     out(`${key.slice(0, 14).padEnd(14)} ${String(g.replies).padStart(8)} ${k(fresh(t)).padStart(10)} ${k(t.cache_read).padStart(11)} ` +
-      `${k(t.output).padStart(9)} ${pct(hit(t)).padStart(9)}%`);
+      `${k(t.output).padStart(9)} ${pct(hit(t)).padStart(9)}% ${dollars(g.cost, g.replies, g.unpriced).padStart(10)}`);
   }
   const t = total.tokens;
   const n = total.tasks.size;
@@ -362,6 +479,11 @@ export function report(groups: Map<string, Group>, total: Total, by: string, sin
       `output ${k(Math.floor(t.output / n))}.`);
   }
   if (total.models.size) out("By model (all tokens): " + byModel(total));
+  if (total.replies) {
+    out(`Cost at Anthropic's API prices (as of ${PRICES_AS_OF}): ${dollars(total.cost, total.replies, total.unpriced)}` +
+      (total.unpriced ? `; ${total.unpriced} replies of models without a known price are not in it (add one with usage.prices).` : "."));
+  }
+  for (const p of problems) out(`\n${p.message} (${p.code})\nFix: ${p.fix}`);
 }
 
 /** The checkpoint (`--budget`): used, budget, what is left and the percent, and a warning from 80%. */
@@ -426,8 +548,10 @@ function isoformat(ms: number): string {
   return s.slice(0, 19) + frac + "+00:00";
 }
 
+const BY = ["task", "agent", "model", "role", "worker", "day"];
+
 const USAGE = `usage: factory usage [-h] [--since SINCE] [--until UNTIL]
-                     [--by {task,agent,model,role,worker}] [--json] [--record LABEL]
+                     [--by {task,agent,model,role,worker,day}] [--json] [--record LABEL]
                      [--task TASK] [--markdown] [--budget] [--github]
 `;
 
@@ -438,8 +562,9 @@ options:
   -h, --help            show this help message and exit
   --since SINCE         first day (YYYY-MM-DD, UTC); default 7 days ago
   --until UNTIL         day after the last (YYYY-MM-DD, UTC); default tomorrow
-  --by {task,agent,model,role,worker}
-  --json
+  --by {task,agent,model,role,worker,day}
+  --json                also the cost, the days, each session, where it
+                        looked and any problem
   --record LABEL        append a summary row to the usage log
   --task TASK           only the sessions of this task (its id or issue
                         number)
@@ -460,7 +585,7 @@ interface Args {
   markdown: boolean;
   budget: boolean;
   github: boolean;
-  logs: string;
+  logs: string | null;
 }
 
 function argError(message: string): never {
@@ -474,7 +599,7 @@ const TAKES_VALUE = new Set(["--since", "--until", "--by", "--record", "--task",
 /** argparse, by hand: the same options, abbreviations, errors (exit 2) and help. */
 export function parseArgs(argv: string[]): Args {
   const a: Args = { since: null, until: null, by: "task", json: false, record: null, task: null, markdown: false, budget: false, github: false,
-    logs: join(process.env.HOME || homedir(), ".claude", "projects") };
+    logs: null };
   for (let i = 0; i < argv.length; i++) {
     let arg = argv[i] as string;
     let value: string | undefined;
@@ -513,8 +638,8 @@ export function parseArgs(argv: string[]): Args {
         break;
       }
       case "--by":
-        if (!["task", "agent", "model", "role", "worker"].includes(v)) {
-          argError(`argument --by: invalid choice: ${pyRepr(v)} (choose from 'task', 'agent', 'model', 'role', 'worker')`);
+        if (!BY.includes(v)) {
+          argError(`argument --by: invalid choice: ${pyRepr(v)} (choose from ${BY.map((b) => `'${b}'`).join(", ")})`);
         }
         a.by = v;
         break;
@@ -598,9 +723,12 @@ export function main(argv: string[]): number {
   const today = Math.floor(Date.now() / DAY_MS) * DAY_MS;
   const until = a.until ?? today + DAY_MS;
   const since = a.since ?? until - 8 * DAY_MS;
+  const given = [process.env.CLAUDE_PROJECT_DIR ?? "", process.env.PWD ?? "", process.cwd()];
   const cfg = load();
-  const root = process.cwd();
-  let sessions = collect(root, a.logs, since, until);
+  const usageCfg = isObj(cfg.usage) ? cfg.usage : {};
+  const extra = Array.isArray(usageCfg.logFolders) ? usageCfg.logFolders.filter((x): x is string => typeof x === "string" && x.trim() !== "") : [];
+  const found = findAll(process.cwd(), a.logs, extra, given.filter(Boolean));
+  let sessions = collect(found, since, until, pricesFrom(usageCfg.prices));
   if (a.task) {
     const task = a.task.replace(/^#+/, "").replace(/-/g, ".");
     sessions = new Map([...sessions].filter(([, s]) => s.task === task));
@@ -611,11 +739,16 @@ export function main(argv: string[]): number {
   if (a.budget) out(checkpoint(id, total, budget.tokens, budget.source));
   else if (a.markdown) out(markdown(id, groups, total, since, budget.tokens));
   else if (a.json) {
-    const g: Record<string, { tokens: Tokens; replies: number }> = {};
-    for (const [key, x] of groups) g[key] = { tokens: x.tokens, replies: x.replies };
+    const g: Record<string, ReturnType<typeof groupJson>> = {};
+    for (const [key, x] of groups) g[key] = groupJson(x);
+    const days: Record<string, ReturnType<typeof groupJson>> = {};
+    for (const [key, x] of [...summarise(sessions, "day")[0]].sort((p, q) => p[0].localeCompare(q[0]))) days[key] = groupJson(x);
     out(pyDumps({ since: isoformat(since), until: isoformat(until), by: a.by, groups: g,
-      total: { tokens: total.tokens, replies: total.replies, tasks: [...total.tasks].sort() } }, { indent: 2 }));
-  } else report(groups, total, a.by, since, until);
+      total: { ...groupJson(total), tasks: [...total.tasks].sort() }, days, sessions: sessionsJson(sessions),
+      prices_as_of: PRICES_AS_OF, project: found.scope.top,
+      looked: found.looked.map((l) => ({ dir: l.dir, why: l.why, state: l.state, folders: l.folders, ...(l.error ? { error: l.error } : {}) })),
+      problems: found.problems }, { indent: 2 }));
+  } else report(groups, total, a.by, since, until, found.problems);
   if (a.record) {
     const log = typeof cfg.usageLog === "string" && cfg.usageLog ? cfg.usageLog : "docs/factory-usage.md";
     record(log, a.record.replace(/\|/g, "/"), total, since, until);

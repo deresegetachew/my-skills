@@ -275,6 +275,8 @@ export const SETTINGS: Record<string, Setting> = table([
   S("design.references", "str", "design", "The folder of design references. Empty: no design check.", { default: "" }),
   S("notes", "str", "paths", "The folder of project notes for the shared agents and skills."),
   S("usageLog", "str", "paths", "Where `factory usage --record` appends its rows (commit it to keep the history).", { default: "docs/factory-usage.md" }),
+  S("usage.logFolders", "list", "paths", "More Claude Code projects folders `factory usage` reads (for example the agents' user's `/home/factory/.claude/projects`), besides yours and the project folder's owner's.", { default: [] }),
+  S("usage.prices", "dict", "paths", 'Prices `factory usage` adds or corrects, in US dollars per million tokens: {"<model id>": {"input": 4, "output": 20, "cacheRead": 0.2, "cacheWrite": 5}}; cacheWrite defaults to 1.25 x input.', { default: {} }),
   S("release.repo", "str", "paths", "The GitHub repository whose releases `factory update` installs (owner/name). Default: the factory's own, deresegetachew/my-skills."),
   S("styles", "list", "commands", 'Style guides per path: [{"paths": [...], "skills": [...], "check": "..."}].'),
   S("ci.name", "str", "ci", "The self-hosted runner's name (default `<repo>-ci`).", { default: "" }),
@@ -365,6 +367,17 @@ const MORE: Record<string, More> = {
   read_by: "the shared agents and skills", examples: ["factory settings set notes .claude/factory/notes"] },
   usageLog: { long: "`factory usage --record LABEL` appends a row of token numbers per task here. Commit the file " +
     "to keep the history.", read_by: "factory_usage.ts" },
+  "usage.logFolders": { long: "Claude Code keeps each session's log in the home folder of the user that runs it " +
+    "(~/.claude/projects, or $CLAUDE_CONFIG_DIR/projects). `factory usage` and the web UI's Usage and cost page read yours " +
+    "and, when the project folder belongs to another user, that user's; when the agents run as a user whose folder is " +
+    "elsewhere, name it here. `factory usage` says where it looked when it finds no logs (`usage_no_logs`).",
+  read_by: "factory_usage.ts (and the web UI's Usage and cost page through it)",
+  examples: ["factory settings set usage.logFolders '[\"/home/factory/.claude/projects\"]'"] },
+  "usage.prices": { long: "`factory usage` prices each reply at Anthropic's API prices for the models it knows " +
+    "(factory_usage_logs.ts says which, and as of when). A model it doesn't know is counted but not priced; give its " +
+    "prices here, or correct one. A 1-hour cache write is 2 x input; fast mode is priced only where it is known.",
+  read_by: "factory_usage.ts",
+  examples: ["factory settings set usage.prices '{\"claude-sonnet-4-5\": {\"input\": 3, \"output\": 15, \"cacheRead\": 0.3}}'"] },
   "commands.typecheck": { long: "Run by CI and by the Stop check after the agent's turn. Empty: skipped.",
     examples: ["factory settings set commands.typecheck 'pnpm -s typecheck'"] },
   "commands.test": { long: "The full test command, run by CI and by the Stop check when files under `codePaths` " +

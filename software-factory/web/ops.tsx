@@ -275,8 +275,8 @@ export function HealthPage(p: OpsProps) {
 
 export function UsagePage(p: OpsProps) {
   const { data, problem } = useLoad<UsageData>(p.get, `${base(p)}/usage`, 0);
-  const [tab, setTab] = useState<"task" | "agent">("task");
-  const rows = data ? (tab === "task" ? data.tasks : data.agents) : [];
+  const [tab, setTab] = useState<"task" | "agent" | "day">("task");
+  const rows = data ? (tab === "task" ? data.tasks : tab === "agent" ? data.agents : data.days ?? []) : [];
   const max = Math.max(0, ...rows.map((r) => Math.max(r.used, r.budget ?? 0)));
   return (
     <>
@@ -292,8 +292,9 @@ export function UsagePage(p: OpsProps) {
             </div>
             {data.measured && (
               <>
-                <Tabs label="Group by" value={tab} onChange={setTab} tabs={[{ id: "task", label: "By task", count: data.tasks.length }, { id: "agent", label: "By agent", count: data.agents.length }]} />
-                <ul className="ops-bars" aria-label={tab === "task" ? "Tokens by task" : "Tokens by agent"}>
+                <Tabs label="Group by" value={tab} onChange={setTab} tabs={[{ id: "task", label: "By task", count: data.tasks.length },
+                  { id: "agent", label: "By agent", count: data.agents.length }, { id: "day", label: "By day", count: data.days?.length ?? 0 }]} />
+                <ul className="ops-bars" aria-label={tab === "task" ? "Tokens by task" : tab === "agent" ? "Tokens by agent" : "Tokens by day"}>
                   {rows.map((r) => {
                     const b = usageBar(r, max);
                     return (
