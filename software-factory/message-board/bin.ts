@@ -7,6 +7,7 @@ import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, stat
 import { join } from "node:path";
 import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
 import { PROTOCOL_VERSIONS, type Role, ROLES, serveMcp } from "./src/mcp.ts";
+import { Numbers } from "./src/numbers.ts";
 import {
   boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
   masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
@@ -21,7 +22,10 @@ events on Postgres.
   factory board down [--purge]       stop it; --purge also removes its data
   factory board status               whether the board answers, its schema and its counts
   factory board migrate              apply the schema migrations not applied yet (safe to run twice)
-  factory board backup [--out FILE]  a pg_dump from inside the container, mode 600
+  factory board backup [--out FILE]  a pg_dump from inside the container (no owner, no grants), mode 600; its default
+                                     name, backups/board-<date>-<time>-utc.sql, is in UTC
+  factory board restore <file> --yes replace the board's data with a backup's, in one transaction, then migrate it;
+                                     refused without --yes. Machine logins aren't in a backup: machines join again
   factory board sweep [--quiet-minutes N]
                                      release the claims whose time is up and whose holder has been quiet N minutes (30);
                                      on the board's machine, also drop the join codes' logins that expired unredeemed
@@ -29,9 +33,13 @@ events on Postgres.
                                      the tasks not done (--all: every task)
   factory board ready [--for <actor>] [--json]
                                      the ready queue, in claim order; tasks handed to an actor show only with --for
-  factory board show <id> [--json]   one task: its fields, edges, context and thread
+  factory board show <number> [--json]
+                                     one task: its fields, edges, context and thread
   factory board prime <actor> [--json]
                                      an actor's start: what it holds, what is ready, what is blocked, recent events
+
+  A task is named by its number: #3 (or 3) for issue 3 of the project, b17 for a task made on the board. The project's
+  repo is --repo owner/name (tasks, ready, show, prime, sweep, mcp), else GH_REPO or the folder's git remote origin.
   factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]
                                      serve the board to one agent as an MCP server over stdio (JSON-RPC, one message a
                                      line); every write is recorded as <actor>, and no tool can name another sender.
@@ -117,12 +125,43 @@ const print = (s = ""): void => console.log(s);
 const json = (v: unknown): void => console.log(JSON.stringify(v, null, 2));
 const state = (t: Task): string => (t.blocked && t.status === "open" ? "blocked" : t.status);
 
-function taskLine(t: Task): string {
-  return `#${String(t.id).padEnd(5)} ${state(t).padEnd(11)} ${(t.holder ?? t.assignee ?? "").padEnd(12)} ${t.title}`;
+/** How tasks are named here (#515): --repo, else GH_REPO or the folder's git remote origin; with neither, no repo (any
+ * GitHub issue's task is "#n"). A --repo that isn't a repo name is refused. */
+function numbersFor(args: string[]): Numbers {
+  const given = option(args, "--repo");
+  if (given !== undefined) return new Numbers(repoName(given));
+  try {
+    return new Numbers(repoName(undefined));
+  } catch {
+    return new Numbers(null);
+  }
 }
 
-function contextLine(c: ContextEntry): string {
-  return `${c.kind.padEnd(9)} #${c.taskId} ${c.author}: ${c.body}`;
+/** The numbers ("#3", "b17") of the tasks with these board ids: from `known`, else read from the board. */
+async function labelsOf(b: Board, n: Numbers, ids: number[], known: Task[] = []): Promise<Map<number, string>> {
+  const out = new Map(known.map((t) => [t.id, n.label(t)]));
+  for (const id of ids) {
+    if (out.has(id)) continue;
+    try {
+      out.set(id, n.label(await b.get(id)));
+    } catch {
+      out.set(id, `b${id}`); // gone from the board: its board id is all there is
+    }
+  }
+  return out;
+}
+
+/** A task with its number beside its board id, for --json (a program may still want the id). */
+const numbered = (n: Numbers, t: Task): Task & { number: string } => ({ ...t, number: n.label(t) });
+
+const named = (labels: Map<number, string>, id: number): string => labels.get(id) ?? `b${id}`;
+
+function taskLine(t: Task, n: Numbers): string {
+  return `${n.label(t).padEnd(6)} ${state(t).padEnd(11)} ${(t.holder ?? t.assignee ?? "").padEnd(12)} ${t.title}`;
+}
+
+function contextLine(c: ContextEntry, labels: Map<number, string>): string {
+  return `${c.kind.padEnd(9)} ${named(labels, c.taskId)} ${c.author}: ${c.body}`;
 }
 
 function eventLine(e: BoardEvent): string {
@@ -162,13 +201,15 @@ async function up(argv: string[]): Promise<number> {
     undo();
     throw e;
   }
+  // a container that is stopped (not changed, not running) is started by this run: say so, not "up to date" (#515)
+  const wasRunning = !fresh && compose(["ps", "--status", "running", "--quiet", "db"], { timeoutMs: 60_000 }).stdout.trim() !== "";
   const r = compose(["up", "-d", ...(w.changed ? ["--force-recreate"] : [])]);
   if (r.code !== 0) {
     undo();
     fail("compose-failed", `docker compose couldn't start the board's Postgres: ${(r.stderr || r.stdout).trim().slice(-400)}`,
       "Fix what Docker says, then run `factory board up` again. Nothing was changed.");
   }
-  print(w.changed ? `Started the message board (${IMAGE}) from ${dir}.` : `The message board is up to date (${dir}).`);
+  print(w.changed || !wasRunning ? `Started the message board (${IMAGE}) from ${dir}.` : `The message board is up to date (${dir}).`);
   print(`This machine connects on 127.0.0.1:${port}` + (address ? `; other machines on ${address}:${s.tailnetPort}.` : "."));
   if (!address) {
     print("note: Tailscale isn't installed or isn't up here, so the board listens on localhost only: other machines can't " +
@@ -235,13 +276,13 @@ function backup(argv: string[]): number {
   let path = out;
   if (!path) {
     ensureDir(join(dir, "backups"), 0o700);
-    path = join(dir, "backups", `board-${new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)}.sql`);
+    path = join(dir, "backups", `board-${new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)}-utc.sql`);
   }
   const tmp = `${path}.tmp-${process.pid}`;
   const fd = openSync(tmp, "w", 0o600);
   let r: { code: number; stderr: string };
   try {
-    r = compose(["exec", "-T", "db", "pg_dump", "-U", DB_USER, "-d", DB_NAME], { stdout: fd, timeoutMs: 3_600_000 });
+    r = compose(["exec", "-T", "db", "pg_dump", "-U", DB_USER, "-d", DB_NAME, "--no-owner", "--no-privileges"], { stdout: fd, timeoutMs: 3_600_000 });
   } finally {
     closeSync(fd);
   }
@@ -250,7 +291,50 @@ function backup(argv: string[]): number {
     fail("backup-failed", `pg_dump failed: ${r.stderr.trim().slice(-400)}`, "Check that the board runs (`factory board status`), then run this again.");
   }
   renameSync(tmp, path);
-  print(`Wrote a backup of the board to ${path} (${statSync(path).size} bytes, mode 600).`);
+  print(`Wrote a backup of the board to ${path} (${statSync(path).size} bytes, mode 600)` + (out ? "." : "; the time in its name is UTC."));
+  return 0;
+}
+
+const RESTORE_USAGE = "factory board restore <file> --yes";
+
+/** `factory board restore <file> --yes` (#515): the board's data replaced with a backup's, in one transaction inside the
+ * running container (psql --single-transaction: a failure changes nothing), then migrated. Refused without --yes. */
+async function restore(argv: string[]): Promise<number> {
+  const args = [...argv];
+  const yes = flag(args, "--yes");
+  const file = args.shift();
+  leftovers(args, RESTORE_USAGE);
+  const dir = boardDir();
+  if (!file) fail("bad-input", "restore needs the backup file.", `For example: factory board restore ${join(dir, "backups", "board-20261107-101500-utc.sql")} --yes`);
+  if (!existsSync(file) || !statSync(file).isFile()) {
+    fail("no-file", `There is no backup file at ${file}.`, `Check the path: \`factory board backup\` says where it wrote each one (${join(dir, "backups")} unless --out named another).`);
+  }
+  if (!existsSync(join(dir, "compose.yaml"))) {
+    fail("no-board", "There is no board container on this machine to restore into.", "Run it on the machine that runs the board, after `factory board up`.");
+  }
+  if (!yes) {
+    fail("needs-yes", `A restore replaces everything on the board with what ${file} holds: what was written since that backup is lost.`,
+      `Take a backup of the board as it is now if you may want it (factory board backup), then run factory board restore ${file} --yes.`);
+  }
+  dockerReady();
+  const fd = openSync(file, "r");
+  let r: { code: number; stderr: string };
+  try {
+    r = compose(["exec", "-T", "db", "psql", "-U", DB_USER, "-d", DB_NAME, "-q", "-v", "ON_ERROR_STOP=1", "--single-transaction",
+      "-c", "SET lock_timeout = '60s'", "-c", "DROP SCHEMA public CASCADE", "-c", "CREATE SCHEMA public", "-f", "-"], { stdin: fd, timeoutMs: 3_600_000 });
+  } finally {
+    closeSync(fd);
+  }
+  if (r.code !== 0) {
+    fail("restore-failed", `psql couldn't restore ${file}: ${r.stderr.trim().slice(-400) || `exit ${r.code}`}`,
+      "Nothing was changed: the restore runs in one transaction. Check that the board runs (`factory board status`, `factory board up`) and that the file " +
+      "is one `factory board backup` wrote, then run this again.");
+  }
+  print(`Restored the message board from ${file}.`);
+  const applied = await withBoard((b) => b.migrate());
+  print(applied.length ? `Applied ${applied.join(", ")}.` : "The schema is up to date.");
+  print("Machine logins aren't in a backup: each other machine joins again. On this machine run `factory machine remove <name>` and " +
+    "`factory machine add <name> --agent <agent>`; on that machine, `factory machine join <code>`.");
   return 0;
 }
 
@@ -305,12 +389,16 @@ async function migrateVerb(argv: string[]): Promise<number> {
 async function sweep(argv: string[]): Promise<number> {
   const args = [...argv];
   const q = option(args, "--quiet-minutes");
-  leftovers(args, "factory board sweep [--quiet-minutes N]");
+  const n = numbersFor(args);
+  leftovers(args, "factory board sweep [--quiet-minutes N] [--repo owner/name]");
   const quietSeconds = q === undefined ? undefined : wholeNumber(q, "--quiet-minutes", 0, 100_000) * 60;
-  const { swept, logins } = await withBoard(async (b) => ({ swept: await b.sweep({ quietSeconds }), logins: await b.dropExpiredLogins() }));
+  const { swept, labels, logins } = await withBoard(async (b) => {
+    const s = await b.sweep({ quietSeconds });
+    return { swept: s, labels: await labelsOf(b, n, s.map((x) => x.id)), logins: await b.dropExpiredLogins() };
+  });
   const { dropped, warnings } = logins;
   if (!swept.length) print("No stale claims.");
-  for (const s of swept) print(`released #${s.id} (held by ${s.holder})`);
+  for (const s of swept) print(`released ${named(labels, s.id)} (held by ${s.holder})`);
   for (const name of dropped) print(`dropped the login ${name}: its join code expired unredeemed (its sessions were ended)`);
   for (const w of warnings) console.error(`warning: ${w}`);
   return 0;
@@ -320,11 +408,12 @@ async function tasks(argv: string[]): Promise<number> {
   const args = [...argv];
   const all = flag(args, "--all");
   const asJson = flag(args, "--json");
-  leftovers(args, "factory board tasks [--all] [--json]");
+  const n = numbersFor(args);
+  leftovers(args, "factory board tasks [--all] [--json] [--repo owner/name]");
   const list = await withBoard((b) => b.tasks({ all }));
-  if (asJson) json(list);
+  if (asJson) json(list.map((t) => numbered(n, t)));
   else if (!list.length) print(all ? "No tasks on the board." : "No open tasks on the board.");
-  else for (const t of list) print(taskLine(t));
+  else for (const t of list) print(taskLine(t, n));
   return 0;
 }
 
@@ -332,43 +421,57 @@ async function ready(argv: string[]): Promise<number> {
   const args = [...argv];
   const asJson = flag(args, "--json");
   const who = option(args, "--for");
-  leftovers(args, "factory board ready [--for <actor>] [--json]");
+  const n = numbersFor(args);
+  leftovers(args, "factory board ready [--for <actor>] [--json] [--repo owner/name]");
   const list = await withBoard((b) => b.ready({ for: who }));
-  if (asJson) json(list);
+  if (asJson) json(list.map((t) => numbered(n, t)));
   else if (!list.length) print("Nothing is ready.");
-  else for (const t of list) print(taskLine(t));
+  else for (const t of list) print(taskLine(t, n));
   return 0;
 }
 
 async function show(argv: string[]): Promise<number> {
   const args = [...argv];
   const asJson = flag(args, "--json");
+  const n = numbersFor(args);
   const idText = args.shift();
-  leftovers(args, "factory board show <id> [--json]");
-  if (idText === undefined) fail("bad-input", "show needs a task id.", "For example: factory board show 12");
-  const id = wholeNumber(idText.replace(/^#/, ""), "A task id", 1, Number.MAX_SAFE_INTEGER);
+  leftovers(args, "factory board show <number> [--json] [--repo owner/name]");
+  if (idText === undefined) fail("bad-input", "show needs a task's number.", "For example: factory board show 12 (issue 12), or factory board show b3 (a task made on the board)");
   const got = await withBoard(async (b) => {
-    const task = await b.get(id);
-    return { task, edges: await b.edges(id), context: await b.contextFor(id), thread: await b.thread({ task: id }) };
+    const { id, label } = await n.resolve(b, idText);
+    let task: Task;
+    try {
+      task = await b.get(id);
+    } catch (e) {
+      if (e instanceof BoardError && e.code === "not-found") fail("not-found", `There is no task ${label} on the board.`, "Check the number (`factory board tasks` lists them).");
+      throw e;
+    }
+    const edges = await b.edges(id);
+    const context = await b.contextFor(id);
+    const labels = await labelsOf(b, n, [...edges.flatMap((e) => [e.from, e.to]), ...context.map((c) => c.taskId), ...task.blockedBy,
+      ...(task.parentId ? [task.parentId] : [])], [task]);
+    return { task, edges, context, thread: await b.thread({ task: id }), labels };
   });
+  const { labels, ...rest } = got;
   if (asJson) {
-    json(got);
+    json({ ...rest, task: numbered(n, got.task) });
     return 0;
   }
   const t = got.task;
-  print(`#${t.id} ${t.title}`);
+  const id = t.id;
+  print(`${n.label(t)} ${t.title}`);
   print(`status    ${t.status}${t.outcome ? ` (${t.outcome})` : ""}`);
   if (t.holder) print(`holder    ${t.holder}${t.claimUntil ? ` (claim until ${t.claimUntil.toISOString()})` : ""}`);
   if (t.assignee) print(`handed to ${t.assignee}`);
   print(`kind      ${t.kind}, priority ${t.priority}, version ${t.version}`);
   if (t.ref) print(`ref       ${t.ref}`);
-  if (t.parentId) print(`parent    #${t.parentId}`);
-  if (t.blocked) print(`blocked   by ${t.blockedBy.map((x) => `#${x}`).join(", ")}`);
-  for (const e of got.edges) print(e.from === id ? `edge      ${e.kind} #${e.to}` : `edge      #${e.from} ${e.kind} this`);
+  if (t.parentId) print(`parent    ${named(labels, t.parentId)}`);
+  if (t.blocked) print(`blocked   by ${t.blockedBy.map((x) => named(labels, x)).join(", ")}`);
+  for (const e of got.edges) print(e.from === id ? `edge      ${e.kind} ${named(labels, e.to)}` : `edge      ${named(labels, e.from)} ${e.kind} this`);
   if (t.body) print(`\n${t.body}`);
   if (got.context.length) {
     print("\nContext");
-    for (const c of got.context) print(`  ${contextLine(c)}`);
+    for (const c of got.context) print(`  ${contextLine(c, labels)}`);
   }
   if (got.thread.length) {
     print("\nThread");
@@ -380,34 +483,41 @@ async function show(argv: string[]): Promise<number> {
 async function prime(argv: string[]): Promise<number> {
   const args = [...argv];
   const asJson = flag(args, "--json");
+  const n = numbersFor(args);
   const actor = args.shift();
-  leftovers(args, "factory board prime <actor> [--json]");
+  leftovers(args, "factory board prime <actor> [--json] [--repo owner/name]");
   if (!actor) fail("bad-input", "prime needs an actor's name.", "For example: factory board prime haile");
-  const p = await withBoard((b) => b.prime(actor));
+  const { p, labels } = await withBoard(async (b) => {
+    const got = await b.prime(actor);
+    const known = [...got.holding.map((h) => h.task), ...got.ready, ...got.blocked];
+    const ids = [...got.holding.flatMap((h) => h.context.map((c) => c.taskId)), ...got.blocked.flatMap((t) => t.blockedBy)];
+    return { p: got, labels: await labelsOf(b, n, ids, known) };
+  });
   if (asJson) {
-    json(p);
+    json({ ...p, holding: p.holding.map((h) => ({ ...h, task: numbered(n, h.task) })), ready: p.ready.map((t) => numbered(n, t)),
+      blocked: p.blocked.map((t) => numbered(n, t)) });
     return 0;
   }
   print(`Start for ${actor}`);
   print("\nHolding");
   if (!p.holding.length) print("  nothing");
   for (const h of p.holding) {
-    print(`  ${taskLine(h.task)}`);
-    for (const c of h.context) print(`      ${contextLine(c)}`);
+    print(`  ${taskLine(h.task, n)}`);
+    for (const c of h.context) print(`      ${contextLine(c, labels)}`);
   }
   print("\nReady");
   if (!p.ready.length) print("  nothing");
-  for (const t of p.ready) print(`  ${taskLine(t)}`);
+  for (const t of p.ready) print(`  ${taskLine(t, n)}`);
   print("\nBlocked");
   if (!p.blocked.length) print("  nothing");
-  for (const t of p.blocked) print(`  ${taskLine(t)} (by ${t.blockedBy.map((x) => `#${x}`).join(", ")})`);
+  for (const t of p.blocked) print(`  ${taskLine(t, n)} (by ${t.blockedBy.map((x) => named(labels, x)).join(", ")})`);
   print("\nRecent");
   if (!p.recent.length) print("  nothing");
   for (const e of p.recent) print(`  ${eventLine(e)}`);
   return 0;
 }
 
-const MCP_USAGE = "factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]";
+const MCP_USAGE = "factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder] [--repo owner/name]";
 
 const MCP_HELP = `${MCP_USAGE}
 
@@ -425,6 +535,9 @@ recorded as --as, with --session on its events; no tool takes a sender.
                                 board_link     link two tasks (blocks, waits_for, related ...)
                                 board_unlink   remove a link
                                 board_comment  a note on a task's thread
+
+Tasks are named by their number, as people see them: 3 or #3 for issue 3 of the project (its repo: --repo, else
+GH_REPO or the folder's git remote origin), b17 for a task made on the board. Results name tasks the same way.
 
 Add it to your own Claude Code session, from the project's folder:
 
@@ -446,6 +559,7 @@ async function mcp(argv: string[]): Promise<number> {
   const as = option(args, "--as");
   const session = option(args, "--session");
   const roleText = option(args, "--role") ?? "builder";
+  const numbers = numbersFor(args);
   leftovers(args, MCP_USAGE);
   if (!(ROLES as readonly string[]).includes(roleText)) {
     fail("bad-input", `--role must be owner, manager or builder, not ${JSON.stringify(roleText)}.`, `Use --role owner, --role manager or --role builder (the default). Usage: ${MCP_USAGE}`);
@@ -470,7 +584,7 @@ async function mcp(argv: string[]): Promise<number> {
   process.stdout.on("error", () => shutdown(0, gone));
   console.error(`factory board mcp: serving the message board to ${as} (${role}) over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
   try {
-    await serveMcp({ board: b, role, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
+    await serveMcp({ board: b, role, numbers, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
       input: process.stdin,
       // A failed write never resolves: the shutdown under way exits the process.
       write: (line) => new Promise<void>((done) => {
@@ -623,7 +737,7 @@ async function importVerb(argv: string[]): Promise<number> {
 }
 
 const VERBS: Record<string, (args: string[]) => number | Promise<number>> = {
-  up, down, status, migrate: migrateVerb, backup, sweep, tasks, ready, show, prime, import: importVerb, mcp, login,
+  up, down, status, migrate: migrateVerb, backup, restore, sweep, tasks, ready, show, prime, import: importVerb, mcp, login,
 };
 
 async function main(argv: string[]): Promise<number> {

@@ -45,7 +45,8 @@ test("a worktree without the factory is refused with a fix and no traceback", ()
   git(work, "worktree", "add", "-q", "--detach", wt, "HEAD");
   const p = runOnce(work, { ...env, AGENT_DIR: wt });
   expect(p.code, p.out).toBe(1);
-  for (const bad of ["Traceback", "Checking again", "(slot 1)"]) expect(p.out).not.toContain(bad);
+  // "command not found": the EXIT trap ran before keep_stop was defined (#515)
+  for (const bad of ["Traceback", "Checking again", "(slot 1)", "command not found"]) expect(p.out).not.toContain(bad);
   const err = JSON.parse(p.out.split("\n").find((l) => l.startsWith("{")) as string) as Record<string, string>;
   expect(err.code).toBe("no-factory");
   expect(err.message).toContain(".claude/factory.json");

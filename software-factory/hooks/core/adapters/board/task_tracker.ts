@@ -12,9 +12,10 @@
 //   another agent holds can't be released, closed or blocked from here: the board's sweep frees a stale claim. Going to
 //   review ends the claim (in review, held by nobody), so the dev manager on any machine can mark it done. A holder whose
 //   token was lost here (the file, or a claim whose answer timed out) takes the claim back on its next pick.
-// - Heartbeats: a claim lasts 30 minutes (the board's CLAIM_SECONDS); only a tick sends a heartbeat, so a build quiet for
-//   longer may be released by `factory board sweep` once its holder has also been quiet that long. Follow-up: a
-//   periodic heartbeat from the loop.
+// - Heartbeats: a claim lasts 30 minutes (the board's CLAIM_SECONDS; `claimSeconds` sets it). A tick sends one, and
+//   keep() sends one: while a builder's session runs, the loop keeps its claim alive every few minutes (factory_agents.ts
+//   keep, #513), so a long quiet build isn't swept. Once the session is gone, `factory board sweep` frees the claim when
+//   its time has passed and its holder has been quiet that long.
 // - Epics are the project's tasks of kind epic; their tasks are the `- [ ] #n` lines and the board's children.
 import { randomUUID } from "node:crypto";
 import type { Edge, Task as BoardTask } from "../../../../message-board/src/index.ts";
@@ -34,6 +35,8 @@ export interface BoardTrackerOptions {
   tokens: ClaimTokens;
   /** Who writes what isn't a claim (default FACTORY_AGENT, else "factory"). */
   actor?: string;
+  /** How long a claim lasts before it needs a heartbeat (default: the board's, 30 minutes). */
+  claimSeconds?: number;
 }
 
 const WORK = new Set(["task", "bug"]);
@@ -215,7 +218,7 @@ export class BoardTaskTracker implements TaskTracker {
     const body = tickTodo(t.body, index, id);
     if (body === t.body) return;
     const calls = held
-      ? [{ op: "heartbeat", args: [t.id, held.token] }, { op: "update", args: [t.id, { version: t.version + 1, body }] }]
+      ? [{ op: "heartbeat", args: [t.id, held.token, this.ttl()] }, { op: "update", args: [t.id, { version: t.version + 1, body }] }]
       : [{ op: "update", args: [t.id, { version: t.version, body }] }];
     this.o.child.call(held?.agent ?? this.actor, calls);
   }
@@ -248,6 +251,14 @@ export class BoardTaskTracker implements TaskTracker {
     }).sort((a, b) => order(a.id) - order(b.id));
   }
 
+  keep(id: string): boolean {
+    const t = this.view().find(id);
+    const held = t ? this.o.tokens.get(t.id) : null;
+    if (!t || !held) return false;
+    this.o.child.call(held.agent, [{ op: "heartbeat", args: [t.id, held.token, this.ttl()] }]);
+    return true;
+  }
+
   file(task: NewTask): Filed {
     const body = task.group && !task.body.includes(`Milestone: ${task.group}`) ? `${task.body.trimEnd()}\n\nMilestone: ${task.group}` : task.body;
     const ref = `factory:${(this.o.repo || "local").toLowerCase()}/${randomUUID()}`;
@@ -257,6 +268,11 @@ export class BoardTaskTracker implements TaskTracker {
   }
 
   // ---------- helpers ----------
+  /** The claim's time for a claim or a heartbeat: the board's own unless `claimSeconds` sets it. */
+  private ttl(): { ttlSeconds?: number } {
+    return this.o.claimSeconds ? { ttlSeconds: this.o.claimSeconds } : {};
+  }
+
   private view(): View {
     const [all, edges] = this.o.child.call(this.actor, [{ op: "tasks", args: [{ all: true, limit: 100_000 }] }, { op: "edges", args: [] }]) as
       [BoardTask[], Edge[]];
@@ -286,7 +302,7 @@ export class BoardTaskTracker implements TaskTracker {
   private take(t: BoardTask, who: Claimant): BoardTask | null {
     let got: { task: BoardTask; token: string };
     try {
-      got = this.o.child.one(who.agent, "claim", t.id) as { task: BoardTask; token: string };
+      got = this.o.child.one(who.agent, "claim", t.id, this.ttl()) as { task: BoardTask; token: string };
     } catch (e) {
       if (e instanceof CoreError && e.code === "not-ready") return null;
       throw e;

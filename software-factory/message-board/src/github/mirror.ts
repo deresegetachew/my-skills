@@ -15,7 +15,9 @@
 //
 // Its place is a value on the board (`mirror:github:<owner>/<repo>`): the last event it read and the state it last sent
 // for each task. Safe to run twice and after downtime: it reads the events after its place. A GitHub failure keeps the
-// place where it was (with the states it did send), so the next run sends what is left, once.
+// place where it was (with the states it did send), so the next run sends what is left, once. A task's line and an ask
+// or answer are recorded as pending in the place before they are posted, each with a marker of its own, so a pass killed
+// after the post and before it saved finds that comment by its marker on the next run and doesn't post it again (#513).
 import type { Board } from "../board.ts";
 import type { BoardEvent, ImportMessage, Message, Task } from "../types.ts";
 import { commentRef, FACTORY_MAPPING, type GhComment, type GhIssue, type Gh, ghCli, GithubError, type GithubMapping, MIRRORED, pages } from "./import.ts";
@@ -60,6 +62,15 @@ interface Place {
   states: Record<string, string>;
   /** Messages whose comment is being posted: a pass that died after posting one is found by its marker, not posted again. */
   pending: number[];
+  /** Task lines being posted, by board task id, oldest first: the state each sends, its marker's id and when (ISO); found
+   * the same way. Each is kept until a line for the task is posted and saved, so none is posted twice (#515). */
+  lines: Record<string, PendingLine[]>;
+}
+
+interface PendingLine {
+  key: string;
+  line: string;
+  at: string;
 }
 
 /** The board's own moves: the events that change a task's state. */
@@ -70,13 +81,21 @@ const ASK_ID = /<!--\s*factory-owner-ask\s+id=([\w.-]+)/g;
 const ANSWER_ID = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const ANY_MARKER = /<!--\s*(factory-[a-z][a-z-]*|pr-watch)\b/;
 const SINCE_MARGIN_MS = 10 * 60 * 1000;
+/** The most lines kept pending for one task (passes killed one after the other); the oldest go first. */
+const MOST_PENDING = 10;
 
 function placeOf(v: unknown): Place {
   const o = typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
   const states = typeof o.states === "object" && o.states !== null && !Array.isArray(o.states) ? (o.states as Record<string, unknown>) : {};
+  const lines = typeof o.lines === "object" && o.lines !== null && !Array.isArray(o.lines) ? (o.lines as Record<string, unknown>) : {};
+  const isLine = (v: unknown): v is PendingLine => typeof v === "object" && v !== null && typeof (v as PendingLine).key === "string" &&
+    typeof (v as PendingLine).line === "string" && typeof (v as PendingLine).at === "string";
   return { seq: typeof o.seq === "number" && Number.isInteger(o.seq) && o.seq >= 0 ? o.seq : 0,
     pending: Array.isArray(o.pending) ? o.pending.filter((x): x is number => typeof x === "number" && Number.isInteger(x)) : [],
-    states: Object.fromEntries(Object.entries(states).filter((e): e is [string, string] => typeof e[1] === "string")) };
+    states: Object.fromEntries(Object.entries(states).filter((e): e is [string, string] => typeof e[1] === "string")),
+    // a place saved before #515 kept one line per task, not a list
+    lines: Object.fromEntries(Object.entries(lines).map(([k, x]): [string, PendingLine[]] => [k, (Array.isArray(x) ? x : [x]).filter(isLine)])
+      .filter((e) => e[1].length)) };
 }
 
 /** The state a task shows on GitHub: ready, in-progress, in-review, blocked (deferred) or done. */
@@ -111,7 +130,7 @@ class Run {
   private readonly prefix: string;
 
   constructor(private readonly board: Board, private readonly gh: Gh, private readonly o: MirrorOptions, private readonly map: GithubMapping,
-    private readonly states: Record<string, string>) {
+    private readonly states: Record<string, string>, private readonly lines: Record<string, PendingLine[]>, private readonly save: () => Promise<void>) {
     this.prefix = `github:${o.repo}#`;
     this.summary = { repo: o.repo, tasks: { mirrored: 0, unchanged: 0 }, messages: 0, answers: 0, calls: 0, cursor: 0 };
   }
@@ -167,11 +186,35 @@ class Run {
       this.gh.send("PATCH", path, { labels: want.labels, state: want.state,
         ...(state === "done" ? { state_reason: t.outcome === "done" || !t.outcome ? "completed" : "not_planned" } : {}) });
     }
+    const key = this.keyOf(t);
+    const id = String(t.id);
+    const was = this.lines[id] ?? [];
+    // Passes that died after recording a line, before saving their place (#513, #515): the last of their lines that is on
+    // the issue is what GitHub shows. When it is this state's, it is there already: not posted again. Lines recorded but
+    // never posted are skipped, so a state that comes back to the last posted one sends nothing, exactly once per state.
+    const shown = was.length ? this.lastPosted(path, was) : null;
+    if (shown?.key === key) {
+      this.states[id] = key;
+      delete this.lines[id];
+      return;
+    }
     let why = reason;
     if (state === "blocked" && !why) why = (await this.board.contextFor(t.id)).filter((c) => c.taskId === t.id && c.kind === "blocker").at(-1)?.body ?? null;
-    this.gh.send("POST", `${path}/comments`, { body: `<!-- ${MIRROR_MARK} v=1 task=${t.id} state=${state} -->\n${line(t, state, why)}` });
-    this.states[String(t.id)] = this.keyOf(t);
+    const pending: PendingLine = { key, line: crypto.randomUUID().slice(0, 8), at: new Date().toISOString() };
+    this.lines[id] = [...was, pending].slice(-MOST_PENDING);
+    await this.save(); // recorded before the post, so a pass killed after it finds the line on the next run
+    this.gh.send("POST", `${path}/comments`, { body: `<!-- ${MIRROR_MARK} v=1 task=${t.id} state=${state} line=${pending.line} -->\n${line(t, state, why)}` });
+    this.states[id] = key;
+    delete this.lines[id];
     this.summary.tasks.mirrored++;
+  }
+
+  /** The last of the pending lines `ps` that is on issue `path` (one read: its comments since a little before the first
+   * was recorded), or null when none is. */
+  private lastPosted(path: string, ps: PendingLine[]): PendingLine | null {
+    const since = new Date(Math.min(...ps.map((p) => Date.parse(p.at))) - SINCE_MARGIN_MS).toISOString();
+    const bodies = pages<GhComment>(this.gh, `${path}/comments?per_page=100&since=${since}`, (c) => c.id).map((c) => c.body ?? "");
+    return [...ps].reverse().find((p) => bodies.some((b) => b.includes(` line=${p.line} -->`))) ?? null;
   }
 
   /** The first pass for a mirror's place: every task of the repo is taken as it is, and only an open issue whose labels
@@ -289,9 +332,14 @@ async function onePass(board: Board, gh: Gh, o: MirrorOptions, map: GithubMappin
   const kept = await board.value(key);
   const place = placeOf(kept);
   const states = { ...place.states };
+  const lines = { ...place.lines };
   const pending = new Set(place.pending);
-  const run = new Run(board, gh, o, map, states);
+  const placeAt = (seq: number): Place => ({ seq, states, pending: [...pending], lines });
+  const save = async (): Promise<void> => board.setValue(key, placeAt(place.seq));
   const first = kept === null;
+  // a first pass keeps no place until it is done (one that fails seeds again from GitHub's labels), so its lines aren't
+  // recorded as pending
+  const run = new Run(board, gh, o, map, states, lines, first ? async () => {} : save);
 
   const touched = new Map<number, BoardEvent>();
   const posted: number[] = [...place.pending];
@@ -315,9 +363,8 @@ async function onePass(board: Board, gh: Gh, o: MirrorOptions, map: GithubMappin
     after = (page.at(-1) as BoardEvent).seq;
   }
 
-  const placeAt = (seq: number): Place => ({ seq, states, pending: [...pending] });
-  const changed = (): boolean => JSON.stringify(states) !== JSON.stringify(place.states) || JSON.stringify([...pending]) !== JSON.stringify(place.pending);
-  const save = async (): Promise<void> => board.setValue(key, placeAt(place.seq));
+  const changed = (): boolean => JSON.stringify(states) !== JSON.stringify(place.states) || JSON.stringify([...pending]) !== JSON.stringify(place.pending) ||
+    JSON.stringify(lines) !== JSON.stringify(place.lines);
   try {
     if (first) await run.seed();
     for (const [id, e] of touched) await run.task(id, e);

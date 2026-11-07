@@ -112,7 +112,7 @@ async function main(): Promise<void> {
       "run `eval \"$(bun --no-env-file --config=/dev/null .claude/hooks/factory_env.ts)\"` in each command, or use factory-loop.sh.");
   }
 
-  // issues mode: the agent's own issue on GitHub says it's alive (factory_agents.ts)
+  // the agent says it is alive: its own issue on GitHub (issues mode) or its value on the message board (#513)
   run([...bunCmd(join(import.meta.dir, "factory_agents.ts")), "register", "--agent", agent], { env: child, timeoutMs: 30_000 });
   const shown = Object.entries(env).filter(([k]) => k !== "FACTORY_PID").map(([k, v]) => `${k}=${v}`).join(", ");
   console.log(`Factory slot ${slot}: this session is ${agent} (${shown}). /next-task claims its tasks as ${agent}.`);

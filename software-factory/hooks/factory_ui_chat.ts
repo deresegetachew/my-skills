@@ -10,7 +10,9 @@
 //                                                    answer arrives over the WebSocket
 //   GET  /api/projects/:p/owner-queue                each ask on the owner queue ("Dev manager: needs the owner"): its
 //                                                    text, its options (its list lines), open or
-//                                                    answered, and the answer
+//                                                    answered, and the answer. With the owner queue on the
+//                                                    message board (#513) it is read there (`factory board queue
+//                                                    --json`), else, or when the board can't be had, from GitHub
 //   POST /api/projects/:p/owner-queue/:id/answer     {answer, confirm: true}: `factory owner answer <id> <answer>`
 //
 // The WebSocket gets {type: "chat", project, agent, items, pending} for each new item in a chat and {type: "owner-queue",
@@ -18,9 +20,10 @@
 // project's state folder, `ui-chat.jsonl` (mode 600): `factory say` logs that it was used, never the text.
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { ownerQueueOnBoard } from "./core/compose.ts";
 import { type Config, roleNames } from "./factory_config.ts";
 import { askText, forProduct, OWNER_QUEUE_TITLE, ownerAskIds, openOwnerAsks, trustedOf } from "./factory_prs.ts";
-import { type Agent, envFor, factoryScript, type Obj, type Problem, type Ran, roleOf, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, envFor, factoryScript, hooksOf, type Obj, type Problem, type Ran, roleOf, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
 
 const TEXT_MAX = 2000; // what `factory say` takes in one message
 const ITEMS_MAX = 200; // what a chat shows
@@ -235,8 +238,27 @@ async function ghAll(p: UiProject, path: string): Promise<Obj[] | Problem> {
   return out;
 }
 
-/** The owner queue of project `p`: every ask on its open "Dev manager: needs the owner" issue, open or answered. */
+/** The owner queue of project `p` on the message board (`factory board queue --json` in its folder), or null when it
+ * isn't there or the board can't be had: GitHub is read then. */
+async function boardQueue(p: UiProject): Promise<{ issue: number | null; url: string | null; comments: Obj[] } | null> {
+  if (!p.config || !ownerQueueOnBoard(p.config)) return null;
+  const r = await spawn([process.execPath, "--no-env-file", "--config=/dev/null", join(hooksOf(p), "factory_board.ts"), "queue", "--json"],
+    p.path, ownerEnv(p), READ_MS);
+  if (r.code !== 0) return null;
+  try {
+    const q = obj(JSON.parse(r.stdout) as unknown);
+    return Array.isArray(q.comments) ? { issue: typeof q.issue === "number" ? q.issue : null, url: str(q.url) || null, comments: q.comments.map(obj) } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The owner queue of project `p`: every ask on its open "Dev manager: needs the owner" issue, open or answered; on the
+ * message board when the owner queue is there (#513; its `owner` actor is the owner). */
 export async function readQueue(p: UiProject): Promise<Queue> {
+  const trusted = trustedOf((p.config ?? {}) as Config);
+  const board = await boardQueue(p);
+  if (board) return asksOf(board.issue, board.url, board.comments, new Set([...trusted, "owner"]));
   const issues = await ghAll(p, "repos/{owner}/{repo}/issues?state=open");
   if (!Array.isArray(issues)) return { issue: null, url: null, asks: [], problem: issues };
   const queue = issues.find((i) => str(i.title).startsWith(OWNER_QUEUE_TITLE) && !i.pull_request);
@@ -244,7 +266,12 @@ export async function readQueue(p: UiProject): Promise<Queue> {
   const n = Number(queue.number);
   const comments = await ghAll(p, `repos/{owner}/{repo}/issues/${n}/comments`);
   if (!Array.isArray(comments)) return { issue: n, url: str(queue.html_url) || null, asks: [], problem: comments };
-  const open = new Set(openOwnerAsks(comments, trustedOf((p.config ?? {}) as Config)).map(([id]) => id));
+  return asksOf(n, str(queue.html_url) || null, comments, trusted);
+}
+
+/** The asks in an owner queue's comments, each with its state and the owner's answer. */
+function asksOf(n: number | null, url: string | null, comments: Obj[], trusted: Set<string>): Queue {
+  const open = new Set(openOwnerAsks(comments, trusted).map(([id]) => id));
   const answers = new Map<string, string>();
   for (const c of comments) for (const m of str(c.body).matchAll(OWNER_ANSWER)) answers.set(m[1] as string, askText(str(c.body)));
   const asks: Ask[] = [];
@@ -254,11 +281,11 @@ export async function readQueue(p: UiProject): Promise<Queue> {
       if (seen.has(id)) continue;
       seen.add(id);
       const text = askText(str(c.body));
-      asks.push({ id, issue: n, text, options: optionsOf(text), state: open.has(id) ? "open" : "answered", forProduct: forProduct(c),
+      asks.push({ id, issue: n ?? 0, text, options: optionsOf(text), state: open.has(id) ? "open" : "answered", forProduct: forProduct(c),
         url: str(c.html_url) || null, created: str(c.created_at) || null, answer: answers.get(id) ?? null });
     }
   }
-  return { issue: n, url: str(queue.html_url) || null, asks, problem: null };
+  return { issue: n, url, asks, problem: null };
 }
 
 // --- the hub -----------------------------------------------------------------------------------------------------------

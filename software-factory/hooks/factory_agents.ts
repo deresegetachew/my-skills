@@ -1,5 +1,6 @@
 #!/usr/bin/env -S bun --no-env-file --config=/dev/null
-// Live agents, tracked on GitHub (issues mode: `tasks.source: "issues"` in .claude/factory.json).
+// Live agents, tracked on GitHub (issues mode: `tasks.source: "issues"` in .claude/factory.json), or on the message
+// board (`tasks.source: "board"`, #513; see "Board mode" below).
 //
 // Each agent has one issue, `Agent: <name> · <status>`, labelled `factory:agent`, so the board and your phone show who
 // is alive and what each one does. The agent keeps it current itself:
@@ -37,6 +38,20 @@
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts ping --agent taytu [--status "working on #42"] [--force]
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts down --agent taytu
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts hook                  the Claude hook entry (reads the event on stdin)
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_agents.ts keep --agent taytu --task 42 --pid <pid>
+//                                                                board mode: keep the agent's claim on task 42 alive while
+//                                                                process <pid> (the loop) runs; factory-loop.sh starts it
+//                                                                for each builder session and stops it when the session ends
+//
+// Board mode (#513): with `tasks.source: "board"` the agents keep no issue. Each one's liveness is a value on the message
+// board, `<project>:agent:<name>` (the AgentRoster port, core/adapters/board/agents.ts), with a `signal.agent` event per
+// write, written by the same verbs and hooks; `list`, `card`, `sweep` and the agents part of `factory status` read it as
+// they read an agent issue (asIssue), with the same rules (downMinutes, the machine check at register). The heartbeat
+// daemon doesn't write for them there, so the hooks always ping. `sweep` marks a silent agent down and runs the board's
+// own sweep, which frees a claim whose time passed and whose holder sent no heartbeat for `tasks.downMinutes`. `keep`
+// sends that heartbeat while a builder's session runs: every FACTORY_BOARD_HEARTBEAT_SECONDS, else a third of the claim
+// time (FACTORY_BOARD_CLAIM_SECONDS, else the board's 30 minutes), so a long quiet build isn't swept; it stops when the
+// process it watches ends or the claim is no longer held here (the task went to review, or was taken back).
 //
 // Every role registers the same way (#102): a dev manager or a product owner has an agent issue too, with its role in a
 // second marker, `<!-- factory-role role=dev-manager -->`, on its own line so an older kit still reads the first one. An
@@ -61,6 +76,9 @@ import { Message, render as renderMessage } from "./factory_messages.ts";
 import { wakeFromHook } from "./factory_wake.ts";
 import { run as runLs } from "./factory_agents_ls.ts";
 import { card, cards, pyRound0, row } from "./factory_cards.ts";
+import { agentRoster, boardClaimSeconds, compose } from "./core/compose.ts";
+import { CoreError } from "./core/domain/error.ts";
+import type { AgentRoster, AgentState as RosterState } from "./core/ports/agents.ts";
 import { bunCmd, die, isoUtc, parseArgs, parseIso, pyDumps, pyRepr, runMain } from "./factory_lib.ts";
 
 export const LABEL = "factory:agent";
@@ -264,8 +282,7 @@ export function machineOf(issue: Issue): string | null {
 
 /** The other machine's id when `agent`'s open issue was pinged by it within `downMinutes` and isn't down, else
  * null. A marker without a machine (an older kit), a down or silent agent and our own machine all return null. */
-export function heldElsewhere(cfg: Cfg, agent: string, machine: string): string | null {
-  const i = findIssue(agent);
+export function heldElsewhere(cfg: Cfg, agent: string, machine: string, i: Issue | null = findIssue(agent)): string | null {
   if (!i || i.state !== "open" || !machine) return null;
   const st = stateOf(cfg, i);
   const other = machineOf(i);
@@ -425,6 +442,127 @@ export function sweep(cfg: Cfg): string[] {
   return done;
 }
 
+// --- board mode (#513) ---------------------------------------------------------------------------------------------------
+
+/** Whether the agents report on the message board: `tasks.source` board. */
+export function onBoard(cfg: Cfg): boolean {
+  return taskSource(cfg as Config) === "board";
+}
+
+function roster(cfg: Cfg): AgentRoster {
+  return agentRoster(cfg as Config) as AgentRoster;
+}
+
+/** An agent's last word on the board, read as its agent issue would be, so issues mode's readers (stateOf, cards) and
+ * rules read it too. */
+export function asIssue(s: RosterState): Issue {
+  const ping = parseIso(s.ping) ?? now();
+  const [title, body] = render(s.name, s.status in { working: 1, waiting: 1, idle: 1, down: 1, "input-required": 1 } ? s.status : "idle", s.detail,
+    s.started || s.ping, ping, s.extra.where === "cloud" ? "cloud" : null, s.machine, s.extra, s.role);
+  return { number: 0, title, body, state: "open", labels: [] };
+}
+
+/** Every agent's last word on the board, as agent issues. */
+export function boardAgentIssues(cfg: Cfg): Issue[] {
+  return roster(cfg).list().map(asIssue);
+}
+
+function boardIssueOf(cfg: Cfg, agent: string): Issue | null {
+  return boardAgentIssues(cfg).find((i) => nameOf(i) === agent) ?? null;
+}
+
+/** Marker fields as the board keeps them: text only. */
+function strings(fieldsIn: Record<string, unknown>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(fieldsIn)) if (v !== null && v !== undefined && v !== "") out[k] = String(v);
+  return out;
+}
+
+/** update() on the board: the agent's value (and its event), and the stamp file as in issues mode, so pings stay
+ * rate-limited. A down agent keeps nothing it was doing. */
+function boardUpdate(cfg: Cfg, agent: string, status: string, opts: UpdateOptions = {}): void {
+  const seen = recall(agent);
+  const kept: Record<string, unknown> = opts.replaceExtra ? {} : { ...(seen.extra || {}) };
+  for (const [k, v] of Object.entries(opts.extra ?? {})) if (v !== null && v !== undefined && v !== "") kept[k] = v;
+  if (status === "down") for (const key of ["task", "on", "since", "session", "follow"]) delete kept[key];
+  const role = opts.role || seen.role || process.env.FACTORY_ROLE || "coding-agent";
+  const started = seen.started || iso(now());
+  const t = clockNow();
+  roster(cfg).save({ name: agent, role, status, detail: status === "down" ? "" : opts.detail ?? "", ping: iso(Math.floor(t)), started,
+    machine: machineId(), extra: strings(kept) });
+  remember(agent, { status, detail: opts.detail ?? "", started, ping: t, extra: kept, role });
+}
+
+/** An agent's new state where this project keeps it: its issue (issues mode) or the board. */
+function write(cfg: Cfg, agent: string, status: string, opts: UpdateOptions = {}): void {
+  if (onBoard(cfg)) boardUpdate(cfg, agent, status, opts);
+  else update(cfg, agent, status, opts);
+}
+
+/** sweep() on the board: mark the agents silent for `tasks.downMinutes` down (unless the heartbeat daemon here sees them
+ * alive), then the board's own sweep frees each claim whose time passed and whose holder sent no heartbeat for as long. */
+export function boardSweep(cfg: Cfg): string[] {
+  const r = roster(cfg);
+  const done: string[] = [];
+  for (const s of r.list()) {
+    const st = stateOf(cfg, asIssue(s));
+    if (!st) continue;
+    const [name, status, , quiet] = st;
+    if (status !== "silent" || aliveHere(name)) continue;
+    const extra = { ...s.extra };
+    for (const key of ["task", "on", "since", "session", "follow"]) delete extra[key];
+    r.save({ ...s, status: "down", detail: "", extra }, "factory"); // its last ping stays: down since then
+    done.push(`${name}: down (silent ${(quiet / 60).toFixed(1)} h)`);
+  }
+  for (const c of r.sweepClaims(num(setting(cfg, "downMinutes")) * 60)) done.push(`released board task #${c.id} (held by ${c.holder})`);
+  return done;
+}
+
+function alive(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code === "EPERM";
+  }
+}
+
+/** How often `keep` sends a heartbeat: FACTORY_BOARD_HEARTBEAT_SECONDS, else a third of the claim time (10 minutes for
+ * the board's 30), so a claim never runs out between two. */
+export function keepSeconds(): number {
+  const given = Number(process.env.FACTORY_BOARD_HEARTBEAT_SECONDS);
+  if (Number.isFinite(given) && given >= 1) return given;
+  return Math.max(1, Math.floor(boardClaimSeconds() / 3));
+}
+
+/** Keep `agent`'s claim on task `id` alive while process `pid` runs: a heartbeat on the claim and a ping saying it works
+ * on it, every keepSeconds(). Ends when `pid` is gone, when this machine no longer holds the claim (in review, released,
+ * done) or when the board gave it to someone else; a board that doesn't answer is tried again on the next beat. */
+async function keep(cfg: Cfg, agent: string, id: string, pid: number): Promise<void> {
+  if (!agent || !id) die("keep needs --agent <name> and --task <id>");
+  const tasks = compose(cfg as Config).tasks;
+  const every = keepSeconds();
+  const detail = `working on ${/^\d+$/.test(id) ? `#${id}` : id}`;
+  while (alive(pid)) {
+    try {
+      if (!tasks.keep(id)) return;
+    } catch (e) {
+      if (e instanceof CoreError && e.code === "claim-lost") {
+        process.stderr.write(pyDumps(e.toJSON()) + "\n");
+        return;
+      }
+      // the board didn't answer: the next beat tries again
+    }
+    try {
+      boardUpdate(cfg, agent, "working", { detail, extra: { task: id } });
+    } catch {
+      // a ping is a courtesy; the claim is what counts
+    }
+    for (let waited = 0; waited < every && alive(pid); waited += Math.min(1, every - waited)) await Bun.sleep(Math.min(1, every - waited) * 1000);
+  }
+}
+
 /** Claude hook entry: PostToolUse pings (rate-limited, detached), Stop goes idle, SessionEnd goes down. While the
  * heartbeat daemon runs on this machine it does the pings and the idle (it knows better); SessionEnd still says down. */
 function hook(cfg: Cfg): void {
@@ -443,16 +581,17 @@ function hook(cfg: Cfg): void {
   if (!agent) return;
   // A pull request opened, a question, an answer, a merge ... wakes whoever waits for it, on the board (#410).
   if (event === "PostToolUse" && command) wakeFromHook(cfg as Config, command);
-  if (taskSource(cfg as Config) !== "issues") return; // agent tracking needs issues mode
-  if ((event === "PostToolUse" || event === "Stop") && managed(agent)) return;
+  const board = onBoard(cfg);
+  if (taskSource(cfg as Config) !== "issues" && !board) return; // agent tracking needs issues mode or the board
+  if ((event === "PostToolUse" || event === "Stop") && !board && managed(agent)) return; // the daemon writes in issues mode only
   const seen = recall(agent);
   if (event === "PostToolUse") {
     if (clockNow() - num(seen.ping ?? 0) < num(setting(cfg, "pingMinutes")) * 60) return; // pinged recently: no network at all
     remember(agent, { ping: clockNow() }); // claim this ping slot before the detached call
     const [exe, ...args] = bunCmd(import.meta.path);
     spawn(exe as string, [...args, "ping", "--agent", agent, "--force"], { detached: true, stdio: "ignore" }).unref();
-  } else if (event === "Stop" && seen.status !== "idle") update(cfg, agent, "idle");
-  else if (event === "SessionEnd" && !process.env.FACTORY_LOOP) update(cfg, agent, "down"); // under factory-loop.sh the loop says down when it exits
+  } else if (event === "Stop" && seen.status !== "idle") write(cfg, agent, "idle");
+  else if (event === "SessionEnd" && !process.env.FACTORY_LOOP) write(cfg, agent, "down"); // under factory-loop.sh the loop says down when it exits
 }
 
 /** The marker fields the command line sets: --kind, --cloud (the agent runs in the cloud) and --follow (the link
@@ -480,7 +619,7 @@ function reachArgs(a: Record<string, unknown>): Record<string, string> {
 }
 
 const PROG = "factory_agents.ts";
-const CMDS = ["register", "ping", "down", "list", "card", "ls", "sweep", "hook"];
+const CMDS = ["register", "ping", "down", "list", "card", "ls", "sweep", "hook", "keep"];
 
 async function main(argv: string[]): Promise<number> {
   const cmd = argv[0];
@@ -497,9 +636,10 @@ async function main(argv: string[]): Promise<number> {
     list: { flags: ["--json"] },
     card: { positionals: ["name"] },
     ls: { flags: ["--json", "--local", "--fresh"] },
+    keep: { valued: ["--agent", "--task", "--pid"] },
   };
   const a = parseArgs(argv.slice(1), specs[cmd] ?? {}, `${PROG} ${cmd}`, `usage: ${PROG} ${cmd} [-h]`);
-  if (["register", "ping", "down"].includes(cmd) && a.agent === undefined) a.agent = process.env.FACTORY_AGENT;
+  if (["register", "ping", "down", "keep"].includes(cmd) && a.agent === undefined) a.agent = process.env.FACTORY_AGENT;
   const cfg = load();
   if (cmd === "ls") { // this machine needs no issues mode
     await runLs(cfg, Boolean(a.json), Boolean(a.local), Boolean(a.fresh));
@@ -513,8 +653,13 @@ async function main(argv: string[]): Promise<number> {
     }
     return 0;
   }
-  if (taskSource(cfg) !== "issues") {
-    if (["list", "sweep", "card"].includes(cmd)) console.log('Agent tracking needs issues mode: "tasks": {"source": "issues"} in .claude/factory.json.');
+  if (cmd === "keep") { // board mode only: nothing to keep elsewhere
+    if (onBoard(cfg)) await keep(cfg, (a.agent as string | undefined) ?? "", String(a.task ?? ""), Number(a.pid));
+    return 0;
+  }
+  const board = onBoard(cfg);
+  if (taskSource(cfg) !== "issues" && !board) {
+    if (["list", "sweep", "card"].includes(cmd)) console.log('Agent tracking needs issues mode or the message board: "tasks": {"source": "issues"} or {"source": "board"} in .claude/factory.json.');
     return 0;
   }
   const agent = a.agent as string | undefined;
@@ -523,20 +668,25 @@ async function main(argv: string[]): Promise<number> {
   const role = (a.role as string | undefined) ?? null;
   if (cmd === "register") {
     const name = agent as string;
-    const other = heldElsewhere(cfg, name, machineId());
+    const other = heldElsewhere(cfg, name, machineId(), board ? boardIssueOf(cfg, name) : findIssue(name));
     if (other) { // exit 3: factory-loop.sh stops here instead of running as a second copy of this agent
       refuse("agent-name-in-use", `${name} is already running on another machine (machine ${other}).`,
         "Start this machine's agents under names no other machine uses: " +
         "`factory machine setup <names>`, or set FACTORY_AGENTS.", 3);
     }
-    remember(name, { started: iso(now()), issue: null, ...(role ? { role } : {}) });
-    const n = update(cfg, name, "idle", { create: true, extra, role });
-    console.log(`#${n === null ? "None" : n}`);
-  } else if (cmd === "down") update(cfg, agent as string, "down", { role });
+    remember(name, { started: iso(now()), issue: null, ...(board ? { extra: {} } : {}), ...(role ? { role } : {}) });
+    if (board) {
+      boardUpdate(cfg, name, "idle", { extra, role });
+      console.log("on the message board");
+    } else {
+      const n = update(cfg, name, "idle", { create: true, extra, role });
+      console.log(`#${n === null ? "None" : n}`);
+    }
+  } else if (cmd === "down") write(cfg, agent as string, "down", { role });
   else if (cmd === "ping") {
     const name = agent as string;
     const given = a.status as string | undefined;
-    if (!a.force && managed(name)) return 0; // the daemon on this machine writes this agent's state (changes and keepalives)
+    if (!a.force && !board && managed(name)) return 0; // the daemon on this machine writes this agent's state (changes and keepalives)
     const seen = recall(name);
     let status: string;
     let detail: string;
@@ -552,17 +702,17 @@ async function main(argv: string[]): Promise<number> {
       else if (status === "input-required") status = "working"; // a tool ran since: it is not waiting any more
     }
     if (!a.force && !given && clockNow() - num(seen.ping ?? 0) < num(setting(cfg, "pingMinutes")) * 60) return 0;
-    update(cfg, name, status, { detail, extra, role });
+    write(cfg, name, status, { detail, extra, role });
   } else if (cmd === "list") {
-    const found = cards(cfg, agentIssues());
+    const found = cards(cfg, board ? boardAgentIssues(cfg) : agentIssues());
     if (a.json) console.log(pyDumps(found, { indent: 2 }));
     else for (const c of found) console.log(row(c));
     if (!found.length && !a.json) console.log("no agents have registered yet");
   } else if (cmd === "card") {
     const name = a.name as string;
-    const found = cards(cfg, agentIssues()).filter((c) => c.name === name);
+    const found = cards(cfg, board ? boardAgentIssues(cfg) : agentIssues()).filter((c) => c.name === name);
     console.log(pyDumps(found[0] ?? card(safeAgent(name)), { indent: 2 }));
-  } else if (cmd === "sweep") for (const line of sweep(cfg)) console.log(line);
+  } else if (cmd === "sweep") for (const line of board ? boardSweep(cfg) : sweep(cfg)) console.log(line);
   return 0;
 }
 

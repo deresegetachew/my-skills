@@ -10,6 +10,8 @@ import { freshDatabase, type Server, startServer } from "./pg.ts";
 setDefaultTimeout(60_000);
 
 const BIN = join(import.meta.dir, "..", "bin.ts");
+/** A task made on the board, by its number as tools take and give it (#515): b<board id>. */
+const n = (t: { id: number }): string => `b${t.id}`;
 const TOOLS = ["board_prime", "board_ready", "board_claim", "board_heartbeat", "board_release", "board_close", "board_show",
   "board_post", "board_thread", "board_note", "board_on_me", "board_delegated"];
 let server: Server | null = null;
@@ -214,37 +216,37 @@ test("each tool's happy path, all written as haile", async () => {
   const c = new Client(url, ["--as", "haile", "--session", "s-9"]);
   await c.start();
 
-  const ready = (await c.ok("board_ready")).tasks as { id: number }[];
-  expect(ready.map((t) => t.id)).toEqual([a.id, b.id]);
+  const ready = (await c.ok("board_ready")).tasks as { id: string }[];
+  expect(ready.map((t) => t.id)).toEqual([n(a), n(b)]);
 
-  const claimed = (await c.ok("board_claim")).claim as { token: string; task: { id: number; holder: string } };
-  expect(claimed.task.id).toBe(a.id);
+  const claimed = (await c.ok("board_claim")).claim as { token: string; task: { id: string; holder: string } };
+  expect(claimed.task.id).toBe(n(a));
   expect(claimed.task.holder).toBe("haile");
   expect(claimed.token).toMatch(/^[0-9a-f-]{36}$/);
   const token = claimed.token;
 
-  const hb = (await c.ok("board_heartbeat", { task: a.id, token, ttlSeconds: 600 })).task as { claimUntil: string };
+  const hb = (await c.ok("board_heartbeat", { task: n(a), token, ttlSeconds: 600 })).task as { claimUntil: string };
   expect(Date.parse(hb.claimUntil)).toBeGreaterThan(Date.now() + 500_000);
 
   const onMe = await c.ok("board_on_me");
-  expect((onMe.tasks as { id: number }[]).map((t) => t.id)).toEqual([a.id]);
+  expect((onMe.tasks as { id: string }[]).map((t) => t.id)).toEqual([n(a)]);
   expect((onMe.messages as { body: string }[]).map((m) => m.body)).toEqual(["Which issues first?"]);
 
   const question = (await po.thread({ task: a.id }))[0] as { id: number };
-  const answer = (await c.ok("board_post", { task: a.id, kind: "answer", body: "The open ones.", inReplyTo: question.id })).message as Json;
-  expect(answer).toMatchObject({ from: "haile", kind: "answer", taskId: a.id, threadId: question.id });
-  const asked = (await c.ok("board_post", { task: a.id, kind: "question", to: "po", body: "Closed ones too?" })).message as Json;
+  const answer = (await c.ok("board_post", { task: n(a), kind: "answer", body: "The open ones.", inReplyTo: question.id })).message as Json;
+  expect(answer).toMatchObject({ from: "haile", kind: "answer", taskId: n(a), threadId: question.id });
+  const asked = (await c.ok("board_post", { task: n(a), kind: "question", to: "po", body: "Closed ones too?" })).message as Json;
   expect(asked).toMatchObject({ from: "haile", to: "po", state: "open" });
 
-  const note = (await c.ok("board_note", { task: a.id, kind: "decision", body: "Keep the issue number as the ref" })).entry as Json;
-  expect(note).toMatchObject({ author: "haile", kind: "decision", taskId: a.id });
+  const note = (await c.ok("board_note", { task: n(a), kind: "decision", body: "Keep the issue number as the ref" })).entry as Json;
+  expect(note).toMatchObject({ author: "haile", kind: "decision", taskId: n(a) });
 
-  const thread = (await c.ok("board_thread", { task: a.id })).messages as { from: string }[];
+  const thread = (await c.ok("board_thread", { task: n(a) })).messages as { from: string }[];
   expect(thread.map((m) => m.from)).toEqual(["po", "haile", "haile"]);
   const byThread = (await c.ok("board_thread", { thread: question.id })).messages as unknown[];
   expect(byThread.length).toBe(2);
 
-  const shown = await c.ok("board_show", { task: a.id });
+  const shown = await c.ok("board_show", { task: n(a) });
   expect((shown.task as Json).title).toBe("Write the importer");
   expect((shown.thread as unknown[]).length).toBe(3);
   expect((shown.context as { body: string }[]).map((x) => x.body)).toEqual(["Keep the issue number as the ref"]);
@@ -252,19 +254,19 @@ test("each tool's happy path, all written as haile", async () => {
 
   const prime = await c.ok("board_prime");
   expect(prime.actor).toBe("haile");
-  expect((prime.holding as { task: { id: number } }[]).map((h) => h.task.id)).toEqual([a.id]);
-  expect((prime.ready as { id: number }[]).map((t) => t.id)).toEqual([b.id]);
-  expect((prime.blocked as { id: number }[]).map((t) => t.id)).toEqual([blocked.id]);
+  expect((prime.holding as { task: { id: string } }[]).map((h) => h.task.id)).toEqual([n(a)]);
+  expect((prime.ready as { id: string }[]).map((t) => t.id)).toEqual([n(b)]);
+  expect((prime.blocked as { id: string }[]).map((t) => t.id)).toEqual([n(blocked)]);
   expect((prime.recent as unknown[]).length).toBeGreaterThan(0);
 
   const delegated = await c.ok("board_delegated");
   expect((delegated.messages as { body: string }[]).map((m) => m.body)).toEqual(["Closed ones too?"]);
 
-  const closed = (await c.ok("board_close", { task: a.id, token, outcome: "done", reason: "merged" })).task as Json;
+  const closed = (await c.ok("board_close", { task: n(a), token, outcome: "done", reason: "merged" })).task as Json;
   expect(closed).toMatchObject({ status: "done", outcome: "done", holder: null });
 
-  const named = (await c.ok("board_claim", { task: b.id })).claim as { token: string };
-  const released = (await c.ok("board_release", { task: b.id, token: named.token, next: "handoff", to: "selam", reason: "needs the web UI" })).task as Json;
+  const named = (await c.ok("board_claim", { task: n(b) })).claim as { token: string };
+  const released = (await c.ok("board_release", { task: n(b), token: named.token, next: "handoff", to: "selam", reason: "needs the web UI" })).task as Json;
   expect(released).toMatchObject({ status: "open", holder: null, assignee: "selam" });
 
   expect((await c.ok("board_claim")).claim).toBeNull(); // b is handed to selam, blocked is blocked
@@ -286,30 +288,30 @@ test("refusals come back as tool errors with code, message and fix", async () =>
   const c = new Client(url);
   await c.start();
 
-  const notReady = await c.refused("board_claim", { task: b.id });
+  const notReady = await c.refused("board_claim", { task: n(b) });
   expect(notReady.code).toBe("not-ready");
   expect(notReady.fix.length).toBeGreaterThan(0);
 
-  const claim = (await c.ok("board_claim", { task: a.id })).claim as { token: string };
-  const lost = await c.refused("board_heartbeat", { task: a.id, token: "00000000-0000-0000-0000-000000000000" });
+  const claim = (await c.ok("board_claim", { task: n(a) })).claim as { token: string };
+  const lost = await c.refused("board_heartbeat", { task: n(a), token: "00000000-0000-0000-0000-000000000000" });
   expect(lost.code).toBe("claim-lost");
   // the claim is released behind haile's back: its token no longer holds the task
   await po.release(a.id, claim.token, { next: "ready", reason: "test" });
-  expect((await c.refused("board_close", { task: a.id, token: claim.token, outcome: "done" })).code).toBe("claim-lost");
+  expect((await c.refused("board_close", { task: n(a), token: claim.token, outcome: "done" })).code).toBe("claim-lost");
 
   expect((await c.refused("board_show", { task: 99_999 })).code).toBe("not-found");
 
   for (const [tool, args, word] of [
     ["board_claim", { task: "seven" }, "task"],
     ["board_claim", { task: 1.5 }, "task"],
-    ["board_heartbeat", { task: a.id }, "token"],
-    ["board_release", { task: a.id, token: "t", next: "later", reason: "x" }, "next"],
+    ["board_heartbeat", { task: n(a) }, "token"],
+    ["board_release", { task: n(a), token: "t", next: "later", reason: "x" }, "next"],
     ["board_post", { kind: "question" }, "body"],
     ["board_post", { kind: "verdict", body: "approve" }, "kind"],
     ["board_post", { kind: "note", body: "   " }, "body"],
-    ["board_note", { task: a.id, kind: "idea", body: "x" }, "kind"],
+    ["board_note", { task: n(a), kind: "idea", body: "x" }, "kind"],
     ["board_thread", {}, "task"],
-    ["board_thread", { task: a.id, thread: 1 }, "thread"],
+    ["board_thread", { task: n(a), thread: 1 }, "thread"],
     ["board_ready", { limit: 0 }, "limit"],
   ] as [string, Json, string][]) {
     const e = await c.refused(tool, args);
@@ -328,13 +330,13 @@ test("a call can't change the actor: an extra sender is refused and nothing is w
   const c = new Client(url);
   await c.start();
   for (const field of ["from", "as", "sender", "actor"]) {
-    const e = await c.refused("board_post", { task: a.id, kind: "note", body: "I am the dev manager", [field]: "dev-manager" });
+    const e = await c.refused("board_post", { task: n(a), kind: "note", body: "I am the dev manager", [field]: "dev-manager" });
     expect(e.code).toBe("bad-input");
     expect(e.message).toContain(field);
   }
   expect(await po.thread({ task: a.id })).toEqual([]);
-  expect((await c.refused("board_note", { task: a.id, kind: "result", body: "x", author: "dev-manager" })).code).toBe("bad-input");
-  const m = (await c.ok("board_post", { task: a.id, kind: "status", body: "Started" })).message as Json;
+  expect((await c.refused("board_note", { task: n(a), kind: "result", body: "x", author: "dev-manager" })).code).toBe("bad-input");
+  const m = (await c.ok("board_post", { task: n(a), kind: "status", body: "Started" })).message as Json;
   expect(m.from).toBe("haile");
   expect((await po.thread({ task: a.id })).map((x) => x.from)).toEqual(["haile"]);
   await po.end();
@@ -474,12 +476,12 @@ test("a body over the cap on a very large line is bad-input, and the server keep
   const a = await po.create({ title: "A" });
   const c = new Client(url);
   await c.start();
-  const e = await c.refused("board_post", { task: a.id, kind: "note", body: "x".repeat(1_000_000) });
+  const e = await c.refused("board_post", { task: n(a), kind: "note", body: "x".repeat(1_000_000) });
   expect(e.code).toBe("bad-input");
   expect(e.message).toContain("body");
   expect(e.message).toContain("20000");
   expect(await po.thread({ task: a.id })).toEqual([]);
-  expect((await c.ok("board_post", { task: a.id, kind: "note", body: "x".repeat(20_000) })).message).toMatchObject({ from: "haile" });
+  expect((await c.ok("board_post", { task: n(a), kind: "note", body: "x".repeat(20_000) })).message).toMatchObject({ from: "haile" });
   await po.end();
   expect(await c.end()).toBe(0);
 });
@@ -494,11 +496,11 @@ test("requests sent back to back without waiting are answered in order", async (
   const before = c.replies.length;
   const call = (id: number, name: string, args: Json): string => JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
   c.raw([
-    call(101, "board_claim", { task: a.id }),
-    call(102, "board_show", { task: a.id }),
+    call(101, "board_claim", { task: n(a) }),
+    call(102, "board_show", { task: n(a) }),
     JSON.stringify({ jsonrpc: "2.0", id: 103, method: "ping" }),
-    call(104, "board_post", { task: a.id, kind: "status", body: "Started" }),
-    call(105, "board_thread", { task: a.id }),
+    call(104, "board_post", { task: n(a), kind: "status", body: "Started" }),
+    call(105, "board_thread", { task: n(a) }),
   ].join("\n"));
   await c.reply(105);
   expect(c.replies.slice(before).map((r) => r.id)).toEqual([101, 102, 103, 104, 105]);
@@ -525,7 +527,7 @@ test("a builder's server (the default) neither lists nor runs the owner's tools;
     await c.start();
     expect(await toolNames(c)).toEqual([...TOOLS].sort());
     for (const name of OWNER_TOOLS) {
-      const r = await c.request("tools/call", { name, arguments: { task: a.id, body: "x", title: "x", kind: "task", to: "ready" } });
+      const r = await c.request("tools/call", { name, arguments: { task: n(a), body: "x", title: "x", kind: "task", to: "ready" } });
       expect(r.error?.code, name).toBe(-32602);
       expect(r.error?.message).toContain(name);
     }
@@ -613,7 +615,7 @@ test("board_move moves a task between columns, each move an event a live listene
   });
   const c = new Client(url, ["--as", "dev-manager", "--role", "manager"]);
   await c.start();
-  const move = async (to: string, extra: Json = {}): Promise<Json> => (await c.ok("board_move", { task: a.id, to, ...extra })).task as Json;
+  const move = async (to: string, extra: Json = {}): Promise<Json> => (await c.ok("board_move", { task: n(a), to, ...extra })).task as Json;
 
   expect(await move("deferred")).toMatchObject({ status: "deferred" });
   expect(await move("in_review")).toMatchObject({ status: "in_review" });
@@ -632,7 +634,7 @@ test("board_move moves a task between columns, each move an event a live listene
 
   // refusals
   const refusal = async (args: Json, code: string, word: string): Promise<void> => {
-    const e = await c.refused("board_move", { task: a.id, ...args });
+    const e = await c.refused("board_move", { task: n(a), ...args });
     expect(e.code, JSON.stringify(args)).toBe(code);
     expect(e.message.toLowerCase()).toContain(word);
     expect(e.fix.length).toBeGreaterThan(0);
@@ -640,7 +642,7 @@ test("board_move moves a task between columns, each move an event a live listene
   await refusal({ to: "sideways" }, "bad-input", "to");
   await refusal({ to: "blocked" }, "bad-input", "blocked");
   await refusal({ to: "ready", outcome: "done" }, "bad-input", "outcome");
-  await refusal({ to: "ready", blockedBy: [1] }, "bad-input", "blockedby");
+  await refusal({ to: "ready", blockedBy: [n(a)] }, "bad-input", "blockedby");
   await refusal({ to: "blocked", blockedBy: [] }, "bad-input", "blockedby");
   await refusal({ to: "blocked", blockedBy: ["one"] }, "bad-input", "blockedby");
   await refusal({ to: "in_progress" }, "bad-input", "claim");
@@ -661,13 +663,13 @@ test("the owner moving a held task takes the claim back, with an event naming th
   const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
   await c.start();
 
-  const noReason = await c.refused("board_move", { task: a.id, to: "ready" });
+  const noReason = await c.refused("board_move", { task: n(a), to: "ready" });
   expect(noReason.code).toBe("bad-input");
   expect(noReason.message).toContain("haile");
   expect(noReason.fix).toContain("reason");
   expect((await po.get(a.id)).holder).toBe("haile");
 
-  const moved = (await c.ok("board_move", { task: a.id, to: "ready", reason: "haile is stuck" })).task as Json;
+  const moved = (await c.ok("board_move", { task: n(a), to: "ready", reason: "haile is stuck" })).task as Json;
   expect(moved).toMatchObject({ status: "open", holder: null });
   const back = await po.events(0, 500, { kind: "task.taken_back" });
   expect(back.length).toBe(1);
@@ -677,7 +679,7 @@ test("the owner moving a held task takes the claim back, with an event naming th
   expect((await po.ready()).map((t) => t.id)).toContain(a.id);
 
   // done from held: taken back and closed
-  expect((await c.ok("board_move", { task: b.id, to: "done", reason: "done by hand" })).task).toMatchObject({ status: "done", outcome: "done", holder: null });
+  expect((await c.ok("board_move", { task: n(b), to: "done", reason: "done by hand" })).task).toMatchObject({ status: "done", outcome: "done", holder: null });
   await expect(agent.close(b.id, { token: claimB?.token as string, outcome: "done" })).rejects.toMatchObject({ code: "claim-lost" });
   expect((await po.events(0, 500, { kind: "task.taken_back" })).length).toBe(2);
   await agent.end();
@@ -694,19 +696,19 @@ test("blocked with blockedBy adds the blocks edge and the task isn't ready; with
   const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
   await c.start();
 
-  const t = (await c.ok("board_move", { task: a.id, to: "blocked", blockedBy: [b.id], reason: "needs B" })).task as Json;
-  expect(t).toMatchObject({ status: "open", blocked: true, blockedBy: [b.id] });
+  const t = (await c.ok("board_move", { task: n(a), to: "blocked", blockedBy: [n(b)], reason: "needs B" })).task as Json;
+  expect(t).toMatchObject({ status: "open", blocked: true, blockedBy: [n(b)] });
   expect(await po.edges(a.id)).toEqual([{ from: b.id, to: a.id, kind: "blocks" }]);
   expect((await po.ready()).map((x) => x.id)).not.toContain(a.id);
   expect((await po.contextFor(a.id)).map((x) => [x.kind, x.body, x.author])).toEqual([["blocker", "needs B", "abebe"]]);
 
   // a cycle is refused and nothing changes
-  const cycle = await c.refused("board_move", { task: b.id, to: "blocked", blockedBy: [a.id] });
+  const cycle = await c.refused("board_move", { task: n(b), to: "blocked", blockedBy: [n(a)] });
   expect(cycle.code).toBe("cycle");
   expect(await po.edges(b.id)).toEqual([{ from: b.id, to: a.id, kind: "blocks" }]);
   expect((await po.get(b.id)).status).toBe("open");
 
-  const r = (await c.ok("board_move", { task: d.id, to: "blocked", reason: "waiting on the owner" })).task as Json;
+  const r = (await c.ok("board_move", { task: n(d), to: "blocked", reason: "waiting on the owner" })).task as Json;
   expect(r).toMatchObject({ status: "deferred" });
   expect((await po.contextFor(d.id)).map((x) => x.kind)).toEqual(["blocker"]);
   expect((await po.ready()).map((x) => x.id)).not.toContain(d.id);
@@ -725,7 +727,7 @@ test("board_assign hands a task to one actor: only they may claim it", async () 
   const c = new Client(url, ["--as", "dev-manager", "--role", "manager"]);
   await c.start();
 
-  expect((await c.ok("board_assign", { task: a.id, to: "selam" })).task).toMatchObject({ assignee: "selam", status: "open" });
+  expect((await c.ok("board_assign", { task: n(a), to: "selam" })).task).toMatchObject({ assignee: "selam", status: "open" });
   await expect(haile.claim(a.id)).rejects.toMatchObject({ code: "not-ready" });
   expect((await haile.ready({ for: "haile" })).map((t) => t.id)).not.toContain(a.id);
   expect((await selam.claim(a.id))?.task.holder).toBe("selam");
@@ -733,17 +735,17 @@ test("board_assign hands a task to one actor: only they may claim it", async () 
   expect(assigned[0]).toMatchObject({ actor: "dev-manager", payload: { to: "selam" } });
 
   // a held task: refused without a reason, taken back and handed on with one
-  const e = await c.refused("board_assign", { task: h.id, to: "selam" });
+  const e = await c.refused("board_assign", { task: n(h), to: "selam" });
   expect(e.code).toBe("bad-input");
   expect(e.message).toContain("haile");
-  const moved = (await c.ok("board_assign", { task: h.id, to: "selam", reason: "selam knows the UI" })).task as Json;
+  const moved = (await c.ok("board_assign", { task: n(h), to: "selam", reason: "selam knows the UI" })).task as Json;
   expect(moved).toMatchObject({ holder: null, assignee: "selam", status: "open" });
   await expect(haile.heartbeat(h.id, held?.token as string)).rejects.toMatchObject({ code: "claim-lost" });
   expect((await po.events(0, 500, { kind: "task.taken_back" }))[0]).toMatchObject({ actor: "dev-manager", payload: { holder: "haile", reason: "selam knows the UI" } });
 
   for (const [args, code] of [
-    [{ task: a.id, to: " " }, "bad-input"],
-    [{ task: a.id }, "bad-input"],
+    [{ task: n(a), to: " " }, "bad-input"],
+    [{ task: n(a) }, "bad-input"],
     [{ task: 99_999, to: "selam" }, "not-found"],
   ] as [Json, string][]) {
     expect((await c.refused("board_assign", args)).code, JSON.stringify(args)).toBe(code);
@@ -761,17 +763,17 @@ test("board_link and board_unlink add and remove typed links; a loop is refused"
   const b = await po.create({ title: "B" });
   const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
   await c.start();
-  expect(await c.ok("board_link", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ linked: true });
-  expect(await c.ok("board_link", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ linked: false });
-  expect(await c.ok("board_link", { from: a.id, to: b.id, kind: "related" })).toMatchObject({ linked: true });
+  expect(await c.ok("board_link", { from: n(a), to: n(b), kind: "blocks" })).toMatchObject({ linked: true });
+  expect(await c.ok("board_link", { from: n(a), to: n(b), kind: "blocks" })).toMatchObject({ linked: false });
+  expect(await c.ok("board_link", { from: n(a), to: n(b), kind: "related" })).toMatchObject({ linked: true });
   expect((await po.get(b.id)).blockedBy).toEqual([a.id]);
-  const loop = await c.refused("board_link", { from: b.id, to: a.id, kind: "waits_for" });
+  const loop = await c.refused("board_link", { from: n(b), to: n(a), kind: "waits_for" });
   expect(loop.code).toBe("cycle");
-  expect((await c.refused("board_link", { from: a.id, to: a.id, kind: "blocks" })).code).toBe("cycle");
-  expect((await c.refused("board_link", { from: a.id, to: b.id, kind: "parent" })).code).toBe("bad-input");
-  expect((await c.refused("board_link", { from: a.id, to: 99_999, kind: "blocks" })).code).toBe("not-found");
-  expect(await c.ok("board_unlink", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ unlinked: true });
-  expect(await c.ok("board_unlink", { from: a.id, to: b.id, kind: "blocks" })).toMatchObject({ unlinked: false });
+  expect((await c.refused("board_link", { from: n(a), to: n(a), kind: "blocks" })).code).toBe("cycle");
+  expect((await c.refused("board_link", { from: n(a), to: n(b), kind: "parent" })).code).toBe("bad-input");
+  expect((await c.refused("board_link", { from: n(a), to: 99_999, kind: "blocks" })).code).toBe("not-found");
+  expect(await c.ok("board_unlink", { from: n(a), to: n(b), kind: "blocks" })).toMatchObject({ unlinked: true });
+  expect(await c.ok("board_unlink", { from: n(a), to: n(b), kind: "blocks" })).toMatchObject({ unlinked: false });
   expect((await po.get(b.id)).blocked).toBe(false);
   expect(await po.edges()).toEqual([{ from: a.id, to: b.id, kind: "related" }]);
   const kinds = (await po.events(0)).filter((e) => e.actor === "abebe").map((e) => e.kind);
@@ -786,11 +788,11 @@ test("board_comment posts a note on the task's thread as the server's actor", as
   const a = await po.create({ title: "A" });
   const c = new Client(url, ["--as", "abebe", "--role", "owner"]);
   await c.start();
-  const m = (await c.ok("board_comment", { task: a.id, body: "Do the login first." })).message as Json;
-  expect(m).toMatchObject({ from: "abebe", kind: "note", taskId: a.id, body: "Do the login first." });
+  const m = (await c.ok("board_comment", { task: n(a), body: "Do the login first." })).message as Json;
+  expect(m).toMatchObject({ from: "abebe", kind: "note", taskId: n(a), body: "Do the login first." });
   expect((await po.thread({ task: a.id })).map((x) => [x.from, x.body])).toEqual([["abebe", "Do the login first."]]);
-  expect((await c.refused("board_comment", { task: a.id, body: "  " })).code).toBe("bad-input");
-  expect((await c.refused("board_comment", { task: a.id, body: "x".repeat(20_001) })).code).toBe("bad-input");
+  expect((await c.refused("board_comment", { task: n(a), body: "  " })).code).toBe("bad-input");
+  expect((await c.refused("board_comment", { task: n(a), body: "x".repeat(20_001) })).code).toBe("bad-input");
   expect((await c.refused("board_comment", { task: 99_999, body: "hi" })).code).toBe("not-found");
   await po.end();
   expect(await c.end()).toBe(0);
@@ -818,4 +820,103 @@ test("--role takes owner, manager or builder; mcp --help shows how to add the se
   }
   const p = Bun.spawnSync([process.execPath, "--no-env-file", BIN, "help"], { env: env(), stdout: "pipe", stderr: "pipe" });
   expect(p.stdout.toString()).toContain("factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]");
+});
+
+// ---------- one number people see (#515) ----------
+test("tasks are named by their issue number (3, \"#3\") or b<id>, in what the tools take and in what they give", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  // board ids and issue numbers differ on purpose: board task 1 is issue #7, and a task numbered like an issue is b-only
+  const seven = await po.create({ title: "Seven", ref: "github:o/r#7", priority: 1 });
+  const three = await po.create({ title: "Three", ref: "github:o/r#3", priority: 2, parentId: seven.id });
+  const filed = await po.create({ title: "Filed on the board", priority: 3 });
+  const other = await po.create({ title: "Another repo's", ref: "github:x/y#3", priority: 4 });
+  await po.link(seven.id, filed.id, "blocks");
+  await po.post({ task: three.id, kind: "note", body: "hello" });
+  const c = new Client(url, ["--as", "abebe", "--role", "owner", "--repo", "o/r"]);
+  const init = await c.start();
+  expect(String(init.result?.instructions)).toContain("b17");
+
+  const ready = (await c.ok("board_ready")).tasks as Json[];
+  expect(ready.map((t) => t.id)).toEqual(["#7", "#3", "x/y#3"]);
+  expect(ready.find((t) => t.id === "#3")?.parentId).toBe("#7");
+
+  for (const named of [3, "3", "#3"]) {
+    const shown = await c.ok("board_show", { task: named });
+    expect((shown.task as Json).title, String(named)).toBe("Three");
+    expect((shown.thread as Json[])[0]?.taskId).toBe("#3");
+  }
+  expect(((await c.ok("board_show", { task: "x/y#3" })).task as Json).title).toBe("Another repo's");
+  const b = await c.ok("board_show", { task: `b${filed.id}` });
+  expect(b.task).toMatchObject({ id: `b${filed.id}`, blocked: true, blockedBy: ["#7"] });
+  expect(b.edges).toEqual([{ from: "#7", to: `b${filed.id}`, kind: "blocks" }]);
+
+  // the owner moves "#3" and the board moves issue 3's task, not board task 3
+  expect((await c.ok("board_move", { task: 3, to: "deferred" })).task).toMatchObject({ id: "#3", status: "deferred" });
+  expect((await po.get(three.id)).status).toBe("deferred");
+  expect(filed.id).toBe(3); // board task 3 is left as it was
+  expect((await po.get(filed.id)).status).toBe("open");
+  expect((await po.get(other.id)).status).toBe("open");
+
+  const missing = await c.refused("board_show", { task: 99 });
+  expect(missing.code).toBe("not-found");
+  expect(missing.message).toContain("issue #99");
+  expect(missing.fix).toContain("b17");
+  const gone = await c.refused("board_show", { task: "b99999" });
+  expect(gone.code).toBe("not-found");
+  expect(gone.message).toContain("b99999");
+  expect(gone.message).not.toContain("#99999");
+  expect((await c.refused("board_show", { task: "three" })).code).toBe("bad-input");
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("board_close on a done task says to move it back to ready with board_move", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const a = await po.create({ title: "A" });
+  await po.close(a.id, { outcome: "done" });
+  const c = new Client(url, ["--as", "dev-manager", "--role", "manager"]);
+  await c.start();
+  const e = await c.refused("board_close", { task: n(a), outcome: "wont_do" });
+  expect(e.code).toBe("bad-input");
+  expect(e.message).toContain(`${n(a)} is already done`);
+  expect(e.fix).toContain("board_move");
+  expect(e.fix).not.toContain("board.update");
+  await po.end();
+  expect(await c.end()).toBe(0);
+});
+
+test("errors name tasks by their number: the board's own, the one it is blocked by, and a lookup's are left as written (#515)", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const three = await po.create({ title: "Three", ref: "github:o/r#3", priority: 1 }); // board id 1
+  const seven = await po.create({ title: "Seven", ref: "github:o/r#7", priority: 2 }); // board id 2
+  const filed = await po.create({ title: "Filed", priority: 3 }); // board id 3
+  await po.link(seven.id, three.id, "blocks");
+  expect([three.id, seven.id, filed.id]).toEqual([1, 2, 3]);
+  const c = new Client(url, ["--as", "abebe", "--role", "owner", "--repo", "o/r"]);
+  await c.start();
+
+  // "#1" is issue 1, which isn't on the board: the lookup's message is kept, not turned into "#3" (board id 1)
+  const lookup = await c.refused("board_link", { from: "#3", to: "#1", kind: "related" });
+  expect(lookup.code).toBe("not-found");
+  expect(lookup.message).toBe("There is no task for issue #1 on the board.");
+  expect(lookup.fix).toContain("3 or #3 for issue 3, b17 for a task made on the board");
+
+  // the board's own refusal names the task and its blocker as people see them
+  const blocked = await c.refused("board_claim", { task: 3 });
+  expect(blocked.code).toBe("not-ready");
+  expect(blocked.message).toContain("#3 isn't ready for abebe");
+  expect(blocked.message).toContain("blocked by #7");
+  expect(blocked.message).not.toContain("#2");
+  expect(blocked.text).toContain("blocked by #7");
+
+  const loop = await c.refused("board_link", { from: "#3", to: "#7", kind: "blocks" });
+  expect(loop.code).toBe("cycle");
+  expect(loop.message).toBe("#3 blocks #7 would make a loop: #3 already waits on #7, or is under it.");
+  const self = await c.refused("board_link", { from: `b${filed.id}`, to: `b${filed.id}`, kind: "blocks" });
+  expect(self.message).toContain(`(b${filed.id})`);
+  await po.end();
+  expect(await c.end()).toBe(0);
 });

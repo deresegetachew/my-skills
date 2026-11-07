@@ -64,17 +64,20 @@ interface Pull {
 
 /** [[id, title, head]] for open PRs with a must-fix on their current head commit, oldest first, leaving out those whose
  * rework another agent holds (#355: a claim on the PR that every machine sees). `me` is the agent picking, if any. Needs
- * `gh`. */
-function rework(cfg: Config, me: string | null): Job[] {
-  const ghAll = <T>(path: string): T[] => {
+ * `gh`. `cache` (board mode, #515): a pull request's comments are read again only when its updated_at moved, as with the
+ * pull request feed, so a look when nothing changed costs one call (the open pull requests), not one more per pull request. */
+function rework(cfg: Config, me: string | null, cache = false): Job[] {
+  // null when gh fails: a failed read is never kept as "no comments"
+  const ghList = <T>(path: string): T[] | null => {
     const p = run(["gh", "api", "--paginate", path]);
-    if (p.code !== 0) return [];
+    if (p.code !== 0) return null;
     try {
       return JSON.parse(p.stdout.replace(/\]\[/g, ",")) as T[];
     } catch {
-      return [];
+      return null;
     }
   };
+  const ghAll = <T>(path: string): T[] => ghList<T>(path) ?? [];
   const out: Job[] = [];
   const hold = (cfg.holdLabel as string | undefined) ?? "factory-hold";
   // With `trustedReviewers`, only those logins' must-fixes count, so an agent can't send the loops to rework (#260).
@@ -90,8 +93,9 @@ function rework(cfg: Config, me: string | null): Job[] {
     .sort((a, b) => a.number - b.number);
   for (const pr of prs) {
     if ((pr.labels ?? []).some((l) => l.name === hold)) continue; // the dev manager is reviewing it: not rework
-    const read = () => ghAll<Comment>(`repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`);
-    const comments = fed ? remember(cfg, `rework-comments-${pr.number}`, settled(pr.updated_at), read) : read();
+    const path = `repos/{owner}/{repo}/issues/${pr.number}/comments?per_page=100`;
+    const read = (): Comment[] | null => ghList<Comment>(path);
+    const comments = (fed || cache ? remember(cfg, `rework-comments-${pr.number}`, settled(pr.updated_at), read, (d) => d !== null) : read()) ?? [];
     const shas = comments.filter((c) => !trusted.size || trusted.has(String(c.user?.login ?? "")))
       .flatMap((c) => verdicts(c.body || "")).filter(([kind, sha]) => kind === "mustfix" && sha).map(([, sha]) => sha as string); // either form
     if (!shas.length || !pr.head.sha.startsWith(shas[shas.length - 1] as string)) continue;
@@ -174,8 +178,9 @@ function argError(text: string): never {
   throw new Exit(2);
 }
 
-function ping(agent: string, n: number): void {
-  run([...bunCmd(join(import.meta.dir, "factory_agents.ts")), "ping", "--agent", agent, "--status", `working on #${n}`],
+function ping(agent: string, n: number | string): void {
+  const what = /^\d+$/.test(String(n)) ? `#${n}` : String(n);
+  run([...bunCmd(join(import.meta.dir, "factory_agents.ts")), "ping", "--agent", agent, "--status", `working on ${what}`],
     { timeoutMs: 60_000 });
 }
 
@@ -310,14 +315,15 @@ function issuesMode(cfg: Config, tracker: TaskTracker, a: Args): number {
 }
 
 /** Board mode (`tasks.source: "board"`, #500): the tasks and their claims are the message board's (the TaskTracker
- * port claims there and keeps the token on this machine). Rework, a pull request, still comes first, read from GitHub.
+ * port claims there and keeps the token on this machine). Rework, a pull request, still comes first, read from GitHub: the
+ * open pull requests in one call, and a pull request's comments only when its updated_at moved since the last look (#515).
  * A task is printed by its id: the issue number for one that came from GitHub, b<n> for one filed on the board. */
 function boardMode(cfg: Config, tracker: TaskTracker, a: Args): number {
   let t: Task | null = null;
   try {
     if (a.issue) t = tracker.claim(String(a.issue), { agent: a.claim as string, machine: machineId() });
     else {
-      let jobs = a.noRework ? [] : rework(cfg, me(a));
+      let jobs = a.noRework ? [] : rework(cfg, me(a), true);
       if (jobs.length && a.claim) jobs = claimFirst(cfg, jobs, a.claim, a.pid || process.ppid);
       if (jobs.length) {
         const [tid, title] = jobs[0] as Job;
@@ -340,6 +346,7 @@ function boardMode(cfg: Config, tracker: TaskTracker, a: Args): number {
     console.log(a.json ? pyDumps({ id: null, remaining: 0 }) : "none");
     return 1;
   }
+  if (a.claim) ping(a.claim, t.id); // the agent's liveness on the board says what it works on (#513)
   console.log(a.json ? pyDumps({ id: t.id, title: t.title }) : `${t.id} ${t.title}`);
   if (!a.json && !a.issue) note(a);
   return 0;

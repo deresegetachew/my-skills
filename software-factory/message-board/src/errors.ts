@@ -23,10 +23,35 @@ export const LOGIN_REFUSED = "This machine's board login was refused (removed or
 export const LOGIN_REFUSED_FIX = "Ask the hub for a new code: on the hub run `factory machine add <name> --agent ...`, then " +
   "`factory machine join <code>` here — or `factory machine leave` to stop using the board here.";
 
+const TASK_TOKEN = /\{\{task:(\d+)\}\}/g;
+
+/** A board task named in a refusal (#515): its message and fix say "#<id>", and a caller that names tasks otherwise (the
+ * MCP server: "#3" for an issue, "b17") renders them again from the error's `template`. */
+export const taskOf = (id: number): string => `{{task:${id}}}`;
+
+const render = (text: string, name: (id: number) => string): string => text.replace(TASK_TOKEN, (_, id: string) => name(Number(id)));
+const boardId = (id: number): string => `#${id}`;
+
 export class BoardError extends Error {
-  constructor(readonly code: ErrorCode, message: string, readonly fix: string) {
-    super(message);
+  readonly fix: string;
+  /** The message and fix with each task the board named as a taskOf() token. */
+  readonly template: { message: string; fix: string };
+
+  constructor(readonly code: ErrorCode, message: string, fix: string) {
+    super(render(message, boardId));
     this.name = "BoardError";
+    this.fix = render(fix, boardId);
+    this.template = { message, fix };
+  }
+
+  /** The board ids of the tasks it names. */
+  tasks(): number[] {
+    return [...new Set([...`${this.template.message} ${this.template.fix}`.matchAll(TASK_TOKEN)].map((m) => Number(m[1])))];
+  }
+
+  /** Its message and fix with each task it names written by `name`. */
+  named(name: (id: number) => string): { message: string; fix: string } {
+    return { message: render(this.template.message, name), fix: render(this.template.fix, name) };
   }
 
   toJSON(): { code: ErrorCode; message: string; fix: string } {

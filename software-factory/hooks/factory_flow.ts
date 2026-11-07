@@ -9,7 +9,8 @@
 //
 // The stages: 1 vision (the PRD has stories with unique numbers), 2 design (the design folder has references), 3 plan (task
 // issues that name the stories, each with its "Done when"), 4 hand over (the three are approved and a task is ready for a
-// coding agent). Nothing is stored apart from the owner-queue comments: an approval is the owner's reply under the ask
+// coding agent). Nothing is stored apart from the owner-queue comments (on the message board when the owner queue is there,
+// #513, else the issue's): an approval is the owner's reply under the ask
 // `stage-<name>`, either `<!-- factory-owner-answer id=stage-<name> -->` or a first word of yes, approved, ok or go ahead.
 // Any other reply is a question or a no: the stage stays open and the product owner reads it. Read-only except `--ask`.
 // Errors are `{code, message, fix}` on stderr.
@@ -19,7 +20,7 @@ import { type Config, load, taskLabels } from "./factory_config.ts";
 import { comment, type Comment, ghAll, type Issue, names } from "./factory_issues.ts";
 import { refuse } from "./factory_machine.ts";
 import { ownerQueueOnBoard } from "./core/compose.ts";
-import { askOnBoard, ownerQueue } from "./factory_orchestrator.ts";
+import { askOnBoard, ownerQueue, queueOnBoard } from "./factory_orchestrator.ts";
 import { parseStories, storyRefs } from "./factory_prd.ts";
 import { CHAT_SUMMARY, trustedOf } from "./factory_prs.ts";
 import { pyDumps, runMain } from "./factory_lib.ts";
@@ -130,11 +131,14 @@ export interface Row {
 }
 
 export function status(cfg: Config, comments: Comment[] | null = null, issues: Issue[] | null = null): Row[] {
-  const queue = ownerQueue(cfg, false);
-  const cs = comments ?? (queue ? ghAll<Comment>(`repos/{owner}/{repo}/issues/${queue}/comments`) : []);
+  // With the owner queue on the message board (#513) the asks and the owner's answers are read there (its `owner` actor is
+  // the owner); a board that can't be had falls back to the issue's comments, as before.
+  const board = comments === null && ownerQueueOnBoard(cfg) ? queueOnBoard() : null;
+  const queue = board?.issue ?? ownerQueue(cfg, false);
+  const cs = comments ?? board?.comments ?? (queue ? ghAll<Comment>(`repos/{owner}/{repo}/issues/${queue}/comments`) : []);
   const all = issues ?? ghAll<Issue>("repos/{owner}/{repo}/issues?state=all");
   const ev = evidence(cfg, all);
-  const approved = approvals(cs, trustedOf(cfg));
+  const approved = approvals(cs, board ? new Set([...trustedOf(cfg), "owner"]) : trustedOf(cfg));
   const rows: Row[] = [];
   for (const name of GATES) {
     const [done, line] = ev[name] as [boolean, string];

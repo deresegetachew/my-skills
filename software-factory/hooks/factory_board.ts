@@ -13,6 +13,13 @@
 //       an owner-queue ask: with the owner queue on the board (`tasks.source` board, or ask in `messaging.kinds`), written to
 //       the board (kind ask, to the owner, on the owner-queue issue's task) and mirrored; otherwise a comment on the
 //       owner-queue issue, as before. `--body -` takes the whole comment (its marker included) from stdin instead.
+//   factory board queue [--json]
+//       the owner queue as the board has it (#513): the messages on the owner-queue issue's task, oldest first, each in the
+//       shape of a GitHub comment (body, user.login, created_at), so `factory prd --stage` and the web UI's Inbox read the
+//       board as they read the issue. Exit 3 when the board can't be had: they fall back to GitHub.
+//   factory board sweep [--quiet-minutes N] [--max-seconds N]
+//       the board's sweep (message-board/bin.ts); --max-seconds stops one that runs longer, as the mirror's does, for the
+//       dev manager's pass in factory-loop.sh (#513).
 //   factory board import github ...
 //       the board's import, with `--board-is-record` when `tasks.source` is board: a status the board changed since the
 //       last import is kept (the board is the record); new issues, edited titles and bodies and new comments still come in.
@@ -34,6 +41,8 @@ const MIRROR_ACTOR = "github-mirror";
 const OWNER = "owner";
 const USAGE = `factory board mirror [--watch] [--every <seconds>] [--max-seconds <n>]
 factory board ask <id> <text>      (or --body - with the whole comment on stdin)
+factory board queue [--json]
+factory board sweep [--quiet-minutes N] [--max-seconds N]
 factory board import github [--closed] [--dry-run] [--repo owner/name]`;
 
 class Refusal extends Error {
@@ -95,7 +104,15 @@ const OFF = "The mirror is off (board.mirror is false): nothing was sent to GitH
  * `gh`) when it runs longer than `seconds`. A stopped pass loses nothing: its place is kept on the board and the next run
  * sends the rest. */
 async function mirrorWithin(seconds: number, args: string[]): Promise<number> {
-  const child = spawn(process.execPath, ["--no-env-file", "--config=/dev/null", import.meta.path, "mirror", ...args], { stdio: "inherit", detached: true });
+  return within(seconds, [import.meta.path, "mirror", ...args], () => refuse("mirror_timeout",
+    `factory board mirror ran longer than ${seconds} seconds and was stopped. What it sent stays sent; the next run sends the rest.`,
+    "Run `factory board mirror` by hand to see where it waits, and check `gh auth status` and `factory board status`."));
+}
+
+/** Bun running `script` and its arguments in a child process with a group of its own, stopped with whatever it started
+ * when it runs longer than `seconds` (then `late` says so). Its output is this command's. */
+async function within(seconds: number, script: string[], late: () => never): Promise<number> {
+  const child = spawn(process.execPath, ["--no-env-file", "--config=/dev/null", ...script], { stdio: "inherit", detached: true });
   const stop = (): void => {
     try {
       process.kill(-(child.pid as number), "SIGKILL");
@@ -111,15 +128,14 @@ async function mirrorWithin(seconds: number, args: string[]): Promise<number> {
   process.on("SIGTERM", onSignal);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const ended = new Promise<number>((resolve) => child.on("exit", (code) => resolve(code ?? 1)));
-  const late = new Promise<"late">((resolve) => {
+  const timeUp = new Promise<"late">((resolve) => {
     timer = setTimeout(() => resolve("late"), seconds * 1000);
   });
   try {
-    const r = await Promise.race([ended, late]);
+    const r = await Promise.race([ended, timeUp]);
     if (r !== "late") return r;
     stop();
-    return refuse("mirror_timeout", `factory board mirror ran longer than ${seconds} seconds and was stopped. What it sent stays sent; the next run sends the rest.`,
-      "Run `factory board mirror` by hand to see where it waits, and check `gh auth status` and `factory board status`.");
+    return late();
   } finally {
     clearTimeout(timer);
     process.off("SIGINT", onSignal);
@@ -159,6 +175,8 @@ async function mirror(cfg: Config, args: string[]): Promise<number> {
   const key = `value:mirror:github:${repoOf()}`;
   const listener = await board.listen((e) => {
     if (e.kind === "value.set" && e.subject === key) return; // its own place
+    // an agent's liveness and a claim's heartbeat change nothing on GitHub (#513): no pass for them
+    if (e.kind === "task.heartbeat" || e.kind === "signal.agent" || (e.kind === "value.set" && /^value:[^:]+:agent:/.test(e.subject))) return;
     pending = true;
     wake();
   });
@@ -294,6 +312,89 @@ async function ask(cfg: Config, args: string[]): Promise<number> {
   return 0;
 }
 
+// --- the sweep -----------------------------------------------------------------------------------------------------------
+
+/** `factory board sweep [--quiet-minutes N] [--max-seconds N]`: the board's sweep (message-board/bin.ts), stopped after
+ * --max-seconds when given, so a board that doesn't answer can't stall the dev manager's pass (#513). */
+async function sweep(args: string[]): Promise<number> {
+  const lim = args.indexOf("--max-seconds");
+  if (lim < 0) return spawnSync(process.execPath, ["--no-env-file", "--config=/dev/null", BIN, "sweep", ...args], { stdio: "inherit" }).status ?? 1;
+  const seconds = Number(args[lim + 1]);
+  if (!Number.isFinite(seconds) || seconds < 1) refuse("bad_args", "--max-seconds takes a number of seconds, 1 or more.", "factory board sweep --max-seconds 60");
+  const rest = args.filter((_, i) => i !== lim && i !== lim + 1);
+  return within(seconds, [BIN, "sweep", ...rest], () => refuse("sweep_timeout",
+    `factory board sweep ran longer than ${seconds} seconds and was stopped. A claim it freed stays freed; the next pass sweeps again.`,
+    "Check the board with `factory board status`, then run `factory board sweep` by hand."));
+}
+
+// --- the owner queue, read ---------------------------------------------------------------------------------------------
+
+/** One message of the owner queue in the shape of a GitHub comment, so the owner queue's readers (factory_prs.ts's
+ * ownerAskStates, factory_flow.ts's approvals, the web UI's Inbox) read the board as they read the issue. */
+export interface QueueComment {
+  id: number;
+  body: string;
+  user: { login: string };
+  created_at: string;
+  html_url: string | null;
+  kind: string;
+  state: string;
+}
+
+export interface BoardQueue {
+  source: "board";
+  /** The owner-queue issue's number (its task's ref), null when the board has no owner queue for this repo. */
+  issue: number | null;
+  url: string | null;
+  comments: QueueComment[];
+}
+
+/** The messages on this repo's owner-queue tasks on the board, oldest first. An answer read back from GitHub keeps
+ * GitHub's time, so the order is the one the issue shows. The board's `owner` actor is the owner. */
+async function boardQueue(board: Board, repo: string): Promise<BoardQueue> {
+  const prefix = `github:${repo}#`;
+  const queues = (await board.tasks({ all: true, limit: 1_000_000 })).filter((t) => t.title === OWNER_TITLE && (t.ref ?? "").startsWith(prefix))
+    .sort((a, b) => Number((a.ref as string).slice(prefix.length)) - Number((b.ref as string).slice(prefix.length)));
+  const newest = queues.filter((t) => t.status !== "done").at(-1) ?? queues.at(-1);
+  const issue = newest ? Number((newest.ref as string).slice(prefix.length)) : null;
+  const messages: Message[] = [];
+  for (const q of queues) messages.push(...(await board.thread({ task: q.id })));
+  messages.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
+  const link = (m: Message): string | null => {
+    const c = /\/comments\/(\d+)$/.exec(m.ref ?? "")?.[1];
+    const n = queues.find((q) => q.id === m.taskId)?.ref?.slice(prefix.length);
+    return c && n ? `https://github.com/${repo}/issues/${n}#issuecomment-${c}` : null;
+  };
+  return { source: "board", issue, url: issue === null ? null : `https://github.com/${repo}/issues/${issue}`,
+    comments: messages.map((m) => ({ id: m.id, body: m.body, user: { login: m.from }, created_at: m.createdAt.toISOString(), html_url: link(m),
+      kind: m.kind, state: m.state })) };
+}
+
+/** `factory board queue [--json]`: the owner queue as the board has it. Exit 3 (NO_BOARD_EXIT) when the board can't be
+ * had, so a reader falls back to GitHub. */
+async function queue(args: string[]): Promise<number> {
+  const asJson = args.includes("--json");
+  const rest = args.filter((a) => a !== "--json");
+  if (rest.length) refuse("bad_args", `factory board queue doesn't take \`${rest.join(" ")}\`.`, "factory board queue [--json]");
+  const repo = repoOf();
+  const board = await open("factory");
+  try {
+    const q = await boardQueue(board, repo);
+    if (asJson) {
+      console.log(JSON.stringify(q, null, 2));
+      return 0;
+    }
+    if (q.issue === null) console.log("The message board has no owner queue for this repo yet.");
+    const answered = new Set(q.comments.flatMap((c) => [...c.body.matchAll(/<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/g)].map((m) => m[1] as string)));
+    for (const c of q.comments) {
+      for (const id of ownerAskIds(c.body)) console.log(`${id.padEnd(24)} ${answered.has(id) ? "answered" : "open    "} asked by ${c.user.login}, ${c.created_at.slice(0, 16).replace("T", " ")}`);
+    }
+    return 0;
+  } finally {
+    await board.end().catch(() => {});
+  }
+}
+
 // --- the import ----------------------------------------------------------------------------------------------------------
 
 function importVerb(cfg: Config, args: string[]): number {
@@ -323,6 +424,8 @@ export async function main(argv: string[]): Promise<number> {
     if (verb === "mirror") return await mirror(cfg, rest);
     if (verb === "ask") return await ask(cfg, rest);
     if (verb === "import") return importVerb(cfg, rest);
+    if (verb === "sweep") return await sweep(rest);
+    if (verb === "queue") return await queue(rest);
     return refuse("unknown_verb", `\`${verb}\` isn't one of this command's verbs.`, "Run `factory board help`.");
   } catch (e) {
     if (e instanceof Refusal || e instanceof GithubError || e instanceof BoardError) {

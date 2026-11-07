@@ -90,7 +90,7 @@ function fixture(): Fixture {
       issue(3, "The schema", ["factory:in-review"], "Tables."),
       issue(4, "Show the board", ["factory:in-progress", "agent:haile"], "Depends on #2, #3"),
       issue(5, "Take payments", ["factory:blocked"], "Stripe."),
-      issue(6, "Fix the crash", ["bug"], ""),
+      issue(6, "Fix the crash", ["bug", "factory:ready"], ""), // a task by the factory's rule: it carries a factory label (#515)
       issue(7, "An old task", ["factory:ready"], "Done long ago.", { state: "closed", state_reason: "completed" }),
       issue(8, "A pull request", [], "", { pull_request: { url: "x" } }),
       issue(9, "Dev manager: needs the owner", [], "One comment per thing."),
@@ -574,4 +574,57 @@ test("a comment the board's mirror wrote is not imported again, and a reply to i
   expect(thread.map((m) => [m.kind, m.from, m.inReplyTo])).toEqual([["ask", "system", null], ["answer", "boss", ask.id]]);
   expect(thread[0]?.state).toBe("answered");
   expect(thread[0]?.body).not.toContain("factory-mirror");
+});
+
+test("an open issue without a factory label comes in as a note, not a task: it is never ready (#515)", async () => {
+  const url = await migrated();
+  const fx = fixture();
+  fx.issues.push(issue(10, "Channel", [], "Where we talk."), issue(11, "Just a bug report", ["bug"], "It crashes."));
+  const w = world(url, fx);
+  const r = importGithub(w);
+  expect(r.code, r.stderr).toBe(0);
+  const t = await byRef(url);
+  expect(t.get(ref(10))).toMatchObject({ kind: "note", status: "open", title: "Channel" });
+  expect(t.get(ref(11))).toMatchObject({ kind: "note", status: "open" });
+  const ready = await look(url, (b) => b.ready());
+  expect(ready.map((x) => x.ref)).not.toContain(ref(10));
+  expect(ready.map((x) => x.ref)).not.toContain(ref(11));
+  expect(ready.map((x) => x.ref).sort()).toEqual([ref(5), ref(6)].sort());
+
+  // once the factory takes it as a task (a factory label), the next import makes it one
+  (fx.issues.find((i) => i.number === 10) as Record<string, unknown>).labels = [{ name: "factory:ready" }];
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  expect(importGithub(w).code).toBe(0);
+  expect((await byRef(url)).get(ref(10))).toMatchObject({ kind: "task" });
+
+  // a task closed through the board's mirror loses its factory labels on GitHub; it stays a task, done
+  const closed = fx.issues.find((i) => i.number === 2) as Record<string, unknown>;
+  Object.assign(closed, { state: "closed", state_reason: "completed", labels: [] });
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  expect(importGithub(w, ["--closed"]).code).toBe(0);
+  expect((await byRef(url)).get(ref(2))).toMatchObject({ kind: "task", status: "done" });
+});
+
+test("a task already on the board whose issue has no factory label stays a task on a re-import, held as it was (#515)", async () => {
+  const url = await migrated();
+  // imported before the factory-label rule: the issue has no label, the board has it as a task, and haile holds it
+  const t = await look(url, (b) => b.create({ title: "Channel", ref: ref(10) }));
+  const haile = await Board.open(url, { as: "haile", max: 1 });
+  try {
+    await haile.claim(t.id);
+  } finally {
+    await haile.end();
+  }
+  const fx = fixture();
+  fx.issues.push(issue(10, "Channel", [], "Where we talk."));
+  const w = world(url, fx);
+  const r = importGithub(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect((await byRef(url)).get(ref(10))).toMatchObject({ kind: "task", status: "in_progress", holder: "haile" });
+  // a new unlabelled issue still comes in as a note
+  fx.issues.push(issue(12, "Another channel", []));
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  expect(importGithub(w).code).toBe(0);
+  expect((await byRef(url)).get(ref(12))).toMatchObject({ kind: "note" });
+  expect((await byRef(url)).get(ref(10))).toMatchObject({ kind: "task", holder: "haile" });
 });

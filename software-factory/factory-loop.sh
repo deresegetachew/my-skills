@@ -111,8 +111,10 @@ else
     read -r agent dir < <(fh "$hooks/factory_claims" checkout --pid $$ --role "$role" ${req_name:+--name "$req_name"}) || exit 1
   fi
 fi
-# On exit: drop the local claims, and say on GitHub that this agent is down (issues mode; a no-op otherwise).
-trap 'fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1' EXIT
+# On exit: stop the claim's keeper, drop the local claims, and say this agent is down (on GitHub in issues mode, on the
+# message board with tasks.source board; a no-op otherwise).
+keeper=""
+trap 'type keep_stop >/dev/null 2>&1 && keep_stop; fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1' EXIT
 trap 'exit 130' INT TERM
 main=$(setting mainBranch main)
 if [ "$dir" != "$PWD" ]; then
@@ -300,13 +302,37 @@ mirror_board() {
   fh "$hooks/factory_board" mirror --max-seconds "$mirror_seconds" 2>&1 | sed "s/^/[$agent] /"
   return 0
 }
+# ... and `factory board sweep` (#513): the claims whose time passed and whose agent sent no heartbeat for 30 minutes go
+# back to ready, so a crashed builder's task is picked up again without a job on the hub. Its own time limit, like the
+# mirror's; it never stops the pass.
+sweep_seconds=60
+sweep_board() {
+  [ -f "$hooks/factory_board.ts" ] || return 0
+  fh "$hooks/factory_mcp" board-on >/dev/null 2>&1 || return 0
+  fh "$hooks/factory_board" sweep --max-seconds "$sweep_seconds" 2>&1 | grep -v '^No stale claims\.$' | sed "s/^/[$agent] /"
+  return 0
+}
+
+# While a builder's session runs on a claimed board task, its claim is kept alive (#513): `factory_agents.ts keep` sends a
+# heartbeat every few minutes (a third of the claim time), so a long quiet build isn't swept, and stops when the session
+# ends (keep_stop), when this loop is gone, or when the task is no longer held here. Outside board mode it ends at once.
+keep_start() {
+  keep_stop
+  [ -f "$hooks/factory_agents.ts" ] && command -v bun >/dev/null 2>&1 || return 0
+  bun --no-env-file --config=/dev/null "$hooks/factory_agents.ts" keep --agent "$agent" --task "$1" --pid $$ >/dev/null 2>&1 &
+  keeper=$!
+}
+keep_stop() {
+  [ -n "${keeper:-}" ] || return 0
+  kill "$keeper" 2>/dev/null; wait "$keeper" 2>/dev/null; keeper=""
+}
 
 # One pass of a manager or a product owner. Returns 0 (it had work and did it), 3 (nothing to do), 4 (GitHub was busy)
 # or 1 (it failed).
 # When factory_roles.ts finds work, one fresh `claude -p` runs the role's skill (`claude` without -p under -i).
 role_pass() {
   local found rc prompt discover=0
-  [ "$role" = dev-manager ] && mirror_board
+  [ "$role" = dev-manager ] && { mirror_board; sweep_board; }
   if [ "$role_kind" = orchestrator ]; then
     # No model here: the orchestrator reads GitHub, posts to the owner queue and starts one-item sub-managers.
     fh "$hooks/factory_orchestrator" cycle --name "$agent" $([ "$interactive" = 1 ] && echo --interactive); rc=$?
@@ -442,11 +468,13 @@ for ((n = 1; n <= limit; n++)); do
     # off` on this machine): the session also appears at claude.ai/code and in the Claude app, so you can watch it and
     # type into it (/exit included) from your phone.
     rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$hooks/factory_machine" remote 2>/dev/null || echo 1)"
+    keep_start "$id"
     if [ "$rc" = 1 ]; then
       claude "${claude_flags[@]}" --remote-control="$agent $id" "$prompt" || true
     else
       claude "${claude_flags[@]}" "$prompt" || true
     fi
+    keep_stop
     stty sane 2>/dev/null
     fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null
     give_back "$id"
@@ -465,7 +493,9 @@ for ((n = 1; n <= limit; n++)); do
     continue
   else
     trust_gate || { fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null; give_back "$id"; exit 1; }
+    keep_start "$id"
     claude "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+    keep_stop
   fi
   fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now
   give_back "$id"

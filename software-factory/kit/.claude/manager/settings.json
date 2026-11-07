@@ -53,6 +53,8 @@
       "Bash(./factory board ask*)",
       "Bash(factory board mirror*)",
       "Bash(./factory board mirror*)",
+      "Bash(factory board sweep*)",
+      "Bash(./factory board sweep*)",
       "mcp__board__board_prime",
       "mcp__board__board_ready",
       "mcp__board__board_claim",
