@@ -4,7 +4,8 @@ export const TASK_KINDS = ["task", "epic", "bug", "decision", "note"] as const;
 export const STATUSES = ["open", "in_progress", "in_review", "done", "deferred"] as const;
 export const OUTCOMES = ["done", "wont_do", "duplicate", "superseded"] as const;
 export const EDGE_KINDS = ["blocks", "waits_for", "discovered_from", "supersedes", "duplicates", "related"] as const;
-/** The edge kinds that block the task they point to. */
+/** The edge kinds that order two tasks. blocks: from must be done before to can start. waits_for: from can't start
+ * until to is done (so to blocks from). */
 export const BLOCKING: readonly EdgeKind[] = ["blocks", "waits_for"];
 export const MESSAGE_KINDS = ["question", "answer", "status", "note", "verdict", "ask"] as const;
 export const CONTEXT_KINDS = ["discovery", "decision", "blocker", "result"] as const;

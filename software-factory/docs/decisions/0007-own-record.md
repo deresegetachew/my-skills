@@ -192,8 +192,9 @@ fasil's answers on #469 and #472 and the ideas in point 7.
   bug, decision, note); a status (`open`, `in_progress`, `in_review`, `done`, `deferred`); a close outcome (`done`,
   `wont_do`, `duplicate`, `superseded`); priority; parent id; the holder and claim fields (holder, a claim token, since,
   until); a version, raised by every write; created and updated times.
-- `edges`: from, to, kind (`blocks`, `waits_for`, `discovered_from`, `supersedes`, `duplicates`, `related`). A cycle
-  of `blocks` edges is refused in the same transaction. Parent and child is the `parent` column, not an edge.
+- `edges`: from, to, kind (`blocks`, `waits_for`, `discovered_from`, `supersedes`, `duplicates`, `related`). `blocks`:
+  from must be done before to can start. `waits_for`: from can't start until to is done (corrected 7 Nov: it was
+  read like `blocks`, the opposite of its name). A cycle of blocking edges is refused in the same transaction. Parent and child is the `parent` column, not an edge.
 - `messages`: id, task id or none, thread id, kind (`question`, `answer`, `status`, `note`, `verdict`, `ask`), sender,
   addressee, state, in-reply-to, body, created time. This is the factory's envelope as columns.
 - `context`: task id, kind (`discovery`, `decision`, `blocker`, `result`), body, author, time.
@@ -201,8 +202,8 @@ fasil's answers on #469 and #472 and the ideas in point 7.
   its event in the same transaction, then `NOTIFY mb_events, '<seq>'` (the notification carries only the sequence).
 
 **The rules, in SQL.**
-- **"Blocked" and "ready" are a view, computed when read.** A task is blocked while any `blocks` or `waits_for` edge
-  points to it from a task that isn't done, its own or one of its parents'. Ready means open, not blocked, and nobody
+- **"Blocked" and "ready" are a view, computed when read.** A task is blocked while it, or one of its parents, has a
+  blocker that isn't done: the from of a `blocks` edge into it, or the to of a `waits_for` edge out of it. Ready means open, not blocked, and nobody
   holds it. Nothing is stored that a write could forget to refresh (plandb's weak point).
 - **Claim** is one statement: `UPDATE tasks SET holder, token, until, status = 'in_progress' WHERE id = (SELECT id
   FROM ready ... ORDER BY priority, created LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING`. A claim of a named task
