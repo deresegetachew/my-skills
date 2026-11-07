@@ -698,6 +698,10 @@ processes per test) still apply.
 
 ### C. Other things that are later or not agreed
 
+- **Agent runtime** (owner, 7 Nov 2026): Claude Code is the only supported agent; its hooks are the Claude adapter. The
+  real locks stay server-side (branch protection, the CI guard, the board), so another agent (Codex, Gemini) can be
+  added later without hooks. Later: one compiled `factory` binary (`bun build --compile`) with the kit files embedded
+  and the hooks run as `factory hook <name>`.
 - **A VS Code extension on stable APIs**, as a second screen on the same core as the web UI. (#295)
 - **An A2A adapter** for the message envelope, in the heartbeat daemon, beside the GitHub and board transports; a later
   step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)
