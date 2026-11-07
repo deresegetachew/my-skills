@@ -3,7 +3,7 @@ import { expect, test } from "bun:test";
 import { symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { type Env, issue, type IssueRow, setup } from "./issues_support.ts";
-import { HOOKS, readmeAndWiki, runHook, SF, sh } from "./support.ts";
+import { HOOKS, read, readmeAndWiki, runHook, SF, sh } from "./support.ts";
 
 // The command a person runs to claim (the .ts since #252; it was python3 .claude/hooks/next_task.py before).
 const CLAIM = "bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --pid $$";
@@ -80,4 +80,29 @@ test("the dry run says it too", () => {
     { cwd: d, env: { ...env, FACTORY_ROLE: "coding-agent", FACTORY_NAME: "taytu" } });
   expect(p.out).toContain("factory issues release 3");
   expect(p.out).toContain("issue-7");
+});
+
+test("factory next --dry-run prints what it would take and claims nothing, even with --claim (#520)", () => {
+  const [d, env] = project([issue(7)]);
+  const before = read(env.FAKE_GH_DB as string);
+  let p = sh(["bash", join(SF, "factory"), "next", "--dry-run"], { cwd: d, env });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
+  expect(p.stdout).toContain("Dry run: nothing was claimed.");
+  expect(p.stderr).not.toContain("unrecognized");
+  // --claim with --dry-run: the same look, as that agent, and still nothing claimed
+  p = sh(["bash", join(SF, "factory"), "next", "--dry-run", "--claim", "taytu", "--pid", "1"], { cwd: d, env: { ...env, FACTORY_PID: "1" } });
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout.split("\n")[0]).toBe("issue-7 Task 7");
+  expect(p.stdout).toContain("Dry run: nothing was claimed.");
+  expect(read(env.FAKE_GH_DB as string), "GitHub was not written").toBe(before);
+});
+
+test("factory next --dry-run with --issue is refused with code, message and fix", () => {
+  const [d, env] = project([issue(7)]);
+  const p = sh(["bash", join(SF, "factory"), "next", "--dry-run", "--claim", "taytu", "--issue", "7"], { cwd: d, env });
+  expect(p.code).toBe(1);
+  const e = JSON.parse(p.stderr.trim().split("\n").at(-1) as string) as { code: string; message: string; fix: string };
+  expect(e.code).toBe("dry_run_issue");
+  expect(e.fix).toContain("factory issues show 7");
 });

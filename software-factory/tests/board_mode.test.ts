@@ -155,6 +155,8 @@ test("factory doctor: the board answers, or it says so with the fix", () => {
   const fix = lines(bad, "fix").find((l) => l.includes("message board"));
   expect(fix, bad.stdout).toBeDefined();
   expect(fix).toContain("factory board up");
+  // #520: the message and the fix are two sentences: "... Failed to connect. Fix: Start it ..."
+  expect(fix, fix).toMatch(/[.!?] Fix: \S/);
   expect(bad.stdout).not.toContain(new URL(world.url).password);
   // with no tasks.source board and no transport set, a machine with a board uses it for messages (#504): checked too
   const plain = doctorProject({}, { agents: ["haile"] });

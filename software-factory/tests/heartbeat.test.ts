@@ -691,6 +691,14 @@ test("ls shows local agents from the state file and the others from github", () 
   expect(text).toContain("State");
 });
 
+test("with the tasks on the board, ls says the missing daemon reports to the board, not GitHub (#520)", () => {
+  const issues = ls(world()).stdout;
+  expect(issues).toContain("nothing reports to GitHub while an agent waits");
+  const board = ls(world({ tasks: { source: "board" } })).stdout;
+  expect(board).toContain("nothing reports to the message board while an agent waits");
+  expect(board).not.toContain("GitHub while");
+});
+
 test("ls reads this machine without asking github and caches the others", () => {
   const w = world();
   fleet(w);
