@@ -114,11 +114,14 @@ export function ownerQueue(_cfg: Config, create = false): number | null {
 }
 
 /** Writes ask `askId` (its whole comment, `body`) to the message board through `factory board ask` (#502), which mirrors
- * it to the owner-queue issue. False when the board couldn't take it: the caller posts it on GitHub instead. */
-export function askOnBoard(askId: string, body: string): boolean {
+ * it to the owner-queue issue. "board": it is there (a mirror that failed after it sends it later). "unavailable": the
+ * board couldn't be had (exit 3), so nothing was written and the caller posts it on GitHub instead. "failed": anything
+ * else, which may have written it already, so the caller posts nothing (no ask twice). */
+export function askOnBoard(askId: string, body: string): "board" | "unavailable" | "failed" {
   const p = run([process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_board.ts"), "ask", askId, "--body", "-"],
     { input: body });
-  return p.code === 0;
+  if (p.code === 0) return "board";
+  return p.code === 3 ? "unavailable" : "failed";
 }
 
 /** Posts a report to the owner queue once per id. Returns true when it posted (or would, in a dry run). With the owner
@@ -139,9 +142,14 @@ export function postAsk(cfg: Config, name: string, askId: string, line: string, 
   const login = ownerLogin(cfg);
   const body = `<!-- factory-owner-ask id=${askId} -->\n${login ? "@" + login + " " : ""}for your attention: ${line}\n\n` +
     `Posted by the dev manager ${name}. If you want it handled differently, say so here; the next pass reads the reply.`;
-  if (ownerQueueOnBoard(cfg) && askOnBoard(askId, body)) {
+  const onBoard = ownerQueueOnBoard(cfg) ? askOnBoard(askId, body) : "unavailable";
+  if (onBoard === "board") {
     out(`asked on the message board, mirrored to the owner queue (id ${askId}): ${line}`);
     return true;
+  }
+  if (onBoard === "failed") {
+    out(`could not ask on the message board (id ${askId}); \`factory board ask\` failed, so nothing was posted on GitHub either`);
+    return false;
   }
   comment(queue, body);
   out(`posted to the owner queue (id ${askId}): ${line}`);

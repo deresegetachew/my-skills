@@ -34,6 +34,8 @@ export interface MirrorOptions {
   trusted?: string[];
   /** Read the owner's answers back from GitHub (default true). */
   readBack?: boolean;
+  /** How long a pass waits while another holds this mirror (default 15 s); then it sends nothing (`busy`). */
+  waitMs?: number;
 }
 
 export interface MirrorSummary {
@@ -48,16 +50,22 @@ export interface MirrorSummary {
   calls: number;
   /** The last event read. */
   cursor: number;
+  /** Another pass of this mirror was running the whole time this one waited: it sent nothing. */
+  busy?: boolean;
 }
 
 interface Place {
   seq: number;
   /** The state last sent, by board task id. */
   states: Record<string, string>;
+  /** Messages whose comment is being posted: a pass that died after posting one is found by its marker, not posted again. */
+  pending: number[];
 }
 
 /** The board's own moves: the events that change a task's state. */
 const MOVES = new Set(["task.claimed", "task.released", "task.closed", "task.moved", "task.assigned", "task.swept", "task.taken_back"]);
+/** The kinds that are work items: epics, notes (the owner queue) and decisions keep their labels. */
+const WORK = new Set(["task", "bug"]);
 const ASK_ID = /<!--\s*factory-owner-ask\s+id=([\w.-]+)/g;
 const ANSWER_ID = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const ANY_MARKER = /<!--\s*(factory-[a-z][a-z-]*|pr-watch)\b/;
@@ -67,6 +75,7 @@ function placeOf(v: unknown): Place {
   const o = typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
   const states = typeof o.states === "object" && o.states !== null && !Array.isArray(o.states) ? (o.states as Record<string, unknown>) : {};
   return { seq: typeof o.seq === "number" && Number.isInteger(o.seq) && o.seq >= 0 ? o.seq : 0,
+    pending: Array.isArray(o.pending) ? o.pending.filter((x): x is number => typeof x === "number" && Number.isInteger(x)) : [],
     states: Object.fromEntries(Object.entries(states).filter((e): e is [string, string] => typeof e[1] === "string")) };
 }
 
@@ -115,51 +124,104 @@ class Run {
     return /^\d+$/.test(n) ? Number(n) : null;
   }
 
+  /** The key a task's state is kept under: its state, and its holder while in progress. */
+  keyOf(t: Task): string {
+    const state = mirrorState(t);
+    return state === "in-progress" ? `${state}:${t.holder}` : state;
+  }
+
+  /** The labels and open or closed state task `t` gives `issue`, and whether the issue has them already. */
+  wanted(t: Task, issue: GhIssue): { labels: string[]; state: string; same: boolean } {
+    const L = this.map.labels;
+    const state = mirrorState(t);
+    const have = labelNames(issue);
+    const stateLabels = new Set([L.ready, L.inProgress, L.inReview, L.blocked]);
+    const labels = have.filter((l) => !stateLabels.has(l) && !l.startsWith(L.agentPrefix));
+    const own: Record<string, string[]> = { ready: [L.ready], "in-progress": [L.inProgress, `${L.agentPrefix}${t.holder}`], "in-review": [L.inReview],
+      blocked: [L.blocked], done: [] };
+    labels.push(...(own[state] ?? []));
+    const ghState = state === "done" ? "closed" : "open";
+    const same = labels.length === have.length && labels.every((l) => have.includes(l)) && (issue.state ?? "open") === ghState;
+    return { labels, state: ghState, same };
+  }
+
   async task(id: number, e: BoardEvent): Promise<void> {
     const t = await this.board.get(id);
     const n = this.issueOf(t);
-    if (n === null) return;
-    const state = mirrorState(t);
-    const key = state === "in-progress" ? `${state}:${t.holder}` : state;
-    if (this.states[String(id)] === key) {
+    if (n === null || !WORK.has(t.kind)) return;
+    if (this.states[String(id)] === this.keyOf(t)) {
       this.summary.tasks.unchanged++;
       return;
     }
-    const L = this.map.labels;
+    // one read of the issue (its other labels, which a label call replaces), then one label call and one line
+    const issue = this.gh.get(`repos/${this.o.repo}/issues/${n}`) as GhIssue;
+    await this.send(t, n, issue, typeof e.payload.reason === "string" ? e.payload.reason : null);
+  }
+
+  /** Set issue `n` to task `t`'s state (one call, left out when it has it) and post its line. */
+  async send(t: Task, n: number, issue: GhIssue, reason: string | null): Promise<void> {
+    const state = mirrorState(t);
     const path = `repos/${this.o.repo}/issues/${n}`;
-    const issue = this.gh.get(path) as GhIssue;
-    const have = labelNames(issue);
-    const stateLabels = new Set([L.ready, L.inProgress, L.inReview, L.blocked]);
-    const want = have.filter((l) => !stateLabels.has(l) && !l.startsWith(L.agentPrefix));
-    const own: Record<string, string[]> = { ready: [L.ready], "in-progress": [L.inProgress, `${L.agentPrefix}${t.holder}`], "in-review": [L.inReview],
-      blocked: [L.blocked], done: [] };
-    want.push(...(own[state] ?? []));
-    const ghState = state === "done" ? "closed" : "open";
-    const same = want.length === have.length && want.every((l) => have.includes(l)) && (issue.state ?? "open") === ghState;
-    if (!same) {
-      this.gh.send("PATCH", path, { labels: want, state: ghState,
+    const want = this.wanted(t, issue);
+    if (!want.same) {
+      this.gh.send("PATCH", path, { labels: want.labels, state: want.state,
         ...(state === "done" ? { state_reason: t.outcome === "done" || !t.outcome ? "completed" : "not_planned" } : {}) });
     }
-    const reason = typeof e.payload.reason === "string" ? e.payload.reason : null;
-    this.gh.send("POST", `${path}/comments`, { body: `<!-- ${MIRROR_MARK} v=1 task=${id} state=${state} -->\n${line(t, state, reason)}` });
-    this.states[String(id)] = key;
+    let why = reason;
+    if (state === "blocked" && !why) why = (await this.board.contextFor(t.id)).filter((c) => c.taskId === t.id && c.kind === "blocker").at(-1)?.body ?? null;
+    this.gh.send("POST", `${path}/comments`, { body: `<!-- ${MIRROR_MARK} v=1 task=${t.id} state=${state} -->\n${line(t, state, why)}` });
+    this.states[String(t.id)] = this.keyOf(t);
     this.summary.tasks.mirrored++;
   }
 
-  async message(id: number): Promise<void> {
+  /** The first pass for a mirror's place: every task of the repo is taken as it is, and only an open issue whose labels
+   * differ from the board's state is sent (the open issues are read in pages of 100, not one by one). */
+  async seed(): Promise<void> {
+    const open = new Map(pages<GhIssue>(this.gh, `repos/${this.o.repo}/issues?state=open&per_page=100`, (i) => i.number)
+      .filter((i) => !i.pull_request).map((i) => [i.number, i]));
+    for (const t of await this.board.tasks({ all: true, limit: 1_000_000 })) {
+      const n = this.issueOf(t);
+      if (n === null || !WORK.has(t.kind)) continue;
+      const issue = open.get(n);
+      if (issue && !this.wanted(t, issue).same) await this.send(t, n, issue, null);
+      else this.states[String(t.id)] = this.keyOf(t);
+    }
+  }
+
+  async message(id: number, pending: Set<number>, save: () => Promise<void>): Promise<void> {
     const m = await this.board.message(id);
-    if (m.ref !== null || m.taskId === null) return;
+    if (m.ref !== null || m.taskId === null) {
+      pending.delete(id);
+      return;
+    }
     if (m.kind === "ask" && m.to !== this.map.asksTo) return;
     if (m.kind === "answer") {
       if (m.inReplyTo === null || (await this.board.message(m.inReplyTo)).kind !== "ask") return;
     } else if (m.kind !== "ask") return;
     const n = this.issueOf(await this.board.get(m.taskId));
     if (n === null) return;
-    const c = this.gh.send("POST", `repos/${this.o.repo}/issues/${n}/comments`,
-      { body: `${m.body.trimEnd()}\n\n<!-- ${MIRROR_MARK} v=1 message=${m.id} -->` }) as { id?: unknown } | null;
-    if (typeof c?.id !== "number") throw new GithubError("gh-failed", "GitHub didn't say which comment it made.", "Run `factory board mirror` again.");
-    await this.board.linkMessage(m.id, commentRef(this.o.repo, c.id));
-    this.summary.messages++;
+    const marker = `<!-- ${MIRROR_MARK} v=1 message=${m.id} -->`;
+    const path = `repos/${this.o.repo}/issues/${n}/comments`;
+    let made: number | null = null;
+    if (pending.has(id)) {
+      // a pass that posted it may have died before linking it: look for that comment first
+      const since = new Date(m.createdAt.getTime() - SINCE_MARGIN_MS).toISOString();
+      made = pages<GhComment>(this.gh, `${path}?per_page=100&since=${since}`, (c) => c.id).find((c) => (c.body ?? "").includes(marker))?.id ?? null;
+    }
+    if (made === null) {
+      pending.add(id);
+      await save(); // recorded before the post, so a crash after it is found on the next pass
+      const c = this.gh.send("POST", path, { body: `${m.body.trimEnd()}\n\n${marker}` }) as { id?: unknown } | null;
+      if (typeof c?.id !== "number") throw new GithubError("gh-failed", "GitHub didn't say which comment it made.", "Run `factory board mirror` again.");
+      made = c.id;
+      this.summary.messages++;
+    }
+    try {
+      await this.board.linkMessage(m.id, commentRef(this.o.repo, made));
+    } catch (e) {
+      if ((await this.board.message(m.id)).ref === null) throw e; // linked meanwhile: nothing to do
+    }
+    pending.delete(id);
   }
 
   /** The owner's answers on GitHub under the open asks the board mirrored, read back once. */
@@ -218,12 +280,21 @@ export async function mirrorToGithub(board: Board, o: MirrorOptions): Promise<Mi
   const gh = o.gh ?? ghCli();
   const map = o.mapping ?? FACTORY_MAPPING;
   const key = o.key ?? `mirror:github:${o.repo}`;
-  const place = placeOf(await board.value(key));
+  const pass = await board.exclusive(`mirror:${key}`, () => onePass(board, gh, o, map, key), { waitMs: o.waitMs });
+  if (pass.ran) return pass.result;
+  return { repo: o.repo, tasks: { mirrored: 0, unchanged: 0 }, messages: 0, answers: 0, calls: gh.calls, cursor: 0, busy: true };
+}
+
+async function onePass(board: Board, gh: Gh, o: MirrorOptions, map: GithubMapping, key: string): Promise<MirrorSummary> {
+  const kept = await board.value(key);
+  const place = placeOf(kept);
   const states = { ...place.states };
+  const pending = new Set(place.pending);
   const run = new Run(board, gh, o, map, states);
+  const first = kept === null;
 
   const touched = new Map<number, BoardEvent>();
-  const posted: number[] = [];
+  const posted: number[] = [...place.pending];
   let top = place.seq;
   let news = false;
   for (let after = place.seq; ;) {
@@ -233,27 +304,30 @@ export async function mirrorToGithub(board: Board, o: MirrorOptions): Promise<Mi
       if (e.kind === "value.set" && e.subject === `value:${key}`) continue; // its own place
       news = true;
       const id = /^task:(\d+)$/.exec(e.subject)?.[1];
-      if (id && isMove(e)) {
+      if (id && isMove(e) && !first) {
         touched.delete(Number(id)); // in the order of their last change
         touched.set(Number(id), e);
       }
       const mid = /^message:(\d+)$/.exec(e.subject)?.[1];
-      if (mid && e.kind === "message.posted" && (e.payload.kind === "ask" || e.payload.kind === "answer")) posted.push(Number(mid));
+      if (mid && e.kind === "message.posted" && (e.payload.kind === "ask" || e.payload.kind === "answer") && !posted.includes(Number(mid))) posted.push(Number(mid));
     }
     if (page.length < 500) break;
     after = (page.at(-1) as BoardEvent).seq;
   }
 
-  const sent = (): boolean => JSON.stringify(states) !== JSON.stringify(place.states);
+  const placeAt = (seq: number): Place => ({ seq, states, pending: [...pending] });
+  const changed = (): boolean => JSON.stringify(states) !== JSON.stringify(place.states) || JSON.stringify([...pending]) !== JSON.stringify(place.pending);
+  const save = async (): Promise<void> => board.setValue(key, placeAt(place.seq));
   try {
+    if (first) await run.seed();
     for (const [id, e] of touched) await run.task(id, e);
-    for (const id of posted) await run.message(id);
+    for (const id of posted) await run.message(id, pending, save);
   } catch (e) {
-    if (sent()) await board.setValue(key, { seq: place.seq, states }).catch(() => {});
+    if (!first && changed()) await save().catch(() => {}); // a first pass that failed seeds again from GitHub's labels
     throw waits(e);
   }
   // Only a run that read something new moves its place, so its own write never wakes it again.
-  if (news || sent()) await board.setValue(key, { seq: top, states });
+  if (first || news || changed()) await board.setValue(key, placeAt(top));
   if (o.readBack !== false) {
     try {
       await run.readBack();
@@ -265,3 +339,4 @@ export async function mirrorToGithub(board: Board, o: MirrorOptions): Promise<Mi
   run.summary.cursor = top;
   return run.summary;
 }
+

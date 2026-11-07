@@ -296,7 +296,7 @@ test("a pass that dies after posting a comment and before linking it: the next p
 });
 
 test("an ask whose mirror fails after it is on the board is never posted twice: only a board that can't take it falls back", async () => {
-  const w = await world();
+  const w = await world({ tasks: { source: "board" } }, [issue(101, "Add login", ["factory:ready"]), issue(103, QUEUE, [])]);
   const code = (extra: Record<string, string>): Proc => runCodeIn(w, `
     const { askOnBoard } = await import(${JSON.stringify(join(HOOKS, "factory_orchestrator.ts"))});
     console.log("result=" + askOnBoard("palette", "<!-- factory-owner-ask id=palette -->\\nWhich colour?"));`, extra);

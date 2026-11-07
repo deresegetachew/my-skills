@@ -99,6 +99,10 @@ the `ref` they came with and a `tag`, the user's own word for what a message is 
 With `keepBoardStatus` the board is the record: a task whose status the board changed since the last import from the
 same source (a claim, release, close, move, hand-off, sweep, or an update that set it) keeps it too.
 
+**One at a time:** `exclusive(name, fn, { waitMs? })` runs `fn` while holding a Postgres session lock named `name`,
+on a connection kept for the whole run (a caller that dies lets it go); `{ ran: false }` when it was still held after
+`waitMs` (15 s).
+
 **Messages by id:** `message(id)` reads one; `linkMessage(id, ref)` records where a message was copied to outside (a
 GitHub comment's ref), so an import that meets the copy knows it: a reply to it joins the message's thread, and the copy
 is never brought in as a second message. Linking twice to the same ref changes nothing; another ref is refused.
@@ -182,10 +186,10 @@ The factory runs it as `factory board mirror` (its `board.mirror` setting turns 
 
 - **Tasks:** a task whose ref is one of the repo's issues and whose state the board changed (the events `task.claimed`,
   `released`, `closed`, `moved`, `assigned`, `swept`, `taken_back`, and `task.updated` with its status) gets, per
-  change, one call that sets the issue's labels (the mapping's state label, `agent:<holder>` while in progress; every
+  change, three calls: one read of the issue (its other labels, since a label call replaces them all), one call that sets the issue's labels (the mapping's state label, `agent:<holder>` while in progress; every
   other label is kept) and opens or closes it, and one short line under `<!-- factory-mirror v=1 task=<id> state=<s> -->`.
   A state that comes back to what was last sent sends nothing; a heartbeat is no change; a task with no issue is left
-  alone. States: open is ready, in progress, in review, deferred is blocked (the line carries the reason as
+  alone, and so are epics, notes (the owner queue) and decisions. States: open is ready, in progress, in review, deferred is blocked (the line carries the reason as
   `**Blocked:** ...`), done closes the issue.
 - **Asks and answers:** a message of kind `ask` to the mapping's `asksTo` (the owner), and an answer to one, on a task
   with an issue, is posted there once as it is, with `<!-- factory-mirror v=1 message=<id> -->` under it, and linked to
@@ -193,6 +197,14 @@ The factory runs it as `factory board mirror` (its `board.mirror` setting turns 
 - **Answers read back:** under each open ask it mirrored, a `factory-owner-answer id=<ask>` comment, or a plain comment
   after the ask (from `trusted` logins when given), is imported once as the owner's answer, keyed by the comment's id
   (source `github:<owner>/<repo>/owner-answers`).
+- **The first pass** for a place (none kept yet) reads the repo's open issues in pages of 100 and sends only to those
+  whose labels differ from the board's state; every other task is taken as it is, so turning the mirror on doesn't flood
+  the issues.
+- **One pass at a time:** a pass holds a Postgres lock named after its place (`Board.exclusive`) for the whole pass, so a
+  `--watch` and a run by hand, or two machines, never send twice; a pass that waited 15 s for it sends nothing and says
+  so (`busy`). Before posting an ask or an answer it records the message as pending in its place; a pass that finds one
+  pending and not linked first looks for a comment carrying that message's marker (one read of the issue's recent
+  comments) and links it instead of posting again, so a crash between the post and the link sends nothing twice.
 - **Its place** is the value `mirror:github:<owner>/<repo>`: the last event read and the state sent per task. It reads
   the events after it, so it is safe to run twice and goes on after downtime; it moves its place only when it read
   something new, so its own write never wakes it again. A GitHub failure keeps the place (with the states it did send)

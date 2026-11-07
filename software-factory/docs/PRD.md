@@ -473,8 +473,9 @@ web UI section proposed on #293 (US-14 onward) keeps its range. The owner accept
   github`, #494); the first-launch screens are #457.* (#472; #457; 0007 point 4)
 - **US-42.** As the owner, I can still follow the work on GitHub: a task's issue is updated when its state changes, one
   way, on by default and off with a setting. Each new owner ask also appears on the owner-queue issue, so GitHub's
-  notifications still reach my phone, and my answer there is read back. *Built (#502): `factory board mirror` sets the
-  issue's labels in one call with one short line per change and nothing for a state that didn't change, keeps its place on
+  notifications still reach my phone, and my answer there is read back. *Built (#502): `factory board mirror` reads the
+  issue, sets its labels in one call and posts one short line per change (one pass at a time, a first pass that sends only
+  what differs) and nothing for a state that didn't change, keeps its place on
   the board (safe to run twice, goes on after a GitHub failure), and `board.mirror` turns it off. With the owner queue on
   the board (`tasks.source: board`, or ask in `messaging.kinds`), asks (`factory board ask`, the dev manager's pass,
   `factory prd --stage --ask`) are written to the board and posted once to the owner-queue issue, an answer given there is

@@ -185,10 +185,12 @@ export function ask(cfg: Config, stage: string, rows: Row[]): void {
   const queue = ownerQueue(cfg, true) as number;
   const body = `<!-- factory-owner-ask id=stage-${stage} -->\nPlease approve the ${stage}: ${row.line}.\n\n` +
     "Reply `yes` to approve it, or say what to change; the product owner reads the reply.";
-  if (ownerQueueOnBoard(cfg) && askOnBoard(`stage-${stage}`, body)) {
+  const onBoard = ownerQueueOnBoard(cfg) ? askOnBoard(`stage-${stage}`, body) : "unavailable";
+  if (onBoard === "board") {
     console.log(`stage-${stage}: asked on the message board, mirrored to the owner queue (#${queue}).`);
     return;
   }
+  if (onBoard === "failed") refuse("ask-failed", `stage-${stage} couldn't be asked on the message board.`, `Run \`factory board ask stage-${stage} ...\` to see why, then ask again.`);
   comment(queue, body);
   console.log(`stage-${stage}: asked in the owner queue (#${queue}).`);
 }

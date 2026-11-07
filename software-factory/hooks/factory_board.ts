@@ -78,6 +78,10 @@ export async function mirrorOnce(cfg: Config, board?: Board): Promise<MirrorSumm
 }
 
 function report(s: MirrorSummary): void {
+  if (s.busy) {
+    console.log("Another mirror pass is running (a --watch, or another machine's); this one sent nothing. It sends what changed.");
+    return;
+  }
   console.log(`Mirrored the message board to ${s.repo}: ${plural(s.tasks.mirrored, "task's new state", "tasks' new states")}, ` +
     `${plural(s.messages, "ask or answer", "asks and answers")} posted, ${plural(s.answers, "answer", "answers")} read back from GitHub` +
     (s.tasks.unchanged ? ` (${plural(s.tasks.unchanged, "task", "tasks")} back where it was last sent: nothing sent)` : "") + ".");
@@ -159,9 +163,9 @@ async function boardAsks(board: Board, repo: string): Promise<Message[]> {
  * was already asked there. */
 export async function askOnBoard(cfg: Config, id: string, body: string): Promise<boolean> {
   const repo = repoOf();
-  const n = ownerQueue(cfg, true) as number;
   const board = await open(process.env.FACTORY_AGENT || "dev-manager");
   try {
+    const n = ownerQueue(cfg, true) as number;
     if ((await boardAsks(board, repo)).some((m) => ownerAskIds(m.body).includes(id))) return false;
     const q = await queueTask(board, repo, n);
     await board.post({ task: q.id, kind: "ask", tag: "owner-ask", to: OWNER, body });
@@ -180,10 +184,10 @@ async function mirrorAfter(cfg: Config, board: Board, where: string): Promise<vo
     return;
   }
   try {
-    await mirrorOnce(cfg, board);
-    console.log(`Mirrored to ${where} on GitHub.`);
+    const s = await mirrorOnce(cfg, board);
+    console.log(s?.busy ? `Another mirror pass is running; it sends this to ${where}.` : `Mirrored to ${where} on GitHub.`);
   } catch (e) {
-    if (!(e instanceof GithubError)) throw e;
+    if (!(e instanceof GithubError) && !(e instanceof BoardError)) throw e;
     console.log(`It is on the board; GitHub didn't take the copy yet (${e.message}). \`factory board mirror\` sends it.`);
   }
 }
@@ -198,7 +202,7 @@ export async function answerOnBoard(cfg: Config, id: string, text: string): Prom
       try {
         await mirrorOnce(cfg, board); // an answer given on GitHub meanwhile comes back first
       } catch (e) {
-        if (!(e instanceof GithubError)) throw e;
+        if (!(e instanceof GithubError) && !(e instanceof BoardError)) throw e;
       }
     }
     const ask = (await boardAsks(board, repo)).filter((m) => ownerAskIds(m.body).includes(id)).at(-1);
@@ -250,6 +254,14 @@ function importVerb(cfg: Config, args: string[]): number {
   return p.status ?? 1;
 }
 
+/** Exit code 3: the board couldn't be had (none set up, or it doesn't answer), so nothing was written to it. A caller that
+ * falls back to GitHub (the dev manager's asks) does so only then; any other failure may have written to the board. */
+export const NO_BOARD_EXIT = 3;
+
+function boardCouldNotTake(e: { code: string }): boolean {
+  return ["board_missing", "no-answer", "board-unreachable", "failed"].includes(e.code) && !(e instanceof GithubError);
+}
+
 // --- the command ---------------------------------------------------------------------------------------------------------
 
 export async function main(argv: string[]): Promise<number> {
@@ -267,7 +279,7 @@ export async function main(argv: string[]): Promise<number> {
   } catch (e) {
     if (e instanceof Refusal || e instanceof GithubError || e instanceof BoardError) {
       process.stderr.write(pyDumps({ code: e.code, message: e.message, fix: e.fix }) + "\n");
-      throw new Exit(1);
+      throw new Exit(boardCouldNotTake(e) ? NO_BOARD_EXIT : 1);
     }
     throw e;
   }

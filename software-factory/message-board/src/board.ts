@@ -578,6 +578,31 @@ export class Board {
     });
   }
 
+  // ---------- one at a time ----------
+  /** Run `fn` while holding the named lock, so two callers anywhere (other processes, other machines) never run it at
+   * once. The lock is a Postgres session lock on a connection kept for the whole run: a caller that dies lets it go.
+   * Waits up to `waitMs` (default 15 s) for it; `{ ran: false }` when it is still held then. */
+  async exclusive<T>(name: string, fn: () => Promise<T>, options: { waitMs?: number } = {}): Promise<{ ran: true; result: T } | { ran: false }> {
+    named("A lock's name", name);
+    const conn = await this.run(() => this.sql.reserve());
+    try {
+      const deadline = Date.now() + (options.waitMs ?? 15_000);
+      for (;;) {
+        const r = rows(await conn`SELECT pg_try_advisory_lock(7007, hashtext(${name})) AS got`);
+        if (r[0]?.got) break;
+        if (Date.now() >= deadline) return { ran: false };
+        await Bun.sleep(200);
+      }
+      try {
+        return { ran: true, result: await fn() };
+      } finally {
+        await conn`SELECT pg_advisory_unlock(7007, hashtext(${name}))`.catch(() => {});
+      }
+    } finally {
+      conn.release();
+    }
+  }
+
   /** One message, by its id. */
   async message(id: number): Promise<Message> {
     return this.run(async () => {
