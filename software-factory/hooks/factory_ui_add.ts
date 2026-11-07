@@ -189,6 +189,15 @@ function gitEnv(): Record<string, string> {
   return env;
 }
 
+/** The host a git remote URL points at (`https://host/…`, `ssh://git@host/…`, `git@host:…`), or null for a local path. */
+export function remoteHost(url: string): string | null {
+  const u = url.trim();
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?([^/:]+)/i.exec(u);
+  if (scheme) return u.toLowerCase().startsWith("file:") ? null : (scheme[1] as string).toLowerCase();
+  const scp = /^(?:[^@/]+@)?([^/:]+):(?!\/)/.exec(u); // git@github.com:owner/name.git
+  return scp ? (scp[1] as string).toLowerCase() : null;
+}
+
 /** The origin of the checkout at `path` ends with `repo` (owner/name, .git or not). */
 async function isCheckoutOf(path: string, repo: string): Promise<boolean> {
   if (!isDir(path)) return false;
@@ -239,6 +248,16 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
     if (origin.code !== 0 || !origin.stdout.trim()) {
       return problem("ui_add_no_remote", `${path} has no remote called origin, so its setup pull request would have nowhere to go.`,
         `Add the project's GitHub repo as its origin (in that folder: git remote add origin https://github.com/<owner>/<name>.git, then git push -u origin main), or pick Create a new repo instead.`);
+    }
+    // labels, the owner queue and the setup pull request all go through gh, so origin must be a GitHub repo (#605); the
+    // configured URL, not get-url's (which applies insteadOf), and a GitHub Enterprise host only when gh is signed in to it
+    const url = (await git(path, ["config", "--get", "remote.origin.url"])).stdout.trim();
+    const where = remoteHost(url);
+    const onGitHub = where === "github.com" ||
+      (where !== null && (await spawn(["gh", "auth", "status", "--hostname", where], path, gitEnv(), 60_000)).code === 0);
+    if (!onGitHub) {
+      return problem("ui_add_not_github", `${path}'s origin (${url}) isn't a GitHub repo, so its labels, owner queue and setup pull request can't be made.`,
+        `The factory needs the project on GitHub. Point origin at the repo (in that folder: git remote set-url origin https://github.com/<owner>/<name>.git, then git push -u origin main), or pick Create a new repo instead.`);
     }
   }
   const tasks = b.tasks;
