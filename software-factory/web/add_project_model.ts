@@ -57,6 +57,8 @@ export interface Form {
   reviewer: string;
   protected: string[];
   team: Team;
+  /** Pictures chosen for agents (#457), by name, as data URLs; written to .claude/factory/avatars/ by the run. */
+  avatars: Record<string, string>;
 }
 
 export interface Repo {
@@ -100,7 +102,8 @@ export function teamOf(builders: number): Team {
 
 export function emptyForm(folder: string): Form {
   return { source: "clone", repo: "", folder, path: "", pathEdited: false, visibility: "private", tasks: "issues", mainBranch: "main",
-    install: "", typecheck: "", lint: "", test: "", build: "", reviewer: "", protected: [...DEFAULT_PROTECTED], team: teamOf(2) };
+    install: "", typecheck: "", lint: "", test: "", build: "", reviewer: "", protected: [...DEFAULT_PROTECTED], team: teamOf(2),
+    avatars: {} };
 }
 
 /** Where `repo` (owner/name) is cloned in `folder`. */
@@ -132,8 +135,8 @@ export function sourceProblem(form: Form): string | null {
 export function setupProblem(form: Form): string | null {
   if (!form.mainBranch.trim() || /\s/.test(form.mainBranch.trim())) return "Type the main branch, usually main.";
   const t = form.team;
-  if (!t.builders.length) return "Pick at least one builder.";
-  const names = [t.devManager, t.productOwner, ...t.builders];
+  if (!t.builders.length) return "Pick at least one builder: the first agent plans, the next reviews and merges, the rest build.";
+  const names = picksOf(t);
   if (names.some((n) => !AGENT_NAME.test(n))) return "Agent names are lowercase letters, digits and dashes.";
   if (new Set(names).size !== names.length) return "Two agents have the same name: give each its own.";
   return null;
@@ -144,7 +147,99 @@ export function requestOf(form: Form): Record<string, unknown> {
   return { source: form.source, repo: form.source === "folder" ? "" : form.repo.trim(), path: form.path.trim(), visibility: form.visibility,
     tasks: form.tasks, mainBranch: form.mainBranch.trim(), install: form.install.trim(), typecheck: form.typecheck.trim(),
     lint: form.lint.trim(), test: form.test.trim(), build: form.build.trim(), reviewer: form.reviewer.trim(), protected: form.protected,
-    team: { devManager: form.team.devManager, productOwner: form.team.productOwner, builders: form.team.builders } };
+    team: { devManager: form.team.devManager, productOwner: form.team.productOwner, builders: form.team.builders },
+    ...avatarsOf(form) };
+}
+
+/** The pictures of the team's own agents, as the request carries them: none when there are none. */
+function avatarsOf(form: Form): { avatars?: Record<string, string> } {
+  const names = new Set(picksOf(form.team));
+  const kept = Object.entries(form.avatars).filter(([n]) => names.has(n));
+  return kept.length ? { avatars: Object.fromEntries(kept) } : {};
+}
+
+// --- Choose your team (#457) -------------------------------------------------------------------------------------------
+
+export type PresetId = "solo" | "small" | "full" | "custom";
+
+/** The team sizes on Choose your team; `picks` in role order (see teamFromPicks), null for your own mix. */
+export const TEAM_PRESETS: { id: PresetId; name: string; what: string; picks: string[] | null }[] = [
+  { id: "solo", name: "Just a builder", what: "One agent builds; you plan, review and merge.", picks: ["haile"] },
+  { id: "small", name: "A small team", what: "A product owner, a dev manager and one builder.", picks: ["mentewab", "fasil", "haile"] },
+  { id: "full", name: "The full team", what: "A product owner, a dev manager and three builders.", picks: ["mentewab", "fasil", "haile", "taytu", "menelik"] },
+  { id: "custom", name: "Your own mix", what: "Pick any legends below, or add your own.", picks: null },
+];
+
+/** Who each legend is, shown under its name. */
+export const LEGEND_WHO: Record<string, string> = {
+  mentewab: "Empress Mentewab", fasil: "Emperor Fasilides", menelik: "Menelik II", taytu: "Empress Taytu", haile: "Haile Selassie",
+  tewodros: "Tewodros II", yohannes: "Yohannes IV", zewditu: "Empress Zewditu", lalibela: "King Lalibela", ezana: "King Ezana of Aksum",
+  alula: "Ras Alula", abebe: "Abebe Bikila",
+};
+
+/** The team from the picks in order: the first plans the product, the next reviews and merges, the rest build. One pick
+ * alone builds, and you plan, review and merge yourself. */
+export function teamFromPicks(picks: string[]): Team {
+  if (picks.length === 1) return { productOwner: "", devManager: "", builders: [...picks] };
+  return { productOwner: picks[0] ?? "", devManager: picks[1] ?? "", builders: picks.slice(2) };
+}
+
+/** The team's agents in pick order (the inverse of teamFromPicks). */
+export function picksOf(t: Team): string[] {
+  return [t.productOwner, t.devManager, ...t.builders].filter((n) => n !== "");
+}
+
+/** The role of the `i`th of `n` picks, in words. */
+export function roleNameOf(i: number, n: number): string {
+  if (n === 1 || i >= 2) return "Builder";
+  return i === 0 ? "Product owner" : "Dev manager";
+}
+
+/** The preset the team is, or your own mix. */
+export function presetOf(t: Team): PresetId {
+  const picks = picksOf(t).join(",");
+  return TEAM_PRESETS.find((p) => p.picks && p.picks.join(",") === picks)?.id ?? "custom";
+}
+
+export function withPreset(form: Form, id: PresetId): Form {
+  const p = TEAM_PRESETS.find((x) => x.id === id);
+  return p?.picks ? { ...form, team: teamFromPicks(p.picks) } : form;
+}
+
+function withPicks(form: Form, picks: string[]): Form {
+  return { ...form, team: teamFromPicks(picks) };
+}
+
+/** A legend tapped: added at the end, or taken out. */
+export function togglePick(form: Form, name: string): Form {
+  const picks = picksOf(form.team);
+  return withPicks(form, picks.includes(name) ? picks.filter((n) => n !== name) : [...picks, name]);
+}
+
+/** Your own agent: added at the end with the first free name agent-1, agent-2, ..., to rename. */
+export function addPick(form: Form): Form {
+  const picks = picksOf(form.team);
+  let i = 1;
+  while (picks.includes(`agent-${i}`)) i++;
+  return withPicks(form, [...picks, `agent-${i}`]);
+}
+
+/** An agent renamed in its place; its picture goes with it. The name is checked by setupProblem. */
+export function renamePick(form: Form, from: string, to: string): Form {
+  const picks = picksOf(form.team).map((n) => (n === from ? to : n));
+  const avatars = Object.fromEntries(Object.entries(form.avatars).map(([n, v]) => [n === from ? to : n, v]));
+  return { ...withPicks(form, picks), avatars };
+}
+
+/** The pictures the server takes, and their largest size (as for an image in .claude/factory/avatars, #437). */
+export const AVATAR_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+export const AVATAR_MAX_BYTES = 256 * 1024;
+
+/** What is wrong with a picked picture file, or null. */
+export function avatarProblem(file: { type: string; size: number }): string | null {
+  if (!AVATAR_TYPES.includes(file.type)) return "Pick a PNG, JPEG, WebP or GIF picture.";
+  if (file.size > AVATAR_MAX_BYTES) return "That picture is over 256 KB: pick a smaller one.";
+  return null;
 }
 
 export function addProtected(list: string[], text: string): string[] {
@@ -159,7 +254,8 @@ export function createsOf(form: Form): { title: string; where: string; detail: s
     { title: "Role folders", where: "Repo", detail: "One for the product owner, the dev manager and the builders" },
     ...(form.tasks === "issues" ? [{ title: "4 task labels", where: "GitHub", detail: "Ready, in progress, in review, blocked" }] : []),
     { title: "The owner queue", where: "GitHub issue", detail: "One issue where the agents ask what only you decide" },
-    { title: "A starter PRD", where: "Repo", detail: `docs/PRD.md with headings for ${form.team.productOwner} to fill in with you` },
+    { title: "A starter PRD", where: "Repo", detail: `docs/PRD.md with headings for ${form.team.productOwner || "you"} to fill in${form.team.productOwner ? " with you" : ""}` },
+    ...(Object.keys(avatarsOf(form).avatars ?? {}).length ? [{ title: "Your agents' pictures", where: "Repo", detail: "One picture for each agent you gave one" }] : []),
     { title: "Your answers", where: "Repo", detail: "Task source, protected paths, commands and the team, saved in the project" },
     { title: "What agents may run", where: "Repo", detail: "Your commands, allowed for unattended agents and run by CI" },
     { title: "The trusted reviewer", where: "Repo", detail: `${form.reviewer || "Your GitHub login"}: only these reviews count at a merge` },

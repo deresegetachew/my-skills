@@ -4,7 +4,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { encodeCode } from "../hooks/factory_machine_join.ts";
+import { encodeCode } from "../hooks/factory_join_code.ts";
 import { api, project, startUi, type Running } from "./web_ui_support.ts";
 import { write } from "./support.ts";
 

@@ -38,6 +38,8 @@
 //                                              changes (worked out from what the server already holds, no GitHub call)
 //   GET|POST /api/add-project[/check|/runs/:id[/retry]]: add a project from the page (factory_ui_add.ts, #447); the
 //                                              WebSocket gets {type: "add-project", run} and {type: "projects"}
+//   POST /api/setup/join[/preview]           first launch, Join my factory (factory_ui_setup.ts, #457): what a join code
+//                                              connects to, then `factory machine join <code>` after a confirm
 //
 // With a message board on this machine (#498, factory_ui_board.ts) a project's tasks and epics come from it, live: the
 // server keeps one listen() and pushes a project's views when the board changes. Its snapshot then leaves the tasks
@@ -59,6 +61,7 @@ import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { settingsApi } from "./factory_ui_settings.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
+import { setupApi } from "./factory_ui_setup.ts";
 import { BoardFeed } from "./factory_ui_board.ts";
 import { Ops } from "./factory_ui_ops.ts";
 import { ciAction, pullRowOf, Refresher, repoOfProject, taskAction, viewsOf } from "./factory_ui_views.ts";
@@ -298,6 +301,11 @@ export function serve(o: ServeOptions): Running {
       const r = await adds.api(req, parts.slice(1));
       return r ? json(r.status, r.body) : problem(404, "not_found", `There is no ${req.method} ${url.pathname}.`,
         "Adding a project is GET or POST /api/add-project, POST /api/add-project/check, GET /api/add-project/runs/:id and POST .../retry.");
+    }
+    if (parts[0] === "setup") { // first launch: Join my factory (#457)
+      const r = await setupApi(req, parts.slice(1), list.find((x) => x.current) ?? list[0] as UiProject);
+      return r ? json(r.status, r.body) : problem(404, "not_found", `There is no ${req.method} ${url.pathname}.`,
+        "First launch has POST /api/setup/join/preview and POST /api/setup/join.");
     }
     if (parts[0] !== "projects") return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
     if (parts.length === 1) {

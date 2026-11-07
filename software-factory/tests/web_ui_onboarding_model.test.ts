@@ -16,7 +16,7 @@ test("Welcome offers three ways in, the first the primary: start here, join my f
     ["Join my factory", "Paste a join code", "#/setup/join", false],
     ["Open a project", "Choose a folder", "#/add-project", false],
   ]);
-  for (const c of WELCOME_CHOICES) expect(c.body).not.toMatch(/factory [a-z]+ |--/); // no command on screen
+  for (const c of WELCOME_CHOICES) expect(c.body).not.toMatch(/`|--|\bfactory (machine|doctor|init|update|bootstrap|ui)\b/); // no command on screen
 });
 
 test("the onboarding addresses: welcome, the machine check and join; anything else is not onboarding", () => {
