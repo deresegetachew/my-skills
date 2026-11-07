@@ -12,6 +12,8 @@ export interface Spec {
   state?: "ready" | "blocked" | "done";
   dependsOn?: number[];
   todos?: number; // that many unticked checkboxes, "todo 1" ... "todo n"
+  /** It comes from a PRD change (#578): it waits for the fixture's PRD pull request, which starts open. */
+  prd?: boolean;
 }
 
 /** A fresh port holding `specs`, and what the test needs to know about how this adapter names them. */
@@ -22,6 +24,10 @@ export interface Fixture {
   foreign: string; // an id in the other mode's form (a plan id for issues, an issue number for a plan)
   /** Another agent's claim lands first, before its labels or state show it: the start of a race. */
   rival(id: string, who: Claimant): void;
+  /** The number of the PRD change's pull request that the `prd` specs wait for (as written after `#`). */
+  prd: string;
+  /** That pull request merges. */
+  mergePrd(): void;
 }
 
 const haile: Claimant = { agent: "haile", machine: "m1" };
@@ -193,5 +199,46 @@ export function taskTrackerContract(name: string, make: (specs: Spec[]) => Fixtu
     port.keep(id);
     expect(port.list().map((t) => [t.id, t.state, t.holders])).toEqual([[id, "in-progress", ["haile"]]]);
     expect(port.pick(taytu).task).toBeNull();
+  });
+
+  test(`${name}: a task whose PRD change hasn't merged waits for it and says so; the merge makes it ready (#578)`, () => {
+    const { port, ids, prd, mergePrd } = make([{ title: "Waits", prd: true }, { title: "Free" }]);
+    const waits = (): string | undefined => port.list().find((t) => t.title === "Waits")?.waitsForPrd;
+    expect(waits()).toBe(prd);
+    expect(port.list().find((t) => t.title === "Free")?.waitsForPrd).toBeUndefined();
+    expect(titled(port.next())).toBe("Free");
+    const r = refusal(() => port.claim(ids[0] as string, haile));
+    expect(r.code).toMatch(/-waits-for-prd$/);
+    expect(r.message).toContain(`PR #${prd}`);
+    const picked = port.pick(haile);
+    expect(titled(picked.task)).toBe("Free");
+    expect(picked.note).toContain(`PR #${prd}`);
+    const none = port.pick(taytu);
+    expect(none.task).toBeNull();
+    expect(none.note).toContain(`PR #${prd}`);
+    mergePrd();
+    expect(waits()).toBeUndefined();
+    expect(titled(port.next())).toBe("Waits");
+    expect(port.claim(ids[0] as string, taytu).id).toBe(ids[0] as string);
+  });
+
+  test(`${name}: next says which ready tasks it passed over for their PRD change, and nothing once it merged (#578)`, () => {
+    const { port, prd, mergePrd } = make([{ title: "Waits", prd: true }, { title: "Free" }]);
+    const skipped: { name: string; pr: string }[] = [];
+    expect(titled(port.next(skipped))).toBe("Free");
+    expect(skipped.map((s) => s.pr)).toEqual([prd]);
+    expect(skipped[0]?.name).toBeTruthy();
+    mergePrd();
+    const after: { name: string; pr: string }[] = [];
+    expect(titled(port.next(after))).toBe("Waits");
+    expect(after).toEqual([]);
+  });
+
+  test(`${name}: a task with no PRD change is picked as before, with no note (#578)`, () => {
+    const { port, ids } = make([{ title: "One" }]);
+    expect(port.list()[0]?.waitsForPrd).toBeUndefined();
+    const picked = port.pick(haile);
+    expect(picked.task?.id).toBe(ids[0] as string);
+    expect(picked.note).toBeUndefined();
   });
 }

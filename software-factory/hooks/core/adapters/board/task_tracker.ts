@@ -18,14 +18,18 @@
 //   keep, #513), so a long quiet build isn't swept. Once the session is gone, `factory board sweep` frees the claim when
 //   its time has passed and its holder has been quiet that long.
 // - Epics are the project's tasks of kind epic; their tasks are the `- [ ] #n` lines and the board's children.
+// - A PRD change (#578) is a card that isn't a task (a note) whose title or body has a `PRD change: #62` line; a task from
+//   it has a `waits_for` edge to the card, so the board's own ready view holds it back while the card is open. Here it
+//   is the task's `waitsForPrd`, not one of its dependencies. `factory board sweep` closes the card when the pull request
+//   merges; the owner moving the card to done is "build now".
 import { randomUUID } from "node:crypto";
 import type { Edge, Task as BoardTask } from "../../../../message-board/src/index.ts";
 import { citesIn } from "../../domain/cites.ts";
 import type { Claimant } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
 import { type Epic, parseEpic } from "../../domain/epic.ts";
-import { checkClaim, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
-import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
+import { checkClaim, prdChangeIn, prdSkipNote, type Task, type TaskState, tickTodo, todos } from "../../domain/task.ts";
+import type { Filed, NewTask, Picked, SkippedForPrd, TaskTracker } from "../../ports/task_tracker.ts";
 import type { BoardChild } from "./child.ts";
 import type { ClaimTokens } from "./tokens.ts";
 
@@ -57,6 +61,10 @@ class View {
   private readonly ids = new Map<number, string>();
   private readonly byId = new Map<string, BoardTask>();
   private readonly deps = new Map<number, number[]>();
+  /** The open PRD change cards (#578): board id to the pull request number. */
+  private readonly prdCards = new Map<number, string>();
+  /** A task's open PRD change: board id to the pull request it waits for. */
+  private readonly prds = new Map<number, string>();
 
   constructor(all: BoardTask[], edges: Edge[], repo: string) {
     const gh = repo ? `github:${repo.toLowerCase()}#` : null;
@@ -72,11 +80,20 @@ class View {
       this.byId.set(id, t);
       return true;
     });
+    for (const t of this.mine) {
+      const pr = !WORK.has(t.kind) && t.kind !== "epic" && t.status !== "done" ? prdChangeIn(`${t.title}\n${t.body}`) : null;
+      if (pr !== null) this.prdCards.set(t.id, pr);
+    }
     for (const e of edges) {
       if (!this.ids.has(e.to) || !this.ids.has(e.from)) continue;
       const pair = waiterAndBlocker(e);
       if (!pair) continue;
       const [waiter, blocker] = pair;
+      const pr = this.prdCards.get(blocker);
+      if (pr !== undefined) {
+        if (!this.prds.has(waiter)) this.prds.set(waiter, pr);
+        continue;
+      }
       const list = this.deps.get(waiter) ?? [];
       if (!list.includes(blocker)) list.push(blocker);
       this.deps.set(waiter, list);
@@ -107,11 +124,17 @@ class View {
     return this.dependsOn(t).filter((d) => d.status !== "done").map((d) => this.idOf(d));
   }
 
+  /** The pull request of the open PRD change card `t` waits for (#578), or null. */
+  prdOf(t: BoardTask): string | null {
+    return this.prds.get(t.id) ?? null;
+  }
+
   task(t: BoardTask): Task {
     const group = /^Milestone:[ \t]*(.+)$/m.exec(t.body)?.[1]?.trim() ?? "";
+    const prd = t.status === "open" && !t.holder ? this.prdOf(t) : null;
     return { id: this.idOf(t), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [],
       dependsOn: this.dependsOn(t).map((d) => this.idOf(d)), todos: todos(t.body), group, tags: t.kind === "bug" ? ["bug"] : [],
-      cites: citesIn(`${t.title}\n${t.body}`) };
+      cites: citesIn(`${t.title}\n${t.body}`), ...(prd === null ? {} : { waitsForPrd: prd }) };
   }
 }
 
@@ -146,9 +169,14 @@ export class BoardTaskTracker implements TaskTracker {
     return text;
   }
 
-  next(): Task | null {
+  next(skipped: SkippedForPrd[] = []): Task | null {
     const v = this.view();
-    const t = this.candidates(v, null)[0];
+    const ready = this.candidates(v, null);
+    for (const x of ready) {
+      const pr = v.prdOf(x);
+      if (pr !== null) skipped.push({ name: label(v.idOf(x)), pr });
+    }
+    const t = ready.find((x) => v.prdOf(x) === null);
     return t ? v.task(t) : null;
   }
 
@@ -159,11 +187,15 @@ export class BoardTaskTracker implements TaskTracker {
     const lost = v.mine.find((t) => this.lostHere(t, who));
     const back = lost ? this.take(lost, who) : null; // held on the board with no token here: take the claim back
     if (back) return { task: v.task(back) };
-    for (const t of this.candidates(v, who.agent)) {
+    const ready = this.candidates(v, who.agent);
+    // a task whose PRD change card is open is skipped, and the note says so (#578); the board would refuse it anyway
+    const note = prdSkipNote(ready.filter((t) => v.prdOf(t) !== null).map((t) => ({ name: label(v.idOf(t)), pr: v.prdOf(t) as string })));
+    const withNote = (p: Picked): Picked => (note ? { ...p, note } : p);
+    for (const t of ready.filter((x) => v.prdOf(x) === null)) {
       const got = this.take(t, who);
-      if (got) return { task: v.task(got) };
+      if (got) return withNote({ task: v.task(got) });
     }
-    return { task: null };
+    return withNote({ task: null });
   }
 
   claim(id: string, who: Claimant): Task {
@@ -179,6 +211,11 @@ export class BoardTaskTracker implements TaskTracker {
     if (check === "mine") return task;
     if (check === "taken") throw new CoreError("task-taken", `${id} is already taken by ${t.holder ?? "another agent"}.`, "Pick another task.");
     if (check === "blocked") throw new CoreError("task-blocked", `${id} is blocked.`, "Pick another task.");
+    if (check === "prd") {
+      throw new CoreError("task-waits-for-prd", `${id} waits for its PRD change, PR #${open[0]}, to merge.`,
+        `Pick another task: ${id} is ready once PR #${open[0]} merges and \`factory board sweep\` closes its PRD change card. ` +
+        "To build it now, the owner moves that card to done (board_move).");
+    }
     if (check === "waiting") throw new CoreError("task-blocked", `${id} waits for ${open.join(", ")}.`, "Build what it depends on first.");
     if (check === "not-ready") throw new CoreError("task-not-ready", `${id} is not ready.`, "Pick another task.");
     if (t.assignee && t.assignee !== who.agent) throw new CoreError("task-taken", `${id} was handed to ${t.assignee}.`, "Pick another task.");
@@ -342,4 +379,9 @@ export class BoardTaskTracker implements TaskTracker {
 /** Issue numbers first, in order, then board ids. */
 function order(id: string): number {
   return /^\d+$/.test(id) ? Number(id) : 1e12 + Number(id.slice(1));
+}
+
+/** How people call a task in a line: `#7` for an issue, `b12` for a task made on the board. */
+function label(id: string): string {
+  return /^\d+$/.test(id) ? `#${id}` : id;
 }

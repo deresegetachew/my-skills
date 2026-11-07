@@ -20,6 +20,25 @@ export interface Task {
   group: string; // the milestone or the plan's phase, "" for none
   tags: string[]; // the tracker's own labels, for commands that print them
   cites?: string[]; // the decisions and PRD stories its body cites (`decision 0004`, `US-12`), as written
+  /** The pull request of the PRD change it comes from, while that change isn't merged (#578): `"62"` for PR #62. It
+   * isn't claimable until then. Unset for a task with no PRD change, or once its change merged. */
+  waitsForPrd?: string;
+}
+
+const PRD_CHANGE = /^[^\S\n]*(?:[-*][^\S\n]+)?PRD change:[^\S\n]*(?:#(\d+)|https?:\/\/\S+?\/pull\/(\d+))\b/im;
+
+/** The pull request number a task's text names on its `PRD change:` line (#578): `PRD change: #62`, or the pull request's
+ * link. null for none. The line starts the text or a line of it, so a sentence that mentions a PRD change is not one. */
+export function prdChangeIn(text: string): string | null {
+  const m = PRD_CHANGE.exec(text);
+  return m ? ((m[1] ?? m[2]) as string) : null;
+}
+
+/** The note for the ready tasks a pick or a look skipped because their PRD change hasn't merged: one line each, or
+ * undefined for none. `name` is how the task is called ("#5", "b12", "1.3"). */
+export function prdSkipNote(skipped: { name: string; pr: string }[]): string | undefined {
+  if (!skipped.length) return undefined;
+  return skipped.map((s) => `Skipped ${s.name}: it waits for its PRD change, PR #${s.pr}, to merge.`).join("\n");
 }
 
 const BOX = /^(\s*[-*]\s+\[)([ xX])(\]\s+)(.*)$/gm;
@@ -58,15 +77,16 @@ export function dependencies(text: string, style: keyof typeof DEPENDS): string[
 }
 
 /** Why `agent` may or may not claim `task`, checked in this order: it is already the agent's (`mine`), someone holds it
- * or it is in progress or review (`taken`), it is `blocked`, it is `waiting` for open dependencies (given back), or it
- * isn't ready (`not-ready`). Else `free`. `own` and `waitingFor` are asked only when the answer depends on them, as each
- * may cost the tracker a call. */
-export type ClaimCheck = "mine" | "taken" | "blocked" | "waiting" | "not-ready" | "free";
+ * or it is in progress or review (`taken`), it is `blocked`, its PRD change hasn't merged (`prd`, the pull request given
+ * back, #578), it is `waiting` for open dependencies (given back), or it isn't ready (`not-ready`). Else `free`. `own`
+ * and `waitingFor` are asked only when the answer depends on them, as each may cost the tracker a call. */
+export type ClaimCheck = "mine" | "taken" | "blocked" | "prd" | "waiting" | "not-ready" | "free";
 
 export function checkClaim(task: Task, agent: string, own: () => boolean, waitingFor: () => string[]): [ClaimCheck, string[]] {
   if (task.holders.includes(agent) && task.state === "in-progress" && own()) return ["mine", []];
   if (task.holders.length || task.state === "in-progress" || task.state === "in-review") return ["taken", []];
   if (task.state === "blocked") return ["blocked", []];
+  if (task.waitsForPrd) return ["prd", [task.waitsForPrd]];
   const open = waitingFor();
   if (open.length) return ["waiting", open];
   if (task.state !== "ready") return ["not-ready", []];

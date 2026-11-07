@@ -3,8 +3,8 @@
 import { type Claimant, type ClaimEvent, isMe, winner } from "../../domain/claim.ts";
 import { CoreError } from "../../domain/error.ts";
 import type { Epic } from "../../domain/epic.ts";
-import { checkClaim, type Task, type TaskState, tickTodo, type Todo } from "../../domain/task.ts";
-import type { Filed, NewTask, Picked, TaskTracker } from "../../ports/task_tracker.ts";
+import { checkClaim, prdSkipNote, type Task, type TaskState, tickTodo, type Todo } from "../../domain/task.ts";
+import type { Filed, NewTask, Picked, SkippedForPrd, TaskTracker } from "../../ports/task_tracker.ts";
 
 interface Held {
   task: Task;
@@ -19,6 +19,8 @@ export interface Start {
   dependsOn?: string[];
   todos?: Todo[];
   group?: string;
+  /** The pull request of the PRD change it comes from, not merged yet (#578). */
+  prdChange?: string;
 }
 
 export class MemoryTaskTracker implements TaskTracker {
@@ -29,7 +31,7 @@ export class MemoryTaskTracker implements TaskTracker {
     const id = String(this.tasks.size + 1);
     const todos = (start.todos ?? []).map((t) => ({ ...t }));
     this.tasks.set(id, { task: { id, title: start.title, state: start.state ?? "ready", holders: [], dependsOn: start.dependsOn ?? [],
-      todos, group: start.group ?? "", tags: [] }, text: todos.map((t) => `- [${t.done ? "x" : " "}] ${t.text}`).join("\n"),
+      todos, group: start.group ?? "", tags: [], ...(start.prdChange ? { waitsForPrd: start.prdChange } : {}) }, text: todos.map((t) => `- [${t.done ? "x" : " "}] ${t.text}`).join("\n"),
     events: [], why: "" });
     return id;
   }
@@ -37,6 +39,11 @@ export class MemoryTaskTracker implements TaskTracker {
   /** Another agent's claim lands first, before it shows in the task's state (the start of a race). */
   rival(id: string, who: Claimant): void {
     this.held(id).events.push({ claim: { agent: who.agent, machine: who.machine } });
+  }
+
+  /** The PRD change in pull request `pr` merged: its tasks wait no more. */
+  mergePrd(pr: string): void {
+    for (const h of this.tasks.values()) if (h.task.waitsForPrd === pr) delete h.task.waitsForPrd;
   }
 
   list(): Task[] {
@@ -48,8 +55,10 @@ export class MemoryTaskTracker implements TaskTracker {
     return `${id} ${h.task.title}  [${h.task.state}]\n\n${h.text}` + (h.why ? `\n\nBlocked: ${h.why}` : "");
   }
 
-  next(): Task | null {
-    const t = [...this.tasks.values()].find((h) => h.task.state === "ready" && !h.task.holders.length && !this.waitingFor(h.task).length);
+  next(skipped: SkippedForPrd[] = []): Task | null {
+    const ready = [...this.tasks.values()].filter((h) => h.task.state === "ready" && !h.task.holders.length && !this.waitingFor(h.task).length);
+    for (const h of ready) if (h.task.waitsForPrd) skipped.push({ name: h.task.id, pr: h.task.waitsForPrd });
+    const t = ready.find((h) => !h.task.waitsForPrd);
     return t ? copy(t.task) : null;
   }
 
@@ -57,11 +66,16 @@ export class MemoryTaskTracker implements TaskTracker {
     const own = [...this.tasks.values()].find((h) => h.task.state === "in-progress" && h.task.holders.includes(who.agent) &&
       isMe(winner(h.events), who.agent, who.machine));
     if (own) return { task: copy(own.task) };
+    const skipped: { name: string; pr: string }[] = [];
     for (const h of this.tasks.values()) {
       if (h.task.state !== "ready" || h.task.holders.length || this.waitingFor(h.task).length) continue;
-      if (this.take(h, who)) return { task: copy(h.task) };
+      if (h.task.waitsForPrd) {
+        skipped.push({ name: h.task.id, pr: h.task.waitsForPrd });
+        continue;
+      }
+      if (this.take(h, who)) return withNote({ task: copy(h.task) }, prdSkipNote(skipped));
     }
-    return { task: null };
+    return withNote({ task: null }, prdSkipNote(skipped));
   }
 
   claim(id: string, who: Claimant): Task {
@@ -71,6 +85,10 @@ export class MemoryTaskTracker implements TaskTracker {
     if (check === "mine") return copy(h.task);
     if (check === "taken") throw new CoreError("task-taken", `${id} is already taken by ${h.task.holders[0] ?? "another agent"}.`, "Pick another task.");
     if (check === "blocked") throw new CoreError("task-blocked", `${id} is blocked.`, "Pick another task.");
+    if (check === "prd") {
+      throw new CoreError("task-waits-for-prd", `${id} waits for its PRD change, PR #${open[0]}, to merge.`,
+        `Pick another task: ${id} is ready once PR #${open[0]} merges.`);
+    }
     if (check === "waiting") throw new CoreError("task-blocked", `${id} waits for ${open.join(", ")}.`, "Build what it depends on first.");
     if (check === "not-ready") throw new CoreError("task-not-ready", `${id} is not ready.`, "Pick another task.");
     if (!this.take(h, who)) throw new CoreError("task-taken", `Another agent claimed ${id} first.`, "Pick another task.");
@@ -136,6 +154,10 @@ export class MemoryTaskTracker implements TaskTracker {
     Object.assign(h.task, { state: "in-progress", holders: [who.agent] });
     return true;
   }
+}
+
+function withNote(p: Picked, note: string | undefined): Picked {
+  return note ? { ...p, note } : p;
 }
 
 function copy(t: Task): Task {

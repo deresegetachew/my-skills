@@ -101,6 +101,19 @@ to the product owner again (so the loop never stops on it), and `factory prs` an
 state `owner`) show it as waiting for the owner. An owner comment after it, `factory owner answer <slug>` or a plain reply, gives it back to the
 product owner. `<!-- factory-po-reply ask=<slug> done -->`, once the change is recorded, closes it.
 
+**Tasks from a PRD change wait for it to merge** (#578). The order is PRD, then tasks, then builders. When the product
+owner files tasks for a PRD change that is still an open pull request, each task says so on a line of its own,
+`PRD change: #62` (or the pull request's link), next to its `PRD: US-<n>` line. Until that pull request merges the task
+is not claimable: `factory next` and the loops pass it over, with one line on stderr each ("Skipped #5: it waits for its
+PRD change, PR #62, to merge."), a claim by number is refused with `issue-waits-for-prd` (`task-waits-for-prd` for a plan or
+the board), and the web UI shows it as "waits for its PRD" with a link to the pull request. The merge makes it ready; no
+one has to move it. To build it now, the owner takes the line out of the task. A pull request closed without merging
+keeps its tasks waiting: the product owner drops or re-plans them. On the message board (`tasks.source: board`) the
+change is a note card, titled `PRD change: #62 (<what>)`, and each task gets a `waits_for` link to it (`board_link`), so the
+board's own ready queue and `board_claim` hold the task back too. `factory board sweep`, in the dev manager's pass, closes
+the card once the pull request has merged, which makes its tasks ready; the owner moving the card to done
+(`board_move`, recorded on the board) is "build now". A task with no PRD change works as before.
+
 **`factory prd [--open] [--story N] [--json]`** shows progress against the PRD, computed from GitHub. A story's id is `US-<n>`
 at the start of its heading or list item in the PRD file (`prd` in `factory.json`). A task issue says which stories it serves
 with one line, `PRD: US-3, US-5` (the task template has it). Per story it prints the state (done, in progress, planned, no
