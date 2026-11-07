@@ -29,7 +29,7 @@ afterAll(async () => {
 interface World { dir: string; env: Record<string, string>; url: string }
 interface Run { code: number; stdout: string; stderr: string }
 interface Made { name: string; role: string; url: string }
-interface Row { name: string; role: string; firstSeen: string | null; lastSeen: string | null; connected: boolean }
+interface Row { name: string; role: string; firstSeen: string | null; lastSeen: string | null; connected: boolean; redeemedAt: string | null }
 
 /** The board's machine: a fresh, migrated database, its url file, and state.json saying where others reach it. */
 async function hub(o: { address?: string; state?: boolean } = {}): Promise<World> {
@@ -238,4 +238,150 @@ test("a login can't make logins", async () => {
   expect(r.code).toBe(1);
   expect(err(r).code).toBe("no-rights");
   expect(r.stdout + r.stderr).not.toContain(new URL(a.url).password);
+});
+
+// ---------- join codes (#514): the server enforces the expiry and the one use ----------
+function addFor(w: World, name: string, seconds: number): Made {
+  const r = board(w, ["login", "add", name, "--valid-for", String(seconds), "--json"]);
+  expect(r.code, r.stderr).toBe(0);
+  return JSON.parse(r.stdout) as Made;
+}
+
+const withPassword = (url: string, password: string): string => {
+  const u = new URL(url);
+  u.password = encodeURIComponent(password);
+  return u.toString();
+};
+
+/** Redeems the login of `url`; the new password, or the refusal's code. */
+async function redeem(url: string, keep: (password: string) => void = () => {}): Promise<{ password: string } | { code: string }> {
+  let b: Board;
+  try {
+    b = await Board.open(url, { max: 1 });
+  } catch (e) {
+    return { code: (e as { code: string }).code };
+  }
+  try {
+    let password = "";
+    await b.redeemLogin((p) => {
+      password = p;
+      keep(p);
+    });
+    return { password };
+  } catch (e) {
+    return { code: (e as { code: string }).code };
+  } finally {
+    await b.end().catch(() => {});
+  }
+}
+
+test("a login made with --valid-for is refused by Postgres itself once it expires", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 2);
+  expect(await tryQuery(made.url, "select 1")).toBe("ok");
+  await Bun.sleep(3500);
+  expect(await tryQuery(made.url, "select 1")).toMatch(/password authentication failed/i);
+  expect(err(board(w, ["login", "add", "desktop", "--valid-for", "0"])).code).toBe("bad-input");
+});
+
+test("redeeming a login works once: it rotates the password and lifts the expiry", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 3);
+  expect(ls(w)[0]?.redeemedAt).toBeNull();
+  const first = await redeem(made.url);
+  if (!("password" in first)) throw new Error(`redeem refused: ${first.code}`);
+  expect(first.password.length).toBeGreaterThanOrEqual(32);
+  const fresh = withPassword(made.url, first.password);
+  expect(await tryQuery(made.url, "select 1")).toMatch(/password authentication failed/i); // the code's password is gone
+  expect(await tryQuery(fresh, "select 1")).toBe("ok");
+  expect(ls(w)[0]?.redeemedAt).not.toBeNull();
+  await Bun.sleep(4000);
+  expect(await tryQuery(fresh, "select count(*) from tasks")).toBe("ok"); // past the code's expiry: the login is kept
+  expect(await redeem(fresh)).toEqual({ code: "login-redeemed" });
+  expect(await redeem(made.url)).toEqual({ code: "login-refused" });
+});
+
+test("a redeem whose keeper fails changes nothing: the code's password still works", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  const r = await redeem(made.url, () => {
+    throw new Error("disk full");
+  });
+  expect("password" in r).toBe(false);
+  expect(await tryQuery(made.url, "select 1")).toBe("ok");
+  expect(ls(w)[0]?.redeemedAt).toBeNull();
+  expect("password" in (await redeem(made.url))).toBe(true);
+});
+
+test("a redeem ends the other connections of the same login", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  const other = new SQL(made.url, { max: 1 });
+  await other`select 1`;
+  expect("password" in (await redeem(made.url))).toBe(true);
+  let ended = false;
+  try {
+    await other`select 1`;
+  } catch {
+    ended = true;
+  }
+  await other.close().catch(() => {});
+  expect(ended).toBe(true);
+});
+
+test("only a login redeems, only itself, and the redeem can't be bent to another role", async () => {
+  const w = await hub();
+  const a = addFor(w, "laptop", 60);
+  const b = addFor(w, "desktop", 60);
+  expect(await redeem(w.url)).toEqual({ code: "not-found" }); // the board's own user isn't a login
+  expect(await tryQuery(a.url, `alter role "${b.role}" password 'taken'`)).toMatch(/permission denied/i);
+  expect(await tryQuery(a.url, `alter role "${a.role}" valid until 'infinity'`)).toMatch(/permission denied/i);
+  expect(await tryQuery(a.url, "set role postgres")).not.toBe("ok");
+  expect("password" in (await redeem(a.url))).toBe(true);
+  expect(await tryQuery(b.url, "select 1")).toBe("ok"); // the other login is untouched
+  const sql = new SQL(w.url, { max: 1 });
+  try {
+    const [f] = (await sql`select p.prosecdef, p.proconfig, r.rolsuper,
+        has_function_privilege('public', p.oid, 'execute') as public_may
+      from pg_proc p join pg_roles r on r.oid = p.proowner where p.proname = 'mb_redeem_login'`) as
+      { prosecdef: boolean; proconfig: string[]; rolsuper: boolean; public_may: boolean }[];
+    expect(f?.prosecdef).toBe(true);
+    expect(f?.rolsuper).toBe(true);
+    expect(f?.proconfig.some((c) => c.startsWith("search_path=pg_catalog"))).toBe(true);
+    expect(f?.public_may).toBe(false);
+  } finally {
+    await sql.close();
+  }
+});
+
+test("remove --unredeemed drops a login that connected but never redeemed, and keeps a redeemed one", async () => {
+  const w = await hub();
+  const a = addFor(w, "laptop", 60);
+  const b = addFor(w, "desktop", 60);
+  expect(await tryQuery(a.url, "select 1")).toBe("ok"); // used, not redeemed
+  expect(board(w, ["login", "remove", "laptop", "--unredeemed"]).code).toBe(0);
+  expect(await roleExists(w, a.role)).toBe(false);
+  expect("password" in (await redeem(b.url))).toBe(true);
+  const kept = board(w, ["login", "remove", "desktop", "--unredeemed"]);
+  expect(kept.code).toBe(1);
+  expect(err(kept).code).toBe("login-redeemed");
+  expect(await roleExists(w, b.role)).toBe(true);
+});
+
+test("a refused login says to ask the hub for a new code, not to start the board", async () => {
+  const w = await hub();
+  const a = add(w, "laptop");
+  expect(board(w, ["login", "remove", "laptop"]).code).toBe(0);
+  const joined = await hub({ state: false });
+  writeFileSync(join(joined.dir, "url"), a.url + "\n", { mode: 0o600 });
+  const s = board(joined, ["status"]);
+  expect(s.code).toBe(1);
+  expect(s.stdout).toContain("This machine's board login was refused (removed or expired).");
+  expect(s.stdout).toContain("factory machine add <name> --agent ...");
+  expect(s.stdout).toContain("factory machine leave");
+  expect(s.stdout).not.toContain("factory board up");
+  expect(s.stdout).not.toContain(new URL(a.url).password);
+  const t = board(joined, ["tasks"]);
+  expect(err(t).code).toBe("login-refused");
+  expect(err(t).fix).toContain("factory machine leave");
 });

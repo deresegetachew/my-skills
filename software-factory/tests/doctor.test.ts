@@ -286,3 +286,11 @@ test("doctor outside a git repo says where to run it", () => {
   expect(p.stderr).toContain("factory doctor: run it inside the project's git repo.");
   rmSync(d, { recursive: true, force: true });
 });
+
+test("the machine's names that aren't agents are named with the right grammar", () => {
+  const d = project();
+  const one = lines(doctor(d, { ...machine(), FACTORY_AGENTS: "probe-agent" }), "fix").find((l) => l.includes("probe-agent"));
+  expect(one).toContain("probe-agent isn't in `agents` in .claude/factory.json");
+  const two = lines(doctor(d, { ...machine(), FACTORY_AGENTS: "probe-a,probe-b" }), "fix").find((l) => l.includes("probe-a"));
+  expect(two).toContain("probe-a, probe-b aren't in `agents` in .claude/factory.json");
+});

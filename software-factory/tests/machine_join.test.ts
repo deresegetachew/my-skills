@@ -142,6 +142,16 @@ async function connects(url: string): Promise<boolean> {
 
 const urlFile = (m: World): string => join(m.board, "url");
 
+/** The board URL a join code carries (the code is the secret a test made, read here to try it directly). */
+function codeUrl(code: string): string {
+  return (JSON.parse(Buffer.from(code.slice(4), "base64url").toString("utf8")) as { url: string }).url;
+}
+
+function withUrl(code: string, url: string): string {
+  const p = JSON.parse(Buffer.from(code.slice(4), "base64url").toString("utf8")) as { url: string };
+  return `FM1-${Buffer.from(JSON.stringify({ ...p, url }), "utf8").toString("base64url")}`;
+}
+
 // ---------- add ----------
 test("add on a machine with no board is refused and says to start one", () => {
   const w = world();
@@ -317,18 +327,32 @@ test("join without Tailscale is refused with nothing written; --no-tailscale ski
   expect(existsSync(urlFile(m))).toBe(true);
 });
 
-test("a join whose login doesn't connect keeps nothing and puts back the URL that was there", async () => {
+test("a join whose login the board refuses keeps nothing, puts back the URL that was there, and says to ask for a new code", async () => {
   const h = await hub();
   const a = add(h, "laptop");
   expect(machine(h, ["remove", "laptop"]).code).toBe(0); // its login is gone
   const m = world();
   write(urlFile(m), "postgres://someone:pw@127.0.0.1:1/other\n", 0o600);
   const p = machine(m, ["join", a.code, "--no-doctor"]);
-  expect(refused(p, "board-unreachable").fix).toMatch(/factory board status|tailscale/i);
+  const e = refused(p, "code-refused");
+  expect(e.fix).toContain("factory machine add laptop --agent ...");
+  expect(e.fix).not.toContain("factory board up");
+  expect(p.out).not.toContain(new URL(codeUrl(a.code)).password);
   expect(read(urlFile(m))).toBe("postgres://someone:pw@127.0.0.1:1/other\n");
   const fresh = world();
-  refused(machine(fresh, ["join", a.code, "--no-doctor"]), "board-unreachable");
+  refused(machine(fresh, ["join", a.code, "--no-doctor"]), "code-refused");
   expect(existsSync(urlFile(fresh))).toBe(false);
+});
+
+test("a join whose board doesn't answer keeps nothing and says to check the route to the board", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const u = new URL(codeUrl(a.code));
+  u.port = "1";
+  const m = world();
+  const p = machine(m, ["join", withUrl(a.code, u.toString()), "--no-doctor"]);
+  expect(refused(p, "board-unreachable").fix).toMatch(/factory board status|tailscale/i);
+  expect(existsSync(m.board)).toBe(false);
 });
 
 test("a join that can't record itself after reaching the board keeps nothing: the URL goes again", async () => {
@@ -341,6 +365,9 @@ test("a join that can't record itself after reaching the board keeps nothing: th
   expect(error(p).code).toBe("join-not-saved");
   expect(existsSync(urlFile(m))).toBe(false);
   expect(existsSync(m.board)).toBe(false);
+  expect(await connects(codeUrl(a.code))).toBe(true); // the code wasn't spent: it still joins
+  rmSync(join(m.cfg, "machine-joins.json"), { recursive: true });
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
 });
 
 test("join runs the doctor and reports it unless --no-doctor", async () => {
@@ -406,7 +433,7 @@ test("a code that expires before its machine joins: its login is dropped, ls say
   const [row] = lsJson(h, LATER + 60);
   expect(row).toMatchObject({ state: "revoked", revokedAt: LATER, joinedAt: null });
   const m = world();
-  refused(machine(m, ["join", a.code, "--no-doctor"]), "board-unreachable"); // a copy kept elsewhere is useless now
+  refused(machine(m, ["join", a.code, "--no-doctor"]), "code-refused"); // a copy kept elsewhere is useless now
   expect(machine(h, ["remove", "laptop"]).code).toBe(0); // the record is kept until remove
   expect(machine(h, ["ls"]).stdout).not.toContain("laptop");
 });
@@ -473,6 +500,100 @@ test("remove while the board doesn't answer is refused and keeps the record", as
 test("factory help lists machine add, join, ls and remove", () => {
   const w = world();
   const help = sh(["bash", join(SF, "factory"), "help"], { cwd: w.d, env: w.env, timeoutMs: 60_000 });
-  for (const c of ["machine add", "machine join", "machine ls", "machine remove"]) expect(help.stdout).toContain(c);
+  for (const c of ["machine add", "machine join", "machine ls", "machine remove", "machine leave"]) expect(help.stdout).toContain(c);
   expect(help.stdout).not.toMatch(/nats/i);
+});
+
+// ---------- the board enforces the code (#514): its expiry and its one use ----------
+const BOARD_BIN = join(SF, "message-board", "bin.ts");
+const boardStatus = (w: World): Proc => sh([process.execPath, "--no-env-file", BOARD_BIN, "status"], { cwd: w.d, env: w.env, timeoutMs: 60_000 });
+
+test("a code joins exactly once: a second machine is refused, and the code's own password stops working", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const m = world();
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
+  const mine = read(urlFile(m)).trim();
+  expect(new URL(mine).password).not.toBe(new URL(codeUrl(a.code)).password); // the join wrote a new password
+  expect(await connects(codeUrl(a.code))).toBe(false);
+  expect(await connects(mine)).toBe(true);
+  const other = world(); // another machine with a copy of the code
+  const p = machine(other, ["join", a.code, "--no-doctor"]);
+  expect(refused(p, "code-refused").fix).toContain("factory machine add laptop");
+  expect(existsSync(other.board)).toBe(false);
+  expect(await connects(mine)).toBe(true); // the first machine keeps its login
+  expect(lsJson(h, NOW + 60)[0]).toMatchObject({ state: "joined" });
+});
+
+test("an expired code's password is refused by Postgres itself, whatever the clocks say", async () => {
+  const h = await hub();
+  const a = add(h, "laptop", ["haile"], ["--ttl", "0.05"]); // 3 seconds
+  expect(await connects(codeUrl(a.code))).toBe(true);
+  await Bun.sleep(4000);
+  expect(await connects(codeUrl(a.code))).toBe(false);
+  const m = world(); // its clock (FACTORY_NOW) says the code is still good: the board refuses it anyway
+  refused(machine(m, ["join", a.code, "--no-doctor"]), "code-refused");
+  expect(existsSync(m.board)).toBe(false);
+});
+
+test("ls says joined only once the code is redeemed: connecting with the code isn't joining", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  expect(await connects(codeUrl(a.code))).toBe(true);
+  expect(lsJson(h, NOW + 60)[0]).toMatchObject({ state: "waiting", joinedAt: null });
+  const line = lsLine(h, "laptop", LATER);
+  expect(line).toContain("code expired; its board login was removed");
+  expect(await roles(h)).toEqual([]);
+  expect(await connects(codeUrl(a.code))).toBe(false);
+});
+
+test("a joined machine whose login was removed is told to ask the hub for a new code, or leave", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const m = world();
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
+  expect(machine(h, ["remove", "laptop"]).code).toBe(0);
+  const s = boardStatus(m);
+  expect(s.code).toBe(1);
+  expect(s.stdout).toContain("This machine's board login was refused (removed or expired).");
+  expect(s.stdout).toContain("on the hub run `factory machine add <name> --agent ...`, then `factory machine join <code>` here");
+  expect(s.stdout).toContain("factory machine leave");
+  expect(s.stdout).not.toContain("factory board up");
+  const down = new URL(read(urlFile(m)).trim());
+  down.port = "1";
+  writeFileSync(urlFile(m), down.toString() + "\n");
+  const d = boardStatus(m); // a board that doesn't answer is another matter
+  expect(d.stdout).toMatch(/doesn't answer/);
+  expect(d.stdout).not.toContain("login was refused");
+});
+
+// ---------- leave ----------
+test("leave removes this machine's board URL and the agent names its join added; safe to run twice", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const m = world();
+  write(join(m.cfg, "work.json"), JSON.stringify({ agents: ["menelik"] })); // a name this machine had before it joined (its names file)
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
+  expect(machine(m, ["show"]).out).toContain("haile");
+  const p = machine(m, ["leave"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("factory machine remove laptop");
+  expect(existsSync(urlFile(m))).toBe(false);
+  const shown = machine(m, ["show"]).out;
+  expect(shown).toContain("menelik");
+  expect(shown).not.toContain("haile");
+  expect(shown).not.toContain("taytu");
+  const again = machine(m, ["leave"]);
+  expect(again.code, again.out).toBe(0);
+  expect(again.stdout).toMatch(/doesn't use a message board|nothing to do/i);
+  const b = add(h, "desktop", ["tewodros"]); // it can join again later
+  expect(machine(m, ["join", b.code, "--no-doctor"]).code).toBe(0);
+});
+
+test("leave on the machine that runs the board is refused and changes nothing", async () => {
+  const h = await hub();
+  const before = read(urlFile(h));
+  const e = refused(machine(h, ["leave"]), "is-hub");
+  expect(e.fix).toContain("factory board down");
+  expect(read(urlFile(h))).toBe(before);
 });
