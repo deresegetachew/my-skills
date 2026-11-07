@@ -619,3 +619,52 @@ test("a join whose new password doesn't work after the redeem says the code may 
   expect(existsSync(join(m.cfg, "machine-joins.json"))).toBe(false); // the code isn't marked used here
   expect(machine(m, ["show"]).out).not.toContain("haile");
 });
+
+test("a copy of the code that starts logging in before the join commits and finishes after is refused; the join holds", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const go = join(tmp("pause-"), "go");
+  // the board's paused-handshake client, run as a program (the factory imports only the board's public entry)
+  const copy = Bun.spawn([process.execPath, "--no-env-file", join(SF, "message-board", "tests", "scram_pause.ts")], {
+    env: { ...process.env, PAUSE_URL: codeUrl(a.code), PAUSE_GO: go }, stdout: "pipe", stderr: "pipe",
+  });
+  const out = copy.stdout.getReader();
+  let said = "";
+  while (!said.includes("paused")) {
+    const { value, done } = await out.read();
+    if (done) break;
+    said += new TextDecoder().decode(value);
+  }
+  expect(said).toContain("paused");
+  const m = world();
+  const p = machine(m, ["join", a.code, "--no-doctor"]);
+  expect(p.code, p.out).toBe(0);
+  writeFileSync(go, "");
+  for (;;) {
+    const { value, done } = await out.read();
+    if (done) break;
+    said += new TextDecoder().decode(value);
+  }
+  await copy.exited;
+  expect(said).toMatch(/refused: .*not permitted to log in/i);
+  const mine = read(urlFile(m)).trim();
+  expect(await connects(mine)).toBe(true);
+  expect(decodeURIComponent(new URL(mine).username)).not.toBe(decodeURIComponent(new URL(codeUrl(a.code)).username));
+});
+
+test("after a join the code's own role can't log in at all", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  const m = world();
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
+  const sql = new SQL(codeUrl(a.code), { max: 1, connectionTimeout: 5 });
+  let why = "";
+  try {
+    await sql`select 1`;
+  } catch (e) {
+    why = e instanceof Error ? e.message : String(e);
+  } finally {
+    await sql.close().catch(() => {});
+  }
+  expect(why).toMatch(/not permitted to log in/i);
+});
