@@ -2,7 +2,7 @@
 // React): the "stuck" marks a card, an epic and an agent show, the dot and line of Home's list, what each action opens,
 // the red count beside Home in the sidebar, an agent's stuck mark there, and what Close says in its confirm.
 import { expect, test } from "bun:test";
-import { type AttentionItem, actionOf, attentionDot, attentionLine, stuckMarks } from "../web/attention_model.ts";
+import { type AttentionItem, actionOf, attentionDot, attentionLine, sayAsk, stuckMarks } from "../web/attention_model.ts";
 import { taskAsk } from "../web/board_model.ts";
 import { sidebar } from "../web/nav_model.ts";
 
@@ -59,4 +59,14 @@ test("Close's confirm says the task is closed as done and what stays", () => {
   expect(taskAsk("close", { id: "7", holders: ["menelik"] })).toEqual({ happens: "#7 is closed as done. menelik's claim comes off.",
     doesNot: "A session already working on it isn't stopped. Its branch and pull request stay, and nothing is deleted." });
   expect(taskAsk("close", { id: "b3", holders: [] })).toEqual({ happens: "b3 is closed as done.", doesNot: "Its branch and pull request stay, and nothing is deleted." });
+});
+
+test("idle while a task is ready (#591): Start work opens the say confirm with /next-task; the agent carries the mark, yellow", () => {
+  const idle = item("idle-ready", { agent: "taytu", task: "b32", reason: "taytu has been idle for 40 minutes while b32 Shelf is ready.",
+    action: { kind: "say", label: "Start work", agent: "taytu", text: "/next-task" } });
+  expect(actionOf(idle)).toEqual({ do: "say", agent: "taytu", text: "/next-task" });
+  expect(attentionDot(idle)).toBe("waiting");
+  expect(stuckMarks([idle])).toEqual({ tasks: {}, agents: { taytu: "taytu has been idle for 40 minutes while b32 Shelf is ready." } });
+  expect(sayAsk("taytu", "/next-task")).toEqual({ happens: "/next-task is sent to taytu's session, as if typed there, and it looks for the next ready task.",
+    doesNot: "Nothing is claimed for it here. If the same text is already typed in its prompt box, it is sent, not typed again." });
 });

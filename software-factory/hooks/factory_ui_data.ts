@@ -66,6 +66,9 @@ export interface Agent {
   parent: string | null;
   item: string | null;
   stoppable: boolean | null;
+  /** Its Claude session's prompt box, on this machine (#591): "empty" (idle at its prompt), "unsent" (text typed there
+   *  but not sent), or null (no Claude session at its prompt, or not known). */
+  prompt: string | null;
 }
 
 export interface Machine {
@@ -425,7 +428,7 @@ export async function live(p: UiProject): Promise<Live> {
       detail: str(a.detail) || str(a.state), task, taskTitle: task ? titles.get(task) ?? null : null, on: strOrNull(a.on),
       machine: strOrNull(a.machine), machineName: strOrNull(a.machineName), here, runs: str(a.runs), session: strOrNull(a.session),
       since: strOrNull(a.since), lastSeen: strOrNull(a.lastSeen), log: here ? await logOf(a) : [], parent: strOrNull(a.parent),
-      item: strOrNull(a.item), stoppable: typeof a.stoppable === "boolean" ? a.stoppable : null };
+      item: strOrNull(a.item), stoppable: typeof a.stoppable === "boolean" ? a.stoppable : null, prompt: strOrNull(a.prompt) };
   }));
   const now = Date.now() / 1000;
   return { agents, machines: machinesOf(agents, strOrNull(data.machine)), runners: runnersOf(cache), limit: limitOf(state, cache, now),
