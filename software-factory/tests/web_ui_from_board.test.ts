@@ -652,3 +652,19 @@ test("the tasks done this week come apart from the open ones, newest first, for 
   expect(done[0]).toMatchObject({ state: "done", holders: [], blockedBy: [], actions: [], title: "Remember the theme" });
   await finish(ui);
 }, T);
+
+test("an answer about a task made on the board names it b3, not #b3 (#546)", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const mine = await board.create({ title: "Made on the board", ref: `factory:${REPO}/n1`, priority: 0 });
+  await board.close(mine.id, { outcome: "done" });
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const gone = await api(ui, "/api/projects/work/tasks/b99999/actions/release", { method: "POST", body: { confirm: true } });
+  expect(gone.status).toBe(404);
+  expect(String(gone.json.message)).toStartWith("b99999 isn't one of");
+  const page = await api(ui, "/api/projects/work/tasks/b99999");
+  expect(String(page.json.message)).toStartWith("b99999 isn't one of");
+  await finish(ui);
+}, T);
