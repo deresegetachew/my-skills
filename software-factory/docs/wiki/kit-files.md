@@ -43,6 +43,7 @@ software-factory/
     factory_agent_settings.ts           the agents' rules from main, passed with `claude --settings` when an agent starts (#258); their hooks run main's copy, unpacked read-only into `<git folder>/factory-hooks/` (#274)
     factory_mcp.ts                      the MCP config a factory session starts with: main's `.mcp.json`, never the worktree's
     factory_trust.ts                    is a folder trusted by Claude Code (doctor and the loop read it)
+    factory_claude.ts                   where the `claude` program is: the PATH, else ~/.local/bin, else ~/.claude/local (#568)
     factory_review_pass.ts              `factory review-pass`: a review agent records its pass for the current commit
     check.ts                            Stop: typecheck and tests (in a factory run only)
     factory_stop.ts                     Stop: closes a finished session in `factory loop -i`

@@ -21,6 +21,7 @@ import * as autostart from "./factory_autostart.ts";
 import { boardInfo, messagingSettings } from "./core/compose.ts";
 import { CoreError } from "./core/domain/error.ts";
 import { missingOriginMain } from "./factory_claims.ts";
+import { claudeMissing, findClaude } from "./factory_claude.ts";
 import { type Config, load, roleNames, rolesDir, taskSource } from "./factory_config.ts";
 import * as doctorCi from "./factory_doctor_ci.ts";
 import * as heartbeat from "./factory_heartbeat_service.ts";
@@ -140,11 +141,14 @@ export function tools(r: Reporter): void {
     if (rc !== 0) r.fix("bun_missing", `\`bun --version\` fails, and every factory command and hook runs with Bun. Fix: ${BUN_FIX}`);
     else r.ok(`bun ${firstLine(out) || "(version unknown)"}`);
   }
-  if (!which("claude")) {
-    r.fix("Claude Code", "install it (`npm install -g @anthropic-ai/claude-code`), then run `claude` once to log in");
+  // the `claude` the factory runs (#568): on the PATH, else ~/.local/bin, else ~/.claude/local
+  const claude = findClaude();
+  if (!claude) {
+    const missing = claudeMissing();
+    r.fix("Claude Code", `${missing.message} Fix: ${missing.fix} Then run \`claude\` once to log in.`);
   } else {
-    const words = run(["claude", "--version"])[1].split(/\s+/).filter(Boolean);
-    r.ok("Claude Code " + (words[0] ?? "(version unknown)"));
+    const words = run([claude, "--version"])[1].split(/\s+/).filter(Boolean);
+    r.ok(`Claude Code ${words[0] ?? "(version unknown)"} (${claude})`);
   }
   r.section?.("github");
   if (!which("gh")) r.fix("GitHub CLI", "install gh (https://cli.github.com), then `gh auth login`");

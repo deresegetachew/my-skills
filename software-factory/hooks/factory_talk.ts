@@ -11,6 +11,7 @@
 // when there is no queue or GitHub refused. A session that fails is `chat_failed` and posts nothing. It is the owner's:
 // it refuses in an agent session. While the session runs, a file in this machine's state folder (factory_talks.ts) says
 // so, and `factory agents ls` shows the role as working, "talking with the owner", rather than down.
+import { claudeBin } from "./factory_claude.ts";
 import { load, roleNames, toFloat } from "./factory_config.ts";
 import { gh } from "./factory_issues.ts";
 import { run, runMain } from "./factory_lib.ts";
@@ -116,11 +117,12 @@ export function main(args: string[]): number {
   const name = nameOf(role);
   // the web UI waits 20 minutes for an answer (factory_ui_chat.ts): a session never runs past it, so none posts after
   const minutes = Math.min(Math.max(toFloat(process.env.FACTORY_CHAT_MINUTES) ?? MINUTES, 1), MAX_MINUTES);
+  const claude = claudeBin(); // PATH, else ~/.local/bin, else ~/.claude/local (#568): `factory ui` may run from a short PATH
   const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: role, FACTORY_LOOP: "1" };
   const mark = talkBegin(role, name); // while it runs, `factory agents ls` shows the role as working, talking with the owner
   let p: ReturnType<typeof run>;
   try {
-    p = run(["claude", ...sessionFlags(cfg, role, name), ...permissionFlags(cfg), "-p", prompt(role, name, text, history)],
+    p = run([claude, ...sessionFlags(cfg, role, name), ...permissionFlags(cfg), "-p", prompt(role, name, text, history)],
       { env, timeoutMs: minutes * 60_000 });
   } finally {
     talkEnd(mark);

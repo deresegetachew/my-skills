@@ -207,6 +207,12 @@ home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 # role. --mcp-config takes several values, so another flag must follow it.
 isolate() {
   local cfg
+  # The `claude` to run (#568): on the PATH, else ~/.local/bin, else ~/.claude/local, so a loop started from a shell that is
+  # not a login shell still finds it. None: the claude_missing error says where it looked, and no session starts.
+  claude_bin=claude
+  if [ -f "$hooks/factory_claude.ts" ]; then
+    claude_bin="$(fh "$hooks/factory_claude" path)" || { echo "[$agent] Claude Code was not found (the error above says where it looked and what to do); no session was started."; exit 1; }
+  fi
   cfg="$(fh "$hooks/factory_mcp" --as "$agent" --role "$role")" || cfg='{"mcpServers":{}}'
   [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
   if [ "$role" = coding-agent ]; then
@@ -365,11 +371,11 @@ role_pass() {
   prompt="$(fh "$hooks/factory_roles" prompt "$role" "$agent" $([ "$discover" = 1 ] && echo discover))"
   fh "$hooks/factory_agents" ping --agent "$agent" --status "$item" >/dev/null 2>&1 || true
   if [ "$interactive" = 1 ]; then
-    if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then claude "${claude_flags[@]}" --remote-control="$agent" "$prompt"; else claude "${claude_flags[@]}" "$prompt"; fi
+    if [ "${FACTORY_REMOTE_CONTROL:-1}" = 1 ]; then "$claude_bin" "${claude_flags[@]}" --remote-control="$agent" "$prompt"; else "$claude_bin" "${claude_flags[@]}" "$prompt"; fi
     rc=$?; stty sane 2>/dev/null
   else
     trust_gate || exit 1
-    claude "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt"; rc=$?
+    "$claude_bin" "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt"; rc=$?
   fi
   [ "$discover" = 0 ] || exit "$rc"
   [ "$rc" = 0 ] || return 1
@@ -476,9 +482,9 @@ for ((n = 1; n <= limit; n++)); do
     rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$hooks/factory_machine" remote 2>/dev/null || echo 1)"
     keep_start "$id"
     if [ "$rc" = 1 ]; then
-      claude "${claude_flags[@]}" --remote-control="$agent $id" "$prompt" || true
+      "$claude_bin" "${claude_flags[@]}" --remote-control="$agent $id" "$prompt" || true
     else
-      claude "${claude_flags[@]}" "$prompt" || true
+      "$claude_bin" "${claude_flags[@]}" "$prompt" || true
     fi
     keep_stop
     stty sane 2>/dev/null
@@ -500,7 +506,7 @@ for ((n = 1; n <= limit; n++)); do
   else
     trust_gate || { fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null; give_back "$id"; exit 1; }
     keep_start "$id"
-    claude "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
+    "$claude_bin" "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt" || echo "[$agent] (the run for $id exited with an error; the next pass picks up from git)"
     keep_stop
   fi
   fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null  # the pushed branch marks it now

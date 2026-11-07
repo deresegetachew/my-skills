@@ -400,8 +400,11 @@ case "$cmd" in
     # Remote Control, as in `factory loop -i`: reach this session from claude.ai/code or your phone.
     # FACTORY_REMOTE_CONTROL=0|1 wins; else this machine's `remoteControl` setting (factory settings --local); else on.
     rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$dir/.claude/hooks/factory_machine" remote 2>/dev/null || echo 1)"
-    if [ "$rc" = 1 ]; then exec claude --remote-control="$name" "$@"; fi
-    exec claude "$@" ;;
+    # The `claude` to run (#568): on the PATH, else ~/.local/bin, else ~/.claude/local. None: the error says where it looked.
+    cb=claude
+    if [ -f "$dir/.claude/hooks/factory_claude.ts" ]; then cb="$(fh "$dir/.claude/hooks/factory_claude" path)" || exit 1; fi
+    if [ "$rc" = 1 ]; then exec "$cb" --remote-control="$name" "$@"; fi
+    exec "$cb" "$@" ;;
   worktree)  fh "$hooks/factory_claims" worktree "${1:?usage: factory worktree <name|N>}" ;;
   issues)    fh "$hooks/factory_issues" "${1:-list}" "${@:2}" ;;
   machine)   fh "$hooks/factory_machine" "${1:-show}" "${@:2}" ;;
