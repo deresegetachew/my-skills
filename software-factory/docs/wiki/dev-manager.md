@@ -92,7 +92,9 @@ factory watch [--json]                     the seven checks on their own: one li
 (`factory_watch.ts`; `factory precheck` is its checks 1, 2 and the quiet agents and issues), reads labels and comments as
 the only truth, and starts a fresh one-item sub-manager for each item that needs a manager: `claude -p "/manage-pass pr-417"`
 on the manager settings profile, with the item's fact sheet and its thread note in the prompt. A sub-manager does its one item
-and exits. The orchestrator never starts a builder, and it never merges or reviews itself.
+and exits. The orchestrator never starts a builder, and it never merges or reviews itself. With the board on, an open
+question an agent asked the dev manager on the board is an item too, `board-m<id>` (see
+[the board](board.md)): its sub-manager answers it there.
 
 | # | Check | Goes to | Fires when |
 |---|---|---|---|
