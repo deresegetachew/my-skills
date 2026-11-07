@@ -25,7 +25,8 @@ use the commands below and nothing changes.
 - **Start** with `board_prime`, then `board_on_me` for the product questions addressed to you.
 - **Questions and proposals:** read the thread with `board_thread`; reply with `board_post` on that thread.
 - **What was decided** for a task (the owner's yes, a changed "Done when") goes on it with `board_note`.
-- **Tasks:** `board_create` files a task under its epic, and `board_link` records what it waits for. A task the owner
+- **Tasks:** `board_create` files a task under its epic, and `board_link` records what it waits for
+  (`{from: <the task>, to: <what it waits for>, kind: "waits_for"}`: from can't start until to is done). A task the owner
   dropped is moved to done as not planned (`board_move` with outcome `wont_do`). You never build, so you have no claim tools.
   Scope and order are still the owner's: file only what the owner agreed to.
 
