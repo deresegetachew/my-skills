@@ -2,7 +2,10 @@
 // Activity.dc.html, Health.dc.html and Usage.dc.html). Each reads its route (GET /api/projects/:p/home|activity|health|usage,
 // hooks/factory_ui_ops.ts) and reads it again when the WebSocket says something changed (`pulse`), at most every two
 // seconds. Health's "Check again" posts .../health/check. The words are in ops_model.ts; nothing here shows a command.
-import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { AttentionList } from "./attention.tsx";
+import { AttentionContext } from "./attention_context.tsx";
+import { type AttentionItem, attentionLine } from "./attention_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
 import { type ActivityItem, activityDot, activitySub, attention, type HealthData, healthLine, type HomeData, homeLine, KIND_LABEL, passed,
@@ -21,6 +24,10 @@ export interface OpsProps {
   onMenu: () => void;
   /** Goes up when the WebSocket says this project changed. */
   pulse: number;
+  /** Needs attention as the WebSocket last pushed it (#579); left out, Home's own. */
+  attention?: AttentionItem[];
+  /** Opens the confirm to start an agent (the same as its page's Start). */
+  startAgent?: (name: string) => void;
 }
 
 const UNREACHABLE: Problem = { code: "unreachable", message: "The server can't be reached.", fix: "Check that the web UI is still running on its machine, then reload the page." };
@@ -75,6 +82,8 @@ function base(p: OpsProps): string {
 
 export function HomePage(p: OpsProps) {
   const { data, problem } = useLoad<HomeData>(p.get, `${base(p)}/home`, p.pulse);
+  const stuck = useContext(AttentionContext).agents;
+  const attention = p.attention ?? data?.attention ?? [];
   const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
   return (
     <>
@@ -84,6 +93,12 @@ export function HomePage(p: OpsProps) {
         {!data && !problem && <p className="empty">Reading what the team is doing…</p>}
         {data && (
           <>
+            {attention.length > 0 && (
+              <Section title="Needs attention">
+                <p className="ops-line">{attentionLine(attention)}</p>
+                <AttentionList items={attention} project={p.project} post={p.post} say={p.say} open={p.open} startAgent={p.startAgent} />
+              </Section>
+            )}
             <Section title="Needs you">
               {!data.needs.length && <p className="empty">Nothing needs you now.</p>}
               <ul className="lrows" aria-label="Needs you">
@@ -99,7 +114,10 @@ export function HomePage(p: OpsProps) {
               <ul className="lrows" aria-label="The team">
                 {data.team.map((a) => {
                   const r = teamRow(a, data.limit);
-                  return <ListRow key={a.name} avatar={{ name: a.name, role: a.role }} title={a.name} sub={r.sub} status={{ state: r.dot, text: r.state }}
+                  const why = stuck[a.name];
+                  return <ListRow key={a.name} avatar={{ name: a.name, role: a.role }} title={a.name}
+                    sub={why ? <>{r.sub}<span className="stuck-mark"><span className="stuck-tag">Stuck</span><span className="stuck-why">{why}</span></span></> : r.sub}
+                    status={{ state: r.dot, text: r.state }}
                     action={<button className="btn small" onClick={() => p.open(a.link)}>Talk</button>} />;
                 })}
               </ul>

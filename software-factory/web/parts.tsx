@@ -113,7 +113,7 @@ function CheckRow({ c, onFix }: { c: Check; onFix?: (c: Check) => void }) {
       <StatusDot state={c.met ? "working" : "down"} />
       <span className="check-main"><strong>{c.title}</strong>{c.sub && <span>{c.sub}</span>}</span>
       <span className="check-end">
-        {c.met ? <span className="muted">Done</span> : c.fix && onFix ? <button className="btn" type="button" onClick={() => onFix(c)}>{c.fix}</button> : <span className="muted">Not yet</span>}
+        {c.met ? <span className="muted">Done</span> : c.waiting ? <span className="muted" role="status">{c.waiting}</span> : c.fix && onFix ? <button className="btn" type="button" onClick={() => onFix(c)}>{c.fix}</button> : <span className="muted">Not yet</span>}
       </span>
     </li>
   );

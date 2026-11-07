@@ -1,7 +1,8 @@
 // An epic's page and the "New epic" form (#440), from the owner's reference design (Epic.dc.html, Epics.dc.html): the
 // stage bar, the tasks, where it is written down, and the "Talk about this" box, whose thread is the owner's messages
 // about the epic to the product owner or the dev manager, and their answers. Nothing here shows a command.
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useContext, useState } from "react";
+import { AttentionContext, StuckMark } from "./attention_context.tsx";
 import { Avatar } from "./avatar_view.tsx";
 import { type Chat, useChat } from "./chat.tsx";
 import { itemLabel } from "./chat_model.ts";
@@ -57,6 +58,7 @@ export function EpicPage({ epic, tasks, token, project, talkers, docs, open, bac
   const chat = useChat(token, project, to);
   const steps = stageSteps(epic.stage);
   const progress = epic.all ? `${epic.done} of ${epic.all} tasks done` : "No tasks yet";
+  const stuck = useContext(AttentionContext).tasks[epic.id]; // Needs attention (#579)
   const lines = epic.tasks.map((t) => ({ t, ...taskLine(t, tasks) }));
   const list = tab === "tasks" ? lines : lines.slice(0, 8);
   const links = writtenDown(epic, docs ?? []);
@@ -70,6 +72,7 @@ export function EpicPage({ epic, tasks, token, project, talkers, docs, open, bac
           <h2><Cited text={epic.title} docs={docs} open={open} /></h2>
           {epic.summary && <p>{epic.summary}</p>}
           <span className="vstate"><StatusDot state={epic.stage === "building" ? "working" : "idle"} />{epic.stageText.charAt(0).toUpperCase() + epic.stageText.slice(1)} · {progress}</span>
+          {stuck && <StuckMark reason={stuck} />}
         </header>
         <TalkBox item={{ kind: "epic", id: epic.id, title: epic.title }} to={to} setTo={setTo} chat={chat} talkers={talkers} />
       </div>

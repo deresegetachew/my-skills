@@ -172,7 +172,8 @@ export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj
     const blockedBy = open.filter((b) => prdOf(b) === null).map(named);
     return { ...(prd === null ? {} : { waitsForPrd: prd }), id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [], assignee: t.assignee ?? null,
       group: /^Milestone:[ \t]*(.+)$/m.exec(t.body)?.[1]?.trim() ?? "", todos: todos(t.body).map((d) => ({ done: d.done })),
-      dependsOn: blockedBy, blockedBy, cites: citesIn(t.body), epic: epic ? ids.get(epic.id) : null };
+      dependsOn: blockedBy, blockedBy, cites: citesIn(t.body), epic: epic ? ids.get(epic.id) : null,
+      updatedAt: new Date(t.updatedAt).toISOString(), claimedAt: t.claimedAt ? new Date(t.claimedAt).toISOString() : null };
   };
   const tasks = work.filter((t) => t.status !== "done").map(rowOf);
   const done = recent.map(rowOf);
@@ -326,14 +327,15 @@ export class BoardFeed {
   }
 
   /** A card's action written to the board (#502): release (to ready, with its reason), block (to blocked, with its reason
-   *  as a blocker note) or reassign (handed to `to`). Throws a Problem-shaped error when the board can't take it. */
-  async write(p: UiProject, id: string, action: "release" | "block" | "reassign", reason: string, to = ""): Promise<Task> {
+   *  as a blocker note), reassign (handed to `to`), or Needs attention's close (to done, #579). Throws a Problem-shaped error when the board can't take it. */
+  async write(p: UiProject, id: string, action: "release" | "block" | "reassign" | "close", reason: string, to = ""): Promise<Task> {
     const prefix = prefixOf(this.o.repoOf(p));
     const board = this.board;
     if (!board || !this.live(p)) throw this.down ?? unreachable("it isn't open on this server");
     const task = this.all.find((t) => numberOf(t, prefix) === id);
     if (!task) throw { code: "ui_task_unknown", message: `${taskName(id)} isn't one of ${p.name}'s tasks on the message board.`, fix: "Read the board again, then pick a task it shows." };
     if (action === "reassign") return board.assign(task.id, to, { reason });
+    if (action === "close") return board.move(task.id, { to: "done", reason }); // Needs attention's close (#579): a held task is taken back
     return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
   }
 

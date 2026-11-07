@@ -32,6 +32,9 @@
 //                                              context entries (404 ui_board_absent when its tasks aren't on a board)
 //   GET  /api/projects/:p/health|usage|activity|home, POST .../health/check: Health, Usage and cost, Activity and Home
 //                                              (factory_ui_ops.ts, #455, #451); the WebSocket gets {type: "health"|"activity", project}
+//   GET  /api/projects/:p/attention            Needs attention (#579, factory_ui_attention.ts): anything stuck, with its reason
+//                                              and one action; the WebSocket gets {type: "attention", project, items} when it
+//                                              changes (worked out from what the server already holds, no GitHub call)
 //   GET|POST /api/add-project[/check|/runs/:id[/retry]]: add a project from the page (factory_ui_add.ts, #447); the
 //                                              WebSocket gets {type: "add-project", run} and {type: "projects"}
 //
@@ -175,6 +178,7 @@ export function serve(o: ServeOptions): Running {
       if (now.text !== before) for (const s of servers) s.publish(TOPIC, message(p, now.data));
       refresher.ifStale(p);
       pushViews(p);
+      pushAttention(p);
       await chat.tick(p);
     }
   }
@@ -195,13 +199,26 @@ export function serve(o: ServeOptions): Running {
     if (viewsSent.get(p.id) === text) return;
     viewsSent.set(p.id, text);
     for (const s of servers) s.publish(TOPIC, text);
+    pushAttention(p);
+  }
+  // Needs attention (#579): pushed when it changes, from the views and the agents last read
+  const attentionSent = new Map<string, string>();
+  function attentionMessage(p: UiProject): string {
+    return JSON.stringify({ type: "attention", project: p.id, items: ops.attention(p, kept.get(p.id)?.data ?? null) });
+  }
+  function pushAttention(p: UiProject): void {
+    if (!clients) return; // worked out only while a page is open
+    const text = attentionMessage(p);
+    if (attentionSent.get(p.id) === text) return;
+    attentionSent.set(p.id, text);
+    for (const s of servers) s.publish(TOPIC, text);
   }
   function publish(m: Record<string, unknown>): void {
     const text = JSON.stringify(m);
     for (const s of servers) s.publish(TOPIC, text);
   }
   const ops = new Ops({ views: (p) => viewsOf(p, refresher.running(p), Date.now(), feed.view(p)), live: (p) => state(p, o.pollSeconds * 1000).then((k) => k.data),
-    queue: (p) => chat.ownerQueue(p), board: feed, publish });
+    queue: (p) => chat.ownerQueue(p), keptQueue: (p) => chat.keptQueue(p), board: feed, publish });
 
   // adding a project (#447)
   const adds = new AddRuns({
@@ -418,6 +435,7 @@ export function serve(o: ServeOptions): Running {
         if (ws.readyState === 1) ws.send(viewsMessage(p));
         const s = await state(p, o.pollSeconds * 1000);
         if (ws.readyState === 1) ws.send(message(p, s.data));
+        if (ws.readyState === 1) ws.send(attentionMessage(p));
       }
     },
     message(): void {

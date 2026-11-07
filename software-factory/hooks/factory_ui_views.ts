@@ -11,7 +11,9 @@
 //   POST /api/projects/:p/refresh               runs `factory snapshot` in the background (202)
 //   POST /api/projects/:p/tasks/:id/actions/:name  {confirm: true[, reason][, agent]}: the board's release, block or
 //                                               reassign (#439), through `factory issues` and `factory say`; with
-//                                               tasks.source board, written to the message board (#502)
+//                                               tasks.source board, written to the message board (#502). close (#579,
+//                                               Needs attention's action, never on a card): a task or an epic that
+//                                               isn't done is closed as done, its issue through `gh api` or on the board
 //
 // Each row carries `find`: the text the search within a view and across views matches (#392, factory_match.ts).
 // While a page looks at a project, its cache is read again when older than FACTORY_SNAPSHOT_CACHE_SECONDS (300 s),
@@ -77,18 +79,27 @@ export interface TaskRow {
   /** The id of the first epic that names this task (#440), or null. */
   epic: string | null;
   cites: string[];
+  /** When the task last changed (#579), from the message board; null on the GitHub path. */
+  updatedAt: string | null;
+  /** When its holder claimed it (#579), from the message board; null on the GitHub path or when nobody holds it. */
+  claimedAt: string | null;
   find: string;
 }
 
 /** The board's actions on a task (#439), in the order it shows them. */
-export const TASK_ACTIONS = ["release", "block", "reassign"] as const;
+export const TASK_ACTIONS = ["release", "block", "reassign", "close"] as const;
 export type TaskActionName = (typeof TASK_ACTIONS)[number];
 
 /** The states each action is offered in: release puts a held or blocked task back to ready (the documented way to
  *  unblock one); block parks one that isn't in review yet; reassign hands one nobody has finished to another agent. A
  *  task in review has an open PR, so it is left to the PR's own flow. */
 const OFFERED: Record<TaskActionName, string[]> = { release: ["in-progress", "blocked"], block: ["new", "ready", "in-progress"],
-  reassign: ["ready", "in-progress"] };
+  reassign: ["ready", "in-progress"], close: [] };
+
+/** Close (#579) is Needs attention's, not a card's: it takes any task or epic that isn't done yet. */
+function closable(state: string, source: string): boolean {
+  return source === "issues" && state !== "done";
+}
 
 function actionsFor(state: string, source: string): TaskActionName[] {
   return source === "issues" ? TASK_ACTIONS.filter((a) => OFFERED[a].includes(state)) : [];
@@ -144,6 +155,8 @@ export interface PullView {
   author: Author;
   /** Its head commit, when the snapshot has it. */
   head: string | null;
+  /** When it was opened, when the snapshot has it. */
+  createdAt: string | null;
   task: string | null;
   checks: { state: string; failing: string[] };
   review: { state: "approved" | "changes-asked" | "watching" | "none"; text: string; claim: string | null };
@@ -311,7 +324,8 @@ function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], ori
       todos: { done: todos.filter((d) => d.done === true).length, all: todos.length }, dependsOn, blockedBy,
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
       pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, prd, next: isNext, actions: actionsFor(str(t.state), source),
-      epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
+      epic: epicOf.get(id) ?? null, cites: strings(t.cites), updatedAt: str(t.updatedAt) || null,
+      claimedAt: str(t.claimedAt) || null, find: taskText(t) };
   };
   const tasks = rows.map(toRow);
   const done = list(part.done).filter((t) => str(t.id)).map(toRow); // the board's recently done (#545), never next
@@ -345,7 +359,7 @@ function pullsView(p: UiProject, cache: Obj): PullsView {
     const author = authorOf(p.config, { branch, agent: str(x.agent) || null });
     const truth = truthOf({ action: str(x.next) || "none", text: str(x.nextText) || str(x.next) || "none" }, author);
     return { number: num(x.number), title: str(x.title), url: str(x.url) || null, branch, draft: x.draft === true,
-      agent: str(x.agent) || null, author, head: str(x.head) || null, task: taskOfPull(branch, str(x.title)), checks: { state: str(x.ci) || "unknown",
+      agent: str(x.agent) || null, author, head: str(x.head) || null, createdAt: str(x.createdAt) || null, task: taskOfPull(branch, str(x.title)), checks: { state: str(x.ci) || "unknown",
         failing: list(x.notGreen).filter((j) => str(j.state) === "red").map((j) => str(j.name)) },
       review: reviewOf(x), protected: typeof x.protected === "boolean" ? x.protected : null,
       ...truth, rework: str(x.rework) || null,
@@ -576,7 +590,8 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
   const action = name as TaskActionName;
   const b = obj(body);
   if (b.confirm !== true) {
-    return refusal(400, "confirm_needed", `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
+    return refusal(400, "confirm_needed", action === "close" ? "Closing a task or an epic marks it done and takes it from whoever holds it, so it needs a confirm."
+      : `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
   }
   const onBoard = str(obj(p.config?.tasks).source) === "board";
   if (onBoard && (!part || !board)) {
@@ -585,13 +600,17 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
   }
   const tasksPart = part ?? obj(cacheOf(p)?.tasks);
   // an issue number, or with the board as the record a task made on it (b<id>, #528); never an option
-  const task = /^\d+$/.test(id) || (onBoard && /^b\d+$/.test(id)) ? list(tasksPart.tasks).find((t) => str(t.id) === id) : undefined;
+  const valid = /^\d+$/.test(id) || (onBoard && /^b\d+$/.test(id));
+  const epic = valid && action === "close" ? list(tasksPart.epics).find((e) => str(e.id) === id) : undefined;
+  const task = !valid ? undefined : list(tasksPart.tasks).find((t) => str(t.id) === id)
+    ?? (epic ? { ...epic, state: str(epic.stage) === "done" ? "done" : "open" } : undefined);
   if (!task) {
     return refusal(404, "ui_task_unknown", `${taskName(id)} isn't one of ${p.name}'s tasks in the last snapshot.`, "Read the board again, then pick a task it shows.");
   }
-  if (!actionsFor(str(task.state), str(tasksPart.source)).includes(action)) {
+  const offered = action === "close" ? closable(str(task.state), str(tasksPart.source)) : actionsFor(str(task.state), str(tasksPart.source)).includes(action);
+  if (!offered) {
     const why = str(tasksPart.source) !== "issues" ? "only a task kept as a GitHub issue can be changed from here" : `${taskName(id)} is ${taskStateText(str(task.state))}`;
-    return refusal(400, "ui_action_unavailable", `${taskName(id)} can't be ${action === "block" ? "blocked" : `${action}d`}: ${why}.`,
+    return refusal(400, "ui_action_unavailable", `${taskName(id)} can't be ${action === "block" ? "blocked" : action === "close" ? "closed" : `${action}d`}: ${why}.`,
       "Read the board again; a card shows only the actions it can take.");
   }
   const reason = reasonOf(b.reason);
@@ -618,6 +637,15 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
         output: `${named} is handed to ${to} on the message board. ${to} isn't running on this machine now, so it takes ${named} when it starts.` } };
     }
     return runSteps(p, [["factory", "issues", "release", id, `reassigned to ${to} from the web UI`], ["factory", "say", to, `/next-task issue-${id}`]],
+      TASK_ACTION_TIMEOUT_MS);
+  }
+  if (action === "close") {
+    const why = reason || "closed from the web UI: its work is done";
+    if (onBoard) {
+      return (await onTheBoard(board as TaskBoard, p, id, action, why)) ??
+        { status: 200, body: { ok: true, command: `close ${taskName(id)} on the message board`, output: `${taskName(id)}: closed as done on the message board.` } };
+    }
+    return runSteps(p, [["gh", "api", "-X", "PATCH", `repos/{owner}/{repo}/issues/${id}`, "-f", "state=closed", "-f", "state_reason=completed"]],
       TASK_ACTION_TIMEOUT_MS);
   }
   if (onBoard) {

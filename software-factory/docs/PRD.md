@@ -637,6 +637,12 @@ What is planned:
   diagram. *Partly built (#451): needs you (unanswered owner asks, PRs only a person merges, blocked tasks with their
   reason, failed CI on main, Health's failures), the team with its state and task, progress by epic and the last 10
   events, each linking to its page, live over the WebSocket. Left: the How it runs diagram and the new-version line.*
+  As the owner, anything stuck is flagged without my looking for it: a task held but not moving or whose PR is gone, an
+  agent or a role down while work waits, a session working past its role's limit, a PR waiting too long, an epic whose
+  tasks are all done, a PRD change still open while its tasks are built, the board or the CI runners down. Each says why
+  and offers one action (Release, Close, Start, or open the PR or the output), at the top of Home, as a count beside Home
+  in the sidebar, and as a "stuck" mark on the card or agent. *Built (#579): worked out from what the server already
+  reads, no GitHub call; the thresholds are the `attention.*` settings.*
 - **US-33.** As the owner, the Inbox holds everything that needs me, and I answer and merge in place. *Decided (#451);
   the owner queue part is built (US-17).*
 - **US-34.** As the owner, Activity shows the team's feed and the open questions. *Partly built (#451): with the board as
