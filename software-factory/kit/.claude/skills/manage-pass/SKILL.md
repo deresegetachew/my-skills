@@ -42,6 +42,8 @@ commands below and nothing changes.
 - **Start** with `board_prime`, then `board_on_me` for the questions and asks addressed to you.
 - **Questions and answers:** read the thread with `board_thread`; answer with `board_post`, replying on that thread.
 - **What you decide** on a task (a must-fix's reason, a hold, a blocker) goes on it with `board_note`.
+- **Owner asks** go with `factory board ask <id> <text>` (or `--body -` with the text on stdin), never as a
+  hand-written comment. The loop runs `factory board mirror` before each pass, so GitHub's copy stays current.
 - **Cards:** `board_move` (with a reason when it takes a claim back), `board_assign`, `board_link` and `board_unlink`,
   only for what this skill already lets you do on your own; `board_create` for a review follow-up task.
 

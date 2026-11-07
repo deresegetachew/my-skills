@@ -18,6 +18,8 @@
 //
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_mcp.ts [--as <agent>] [--role <factory role>] [--session <id>]
 //       prints the value for `--mcp-config`
+//   bun --no-env-file --config=/dev/null .claude/hooks/factory_mcp.ts board-on
+//       exit 0 when main's settings turn the board on (the dev manager's loop then runs `factory board mirror`), else 1
 import { randomUUID } from "node:crypto";
 import { existsSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -121,20 +123,33 @@ function mainFile(path: string): Buffer | null {
   return shown.code === 0 ? shown.stdout : null;
 }
 
-export function main(args: string[] = []): number {
+/** Fetch main from origin (FETCH_HEAD, straight from the remote: a local ref named origin/<main> can't stand in for
+ * it) and return its .claude/factory.json; null when main can't be fetched. */
+function fetchMainSettings(): unknown {
+  const branch = mainBranch();
+  if (!branch || git("fetch", "-q", "origin", `refs/heads/${branch}`).code !== 0) return null;
+  const settings = mainFile(".claude/factory.json");
   try {
-    // FETCH_HEAD, straight from the remote: a local ref named origin/<main> can't stand in for it.
-    const branch = mainBranch();
-    if (!branch || git("fetch", "-q", "origin", `refs/heads/${branch}`).code !== 0) {
+    return settings ? JSON.parse(settings.toString()) : {};
+  } catch {
+    return {}; // a broken file on main: the board is on only where this machine has one
+  }
+}
+
+export function main(args: string[] = []): number {
+  if (args[0] === "board-on") {
+    try {
+      const cfg = fetchMainSettings();
+      return cfg !== null && boardOn(cfg) ? 0 : 1;
+    } catch {
+      return 1;
+    }
+  }
+  try {
+    const cfg = fetchMainSettings();
+    if (cfg === null) {
       console.log(EMPTY);
       return 0;
-    }
-    const settings = mainFile(".claude/factory.json");
-    let cfg: unknown = {};
-    try {
-      cfg = settings ? JSON.parse(settings.toString()) : {};
-    } catch {
-      cfg = {}; // a broken file on main: the board is on only where this machine has one
     }
     if (boardOn(cfg)) {
       console.log(boardFor(args));

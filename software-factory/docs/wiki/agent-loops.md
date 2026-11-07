@@ -147,6 +147,8 @@ gets exactly one server, `board`, and main's `.mcp.json` is not used: `bun .clau
 are its managers. The board's URL reaches the server through its environment (MB_URL, or this machine's url file), never
 a command line. The agents' rules allow each role only its board tools (`mcp__board__board_prime` and the rest), and the
 skills say which to use. The PR gate and the guard still read only GitHub. `/mcp` in a session should list only `board`.
+With the board on, the dev manager's loop also runs `factory board mirror` before each pass, so GitHub's copy of the
+board stays current (#502; a release without it skips this).
 
 ### Practical notes
 
