@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { BoardError, LOGIN_REFUSED, LOGIN_REFUSED_FIX, refuse } from "./errors.ts";
 import { GRAPH_LOCK, type NewEvent, reaches, recordEvents } from "./graph.ts";
 import { applyImport } from "./import.ts";
-import { addLogin, dropExpiredLogins, listLogins, type Login, redeemLogin, removeLogin } from "./logins.ts";
+import { addLogin, dropExpiredLogins, listLogins, type Login, redeemLogin, removeLogin, tidyLogins } from "./logins.ts";
 import { applied, migrate } from "./migrate.ts";
 import { CONTEXT_COLS, EVENT_COLS, MESSAGE_COLS, type Row, TASK_SELECT, toContext, toEvent, toMessage, toTask } from "./rows.ts";
 import {
@@ -149,10 +149,15 @@ export class Board {
     return this.run(() => redeemLogin(this.sql, this.url, keep));
   }
 
-  /** Drops the join codes' logins that expired unredeemed, ending their sessions (logins.ts); the names. Only the board's
-   * own user can; for anyone else, none. */
-  async dropExpiredLogins(): Promise<string[]> {
+  /** Drops the join codes' logins that expired unredeemed, ending their sessions, and the spent code roles (logins.ts);
+   * the names, and a warning for each that couldn't be dropped. Only the board's own user can; for anyone else, none. */
+  async dropExpiredLogins(): Promise<{ dropped: string[]; warnings: string[] }> {
     return this.run(() => dropExpiredLogins(this.sql));
+  }
+
+  /** Drops the spent join code roles (logins.ts); a warning for each that couldn't be. Only the board's own user can. */
+  async tidyLogins(): Promise<string[]> {
+    return this.run(() => tidyLogins(this.sql));
   }
 
   /** Every login, with when it was first used and whether it is connected now. */

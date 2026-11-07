@@ -206,7 +206,6 @@ export async function addLogin(sql: SQL, name: string, password: string, options
 export async function listLogins(sql: SQL): Promise<Login[]> {
   if (!(await tableExists(sql, "mb_logins"))) return [];
   await upgrade(sql);
-  await dropSpentRoles(sql);
   await sql`UPDATE mb_logins SET first_seen = now(), last_seen = now()
     WHERE first_seen IS NULL AND role IN (SELECT usename FROM pg_stat_activity WHERE usename IS NOT NULL)`;
   const rows = (await sql`SELECT l.name, l.role, l.created_at, l.first_seen, l.last_seen, l.redeemed_at,
@@ -246,26 +245,75 @@ export async function removeLogin(sql: SQL, name: string, options: { unused?: bo
     if (options.unredeemed && found[0]?.redeemed_at) {
       refuse("login-redeemed", `The login ${name} was redeemed (its machine joined), so it was kept.`, `Remove it anyway with \`factory board login remove ${name}\`.`);
     }
-    await tx`DELETE FROM mb_logins WHERE name = ${name}`;
-    for (const r of [found[0]?.role, found[0]?.code_role]) if (typeof r === "string" && r) await tx.unsafe(`DROP ROLE IF EXISTS ${ident(r)}`);
+    for (const r of roles) await disable(tx, r); // committed first, so an ended session can't log in again
   });
-  for (const oid of oids) await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usesysid = ${oid}`;
+  try {
+    await endSessions(sql, oids);
+    await sql.begin(async (tx) => {
+      await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
+      for (const r of roles) await disown(tx, r);
+      await tx`DELETE FROM mb_logins WHERE name = ${name}`;
+    });
+  } finally {
+    await endSessions(sql, oids); // even when the drop failed: the role can't log in, and nothing of it stays connected
+  }
   return { name, role };
 }
 
-/** Drops the code roles of redeemed logins (NOLOGIN since the redeem) and ends any session they still have. Only the
- * board's own user can; for anyone else it does nothing. */
-async function dropSpentRoles(sql: SQL): Promise<void> {
-  if (!(await superuser(sql))) return;
+const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
+
+/** No new logins for `role` (it can't take effect inside an open transaction for others, so commit it first). */
+async function disable(sql: SQL, role: string): Promise<void> {
+  if (((await sql`SELECT 1 FROM pg_roles WHERE rolname = ${role}`) as Row[]).length) await sql.unsafe(`ALTER ROLE ${ident(role)} NOLOGIN`);
+}
+
+/** Ends the sessions of the roles with these oids, waiting up to 5 s for each. */
+async function endSessions(sql: SQL, oids: unknown[]): Promise<void> {
+  for (const oid of oids) await sql`SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE usesysid = ${oid} AND pid <> pg_backend_pid()`;
+}
+
+/** Drops `role` with what it owns. Any role may make a large object or set its default privileges without CREATE, and
+ * DROP ROLE alone refuses a role that owns anything: so what it owns goes to the board's user and is dropped first (in
+ * the board's database, the only one a login reaches). */
+async function disown(tx: SQL, role: string): Promise<void> {
+  if (!((await tx`SELECT 1 FROM pg_roles WHERE rolname = ${role}`) as Row[]).length) return;
+  await tx.unsafe(`REASSIGN OWNED BY ${ident(role)} TO CURRENT_USER`);
+  await tx.unsafe(`DROP OWNED BY ${ident(role)}`);
+  await tx.unsafe(`DROP ROLE ${ident(role)}`);
+}
+
+/** Drops the code roles of redeemed logins (NOLOGIN since the redeem), ending any session they still have; one that
+ * can't be dropped is a warning and the others go on. Only the board's own user can; for anyone else it does nothing. */
+async function dropSpentRoles(sql: SQL): Promise<string[]> {
+  if (!(await superuser(sql))) return [];
+  const warnings: string[] = [];
   const spent = (await sql`SELECT l.name, l.code_role, r.oid FROM mb_logins l LEFT JOIN pg_roles r ON r.rolname = l.code_role
     WHERE l.code_role IS NOT NULL`) as Row[];
-  for (const s of spent) {
-    if (s.oid !== null && s.oid !== undefined) {
-      await sql`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usesysid = ${s.oid}`;
-      await sql.unsafe(`DROP ROLE IF EXISTS ${ident(String(s.code_role))}`);
+  for (const sp of spent) {
+    const role = String(sp.code_role);
+    const oids = sp.oid === null || sp.oid === undefined ? [] : [sp.oid];
+    try {
+      await disable(sql, role);
+      await endSessions(sql, oids);
+      await sql.begin(async (tx) => {
+        await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
+        await disown(tx, role);
+        await tx`UPDATE mb_logins SET code_role = NULL WHERE name = ${sp.name} AND code_role = ${role}`;
+      });
+    } catch (e) {
+      warnings.push(`Couldn't drop ${role}, the spent join code role of the login ${String(sp.name)} (it can't log in): ${errText(e)}`);
+    } finally {
+      await endSessions(sql, oids).catch(() => {});
     }
-    await sql`UPDATE mb_logins SET code_role = NULL WHERE name = ${s.name} AND code_role = ${s.code_role}`;
   }
+  return warnings;
+}
+
+/** Drops the spent join code roles (dropSpentRoles); warnings for the ones that couldn't be. */
+export async function tidyLogins(sql: SQL): Promise<string[]> {
+  if (!(await tableExists(sql, "mb_logins"))) return [];
+  await upgrade(sql);
+  return dropSpentRoles(sql);
 }
 
 async function superuser(sql: SQL): Promise<boolean> {
@@ -300,15 +348,27 @@ export async function redeemLogin(sql: SQL, url: string, keep: (login: { role: s
   const copied = (why: string): never => refuse("login-compromised",
     `The join code's login didn't hold after the redeem (${why.replace(/\/\/[^@\s]*@/g, "//***@").slice(0, 200)}): this code may have been copied.`,
     "Run `factory machine remove <name>` on the hub and make a new code (`factory machine add <name> --agent ...`).");
-  let ended = true;
-  try {
-    const rows = (await sql`SELECT pg_terminate_backend(pid, 5000) AS ok FROM pg_stat_activity
-      WHERE usesysid = (SELECT oid FROM pg_roles WHERE rolname = session_user) AND pid <> pg_backend_pid()`) as Row[];
-    ended = rows.every((r) => r.ok === true);
-  } catch (e) {
-    copied(e instanceof Error ? e.message : String(e));
+  // A backend that passed the login check just before the commit may show in pg_stat_activity a moment later, so scan
+  // (every 200 ms) for at least 600 ms and until a scan finds none, for up to 3 s.
+  const started = Date.now();
+  for (let quiet = false; ;) {
+    let rows: Row[] = [];
+    try {
+      rows = (await sql`SELECT pg_terminate_backend(pid, 5000) AS ok FROM pg_stat_activity
+        WHERE usesysid = (SELECT oid FROM pg_roles WHERE rolname = session_user) AND pid <> pg_backend_pid()`) as Row[];
+    } catch (e) {
+      copied(e instanceof Error ? e.message : String(e));
+    }
+    if (rows.some((r) => r.ok !== true)) copied("a session of the code's login didn't end");
+    quiet = rows.length === 0;
+    const spent = Date.now() - started;
+    if (quiet && spent >= 600) break;
+    if (spent >= 3000) {
+      if (!quiet) copied("sessions of the code's login kept appearing");
+      break;
+    }
+    await Bun.sleep(200);
   }
-  if (!ended) copied("a session of the code's login didn't end");
   const u = new URL(url);
   u.username = encodeURIComponent(role);
   u.password = encodeURIComponent(password);
@@ -322,13 +382,14 @@ export async function redeemLogin(sql: SQL, url: string, keep: (login: { role: s
   }
 }
 
-/** Drops each join code's login that expired unredeemed and ends its sessions (VALID UNTIL stops only new ones); the
- * names dropped. Only the board's own user (a superuser) can: for anyone else it does nothing. */
-export async function dropExpiredLogins(sql: SQL): Promise<string[]> {
-  if (!(await tableExists(sql, "mb_logins"))) return [];
-  if (!(await superuser(sql))) return [];
+/** Drops each join code's login that expired unredeemed and ends its sessions (VALID UNTIL stops only new ones), and the
+ * spent code roles; the names dropped, and a warning for each that couldn't be (the others go on). Only the board's own
+ * user (a superuser) can: for anyone else it does nothing. */
+export async function dropExpiredLogins(sql: SQL): Promise<{ dropped: string[]; warnings: string[] }> {
+  if (!(await tableExists(sql, "mb_logins"))) return { dropped: [], warnings: [] };
+  if (!(await superuser(sql))) return { dropped: [], warnings: [] };
   await upgrade(sql);
-  await dropSpentRoles(sql);
+  const warnings = await dropSpentRoles(sql);
   const due = (await sql`SELECT l.name FROM mb_logins l JOIN pg_roles r ON r.rolname = l.role
     WHERE l.redeemed_at IS NULL AND r.rolvaliduntil IS NOT NULL AND r.rolvaliduntil <= now() ORDER BY l.name`) as Row[];
   const dropped: string[] = [];
@@ -337,8 +398,9 @@ export async function dropExpiredLogins(sql: SQL): Promise<string[]> {
       await removeLogin(sql, String(name), { unredeemed: true });
       dropped.push(String(name));
     } catch (e) {
-      if (!(e instanceof BoardError) || !["login-redeemed", "not-found"].includes(e.code)) throw e; // redeemed just now, or gone
+      if (e instanceof BoardError && ["login-redeemed", "not-found"].includes(e.code)) continue; // redeemed just now, or gone
+      warnings.push(`Couldn't drop the expired login ${String(name)} (it can't log in, and its sessions were ended): ${errText(e)}`);
     }
   }
-  return dropped;
+  return { dropped, warnings };
 }

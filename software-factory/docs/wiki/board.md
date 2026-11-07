@@ -68,7 +68,8 @@ fails, the code may have been copied: the join keeps nothing and says to run `fa
 (`code-compromised`). Postgres checks `VALID UNTIL` only when a session connects, so a session opened with an
 unredeemed code before it expired may stay open until `factory board sweep` runs on the hub: the sweep drops each
 login whose code expired unredeemed and ends its sessions (as `machine ls` and `machine add` drop it too). The spent code role is dropped by the next sweep, `machine ls`
-or `machine add` on the hub. `factory machine ls` shows who joined (a machine joins when its code is redeemed, not
+or `machine add` on the hub, with whatever it made (a role can make a large object without any rights); one that can't
+be dropped is a warning, and the others go on. `factory machine ls` shows who joined (a machine joins when its code is redeemed, not
 when something connects with it); `factory machine remove <name>` drops a machine's login.
 
 When the hub removes a machine's login, or it expired, that machine's `factory board status`, `factory next` and

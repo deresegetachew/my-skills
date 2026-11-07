@@ -307,10 +307,12 @@ async function sweep(argv: string[]): Promise<number> {
   const q = option(args, "--quiet-minutes");
   leftovers(args, "factory board sweep [--quiet-minutes N]");
   const quietSeconds = q === undefined ? undefined : wholeNumber(q, "--quiet-minutes", 0, 100_000) * 60;
-  const { swept, dropped } = await withBoard(async (b) => ({ swept: await b.sweep({ quietSeconds }), dropped: await b.dropExpiredLogins() }));
+  const { swept, logins } = await withBoard(async (b) => ({ swept: await b.sweep({ quietSeconds }), logins: await b.dropExpiredLogins() }));
+  const { dropped, warnings } = logins;
   if (!swept.length) print("No stale claims.");
   for (const s of swept) print(`released #${s.id} (held by ${s.holder})`);
   for (const name of dropped) print(`dropped the login ${name}: its join code expired unredeemed (its sessions were ended)`);
+  for (const w of warnings) console.error(`warning: ${w}`);
   return 0;
 }
 
@@ -530,7 +532,8 @@ async function loginAdd(args: string[]): Promise<number> {
 async function loginLs(args: string[]): Promise<number> {
   const asJson = flag(args, "--json");
   leftovers(args, "factory board login ls [--json]");
-  const list = await withBoard((b) => b.logins());
+  const { list, warnings } = await withBoard(async (b) => ({ warnings: await b.tidyLogins(), list: await b.logins() }));
+  for (const w of warnings) console.error(`warning: ${w}`);
   if (asJson) {
     json(list.map((l) => ({ name: l.name, role: l.role, createdAt: l.createdAt.toISOString(), firstSeen: l.firstSeen?.toISOString() ?? null,
       lastSeen: l.lastSeen?.toISOString() ?? null, connected: l.connected, redeemedAt: l.redeemedAt?.toISOString() ?? null })));

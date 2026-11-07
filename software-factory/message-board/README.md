@@ -70,7 +70,10 @@ touching the others:
 - The board notes when a login is first used itself: a login event trigger (Postgres 17) stamps `mb_logins.first_seen`
   and `last_seen` (at most once a minute), and a login connected now (`pg_stat_activity`) counts too.
   `factory board login ls [--json]` shows it.
-- `factory board login remove <name> [--unused|--unredeemed]` drops the role and ends its connections; with `--unused`,
+- `factory board login remove <name> [--unused|--unredeemed]` drops the role and ends its connections (#514: first the
+  role is made `NOLOGIN` and its sessions are ended, then what it owns is reassigned to the board's user and dropped, as
+  any role may make a large object or set its default privileges without CREATE and `DROP ROLE` alone would refuse it;
+  its sessions are ended even when the drop fails); with `--unused`,
   only a login that was never used (`login-used` otherwise); with `--unredeemed`, only one whose join code wasn't
   redeemed (`login-redeemed` otherwise).
 - **Join codes (#514).** `login add --valid-for <seconds>` makes the role with `VALID UNTIL` that long from now by the
@@ -81,14 +84,15 @@ touching the others:
   returns the fresh role and its password. Postgres checks `NOLOGIN` after the password, so a copy of the code that
   started its handshake before the redeem and finishes after is refused, and the code's role can only change its own
   password, never the fresh role's. The spent code role is dropped (its sessions ended) by the board's own user at the
-  next `login ls`, `login remove` or sweep. It refuses a login already redeemed (`login-redeemed`), one that expired
+  next `login ls`, `login remove` or sweep; a role that can't be dropped is a warning on stderr and the others go on. It refuses a login already redeemed (`login-redeemed`), one that expired
   (`login-expired`), and a user that isn't a login (`not-found`). The redeem runs in the caller's transaction and
   `keep` gets the fresh role and password before the commit: a `keep` that throws undoes it, so the code still works. The function
   is `SECURITY DEFINER`, owned by the board's user, with `search_path` pinned to `pg_catalog, public, pg_temp`; it
   touches only the row of `session_user`, its role and the fresh one, takes the role's name from `mb_logins`
   (which logins can't write) and builds its dynamic statements with `format('%I', '%L')`. Only the logins group may execute it (PUBLIC can't).
   After the commit `redeemLogin` ends the code role's other sessions (`pg_terminate_backend(pid, 5000)`: a copy may
-  have connected before the commit) and connects as the fresh role; if a session doesn't end or that fails it refuses `login-compromised` (the
+  have connected before the commit; it scans every 200 ms for at least 600 ms and until a scan finds none, up to 3 s, as a
+  backend shows in `pg_stat_activity` a little after its login check) and connects as the fresh role; if a session doesn't end or that fails it refuses `login-compromised` (the
   code may have been copied). `VALID UNTIL` stops only new sessions: `Board.dropExpiredLogins`, run by `factory board
   sweep` as the board's own user, drops each login whose code expired unredeemed and ends its sessions.
   `factory machine add` makes its login with `--valid-for` (the code's time), `factory machine join` redeems it.
