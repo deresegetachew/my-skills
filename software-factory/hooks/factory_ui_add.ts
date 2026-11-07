@@ -17,6 +17,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { addedFile, addedPaths, envFor, factoryScript, type Obj, type Problem, projectAt, readJson, type Ran, spawn,
   type UiProject } from "./factory_ui_data.ts";
 import { messagingSettings } from "./core/compose.ts";
+import { archiveName, cacheFolder, DEFAULT_REPO, type Pin, readPin, sha256File } from "./factory_release.ts";
 import type { Config } from "./factory_config.ts";
 
 const HOOKS = import.meta.dir;
@@ -26,6 +27,18 @@ const SETUP_BRANCH = "factory/setup";
 const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const REPO = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9_.][A-Za-z0-9_.-]*$/;
 const INSTALLER = resolve(HOOKS, "..", "install.sh");
+// A project installed from a release has no install.sh: its own release client puts the same release in the new folder (#537).
+const SERVING_ROOT = resolve(HOOKS, "..", "..");
+const RELEASE_CLIENT = join(HOOKS, "factory_release.ts");
+
+/** The pin of the release that serves the page, or null (a my-skills checkout, or no readable pin). */
+function servingPin(): Pin | null {
+  try {
+    return readPin(SERVING_ROOT);
+  } catch {
+    return null;
+  }
+}
 
 /** The `protected` regex for a path the owner typed: anchored at the start, its dots and brackets taken as they are, and
  * a file (no / at the end) matched whole: "factory" protects ^factory$, not every path with factory in it. */
@@ -211,9 +224,9 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
   if (odd !== undefined) {
     return problem("ui_add_protected", `"${odd}" isn't a path in the repo.`, "Type each protected path from the repo's top, without a leading /, for example migrations/.");
   }
-  if (!existsSync(INSTALLER)) {
-    return problem("ui_add_no_installer", "This factory has no installer beside it, so it can't install itself into another project.",
-      "Start the web UI from a my-skills checkout, then add the project again.");
+  if (!existsSync(INSTALLER) && !servingPin()) {
+    return problem("ui_add_no_installer", "This factory has no installer beside it and no release pin, so it can't install itself into another project.",
+      "Install the factory here from a release (`factory update`), or start the web UI from a my-skills checkout, then add the project again.");
   }
   return { source, repo: source === "folder" ? "" : repo, path, visibility: b.visibility === "public" ? "public" : "private", tasks,
     mainBranch, test: str(b.test), lint: str(b.lint), protected: [...new Set(prot)], team };
@@ -299,7 +312,41 @@ async function stepRepo(req: AddRequest, step: AddStep): Promise<Done> {
 }
 
 async function stepKit(req: AddRequest, step: AddStep): Promise<Done> {
-  return { state: "done", output: await must(step, ["bash", INSTALLER, req.path], req.path, gitEnv(), "Read what it printed, fix it, then press Retry.") };
+  if (existsSync(INSTALLER)) {
+    return { state: "done", output: await must(step, ["bash", INSTALLER, req.path], req.path, gitEnv(), "Read what it printed, fix it, then press Retry.") };
+  }
+  return releaseKit(req, step);
+}
+
+/** Installs the release that serves the page into the new folder with its own release client: from the download cache
+ * when it holds that exact archive, else by downloading the tag; then the new pin must name that same archive (#537). */
+async function releaseKit(req: AddRequest, step: AddStep): Promise<Done> {
+  const pin = servingPin();
+  const tag = pin?.tag ?? "";
+  const repo = pin?.repo || DEFAULT_REPO;
+  const folder = cacheFolder(repo, tag);
+  const archive = join(folder, archiveName(tag));
+  const fix = `Get the archive of ${tag} (software-factory-${tag.replace(/^v/, "")}.tar.gz and its SHA256SUMS), then in ${req.path} run ` +
+    `\`factory update --archive <archive> --sums <SHA256SUMS>\` and press Retry.`;
+  if (!pin) throw new StepFailed(problem("ui_add_no_installer", "The release that serves this page has no pin any more.", fix), "");
+  const cached = existsSync(archive) && sha256File(archive) === pin.sha256;
+  const args = cached ? ["update", "--archive", archive, "--sums", join(folder, "SHA256SUMS")] : ["update", tag];
+  // the page is the owner's (factory ui refuses FACTORY_AGENT and FACTORY_LOOP), so the owner's own Claude Code session
+  // (CLAUDECODE) is not an agent here; the agent variables are kept, and the client still refuses them
+  const env: Record<string, string> = { ...gitEnv(), FACTORY_RELEASE_REPO: repo };
+  delete env.CLAUDECODE;
+  const out = await must(step, [process.execPath, "--no-env-file", "--config=/dev/null", RELEASE_CLIENT, ...args], req.path, env, fix);
+  let got: Pin | null = null;
+  try {
+    got = readPin(req.path);
+  } catch {
+    got = null;
+  }
+  if (!got || got.sha256 !== pin.sha256) {
+    throw new StepFailed(problem("ui_add_release_differs", `${req.path} didn't get the same ${tag} as this page runs ` +
+      `(${got ? `its archive is ${got.sha256.slice(0, 12)}…, this page's is ${pin.sha256.slice(0, 12)}…` : "no pin was written"}).`, fix), out);
+  }
+  return { state: "done", output: out };
 }
 
 function writeJson(path: string, data: unknown): void {

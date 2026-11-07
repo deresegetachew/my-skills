@@ -170,6 +170,47 @@ test("update from a local archive installs it with no network and records the pi
   expect(out.includes("not refreshed") && ciLog(env).slice(0, -1).length === 0, "the archive's own scripts are not run to refresh services").toBe(true);
 });
 
+/** A second empty project with one commit, beside the first (same cache and HOME in `env`). */
+function emptyProject(): string {
+  const d = tmp();
+  git(d, "init", "-q", "-b", "main");
+  writeFileSync(join(d, "README.md"), "project\n");
+  git(d, "add", "-A");
+  git(d, "commit", "-q", "-m", "start");
+  return d;
+}
+
+test("an install from a local archive keeps it in the download cache, so the same release installs again offline (#537)", async () => {
+  const [gh, d, env] = await world();
+  const [archive, sums] = localRelease("1.0.0");
+  let [rc, out] = await fac(d, offline(env), "update", "--archive", archive, "--sums", sums);
+  expect(rc, out).toBe(0);
+  expect(cached(env).sort()).toEqual(["SHA256SUMS", "software-factory-1.0.0.tar.gz"]);
+  // another project on this machine takes the same release by its name, with no network
+  const other = emptyProject();
+  [rc, out] = await fac(other, offline(env), "update", "v1.0.0");
+  expect(rc, out).toBe(0);
+  expect(pin(other).sha256).toBe(sha256(readFileSync(archive)));
+  expect(read(join(other, ".claude/hooks/factory_x.ts"))).toBe(VERSION_TS("1.0.0"));
+  expect(gh.hits, "no request reached the fake GitHub").toEqual([]);
+});
+
+test("a local archive never replaces a different archive already cached for that release (#537)", async () => {
+  const [, d, env] = await world();
+  const [first, firstSums] = localRelease("1.0.0");
+  let [rc, out] = await fac(d, offline(env), "update", "--archive", first, "--sums", firstSums);
+  expect(rc, out).toBe(0);
+  const dist = buildRelease("1.0.0", { "hooks/factory_y.ts": "export const Y = 1;\n" }); // the same tag, other files
+  const second = join(dist, "software-factory-1.0.0.tar.gz");
+  expect(sha256(readFileSync(second))).not.toBe(sha256(readFileSync(first)));
+  const other = emptyProject();
+  [rc, out] = await fac(other, offline(env), "update", "--archive", second, "--sums", join(dist, "SHA256SUMS"));
+  expect(rc, out).toBe(0);
+  expect(pin(other).sha256).toBe(sha256(readFileSync(second)));
+  const kept = join(env.FACTORY_CACHE_DIR as string, "deresegetachew__my-skills", "v1.0.0", "software-factory-1.0.0.tar.gz");
+  expect(sha256(readFileSync(kept))).toBe(sha256(readFileSync(first)));
+});
+
 test("the sums file defaults to the one beside the archive and a version must agree with the archive", async () => {
   const [, d, env] = await world();
   const [archive, sums] = localRelease("1.0.0");
