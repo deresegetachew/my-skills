@@ -122,7 +122,7 @@ function who(pr: PrPageData): string {
   return pr.author.name ?? pr.author.text;
 }
 
-/** Merge: open, not a draft, checks passing. Squashed into the base, pinned to the commit shown. */
+/** Merge: open, not a draft, checks passing. Merged into the base with a merge commit, pinned to the commit shown. */
 export function mergeAsk(pr: PrPageData): ConfirmSpec {
   const open = pr.state === "open";
   const green = pr.checks.state === "green";
@@ -136,7 +136,7 @@ export function mergeAsk(pr: PrPageData): ConfirmSpec {
         ...(green ? {} : { sub: pr.checks.state === "red" ? `Failing: ${pr.checks.failing.join(", ")}.` : pr.checks.state === "none" ? "They haven't run yet."
           : "They are still running." }) },
     ],
-    happens: `#${pr.number} is squashed into ${pr.base || "the main branch"} as one commit, at ${short}, the commit on this page. ` +
+    happens: `#${pr.number} is merged into ${pr.base || "the main branch"} at ${short}, the commit on this page. ` +
       `Its branch is deleted${pr.tasks.length ? `, and #${pr.tasks[0]} is done` : ""}.`,
     doesNot: `If a new commit lands first, nothing is merged and you are asked again. ` +
       (pr.protected.personOnly ? `${who(pr)} can't merge it: ${pr.protected.why.charAt(0).toLowerCase()}${pr.protected.why.slice(1)}` : "Nothing else changes."),

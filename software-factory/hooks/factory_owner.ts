@@ -2,12 +2,10 @@
 // `factory owner`: what the owner does by hand, as factory commands, so the web UI and the command line share them
 // (US-6, #302). Each one is a thin wrapper over what exists.
 //
-//   factory owner merge <pr> [--head <sha>] [--squash]
-//                                            names the protected paths the PR touches, checks it is open, not a draft,
+//   factory owner merge <pr> [--head <sha>]  names the protected paths the PR touches, checks it is open, not a draft,
 //                                            mergeable and green (factory_ci_judge.ts), then merges it (a merge commit) pinned to
 //                                            its head (`gh pr merge --match-head-commit`). --head: only when the head is still
-//                                            that commit (the one a screen showed, #309). --squash: one squashed commit
-//                                            instead (the web UI's pull request page, #453), else `pr_changed`
+//                                            that commit (the one a screen showed, #309), else `pr_changed`
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
 //   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`; m<n> is
@@ -43,10 +41,8 @@ const REPO = "repos/{owner}/{repo}";
 const VERSION_FILE = "software-factory/VERSION";
 const USAGE = `factory owner <command>
 
-  merge <pr> [--head <sha>] [--squash]
-                              name the protected paths the pull request touches, then merge it (a merge commit) when it is open,
-                              not a draft, mergeable and green, pinned to its head commit (--head: only if that is still the head;
-                              --squash: one squashed commit instead)
+  merge <pr> [--head <sha>]   name the protected paths the pull request touches, then merge it (a merge commit) when it is open,
+                              not a draft, mergeable and green, pinned to its head commit (--head: only if that is still the head)
   label <n> <label> [--remove]
                               add a label that exists on the repository to an issue or pull request (--remove: take it off)
   answer <ask-id> <text>      answer an ask in the owner queue ("Dev manager: needs the owner")
@@ -149,7 +145,7 @@ function protectedPaths(files: string[]): string[] {
   return files.filter((f) => !cfg.alwaysAllowed.includes(f) && cfg.protected.some((rx) => new RegExp(rx).test(f)));
 }
 
-function merge(n: string, me: Who, seen: string | null, squash = false): void {
+function merge(n: string, me: Who, seen: string | null): void {
   const pr = row(api<Row>("GET", `${REPO}/pulls/${n}`, undefined, true));
   if (!Object.keys(pr).length) refuse("no_such_pr", `There is no pull request #${n}.`, "Check the number with `factory prs`.");
   const head = str(row(pr.head).sha);
@@ -189,14 +185,14 @@ function merge(n: string, me: Who, seen: string | null, squash = false): void {
     refuse("not_mergeable", `#${n} can't be merged as it is (it conflicts with the base branch).`,
       "Merge the main branch into the pull request's branch and push, then run the command again.");
   }
-  const cmd = ["gh", "pr", "merge", n, squash ? "--squash" : "--merge", "--delete-branch", "--match-head-commit", head];
+  const cmd = ["gh", "pr", "merge", n, "--merge", "--delete-branch", "--match-head-commit", head];
   if (me === "dev-manager") gate(cmd);
   const p = run(cmd);
   if (p.code !== 0) {
     refuse("merge_failed", `gh pr merge #${n} failed: ${(p.stderr || p.stdout).trim().slice(0, 300)}`,
       `Look at the pull request (\`gh pr view ${n} --web\`) and run the command again.`);
   }
-  console.log(`Merged #${n} at ${head.slice(0, 12)}${squash ? " (squashed)" : ""}.`);
+  console.log(`Merged #${n} at ${head.slice(0, 12)}.`);
 }
 
 // --- label ----------------------------------------------------------------------------------------------------------
@@ -402,14 +398,8 @@ function stop(name: string): void {
 
 // --- the command ----------------------------------------------------------------------------------------------------
 
-/** `merge <pr> [--head <sha>] [--squash]`: the number, the head the owner saw (if given) and whether to squash. */
-function mergeArgs(all: string[]): [string, string | null, boolean] {
-  const squash = all.includes("--squash");
-  const [n, sha] = headArgs(all.filter((x) => x !== "--squash"));
-  return [n, sha, squash];
-}
-
-function headArgs(rest: string[]): [string, string | null] {
+/** `merge <pr> [--head <sha>]`: the number and the head the owner saw, if given. */
+function mergeArgs(rest: string[]): [string, string | null] {
   const at = rest.indexOf("--head");
   if (at < 0) return [number(rest[0], "pull request", "factory owner merge 12"), null];
   const sha = rest[at + 1] ?? "";
@@ -433,8 +423,8 @@ export async function main(argv: string[]): Promise<number> {
   }
   const me = who();
   if (cmd === "merge") {
-    const [n, seen, squash] = mergeArgs(rest);
-    merge(n, me, seen, squash);
+    const [n, seen] = mergeArgs(rest);
+    merge(n, me, seen);
   }
   else if (cmd === "start" || cmd === "stop") {
     if (me === "dev-manager") ownerOnly(cmd === "start" ? "Starting a session" : "Stopping a session");

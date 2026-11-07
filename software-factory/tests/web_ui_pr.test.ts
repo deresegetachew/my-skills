@@ -119,12 +119,12 @@ test("an unknown pull request is a 404 with a fix; one GitHub can't give is a 50
 const act = (ui: Running, n: number, name: string, body: Row) =>
   api(ui, `/api/projects/work/pull-requests/${n}/actions/${name}`, { method: "POST", body });
 
-test("merge: green and ready, it runs factory owner merge pinned to the head, squashed", async () => {
+test("merge: green and ready, it runs factory owner merge pinned to the head (a merge commit)", async () => {
   const { ui, p } = await started();
   const r = await act(ui, 22, "merge", { confirm: true, head: NEW_HEAD });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
-  expect(factoryCalls(p)).toContain(`owner merge 22 --head ${NEW_HEAD} --squash`);
-  expect(r.json.command).toBe(`factory owner merge 22 --head ${NEW_HEAD} --squash`);
+  expect(factoryCalls(p)).toContain(`owner merge 22 --head ${NEW_HEAD}`);
+  expect(r.json.command).toBe(`factory owner merge 22 --head ${NEW_HEAD}`);
 }, T);
 
 test("merge is refused for a draft (mark it ready first), red checks, a head that moved, and without a confirm; nothing runs", async () => {

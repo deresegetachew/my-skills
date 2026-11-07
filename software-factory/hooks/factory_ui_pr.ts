@@ -18,7 +18,7 @@
 // one", or no builder wrote it) or one the product owner opened for the owner waits for you (truthOf).
 //
 // Every action is the owner's: in a factory session (FACTORY_AGENT or FACTORY_LOOP) it is refused with `owner_only`.
-// Merge runs `factory owner merge <n> --head <sha> --squash` (it checks again and pins the merge to the head the page
+// Merge runs `factory owner merge <n> --head <sha>`, a merge commit as the factory's own merges (it checks again and pins the merge to the head the page
 // showed); it is refused here first for a draft (`pr_draft`, mark it ready first) or checks that aren't green. Ready is
 // `gh pr ready <n>`. Comment, request changes and close go through `gh api`. Request changes posts the factory's
 // must-fix marker on the head (`<!-- factory-mustfix sha=<head> -->`, as the dev manager's verdicts do, so the author
@@ -508,7 +508,7 @@ export async function prAction(p: UiProject, n: string, name: string, body: unkn
     if (word !== "green") {
       return refusal(409, "checks_pending", `The checks on #${n} ${word === "none" ? "haven't run yet" : "are still running"}.`, "Wait for them to pass, then merge.");
     }
-    return runAll(p, [["factory", "owner", "merge", n, "--head", head, "--squash"]]);
+    return runAll(p, [["factory", "owner", "merge", n, "--head", head]]);
   }
   if (action === "ready") {
     if (pr.draft !== true) return refusal(409, "pr_not_draft", `#${n} is already ready for review.`, "Read the page again.");

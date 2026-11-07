@@ -57,10 +57,10 @@ test("a draft offers Mark ready first; merge stays off until it is ready, with t
   expect(st.unmet.map((c) => [c.title, c.fix])).toEqual([["It is ready for review", "Mark ready"]]);
 });
 
-test("merge: on, once ready and green; it says it squashes at the commit shown, and that a new commit stops it", () => {
+test("merge: on, once ready and green; it says it merges at the commit shown, and that a new commit stops it", () => {
   const ask = mergeAsk(pr({ draft: false }));
   expect(confirmState(ask, "").ready).toBe(true);
-  expect(ask.happens).toContain("squashed into main");
+  expect(ask.happens).toContain("merged into main");
   expect(ask.happens).toContain("a1b2c3d");
   expect(ask.doesNot).toContain("If a new commit lands first, nothing is merged");
   expect(ask.doesNot).toContain("mentewab can't merge it");

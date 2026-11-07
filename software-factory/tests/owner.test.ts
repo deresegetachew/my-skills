@@ -184,17 +184,6 @@ test("merge pins the merge to the full head sha, names the protected paths first
   expect(m[0]?.argv).toEqual(["pr", "merge", "7", "--merge", "--delete-branch", "--match-head-commit", SHA]);
 });
 
-test("merge --squash squashes it, still pinned to the head and after the same checks (the web UI's PR page, #453)", () => {
-  const r = openPr();
-  const p = owner(r, OWNER, "merge", "7", "--head", SHA.slice(0, 12), "--squash");
-  expect(p.code, p.out).toBe(0);
-  expect(p.stdout).toContain(`Merged #7 at ${SHA.slice(0, 12)} (squashed).`);
-  expect(merges(r).map((c) => c.argv)).toEqual([["pr", "merge", "7", "--squash", "--delete-branch", "--match-head-commit", SHA]]);
-  const draft = openPr({ draft: true });
-  refused(owner(draft, OWNER, "merge", "7", "--squash"), "pr_draft");
-  expect(merges(draft)).toEqual([]);
-});
-
 test("merge says 'Protected paths: none' when no path matches", () => {
   const r = openPr({}, 7, { factoryJson: JSON.stringify({ protected: ["^\\.github/"] }) });
   const p = owner(r, OWNER, "merge", "7");
