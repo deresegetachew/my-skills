@@ -139,6 +139,18 @@ test("wait sleeps until the reset plus the margin, then carries on; with no limi
   expect(cmd(w, ["wait", "--name", "taytu"]).code).toBe(1); // it has passed: no second wait
 });
 
+test("a reset more than 8 days away is capped at 8 days, from Claude's resetsAt or a hand-edited file", () => {
+  const w = world();
+  const now = Math.floor(Date.now() / 1000);
+  const cap = 8 * 86_400;
+  transcript(w, [quotaReply(now + 30 * 86_400, SESSION, new Date(now * 1000).toISOString())]);
+  expect(cmd(w, ["check", "--since", String(now - 5)], { FACTORY_NOW: String(now) }).code).toBe(0);
+  expect((readJson(w.state) as { until: number }).until).toBe(now + cap);
+  write(w.state, JSON.stringify({ at: now, reset: now + 365 * 86_400, until: now + 365 * 86_400, window: "seven_day", pattern: "quota-rejected", text: "x", by: "haile" }));
+  const s = JSON.parse(cmd(w, ["status", "--json"], { FACTORY_NOW: String(now) }).stdout) as { limit: { until: number } };
+  expect(s.limit.until).toBe(now + cap);
+});
+
 test("a later limit already in the shared file is kept", () => {
   const w = world();
   const now = Math.floor(Date.now() / 1000);

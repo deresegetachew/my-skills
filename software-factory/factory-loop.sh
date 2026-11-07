@@ -402,8 +402,9 @@ role_pass() {
     "$claude_bin" "${claude_flags[@]}" ${headless_flags[@]+"${headless_flags[@]}"} -p "$prompt"; rc=$?
   fi
   [ "$discover" = 0 ] || exit "$rc"
-  # Ended on Claude's limit: not a failed pass; the next pass waits for the reset (#614).
-  claude_limit_check "$started" && return 0
+  # Ended on Claude's limit: not a failed pass, and not counted as the item coming up again; the next pass waits for the
+  # reset (#614).
+  if claude_limit_check "$started"; then repeats=$((repeats - 1)); return 0; fi
   [ "$rc" = 0 ] || return 1
   return 0
 }

@@ -207,7 +207,7 @@ test("a first import brings the open issues as tasks, with states, edges, parent
   expect(t.get(ref(2))).toMatchObject({ kind: "task", status: "open", title: "Write the importer" });
   expect(t.get(ref(3))).toMatchObject({ status: "in_review" });
   expect(t.get(ref(4))).toMatchObject({ status: "open", holder: null });
-  expect(t.get(ref(5))).toMatchObject({ status: "open" });
+  expect(t.get(ref(5))).toMatchObject({ status: "deferred" }); // blocked on GitHub: blocked on the board, never ready (#616)
   expect(t.get(ref(6))).toMatchObject({ kind: "bug", status: "open" });
   expect(t.get(ref(9))).toMatchObject({ kind: "note" });
   const body2 = (t.get(ref(2)) as Task).body;
@@ -247,7 +247,7 @@ test("a first import brings the open issues as tasks, with states, edges, parent
 
   // The board's own rules hold on what came in: the ready queue is the open tasks that nothing open blocks.
   const ready = await look(url, (b) => b.ready());
-  expect(ready.map((x) => x.ref).sort()).toEqual([ref(5), ref(6)].sort());
+  expect(ready.map((x) => x.ref)).toEqual([ref(6)]);
 });
 
 test("a second import updates what changed, adds new comments, and duplicates nothing", async () => {
@@ -589,7 +589,7 @@ test("an open issue without a factory label comes in as a note, not a task: it i
   const ready = await look(url, (b) => b.ready());
   expect(ready.map((x) => x.ref)).not.toContain(ref(10));
   expect(ready.map((x) => x.ref)).not.toContain(ref(11));
-  expect(ready.map((x) => x.ref).sort()).toEqual([ref(5), ref(6)].sort());
+  expect(ready.map((x) => x.ref)).toEqual([ref(6)]);
 
   // once the factory takes it as a task (a factory label), the next import makes it one
   (fx.issues.find((i) => i.number === 10) as Record<string, unknown>).labels = [{ name: "factory:ready" }];
@@ -628,3 +628,27 @@ test("a task already on the board whose issue has no factory label stays a task 
   expect((await byRef(url)).get(ref(12))).toMatchObject({ kind: "note" });
   expect((await byRef(url)).get(ref(10))).toMatchObject({ kind: "task", holder: "haile" });
 });
+
+test("an issue labelled factory:blocked comes in blocked (deferred), is never ready, and follows GitHub once it is unblocked (#616)", async () => {
+  const url = await migrated();
+  const fx = fixture();
+  const w = world(url, fx);
+  expect(importGithub(w).code).toBe(0);
+  let t = await byRef(url);
+  expect(t.get(ref(5))).toMatchObject({ status: "deferred" });
+  const id5 = (t.get(ref(5)) as Task).id;
+  const ctx = await look(url, (b) => b.contextFor(id5));
+  expect(ctx.find((c) => c.kind === "blocker")?.body).toContain("needs the Stripe keys");
+  expect((await look(url, (b) => b.ready())).map((x) => x.ref)).not.toContain(ref(5));
+  // importing again keeps it blocked
+  expect(importGithub(w).code).toBe(0);
+  expect((await byRef(url)).get(ref(5))?.status).toBe("deferred");
+  // unblocked on GitHub (factory:ready): the next import makes it ready
+  const i5 = fx.issues.find((i) => i.number === 5) as Record<string, unknown>;
+  Object.assign(i5, { labels: [{ name: "factory:ready" }], updated_at: new Date().toISOString() });
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  expect(importGithub(w).code).toBe(0);
+  t = await byRef(url);
+  expect(t.get(ref(5))?.status).toBe("open");
+  expect((await look(url, (b) => b.ready())).map((x) => x.ref)).toContain(ref(5));
+}, 300_000);

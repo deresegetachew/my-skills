@@ -361,7 +361,8 @@ export function readLimit(path: string = limitFile()): LimitState | null {
   try {
     const v = JSON.parse(readFileSync(path, "utf8")) as unknown;
     if (!isObj(v) || typeof v.until !== "number" || typeof v.at !== "number") return null;
-    return { at: v.at, reset: typeof v.reset === "number" ? v.reset : null, until: v.until, window: typeof v.window === "string" ? v.window : null,
+    // never wait more than MAX_AHEAD past when it was found, whatever the file says (a misread or hand-edited time)
+    return { at: v.at, reset: typeof v.reset === "number" ? v.reset : null, until: Math.min(v.until, v.at + MAX_AHEAD), window: typeof v.window === "string" ? v.window : null,
       pattern: typeof v.pattern === "string" ? v.pattern : "", text: typeof v.text === "string" ? v.text : "", by: typeof v.by === "string" ? v.by : "" };
   } catch {
     return null;
@@ -376,7 +377,8 @@ export function activeLimit(t: number = clockNow(), path: string = limitFile()):
 
 /** Writes a limit found now; a later wait already in the file is kept. Safe to run twice; never half written. */
 export function writeLimit(hit: Hit, by: string, t: number, s: Settings, path: string = limitFile()): LimitState {
-  const until = hit.reset !== null && hit.reset > t ? hit.reset : t + s.waitMinutes * 60;
+  // capped at MAX_AHEAD from now on every path, quotaLimits.resetsAt included
+  const until = Math.min(hit.reset !== null && hit.reset > t ? hit.reset : t + s.waitMinutes * 60, t + MAX_AHEAD);
   const kept = activeLimit(t, path);
   const state: LimitState = kept && kept.until >= until ? kept
     : { at: Math.floor(t), reset: hit.reset, until: Math.floor(until), window: hit.window, pattern: hit.pattern, text: hit.text, by };

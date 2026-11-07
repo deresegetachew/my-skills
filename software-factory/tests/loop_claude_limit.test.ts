@@ -50,11 +50,20 @@ writeFileSync(join(dir, "s" + n + ".jsonl"), JSON.stringify({ type: "assistant",
 
 interface Setup { work: string; env: Env; state: string; log: string }
 
+/** factory_roles.ts for a product owner whose queue always has the same item, with no waits between passes. */
+const ROLES = String.raw`#!/usr/bin/env bun
+const [cmd] = process.argv.slice(2);
+if (cmd === "vars") console.log("role_kind=skill\nrole_skill=product-pass\nrole_model_role=product-owner\nrole_title=x\nrole_busy=0\nrole_idle=0\nrole_profile=");
+else if (cmd === "work") console.log("ask 9: pick a database");
+else if (cmd === "prompt") console.log("/product-pass ask-9");
+`;
+
 function setup(extra: Record<string, string> = {}): Setup {
   const [d, work] = loopRepo(undefined, {
     ".claude/factory.json": JSON.stringify({ waitMinutes: 0, claudeLimit: { marginSeconds: 0 } }),
   });
   writeExe(join(work, ".claude", "hooks", "next_task.ts"), NEXT_TASK);
+  writeExe(join(work, ".claude", "hooks", "factory_roles.ts"), ROLES);
   for (const f of REAL) copyFileSync(join(HOOKS, f), join(work, ".claude", "hooks", f));
   commitAll(work, "the limit check");
   push(work);
@@ -147,3 +156,14 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     expect(existsSync(s.state)).toBe(true);
   });
 }
+
+test("a product owner's pass that ends on the limit three times is not an item that came up 3 times in a row", () => {
+  const s = setup({ FACTORY_ROLE: "product-owner", LIMITED_RUNS: "9", RESET_IN: "1" });
+  const p = sh(["bash", "./factory-loop.sh", "4"], { cwd: s.work, env: s.env, timeoutMs: 90_000 });
+  expect(p.code, p.out).toBe(0);
+  expect(p.out).not.toContain("came up 3 times in a row");
+  expect(p.out).not.toContain("passes failed in a row");
+  expect(claudeRuns(s)).toBe(4);
+  expect(count(p.stdout, "The session ended on Claude's usage limit")).toBe(4);
+  expect(count(p.stdout, "Claude limit reached; waiting until")).toBeGreaterThanOrEqual(3); // each pass after one on the limit waits first
+});
