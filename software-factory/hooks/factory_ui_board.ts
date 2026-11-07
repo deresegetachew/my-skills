@@ -65,11 +65,16 @@ function masked(text: string): string {
   return text.replace(/\/\/[^@\s/]*@/g, "//***@");
 }
 
-/** What a page sees about the board for one project: the tasks part when it reads from the board, and the notice when the
- *  board can't be read. */
+/** Where the board stands for this server (#515): none set up here, being opened the first time, read live, or down. */
+export type BoardState = "none" | "opening" | "live" | "down";
+
+/** What a page sees about the board for one project: the tasks part when it reads from the board, the notice when the
+ *  board can't be read, and where the board stands (a project whose tasks.source is board shows its tasks as unknown,
+ *  not GitHub's, while it isn't live). */
 export interface BoardView {
   part: Obj | null;
   problem: Problem | null;
+  state: BoardState;
 }
 
 function unreachable(why: string): Problem {
@@ -159,7 +164,7 @@ export class BoardFeed {
 
   /** `url`: the board's; left out, this machine's (MB_URL, else the settings folder's url file, as `factory board`). */
   constructor(private readonly projects: UiProject[], private readonly o: { url?: string | null; repoOf: (p: UiProject) => string;
-    changed: (p: UiProject) => void; fellBack?: (p: UiProject, wasLive: boolean) => void }) {
+    changed: (p: UiProject) => void; fellBack?: (p: UiProject, wasLive: boolean) => void; log?: (line: string) => void }) {
     // fellBack(p, wasLive): p's tasks come from GitHub again (wasLive), or turned out not to come from the board
     // known at once when there is no board, so a project without one waits for nothing
     this.url = o.url !== undefined ? o.url : maybeBoard() ? undefined : null;
@@ -192,6 +197,7 @@ export class BoardFeed {
       this.board = board;
       this.all = await board.tasks({ all: true, limit: MOST });
       this.listener = await board.listen((_e: BoardEvent) => this.schedule(), { onError: (e) => void this.fail(e) });
+      if (this.down) this.o.log?.("message board: reconnected; tasks come from it again, live.");
       this.down = null;
       this.publish(true);
       this.settle();
@@ -211,9 +217,10 @@ export class BoardFeed {
 
   /** The board's part for project `p` and its notice. */
   view(p: UiProject): BoardView {
-    if (!this.url) return { part: null, problem: null };
+    if (!this.url) return { part: null, problem: null, state: this.url === null ? "none" : "opening" };
     const text = this.down ? undefined : this.parts.get(p.id);
-    return { part: text ? (JSON.parse(text) as Obj) : null, problem: this.down };
+    const state: BoardState = this.down ? "down" : this.board ? "live" : "opening";
+    return { part: text ? (JSON.parse(text) as Obj) : null, problem: this.down, state };
   }
 
   /** False while the board is being opened the first time: whether tasks come from it isn't known yet. */
@@ -311,6 +318,7 @@ export class BoardFeed {
     const wasLive = this.projects.filter((p) => this.live(p));
     const first = this.down === null;
     this.down = unreachable(e instanceof Error ? e.message : String(e));
+    if (first) this.o.log?.(`message board: can't be read (${masked(e instanceof Error ? e.message : String(e)).slice(0, 200)}); trying again every ${RETRY_MS / 1000} s.`);
     await this.close();
     this.parts.clear();
     if (first) {

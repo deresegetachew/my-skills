@@ -19,7 +19,7 @@
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { config as ciConfig, runnerSetting, sourceText } from "../ci/ci_names.ts";
-import { branchTask, toFloat } from "./factory_config.ts";
+import { branchTask, taskSource, toFloat } from "./factory_config.ts";
 import { CI_ACTIONS, type CiActionName, ciActionOf, type CiSettingsSeen, ciVerdict, FAILED, machineOf, orderedRuns,
   waitingPulls } from "./factory_ci_view.ts";
 import { prText, taskStateText, taskText } from "./factory_match.ts";
@@ -108,7 +108,8 @@ export interface EpicView {
 /** Where a view's tasks come from (#498): the message board, live, or GitHub through the snapshot, read every `every`
  *  seconds (null from the board). */
 export interface Origin {
-  from: "board" | "github";
+  /** unknown: the board is the record and can't be read (#515). */
+  from: "board" | "github" | "unknown";
   every: number | null;
 }
 
@@ -381,14 +382,34 @@ function ciView(p: UiProject, cache: Obj, repo: string): CiView {
 }
 
 /** What the board gives a project (factory_ui_board.ts BoardFeed.view): its tasks part while they come from the board,
- *  and the notice while the board can't be read. */
+ *  the notice while the board can't be read, and where the board stands (left out: as "none", no board here). */
 export interface BoardSide {
   part: Obj | null;
   problem: Problem | null;
+  state?: "none" | "opening" | "live" | "down";
 }
 
 const NO_SNAPSHOT = (p: UiProject): Problem => ({ code: "ui_no_snapshot", message: `${p.name} has no snapshot yet; one is being read.`,
   fix: `Wait a minute, or run \`factory snapshot\` in ${p.path}.` });
+
+/** The one notice while the board is the record (tasks.source board) and can't be read (#515): its tasks are unknown,
+ *  not GitHub's, and the page shows no empty board. No command on screen: the hub is the machine that runs the board. */
+export const BOARD_DOWN: Problem = { code: "ui_board_down", message: "The message board can't be reached, so tasks are unknown until it's back.",
+  fix: "On the hub, start it again." };
+
+/** True when project `p` keeps its tasks on the message board (tasks.source board). */
+function boardIsRecord(p: UiProject): boolean {
+  return p.config !== null && taskSource(p.config) === "board";
+}
+
+/** Where project `p`'s tasks come from, the part to read them from, and the board's notice. With the board as the record
+ *  they come from the board or are unknown (#515): never GitHub's snapshot. */
+function tasksFrom(p: UiProject, board: BoardSide, cached: Obj): { origin: Origin; part: Obj; problem: Problem | null } {
+  if (board.part) return { origin: { from: "board", every: null }, part: board.part, problem: board.problem };
+  if (!boardIsRecord(p)) return { origin: { from: "github", every: ttl() }, part: cached, problem: board.problem };
+  if (board.state === "live") return { origin: { from: "board", every: null }, part: { source: "issues", from: "board", tasks: [], epics: [] }, problem: null };
+  return { origin: { from: "unknown", every: null }, part: { source: "issues", tasks: [], epics: [] }, problem: board.state === "opening" ? null : BOARD_DOWN };
+}
 
 /** What the three channels show for project `p`, from its snapshot cache, and its tasks and epics from the message board
  *  while `board` gives them (#498). */
@@ -407,16 +428,24 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now(), boar
   const pulls = pullsView(c);
   const at = Date.parse(str(c.generatedAt));
   const limit = list(c.missing).filter((m) => str(m.code) === "github_limit").map((m) => ({ code: str(m.code), message: str(m.message), fix: str(m.fix) }));
-  const origin: Origin = board.part ? { from: "board", every: null } : { from: "github", every: ttl() };
-  const part = board.part ?? obj(c.tasks);
+  const { origin, part, problem } = tasksFrom(p, board, obj(c.tasks));
   const tasks = tasksView(p, part, repo, pulls.pulls, origin);
   const epics = epicsView(part, repo, origin, obj(c.tasks));
-  if (board.problem) {
-    tasks.problems.unshift(board.problem);
-    epics.problems.unshift(board.problem);
+  if (problem) {
+    tasks.problems.unshift(problem);
+    epics.problems.unshift(problem);
+  }
+  const ci = ciView(p, c, repo);
+  // Tasks that don't come from GitHub's snapshot don't wait for it (#515): its banner goes with what still comes from it,
+  // the pull requests and CI, and not beside "From the message board, live".
+  const noSnapshot = cache ? [] : [NO_SNAPSHOT(p)];
+  const fromSnapshot = origin.from === "github";
+  if (!fromSnapshot) {
+    pulls.problems.unshift(...noSnapshot);
+    ci.problems.unshift(...noSnapshot);
   }
   return { generatedAt: str(c.generatedAt) || null, age: Number.isNaN(at) ? null : Math.max(Math.round((now - at) / 1000), 0), refreshing,
-    problems: cache ? limit : [NO_SNAPSHOT(p)], tasks, epics, pulls, ci: ciView(p, c, repo) };
+    problems: [...limit, ...(fromSnapshot ? noSnapshot : [])], tasks, epics, pulls, ci };
 }
 
 /** The cache's age limit, in seconds: a read costs a few GitHub calls per open pull request, on the agents' token. */

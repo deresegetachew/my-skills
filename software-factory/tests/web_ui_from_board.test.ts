@@ -482,12 +482,13 @@ test("tasks from a healthy board show no 'no snapshot yet' banner; the pull requ
   const url = await boardUrl();
   await seeded(url);
   const p = workProject();
-  rmSync(join(p.state, "snapshot.json"));
+  rmSync(join(p.state, "snapshot.json")); // no snapshot: the repo comes from the git remote
+  Bun.spawnSync(["git", "-C", p.d, "remote", "add", "origin", `https://github.com/${REPO}.git`]);
   const ui = await started(p, url);
   const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
   expect(problemsOf(json)).not.toContain("ui_no_snapshot");
   expect(problemsOf((await api(ui, "/api/projects/work/epics")).json)).not.toContain("ui_no_snapshot");
-  expect(problemsOf((await api(ui, "/api/projects/work/pulls")).json)).toContain("ui_no_snapshot");
+  expect(problemsOf((await api(ui, "/api/projects/work/pull-requests")).json)).toContain("ui_no_snapshot");
   await finish(ui);
 }, T);
 

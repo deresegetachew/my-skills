@@ -141,10 +141,10 @@ export interface ViewsData {
   };
 }
 
-/** Where the tasks come from (#498): the message board, live, or GitHub, read every `every` seconds. Left out by an
- *  older server. */
+/** Where the tasks come from (#498): the message board, live, or GitHub, read every `every` seconds; unknown while the
+ *  board is the record and can't be read (#515: one notice says so). Left out by an older server. */
 export interface Origin {
-  from?: "board" | "github";
+  from?: "board" | "github" | "unknown";
   every?: number | null;
 }
 
