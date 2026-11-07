@@ -39,7 +39,7 @@ import { join } from "node:path";
 import { branchTask } from "./factory_config.ts";
 import { type AttentionItem, attentionOf, limitsOf } from "./factory_ui_attention.ts";
 import type { Queue } from "./factory_ui_chat.ts";
-import { type Agent, envFor, factoryScript, type Live, type Obj, type Problem, readJson, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, channels, envFor, factoryScript, type Live, type Obj, type Problem, readJson, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
 import { ttl, type Views } from "./factory_ui_views.ts";
 import { epicCost, type EpicCost, keepEvents, type Medians, snapshotEvents as snapshotTimes, type TaskCost, type TaskEvent } from "./factory_task_cost.ts";
 
@@ -762,8 +762,14 @@ export class Ops {
         return i > 0 ? { what: line.slice(0, i), fix: line.slice(i + 2) } : { what: line, fix: "" };
       });
     for (const f of failed) needs.push({ kind: "health", title: f.what, sub: f.fix, link: "page:health", find: "", action: "Open" });
-    const team = live.agents.map((a: Agent) => ({ name: a.name, role: a.role, state: a.state, detail: a.detail, task: a.task, taskTitle: a.taskTitle,
-      machine: a.machineName ?? a.machine, link: `agent:${a.name}` }));
+    // every role the settings name, as the sidebar lists them; one with no live row is down (#609)
+    const byName = new Map(live.agents.map((a: Agent) => [a.name, a]));
+    const team = channels(p, live.agents).filter((c) => c.kind === "agent").map((c) => {
+      const a = byName.get(c.name);
+      return a ? { name: a.name, role: a.role, state: a.state, detail: a.detail, task: a.task, taskTitle: a.taskTitle,
+        machine: a.machineName ?? a.machine, link: `agent:${a.name}` }
+        : { name: c.name, role: c.role ?? "", state: "down", detail: "not running", task: null, taskTitle: null, machine: null, link: `agent:${c.name}` };
+    });
     const epics = views.epics.epics.map((e) => ({ id: e.id, title: e.title, done: e.done, all: e.all, stage: e.stage }));
     const inEpics = new Set(views.epics.epics.flatMap((e) => e.tasks.map((t) => t.id)));
     const loose = views.tasks.tasks.filter((t) => !inEpics.has(t.id) && t.epic === null);
