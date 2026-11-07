@@ -5,6 +5,7 @@
 // ask first, saying what happens and what doesn't, then run on the machine that serves the page (factory_ui_views.ts
 // taskAction); the board is live through the views message. Colours are the palette's (theme.ts) only.
 import { useContext, useEffect, useState } from "react";
+import { AttentionContext, StuckMark } from "./attention_context.tsx";
 import { Avatar, AgentsContext } from "./avatar_view.tsx";
 import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, type TaskAction, taskAsk, taskLabel, unheldText } from "./board_model.ts";
 import { Chips } from "./parts.tsx";
@@ -12,10 +13,11 @@ import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
 import type { Post, Say, ViewProps } from "./views.tsx";
 
-const LABELS: Record<TaskAction, string> = { release: "Release", block: "Block", reassign: "Reassign" };
+const LABELS: Record<TaskAction, string> = { release: "Release", block: "Block", reassign: "Reassign", close: "Close" };
 
-interface Ask {
-  task: TaskRow;
+/** A task's action to confirm: the task as a card or Needs attention (#579) knows it. */
+export interface Ask {
+  task: { id: string; title: string; holders: string[] };
   action: TaskAction;
 }
 
@@ -39,7 +41,7 @@ function useEscape(close: () => void, hold = false): void {
 
 /** The confirm for one card's action, in the shared confirm's look: a reason for block (needed) and release (optional),
  *  an agent for reassign, then what happens and what doesn't. */
-function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: ViewProps["project"]; post: Post; say: Say; close: () => void }) {
+export function AskDialog({ ask, project, post, say, close }: { ask: Ask; project: ViewProps["project"]; post: Post; say: Say; close: () => void }) {
   const agents = Object.entries(useContext(AgentsContext)).filter(([, a]) => (a.role ?? "coding-agent") === "coding-agent")
     .map(([name]) => name).filter((n) => !ask.task.holders.includes(n)).sort();
   const [reason, setReason] = useState("");
@@ -122,6 +124,7 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
   const failed = got !== null && !Array.isArray(got.thread);
   const body = typeof got?.body === "string" ? got.body.trim() : "";
   const actions = (t?.actions ?? []).filter((a): a is TaskAction => a in LABELS);
+  const stuck = useContext(AttentionContext).tasks[id]; // Needs attention (#579)
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className="dialog bthread" role="dialog" aria-modal="true" aria-labelledby="task-page">
@@ -138,6 +141,7 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
               {t.pr.checks && <span className="muted"> · {checksText(t.pr.checks)}</span>}</dd></div>}
             {t.url && <div><dt>On GitHub</dt><dd><a className="ext" href={t.url} target="_blank" rel="noreferrer noopener">Issue {taskLabel(id)}</a></dd></div>}
           </dl>
+          {stuck && <StuckMark reason={stuck} />}
           {actions.length > 0 && <div className="bactions">{actions.map((a) => <button key={a} className="btn small" onClick={() => setAsk({ task: t, action: a })}>{LABELS[a]}</button>)}</div>}
           {got === null && <p className="empty">Reading the task…</p>}
           {failed && <div className="notice bad" role="alert"><div><strong>{String(got?.message ?? "")}</strong><p>{String(got?.fix ?? "")}</p></div></div>}
@@ -176,6 +180,7 @@ function Card({ t, edge, pull, open, act, openTask }: { t: TaskRow; edge: string
   const actions = (t.actions ?? []).filter((a): a is TaskAction => a in LABELS);
   const tag = cardTag(t, pull);
   const blockers = blockersText(t);
+  const stuck = useContext(AttentionContext).tasks[t.id]; // Needs attention (#579)
   return (
     <li className={openTask ? "bcard opens" : "bcard"} data-edge={edge} style={{ borderLeftColor: `var(--${edge}-dot)` }}
       onClick={(e) => { if (openTask && !onControl(e.target)) openTask(t.id); }}>
@@ -189,6 +194,7 @@ function Card({ t, edge, pull, open, act, openTask }: { t: TaskRow; edge: string
         <span className="btag">{tag.needsYou && <span className="sdot down" aria-hidden="true" />}{tag.text}</span>
       </div>
       {blockers && <p className="bblock"><Dot tone="bad" />{blockers}</p>}
+      {stuck && <StuckMark reason={stuck} />}
       {t.pr && (
         <p className="bpr">
           <button className="blink" onClick={() => open("view:pull-requests", `#${t.pr?.number}`)}>PR #{t.pr.number}</button>
