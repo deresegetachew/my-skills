@@ -111,7 +111,13 @@ question an agent asked the dev manager on the board is an item too, `board-m<id
 that is not renewed expires after `manager.claimMinutes` (20). Two orchestrators (two machines) therefore never start the
 same item. A new head is a new key. The cap is `manager.maxSubManagers` (2) sub-managers at once, counting the ones this
 orchestrator started and the items other managers hold; the rest wait for the next cycle. `-i` runs one at a time.
-`manager.subManagerMinutes` (30) stops a sub-manager that runs too long. The marker formats are the ones #99 defines;
+`manager.subManagerMinutes` (30) stops a sub-manager that runs too long, the `-i` one you can type into too: the item is logged as
+"timed out, will retry" and the pass goes on to its next item (a board question that keeps timing out waits an hour after
+three starts). A sub-manager also ends once its item is resolved (#585): each time its session ends a turn, the Stop hook
+in the manager profile touches `<item>.turn` and the orchestrator reads the item again; when it no longer needs a manager
+(the question has its answer, the head has its verdict), the session, which then waits at its prompt, is ended. One
+past its time shows as `stuck` in `factory agents ls` and the web UI, with `factory owner stop <manager>-<item>`, which
+ends its Claude session and lets the pass go on. The marker formats are the ones #99 defines;
 `factory_lease.ts` is the small module behind them, to be replaced by #99's.
 
 **Thread notes.** The memory of a sub-manager is a comment on the task issue (on the PR when there is no issue):

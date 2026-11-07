@@ -67,7 +67,8 @@ import { ftruncateSync, mkdirSync, openSync, readdirSync, readFileSync, readlink
   writeSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { type Config, load, roleNames, taskSource, toFloat } from "./factory_config.ts";
+import { type Config, load, managerSetting, roleNames, taskSource, toFloat } from "./factory_config.ts";
+import { liveSubs } from "./factory_subs.ts";
 import { now as clockNow } from "./factory_clock.ts";
 import { alive as claimAlive, type Claim, isLoopCommand, pidAlive, stateDir as claimsStateDir } from "./factory_claims.ts";
 import { TALKING, talksNow } from "./factory_talks.ts";
@@ -307,6 +308,10 @@ export interface HeartbeatRow extends Derived {
   /** Where a loop outside tmux writes (its stdout, when that is a file); null when unknown. */
   log?: string | null;
   since?: string;
+  /** A sub-manager's dev manager and item, and whether `factory owner stop` can end it (#585). */
+  parent?: string;
+  item?: string;
+  stoppable?: boolean;
 }
 
 export interface LocalState {
@@ -425,37 +430,26 @@ function roleFor(cfg: Cfg, name: string, claim: Claim): string {
   return NAMED_ROLES.find((role) => roleNames(cfg as Config, role).includes(name)) ?? KIND;
 }
 
-/** {name: row} for the one-item sub-managers running here, from the orchestrator's pid files of live processes. */
-function subManagers(ps: Procs, me: string): Record<string, HeartbeatRow> {
-  const base = join(dirname(claimsStateDir()), "factory-manager");
+/** {name: row} for the one-item sub-managers running here, from the orchestrator's pid files of live processes. Each
+ * names its dev manager (`parent`) and its item, and whether `factory owner stop` can reach it (#585): its Claude
+ * session is known, or it has a tmux window of its own. One that has run longer than `manager.subManagerMinutes` is
+ * `stuck`, and its detail says how to end it. */
+function subManagers(cfg: Cfg, ps: Procs, me: string, sessions: Map<string, number | null>, now: number): Record<string, HeartbeatRow> {
   const rows: Record<string, HeartbeatRow> = {};
-  let folders: string[];
-  try {
-    folders = readdirSync(base).filter((f) => f.endsWith(".d"));
-  } catch {
-    return rows; // no dev manager has run here
-  }
-  for (const folder of folders) {
-    let files: string[];
-    try {
-      files = readdirSync(join(base, folder)).filter((f) => f.endsWith(".pid"));
-    } catch {
-      continue;
+  const limit = (toFloat(managerSetting(cfg as Config, "subManagerMinutes")) ?? 0) * 60;
+  for (const [name, sub] of liveSubs(join(dirname(claimsStateDir()), "factory-manager"))) {
+    const session = sessionName(name);
+    const windowed = sessions.has(session);
+    const row: HeartbeatRow = { ...derive({ alive: true, task: sub.item, wait: waitsInTree(ps, sub.pid) }), name, kind: SUB_MANAGER,
+      machine: me, path: null, pid: sub.pid, session: windowed ? session : null, follow: null, activity: null,
+      runs: windowed ? "tmux" : "", log: null, parent: sub.manager, item: sub.item, stoppable: windowed || sub.claude !== null };
+    if (limit > 0 && now - sub.started > limit) {
+      const minutes = Math.floor((now - sub.started) / 60);
+      row.state = "stuck";
+      row.detail = `stuck: on ${sub.item} for ${minutes} min, past manager.subManagerMinutes (${Math.round(limit / 60)}); ` +
+        (row.stoppable ? `end it: factory owner stop ${name}` : `stop its dev manager: factory owner stop ${sub.manager}`);
     }
-    for (const file of files) {
-      let text: string;
-      try {
-        text = readFileSync(join(base, folder, file), "utf8").trim();
-      } catch {
-        continue; // it ended between the listing and the read
-      }
-      if (!/^\d+$/.test(text) || !pidAlive(text)) continue;
-      const pid = Number(text);
-      const item = file.slice(0, -4);
-      const name = `${folder.slice(0, -2)}-${item}`;
-      rows[name] = { ...derive({ alive: true, task: item, wait: waitsInTree(ps, pid) }), name, kind: SUB_MANAGER, machine: me,
-        path: null, pid, session: null, follow: null, activity: null, runs: "", log: null };
-    }
+    rows[name] = row;
   }
   return rows;
 }
@@ -576,7 +570,7 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
     }
     rows[name] = row;
   }
-  for (const [name, row] of Object.entries(subManagers(ps, me))) if (!(name in rows)) rows[name] = row;
+  for (const [name, row] of Object.entries(subManagers(cfg, ps, me, sessions, now))) if (!(name in rows)) rows[name] = row;
   return withTalks(rows, ps);
 }
 

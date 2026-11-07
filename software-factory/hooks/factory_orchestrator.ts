@@ -48,6 +48,7 @@ import { ensureWatcher, freshPrs, prFeedIsOn } from "./factory_pr_feed.ts";
 import type { PrSnapshot } from "./core/ports/messaging.ts";
 import { ownerQueueOnBoard } from "./core/compose.ts";
 import { wakeUp } from "./factory_wake.ts";
+import { below, signalAll } from "./factory_subs.ts";
 import { type Job, running as sessionRunning, sessionName, startWindow, type Started, WindowError, windowName } from "./factory_window.ts";
 
 export const OWNER_TITLE = "Dev manager: needs the owner";
@@ -390,6 +391,9 @@ export function findSub(ref: string): { name: string; live: boolean; out: string
 /** Runs one sub-manager in its own tmux window and waits for it. Its exit code, null when no window could be made
  * (the caller then runs it with no screen), or "busy" when a window from an earlier run is still open (it may still
  * be working, so the caller leaves the item to the next cycle). */
+/** What inWindow returns for a window it stopped at the time limit. */
+const TIMED_OUT = -1;
+
 function inWindow(name: string, ref: string, job: Job, limit: number, out: Out): number | null | "busy" {
   const d = stateDir(name);
   const file = join(d, `${ref}.job.json`);
@@ -424,8 +428,8 @@ function inWindow(name: string, ref: string, job: Job, limit: number, out: Out):
     }
     if (Date.now() >= deadline) {
       run(["tmux", "kill-session", "-t", `=${s.session}`]);
-      out(`${ref}: stopped after ${(limit / 60).toFixed(0)} minutes (manager.subManagerMinutes)`);
-      return 1;
+      out(`${ref}: timed out after ${mins(limit)} minutes (manager.subManagerMinutes); stopped it, will retry`);
+      return TIMED_OUT;
     }
     Bun.sleepSync(500);
   }
@@ -517,7 +521,98 @@ function boardWaitsUntil(name: string, ref: string, now: number): number | null 
   return t.n >= BOARD_TRIES && now < until ? until : null;
 }
 
+/** How a sub-manager's session ended (#585): by itself; ended here once its item was resolved and it sat at its prompt;
+ * or stopped at `manager.subManagerMinutes`. */
+export type Outcome = "ended" | "resolved" | "timeout";
+
+/** `seconds` as minutes in words: "30", or "0.5" for a part of one. */
+function mins(seconds: number): string {
+  return String(Math.round((seconds / 60) * 10) / 10);
+}
+
+/** Whether `item` still needs this manager, read again now: on the board for a question, else from GitHub. The same
+ * ref with another kind or key (a new head, a review that became a merge) is a new item, so this one is resolved.
+ * When it can't be read, it counts as open: the session is left alone. */
+async function stillOpen(cfg: Config, name: string, item: Item): Promise<boolean> {
+  try {
+    const now = BOARD_ITEM.test(item.ref) ? await boardItems(cfg, name) : collect(cfg);
+    return now.some((i) => i.ref === item.ref && i.to === "manager" && i.kind === item.kind && i.lease[0] === item.lease[0] &&
+      i.lease[1] === item.lease[1]);
+  } catch {
+    return true;
+  }
+}
+
+function mtimeOf(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+function alivePid(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Ends a session the orchestrator started, and what runs below it (its MCP servers, a command it ran). */
+async function endSession(child: Bun.Subprocess): Promise<void> {
+  const all = [child.pid, ...below(child.pid)];
+  signalAll(all, "SIGTERM");
+  await Promise.race([child.exited, Bun.sleep(5000)]);
+  signalAll(all.filter(alivePid), "SIGKILL");
+}
+
+/** Waits for a sub-manager's session (#585), never for ever. Each time the session ends a turn (the Stop hook touches
+ * `<item>.turn`, factory_stop.ts), the item is read again; once it is resolved, the session, which then waits at its
+ * prompt, is ended. At `limit` seconds (0: none) it is stopped. Its pid is in `<item>.claude` meanwhile, so
+ * `factory owner stop <manager>-<item>` can end it. */
+async function supervise(cfg: Config, name: string, item: Item, child: Bun.Subprocess, turn: string, limit: number,
+  out: Out): Promise<{ rc: number; outcome: Outcome }> {
+  const claudeFile = join(stateDir(name), `${item.ref}.claude`);
+  writeFileSync(claudeFile, String(child.pid));
+  let rc: number | null = null;
+  void child.exited.then((c) => {
+    rc = typeof c === "number" ? c : 1;
+  });
+  const deadline = limit > 0 ? Date.now() + limit * 1000 : Infinity;
+  let seen = mtimeOf(turn);
+  try {
+    while (rc === null) {
+      if (Date.now() >= deadline) {
+        await endSession(child);
+        out(`${item.ref}: timed out after ${mins(limit)} minutes (manager.subManagerMinutes); stopped it, will retry`);
+        return { rc: 1, outcome: "timeout" };
+      }
+      const t = mtimeOf(turn);
+      if (t > seen) {
+        seen = t;
+        if (!(await stillOpen(cfg, name, item)) && rc === null) {
+          out(`${item.ref}: the item is resolved and the session waits at its prompt; ending it`);
+          await endSession(child);
+          return { rc: 0, outcome: "resolved" };
+        }
+      }
+      await Bun.sleep(250);
+    }
+    return { rc: rc ?? 1, outcome: "ended" };
+  } finally {
+    rmSync(claudeFile, { force: true });
+    rmSync(turn, { force: true });
+  }
+}
+
 export async function runSub(cfg: Config, name: string, ref: string, interactive = false): Promise<number> {
+  return (await subManager(cfg, name, ref, interactive)).rc === 0 ? 0 : 1;
+}
+
+/** One sub-manager for `ref`: its exit code (0 or 1) and how its session ended. */
+export async function subManager(cfg: Config, name: string, ref: string, interactive = false): Promise<{ rc: number; outcome: Outcome }> {
   const out = makeOut(name, false);
   const pidfile = join(stateDir(name), `${ref}.pid`);
   writeFileSync(pidfile, String(process.pid));
@@ -526,7 +621,7 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
     const item = (BOARD_ITEM.test(ref) ? await boardItems(cfg, name) : collect(cfg)).find((i) => i.ref === ref && i.to === "manager");
     if (!item) {
       out(`${ref}: nothing needs a manager any more`);
-      return 0;
+      return { rc: 0, outcome: "ended" };
     }
     if (item.kind === "board-question") {
       writeFileSync(triesFile(name, ref), JSON.stringify({ n: boardTries(name, ref).n + 1, last: lease.now() }));
@@ -536,7 +631,7 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
       held = lease.acquire(item.target, item.lease[0], item.lease[1], name, toFloat(managerSetting(cfg, "claimMinutes")) ?? 0);
       if (!held) {
         out(`${ref}: another manager holds the lease; leaving it`);
-        return 0;
+        return { rc: 0, outcome: "ended" };
       }
     }
     let [number, thread, note] = threadOf(item);
@@ -547,36 +642,45 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
     const sheet = factSheet(cfg, item, held, note, ownerLogin(cfg));
     const text = rolePrompt(cfg, "dev-manager", name, ref, sheet);
     const flags = sessionFlags(cfg, "dev-manager", name);
-    const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: "dev-manager", FACTORY_LOOP: "1", FACTORY_ITEM: ref };
+    const turn = join(stateDir(name), `${ref}.turn`); // the Stop hook touches it at each turn's end (factory_stop.ts)
+    rmSync(turn, { force: true });
+    const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: "dev-manager", FACTORY_LOOP: "1", FACTORY_ITEM: ref,
+      FACTORY_SUB_TURN: turn };
     const limit = (toFloat(managerSetting(cfg, "subManagerMinutes")) ?? 0) * 60;
     const before = new Set<unknown>(item.pr ? ghAll<Comment>(`repos/{owner}/{repo}/issues/${item.pr}/comments`).map((c) => c.id) : []);
     out(`${ref}: starting a ${interactive ? "session you can type into" : "sub-manager"} (${item.line})`);
     let rc: number;
-    if (interactive) {
+    let outcome: Outcome = "ended";
+    const clean = Object.fromEntries(Object.entries(env).filter((kv): kv is [string, string] => kv[1] !== undefined));
+    if (interactive) { // a session you can type into: it never ends by itself, so it is watched (#585)
       const args = [claude, ...flags];
       if ((process.env.FACTORY_REMOTE_CONTROL ?? "1") === "1") args.push(`--remote-control=${name} ${ref}`);
-      rc = run([...args, text], { env, inherit: true }).code;
+      try {
+        const child = Bun.spawn([...args, text], { env: clean, stdio: ["inherit", "inherit", "inherit"] });
+        ({ rc, outcome } = await supervise(cfg, name, item, child, turn, limit, out));
+      } catch {
+        rc = 127;
+      }
     } else {
       const logfile = join(stateDir(name), `${ref}.out`);
-      const clean = Object.fromEntries(Object.entries(env).filter((kv): kv is [string, string] => kv[1] !== undefined));
       let windowed: number | null | "busy" = null;
       if (process.env.FACTORY_WINDOW && which("tmux")) { // the dev manager has a window, so its sub-managers get one
         const { TMUX: _t, TMUX_PANE: _p, ...rest } = clean;
         windowed = inWindow(name, ref, { argv: [claude, ...flags, ...permissionFlags(cfg), "--output-format", "stream-json",
           "--verbose", "-p", text], env: rest, log: logfile, rc: join(stateDir(name), `${ref}.rc`) }, limit, out);
       }
-      if (windowed === "busy") return 0; // no verdict: the open window may still post its own
-      if (windowed !== null) rc = windowed;
+      if (windowed === "busy") return { rc: 0, outcome: "ended" }; // no verdict: the open window may still post its own
+      if (windowed !== null) {
+        rc = windowed === TIMED_OUT ? 1 : windowed;
+        if (windowed === TIMED_OUT) outcome = "timeout";
+      }
       else {
         const fd = openSync(logfile, "w");
         try {
-          const p = Bun.spawnSync([claude, ...flags, ...permissionFlags(cfg), "-p", text], {
-            env: clean, stdin: "ignore", stdout: fd, stderr: fd, timeout: limit * 1000, killSignal: "SIGKILL",
+          const child = Bun.spawn([claude, ...flags, ...permissionFlags(cfg), "-p", text], {
+            env: clean, stdin: "ignore", stdout: fd, stderr: fd,
           });
-          if (p.exitedDueToTimeout) {
-            out(`${ref}: stopped after ${(limit / 60).toFixed(0)} minutes (manager.subManagerMinutes)`);
-            rc = 1;
-          } else rc = p.exitCode ?? 1;
+          ({ rc, outcome } = await supervise(cfg, name, item, child, turn, limit, out));
         } catch {
           rc = 127;
         } finally {
@@ -584,14 +688,14 @@ export async function runSub(cfg: Config, name: string, ref: string, interactive
         }
       }
     }
-    out(`${ref}: the session ended (${rc === 0 ? "ok" : `exit ${rc}`})`);
+    if (outcome === "ended") out(`${ref}: the session ended (${rc === 0 ? "ok" : `exit ${rc}`})`);
     try {
       leaveVerdict(cfg, name, item, before, out);
     } catch (e) { // a missing reason must not turn a finished session into a failure
       if (e instanceof Exit) throw e;
       out(`${ref}: could not leave the reason on the pull request (${e instanceof Error ? e.message : String(e)})`);
     }
-    return rc === 0 ? 0 : 1;
+    return { rc: rc === 0 ? 0 : 1, outcome };
   } finally {
     lease.release(held);
     try {
@@ -661,6 +765,7 @@ export async function cycle(cfg: Config, name: string, dry = false, interactive 
   const alive = dry ? [] : running(name);
   let foreign = 0;
   const started: string[] = [];
+  const timedOut: string[] = [];
   const procs: Bun.Subprocess[] = [];
   for (const i of managers) {
     if (alive.includes(i.ref)) {
@@ -691,8 +796,12 @@ export async function cycle(cfg: Config, name: string, dry = false, interactive 
       started.push(i.ref);
       continue;
     }
-    if (interactive) {
-      await runSub(cfg, name, i.ref, true);
+    if (interactive) { // one session at a time, here; one that timed out gives its place to the next item (#585)
+      const r = await subManager(cfg, name, i.ref, true);
+      if (r.outcome === "timeout") {
+        timedOut.push(i.ref);
+        continue;
+      }
       started.push(i.ref);
       break;
     }

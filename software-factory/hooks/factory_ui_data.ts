@@ -62,6 +62,10 @@ export interface Agent {
   since: string | null;
   lastSeen: string | null;
   log: string[];
+  /** A dev manager's sub-manager (#585): its dev manager and item, and whether `factory owner stop` can reach it. */
+  parent: string | null;
+  item: string | null;
+  stoppable: boolean | null;
 }
 
 export interface Machine {
@@ -101,7 +105,7 @@ export const VIEWS: Channel[] = [
   { id: "view:machines", kind: "view", name: "machines", title: "Machines" },
 ];
 
-const ROLE_ORDER = ["dev-manager", "product-owner", "coding-agent"];
+const ROLE_ORDER = ["dev-manager", "product-owner", "coding-agent", "sub-manager"];
 
 function obj(v: unknown): Obj {
   return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Obj) : {};
@@ -420,7 +424,8 @@ export async function live(p: UiProject): Promise<Live> {
     return { name: str(a.name), role: roleOf(p, str(a.name)) ?? roleOfKind(str(a.kind)), state: str(a.state) || "unknown",
       detail: str(a.detail) || str(a.state), task, taskTitle: task ? titles.get(task) ?? null : null, on: strOrNull(a.on),
       machine: strOrNull(a.machine), machineName: strOrNull(a.machineName), here, runs: str(a.runs), session: strOrNull(a.session),
-      since: strOrNull(a.since), lastSeen: strOrNull(a.lastSeen), log: here ? await logOf(a) : [] };
+      since: strOrNull(a.since), lastSeen: strOrNull(a.lastSeen), log: here ? await logOf(a) : [], parent: strOrNull(a.parent),
+      item: strOrNull(a.item), stoppable: typeof a.stoppable === "boolean" ? a.stoppable : null };
   }));
   const now = Date.now() / 1000;
   return { agents, machines: machinesOf(agents, strOrNull(data.machine)), runners: runnersOf(cache), limit: limitOf(state, cache, now),

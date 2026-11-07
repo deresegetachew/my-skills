@@ -10,7 +10,7 @@
 import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { agentState, ago, channelHash, type ChannelView, type LimitView, parseHash, pickProject, type ProjectView, ROLE_TITLE,
-  searchChannels, splitTask, taskChannel, type Tone } from "./model.ts";
+  roleLine, searchChannels, splitTask, taskChannel, type Tone } from "./model.ts";
 import { ADD_CSS, AddProjectPage } from "./add_project.tsx";
 import type { Run as AddRun } from "./add_project_model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
@@ -65,6 +65,10 @@ interface Agent {
   since: string | null;
   lastSeen: string | null;
   log: string[];
+  /** A dev manager's sub-manager (#585): its dev manager, its item, and whether Stop can reach its session. */
+  parent?: string | null;
+  item?: string | null;
+  stoppable?: boolean | null;
 }
 
 interface Machine {
@@ -250,7 +254,7 @@ function AgentChannel({ agent, channel, live, project, token }: { agent: Agent |
   const chat = useChat(token, project.id, channel.name);
   const limit = live?.limit ?? null;
   const st = agentState(agent, limit);
-  const role = ROLE_TITLE[channel.role ?? ""] ?? channel.role ?? "";
+  const role = roleLine(agent, channel.role);
   const runs = agent ? agent.runs === "tmux" && agent.session ? `tmux · ${agent.session}` : agent.runs || "—" : "—";
   return (
     <>
@@ -299,7 +303,8 @@ function agentActions(agent: Agent | undefined, channel: ChannelView, project: P
   const role = channel.role ?? "coding-agent";
   const down = !agent || agent.state === "down";
   const facts: AgentFacts = { name: channel.name, here: agent?.here ?? false, state: agent?.state ?? "down", machineName: agent?.machineName ?? agent?.machine ?? null,
-    task: agent?.task ?? null };
+    task: agent?.task ?? null,
+    sub: agent?.parent ? { parent: agent.parent, item: agent.item ?? "", stoppable: agent.stoppable === true } : null };
   if (!down && agent && !agent.here) return <span className="tag quiet">on {agent.machineName ?? "another machine"}</span>;
   return down
     ? <button className="btn primary" onClick={() => onAsk({ verb: "start", project: project.id, agent: channel.name, role, spec: startAgentAsk(facts) })}>Start</button>

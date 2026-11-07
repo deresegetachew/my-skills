@@ -27,7 +27,7 @@
 // releases, starting and stopping stay the owner's. Every other factory session (a coding agent, the product owner) is
 // refused before anything is read or written. Errors are one JSON line `{code, message, fix}` on stderr.
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
 import { alive as claimAlive, type Claims, HOST, isLoop, stateDir as claimsDir } from "./factory_claims.ts";
 import { ownerQueueOnBoard } from "./core/compose.ts";
@@ -37,6 +37,7 @@ import { type Comment, type Issue } from "./factory_issues.ts";
 import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 import { breakMarkers, OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
 import { TAG_RE } from "./factory_release.ts";
+import { endTree, liveSubs, type Sub } from "./factory_subs.ts";
 import { running, sessionName, startLoop } from "./factory_window.ts";
 
 const REPO = "repos/{owner}/{repo}";
@@ -391,10 +392,25 @@ function stopProcess(name: string, pid: number): void {
     `or \`factory release ${name}\` to give its claims back.`);
 }
 
+/** Ends a dev manager's one-item sub-manager that has no tmux session of its own (#585): its Claude session, which the
+ * orchestrator started. The orchestrator then goes on with its pass; the item comes back at a later one. */
+function stopSub(name: string, sub: Sub): void {
+  if (sub.claude === null) {
+    refuse("sub_unreachable", `${name} (${sub.manager}'s sub-manager on ${sub.item}) runs, but its Claude session can't be ` +
+      "found: it was started by an older release, or it is just starting.",
+      `Wait for manager.subManagerMinutes to stop it, or stop ${sub.manager} itself: \`factory owner stop ${sub.manager}\`.`);
+  }
+  endTree(sub.claude);
+  console.log(`Stopped ${name}, ${sub.manager}'s sub-manager on ${sub.item} (Claude pid ${sub.claude}). ${sub.manager} goes ` +
+    "on with its pass; the item comes back at a later one.");
+}
+
 function stop(name: string): void {
   delete process.env.TMUX;
   const session = sessionName(name);
   if (!running(session)) {
+    const sub = liveSubs(join(dirname(claimsDir()), "factory-manager")).get(name);
+    if (sub) return stopSub(name, sub);
     const pid = loopPid(name);
     if (pid !== null) return stopProcess(name, pid);
     console.log(`${name} is not running on this machine (no tmux session ${session}); nothing to stop.`);

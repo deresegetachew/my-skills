@@ -41,12 +41,33 @@ export interface AgentFacts {
   state: string;
   machineName: string | null;
   task: string | null;
+  /** A dev manager's sub-manager (#585): its dev manager, its item, and whether its session can be reached to end it. */
+  sub?: { parent: string; item: string; stoppable: boolean } | null;
 }
 
-/** Stopping an agent: it must be running, on this machine. Its session ends; its task, branch and pull request stay. */
+/** Stopping an agent: it must be running, on this machine. Its session ends; its task, branch and pull request stay.
+ * A sub-manager's session must also be one this machine can reach; when it can't, the confirm says so and stays off. */
 export function stopAgentAsk(a: AgentFacts): ConfirmSpec {
   const running = a.state !== "down";
   const where = a.machineName ?? "this machine";
+  const sub = a.sub ?? null;
+  if (sub) {
+    return {
+      title: `Stop ${a.name}?`,
+      checks: [
+        { title: `${a.name} is running`, met: running, ...(running ? {} : { sub: "There is nothing to stop." }) },
+        { title: `${a.name} runs on this machine`, met: a.here,
+          ...(a.here ? {} : { sub: `It runs on ${a.machineName ?? "another machine"}: stop it from a page served there.` }) },
+        { title: `Its session can be reached`, met: sub.stoppable,
+          ...(sub.stoppable ? {} : { sub: `Its Claude session can't be found (an older release started it). Stop ${sub.parent} ` +
+            "instead, or wait for manager.subManagerMinutes to end it." }) },
+      ],
+      happens: `${sub.parent}'s sub-manager on ${sub.item} ends, mid-step if it is working. ${sub.parent} goes on with its pass.`,
+      doesNot: `${sub.parent} keeps running, and ${sub.item} comes back at a later pass. Nothing on GitHub or the board changes.`,
+      action: `Stop ${a.name}`,
+      tone: "danger",
+    };
+  }
   return {
     title: `Stop ${a.name}?`,
     checks: [
