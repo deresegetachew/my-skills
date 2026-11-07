@@ -157,13 +157,32 @@ export function syncAsk(c: CheckoutFacts): ConfirmSpec {
   };
 }
 
+/** Where a new agent will run (#581): "here", another machine's name, or "later"; its label as the page shows it, and
+ * whether this machine runs a list of its own (else it runs every agent). */
+export interface AddWhere {
+  machine: string;
+  label: string;
+  ownList: boolean;
+}
+
+function whereWords(name: string, w: AddWhere | undefined): { happens: string; doesNot: string } {
+  if (!w || w.machine === "later") return { happens: "", doesNot: "" };
+  if (w.machine === "here") {
+    return { happens: w.ownList ? ` It is kept for ${w.label} and joins the agents that run there once the change is merged and on this machine.`
+      : ` ${w.label} runs every agent of the project, so ${name} runs there once the change is merged.`, doesNot: "" };
+  }
+  return { happens: ` It is meant for ${w.label}: choose it there, on that machine's Team page, once the change is merged.`,
+    doesNot: ` Nothing is saved on this machine for ${name}.` };
+}
+
 /** Adding an agent: it is staged, nothing starts. */
-export function addAgentAsk(name: string): ConfirmSpec {
+export function addAgentAsk(name: string, where?: AddWhere): ConfirmSpec {
+  const w = whereWords(name, where);
   return {
     title: `Add ${name} to the team?`,
     checks: [],
-    happens: `${name} is added to the coding agents as a staged change. ${AFTER_MERGE}${name} shows in Your team and you can start it from its page.`,
-    doesNot: "Nothing starts now, no other setting changes, and nothing on GitHub changes until you propose it.",
+    happens: `${name} is added to the coding agents as a staged change. ${AFTER_MERGE}${name} shows in Your team and you can start it from its page.${w.happens}`,
+    doesNot: `Nothing starts now, no other setting changes, and nothing on GitHub changes until you propose it.${w.doesNot}`,
     action: `Stage ${name}`,
     tone: "primary",
   };
@@ -250,18 +269,23 @@ export async function recheckAgent(o: { read: () => Promise<LiveAgent | null>; d
 }
 
 /** Removing an agent: stopped first, its task released first; then it leaves the team in a staged change. */
-export function removeAgentAsk(a: RemoveFacts): ConfirmSpec {
+/** What remove and rename both need first, each with its own button: it isn't running, and it holds no task. */
+export function idleChecks(a: RemoveFacts): Check[] {
   const stopHere = a.running && a.here;
   const wait = (f: Fixing): { waiting: string } | null => (a.checking === f ? { waiting: CHECKING } : null);
+  return [
+    { title: `${a.name} isn't running`, met: !a.running,
+      ...(a.running ? { sub: a.here ? "Stop it first; its session ends and its work is kept." : `It runs on ${a.machineName ?? "another machine"}: stop it from a page served there.` } : {}),
+      ...(stopHere ? wait("stop") ?? { fix: `Stop ${a.name}` } : {}) },
+    { title: `${a.name} holds no task`, met: !a.task,
+      ...(a.task ? { sub: `Release its work first: #${a.task} goes back to Ready for another agent.`, ...(wait("release") ?? { fix: `Release #${a.task}` }) } : {}) },
+  ];
+}
+
+export function removeAgentAsk(a: RemoveFacts): ConfirmSpec {
   return {
     title: `Remove ${a.name} from the team?`,
-    checks: [
-      { title: `${a.name} isn't running`, met: !a.running,
-        ...(a.running ? { sub: a.here ? "Stop it first; its session ends and its work is kept." : `It runs on ${a.machineName ?? "another machine"}: stop it from a page served there.` } : {}),
-        ...(stopHere ? wait("stop") ?? { fix: `Stop ${a.name}` } : {}) },
-      { title: `${a.name} holds no task`, met: !a.task,
-        ...(a.task ? { sub: `It holds #${a.task}. Releasing it puts the task back to Ready for another agent.`, ...(wait("release") ?? { fix: `Release #${a.task}` }) } : {}) },
-    ],
+    checks: idleChecks(a),
     happens: `${a.name} leaves the team as a staged change. ${AFTER_MERGE}it is gone from Your team.`,
     doesNot: `${a.name}'s branches, pull requests, messages and finished tasks are kept, and nothing on GitHub changes until you propose it.`,
     action: `Remove ${a.name}`,

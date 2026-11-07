@@ -1,5 +1,5 @@
 // The sidebar's rules (#450), from the owner's design (docs/design/web-ui/Sidebar.dc.html): the pages in their order,
-// Your team, Run the factory, and Factory settings with its tabs; which item is selected for an address, and the address
+// Your team, Run the factory (Team first, #581), and Factory settings with its tabs; which item is selected for an address, and the address
 // each item opens. The views built before this page (tasks, epics, pull requests, CI, the owner queue, machines) keep
 // their addresses; a page not built yet is `page:<id>`. No React here, so tests/web_ui_nav.test.ts runs it as it is.
 import { agentState, type LimitView } from "./model.ts";
@@ -57,6 +57,7 @@ const PAGES: Record<string, { label: string; channel: string; title: string; pur
     purpose: "The designs builders work from, kept as reviewed copies in the repo." },
   signoff: { label: "Sign-off and testing", channel: "page:signoff", title: "Sign-off and testing", purpose: "What was built and waits for you to try it." },
   activity: { label: "Activity", channel: "page:activity", title: "Activity", purpose: "Everything that happened, newest first." },
+  team: { label: "Team", channel: "page:team", title: "Team", purpose: "Who is on the team, where each one runs, and how many build at once." },
   ci: { label: "CI and runners", channel: "view:ci", title: "CI and runners", purpose: "Whether the checks pass, and the machines that run them." },
   machines: { label: "Machines", channel: "view:machines", title: "Machines", purpose: "The computers the agents run on, and who runs where." },
   health: { label: "Health", channel: "page:health", title: "Health", purpose: "Whether every part works, with a fix for what doesn't." },
@@ -68,7 +69,7 @@ const PAGES: Record<string, { label: string; channel: string; title: string; pur
 };
 
 const MAIN = ["home", "inbox", "board", "epics", "prs", "docs", "signoff", "activity"];
-const OPS = ["ci", "machines", "health", "usage", "settings"];
+const OPS = ["team", "ci", "machines", "health", "usage", "settings"];
 const SETTINGS = ["settings", "integrations", "releases", "maintenance"];
 
 /** Factory settings' tabs, Settings first. */

@@ -74,6 +74,7 @@ export const LABELS: Record<string, string> = {
   "tasks.staleHours": "A task is stale after (hours)",
   "manager.claimMinutes": "A dev manager's lease lasts (minutes)",
   agents: "Coding agents",
+  formerNames: "Earlier agent names",
 };
 export const MACHINE_LABELS: Record<string, string> = {
   agents: "Agents on this machine",
@@ -82,6 +83,7 @@ export const MACHINE_LABELS: Record<string, string> = {
   autostartAgents: "Agents started after a reboot",
   autostartReport: "Post the boot report",
   "ci.runners": "CI runners on this machine",
+  maxCodingAgents: "Coding agents at once on this machine",
 };
 
 const SHOUTED = new Set(["ci", "ui", "pr", "prs", "api", "env", "prd", "id"]);
@@ -263,6 +265,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("tasks.releaseDownMinutes", "int", "issues", "An agent that is plainly down (its loop or the daemon said so) gets its in-progress issues back to ready by the sweep after this long."),
   S("tasks.showWhere", "bool", "issues", "Post the machine, folder, tmux session and Remote Control link on agent issues (anyone who can read the repo sees them).", { default: false }),
   S("machines", "dict", "issues", 'Names for the machines, by machine id (`factory machine id` prints it): {"469ae1ea6a9e": {"name": "dev-pc"}}. The web UI and `factory agents ls --json` show the name; with none, the hostname (another machine\'s only with tasks.showWhere), else the id.', { default: {}, read_by: "factory_agents_ls.ts (`factory agents ls`, the web UI)" }),
+  S("formerNames", "dict", "agents", 'An agent\'s earlier names, by its name now: {"haile": ["tewodros"]}. The web UI\'s Team page adds to it when it renames an agent and shows them; the pull requests, branches, messages and finished tasks of an old name keep that name.', { default: {}, read_by: "the web UI's Team page (factory_ui_settings.ts)" }),
   // #251, #258: the factory adds main's rules to the agents' settings each time it starts one.
   S("permissions.allow", "list", "agents", 'Extra Claude Code allow rules for this project\'s agents, like "Edit(src/**)". A rule applies on an agent\'s next run once the pull request from `factory settings pr` is merged: the factory adds them to the agents\' settings, after the release\'s own.'),
   S("reviews.safety-auditor.paths", "list", "gate", "Regexes of paths that need the safety auditor."),
@@ -320,6 +323,7 @@ export const MACHINE: Record<string, Setting> = table([
   S("autostart", "bool", "machine", "Bring the stack and this machine's agents back after a reboot (`factory autostart`).", { scope: "machine", default: false }),
   S("autostartAgents", "list", "machine", "The agents it starts at boot. Empty: the names this machine runs.", { scope: "machine", default: [] }),
   S("autostartReport", "bool", "machine", "Post the boot report on the first started agent's issue (issues mode).", { scope: "machine", default: true }),
+  S("maxCodingAgents", "int", "machine", "How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`) is refused. Empty: no limit.", { scope: "machine", default: null, minimum: 1, maximum: 32, read_by: "`factory owner start` (factory_owner.ts) and the web UI's Team page" }),
   S("ci.runners", "int", "machine", "Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's.", { scope: "machine", default: null, minimum: 1, maximum: 16 }),
 ]);
 
