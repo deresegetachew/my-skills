@@ -461,10 +461,14 @@ which tmux session and Remote Control link it has, and when it last produced out
 
 | State | Meaning |
 |---|---|
-| `working` | Alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (a dev manager reviewing, a coding agent on its PR) |
+| `working` | Alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (a dev manager reviewing, a coding agent on its PR); or a dev manager or product owner the owner is talking to (`factory talk`, the web UI's chat), doing "talking with the owner" |
 | `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge) |
 | `idle` | Alive, no task, and quiet for 2 minutes |
-| `down` | No live process holds its checkout (a killed session, a power cut after a reboot) |
+| `down` | No live process holds its checkout and none runs in its tmux session (a killed session, a power cut after a reboot) |
+
+A loop is alive by its checkout claim, or, when no live claim names it, by a factory loop (or Claude session) running in
+its tmux session `<repo>-<name>`. Without the daemon, `factory agents ls` works this out when asked, so the web UI shows a
+running agent as running either way.
 
 - **Cheap on GitHub.** It always writes its local state file (`factory agents ls` reads that, instantly). GitHub gets
   one edit of the agent's own issue only when the state changed and lasted a few seconds, plus a keepalive every
@@ -488,6 +492,9 @@ which tmux session and Remote Control link it has, and when it last produced out
 - **Install.** `factory autostart install` installs it with the boot service (`--no-heartbeat` skips it);
   `factory heartbeat install` adds it alone (a systemd user service, or a LaunchAgent on macOS), and
   `factory heartbeat restart` restarts it onto the files now on disk (`factory update` does that). `factory heartbeat status` shows what it sees. `factory doctor` checks it.
+  `factory heartbeat ensure` installs it if it is missing, starts it if it is installed but stopped, and else does
+  nothing; `factory init`, `factory owner start` and the web UI's add-project steps run it, so a fresh install has it.
+  Where it can't run (no systemd user manager), they say why and the fix and go on.
 - It runs as the same user as the agents, so an agent could stop it or forge its state; like the gate, it is for
   well-meaning agents. It needs no new network path: GitHub is still the only shared place.
 
@@ -576,6 +583,12 @@ factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent:
   `~/.local/state/software-factory/say.log` on the machine where the agent runs (not the text). It is for the person who owns the
   machine; never put a secret in it. Agents cannot run `say`, or change the remotes (refused when `FACTORY_AGENT`, `FACTORY_LOOP`
   or `CLAUDECODE` is set); they may list.
+- **`say` to a busy session.** A Claude session that is finishing a turn can drop the Enter, leaving the text typed in its
+  prompt box. So `say` first waits while the pane shows `esc to interrupt` (20 seconds at most in all,
+  `FACTORY_SAY_WAIT_SECONDS`), types the text and presses Enter, then looks again: while the prompt line (the last `❯` line)
+  still holds the text, it waits for the session to be idle and presses Enter again, up to 3 times (`FACTORY_SAY_ENTERS`).
+  If the text is still there it stops with `say-unsent`: the text is typed in the box, so press Enter in the session
+  (`factory follow <agent>`) rather than sending it again.
 
 <br>
 ## After a reboot: `factory autostart`

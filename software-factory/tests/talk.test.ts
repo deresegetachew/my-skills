@@ -1,7 +1,7 @@
 // `factory talk` (#395, #425): one turn of a talk with the dev manager or the product owner, which the web UI's chat
 // runs. It answers in a fresh role session (a fake `claude`) and posts a summary on the owner queue (a fake `gh`).
 import { expect, test } from "bun:test";
-import { cpSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { project } from "./roles_support.ts";
 import { type Proc, read, SF, sh, writeExe } from "./support.ts";
@@ -12,6 +12,10 @@ const FAKE_CLAUDE = String.raw`#!/usr/bin/env bun
 import { appendFileSync } from "node:fs";
 appendFileSync(process.env.CLAUDE_LOG as string, JSON.stringify({ argv: process.argv.slice(2), role: process.env.FACTORY_ROLE ?? null,
   agent: process.env.FACTORY_AGENT ?? null }) + "\n");
+if (process.env.CLAUDE_LS) { // what factory agents ls shows while this session runs
+  const ls = Bun.spawnSync([process.execPath, "--no-env-file", "--config=/dev/null", ".claude/hooks/factory_agents.ts", "ls", "--json", "--local"]);
+  appendFileSync(process.env.CLAUDE_LS, ls.stdout.toString());
+}
 if (process.env.CLAUDE_FAILS) { process.stderr.write("claude: something broke\n"); process.exit(1); }
 console.log(process.env.CLAUDE_ANSWER ?? "Two PRs wait for review.");
 `;
@@ -212,6 +216,36 @@ test("a loop or a Claude Code session can't talk for the owner either", () => {
     expect(problem(p).code).toBe("talk_agent_session");
     expect(claudeCalls(r)).toEqual([]);
   }
+});
+
+// --- while it runs, the role shows as working ---------------------------------------------------------------------------
+
+type LsRow = { name: string; kind: string; state: string; detail: string };
+
+function lsNow(r: Rig, env: Env): LsRow[] {
+  const p = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(r.work, ".claude", "hooks", "factory_agents.ts"), "ls",
+    "--json", "--local"], { cwd: r.work, env: { ...r.env, ...env } });
+  expect(p.code, p.out).toBe(0);
+  return (JSON.parse(p.stdout) as { agents: LsRow[] }).agents;
+}
+
+test("while a talk with the product owner runs, agents ls shows it working, talking with the owner; after it, not", () => {
+  const r = rig();
+  const env = { XDG_STATE_HOME: join(r.d, "state"), CLAUDE_LS: join(r.d, "ls.json") };
+  const p = talk(r, ["product-owner", "how far are we?"], env);
+  expect(p.code, p.out).toBe(0);
+  const during = (JSON.parse(readFileSync(env.CLAUDE_LS, "utf8")) as { agents: LsRow[] }).agents.find((a) => a.name === "eleni");
+  expect([during?.state, during?.detail, during?.kind]).toEqual(["working", "talking with the owner", "product owner"]);
+  expect(lsNow(r, env).find((a) => a.name === "eleni")).toBeUndefined();
+  expect(readdirSync(join(r.d, "state", "work-factory", "talks"))).toEqual([]);
+});
+
+test("a talk whose session fails leaves the role not working", () => {
+  const r = rig();
+  const env = { XDG_STATE_HOME: join(r.d, "state"), CLAUDE_FAILS: "1" };
+  expect(talk(r, ["dev-manager", "hello"], env).code).not.toBe(0);
+  expect(lsNow(r, env).find((a) => a.name === "lead")).toBeUndefined();
+  expect(readdirSync(join(r.d, "state", "work-factory", "talks"))).toEqual([]);
 });
 
 test("factory help and the commands page list talk", () => {
