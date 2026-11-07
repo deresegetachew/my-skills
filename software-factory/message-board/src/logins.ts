@@ -165,7 +165,7 @@ async function ensure(tx: SQL, db: string): Promise<void> {
   }
   // Runs as its owner on every connection to this database; a failure in it must never stop a login.
   await tx.unsafe(`CREATE OR REPLACE FUNCTION mb_login_seen() RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path = public, pg_temp AS $f$
+    SET search_path = public, pg_temp SET lock_timeout = '1s' AS $f$
     BEGIN
       UPDATE mb_logins SET first_seen = coalesce(first_seen, now()), last_seen = now()
        WHERE role = session_user AND (last_seen IS NULL OR last_seen < now() - interval '1 minute');
@@ -209,8 +209,15 @@ export async function addLogin(sql: SQL, name: string, password: string, options
 export async function listLogins(sql: SQL): Promise<Login[]> {
   if (!(await tableExists(sql, "mb_logins"))) return [];
   await upgrade(sql);
-  await sql`UPDATE mb_logins SET first_seen = now(), last_seen = now()
-    WHERE first_seen IS NULL AND role IN (SELECT usename FROM pg_stat_activity WHERE usename IS NOT NULL)`;
+  try { // noting first use waits on no row (a session may hold one): it is done next time
+    await sql.begin(async (tx) => {
+      await tx.unsafe(`SET LOCAL lock_timeout = '${LOCK_WAIT_SECONDS}s'`);
+      await tx`UPDATE mb_logins SET first_seen = now(), last_seen = now()
+        WHERE first_seen IS NULL AND role IN (SELECT usename FROM pg_stat_activity WHERE usename IS NOT NULL)`;
+    });
+  } catch (e) {
+    if ((e as { errno?: string }).errno !== "55P03") throw e;
+  }
   const rows = (await sql`SELECT l.name, l.role, l.created_at, l.first_seen, l.last_seen, l.redeemed_at,
       EXISTS (SELECT 1 FROM pg_stat_activity a WHERE a.usename = l.role) AS connected
     FROM mb_logins l ORDER BY l.name`) as Row[];
@@ -235,8 +242,9 @@ export async function removeLogin(sql: SQL, name: string, options: { unused?: bo
     if (typeof r === "string" && r) roles.add(r);
   };
   let role = "";
-  await sql.begin(async (tx) => {
-    await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
+  const what = `Removing the login ${name}`;
+  const unconditional = !options.unused && !options.unredeemed;
+  await underLock(sql, what, () => rolesOfLogin(sql, name), async (tx) => {
     const found = (await tx`SELECT first_seen, redeemed_at, role, code_role FROM mb_logins WHERE name = ${name} FOR UPDATE`) as Row[];
     if (!found.length) refuse("not-found", `There is no login called ${name}.`, "`factory board login ls` lists them.");
     role = String(found[0]?.role ?? "");
@@ -252,12 +260,11 @@ export async function removeLogin(sql: SQL, name: string, options: { unused?: bo
     add(found[0]?.role);
     add(found[0]?.code_role);
     for (const r of roles) await disable(tx, r); // committed first, so an ended session can't log in again (nor redeem)
-  });
+  }, unconditional);
   const oids = new Set<unknown>(await oidsOf(sql, roles)); // pg_stat_activity names a role by oid once it is dropped
   try {
     await endSessions(sql, [...oids]);
-    await sql.begin(async (tx) => {
-      await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
+    await underLock(sql, what, async () => [...roles, ...(await rolesOfLogin(sql, name))], async (tx) => {
       const now = (await tx`SELECT role, code_role FROM mb_logins WHERE name = ${name} FOR UPDATE`) as Row[];
       add(now[0]?.role);
       add(now[0]?.code_role);
@@ -265,11 +272,71 @@ export async function removeLogin(sql: SQL, name: string, options: { unused?: bo
       for (const r of roles) await disable(tx, r);
       for (const r of roles) await disown(tx, r);
       await tx`DELETE FROM mb_logins WHERE name = ${name}`;
-    });
+    }, true);
   } finally {
-    await endSessions(sql, [...oids]); // even when the drop failed: the roles can't log in, and nothing of them stays connected
+    // even when the drop failed: the roles can't log in, and nothing of them stays connected (a backend shows in
+    // pg_stat_activity a little after its login check, so this looks again until it finds none)
+    await endSessionsUntilQuiet(sql, [...oids]);
   }
   return { name, role };
+}
+
+const LOCK_WAIT_SECONDS = 2;
+const LOCK_BOUND_MS = 15_000;
+
+/** The login's roles now (read without waiting on its row). */
+async function rolesOfLogin(sql: SQL, name: string): Promise<string[]> {
+  const r = ((await sql`SELECT role, code_role FROM mb_logins WHERE name = ${name}`) as Row[])[0];
+  return [r?.role, r?.code_role].filter((x): x is string => typeof x === "string" && x !== "");
+}
+
+/** Runs `fn` in a transaction that holds the login changes' lock and waits at most 2 s for any lock. A session of a login
+ * (a copy of a join code, say) can hold the login's row in a redeem it never finishes, and nothing would end it: so when
+ * the wait times out, the sessions of `rolesNow()` are ended (which rolls their transaction back and frees the row),
+ * with `disableOnWait` those roles are made NOLOGIN first so they can't come back, and it runs again, for up to 15 s in
+ * all (`busy` then). */
+async function underLock<T>(sql: SQL, what: string, rolesNow: () => Promise<string[]>, fn: (tx: SQL) => Promise<T>, disableOnWait = false): Promise<T> {
+  const deadline = Date.now() + LOCK_BOUND_MS;
+  for (;;) {
+    try {
+      return await sql.begin(async (tx) => {
+        await tx.unsafe(`SET LOCAL lock_timeout = '${LOCK_WAIT_SECONDS}s'`);
+        await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
+        return await fn(tx);
+      });
+    } catch (e) {
+      if ((e as { errno?: string }).errno !== "55P03") throw e;
+      if (Date.now() >= deadline) {
+        refuse("busy", `${what} waited ${LOCK_BOUND_MS / 1000} s for the login's record, which another session kept; this step changed nothing.`,
+          "Run it again in a minute; if it keeps happening, `factory board login ls` shows who is connected.");
+      }
+      const roles = await rolesNow();
+      await endSessions(sql, await oidsOf(sql, roles));
+      if (disableOnWait) {
+        for (const r of roles) {
+          await sql.begin(async (tx) => {
+            await tx.unsafe(`SET LOCAL lock_timeout = '${LOCK_WAIT_SECONDS}s'`);
+            await disable(tx, r);
+          }).catch(() => {}); // the next round tries again
+        }
+      }
+    }
+  }
+}
+
+/** Ends the sessions of the roles with these oids, looking again every 200 ms for at least 600 ms and until a look finds
+ * none (up to 3 s): a backend shows in pg_stat_activity a little after its login check. */
+async function endSessionsUntilQuiet(sql: SQL, oids: unknown[]): Promise<void> {
+  const started = Date.now();
+  for (;;) {
+    let found = 0;
+    for (const oid of oids) {
+      found += ((await sql`SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE usesysid = ${oid} AND pid <> pg_backend_pid()`) as Row[]).length;
+    }
+    const spent = Date.now() - started;
+    if ((found === 0 && spent >= 600) || spent >= 3000) return;
+    await Bun.sleep(200);
+  }
 }
 
 async function oidsOf(sql: SQL, roles: Iterable<string>): Promise<unknown[]> {
@@ -311,13 +378,13 @@ async function dropSpentRoles(sql: SQL): Promise<string[]> {
     const role = String(sp.code_role);
     const oids = sp.oid === null || sp.oid === undefined ? [] : [sp.oid];
     try {
-      await disable(sql, role);
+      const what = `Dropping ${role}`;
+      await underLock(sql, what, async () => [role], (tx) => disable(tx, role), true);
       await endSessions(sql, oids);
-      await sql.begin(async (tx) => {
-        await tx`SELECT pg_advisory_xact_lock(${LOCK})`;
+      await underLock(sql, what, async () => [role], async (tx) => {
         await disown(tx, role);
         await tx`UPDATE mb_logins SET code_role = NULL WHERE name = ${sp.name} AND code_role = ${role}`;
-      });
+      }, true);
     } catch (e) {
       warnings.push(`Couldn't drop ${role}, the spent join code role of the login ${String(sp.name)} (it can't log in): ${errText(e)}`);
     } finally {

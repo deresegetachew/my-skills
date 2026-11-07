@@ -75,7 +75,9 @@ touching the others:
   any role may make a large object or set its default privileges without CREATE and `DROP ROLE` alone would refuse it;
   its sessions are ended even when the drop fails). The roles are read under the login row's lock and again just before
   the drop, so a remove that crosses a redeem drops the fresh role it made too, and a session of the code's role that
-  predates the remove's `NOLOGIN` can't redeem (`login-expired`); with `--unused`,
+  predates the remove's `NOLOGIN` can't redeem (`login-expired`). Each step waits at most 2 s for the login's row (a
+  copy of the code can hold it in a redeem it never finishes): then it ends the sessions of the login's roles, which
+  rolls that back, makes them `NOLOGIN` for a plain remove, and tries again, for up to 15 s (`busy` after that); with `--unused`,
   only a login that was never used (`login-used` otherwise); with `--unredeemed`, only one whose join code wasn't
   redeemed (`login-redeemed` otherwise).
 - **Join codes (#514).** `login add --valid-for <seconds>` makes the role with `VALID UNTIL` that long from now by the
