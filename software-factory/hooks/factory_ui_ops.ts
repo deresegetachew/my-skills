@@ -13,13 +13,17 @@
 //   GET  /api/projects/:p/activity        everything that happened, newest first: the message board's events (claims,
 //                                         moves, comments, closes) while it is the project's record, and the pull
 //                                         requests opened and gone from the snapshot. ?agent=, ?task=, ?kind= filter it
-//   GET  /api/projects/:p/home            what needs the owner, the team, progress by epic and the last 10 events
+//   GET  /api/projects/:p/home            what needs attention (#579), what needs the owner, the team, progress by epic
+//                                         and the last 10 events
+//   GET  /api/projects/:p/attention       what needs attention (factory_ui_attention.ts): anything stuck, each with its
+//                                         reason and one action, and the thresholds used
 //
 // The WebSocket gets {type: "health", project} when a doctor run ends and {type: "activity", project} on a board event;
 // the pages read their route again then (and on "state" and "views"), so they stay live.
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { branchTask } from "./factory_config.ts";
+import { type AttentionItem, attentionOf, limitsOf } from "./factory_ui_attention.ts";
 import type { Queue } from "./factory_ui_chat.ts";
 import { type Agent, envFor, factoryScript, type Live, type Obj, type Problem, readJson, spawn, stateDirOf, type UiProject } from "./factory_ui_data.ts";
 import { ttl, type Views } from "./factory_ui_views.ts";
@@ -64,6 +68,8 @@ export interface OpsDeps {
   views: (p: UiProject) => Views;
   live: (p: UiProject) => Promise<Live>;
   queue: (p: UiProject) => Promise<Queue>;
+  /** The owner queue as last read, or null (never read for this). */
+  keptQueue?: (p: UiProject) => Queue | null;
   board: BoardEvents;
   publish: (m: Obj) => void;
 }
@@ -279,17 +285,21 @@ export class Ops {
   /** The reply to a Health, Usage, Activity or Home request (after the token), or null when the path is none of theirs. */
   async api(req: Request, p: UiProject, rest: string[], url: URL): Promise<Reply | null> {
     const page = rest[0] ?? "";
-    if (!["health", "usage", "activity", "home"].includes(page)) return null;
+    if (!["health", "usage", "activity", "home", "attention"].includes(page)) return null;
     if (page === "health" && rest.length === 2 && rest[1] === "check") {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST.");
       const h = await this.check(p);
       return { status: h.problem && !h.ranAt ? 500 : 200, body: { project: p.id, command: "factory doctor --json", ...this.healthBody(p, h) } };
     }
-    if (rest.length !== 1) return problem(404, "not_found", `There is no ${url.pathname}.`, "Health has GET and POST .../health/check; Usage, Activity and Home are GET.");
+    if (rest.length !== 1) return problem(404, "not_found", `There is no ${url.pathname}.`, "Health has GET and POST .../health/check; Usage, Activity, Home and Attention are GET.");
     if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
     if (p.problem) return { status: 200, body: { project: p.id, problems: [p.problem] } };
     if (page === "health") return { status: 200, body: { project: p.id, command: "factory doctor --json", ...this.healthBody(p, this.kept(p)) } };
     if (page === "usage") return { status: 200, body: { project: p.id, ...(await this.usageOf(p)) } };
+    if (page === "attention") {
+      const live = await this.d.live(p);
+      return { status: 200, body: { project: p.id, items: this.attention(p, live), limits: limitsOf(p.config) } };
+    }
     if (page === "activity") {
       const a = await this.activity(p);
       const want = (k: string): string => (url.searchParams.get(k) ?? "").trim().replace(/^#/, "");
@@ -426,6 +436,21 @@ export class Ops {
     return { from: fromBoard === null ? "snapshot" : "board", items, problems };
   }
 
+  // --- needs attention (#579) ----------------------------------------------------------------------------------------
+
+  /** What needs attention in project `p`, from what the server holds: the views, `live` (null: not read yet, so no agent
+   *  case is judged), the pull requests gone from the snapshot, and the product owner's open asks. No GitHub call. */
+  attention(p: UiProject, live: Live | null): AttentionItem[] {
+    if (p.problem) return [];
+    const snap = snapshotOf(p);
+    const kept = this.d.keptQueue?.(p) ?? null;
+    const productAsks = kept && !kept.problem ? kept.asks.filter((a) => a.state === "open" && a.forProduct).length
+      : list(snap.needsYou).filter((x) => x.kind === "owner-ask" && str(x.state) === "product").length;
+    const readable = live !== null && !live.problems.some((x) => x.code === "ui_agents_unreadable");
+    return attentionOf({ config: p.config, views: this.d.views(p), agents: readable ? live.agents : null,
+      gone: pullsGone(p, snap).map((g) => ({ number: g.number, title: g.title, task: g.task, at: g.at })), productAsks });
+  }
+
   // --- home --------------------------------------------------------------------------------------------------------
 
   private async home(p: UiProject): Promise<Obj> {
@@ -474,7 +499,7 @@ export class Ops {
     const loose = views.tasks.tasks.filter((t) => !inEpics.has(t.id) && t.epic === null);
     const done = epics.reduce((n, e) => n + e.done, 0) + loose.filter((t) => t.state === "done").length;
     const all = epics.reduce((n, e) => n + e.all, 0) + loose.length;
-    return { needs, team, progress: { done, all, epics, noEpic: { done: loose.filter((t) => t.state === "done").length, all: loose.length } },
+    return { attention: this.attention(p, live), needs, team, progress: { done, all, epics, noEpic: { done: loose.filter((t) => t.state === "done").length, all: loose.length } },
       recent: act.items.slice(0, HOME_RECENT), activityFrom: act.from, limit: live.limit,
       problems: [...live.problems, ...(queue?.problem ? [queue.problem] : []), ...views.problems] };
   }

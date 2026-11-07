@@ -7,11 +7,13 @@
 //
 // It reads only the API (factory_ui_server.ts); its rules are in model.ts, nav_model.ts, parts_model.ts and theme_model.ts,
 // tested on their own. Nothing on screen names a command.
-import { type ReactNode, StrictMode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, StrictMode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { agentState, ago, channelHash, type ChannelView, type LimitView, parseHash, pickProject, type ProjectView, ROLE_TITLE,
   roleLine, searchChannels, splitTask, taskChannel, type Tone } from "./model.ts";
 import { ADD_CSS, AddProjectPage } from "./add_project.tsx";
+import { AttentionContext, STUCK_CSS } from "./attention_context.tsx";
+import { type AttentionItem, stuckMarks } from "./attention_model.ts";
 import type { Run as AddRun } from "./add_project_model.ts";
 import { AgentsContext, Avatar, AVATAR_CSS } from "./avatar_view.tsx";
 import { BOARD_CSS } from "./board.tsx";
@@ -252,6 +254,7 @@ interface Ask {
 function AgentChannel({ agent, channel, live, project, token }: { agent: Agent | undefined; channel: ChannelView; live: Live | undefined;
   project: Project; token: string }) {
   const chat = useChat(token, project.id, channel.name);
+  const stuck = useContext(AttentionContext).agents[channel.name]; // Needs attention (#579)
   const limit = live?.limit ?? null;
   const st = agentState(agent, limit);
   const role = roleLine(agent, channel.role);
@@ -260,6 +263,7 @@ function AgentChannel({ agent, channel, live, project, token }: { agent: Agent |
     <>
       <div className="body">
         {limit && <Notice tone="warn" title={limit.message}><p>The agents wait until then; nothing to do.</p></Notice>}
+        {stuck && <Notice tone="warn" title="Stuck"><p>{stuck}</p></Notice>}
         {(live?.problems ?? []).map((p) => <ProblemNotice key={p.code} p={p} />)}
         {!live && <p className="empty">Reading {project.name}…</p>}
         {live && !agent && (
@@ -548,6 +552,7 @@ function App() {
   const [addRun, setAddRun] = useState<AddRun | null>(null);
   const [listed, setListed] = useState(0); // goes up when the server's project list changes
   const [pulseBy, setPulseBy] = useState<Record<string, number>>({}); // Home, Activity, Health read again (#455)
+  const [attentionBy, setAttentionBy] = useState<Record<string, AttentionItem[]>>({}); // Needs attention (#579)
   const search = useRef<HTMLInputElement>(null);
 
   const signedOut = useCallback((e: unknown) => {
@@ -603,6 +608,9 @@ function App() {
         } else if (m.type === "views" && m.project) {
           const { type: _t, project, ...data } = m as unknown as { type: string; project: string } & ViewsData;
           setViewsBy((before) => ({ ...before, [project]: data }));
+        } else if (m.type === "attention" && m.project) {
+          const { items } = m as unknown as { items: AttentionItem[] };
+          setAttentionBy((before) => ({ ...before, [m.project as string]: Array.isArray(items) ? items : [] }));
         } else if (m.type === "add-project") setAddRun((m as unknown as { run: AddRun }).run);
         else if (m.type === "projects") setListed((n) => n + 1);
         else dispatchLive(m);
@@ -770,13 +778,21 @@ function App() {
   };
 
   const agentChannels = view.channels.filter((c) => c.kind === "agent");
+  const attention = attentionBy[project.id];
+  const marks = stuckMarks(attention ?? []);
+  const startAgent = (name: string): void => { // Needs attention's Start (#579): the same confirm as the agent's page
+    const a = agentOf(name);
+    const role = view.channels.find((c) => c.kind === "agent" && c.name === name)?.role ?? a?.role ?? "coding-agent";
+    setAsk({ verb: "start", project: project.id, agent: name, role, spec: startAgentAsk({ name, here: a?.here ?? false, state: a?.state ?? "down",
+      machineName: a?.machineName ?? a?.machine ?? null, task: a?.task ?? null }) });
+  };
   const nav = sidebar({
     page,
     team: agentChannels.map((c) => {
       const a = agentOf(c.name);
-      return { name: c.name, role: c.role, ...(a ? { state: a.state, detail: a.detail } : {}) };
+      return { name: c.name, role: c.role, stuck: marks.agents[c.name] ?? null, ...(a ? { state: a.state, detail: a.detail } : {}) };
     }),
-    counts: { prs: viewsBy[project.id]?.pulls.pulls.length ?? 0 },
+    counts: { prs: viewsBy[project.id]?.pulls.pulls.length ?? 0, home: attention?.length ?? 0 },
     limit: live?.limit ?? null,
   });
 
@@ -793,6 +809,7 @@ function App() {
 
   return (
     <AgentsContext.Provider value={agentsHere}>
+    <AttentionContext.Provider value={marks}>
     <div className={`app${menu ? " open" : ""}`}>
       {menu && <button className="backdrop" aria-label="Close the menu" onClick={() => setMenu(false)} />}
       <nav className="rail" aria-label="Projects">
@@ -867,7 +884,7 @@ function App() {
               {nav.main.map((n) => (
                 <button key={n.page} className="nav-item" aria-current={n.on ? "page" : undefined} onClick={() => go(project.id, n.channel)}>
                   <span className="name">{n.label}</span>
-                  {n.badge && <span className={`badge ${n.badge.tone}`} aria-label={`${n.badge.count} ${n.page === "inbox" ? "need you" : "open"}`}>{n.badge.count}</span>}
+                  {n.badge && <span className={`badge ${n.badge.tone}`} aria-label={`${n.badge.count} ${n.page === "inbox" ? "need you" : n.page === "home" ? "need attention" : "open"}`}>{n.badge.count}</span>}
                 </button>
               ))}
             </div>
@@ -877,7 +894,7 @@ function App() {
               {nav.team.map((t) => (
                 <button key={t.name} className="nav-item mate" aria-current={t.on ? "page" : undefined} title={t.title} onClick={() => go(project.id, t.channel)}>
                   <Avatar name={t.name} role={t.roleId} size={28} />
-                  <span className="name">{t.name}<span className="sub">{t.role}</span></span>
+                  <span className="name">{t.name}<span className="sub">{t.role}{t.stuck && <span className="stuck-tag">Stuck</span>}</span></span>
                   <span role="img" aria-label={t.title} style={{ display: "inline-flex" }}><StatusDot state={t.dot} /></span>
                 </button>
               ))}
@@ -917,6 +934,7 @@ function App() {
           : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
           : ownHead && OpsPage ? <OpsPage key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} pulse={pulseBy[project.id] ?? 0}
+            attention={attention} startAgent={startAgent}
             open={(c, f) => go(project.id, addressOf(c), f)} onMenu={() => setMenu(true)} />
           : !channel && SETTINGS_PAGES[page] ? (() => {
             const Page = SETTINGS_PAGES[page] as typeof SettingsPage;
@@ -938,12 +956,13 @@ function App() {
         </div>
       )}
     </div>
+    </AttentionContext.Provider>
     </AgentsContext.Provider>
   );
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS
+style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS
   + OPS_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

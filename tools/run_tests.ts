@@ -6,7 +6,8 @@
 //
 // Files run in parallel (--jobs N, or FACTORY_TEST_JOBS, default min(CPU count, 8)), biggest first. Each file's report
 // is printed whole when it finishes, so output never interleaves. Arguments that are not options pick files by name
-// (`bun tools/run_tests.ts issues` runs tests/issues.test.ts).
+// (`bun tools/run_tests.ts issues` runs tests/issues.test.ts; a path or `.test.ts` is fine; a name ending in `*`, quoted, takes every
+// file it starts: `bun tools/run_tests.ts "web_ui_attention*"`).
 import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
@@ -50,7 +51,9 @@ function testFiles(argv: string[]): string[] {
   const all = [...readdirSync(TESTS).filter((f) => f.endsWith(".test.ts")).sort().map((f) => join(TESTS, f)),
     ...(process.env.FACTORY_TEST_DIR ? [] : boardTests())];
   const name = (f: string): string => f.replace(/^.*\//, "").replace(/\.test\.ts$/, "");
-  return picks.length ? all.filter((f) => picks.includes(name(f))) : all;
+  // a pick ending in * takes every file whose name starts with what comes before it (`web_ui_attention*`, quoted)
+  const picked = (n: string): boolean => picks.some((p) => (p.endsWith("*") ? n.startsWith(p.slice(0, -1)) : n === p));
+  return picks.length ? all.filter((f) => picked(name(f))) : all;
 }
 
 /** The message board's own tests (decision 0007): software-factory/message-board/tests/*.test.ts. */
