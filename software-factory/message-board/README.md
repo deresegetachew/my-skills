@@ -199,6 +199,8 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
 - `assign(id, to, { reason? })` (#503): hand a task to one actor, so only they may claim it. It keeps its column; a
   held task is taken back first (with a reason) and goes back to open. A done task is refused. Event `task.assigned`.
 - `sweep({ quietSeconds? })`.
+- `settleEpics()`: closes each open epic whose tasks are all done (see the rules); the ids closed. A pass runs it
+  for epics whose tasks were done before the board closed epics itself.
 
 **Threads:** `post({ task?, kind, tag?, to?, body, inReplyTo? })` and `thread({ thread } | { task })`, and `messages({ after? })`: every message, or those posted after a cursor it gave, with the next cursor. Kind is `question`,
 `answer`, `status`, `note`, `verdict` or `ask`. A reply joins its parent's thread. An answer marks its question
@@ -261,6 +263,12 @@ and the counts, `end()` closes the connections.
   sent no claim or heartbeat for the quiet time (default 30 minutes). Both are checked again inside the same `UPDATE`.
   A swept task goes back to open, except one in review, which stays in review without a holder. The sweep records a
   `task.swept` event as `system`.
+- **An epic is done when all its tasks are** (its children of kind task or bug). A write that closes an epic's last
+  open task closes the epic too, as done, in the same transaction, with an `epic.done` event by `system`; one that
+  opens a task of an epic closed as done (a move back, an update, a new task under it) reopens it (`epic.reopened`).
+  An epic with no tasks is never closed this way, an epic closed with another outcome isn't reopened, and an epic
+  someone moved after its last task changed is left as they put it. An import closes the epics it finished, and
+  reopens none.
 - **Edits carry the version they read.** Every write raises a task's version. A mismatch is a `conflict`, and nothing
   changes.
 - **No loops.** A `blocks` or `waits_for` edge that would make a task wait on itself is refused (`cycle`), whichever

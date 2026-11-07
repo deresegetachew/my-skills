@@ -175,6 +175,19 @@ test("the tasks API answers from the board: columns from its status, blocked and
   expect(problemsOf(json)).toEqual([]);
 }, T);
 
+test("when an epic's last task is done on the board, the Epics page shows its stage as done", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  await board.move(id[7] as number, { to: "done", reason: "its pull request merged" });
+  await board.close(id[9] as number, { outcome: "done" });
+  expect((await board.get(id[1] as number)).status).toBe("done");
+  const ui = await started(workProject(), url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const epics = (await api(ui, "/api/projects/work/epics")).json;
+  const e = (epics.epics as Row[]).find((x) => x.id === "1") as Row;
+  expect(e).toMatchObject({ stage: "done", done: 3, all: 3 });
+}, T);
+
 function problemsOf(json: Row): string[] {
   return ((json.problems as Row[] | undefined) ?? []).map((p) => String(p.code));
 }
