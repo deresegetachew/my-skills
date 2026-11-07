@@ -178,19 +178,89 @@ export interface RemoveFacts {
   here: boolean;
   machineName: string | null;
   task: string | null;
+  /** Its Stop or Release button ran and the page is reading the agent again until that shows (#589). */
+  checking?: Fixing | null;
+}
+
+/** What a precondition's own button did: stopped the agent, or released its task. */
+export type Fixing = "stop" | "release";
+
+/** An agent as it runs now: the shell's live state, or GET /api/projects/:p/agents/:name's `agent`. */
+export interface LiveAgent {
+  name: string;
+  state: string;
+  task: string | null;
+  here: boolean;
+  machineName: string | null;
+}
+
+const CHECKING = "Checking…";
+
+/** The remove dialog's facts from the live push and the agent read again after a fix (#589): whichever shows a
+ * precondition met wins, since each fix only ever moves it that way. */
+export function removeFactsOf(role: string, live: LiveAgent | undefined, fresh: LiveAgent | null): RemoveFacts {
+  const a = fresh ?? live;
+  const runs = (x: LiveAgent | undefined): boolean => !!x && x.state !== "down";
+  const running = runs(live) && (fresh === null || runs(fresh));
+  const liveTask = live?.task ?? null;
+  const task = fresh === null ? liveTask : liveTask && fresh.task ? fresh.task : null;
+  return { name: a?.name ?? "", role, running, here: a?.here ?? false, machineName: a?.machineName ?? null, task };
+}
+
+/** The agent out of what GET /api/projects/:p/agents/:name answered: the agent; down when it isn't reported any more;
+ * null when the read failed, so the next one tries again. */
+export function agentOfAnswer(name: string, body: unknown): LiveAgent | null {
+  if (typeof body !== "object" || body === null) return null;
+  const b = body as { agent?: unknown; code?: unknown };
+  if (b.code === "ui_agent_unknown") return { name, state: "down", task: null, here: true, machineName: null };
+  const a = b.agent;
+  if (typeof a !== "object" || a === null) return null;
+  const x = a as Record<string, unknown>;
+  if (typeof x.state !== "string") return null;
+  return { name: typeof x.name === "string" ? x.name : name, state: x.state, task: typeof x.task === "string" ? x.task : null,
+    here: x.here === true, machineName: typeof x.machineName === "string" ? x.machineName : null };
+}
+
+/** Whether a fix shows on the agent: stopped, or its task released. */
+export function fixShows(done: Fixing, a: LiveAgent): boolean {
+  return done === "stop" ? a.state === "down" : !a.task;
+}
+
+/** After a precondition's own button ran (#589): read the agent every `everyMs` (2 s) for at most `forMs` (30 s), each
+ * read shown at once through `seen`, until the fix shows, the dialog closes (`gone`) or the time is up. The live push
+ * keeps working beside it. Gives the last read (null when none could be made). */
+export async function recheckAgent(o: { read: () => Promise<LiveAgent | null>; done: Fixing; seen: (a: LiveAgent) => void;
+  sleep?: (ms: number) => Promise<void>; gone?: () => boolean; everyMs?: number; forMs?: number }): Promise<LiveAgent | null> {
+  const every = o.everyMs ?? 2000;
+  const limit = o.forMs ?? 30_000;
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let last: LiveAgent | null = null;
+  for (let waited = 0; ; waited += every) {
+    const a = await o.read().catch(() => null);
+    if (o.gone?.()) return last;
+    if (a) {
+      last = a;
+      o.seen(a);
+      if (fixShows(o.done, a)) return a;
+    }
+    if (waited + every > limit) return last;
+    await sleep(every);
+    if (o.gone?.()) return last;
+  }
 }
 
 /** Removing an agent: stopped first, its task released first; then it leaves the team in a staged change. */
 export function removeAgentAsk(a: RemoveFacts): ConfirmSpec {
   const stopHere = a.running && a.here;
+  const wait = (f: Fixing): { waiting: string } | null => (a.checking === f ? { waiting: CHECKING } : null);
   return {
     title: `Remove ${a.name} from the team?`,
     checks: [
       { title: `${a.name} isn't running`, met: !a.running,
         ...(a.running ? { sub: a.here ? "Stop it first; its session ends and its work is kept." : `It runs on ${a.machineName ?? "another machine"}: stop it from a page served there.` } : {}),
-        ...(stopHere ? { fix: `Stop ${a.name}` } : {}) },
+        ...(stopHere ? wait("stop") ?? { fix: `Stop ${a.name}` } : {}) },
       { title: `${a.name} holds no task`, met: !a.task,
-        ...(a.task ? { sub: `It holds #${a.task}. Releasing it puts the task back to Ready for another agent.`, fix: `Release #${a.task}` } : {}) },
+        ...(a.task ? { sub: `It holds #${a.task}. Releasing it puts the task back to Ready for another agent.`, ...(wait("release") ?? { fix: `Release #${a.task}` }) } : {}) },
     ],
     happens: `${a.name} leaves the team as a staged change. ${AFTER_MERGE}it is gone from Your team.`,
     doesNot: `${a.name}'s branches, pull requests, messages and finished tasks are kept, and nothing on GitHub changes until you propose it.`,

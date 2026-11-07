@@ -4,14 +4,15 @@
 // this machine's settings (saved at once), the factory's version and update, and the clean-ups. The rules and words are
 // in settings_model.ts; the data and every change go through /api/projects/:p/settings (factory_ui_settings.ts). Nothing
 // here shows a command.
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
 import { ROLE_TITLE } from "./model.ts";
 import { channelOf, SETTINGS_TABS } from "./nav_model.ts";
 import { ConfirmDialog, ListRow, StatusDot, Tabs } from "./parts.tsx";
 import type { Check, ConfirmSpec } from "./parts_model.ts";
-import { addAgentAsk, type CheckoutFacts, checkoutText, fieldOf, fromText, inputOf, MAINTENANCE, machineAgentsText, maintenanceAsk, nameProblem,
-  proposeAsk, rawOf, removeAgentAsk, searchSettings, type SettingRow, type Staged, stagedText, syncAsk, updateAsk, valueText } from "./settings_model.ts";
+import { addAgentAsk, agentOfAnswer, type CheckoutFacts, checkoutText, fieldOf, type Fixing, fromText, inputOf, type LiveAgent, MAINTENANCE,
+  machineAgentsText, maintenanceAsk, nameProblem, proposeAsk, rawOf, recheckAgent, removeAgentAsk, removeFactsOf, searchSettings, type SettingRow,
+  type Staged, stagedText, syncAsk, updateAsk, valueText } from "./settings_model.ts";
 import type { Post, Say } from "./views.tsx";
 
 interface Problem {
@@ -21,13 +22,7 @@ interface Problem {
 }
 
 /** What the page needs to know of an agent as it runs now (the shell's live state). */
-export interface LiveAgent {
-  name: string;
-  state: string;
-  task: string | null;
-  here: boolean;
-  machineName: string | null;
-}
+export type { LiveAgent };
 
 interface SettingsData {
   team: { agents: { name: string; role: string }[]; next: Record<string, string[]>; free: string[] };
@@ -122,6 +117,26 @@ export function SettingsPage(p: Props) {
   const { busy, act } = useAct(p, reload);
   const [ask, setAsk] = useState<{ spec: ConfirmSpec; run: () => Promise<unknown>; fix?: (c: Check) => void } | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  // after the remove dialog's own Stop or Release ran (#589): the agent read again until it shows, beside the live push
+  const [fresh, setFresh] = useState<LiveAgent | null>(null);
+  const [checking, setChecking] = useState<Fixing | null>(null);
+  const round = useRef(0); // a new or closed dialog ends the reading of the one before
+  useEffect(() => {
+    round.current += 1;
+    setFresh(null);
+    setChecking(null);
+  }, [removing]);
+  useEffect(() => () => {
+    round.current += 1;
+  }, []);
+  const recheck = useCallback((name: string, done: Fixing): void => {
+    const mine = ++round.current;
+    setChecking(done);
+    const path = `/api/projects/${encodeURIComponent(p.project.id)}/agents/${encodeURIComponent(name)}`;
+    void recheckAgent({ read: () => p.get<unknown>(path).then((b) => agentOfAnswer(name, b)), done,
+      seen: (a) => { if (round.current === mine) setFresh(a); }, gone: () => round.current !== mine })
+      .finally(() => { if (round.current === mine) setChecking(null); });
+  }, [p.get, p.project.id]);
 
   if (!data) {
     return (
@@ -133,9 +148,8 @@ export function SettingsPage(p: Props) {
   }
   const changes = data.staged.changes;
   const removeSpec = (name: string): ConfirmSpec => {
-    const a = p.agents.find((x) => x.name === name);
     const role = data.team.agents.find((x) => x.name === name)?.role ?? "coding-agent";
-    return removeAgentAsk({ name, role, running: !!a && a.state !== "down", here: a?.here ?? false, machineName: a?.machineName ?? null, task: a?.task ?? null });
+    return removeAgentAsk({ ...removeFactsOf(role, p.agents.find((x) => x.name === name), fresh), name, checking });
   };
   const confirm = async (): Promise<void> => {
     if (removing) {
@@ -149,9 +163,13 @@ export function SettingsPage(p: Props) {
   };
   const fixRemove = (c: Check): void => {
     if (!removing || !c.fix) return;
-    const a = p.agents.find((x) => x.name === removing);
-    if (c.fix.startsWith("Stop")) void act(`agents/${encodeURIComponent(removing)}/stop`, { confirm: true }, { title: `Stopped ${removing}.` });
-    else if (a?.task) void act(`tasks/${encodeURIComponent(a.task)}/actions/release`, { confirm: true }, { title: `#${a.task} is back to Ready.` });
+    const name = removing;
+    const task = removeFactsOf("", p.agents.find((x) => x.name === name), fresh).task;
+    const done: Fixing | null = c.fix.startsWith("Stop") ? "stop" : task ? "release" : null;
+    if (!done) return;
+    const run = done === "stop" ? act(`agents/${encodeURIComponent(name)}/stop`, { confirm: true }, { title: `Stopped ${name}.` })
+      : act(`tasks/${encodeURIComponent(task ?? "")}/actions/release`, { confirm: true }, { title: `#${task} is back to Ready.` });
+    void run.then((ok) => { if (ok) recheck(name, done); });
   };
 
   return (
