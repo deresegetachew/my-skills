@@ -750,7 +750,10 @@ function App() {
     : channel?.kind === "agent" ? { title: channel.name, purpose: [role, agentState(agent, live?.limit ?? null).text].filter(Boolean).join(" · ") }
     : pageHead(page);
 
-  const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => [c.name, { role: c.role, avatar: c.avatar }]));
+  const agentsHere = Object.fromEntries(view.channels.filter((c) => c.kind === "agent").map((c) => {
+    const s = agentState(agentOf(c.name), live?.limit ?? null); // the same words and tone as the sidebar (#545)
+    return [c.name, { role: c.role, avatar: c.avatar, tone: s.tone, state: s.text }];
+  }));
 
   return (
     <AgentsContext.Provider value={agentsHere}>
