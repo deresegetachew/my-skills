@@ -489,3 +489,60 @@ test("after the redeem the code's role can't log in at all, and the next ls on t
   expect(await roleExists(w, r.role)).toBe(false);
   expect(await tryQuery(withLogin(made.url, r.role, r.password), "select 1")).not.toBe("ok");
 });
+
+// ---------- a login that owns something (#514 review 3): any role may make a large object or set its default privileges
+/** What any role may do without CREATE, so that DROP ROLE alone fails on it. */
+async function poison(url: string): Promise<void> {
+  for (const q of ["select lo_create(0)", "alter default privileges grant select on tables to public"]) expect(await tryQuery(url, q)).toBe("ok");
+}
+
+test("a login that made a large object and set default privileges is still removed, and ls goes on for the others", async () => {
+  const w = await hub();
+  const a = add(w, "laptop");
+  add(w, "desktop");
+  await poison(a.url);
+  expect(ls(w).map((l) => l.name)).toEqual(["desktop", "laptop"]);
+  const r = board(w, ["login", "remove", "laptop"]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(await roleExists(w, a.role)).toBe(false);
+  expect(ls(w).map((l) => l.name)).toEqual(["desktop"]);
+});
+
+test("a code role poisoned before the redeem is dropped by the next ls, and the redeemed login can still be removed", async () => {
+  const w = await hub();
+  const made = addFor(w, "laptop", 60);
+  add(w, "desktop");
+  await poison(made.url);
+  const r = await redeem(made.url);
+  if (!("role" in r)) throw new Error(`redeem refused: ${r.code}`);
+  await poison(withLogin(made.url, r.role, r.password)); // the fresh role too
+  const listed = board(w, ["login", "ls", "--json"]);
+  expect(listed.code, listed.stderr).toBe(0);
+  expect((JSON.parse(listed.stdout) as Row[]).map((l) => l.name)).toEqual(["desktop", "laptop"]);
+  expect(await roleExists(w, made.role)).toBe(false);
+  const gone = board(w, ["login", "remove", "laptop"]);
+  expect(gone.code, gone.stderr).toBe(0);
+  expect(await roleExists(w, r.role)).toBe(false);
+});
+
+test("the sweep drops a poisoned expired login and ends its held session", async () => {
+  const w = await hub();
+  const late = addFor(w, "laptop", 2);
+  const other = addFor(w, "desktop", 2);
+  await poison(late.url);
+  const held = new SQL(late.url, { max: 1 });
+  await held`select 1`;
+  await Bun.sleep(3000);
+  const r = board(w, ["sweep"]);
+  expect(r.code, r.stderr).toBe(0);
+  expect(await roleExists(w, late.role)).toBe(false);
+  expect(await roleExists(w, other.role)).toBe(false);
+  let ended = false;
+  try {
+    await held`select 1`;
+  } catch {
+    ended = true;
+  }
+  await held.close().catch(() => {});
+  expect(ended).toBe(true);
+});

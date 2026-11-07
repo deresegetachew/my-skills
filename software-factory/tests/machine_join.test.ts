@@ -668,3 +668,22 @@ test("after a join the code's own role can't log in at all", async () => {
   }
   expect(why).toMatch(/not permitted to log in/i);
 });
+
+test("machine remove works on a machine whose code role and login own something", async () => {
+  const h = await hub();
+  const a = add(h, "laptop");
+  for (const q of ["select lo_create(0)", "alter default privileges grant select on tables to public"]) {
+    const sql = new SQL(codeUrl(a.code), { max: 1 });
+    try {
+      await sql.unsafe(q);
+    } finally {
+      await sql.close();
+    }
+  }
+  const m = world();
+  expect(machine(m, ["join", a.code, "--no-doctor"]).code).toBe(0);
+  const r = machine(h, ["remove", "laptop"]);
+  expect(r.code, r.out).toBe(0);
+  expect(await roles(h)).toEqual([]);
+  expect(await connects(read(urlFile(m)).trim())).toBe(false);
+});
