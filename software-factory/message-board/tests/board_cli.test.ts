@@ -390,6 +390,25 @@ test("tasks, ready, show and prime name a task by its issue number (#7) or b<id>
   }
 });
 
+test("tasks marks a note as note, not as an open task (#520)", async () => {
+  const fresh = await freshDatabase(server as Server);
+  try {
+    const url = fresh.url;
+    const w = world(url);
+    board(w, ["migrate"]);
+    const po = await Board.open(url, { as: "po" });
+    await po.create({ title: "A real task", ref: "github:o/r#7" });
+    await po.create({ title: "A channel issue", kind: "note", ref: "github:o/r#11" });
+    await po.end();
+    const tasks = board(w, ["tasks", "--repo", "o/r"]);
+    expect(tasks.code, tasks.stderr).toBe(0);
+    expect(tasks.stdout).toMatch(/^#7\s+open\s+A real task$/m);
+    expect(tasks.stdout).toMatch(/^#11\s+note\s+A channel issue$/m);
+  } finally {
+    await fresh.drop();
+  }
+});
+
 test("up on a stopped container says it started it; on a running one, that it is up to date (#515)", async () => {
   const target = await boardDatabase();
   try {

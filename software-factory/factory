@@ -69,7 +69,8 @@ Build
                          Agents are named in factory.json (menelik, taytu, haile ...); 2 means the second name
   next                   the job the factory would hand out next. It does not claim it: the last line shows the
                          command that does (bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim <agent> --pid $$);
-                         `--claim AGENT --issue N` claims that one issue
+                         `--claim AGENT --issue N` claims that one issue. --dry-run [--claim AGENT]: what that agent would
+                         take, claiming nothing (it says so); with --issue it is refused
   autostart [status|install|uninstall]
                          bring this machine back after a reboot: the dev stack (commands.stackUp) and its agents, in
                          detached tmux sessions, with unfinished work saved and left in place. status shows what would
@@ -322,6 +323,16 @@ EOF
 }
 
 cmd="${1:-help}"; shift || true
+# A project on releases: once after the pin changes, check offline that the install is complete by the release's own
+# list of its files (#520). A release client older than the release can leave files out; this warns with the fix
+# (`factory update` finishes it) and the command goes on. The commands that install or report it check by themselves.
+case "$cmd" in
+  update|rollback|version|releases|migrate-to-release|doctor|help|-h|--help) ;;
+  *) if [ -f .claude/factory/release.json ] && [ -f "$hooks/factory_release.ts" ]; then
+       stamp="$(git rev-parse --git-common-dir 2>/dev/null)/factory/install-checked"
+       [ "$stamp" -nt .claude/factory/release.json ] || fh "$hooks/factory_release" check-install || true
+     fi ;;
+esac
 case "$cmd" in
   loop)
     # A role word (or FACTORY_ROLE) picks the role. `factory loop -i` alone, in a terminal, asks which (#102); an

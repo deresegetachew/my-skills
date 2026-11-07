@@ -7,7 +7,7 @@
 // - `factory board import github` keeps a status the board changed since the last import when tasks.source is board.
 // A real Postgres (board_pg.ts) and the stateful fake gh (fakegh.ts), whose file says what was written to GitHub.
 import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../hooks/factory_config.ts";
 import { Board, type Message, type Task } from "../message-board/src/index.ts";
@@ -644,6 +644,51 @@ test("factory prd --stage reads the owner's approvals from the board when it is 
   writeFileSync(w.dbFile, JSON.stringify(db));
   expect(stages({ MB_URL: UNREACHABLE })[0]).toMatchObject({ stage: "vision", approval: "asked" });
   expect(calls(w).all.filter((l) => l.includes("issues/103/comments")).length).toBeGreaterThan(0);
+});
+
+/** The factory's hourly GitHub call log for the project (factory_lib.ts countGithubCall, #371): [command, endpoint]. */
+function callLog(state: string): [string, string][] {
+  const dir = join(state, "work-factory", "github-calls");
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".log"));
+  } catch {
+    return [];
+  }
+  return files.flatMap((f) => readFileSync(join(dir, f), "utf8").split("\n").filter(Boolean))
+    .map((l) => l.split("\t")).map((c) => [c[2] ?? "", c[3] ?? ""]);
+}
+
+test("the board's GitHub calls (import, mirror, an ask's mirror) are in the factory's hourly call log (#520)", async () => {
+  const w = await world();
+  const state = tmp("factory-state-");
+  const extra = { XDG_STATE_HOME: state };
+  const imp = hook(w, "factory_board", ["import", "github"], extra);
+  expect(imp.code, imp.stderr + imp.stdout).toBe(0);
+  const imported = Number(/GitHub calls: (\d+)/.exec(imp.stdout)?.[1]);
+  expect(imported).toBeGreaterThan(0);
+  let log = callLog(state);
+  expect(log.filter(([c]) => c === "factory_board import"), JSON.stringify(log)).toHaveLength(imported);
+  expect(log.some(([, e]) => e.startsWith("issues")), JSON.stringify(log)).toBe(true);
+
+  const t = await task(w, 101);
+  const claim = await (await w.as("haile")).claim(t.id);
+  expect(claim).not.toBeNull();
+  const r = mirror(w, extra);
+  expect(r.code, r.stderr).toBe(0);
+  const mirrored = Number(/GitHub calls: (\d+)/.exec(r.stdout)?.[1]);
+  expect(mirrored).toBeGreaterThan(0);
+  log = callLog(state);
+  const mine = log.filter(([c]) => c === "factory_board mirror");
+  expect(mine, JSON.stringify(log)).toHaveLength(mirrored);
+  expect(mine.some(([, e]) => e === "PATCH issues/:n"), JSON.stringify(mine)).toBe(true);
+  expect(mine.some(([, e]) => e === "POST issues/:n/comments"), JSON.stringify(mine)).toBe(true);
+
+  const before = callLog(state).length;
+  const a = hook(w, "factory_board", ["ask", "palette", "Which colour?"], extra);
+  expect(a.code, a.stderr + a.stdout).toBe(0);
+  const asked = callLog(state).slice(before).filter(([c]) => c === "factory_board ask");
+  expect(asked.some(([, e]) => e === "POST issues/:n/comments"), "the ask's mirror is counted too: " + JSON.stringify(asked)).toBe(true);
 });
 
 test("factory help lists board mirror and board ask", () => {

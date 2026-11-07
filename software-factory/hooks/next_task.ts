@@ -19,6 +19,8 @@
 //   Code asks before running a command with a shell variable in it, and unattended nobody can answer): with
 //   FACTORY_AGENT and FACTORY_PID set (the SessionStart hook writes both), no flags claims as FACTORY_AGENT with pid
 //   FACTORY_PID, and `--issue N` claims as FACTORY_AGENT. Explicit --claim and --pid win; --no-claim and --note only look.
+//   --dry-run (#520) only looks too, even with --claim: it prints what that agent would take and claims nothing, then
+//   says so. With --issue it is refused ({code, message, fix}): `factory issues show N` says what that issue is.
 //
 //   bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim taytu --issue 42
 //       -> issues mode: claim issue #42 for taytu, only that one, when it is free and its dependencies are done.
@@ -168,10 +170,13 @@ interface Args {
   issue: number | null;
   note: boolean;
   noRework: boolean;
+  /** --dry-run: look as `lookAs` (the --claim given), claim nothing. */
+  dryRun: boolean;
+  lookAs: string | null;
 }
 
 const PROG = "next_task.ts";
-const USAGE = `usage: ${PROG} [-h] [--json] [--after AFTER] [--claim AGENT] [--pid PID] [--issue N] [--note] [--no-claim] [--no-rework]`;
+const USAGE = `usage: ${PROG} [-h] [--json] [--after AFTER] [--claim AGENT] [--pid PID] [--issue N] [--note] [--no-claim] [--no-rework] [--dry-run]`;
 
 function argError(text: string): never {
   process.stderr.write(`${USAGE}\n${PROG}: error: ${text}\n`);
@@ -200,7 +205,7 @@ function fromEnv(a: Args): void {
 }
 
 function main(argv: string[]): number {
-  const p = parseArgs(argv, { valued: ["--after", "--claim", "--pid", "--issue"], flags: ["--json", "--note", "--no-claim", "--no-rework"] },
+  const p = parseArgs(argv, { valued: ["--after", "--claim", "--pid", "--issue"], flags: ["--json", "--note", "--no-claim", "--no-rework", "--dry-run"] },
     PROG, USAGE);
   let issue: number | null = null;
   if (p.issue !== undefined) {
@@ -208,8 +213,18 @@ function main(argv: string[]): number {
     issue = Number(p.issue);
   }
   const a: Args = { json: Boolean(p.json), after: (p.after as string | undefined) ?? null, claim: (p.claim as string | undefined) ?? null,
-    pid: (p.pid as string | undefined) ?? null, issue, note: Boolean(p.note), noRework: Boolean(p["no-rework"]) };
-  if (!p["no-claim"] && !a.note) fromEnv(a);
+    pid: (p.pid as string | undefined) ?? null, issue, note: Boolean(p.note), noRework: Boolean(p["no-rework"]),
+    dryRun: Boolean(p["dry-run"]), lookAs: null };
+  if (a.dryRun) {
+    if (a.issue !== null) {
+      process.stderr.write(pyDumps({ code: "dry_run_issue", message: `--dry-run looks at what would be taken next; it can't try a claim of issue #${a.issue}.`,
+        fix: `Run \`factory issues show ${a.issue}\` to see that issue, or drop --issue to see what would be taken next. Nothing was claimed.` }) + "\n");
+      return 1;
+    }
+    a.lookAs = a.claim; // what that agent would take, without claiming it
+    a.claim = null;
+    a.pid = null;
+  } else if (!p["no-claim"] && !a.note) fromEnv(a);
   if (a.issue && !a.claim) argError("--issue needs --claim AGENT");
   const cfg = load();
   run(["git", "fetch", "-q", "origin", cfg.mainBranch]);
@@ -244,11 +259,15 @@ function main(argv: string[]): number {
 
 /** Whose own rework claim doesn't hold a PR back: the agent claiming, else (`factory next` only looks) FACTORY_AGENT. */
 function me(a: Args): string | null {
-  return a.claim || (process.env.FACTORY_AGENT ?? "").trim() || null;
+  return a.claim || a.lookAs || (process.env.FACTORY_AGENT ?? "").trim() || null;
 }
 
 /** `factory next` only looks: say so, and show the command that claims. Other programs read one line, so only --note adds it. */
 function note(a: Args): void {
+  if (a.dryRun) {
+    console.log("Dry run: nothing was claimed.");
+    return;
+  }
   if (a.note && !a.claim) {
     const who = process.env.FACTORY_AGENT || "<your-agent-name>";
     console.log(`Not claimed. To claim it: bun --no-env-file --config=/dev/null .claude/hooks/next_task.ts --claim ${who} --pid $$`);

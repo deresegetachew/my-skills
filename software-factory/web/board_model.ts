@@ -19,7 +19,9 @@ export interface Lane {
   cells: Record<string, TaskRow[]>;
 }
 
-/** The columns, left to right, from the factory's labels. */
+/** The columns, left to right, from the factory's labels. The tasks are the open work (the task tracker's list(), and the
+ *  board feed's partOf()), so Done is empty while `factory board status` counts done tasks too: docs/wiki/board.md,
+ *  "What the Board page shows" (#520). */
 export const COLUMNS: Column[] = [
   { state: "ready", title: "Ready" },
   { state: "in-progress", title: "In progress" },

@@ -18,11 +18,14 @@
 // client installs a release by that release's own rules, even when the client is older and would put a new file
 // elsewhere (#278). When the checkout has the web app (software-factory/web/app.tsx), the archive also holds it bundled
 // into one file, hooks/factory_ui_app.js (build_web.ts, decision 0005): built, not tracked.
+// It also holds hooks/factory_release_files.json, built too: every factory file the release installs (where it goes, its
+// sha256, which are executable). Every client installs hooks/, even one older than #278, so the new factory can tell
+// offline that an older client left its install incomplete, and `factory update` finishes it (#520).
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { FactoryError, pyDumps, run } from "../software-factory/hooks/factory_lib.ts";
-import { classify } from "../software-factory/hooks/factory_release.ts";
+import { classify, RELEASE_FILES, RELEASE_FILES_SCHEMA } from "../software-factory/hooks/factory_release.ts";
 import { gzipFixed, tarCreate, type TarInput } from "../software-factory/hooks/factory_tar.ts";
 import { bundleWeb, WEB_BUNDLE, WEB_ENTRY } from "./build_web.ts";
 
@@ -110,6 +113,21 @@ function sha256(data: Uint8Array): string {
   return createHash("sha256").update(data).digest("hex");
 }
 
+/** hooks/factory_release_files.json: the engine files these release files install, {target: sha256}, and which are
+ * executable. It cannot list itself (its own hash). Templates are the project's and are not listed. */
+export function releaseFilesList(files: [string, number, Uint8Array][], version: string): Uint8Array {
+  const targets: Record<string, string> = {};
+  const executable: string[] = [];
+  for (const [rel, mode, data] of [...files].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+    const rule = classify(rel);
+    if (!rule || rule[0] !== "engine") continue;
+    targets[rule[1]] = sha256(data);
+    if (mode & 0o111) executable.push(rule[1]);
+  }
+  const doc = { schema: RELEASE_FILES_SCHEMA, version, files: targets, executable: executable.sort() };
+  return new TextEncoder().encode(pyDumps(doc, { indent: 2, sortKeys: true }) + "\n");
+}
+
 export interface Built {
   archive: string;
   sha256: string;
@@ -137,6 +155,12 @@ export function build(root: string, outDir: string, tag?: string | null): Built 
     }
     files.push([bundle, 0o644, make(join(root, SRC))]);
   }
+  if (files.some(([rel]) => rel === RELEASE_FILES)) {
+    throw new FactoryError("bundle_tracked", `${SRC}/${RELEASE_FILES} is tracked, but the release builds it.`,
+      `remove it from git (git rm --cached ${SRC}/${RELEASE_FILES}); the release makes it.`);
+  }
+  // a release with no factory file to install (a test fixture) has nothing to finish, so no list
+  if (files.some(([rel]) => classify(rel)?.[0] === "engine")) files.push([RELEASE_FILES, 0o644, releaseFilesList(files, version)]);
   files.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   for (const [rel, mode, data] of files) {
     entries.push({ name: `${top}/${rel}`, mode, data });

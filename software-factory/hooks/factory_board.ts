@@ -27,14 +27,16 @@
 // `factory owner answer` (factory_owner.ts) calls answerOnBoard: with the owner queue on the board, the answer goes to the
 // board first, then the mirror posts it. Errors are one JSON line `{code, message, fix}` on stderr.
 import { spawn, spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { boardRepo, ownerQueueOnBoard } from "./core/compose.ts";
 import { boardMirror, type Config, load, taskSource } from "./factory_config.ts";
 import { comment } from "./factory_issues.ts";
-import { Exit, pyDumps, runMain } from "./factory_lib.ts";
+import { countGithubCall, Exit, pyDumps, runMain } from "./factory_lib.ts";
 import { OWNER_TITLE, ownerLogin, ownerQueue } from "./factory_orchestrator.ts";
 import { breakMarkers, ownerAskIds, trustedOf } from "./factory_prs.ts";
-import { Board, BoardError, boardUrl, GithubError, type Message, type MirrorSummary, mirrorToGithub, type Task } from "../message-board/src/index.ts";
+import { Board, BoardError, boardUrl, ghCli, GithubError, type Message, type MirrorSummary, mirrorToGithub, type Task } from "../message-board/src/index.ts";
 
 const BIN = join(import.meta.dir, "..", "message-board", "bin.ts");
 const MIRROR_ACTOR = "github-mirror";
@@ -81,7 +83,8 @@ export async function mirrorOnce(cfg: Config, board?: Board): Promise<MirrorSumm
   const repo = repoOf();
   const b = board ?? (await open(MIRROR_ACTOR));
   try {
-    return await mirrorToGithub(b, { repo, trusted: [...trustedOf(cfg)] });
+    // its gh calls go to the factory's hourly call log, as the factory's own do (#371, #520)
+    return await mirrorToGithub(b, { repo, trusted: [...trustedOf(cfg)], gh: ghCli({ onCall: (a) => countGithubCall(a) }) });
   } finally {
     if (!board) await b.end().catch(() => {});
   }
@@ -397,10 +400,38 @@ async function queue(args: string[]): Promise<number> {
 
 // --- the import ----------------------------------------------------------------------------------------------------------
 
+/** The import runs in the board's own command; it lists its `gh` calls in a file (MB_GH_CALLS_FILE), and they go to the
+ * factory's hourly call log from here, so `factory usage --github` counts them (#520). */
 function importVerb(cfg: Config, args: string[]): number {
   const more = taskSource(cfg) === "board" && !args.includes("--board-is-record") ? ["--board-is-record"] : [];
-  const p = spawnSync(process.execPath, ["--no-env-file", "--config=/dev/null", BIN, "import", ...args, ...more], { stdio: "inherit" });
-  return p.status ?? 1;
+  const dir = mkdtempSync(join(process.env.TMPDIR || tmpdir(), "factory-board-calls-"));
+  const file = join(dir, "calls.jsonl");
+  try {
+    const p = spawnSync(process.execPath, ["--no-env-file", "--config=/dev/null", BIN, "import", ...args, ...more],
+      { stdio: "inherit", env: { ...process.env, MB_GH_CALLS_FILE: file } });
+    logCalls(file);
+    return p.status ?? 1;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Each `gh` call listed in `file` (one JSON list of arguments a line) into the call log. */
+function logCalls(file: string): void {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return; // no call made
+  }
+  for (const line of text.split("\n").filter(Boolean)) {
+    try {
+      const args: unknown = JSON.parse(line);
+      if (Array.isArray(args) && args.every((a) => typeof a === "string")) countGithubCall(args as string[]);
+    } catch {
+      // a torn last line: that call is not counted
+    }
+  }
 }
 
 /** Exit code 3: the board couldn't be had (none set up, or it doesn't answer), so nothing was written to it. A caller that

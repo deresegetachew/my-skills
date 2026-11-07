@@ -9,6 +9,8 @@
 //   factory update --archive F [--sums S]
 //                                the same from a release archive on disk (no network); only writes the archive's files
 //   factory rollback             back to the release that was installed before (offline, from the download cache)
+//   factory check-install        offline: is the install of the pinned release complete, by the release's own list of its
+//                                files (#520)? Warns with the fix when not; `factory` runs it on start after the pin changes
 //   factory migrate-to-release   a project linked to the my-skills submodule: replace the links the release owns with the
 //                                release's files, keep the links it does not ship, print the steps for the pull request
 //
@@ -39,6 +41,11 @@ export const DEFAULT_REPO = "deresegetachew/my-skills";
 export const PIN_PATH = ".claude/factory/release.json";
 export const PIN_SCHEMA = "factory-pin/1";
 export const MANIFEST_SCHEMA = "factory-release/1";
+/** The release's own list of the factory files it installs (#520), built by tools/build_release.ts into hooks/, which
+ * every client installs (even one older than #278), so an install an older client left incomplete can be told offline. */
+export const RELEASE_FILES = "hooks/factory_release_files.json";
+export const RELEASE_FILES_SCHEMA = "factory-release-files/1";
+export const INSTALLED_FILES_LIST = ".claude/hooks/factory_release_files.json";
 export const TAG_RE = /^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.]*))?$/;
 const SUM_RE = /^([0-9a-fA-F]{64}) [ *](\S.*)$/;
 const AGENT_ENV = ["FACTORY_AGENT", "FACTORY_LOOP", "CLAUDECODE"];
@@ -817,6 +824,39 @@ export function pinnedProblems(root: string, pin: Pin): string[] {
   return bad;
 }
 
+/** The release's list of its factory files as installed here ({target: sha256}), or null when there is none (a release
+ * built before #520) or it is for another version than the pin. */
+function releaseList(root: string, pin: Pin): Record<string, string> | null {
+  let doc: JsonObj | null;
+  try {
+    doc = obj(JSON.parse(readFileSync(join(root, INSTALLED_FILES_LIST), "utf8")));
+  } catch {
+    return null;
+  }
+  const files = doc ? obj(doc.files) : null;
+  if (!doc || doc.schema !== RELEASE_FILES_SCHEMA || doc.version !== pin.version || !files) return null;
+  return Object.fromEntries(Object.entries(files).filter((e): e is [string, string] => typeof e[1] === "string"));
+}
+
+/** Why the install of the pinned release is not complete by the release's own list of its files (#520): a file it
+ * ships that is missing or not in the pin, or one the pin records with another release's hash (an older client wrote
+ * it). Offline; empty when complete or when the release has no list. Local changes are pinnedProblems', not these. */
+export function installProblems(root: string, pin: Pin): string[] {
+  const list = releaseList(root, pin);
+  if (!list) return [];
+  const bad: string[] = [];
+  for (const [rel, sha] of Object.entries(list).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) {
+    if (!isFile(join(root, rel))) bad.push(`${rel} is missing (${pin.tag} ships it)`);
+    else if (!(rel in pin.files)) bad.push(`${rel} is not in the pin (${pin.tag} ships it)`);
+    else if (rel !== SETTINGS_REL && pin.files[rel] !== sha) bad.push(`${rel} is not ${pin.tag}'s copy (an older release client wrote it)`);
+  }
+  return bad;
+}
+
+/** What the person runs to finish an incomplete install. */
+export const FINISH_FIX = "run `factory update` (it finishes the install from the release and checks it again; it is safe to repeat), " +
+  "or without the network `factory update --archive <software-factory-X.tar.gz> --sums <SHA256SUMS>`.";
+
 function writeFile(path: string, data: Uint8Array, mode: number): void {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = join(dirname(path), "." + basename(path) + ".factory-tmp");
@@ -1096,7 +1136,7 @@ function tsProblem(path: string): string | null {
  * TypeScript on Bun (#252): each installed .ts must parse and each shell script must pass `bash -n`. A .py file a pin
  * still lists (one from a release before Bun) is only checked against its hash: it is not run any more. */
 export function verifyMachine(root: string, pin: Pin, runScripts = true): string[] {
-  const problems = pinnedProblems(root, pin);
+  const problems = [...pinnedProblems(root, pin), ...installProblems(root, pin)];
   const settings = join(root, SETTINGS_REL);
   if (isFile(settings)) {
     const text = readFileSync(settings, "utf8");
@@ -1198,7 +1238,7 @@ async function cmdVersion(args: Args): Promise<number> {
   const emit = args.json ? (_text = ""): void => undefined : (text = ""): void => console.log(text); // --json prints only the JSON
   emit("Software factory");
   if (pin) {
-    const bad = pinnedProblems(root, pin);
+    const bad = [...pinnedProblems(root, pin), ...installProblems(root, pin)];
     info.installed = { tag: pin.tag, ok: !bad.length, differs: bad };
     emit(`  Installed  ${pin.tag}` + (!bad.length ? "  (the files match the pin)" : `  (${bad.length} file(s) differ from the pin)`));
     for (const b of bad.slice(0, 8)) emit(`             - ${b}`);
@@ -1273,7 +1313,16 @@ async function cmdReleases(args: Args): Promise<number> {
 function checkClean(root: string, pin: Pin | null): boolean {
   const dirty = dirtyPaths(root);
   if (!dirty.length) return false;
-  const managed = pin ? new Set([...Object.keys(pin.files), ...(pin.templates ?? []), PIN_PATH]) : new Set<string>();
+  // the committed pin's files too: a release that drops a file leaves its deletion uncommitted (#520)
+  const committed = pin ? obj((() => {
+    try {
+      return JSON.parse(git(root, ["show", `HEAD:${PIN_PATH}`], false).stdout);
+    } catch {
+      return null;
+    }
+  })()) : null;
+  const committedFiles = committed && obj(committed.files) ? Object.keys(obj(committed.files) as JsonObj) : [];
+  const managed = pin ? new Set([...Object.keys(pin.files), ...committedFiles, ...(pin.templates ?? []), PIN_PATH]) : new Set<string>();
   if (pin && dirty.every((p) => managed.has(p))) return true; // only the factory's own files: fine if this turns out to be a repeat
   const shown = dirty.slice(0, 6).join(", ") + (dirty.length > 6 ? ` and ${dirty.length - 6} more` : "");
   throw new FactoryError("dirty_tree", `the working tree has uncommitted changes (${shown}).`,
@@ -1457,10 +1506,25 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
     tag = release.tag;
   }
   const same = Boolean(pin) && (pin as Pin).tag === tag;
-  const drift = same ? pinnedProblems(root, pin as Pin) : [];
+  if (same) expect = (pin as Pin).sha256 ?? null; // the same release: the cache holds it, and a download must be it
+  const localDrift = same ? pinnedProblems(root, pin as Pin) : []; // the project's own changes to the factory's files
+  // #520: the release's own list of its files says, offline, what an older client left out
+  const incomplete = same && !localDrift.length ? installProblems(root, pin as Pin) : [];
+  const drift = [...localDrift, ...incomplete];
   let unpacked: [string, Files, Manifest] | null = null;
   let unchecked: string | null = null;
-  if (same && !drift.length) {
+  if (incomplete.length) {
+    try {
+      const [archive] = local ? [local] : await fetchArchive(repo, tag, release, expect);
+      unpacked = [archive, ...unpack(archive, tag)];
+    } catch (e) {
+      if (!(e instanceof FactoryError) || !OFFLINE_CODES.includes(e.code)) throw e;
+      throw new FactoryError("incomplete_install", `the install of ${tag} is incomplete, and the release could not be fetched to ` +
+        `finish it (${e.message.replace(/\.+$/, "")}):\n` + incomplete.slice(0, 8).map((p) => "    - " + p).join("\n") +
+        (incomplete.length > 8 ? `\n    ... and ${incomplete.length - 8} more` : ""),
+        FINISH_FIX + " Nothing was changed.");
+    }
+  } else if (same && !drift.length) {
     // #278: the pin only lists what the client that wrote it installed. An older client's rules could leave out a file
     // the release ships, so the release's own plan is checked too, and such a file is repaired like any drift.
     try {
@@ -1473,7 +1537,9 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
       unchecked = e.message.replace(/\.+$/, "");
     }
   }
-  if (dirtyOk && (!same || drift.length)) {
+  // Finishing an incomplete install writes only what is missing or an older copy, never a file with local changes
+  // (those are localDrift), so the uncommitted files an older client's update left are fine (#520).
+  if (dirtyOk && (!same || localDrift.length)) {
     throw new FactoryError("dirty_tree", "the working tree has uncommitted changes to the factory's own files.",
       "commit them (or `git checkout -- .claude factory factory-loop.sh` to drop them), then run it again. Nothing was changed.");
   }
@@ -1549,8 +1615,32 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   return 0;
 }
 
-const COMMANDS = ["version", "releases", "update", "rollback", "migrate-to-release", "check-own-repo"];
-const USAGE = "usage: factory [-h] {version,releases,update,rollback,migrate-to-release,check-own-repo} ...";
+/** `factory check-install` (#520): offline, is the pinned release's install complete by its own list of files? Warns
+ * on stderr with the fix and exits 0 (the `factory` command it runs before goes on); when complete it notes that in
+ * the git folder, so `factory` checks again only after the pin changes. */
+function cmdCheckInstall(): number {
+  const root = projectRoot();
+  const pin = readPin(root);
+  const bad = pin ? installProblems(root, pin) : [];
+  if (pin && bad.length) {
+    process.stderr.write(`factory: [incomplete_install] the install of ${pin.tag} is incomplete: ${bad.length} file(s) the release ` +
+      "ships are missing or older copies (a release client older than the release installed it by its own rules):\n" +
+      bad.slice(0, 8).map((p) => "    - " + p).join("\n") + (bad.length > 8 ? `\n    ... and ${bad.length - 8} more` : "") +
+      `\nFix: ${FINISH_FIX}\n`);
+    return 0;
+  }
+  try {
+    const stamp = join(resolve(root, git(root, ["rev-parse", "--git-common-dir"]).stdout.trim()), "factory", "install-checked");
+    mkdirSync(dirname(stamp), { recursive: true });
+    writeFileSync(stamp, (pin?.tag ?? "") + "\n");
+  } catch {
+    // only saves the next check
+  }
+  return 0;
+}
+
+const COMMANDS = ["version", "releases", "update", "rollback", "migrate-to-release", "check-own-repo", "check-install"];
+const USAGE = "usage: factory [-h] {version,releases,update,rollback,migrate-to-release,check-own-repo,check-install} ...";
 
 function usageError(text: string, sub?: string): never {
   process.stderr.write((sub ? `usage: factory ${sub} [-h] ...` : USAGE) + `\nfactory${sub ? " " + sub : ""}: error: ${text}\n`);
@@ -1572,7 +1662,7 @@ export function parseArgs(argv: string[]): Args {
   args.cmd = cmd;
   const flags: Record<string, string[]> = {
     version: ["--json"], releases: ["--all"], update: ["--release", "--verbose"], rollback: ["--verbose"],
-    "migrate-to-release": ["--verbose"], "check-own-repo": [],
+    "migrate-to-release": ["--verbose"], "check-own-repo": [], "check-install": [],
   };
   const valued = cmd === "update" ? ["--archive", "--sums", "--tasks"] : [];
   const positional = cmd === "update" || cmd === "migrate-to-release";
@@ -1615,6 +1705,7 @@ export async function main(argv: string[]): Promise<number> {
       return 0;
     }
     if (args.cmd === "migrate-to-release") return await cmdMigrate(args);
+    if (args.cmd === "check-install") return cmdCheckInstall();
     return await cmdUpdate(args, args.cmd === "rollback");
   } catch (e) {
     if (e instanceof FactoryError) {

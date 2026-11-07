@@ -588,7 +588,16 @@ export function release(r: Reporter): void {
     return;
   }
   if (pin === null) return;
-  const problems = fr.verifyMachine(process.cwd(), pin);
+  // #520: a release client older than the release may have left out files the release ships; one line says so, and how
+  // to finish it, before the file-by-file checks.
+  const incomplete = fr.installProblems(process.cwd(), pin);
+  if (incomplete.length) {
+    r.fix(`factory ${pin.tag}`, `the install is incomplete, ${incomplete.length} file(s) the release ships are missing or older ` +
+      `copies (${incomplete.slice(0, 3).join("; ")}${incomplete.length > 3 ? "; ..." : ""}). An older release client installed it by ` +
+      `its own rules. Fix: ${fr.FINISH_FIX}`);
+  }
+  const problems = fr.verifyMachine(process.cwd(), pin).filter((p) => !incomplete.includes(p));
+  if (incomplete.length && !problems.length) return;
   if (problems.length) {
     for (const p of problems) {
       r.fix(`factory ${pin.tag}`, `${p}: run \`factory update\` (it repairs the files and the services, and checks again)`);
@@ -677,7 +686,7 @@ export function board(r: Reporter, cfg: Config): void {
     info = boardInfo();
   } catch (e) {
     if (!(e instanceof CoreError)) throw e;
-    r.fix("message board answers", `${e.message} ${e.fix}`);
+    r.fix("message board answers", `${e.message.trim().replace(/[.!?]?$/, ".")} Fix: ${e.fix}`); // two sentences (#520)
     return;
   }
   if (!info.counts) r.fix("message board tables", "the board answers but has none yet: run `factory board migrate`");
