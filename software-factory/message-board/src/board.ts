@@ -227,6 +227,18 @@ export class Board {
     return this.run(() => this.mustTask(this.sql, id));
   }
 
+  /** The tasks whose outside ref is `ref`, in any case (refs are unique, so at most one), or with `anyRepo` every task
+   * whose ref is a GitHub issue numbered like `ref` in any repo (`github:<owner>/<name>#<n>`). Read-only: it lets a
+   * person name a task by its issue number (#515). */
+  async byRef(ref: string, options: { anyRepo?: boolean } = {}): Promise<Task[]> {
+    if (options.anyRepo) {
+      const n = /#(\d+)$/.exec(ref)?.[1];
+      if (!n) return [];
+      return this.tasksWhere("t.external_ref ~ $1", [`^github:[^#]+#${n}$`]);
+    }
+    return this.tasksWhere("lower(t.external_ref) = lower($1)", [ref]);
+  }
+
   /** Edit a task. `version` is the one the caller read: a different one is a `conflict` and nothing changes. */
   async update(id: number, changes: TaskChanges): Promise<Task> {
     const version = wholeNumber("A version", changes.version);
@@ -441,7 +453,7 @@ export class Board {
           const t = await this.mustTask(tx, id);
           if (!t.holder) {
             refuse("bad-input", `#${id} is already done (${t.outcome ?? "no outcome"}).`,
-              "Reopen it first (board.update with status open), then close it with the new outcome.");
+              "Move it back to ready first (board_move with to ready, which the owner and the dev manager have; board.move in code), then close it with the new outcome.");
           }
           refuse("claim-lost", `#${id} is held by ${t.holder}; only its holder closes it, with its token.`,
             "Ask the holder to close it, or wait until it is released.");

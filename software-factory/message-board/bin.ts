@@ -7,6 +7,7 @@ import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, stat
 import { join } from "node:path";
 import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
 import { PROTOCOL_VERSIONS, type Role, ROLES, serveMcp } from "./src/mcp.ts";
+import { Numbers } from "./src/numbers.ts";
 import {
   boardDir, boardUrl, CommandError, compose, COMPOSE_PROJECT, composeYaml, DB_NAME, DB_USER, DEFAULT_PORT, dockerReady, ensureDir, IMAGE, isCommandError,
   masked, readState, sh, type State, tailscaleAddress, urlFor, Writes,
@@ -113,12 +114,43 @@ const print = (s = ""): void => console.log(s);
 const json = (v: unknown): void => console.log(JSON.stringify(v, null, 2));
 const state = (t: Task): string => (t.blocked && t.status === "open" ? "blocked" : t.status);
 
-function taskLine(t: Task): string {
-  return `#${String(t.id).padEnd(5)} ${state(t).padEnd(11)} ${(t.holder ?? t.assignee ?? "").padEnd(12)} ${t.title}`;
+/** How tasks are named here (#515): --repo, else GH_REPO or the folder's git remote origin; with neither, no repo (any
+ * GitHub issue's task is "#n"). A --repo that isn't a repo name is refused. */
+function numbersFor(args: string[]): Numbers {
+  const given = option(args, "--repo");
+  if (given !== undefined) return new Numbers(repoName(given));
+  try {
+    return new Numbers(repoName(undefined));
+  } catch {
+    return new Numbers(null);
+  }
 }
 
-function contextLine(c: ContextEntry): string {
-  return `${c.kind.padEnd(9)} #${c.taskId} ${c.author}: ${c.body}`;
+/** The numbers ("#3", "b17") of the tasks with these board ids: from `known`, else read from the board. */
+async function labelsOf(b: Board, n: Numbers, ids: number[], known: Task[] = []): Promise<Map<number, string>> {
+  const out = new Map(known.map((t) => [t.id, n.label(t)]));
+  for (const id of ids) {
+    if (out.has(id)) continue;
+    try {
+      out.set(id, n.label(await b.get(id)));
+    } catch {
+      out.set(id, `b${id}`); // gone from the board: its board id is all there is
+    }
+  }
+  return out;
+}
+
+/** A task with its number beside its board id, for --json (a program may still want the id). */
+const numbered = (n: Numbers, t: Task): Task & { number: string } => ({ ...t, number: n.label(t) });
+
+const named = (labels: Map<number, string>, id: number): string => labels.get(id) ?? `b${id}`;
+
+function taskLine(t: Task, n: Numbers): string {
+  return `${n.label(t).padEnd(6)} ${state(t).padEnd(11)} ${(t.holder ?? t.assignee ?? "").padEnd(12)} ${t.title}`;
+}
+
+function contextLine(c: ContextEntry, labels: Map<number, string>): string {
+  return `${c.kind.padEnd(9)} ${named(labels, c.taskId)} ${c.author}: ${c.body}`;
 }
 
 function eventLine(e: BoardEvent): string {
@@ -291,11 +323,15 @@ async function migrateVerb(argv: string[]): Promise<number> {
 async function sweep(argv: string[]): Promise<number> {
   const args = [...argv];
   const q = option(args, "--quiet-minutes");
-  leftovers(args, "factory board sweep [--quiet-minutes N]");
+  const n = numbersFor(args);
+  leftovers(args, "factory board sweep [--quiet-minutes N] [--repo owner/name]");
   const quietSeconds = q === undefined ? undefined : wholeNumber(q, "--quiet-minutes", 0, 100_000) * 60;
-  const swept = await withBoard((b) => b.sweep({ quietSeconds }));
+  const { swept, labels } = await withBoard(async (b) => {
+    const s = await b.sweep({ quietSeconds });
+    return { swept: s, labels: await labelsOf(b, n, s.map((x) => x.id)) };
+  });
   if (!swept.length) print("No stale claims.");
-  for (const s of swept) print(`released #${s.id} (held by ${s.holder})`);
+  for (const s of swept) print(`released ${named(labels, s.id)} (held by ${s.holder})`);
   return 0;
 }
 
@@ -303,11 +339,12 @@ async function tasks(argv: string[]): Promise<number> {
   const args = [...argv];
   const all = flag(args, "--all");
   const asJson = flag(args, "--json");
-  leftovers(args, "factory board tasks [--all] [--json]");
+  const n = numbersFor(args);
+  leftovers(args, "factory board tasks [--all] [--json] [--repo owner/name]");
   const list = await withBoard((b) => b.tasks({ all }));
-  if (asJson) json(list);
+  if (asJson) json(list.map((t) => numbered(n, t)));
   else if (!list.length) print(all ? "No tasks on the board." : "No open tasks on the board.");
-  else for (const t of list) print(taskLine(t));
+  else for (const t of list) print(taskLine(t, n));
   return 0;
 }
 
@@ -315,43 +352,57 @@ async function ready(argv: string[]): Promise<number> {
   const args = [...argv];
   const asJson = flag(args, "--json");
   const who = option(args, "--for");
-  leftovers(args, "factory board ready [--for <actor>] [--json]");
+  const n = numbersFor(args);
+  leftovers(args, "factory board ready [--for <actor>] [--json] [--repo owner/name]");
   const list = await withBoard((b) => b.ready({ for: who }));
-  if (asJson) json(list);
+  if (asJson) json(list.map((t) => numbered(n, t)));
   else if (!list.length) print("Nothing is ready.");
-  else for (const t of list) print(taskLine(t));
+  else for (const t of list) print(taskLine(t, n));
   return 0;
 }
 
 async function show(argv: string[]): Promise<number> {
   const args = [...argv];
   const asJson = flag(args, "--json");
+  const n = numbersFor(args);
   const idText = args.shift();
-  leftovers(args, "factory board show <id> [--json]");
-  if (idText === undefined) fail("bad-input", "show needs a task id.", "For example: factory board show 12");
-  const id = wholeNumber(idText.replace(/^#/, ""), "A task id", 1, Number.MAX_SAFE_INTEGER);
+  leftovers(args, "factory board show <number> [--json] [--repo owner/name]");
+  if (idText === undefined) fail("bad-input", "show needs a task's number.", "For example: factory board show 12 (issue 12), or factory board show b3 (a task made on the board)");
   const got = await withBoard(async (b) => {
-    const task = await b.get(id);
-    return { task, edges: await b.edges(id), context: await b.contextFor(id), thread: await b.thread({ task: id }) };
+    const { id, label } = await n.resolve(b, idText);
+    let task: Task;
+    try {
+      task = await b.get(id);
+    } catch (e) {
+      if (e instanceof BoardError && e.code === "not-found") fail("not-found", `There is no task ${label} on the board.`, "Check the number (`factory board tasks` lists them).");
+      throw e;
+    }
+    const edges = await b.edges(id);
+    const context = await b.contextFor(id);
+    const labels = await labelsOf(b, n, [...edges.flatMap((e) => [e.from, e.to]), ...context.map((c) => c.taskId), ...task.blockedBy,
+      ...(task.parentId ? [task.parentId] : [])], [task]);
+    return { task, edges, context, thread: await b.thread({ task: id }), labels };
   });
+  const { labels, ...rest } = got;
   if (asJson) {
-    json(got);
+    json({ ...rest, task: numbered(n, got.task) });
     return 0;
   }
   const t = got.task;
-  print(`#${t.id} ${t.title}`);
+  const id = t.id;
+  print(`${n.label(t)} ${t.title}`);
   print(`status    ${t.status}${t.outcome ? ` (${t.outcome})` : ""}`);
   if (t.holder) print(`holder    ${t.holder}${t.claimUntil ? ` (claim until ${t.claimUntil.toISOString()})` : ""}`);
   if (t.assignee) print(`handed to ${t.assignee}`);
   print(`kind      ${t.kind}, priority ${t.priority}, version ${t.version}`);
   if (t.ref) print(`ref       ${t.ref}`);
-  if (t.parentId) print(`parent    #${t.parentId}`);
-  if (t.blocked) print(`blocked   by ${t.blockedBy.map((x) => `#${x}`).join(", ")}`);
-  for (const e of got.edges) print(e.from === id ? `edge      ${e.kind} #${e.to}` : `edge      #${e.from} ${e.kind} this`);
+  if (t.parentId) print(`parent    ${named(labels, t.parentId)}`);
+  if (t.blocked) print(`blocked   by ${t.blockedBy.map((x) => named(labels, x)).join(", ")}`);
+  for (const e of got.edges) print(e.from === id ? `edge      ${e.kind} ${named(labels, e.to)}` : `edge      ${named(labels, e.from)} ${e.kind} this`);
   if (t.body) print(`\n${t.body}`);
   if (got.context.length) {
     print("\nContext");
-    for (const c of got.context) print(`  ${contextLine(c)}`);
+    for (const c of got.context) print(`  ${contextLine(c, labels)}`);
   }
   if (got.thread.length) {
     print("\nThread");
@@ -363,34 +414,41 @@ async function show(argv: string[]): Promise<number> {
 async function prime(argv: string[]): Promise<number> {
   const args = [...argv];
   const asJson = flag(args, "--json");
+  const n = numbersFor(args);
   const actor = args.shift();
-  leftovers(args, "factory board prime <actor> [--json]");
+  leftovers(args, "factory board prime <actor> [--json] [--repo owner/name]");
   if (!actor) fail("bad-input", "prime needs an actor's name.", "For example: factory board prime haile");
-  const p = await withBoard((b) => b.prime(actor));
+  const { p, labels } = await withBoard(async (b) => {
+    const got = await b.prime(actor);
+    const known = [...got.holding.map((h) => h.task), ...got.ready, ...got.blocked];
+    const ids = [...got.holding.flatMap((h) => h.context.map((c) => c.taskId)), ...got.blocked.flatMap((t) => t.blockedBy)];
+    return { p: got, labels: await labelsOf(b, n, ids, known) };
+  });
   if (asJson) {
-    json(p);
+    json({ ...p, holding: p.holding.map((h) => ({ ...h, task: numbered(n, h.task) })), ready: p.ready.map((t) => numbered(n, t)),
+      blocked: p.blocked.map((t) => numbered(n, t)) });
     return 0;
   }
   print(`Start for ${actor}`);
   print("\nHolding");
   if (!p.holding.length) print("  nothing");
   for (const h of p.holding) {
-    print(`  ${taskLine(h.task)}`);
-    for (const c of h.context) print(`      ${contextLine(c)}`);
+    print(`  ${taskLine(h.task, n)}`);
+    for (const c of h.context) print(`      ${contextLine(c, labels)}`);
   }
   print("\nReady");
   if (!p.ready.length) print("  nothing");
-  for (const t of p.ready) print(`  ${taskLine(t)}`);
+  for (const t of p.ready) print(`  ${taskLine(t, n)}`);
   print("\nBlocked");
   if (!p.blocked.length) print("  nothing");
-  for (const t of p.blocked) print(`  ${taskLine(t)} (by ${t.blockedBy.map((x) => `#${x}`).join(", ")})`);
+  for (const t of p.blocked) print(`  ${taskLine(t, n)} (by ${t.blockedBy.map((x) => named(labels, x)).join(", ")})`);
   print("\nRecent");
   if (!p.recent.length) print("  nothing");
   for (const e of p.recent) print(`  ${eventLine(e)}`);
   return 0;
 }
 
-const MCP_USAGE = "factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder]";
+const MCP_USAGE = "factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder] [--repo owner/name]";
 
 const MCP_HELP = `${MCP_USAGE}
 
@@ -408,6 +466,9 @@ recorded as --as, with --session on its events; no tool takes a sender.
                                 board_link     link two tasks (blocks, waits_for, related ...)
                                 board_unlink   remove a link
                                 board_comment  a note on a task's thread
+
+Tasks are named by their number, as people see them: 3 or #3 for issue 3 of the project (its repo: --repo, else
+GH_REPO or the folder's git remote origin), b17 for a task made on the board. Results name tasks the same way.
 
 Add it to your own Claude Code session, from the project's folder:
 
@@ -429,6 +490,7 @@ async function mcp(argv: string[]): Promise<number> {
   const as = option(args, "--as");
   const session = option(args, "--session");
   const roleText = option(args, "--role") ?? "builder";
+  const numbers = numbersFor(args);
   leftovers(args, MCP_USAGE);
   if (!(ROLES as readonly string[]).includes(roleText)) {
     fail("bad-input", `--role must be owner, manager or builder, not ${JSON.stringify(roleText)}.`, `Use --role owner, --role manager or --role builder (the default). Usage: ${MCP_USAGE}`);
@@ -453,7 +515,7 @@ async function mcp(argv: string[]): Promise<number> {
   process.stdout.on("error", () => shutdown(0, gone));
   console.error(`factory board mcp: serving the message board to ${as} (${role}) over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
   try {
-    await serveMcp({ board: b, role, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
+    await serveMcp({ board: b, role, numbers, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
       input: process.stdin,
       // A failed write never resolves: the shutdown under way exits the process.
       write: (line) => new Promise<void>((done) => {
