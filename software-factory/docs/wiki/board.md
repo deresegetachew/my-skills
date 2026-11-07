@@ -134,6 +134,15 @@ Then:
 - `factory prd --stage` and the web UI's Inbox read the owner queue from the board (`factory board queue`): each ask to
   the owner and the owner's answers. When the board can't be reached they read the owner-queue issue on GitHub, as
   before.
+- A question an agent asks the owner through the board's MCP (`board_post`, kind `question`, `to: owner`, with or
+  without a task, #549) is in the owner queue too, as `m<id>` (board message id), with who asked, the task it is about
+  and when. `factory owner answer m<id> <text>` (the Inbox's answer box) writes the answer on the board in reply to
+  it, to the agent who asked, and marks it answered; the agent reads it with `board_thread`. `factory board mirror`
+  posts each such question once on the owner-queue issue, marked as an ask, and its answer; a plain reply there is
+  read back once. The MCP tags what an agent posts with its project (`project:<owner>/<repo>`), so a project's owner
+  sees only its own agents' questions on a shared board.
+- The dev manager's work check (`factory_roles.ts work dev-manager`) counts the open board questions addressed to the
+  dev manager (its names, or `dev-manager`), so a question asked only on the board starts its pass.
 - The PR gate and the Factory guard still read only GitHub. Nothing on the board changes what may merge.
 
 **One number for a task.** A task that came from an issue is named by the issue's number, `#3`, everywhere you read it:

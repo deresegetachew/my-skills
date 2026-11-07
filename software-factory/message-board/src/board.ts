@@ -17,6 +17,8 @@ import {
 /** How long a claim lasts before it needs a heartbeat, and how long a holder may be silent before the sweep. */
 export const CLAIM_SECONDS = 30 * 60;
 export const QUIET_SECONDS = 30 * 60;
+/** The actor that stands for the project's owner: only it answers a question addressed to it (#549). */
+const OWNER_ACTOR = "owner";
 /** The kinds a claim takes: epics, notes and decisions are not work items. */
 const CLAIMABLE_KINDS = ["task", "bug"] as const;
 const CLAIMABLE = CLAIMABLE_KINDS.map((k) => `'${k}'`).join(", ");
@@ -604,11 +606,13 @@ export class Board {
       let thread: number | null = null;
       let task = input.task ?? null;
       if (input.inReplyTo != null) {
-        const p = rows(await tx`SELECT thread_id::int AS thread, task_id::int AS task, state FROM messages WHERE id = ${input.inReplyTo} FOR UPDATE`);
+        const p = rows(await tx`SELECT thread_id::int AS thread, task_id::int AS task, state, addressee FROM messages WHERE id = ${input.inReplyTo} FOR UPDATE`);
         if (!p[0]) refuse("not-found", `There is no message ${input.inReplyTo} to reply to.`, "Check the id (board.thread lists a thread).");
         thread = Number(p[0].thread);
         task = task ?? (p[0].task === null ? null : Number(p[0].task));
-        if (kind === "answer" && p[0].state === "open") await tx`UPDATE messages SET state = 'answered' WHERE id = ${input.inReplyTo}`;
+        // only the owner answers what was asked of the owner (#549): another actor's reply there leaves it open
+        const answers = p[0].addressee !== OWNER_ACTOR || this.as === OWNER_ACTOR;
+        if (kind === "answer" && answers && p[0].state === "open") await tx`UPDATE messages SET state = 'answered' WHERE id = ${input.inReplyTo}`;
       }
       const id = Number(rows(await tx`SELECT nextval(pg_get_serial_sequence('messages', 'id'))::int AS id`)[0]?.id);
       const state = kind === "question" || kind === "ask" ? "open" : "closed";
