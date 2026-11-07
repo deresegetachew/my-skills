@@ -87,6 +87,7 @@ const AVATAR_KINDS: Record<string, { ext: string; magic: (b: Buffer) => boolean 
 };
 const AVATAR_MAX_BYTES = 256 * 1024;
 /** Every extension an owner's picture can have (factory_ui_data.ts reads these), so a new one replaces any other. */
+const AVATARS_DIR = ".claude/factory/avatars";
 const AVATAR_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
 
 /** A picture's extension and bytes from its data URL, or null when it isn't a picture the setup takes. */
@@ -541,6 +542,7 @@ async function reviewerOf(req: AddRequest): Promise<string> {
 function writeAnswers(req: AddRequest, step: AddStep, host: AddHost, reviewer: string): string {
   const file = join(req.path, ".claude", "factory.json");
   step.command = `write ${file}`;
+  refuseLinkedAvatars(req);
   let cfg: Obj = {};
   if (existsSync(file)) {
     const raw = readJson(file);
@@ -573,22 +575,42 @@ function writeAnswers(req: AddRequest, step: AddStep, host: AddHost, reviewer: s
 }
 
 /** The agents' pictures (#457) in .claude/factory/avatars/<name>.<ext>, readable by all (the UI's server reads them, and
- * they are committed); another picture the agent had is taken away, so this one is shown. The repo paths written. */
+ * they are committed); another picture the agent had is taken away, so this one is shown. The repo paths written. Each is
+ * written to a new temp file and renamed over the target, so a link the repo ships there is replaced, never followed. */
 function writeAvatars(req: AddRequest): string[] {
-  const dir = join(req.path, ".claude", "factory", "avatars");
+  const dir = join(req.path, AVATARS_DIR);
   const out: string[] = [];
   for (const [name, url] of Object.entries(req.avatars)) {
     const f = avatarFile(url);
     if (!f) continue; // checked when the request was read
     mkdirSync(dir, { recursive: true });
     const file = join(dir, `${name}.${f.ext}`);
-    writeFileSync(file, f.data);
-    chmodSync(file, 0o644);
+    const tmp = `${file}.${process.pid}.tmp`;
+    try {
+      writeFileSync(tmp, f.data, { flag: "wx", mode: 0o644 });
+      chmodSync(tmp, 0o644);
+      renameSync(tmp, file);
+    } finally {
+      rmSync(tmp, { force: true });
+    }
     // only once the new one is there, so a failed write leaves the old picture
     for (const ext of AVATAR_EXTS) if (ext !== f.ext) rmSync(join(dir, `${name}.${ext}`), { force: true });
-    out.push(`.claude/factory/avatars/${name}.${f.ext}`);
+    out.push(`${AVATARS_DIR}/${name}.${f.ext}`);
   }
   return out;
+}
+
+/** Refuses the pictures, before anything is written, when a folder on the way to the avatars folder (or that folder) is a
+ * link: the repo may be one just cloned, and writing through its link would change files outside it. */
+function refuseLinkedAvatars(req: AddRequest): void {
+  if (!Object.keys(req.avatars).length) return;
+  let at = req.path;
+  for (const part of AVATARS_DIR.split("/")) {
+    at = join(at, part);
+    if (!isLink(at)) continue;
+    throw new StepFailed(problem("ui_add_avatar_link", `${at} is a link, so the team's pictures can't be written there safely.`,
+      `Replace the link with a real folder (rm ${at} && mkdir -p ${join(req.path, AVATARS_DIR)}) and commit that, then press Retry.`), "");
+  }
 }
 
 /** The allow rules for the commands an agent runs unattended (#540): each check command, alone and through run-check. */
