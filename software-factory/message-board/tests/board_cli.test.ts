@@ -32,6 +32,8 @@ echo "$*" >>"$FAKE_LOG"
 case " $* " in *" up "*) [ "\${FAKE_COMPOSE_FAIL:-0}" = 1 ] && { echo "Error: port is already allocated" >&2; exit 1; } ;; esac
 case " $* " in *" pg_dump "*) echo "-- PostgreSQL database dump"; echo "CREATE TABLE tasks ();" ;; esac
 case " $* " in *" volume inspect "*) [ "\${FAKE_VOLUME:-0}" = 1 ] && exit 0; exit 1 ;; esac
+case " $* " in *" ps "*) [ "\${FAKE_RUNNING:-0}" = 1 ] && echo 0123abcd; exit 0 ;; esac
+case " $* " in *" psql "*) cat >"\$FAKE_LOG.psql"; [ "\${FAKE_PSQL_FAIL:-0}" = 1 ] && { echo "ERROR:  syntax error at or near \"oops\"" >&2; exit 3; }; exit 0 ;; esac
 exit 0
 `;
 const FAKE_TAILSCALE = `#!/usr/bin/env bash
@@ -76,7 +78,7 @@ const password = (url: string): string => decodeURIComponent(new URL(url).passwo
 test("help lists every verb", () => {
   const r = board(world(), ["help"]);
   expect(r.code).toBe(0);
-  for (const verb of ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "show <id>", "ready", "prime <actor>"]) {
+  for (const verb of ["up", "down", "status", "migrate", "backup", "sweep", "tasks", "show <number>", "ready", "prime <actor>", "restore <file> --yes"]) {
     expect(r.stdout).toContain(`factory board ${verb}`);
   }
 });
@@ -115,18 +117,18 @@ test("migrate, then tasks, ready, show, prime and sweep print what is on the boa
 
   const tasks = board(w, ["tasks"]);
   expect(tasks.code, tasks.stderr).toBe(0);
-  expect(tasks.stdout).toMatch(new RegExp(`#${a.id}\\s+in_progress\\s+haile\\s+Write the importer`));
-  expect(tasks.stdout).toMatch(new RegExp(`#${b.id}\\s+blocked\\s+Show the board in the web UI`));
+  expect(tasks.stdout).toMatch(new RegExp(`b${a.id}\\s+in_progress\\s+haile\\s+Write the importer`));
+  expect(tasks.stdout).toMatch(new RegExp(`b${b.id}\\s+blocked\\s+Show the board in the web UI`));
 
   const ready = board(w, ["ready"]);
   expect(ready.stdout).toContain("Nothing is ready");
 
-  const show = board(w, ["show", String(a.id)]);
+  const show = board(w, ["show", `b${a.id}`]);
   expect(show.code, show.stderr).toBe(0);
-  for (const s of ["Write the importer", "status    in_progress", "holder    haile", "From GitHub issues.", `blocks #${b.id}`, "Keep the issue number as the ref"]) {
+  for (const s of ["Write the importer", "status    in_progress", "holder    haile", "From GitHub issues.", `blocks b${b.id}`, "Keep the issue number as the ref"]) {
     expect(show.stdout).toContain(s);
   }
-  const json = JSON.parse(board(w, ["show", String(a.id), "--json"]).stdout) as { task: { id: number; holder: string } };
+  const json = JSON.parse(board(w, ["show", `b${a.id}`, "--json"]).stdout) as { task: { id: number; holder: string } };
   expect(json.task).toMatchObject({ id: a.id, holder: "haile" });
   expect(err(board(w, ["show", "999999"])).code).toBe("not-found");
   expect(err(board(w, ["show"])).code).toBe("bad-input");
@@ -134,15 +136,15 @@ test("migrate, then tasks, ready, show, prime and sweep print what is on the boa
   const prime = board(w, ["prime", "haile"]);
   expect(prime.code, prime.stderr).toBe(0);
   expect(prime.stdout).toContain("Holding");
-  expect(prime.stdout).toContain(`#${a.id}`);
+  expect(prime.stdout).toContain(`b${a.id}`);
   expect(prime.stdout).toContain("Keep the issue number as the ref");
 
   await Bun.sleep(1200);
   const sweep = board(w, ["sweep", "--quiet-minutes", "0"]);
   expect(sweep.code, sweep.stderr).toBe(0);
-  expect(sweep.stdout).toContain(`released #${a.id} (held by haile)`);
+  expect(sweep.stdout).toContain(`released b${a.id} (held by haile)`);
   expect(board(w, ["sweep"]).stdout).toContain("No stale claims");
-  expect(board(w, ["ready"]).stdout).toContain(`#${a.id}`);
+  expect(board(w, ["ready"]).stdout).toContain(`b${a.id}`);
 });
 
 test("status says the board answers, and never prints the password", () => {
@@ -288,10 +290,14 @@ test("backup runs pg_dump inside the container and writes a mode 600 file", () =
   expect(r.stdout).toContain(out);
   expect(readFileSync(out, "utf8")).toContain("PostgreSQL database dump");
   expect(mode(out)).toBe(0o600);
-  expect(dockerLog(w)).toMatch(/exec -T db pg_dump -U factory -d board/);
+  // no owner and no grants in the dump, so a restore has no role errors (#515)
+  expect(dockerLog(w)).toMatch(/exec -T db pg_dump -U factory -d board --no-owner --no-privileges\n/);
   const def = board(w, ["backup"]);
   expect(def.code, def.stderr).toBe(0);
   expect(def.stdout).toContain(join(w.dir, "backups"));
+  // the time in the name is UTC, and the name says so (#515)
+  expect(def.stdout).toMatch(/board-\d{8}-\d{6}-utc\.sql/);
+  expect(def.stdout).toContain("UTC");
 });
 
 test("a url file that others can read is fixed to mode 600 when read", () => {
@@ -338,5 +344,96 @@ test("ready leaves out tasks handed to someone else; --for <actor> shows that ac
   expect(board(w, ["ready"]).stdout).not.toContain("Handed to menelik");
   const mine = board(w, ["ready", "--for", "menelik"]);
   expect(mine.code, mine.stderr).toBe(0);
-  expect(mine.stdout).toMatch(new RegExp(`#${t.id}\\s+open\\s+menelik\\s+Handed to menelik`));
+  expect(mine.stdout).toMatch(new RegExp(`b${t.id}\\s+open\\s+menelik\\s+Handed to menelik`));
+});
+
+test("tasks, ready, show and prime name a task by its issue number (#7) or b<id>, and show takes 7, #7 or b<id> (#515)", async () => {
+  const fresh = await freshDatabase(server as Server);
+  try {
+    const url = fresh.url;
+    const w = world(url);
+    board(w, ["migrate"]);
+    const po = await Board.open(url, { as: "po" });
+    const epic = await po.create({ title: "The epic", kind: "epic", ref: "github:o/r#9" });
+    const seven = await po.create({ title: "Issue seven", ref: "github:o/r#7", parentId: epic.id, priority: 1 });
+    const filed = await po.create({ title: "Filed on the board", priority: 2 });
+    await po.link(seven.id, filed.id, "blocks");
+    await po.end();
+
+    const tasks = board(w, ["tasks", "--repo", "o/r"]);
+    expect(tasks.code, tasks.stderr).toBe(0);
+    expect(tasks.stdout).toMatch(/^#7\s+open\s+Issue seven$/m);
+    expect(tasks.stdout).toMatch(new RegExp(`^b${filed.id}\\s+blocked\\s+Filed on the board$`, "m"));
+    expect(tasks.stdout).not.toContain(`#${seven.id} `);
+    // the repo from GH_REPO, as the importer takes it
+    expect(board(w, ["ready"], { GH_REPO: "o/r" }).stdout).toMatch(/^#7\s+open/m);
+    for (const named of ["7", "#7"]) {
+      const show = board(w, ["show", named, "--repo", "o/r"]);
+      expect(show.code, show.stderr).toBe(0);
+      expect(show.stdout.split("\n")[0]).toBe("#7 Issue seven");
+      expect(show.stdout).toContain("parent    #9");
+      expect(show.stdout).toContain(`edge      blocks b${filed.id}`);
+    }
+    const filedShow = board(w, ["show", `b${filed.id}`, "--repo", "o/r"]);
+    expect(filedShow.stdout).toContain("blocked   by #7");
+    const json = JSON.parse(board(w, ["show", "7", "--json", "--repo", "o/r"]).stdout) as { task: { id: number; number: string } };
+    expect(json.task).toMatchObject({ id: seven.id, number: "#7" });
+    const list = JSON.parse(board(w, ["tasks", "--json", "--repo", "o/r"]).stdout) as { number: string }[];
+    expect(list.map((t) => t.number)).toEqual(["#7", "#9", `b${filed.id}`]);
+    const missing = board(w, ["show", "8", "--repo", "o/r"]);
+    expect(err(missing).code).toBe("not-found");
+    expect(err(missing).message).toContain("issue #8");
+    expect(err(board(w, ["show", "seven"])).code).toBe("bad-input");
+    expect(board(w, ["prime", "nobody", "--repo", "o/r"]).stdout).toMatch(/Blocked\n\s+b\d+\s+blocked\s+Filed on the board \(by #7\)/);
+  } finally {
+    await fresh.drop();
+  }
+});
+
+test("up on a stopped container says it started it; on a running one, that it is up to date (#515)", async () => {
+  const target = await boardDatabase();
+  try {
+    const w = world();
+    mkdirSync(w.dir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(w.dir, "password"), target.password + "\n", { mode: 0o600 });
+    const first = board(w, ["up", "--port", target.port]);
+    expect(first.code, first.stdout + first.stderr).toBe(0);
+    expect(first.stdout).toContain("Started the message board");
+    const stopped = board(w, ["up", "--port", target.port]); // nothing changed, and the container isn't running
+    expect(stopped.code, stopped.stdout + stopped.stderr).toBe(0);
+    expect(stopped.stdout).toContain("Started the message board");
+    expect(stopped.stdout).not.toContain("up to date (");
+    const running = board(w, ["up", "--port", target.port], { FAKE_RUNNING: "1" });
+    expect(running.code, running.stdout + running.stderr).toBe(0);
+    expect(running.stdout).toContain("The message board is up to date");
+  } finally {
+    await target.drop();
+  }
+});
+
+test("restore refuses without --yes, without a file or a board, and changes nothing; a failed restore says nothing changed (#515)", () => {
+  const w = world();
+  const file = join(w.root, "b.sql");
+  writeFileSync(file, "-- PostgreSQL database dump\n", { mode: 0o600 });
+  expect(err(board(w, ["restore", file, "--yes"])).code).toBe("no-board");
+  mkdirSync(w.dir, { recursive: true });
+  writeFileSync(join(w.dir, "compose.yaml"), "name: factory-message-board\n");
+  const noFile = board(w, ["restore", join(w.root, "nope.sql"), "--yes"]);
+  expect(err(noFile).code).toBe("no-file");
+  expect(err(board(w, ["restore"])).code).toBe("bad-input");
+  const ask = board(w, ["restore", file]);
+  expect(ask.code).toBe(1);
+  const e = err(ask);
+  expect(e.code).toBe("needs-yes");
+  expect(e.message).toContain("replaces everything on the board");
+  expect(e.fix).toContain(`factory board restore ${file} --yes`);
+  expect(e.fix).toContain("factory board backup");
+  expect(dockerLog(w)).not.toContain("psql");
+  const failed = board(w, ["restore", file, "--yes"], { FAKE_PSQL_FAIL: "1" });
+  expect(failed.code).toBe(1);
+  expect(err(failed).code).toBe("restore-failed");
+  expect(err(failed).message).toContain("oops");
+  expect(err(failed).fix).toContain("Nothing was changed");
+  expect(dockerLog(w)).toMatch(/exec -T db psql -U factory -d board .*--single-transaction/);
+  expect(readFileSync(`${w.env.FAKE_LOG}.psql`, "utf8")).toBe("-- PostgreSQL database dump\n");
 });

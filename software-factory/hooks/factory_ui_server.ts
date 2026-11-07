@@ -171,7 +171,7 @@ export function serve(o: ServeOptions): Running {
   // the tasks, pull requests and CI channels (#424): from the snapshot's cache, sent when they change
   const viewsSent = new Map<string, string>();
   const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
-    changed: (p) => pushViews(p), fellBack: (p, wasLive) => refresher.tasksNeeded(p, wasLive) });
+    changed: (p) => pushViews(p), fellBack: (p, wasLive) => refresher.tasksNeeded(p, wasLive), log: (line) => console.log(line) });
   const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
   void feed.start();
   function viewsMessage(p: UiProject): string {

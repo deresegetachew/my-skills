@@ -62,8 +62,9 @@ interface Place {
   states: Record<string, string>;
   /** Messages whose comment is being posted: a pass that died after posting one is found by its marker, not posted again. */
   pending: number[];
-  /** Task lines being posted, by board task id: the state they send, their marker's id and when (ISO); found the same way. */
-  lines: Record<string, PendingLine>;
+  /** Task lines being posted, by board task id, oldest first: the state each sends, its marker's id and when (ISO); found
+   * the same way. Each is kept until a line for the task is posted and saved, so none is posted twice (#515). */
+  lines: Record<string, PendingLine[]>;
 }
 
 interface PendingLine {
@@ -80,6 +81,8 @@ const ASK_ID = /<!--\s*factory-owner-ask\s+id=([\w.-]+)/g;
 const ANSWER_ID = /<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/;
 const ANY_MARKER = /<!--\s*(factory-[a-z][a-z-]*|pr-watch)\b/;
 const SINCE_MARGIN_MS = 10 * 60 * 1000;
+/** The most lines kept pending for one task (passes killed one after the other); the oldest go first. */
+const MOST_PENDING = 10;
 
 function placeOf(v: unknown): Place {
   const o = typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
@@ -90,7 +93,9 @@ function placeOf(v: unknown): Place {
   return { seq: typeof o.seq === "number" && Number.isInteger(o.seq) && o.seq >= 0 ? o.seq : 0,
     pending: Array.isArray(o.pending) ? o.pending.filter((x): x is number => typeof x === "number" && Number.isInteger(x)) : [],
     states: Object.fromEntries(Object.entries(states).filter((e): e is [string, string] => typeof e[1] === "string")),
-    lines: Object.fromEntries(Object.entries(lines).filter((e): e is [string, PendingLine] => isLine(e[1]))) };
+    // a place saved before #515 kept one line per task, not a list
+    lines: Object.fromEntries(Object.entries(lines).map(([k, x]): [string, PendingLine[]] => [k, (Array.isArray(x) ? x : [x]).filter(isLine)])
+      .filter((e) => e[1].length)) };
 }
 
 /** The state a task shows on GitHub: ready, in-progress, in-review, blocked (deferred) or done. */
@@ -125,7 +130,7 @@ class Run {
   private readonly prefix: string;
 
   constructor(private readonly board: Board, private readonly gh: Gh, private readonly o: MirrorOptions, private readonly map: GithubMapping,
-    private readonly states: Record<string, string>, private readonly lines: Record<string, PendingLine>, private readonly save: () => Promise<void>) {
+    private readonly states: Record<string, string>, private readonly lines: Record<string, PendingLine[]>, private readonly save: () => Promise<void>) {
     this.prefix = `github:${o.repo}#`;
     this.summary = { repo: o.repo, tasks: { mirrored: 0, unchanged: 0 }, messages: 0, answers: 0, calls: 0, cursor: 0 };
   }
@@ -182,28 +187,34 @@ class Run {
         ...(state === "done" ? { state_reason: t.outcome === "done" || !t.outcome ? "completed" : "not_planned" } : {}) });
     }
     const key = this.keyOf(t);
-    const was = this.lines[String(t.id)];
-    if (was && was.key === key && this.posted(path, was)) {
-      // a pass that died after posting this line and before saving its place: the line is there already
-      this.states[String(t.id)] = key;
-      delete this.lines[String(t.id)];
+    const id = String(t.id);
+    const was = this.lines[id] ?? [];
+    // Passes that died after recording a line, before saving their place (#513, #515): the last of their lines that is on
+    // the issue is what GitHub shows. When it is this state's, it is there already: not posted again. Lines recorded but
+    // never posted are skipped, so a state that comes back to the last posted one sends nothing, exactly once per state.
+    const shown = was.length ? this.lastPosted(path, was) : null;
+    if (shown?.key === key) {
+      this.states[id] = key;
+      delete this.lines[id];
       return;
     }
     let why = reason;
     if (state === "blocked" && !why) why = (await this.board.contextFor(t.id)).filter((c) => c.taskId === t.id && c.kind === "blocker").at(-1)?.body ?? null;
     const pending: PendingLine = { key, line: crypto.randomUUID().slice(0, 8), at: new Date().toISOString() };
-    this.lines[String(t.id)] = pending;
+    this.lines[id] = [...was, pending].slice(-MOST_PENDING);
     await this.save(); // recorded before the post, so a pass killed after it finds the line on the next run
     this.gh.send("POST", `${path}/comments`, { body: `<!-- ${MIRROR_MARK} v=1 task=${t.id} state=${state} line=${pending.line} -->\n${line(t, state, why)}` });
-    this.states[String(t.id)] = key;
-    delete this.lines[String(t.id)];
+    this.states[id] = key;
+    delete this.lines[id];
     this.summary.tasks.mirrored++;
   }
 
-  /** Whether the line `p` names is on issue `path` already (its comments since a little before it was recorded). */
-  private posted(path: string, p: PendingLine): boolean {
-    const since = new Date(Date.parse(p.at) - SINCE_MARGIN_MS).toISOString();
-    return pages<GhComment>(this.gh, `${path}/comments?per_page=100&since=${since}`, (c) => c.id).some((c) => (c.body ?? "").includes(` line=${p.line} -->`));
+  /** The last of the pending lines `ps` that is on issue `path` (one read: its comments since a little before the first
+   * was recorded), or null when none is. */
+  private lastPosted(path: string, ps: PendingLine[]): PendingLine | null {
+    const since = new Date(Math.min(...ps.map((p) => Date.parse(p.at))) - SINCE_MARGIN_MS).toISOString();
+    const bodies = pages<GhComment>(this.gh, `${path}/comments?per_page=100&since=${since}`, (c) => c.id).map((c) => c.body ?? "");
+    return [...ps].reverse().find((p) => bodies.some((b) => b.includes(` line=${p.line} -->`))) ?? null;
   }
 
   /** The first pass for a mirror's place: every task of the repo is taken as it is, and only an open issue whose labels

@@ -166,15 +166,18 @@ Check
                          on Postgres, in Docker on this machine (127.0.0.1 and the Tailscale address), then migrated
   board down [--purge]   stop it; --purge also removes its data
   board status           whether it answers, its schema and its task counts
-  board migrate|backup   apply the schema (safe to run twice) | a pg_dump, mode 600
+  board migrate|backup   apply the schema (safe to run twice) | a pg_dump, mode 600 (the time in its name is UTC)
+  board restore <file> --yes
+                         replace the board's data with a backup's, in one transaction, then migrate; machines join again
   board sweep [--quiet-minutes N] [--max-seconds N]
                          release the claims whose time is up and whose holder has been quiet for 30 minutes (N);
                          --max-seconds stops one that runs longer (the dev manager's loop runs it with 60 each pass)
   board tasks|ready [--json]
                          the tasks not done (--all: every one) | the ready queue, in claim order (--for <actor>:
                          with the tasks handed to that actor)
-  board show <id> [--json]
-                         one task: its fields, edges, context and thread
+  board show <number> [--json]
+                         one task: its fields, edges, context and thread. A task is #3 (or 3) for issue 3, b17 for one
+                         made on the board, in every board verb and board_* tool
   board prime <actor> [--json]
                          an actor's start: what it holds, what is ready, what is blocked, recent events
   board mcp --as <actor> [--session <id>] [--role owner|manager|builder]

@@ -114,7 +114,7 @@ fi
 # On exit: stop the claim's keeper, drop the local claims, and say this agent is down (on GitHub in issues mode, on the
 # message board with tasks.source board; a no-op otherwise).
 keeper=""
-trap 'keep_stop; fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1' EXIT
+trap 'type keep_stop >/dev/null 2>&1 && keep_stop; fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1' EXIT
 trap 'exit 130' INT TERM
 main=$(setting mainBranch main)
 if [ "$dir" != "$PWD" ]; then

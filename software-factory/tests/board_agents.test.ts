@@ -202,7 +202,7 @@ test("a builder quiet for longer than the claim time keeps its task while its se
   expect(gone).toBe(true); // the keeper stops with the session
   await Bun.sleep(5000); // the claim's time passes
   const freed = sweep(w);
-  expect(freed.stdout).toContain(`released #${t.id} (held by haile)`);
+  expect(freed.stdout).toContain("released #101 (held by haile)"); // the issue's number, not the board id (#515)
   expect(await task(w, t.id)).toMatchObject({ holder: null, status: "open" });
 }, 180_000);
 

@@ -152,7 +152,7 @@ export function TasksChannel(p: ViewProps) {
         {LANES.map(([s, name]) => <span key={s}><Dot tone={taskTone(s)} />{name} {all.filter((t) => t.state === s).length}</span>)}
       </div>}
       {mode === "list" && <p className="vnote">In the order the builders take them{v.tasks.next ? <>; the next one is <strong>#{v.tasks.next}</strong></> : "; none is ready to take"}.</p>}
-      {!all.length && !v.problems.length && <p className="empty">No open tasks.</p>}
+      {!all.length && !v.problems.length && v.tasks.from !== "unknown" && <p className="empty">No open tasks.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
       {rows.length > 0 && tab !== "list" && <Board tasks={rows} all={all} epics={epics} pulls={v.pulls.pulls} by={tab} project={p.project} open={p.open}
         post={p.post} say={p.say} token={v.tasks.from === "board" ? p.token : undefined} />}
@@ -252,7 +252,7 @@ export function EpicsChannel(p: ViewProps) {
         <button className="btn primary" onClick={() => setAdding(!adding)} aria-expanded={adding}>New epic</button>
       </div>
       {adding && <NewEpic token={p.token ?? ""} project={p.project.id} talkers={talkers} close={() => setAdding(false)} />}
-      {!all.length && !v.problems.length && <p className="empty">No epics. Tell the product owner what you want with New epic.</p>}
+      {!all.length && !v.problems.length && v.epics.from !== "unknown" && <p className="empty">No epics. Tell the product owner what you want with New epic.</p>}
       {all.length > 0 && !rows.length && <NoMatch typed={typed} />}
       {rows.length > 0 && tab === "board" && <EpicBoard epics={rows} open={setChosen} />}
       {rows.length > 0 && tab === "list" && <ul className="vcards" aria-label="Epics">{rows.map((e) => <EpicCard key={e.id} e={e} open={p.open} pick={setChosen} docs={p.docs} />)}</ul>}

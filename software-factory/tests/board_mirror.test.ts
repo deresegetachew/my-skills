@@ -512,6 +512,56 @@ test("a pass killed after posting a task's line and before saving its place: the
   expect(String(lines()[1]?.body)).toContain("Ready (on the board)");
 });
 
+test("a line recorded but not posted, then a state back where the last posted line left it: that line isn't posted twice (#515)", async () => {
+  const w = await world();
+  const t = await w.board.create({ title: "Add login", ref: ref(101) });
+  expect(mirror(w).code).toBe(0); // the first pass takes the board as it is
+  const haile = await w.as("haile");
+  const fake = (w.env.PATH as string).split(":")[0] as string;
+  const killer = join(w.d, "..", "killer");
+  // DIE_AFTER: the pass dies right after its line is posted; DIE_BEFORE: right before (its line recorded, not posted)
+  writeExe(join(killer, "gh"), `#!/usr/bin/env bash\nif [ -n "\$DIE_BEFORE" ] && [[ " \$* " == *" POST "* ]] && [[ "\$*" == */comments* ]]; then kill -9 \$PPID; exit 1; fi\n` +
+    `"${fake}/gh" "\$@"\nrc=\$?\nif [ -n "\$DIE_AFTER" ] && [[ " \$* " == *" POST "* ]] && [[ "\$*" == */comments* ]]; then kill -9 \$PPID; fi\nexit \$rc\n`);
+  const PATH = `${killer}:${w.env.PATH}`;
+  const lines = (): string[] => posted(w).filter((p) => p.kind === "comment" && p.issue === 101).map((p) => String(p.body));
+
+  let claim = await haile.claim(t.id);
+  expect(mirror(w, { PATH, DIE_AFTER: "1" }).code).not.toBe(0); // "haile is working on this" is posted, not saved
+  expect(lines()).toHaveLength(1);
+  await haile.release(t.id, claim?.token as string, { next: "review", reason: "ready for review" });
+  expect(mirror(w, { PATH, DIE_BEFORE: "1" }).code).not.toBe(0); // "In review" is recorded, never posted
+  expect(lines()).toHaveLength(1);
+  await w.board.move(t.id, { to: "ready", reason: "not yet" });
+  claim = await haile.claim(t.id); // back to what the last posted line says
+  const r = mirror(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect(lines()).toHaveLength(1);
+  expect(lines()[0]).toContain("**haile** is working on this");
+  expect(labelsOf(w, 101)).toEqual(["agent:haile", "bug", "factory:in-progress"]);
+  // and a later change sends its own line, once
+  await haile.release(t.id, claim?.token as string, { next: "ready", reason: "done for today" });
+  expect(mirror(w).code).toBe(0);
+  expect(mirror(w).code).toBe(0);
+  expect(lines()).toHaveLength(2);
+  expect(lines()[1]).toContain("Ready (on the board)");
+});
+
+test("an open issue without a factory label is imported as a note, and the mirror never labels it (#515)", async () => {
+  const w = await world({ tasks: { source: "board" } }, [issue(101, "Add login", ["factory:ready"]), issue(110, "Channel", [])]);
+  const imp = hook(w, "factory_board", ["import", "github"]);
+  expect(imp.code, imp.stderr + imp.stdout).toBe(0);
+  expect(await task(w, 110)).toMatchObject({ kind: "note", status: "open" });
+  expect((await w.board.ready()).map((x) => x.ref)).toEqual([ref(101)]);
+  const r = mirror(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect(labelsOf(w, 110)).toEqual([]);
+  // a move of the note on the board sends nothing either
+  await w.board.move((await task(w, 110)).id, { to: "in_review" });
+  expect(mirror(w).code).toBe(0);
+  expect(labelsOf(w, 110)).toEqual([]);
+  expect(posted(w).filter((p) => p.issue === 110)).toEqual([]);
+});
+
 // --- the owner queue read from the board (#513) --------------------------------------------------------------------------
 
 /** An owner-queue task on the board with an ask the owner answered (palette, with options) and one still open (deploy). */
