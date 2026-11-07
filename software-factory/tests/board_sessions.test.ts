@@ -160,8 +160,15 @@ test("the dev manager's and the product owner's rules allow the manager's board 
 
 // --- the skills ------------------------------------------------------------------------------------------------
 
+/** The skill's "When the board is on" section: in SKILL.md, or (next-task, whose core file has a line limit) in the
+ * board.md beside it that SKILL.md's table of files points to. */
 function boardSection(skill: string): string {
-  const text = read(join(KIT, ".claude", "skills", skill, "SKILL.md"));
+  const dir = join(KIT, ".claude", "skills", skill);
+  let text = read(join(dir, "SKILL.md"));
+  if (skill === "next-task") {
+    expect(text).toContain("| `board.md` |");
+    text = read(join(dir, "board.md")).replace(/^# /, "## ");
+  }
   const m = /^## When the board is on\n([\s\S]*?)(?=^## |(?![\s\S]))/m.exec(text);
   expect(m, `${skill} has a "When the board is on" section`).not.toBeNull();
   return (m as RegExpExecArray)[1] as string;

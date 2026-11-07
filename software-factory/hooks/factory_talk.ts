@@ -115,7 +115,7 @@ export function main(args: string[]): number {
   // the web UI waits 20 minutes for an answer (factory_ui_chat.ts): a session never runs past it, so none posts after
   const minutes = Math.min(Math.max(toFloat(process.env.FACTORY_CHAT_MINUTES) ?? MINUTES, 1), MAX_MINUTES);
   const env = { ...process.env, FACTORY_AGENT: name, FACTORY_ROLE: role, FACTORY_LOOP: "1" };
-  const p = run(["claude", ...sessionFlags(cfg, role), ...permissionFlags(cfg), "-p", prompt(role, name, text, history)],
+  const p = run(["claude", ...sessionFlags(cfg, role, name), ...permissionFlags(cfg), "-p", prompt(role, name, text, history)],
     { env, timeoutMs: minutes * 60_000 });
   const answer = p.stdout.trim().slice(0, ANSWER_MAX);
   if (p.code !== 0 || !answer) {

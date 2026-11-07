@@ -33,6 +33,18 @@ again, then:
 - *Owner items.* Items for the owner (a queued CI, a down or idle agent, the manager's own approved PR) are posted by the
   orchestrator. Do not repeat them; if your item needs the owner, post one `factory-owner-ask` with its own `id`.
 
+## When the board is on
+
+With `tasks.source` or `messaging.transport` set to `board`, your session has one MCP server, `board`, as a manager.
+Everything else here stays the same; the PR gate, reviews, CI and merges stay on GitHub. With the board off, use the
+commands below and nothing changes.
+
+- **Start** with `board_prime`, then `board_on_me` for the questions and asks addressed to you.
+- **Questions and answers:** read the thread with `board_thread`; answer with `board_post`, replying on that thread.
+- **What you decide** on a task (a must-fix's reason, a hold, a blocker) goes on it with `board_note`.
+- **Cards:** `board_move` (with a reason when it takes a claim back), `board_assign`, `board_link` and `board_unlink`,
+  only for what this skill already lets you do on your own; `board_create` for a review follow-up task.
+
 ## What you do on your own, and what you ask the owner first
 
 The rule (owner, 21 Oct 2026). Before acting, check which column the action is in. If it is on the right, do not do it:

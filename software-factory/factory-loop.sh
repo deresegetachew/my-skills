@@ -195,10 +195,11 @@ home="$(cd "$(git rev-parse --git-common-dir)/.." && pwd)"
 # Only the project's MCP servers: never the user's own claude.ai connectors or the servers in their settings, which
 # would put tool definitions nobody here needs into every turn (#55). The config is the .mcp.json main has on origin
 # (factory_mcp.ts), never this worktree's copy, since Claude starts those servers without asking. Set before each
-# run, since main may change it. --mcp-config takes several values, so another flag must follow it.
+# run, since main may change it. With the message board on (#501), only the board's server, as this agent in its
+# role. --mcp-config takes several values, so another flag must follow it.
 isolate() {
   local cfg
-  cfg="$(fh "$hooks/factory_mcp")" || cfg='{"mcpServers":{}}'
+  cfg="$(fh "$hooks/factory_mcp" --as "$agent" --role "$role")" || cfg='{"mcpServers":{}}'
   [ -n "$cfg" ] || cfg='{"mcpServers":{}}'
   if [ "$role" = coding-agent ]; then
     # The agents' rules (deny list, PR gate, hooks) as main has them on origin, never this worktree's copy (#258).
