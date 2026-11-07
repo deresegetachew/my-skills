@@ -12,7 +12,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "n
 import { join, relative } from "node:path";
 import { freshDb, migrateUpTo, olderBoard, type Pg, startPg } from "./board_pg.ts";
 import { doctor, lines, machine, project as doctorProject } from "./doctor_support.ts";
-import { commit, type Env, fac, world } from "./release_support.ts";
+import { buildRelease, commit, type Env, fac, world } from "./release_support.ts";
 import { SF, tmp } from "./support.ts";
 
 setDefaultTimeout(240_000);
@@ -208,6 +208,32 @@ test("on the hub, a board that refuses the board's own user stops the update wit
   expect(rc, out).toBe(0);
   expect(out).toContain(`message board: applied ${NEW}.`);
   expect(await applied(url)).toEqual(["001_init.sql", "002_import_refs.sql", OLD, NEW]);
+});
+
+test("from a local archive with --sums, the hub goes from 003 to 004; without --sums nothing of the archive is run", async () => {
+  const url = await database();
+  migrateUpTo(url, OLD);
+  const cfg = machineDir(url, true);
+  const [, d, base] = await world();
+  const env = onMachine(base, cfg);
+  const dist = buildRelease("1.1.0", NEW_BOARD());
+  const archive = join(dist, "software-factory-1.1.0.tar.gz");
+
+  let [rc, out] = await fac(d, env, "update", "--archive", archive);
+  expect(rc, out).toBe(0);
+  expect(out).toContain("message board: not migrated from a local archive");
+  expect(await applied(url)).toEqual(["001_init.sql", "002_import_refs.sql", OLD]);
+
+  commit(d);
+  [rc, out] = await fac(d, env, "update", "--archive", archive, "--sums", join(dist, "SHA256SUMS"));
+  expect(rc, out).toBe(0);
+  expect(out).toContain(`message board: applied ${NEW}.`);
+  expect(out).not.toContain("not migrated from a local archive");
+  expect(await applied(url)).toEqual(["001_init.sql", "002_import_refs.sql", OLD, NEW]);
+
+  [rc, out] = await fac(d, env, "update", "--archive", archive, "--sums", join(dist, "SHA256SUMS"));
+  expect(rc, out).toBe(0);
+  expect(out).toContain(`message board: the schema is up to date (${NEW}).`);
 });
 
 test("factory doctor says how many board migrations are pending, with the fix, and nothing once they are applied", async () => {

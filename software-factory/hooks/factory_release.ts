@@ -1618,8 +1618,14 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   say("This machine");
   if (local) { // a file nobody published: its own scripts are not run on this machine
     say("  runner services: not refreshed from a local archive. If they are installed here, run `factory ci install` yourself.");
-    if (isFile(join(root, ".claude", "message-board", "bin.ts"))) {
-      say("  message board: not migrated from a local archive. If this machine runs the board, run `factory board migrate` yourself.");
+    // the board's schema is the exception (#570): a local archive is how a machine off the network (the sandbox) is
+    // updated, and a board left behind its code reads its rules the old way. With --sums named, localArchive() has
+    // checked the archive against it (a mismatch installs nothing), so the release's own migrate runs, as online.
+    if (args.sums) {
+      for (const line of refreshBoard(root)) say("  " + line);
+    } else if (isFile(join(root, ".claude", "message-board", "bin.ts"))) {
+      say("  message board: not migrated from a local archive. If this machine runs the board, run `factory board migrate` yourself " +
+        "(or update again with `--sums SHA256SUMS`).");
     }
   } else {
     for (const line of refreshServices(root)) say("  " + line);
