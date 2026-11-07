@@ -20,6 +20,11 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | Command | In the UI | Where | Task |
 |---|---|---|---|
 | `ui` | terminal only | Starts the web UI itself | |
+| `ui sessions ls` | terminal only | The sign-in sessions, read on the hub machine; a person locked out of the page still reaches it there | #542 |
+| `ui sessions revoke` | terminal only | Ends a sign-in session from the hub machine, also when the browser that holds it is lost | #542 |
+| `ui mail set` | terminal only | Takes the mail key or password, which never goes through a page | #542 |
+| `ui mail show` | terminal only | The mail settings, read on the hub machine, with no secret shown | #542 |
+| `ui mail test` | terminal only | Sends a test mail, before anyone can sign in with a code | #542 |
 | `install-shim` | terminal only | Puts `factory` on the PATH, before there is a UI to open; Welcome (Welcome.dc.html) says how | #457 |
 | `doctor` | built | Health (Health.dc.html): each check grouped, with its fix, and Check again (`factory doctor --json`); Machine check (MachineCheck.dc.html) is #457 | #455 |
 | `bootstrap machine` | terminal only | Needs sudo; Machine check (MachineCheck.dc.html) shows the one admin step to type | #457 |

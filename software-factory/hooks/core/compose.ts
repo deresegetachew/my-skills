@@ -27,8 +27,11 @@ import { BoardTaskTracker } from "./adapters/board/task_tracker.ts";
 import { ClaimTokens } from "./adapters/board/tokens.ts";
 import { PlanTaskTracker } from "./adapters/plan/task_tracker.ts";
 import { RoutedMessaging } from "./adapters/routed/messaging.ts";
+import { type HttpMail, HttpNotifier } from "./adapters/mail/http.ts";
+import { SmtpNotifier, type SmtpMail } from "./adapters/mail/smtp.ts";
 import { CoreError } from "./domain/error.ts";
 import type { AgentRoster } from "./ports/agents.ts";
+import type { Notifier } from "./ports/notifications.ts";
 import type { Leases, Messaging, PrFeed, Wakes } from "./ports/messaging.ts";
 import type { TaskTracker } from "./ports/task_tracker.ts";
 
@@ -229,3 +232,17 @@ function checkedBoardBus(): { port: (Leases & Wakes & PrFeed) | null; error: Cor
 export function boardInfo(): { server: string; migrations: string[]; pending?: string[]; counts: Record<string, number> | null } {
   return boardChild().one("factory", "info") as { server: string; migrations: string[]; pending?: string[]; counts: Record<string, number> | null };
 }
+
+// --- notifications (#542) ------------------------------------------------------------------------------------------
+
+/** The mail sender `m` names: an HTTP mail API through fetch, or SMTP over TLS. */
+export type MailSender = ({ kind: "http" } & HttpMail) | ({ kind: "smtp" } & SmtpMail);
+
+/** The Notifications port for `m` (factory_ui_mail.ts reads `m` from this machine's settings folder). */
+export function notifierFor(m: MailSender): Notifier {
+  return m.kind === "http" ? new HttpNotifier(m) : new SmtpNotifier(m);
+}
+
+/** What the mail adapters need checked before settings are saved, said without the secret. */
+export { PRESETS as MAIL_PRESETS, problemOf as httpMailProblem } from "./adapters/mail/http.ts";
+export { problemOf as smtpMailProblem } from "./adapters/mail/smtp.ts";

@@ -1,0 +1,1 @@
+../../../../../software-factory/hooks/core/adapters/mail/smtp.ts

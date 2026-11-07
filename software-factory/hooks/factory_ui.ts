@@ -6,8 +6,10 @@
 // It listens on 127.0.0.1 only, at `ui.port` (4747; `--port` wins, 0 picks a free one). `--host` adds this machine's
 // Tailscale address (`tailscale ip -4`), so the owner's other devices on the tailnet reach it, and nothing else does.
 // A token is required on every API call and the WebSocket: it is kept in .git/factory/ui-token (mode 600, made the first
-// time, the same at each start so an open page keeps working) and printed with the address. The owner's: an agent
-// session is refused. Errors are one JSON line {code, message, fix} on stderr.
+// time, the same at each start so an open page keeps working) and printed with the address. Besides the token, an
+// allowed address can sign in on the page with a code sent by email (#542, factory_ui_auth.ts): `factory ui sessions`
+// lists and revokes those sessions, and `factory ui mail` sets the mail sender (factory_ui_mail.ts). The owner's: an
+// agent session is refused, for these too. Errors are one JSON line {code, message, fix} on stderr.
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -15,13 +17,19 @@ import { type Config, load, toFloat } from "./factory_config.ts";
 import { FactoryError, pyDumps, run, runMain, which } from "./factory_lib.ts";
 import { appMissing, appScript, findApp } from "./factory_ui_build.ts";
 import { projects, uiSetting } from "./factory_ui_data.ts";
+import { sessionsCli } from "./factory_ui_auth.ts";
+import { mailCli, notifier } from "./factory_ui_mail.ts";
 import { serve } from "./factory_ui_server.ts";
 
 const USAGE = `usage: factory ui [--port N] [--host]
+       factory ui sessions ls|revoke <id|all>
+       factory ui mail set|show|test
 
   The factory's web UI on this machine: each project with its agents and views, live.
   --port N   listen on port N (default ui.port, 4747; 0 picks a free one)
-  --host     also listen on this machine's Tailscale address (tailscale ip -4)`;
+  --host     also listen on this machine's Tailscale address (tailscale ip -4)
+  sessions   the sign-in sessions made by a code sent by email (factory ui sessions --help)
+  mail       the mail sender for those codes, kept on this machine only (factory ui mail --help)`;
 
 const DEFAULT_PORT = 4747;
 const DEFAULT_POLL = 5;
@@ -113,16 +121,19 @@ function link(host: string, port: number, t: string): string {
 }
 
 async function main(argv: string[]): Promise<number> {
-  if (argv.includes("-h") || argv.includes("--help")) {
+  const sub = argv[0] === "sessions" || argv[0] === "mail" ? argv[0] : null;
+  if (!sub && (argv.includes("-h") || argv.includes("--help"))) {
     console.log(USAGE);
     return 0;
   }
-  const args = parse(argv);
-  if (typeof args === "string") return usage(args);
   if (process.env.FACTORY_AGENT || process.env.FACTORY_LOOP) {
     fail("owner_only", `factory ui is the owner's; ${process.env.FACTORY_AGENT || "this session"} is a factory session.`,
       "Leave it to the owner: they run `factory ui` in their own terminal.");
   }
+  if (sub === "sessions") return sessionsCli(argv.slice(1), (r) => fail(r.code, r.message, r.fix));
+  if (sub === "mail") return mailCli(argv.slice(1));
+  const args = parse(argv);
+  if (typeof args === "string") return usage(args);
   const root = top();
   const cfg = load();
   const hosts = ["127.0.0.1"];
@@ -136,7 +147,7 @@ async function main(argv: string[]): Promise<number> {
   const port = args.port ?? intSetting(cfg, "port", DEFAULT_PORT);
   let server: ReturnType<typeof serve>;
   try {
-    server = serve({ hosts, port, token: t, pollSeconds: Math.max(intSetting(cfg, "pollSeconds", DEFAULT_POLL), 1), projects: list, app: new TextDecoder().decode(script) });
+    server = serve({ hosts, port, token: t, pollSeconds: Math.max(intSetting(cfg, "pollSeconds", DEFAULT_POLL), 1), projects: list, app: new TextDecoder().decode(script), mail: notifier });
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
     if (/EADDRINUSE|in use/i.test(why)) {

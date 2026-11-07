@@ -44,11 +44,15 @@
 // out, so they aren't read from GitHub. A board that can't be read gives a notice and that project falls back to GitHub.
 //
 // The token goes in `Authorization: Bearer <token>` (or, for the WebSocket, which a browser can't give headers, in
-// ?token=). Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
+// ?token=). A browser signed in with a code sent by email (#542, factory_ui_auth.ts: GET /api/auth, POST /api/auth/code,
+// .../verify, .../signout, which need neither) has a session cookie instead, good for the API and the WebSocket from
+// the UI's own page only. Every refusal is {code, message, fix}. While a page is connected the server reads every project again each
 // `ui.pollSeconds` and pushes what changed; with no page open it reads nothing.
 import { timingSafeEqual } from "node:crypto";
 import type { Server, ServerWebSocket } from "bun";
+import type { Notifier } from "./core/ports/notifications.ts";
 import { AddRuns } from "./factory_ui_add.ts";
+import { type Answer, FOREIGN, foreign, readSessions, SignIn } from "./factory_ui_auth.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, refreshConfig, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { artifactsApi } from "./factory_ui_artifacts.ts";
@@ -70,6 +74,8 @@ export interface ServeOptions {
   app: string;
   /** The message board's URL (#498); left out, this machine's (MB_URL, else the settings folder's url file), or none. */
   boardUrl?: string | null;
+  /** The mail sender for sign-in codes (#542), asked each time; left out or null: sign-in is by token only. */
+  mail?: () => Notifier | null;
 }
 
 export interface Running {
@@ -78,6 +84,11 @@ export interface Running {
 }
 
 const TOPIC = "live";
+
+/** What a WebSocket carries: the id of the session it was opened with (#542), or null for the token. */
+interface Sock {
+  session: string | null;
+}
 
 /** The views' channels (#424) and the part of factory_ui_views.ts's Views each one is. */
 const VIEW_PARTS: Record<string, "tasks" | "epics" | "pulls" | "ci"> = { tasks: "tasks", epics: "epics", "pull-requests": "pulls", ci: "ci" };
@@ -109,13 +120,17 @@ const HEADERS = {
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };
 
-function json(status: number, body: unknown): Response {
+function json(status: number, body: unknown, more: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), { status, headers: { ...HEADERS, "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store" } });
+    "cache-control": "no-store", ...more } });
 }
 
 function problem(status: number, code: string, message: string, fix: string): Response {
   return json(status, { code, message, fix } satisfies Problem);
+}
+
+function answer(a: Answer): Response {
+  return json(a.status, a.body, a.headers);
 }
 
 const TOKEN_FIX = "Open the address `factory ui` printed (it ends in ?token=...), or read the token from .git/factory/ui-token.";
@@ -145,9 +160,10 @@ export function serve(o: ServeOptions): Running {
   const byId = new Map(list.map((p) => [p.id, p]));
   const kept = new Map<string, Kept>();
   const reading = new Map<string, Promise<Kept>>();
-  const servers: Server<undefined>[] = [];
+  const servers: Server<Sock>[] = [];
   let clients = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let signIn: SignIn | undefined; // made once the port is known: the cookie is named for it (#542)
   const chat = new ChatHub({ pollSeconds: o.pollSeconds, publish: (m) => {
     const text = JSON.stringify(m);
     for (const s of servers) s.publish(TOPIC, text);
@@ -173,6 +189,7 @@ export function serve(o: ServeOptions): Running {
   }
 
   async function tick(): Promise<void> {
+    dropEndedSessions();
     for (const p of list) {
       const before = kept.get(p.id)?.text;
       const now = await state(p, 0);
@@ -183,6 +200,16 @@ export function serve(o: ServeOptions): Running {
       pushActivity(p);
       await chat.tick(p);
     }
+  }
+
+  // a WebSocket opened with a session (#542) closes once that session is revoked, signed out or expired: the sessions
+  // file is read once per tick, and every socket whose session is gone gets close code 4401
+  const sockets = new Set<ServerWebSocket<Sock>>();
+  function dropEndedSessions(): void {
+    const withSession = [...sockets].filter((ws) => ws.data.session !== null);
+    if (!withSession.length) return;
+    const live = new Set(readSessions().map((s) => s.id));
+    for (const ws of withSession) if (!live.has(ws.data.session as string)) ws.close(4401, "session ended");
   }
 
   // the tasks, pull requests and CI channels (#424): from the snapshot's cache, sent when they change
@@ -248,12 +275,23 @@ export function serve(o: ServeOptions): Running {
     return kept.get(p.id)?.data.agents ?? [];
   }
 
-  async function api(req: Request, url: URL, server: Server<undefined>): Promise<Response | undefined> {
-    const refused = refuseToken(req, url, o.token);
-    if (refused) return refused;
+  async function api(req: Request, url: URL, server: Server<Sock>): Promise<Response | undefined> {
+    // signing in with a code sent by email (#542): its own answers, then the session's cookie, else the token
+    const si = signIn as SignIn; // set before the first request can come
+    const asked = await si.api(req, url, server.requestIP(req)?.address ?? "");
+    if (asked) return answer(asked);
+    const session = si.session(req);
+    if (session && foreign(req)) return answer(FOREIGN); // the cookie never opens the API to another page
+    if (!session) {
+      const refused = refuseToken(req, url, o.token);
+      if (refused && si.hasCookie(req) && !req.headers.get("authorization") && !url.searchParams.get("token")) {
+        return problem(401, "ui_session_ended", "This browser's sign-in has ended (it ran out or was revoked).", "Sign in again on the page.");
+      }
+      if (refused) return refused;
+    }
     const parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent).slice(1); // after "api"
     if (parts.length === 1 && parts[0] === "ws") {
-      if (server.upgrade(req, { data: undefined })) return undefined;
+      if (server.upgrade(req, { data: { session: session?.id ?? null } })) return undefined;
       return problem(400, "ui_ws_upgrade", "This address is a WebSocket.", "Connect to it with a WebSocket client.");
     }
     if (parts[0] === "add-project") {
@@ -418,7 +456,7 @@ export function serve(o: ServeOptions): Running {
     return problem(404, "not_found", `There is no ${url.pathname}.`, "The API is under /api/projects; see factory_ui_server.ts.");
   }
 
-  async function fetch(req: Request, server: Server<undefined>): Promise<Response | undefined> {
+  async function fetch(req: Request, server: Server<Sock>): Promise<Response | undefined> {
     const url = new URL(req.url);
     if (url.pathname.startsWith("/api/") || url.pathname === "/api") return api(req, url, server);
     if (req.method !== "GET" && req.method !== "HEAD") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
@@ -433,8 +471,9 @@ export function serve(o: ServeOptions): Running {
   }
 
   const websocket = {
-    async open(ws: ServerWebSocket<undefined>): Promise<void> {
+    async open(ws: ServerWebSocket<Sock>): Promise<void> {
       clients++;
+      sockets.add(ws);
       ws.subscribe(TOPIC);
       ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: list.map((p) => p.id) }));
       if (!timer) timer = setInterval(() => void tick(), o.pollSeconds * 1000);
@@ -450,7 +489,8 @@ export function serve(o: ServeOptions): Running {
     message(): void {
       // the page only listens; what it does goes through the API
     },
-    close(): void {
+    close(ws: ServerWebSocket<Sock>): void {
+      sockets.delete(ws);
       clients = Math.max(clients - 1, 0);
       if (!clients && timer) {
         clearInterval(timer);
@@ -461,9 +501,10 @@ export function serve(o: ServeOptions): Running {
 
   let port = o.port;
   for (const hostname of o.hosts) {
-    const s = Bun.serve<undefined>({ hostname, port, fetch, websocket, idleTimeout: 60 });
+    const s = Bun.serve<Sock>({ hostname, port, fetch, websocket, idleTimeout: 60 });
     port = s.port ?? port;
     servers.push(s);
+    if (!signIn) signIn = new SignIn({ port, notifier: () => o.mail?.() ?? null, log: (line) => console.log(line) });
   }
   return {
     port,
