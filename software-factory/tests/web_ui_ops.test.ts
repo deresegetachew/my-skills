@@ -411,3 +411,16 @@ test("the new pages need the token and refuse what they don't do, as {code, mess
   }
   expect((await api(ui, "/api/projects/work/health/nothing")).status).toBe(404);
 }, T);
+
+test("home: the team lists every role the settings name; one with no live row shows as down (#609)", async () => {
+  const p = workProject();
+  heartbeat(p, [hbRow("menelik", { state: "working", detail: "working on #7", task: "7" }), hbRow("fasil", { kind: "dev-manager" })]);
+  const ui = await started(p);
+  const r = await api(ui, "/api/projects/work/home");
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const team = r.json.team as Row[];
+  expect(team.map((a) => a.name).sort()).toEqual(["fasil", "menelik", "mentewab", "taytu"]);
+  expect(team.find((a) => a.name === "taytu")).toMatchObject({ role: "coding-agent", state: "down", link: "agent:taytu" });
+  expect(team.find((a) => a.name === "mentewab")).toMatchObject({ role: "product-owner", state: "down" });
+  expect(team.find((a) => a.name === "menelik")).toMatchObject({ state: "working", task: "7" });
+}, T);
