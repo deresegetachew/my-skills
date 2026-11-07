@@ -32,11 +32,11 @@ test("the repo has a claude md that names the commands that check it", () => {
   expect(isFile(join(REPO, "tools", "run_tests.ts")) && isFile(join(REPO, "tools", "check_skills.ts"))).toBe(true);
 });
 
-test("the factory settings of this repo are valid and take tasks from issues", () => {
+test("the factory settings of this repo are valid and take tasks from the message board (phase B, decision 0007)", () => {
   const p = runBun(join(HOOKS, "factory_settings.ts"), ["validate"], { cwd: REPO, env: { ...process.env, CLAUDE_PROJECT_DIR: REPO } });
   expect(p.code === 0 && p.stdout.includes("valid"), p.out).toBe(true);
   const cfg = config();
-  expect(cfg.tasks.source).toBe("issues");
+  expect(cfg.tasks.source).toBe("board");
   expect(cfg.commands.test).toBe("bun tools/run_tests.ts");
 });
 
