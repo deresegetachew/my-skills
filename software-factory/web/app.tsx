@@ -29,6 +29,7 @@ import { ConfirmDialog, ListRow, PARTS_CSS, StatusDot, Tabs } from "./parts.tsx"
 import { type AgentFacts, type ConfirmSpec, startAgentAsk, stopAgentAsk, talkTargets } from "./parts_model.ts";
 import { MaintenancePage, ReleasesPage, SETTINGS_CSS, SettingsPage } from "./settings.tsx";
 import { SIGNOFF_CSS, SignoffPage } from "./signoff.tsx";
+import { TEAM_CSS, TeamPage } from "./team.tsx";
 import { PR_CSS, PrPage } from "./pr.tsx";
 import { CSS } from "./style.ts";
 import { THEME_CSS } from "./theme.ts";
@@ -780,12 +781,15 @@ function App() {
   const agentChannels = view.channels.filter((c) => c.kind === "agent");
   const attention = attentionBy[project.id];
   const marks = stuckMarks(attention ?? []);
-  const startAgent = (name: string): void => { // Needs attention's Start (#579): the same confirm as the agent's page
+  // Start or Stop from Needs attention (#579) or the Team page (#581): the same confirm as the agent's page
+  const askAgent = (verb: "start" | "stop", name: string, atOnce: AgentFacts["atOnce"] = null): void => {
     const a = agentOf(name);
     const role = view.channels.find((c) => c.kind === "agent" && c.name === name)?.role ?? a?.role ?? "coding-agent";
-    setAsk({ verb: "start", project: project.id, agent: name, role, spec: startAgentAsk({ name, here: a?.here ?? false, state: a?.state ?? "down",
-      machineName: a?.machineName ?? a?.machine ?? null, task: a?.task ?? null }) });
+    const facts: AgentFacts = { name, here: a?.here ?? false, state: a?.state ?? "down", machineName: a?.machineName ?? a?.machine ?? null,
+      task: a?.task ?? null, sub: a?.parent ? { parent: a.parent, item: a.item ?? "", stoppable: a.stoppable === true } : null, atOnce };
+    setAsk({ verb, project: project.id, agent: name, role, spec: verb === "start" ? startAgentAsk(facts) : stopAgentAsk(facts) });
   };
+  const startAgent = (name: string): void => askAgent("start", name);
   const nav = sidebar({
     page,
     team: agentChannels.map((c) => {
@@ -919,7 +923,9 @@ function App() {
               <h1>{channel?.kind === "agent" && <Avatar name={channel.name} role={channel.role} size={40} />}{head.title}</h1>
               {head.purpose && <p>{head.purpose}</p>}
             </div>
-            {!docRoute && channel?.kind === "agent" && live && !project.problem && <div className="page-actions">{agentActions(agent, channel, project, setAsk)}</div>}
+            {!docRoute && channel?.kind === "agent" && live && !project.problem && <div className="page-actions">
+              <button className="btn plain" title="Rename, remove or move it, on the Team page" onClick={() => go(project.id, channelOf("team"))}>Team</button>
+              {agentActions(agent, channel, project, setAsk)}</div>}
           </header>
         )}
         {project.problem ? <div className="body"><ProblemNotice p={project.problem} /></div>
@@ -936,6 +942,8 @@ function App() {
           : ownHead && OpsPage ? <OpsPage key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} pulse={pulseBy[project.id] ?? 0}
             attention={attention} startAgent={startAgent}
             open={(c, f) => go(project.id, addressOf(c), f)} onMenu={() => setMenu(true)} />
+          : !channel && page === "team" ? <TeamPage key={`${project.id}/team`} project={project} get={get} post={post} say={setToast}
+            open={(c) => go(project.id, c)} agents={live?.agents ?? []} machines={live?.machines ?? []} askAgent={askAgent} />
           : !channel && SETTINGS_PAGES[page] ? (() => {
             const Page = SETTINGS_PAGES[page] as typeof SettingsPage;
             return <Page key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} open={(c) => go(project.id, c)}
@@ -963,6 +971,6 @@ function App() {
 
 const style = document.createElement("style");
 style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS
-  + OPS_CSS;
+  + OPS_CSS + TEAM_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

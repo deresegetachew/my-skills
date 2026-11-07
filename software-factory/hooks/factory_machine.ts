@@ -12,7 +12,10 @@
 //                     `factory autostart` needs (#88): "autostart" (true/false), "autostartAgents" (names; default:
 //                     the names above) and "autostartReport" (false: no boot report on the agent's issue), and
 //                     "remoteControl" (false: sessions start without Remote Control; FACTORY_REMOTE_CONTROL wins).
-//                     `factory settings --local` shows and changes all of them.
+//                     `factory settings --local` shows and changes all of them, and "maxCodingAgents" (how many coding
+//                     agents `factory owner start` lets run here at once, #581). "teamPending" ({join, leave}: names) is
+//                     what the web UI's Team page chose for this machine before the change was merged; its next read
+//                     applies it to "agents" once this checkout has the change (factory_ui_settings.ts).
 //   <repo>.env        KEY=value lines `factory resume` loads for the agents it starts at boot (SOPS_AGE_KEY_FILE ...).
 //
 //   bun --no-env-file --config=/dev/null .claude/hooks/factory_machine.ts id                     print this machine's id

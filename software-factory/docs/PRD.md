@@ -658,6 +658,11 @@ What is planned:
   proposed as one pull request the owner merges, this machine's settings saved at once (which agents run here, and only
   whether a message board is set), the version and Update, and the clean-ups (`clean`, `ci clean`, `reset-run`), each
   saying what it will and won't touch. Integrations is #441; Roll back and the release notes are not on the page yet.*
+  As the owner, I change the team in one place: a Team page lists every role with where it runs, its state and task,
+  and Start or Stop; I add an agent (a free name and a machine), remove or rename one (refused while it runs or holds a
+  task, with "Release its work first"), and set how many coding agents run at once on this machine, each asked first
+  and staged into the settings pull request. *Built (#581): adding, removing and renaming moved here from Factory
+  settings; a rename keeps the old name in `formerNames` and on its history; `maxCodingAgents` is this machine's.*
 - **US-37.** As the owner, an Integrations tab lists what the factory connects to and what each agent may use, and a
   change to what governs an agent is proposed as a pull request I merge. *Proposal (#441).*
 - **US-38.** As the owner, a task, a pull request and an agent each have a page of their own, and search covers

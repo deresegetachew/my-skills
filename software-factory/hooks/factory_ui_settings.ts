@@ -11,10 +11,26 @@
 //   POST /api/projects/:p/settings/pr {confirm}    `factory settings pr --ready`: the staged changes as one pull request
 //   POST /api/projects/:p/settings/machine {key, value | unset: true}
 //                                                  `factory settings --local set|unset ...`: saved at once, never staged
-//   POST /api/projects/:p/settings/team {name}     add a coding agent: stages `agents` with the name at the end
+//   POST /api/projects/:p/settings/team {name, machine?}
+//                                                  add a coding agent: stages `agents` with the name at the end. machine
+//                                                  "here" (#581): when this machine runs its own list of agents, the name
+//                                                  waits in this machine's file (teamPending) and joins that list once the
+//                                                  change is merged and on this checkout; another machine or "later":
+//                                                  nothing is written here
 //   POST /api/projects/:p/settings/team/:name/remove {confirm}
 //                                                  stages `agents` (or the role's names) without it; refused while it
-//                                                  runs (409 ui_agent_running) or holds a task (409 ui_agent_holds_task)
+//                                                  runs (409 ui_agent_running) or holds a task (409 ui_agent_holds_task,
+//                                                  "Release its work first"). One this machine runs leaves its list once
+//                                                  the change is merged (teamPending)
+//   POST /api/projects/:p/settings/team/:name/rename {to, confirm}
+//                                                  (#581) refused as remove is; stages the role's names with the new name
+//                                                  in the old one's place and `formerNames` with the old one, and moves it
+//                                                  on this machine once merged (teamPending). Its pull requests, branches,
+//                                                  messages and finished tasks keep the old name
+//
+// What this machine runs is its own file, never staged: a name in it that the project doesn't have stops the loops
+// there, so a choice made before the change is merged waits in teamPending ({join, leave}) and the read below applies
+// it once this checkout has the change (a join once the name is in the project, a leave once it is gone).
 //   GET  /api/projects/:p/settings/release         `factory version --json`: what runs here, the newest, a running update
 //   POST /api/projects/:p/settings/update {confirm} starts `factory update` (202); the release read says how it went
 //   GET  /api/projects/:p/settings/checkout        this machine's checkout against main on GitHub (fetched first): its
@@ -39,6 +55,8 @@ import { MACHINE, parse, type Setting, SettingError, SETTINGS } from "./factory_
 /** The settings shown first, under "The main ones". */
 export const MAIN_KEYS = ["mainBranch", "commands.test", "commands.lint", "tasks.source", "protected", "tasks.staleHours", "manager.claimMinutes"];
 const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
+/** Where a new agent runs: this machine, another by its name (as `factory machine add` names one), or chosen later. */
+const MACHINE_CHOICE = /^(here|later|[a-z][a-z0-9-]{0,39})$/;
 const ROLES = ["dev-manager", "product-owner"];
 const READ_MS = 60_000;
 const ACTION_MS = 120_000;
@@ -56,10 +74,20 @@ interface Team {
   agents: { name: string; role: string }[];
   /** The names once the staged changes are in (what an add or a remove builds on). */
   next: Record<string, string[]>;
+  /** formerNames once the staged changes are in (#581). */
+  former: Record<string, string[]>;
+}
+
+/** A choice of what this machine runs, made before the change is merged (#581). */
+interface Pending {
+  join: string[];
+  leave: string[];
 }
 
 interface Read {
   team: Team;
+  machine: { agents: string[]; from: string; pending: Pending; board: boolean; rows: Obj[] };
+  staged: { changes: Array<{ key: string; [k: string]: unknown }>; problem: string | null };
   problems: Obj[];
   [k: string]: unknown;
 }
@@ -170,27 +198,108 @@ function everyone(team: Team): string[] {
   return [...new Set([...team.agents.map((a) => a.name), ...Object.values(team.next).flat()])];
 }
 
+function badName(name: string): ActionResult | null {
+  if (AGENT_NAME.test(name)) return null;
+  return problem(400, "ui_bad_agent_name", `${name ? `"${name.slice(0, 50)}"` : "An empty name"} isn't a valid agent name.`,
+    "Use lowercase letters, digits and dashes, starting with a letter or digit, at most 40 characters; or pick a free name.");
+}
+
+function roleKey(role: string): string {
+  return role === "coding-agent" ? "agents" : `roles.${role}.names`;
+}
+
+/** This machine runs a list of its own (its file, not FACTORY_AGENTS, not every agent). */
+function ownList(read: Read): string[] | null {
+  return read.machine.from === "machine" ? read.machine.agents : null;
+}
+
+/** Changes what waits in this machine's file (teamPending, #581): names to join or leave its list once merged, or
+ * names dropped from both. Run as this file in the project's folder, so the machine file is the project's. */
+async function pending(p: UiProject, change: { join?: string[]; leave?: string[]; drop?: string[] }): Promise<ActionResult | null> {
+  const r = await spawn([process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_ui_settings.ts"), "pending",
+    JSON.stringify(change)], p.path, envFor(p), READ_MS);
+  if (r.code === 0) return null;
+  const last = (r.stderr.trim() || r.stdout.trim()).split("\n").at(-1) ?? "";
+  return problem(500, "ui_machine_unsaved", `What this machine runs couldn't be saved (${last.slice(0, 200) || `exit ${r.code}`}); nothing was staged.`,
+    "Check that this machine's settings folder can be written, then try again.");
+}
+
+interface Stage {
+  key: string;
+  value: unknown;
+  /** What was staged for the key before, to put back; undefined when nothing was. */
+  before: unknown;
+}
+
+/** Stages each change in turn; when one fails, the ones before it are put back as they were, so nothing is half done. */
+async function stageAll(p: UiProject, steps: Stage[]): Promise<ActionResult> {
+  let last: ActionResult = { status: 200, body: { ok: true, output: "" } };
+  for (const [i, s] of steps.entries()) {
+    last = await factory(p, ["settings", "set", "--stage", s.key, JSON.stringify(s.value)]);
+    if (last.status < 300) continue;
+    for (const done of steps.slice(0, i).reverse()) {
+      await factory(p, done.before === undefined ? ["settings", "unstage", done.key] : ["settings", "set", "--stage", done.key, JSON.stringify(done.before)]);
+    }
+    return last;
+  }
+  return last;
+}
+
+function stagedBefore(read: Read, key: string, value: unknown): unknown {
+  return read.staged.changes.some((c) => c.key === key) ? value : undefined;
+}
+
+/** The checks remove and rename share: it isn't running, and it holds no task. */
+async function idle(p: UiProject, name: string, host: SettingsHost, verb: string): Promise<ActionResult | null> {
+  const agent = (await host.agents()).find((a) => a.name === name);
+  if (agent && agent.state !== "down") {
+    return problem(409, "ui_agent_running", `${name} is running${agent.machineName ? ` on ${agent.machineName}` : ""}.`,
+      `Stop ${name} first (its page has Stop), then ${verb} it.`);
+  }
+  if (agent?.task) {
+    return problem(409, "ui_agent_holds_task", `${name} still holds #${agent.task}.`,
+      `Release its work first: #${agent.task} goes back to Ready for another agent. Then ${verb} ${name}.`);
+  }
+  return null;
+}
+
+/** The role `name` has once the staged changes are in, or the 404 to answer. */
+function roleOfName(read: Read, p: UiProject, name: string): string | ActionResult {
+  const role = Object.keys(read.team.next).find((r) => (read.team.next[r] ?? []).includes(name));
+  if (role && AGENT_NAME.test(name)) return role;
+  return problem(404, "ui_agent_unknown", `${name.slice(0, 50)} isn't on ${p.name}'s team.`, "Your team lists the agents.");
+}
+
 async function addAgent(req: Request, p: UiProject): Promise<ActionResult> {
-  const name = str((await bodyOf(req)).name).trim();
-  if (!AGENT_NAME.test(name)) {
-    return problem(400, "ui_bad_agent_name", `${name ? `"${name.slice(0, 50)}"` : "An empty name"} isn't a valid agent name.`,
-      "Use lowercase letters, digits and dashes, starting with a letter or digit, at most 40 characters; or pick a free name.");
+  const b = await bodyOf(req);
+  const name = str(b.name).trim();
+  const bad = badName(name);
+  if (bad) return bad;
+  const machine = b.machine === undefined ? "later" : b.machine;
+  if (typeof machine !== "string" || !MACHINE_CHOICE.test(machine)) {
+    return problem(400, "ui_bad_machine", "Pick where the agent runs: this machine, another machine by its name, or choose later.",
+      "Choose one of the machines the page lists.");
   }
   const read = await readOf(p);
   if (!isRead(read)) return read;
   if (everyone(read.team).includes(name)) {
     return problem(400, "ui_agent_taken", `${name} is already on ${p.name}'s team.`, "Pick another name; the free ones are listed.");
   }
-  return factory(p, ["settings", "set", "--stage", "agents", JSON.stringify([...(read.team.next["coding-agent"] ?? []), name])]);
+  const waits = machine === "here" && ownList(read) !== null;
+  if (waits) {
+    const unsaved = await pending(p, { join: [name] });
+    if (unsaved) return unsaved;
+  }
+  const out = await factory(p, ["settings", "set", "--stage", "agents", JSON.stringify([...(read.team.next["coding-agent"] ?? []), name])]);
+  if (out.status >= 300 && waits) await pending(p, { drop: [name] });
+  return out;
 }
 
 async function removeAgent(req: Request, p: UiProject, name: string, host: SettingsHost): Promise<ActionResult> {
   const read = await readOf(p);
   if (!isRead(read)) return read;
-  const role = Object.keys(read.team.next).find((r) => (read.team.next[r] ?? []).includes(name));
-  if (!role || !AGENT_NAME.test(name)) {
-    return problem(404, "ui_agent_unknown", `${name.slice(0, 50)} isn't on ${p.name}'s team.`, "Your team lists the agents.");
-  }
+  const role = roleOfName(read, p, name);
+  if (typeof role !== "string") return role;
   if ((await bodyOf(req)).confirm !== true) {
     return problem(400, "confirm_needed", `Removing ${name} changes the team, so it needs a confirm.`, CONFIRM_FIX);
   }
@@ -199,17 +308,51 @@ async function removeAgent(req: Request, p: UiProject, name: string, host: Setti
     return problem(400, "ui_last_of_role", `${name} is ${p.name}'s only ${role === "dev-manager" ? "dev manager" : "product owner"}.`,
       "Add another name for the role first, then remove this one.");
   }
-  const agent = (await host.agents()).find((a) => a.name === name);
-  if (agent && agent.state !== "down") {
-    return problem(409, "ui_agent_running", `${name} is running${agent.machineName ? ` on ${agent.machineName}` : ""}.`,
-      `Stop ${name} first (its page has Stop), then remove it.`);
+  const busy = await idle(p, name, host, "remove");
+  if (busy) return busy;
+  const waits = role === "coding-agent" && (ownList(read) ?? []).includes(name);
+  if (waits) {
+    const unsaved = await pending(p, { leave: [name] });
+    if (unsaved) return unsaved;
   }
-  if (agent?.task) {
-    return problem(409, "ui_agent_holds_task", `${name} still holds #${agent.task}.`,
-      `Release #${agent.task} first, so it goes back to Ready for another agent, then remove ${name}.`);
+  const out = await factory(p, ["settings", "set", "--stage", roleKey(role), JSON.stringify(names.filter((n) => n !== name))]);
+  if (out.status >= 300 && waits) await pending(p, { drop: [name] });
+  return out;
+}
+
+/** Rename (#581): the new name takes the old one's place in its role, and formerNames keeps the old one. */
+async function renameAgent(req: Request, p: UiProject, name: string, host: SettingsHost): Promise<ActionResult> {
+  const read = await readOf(p);
+  if (!isRead(read)) return read;
+  const role = roleOfName(read, p, name);
+  if (typeof role !== "string") return role;
+  const b = await bodyOf(req);
+  if (b.confirm !== true) return problem(400, "confirm_needed", `Renaming ${name} changes the team, so it needs a confirm.`, CONFIRM_FIX);
+  const to = str(b.to).trim();
+  const bad = badName(to);
+  if (bad) return bad;
+  if (everyone(read.team).includes(to)) {
+    return problem(400, "ui_agent_taken", `${to} is already on ${p.name}'s team.`, "Pick another name; the free ones are listed.");
   }
-  const key = role === "coding-agent" ? "agents" : `roles.${role}.names`;
-  return factory(p, ["settings", "set", "--stage", key, JSON.stringify(names.filter((n) => n !== name))]);
+  const busy = await idle(p, name, host, "rename");
+  if (busy) return busy;
+  const names = read.team.next[role] ?? [];
+  const former: Record<string, string[]> = { ...read.team.former };
+  const earlier = former[name] ?? [];
+  delete former[name];
+  former[to] = [...earlier.filter((n) => n !== to && n !== name), name];
+  const waits = role === "coding-agent" && (ownList(read) ?? []).includes(name);
+  if (waits) {
+    const unsaved = await pending(p, { join: [to], leave: [name] });
+    if (unsaved) return unsaved;
+  }
+  const key = roleKey(role);
+  const out = await stageAll(p, [
+    { key, value: names.map((n) => (n === name ? to : n)), before: stagedBefore(read, key, names) },
+    { key: "formerNames", value: former, before: stagedBefore(read, "formerNames", read.team.former) },
+  ]);
+  if (out.status >= 300 && waits) await pending(p, { drop: [to, name] });
+  return out;
 }
 
 function tagOf(v: unknown): string | null {
@@ -313,6 +456,7 @@ export async function settingsApi(req: Request, p: UiProject, rest: string[], ho
       : await factory(p, ["settings", "pr", "--ready"], 180_000);
   } else if (rest.length === 2 && what === "team") out = await addAgent(req, p);
   else if (rest.length === 4 && what === "team" && verb === "remove") out = await removeAgent(req, p, name, host);
+  else if (rest.length === 4 && what === "team" && verb === "rename") out = await renameAgent(req, p, name, host);
   else if (rest.length === 2 && what === "update") {
     out = (await bodyOf(req)).confirm !== true
       ? problem(400, "confirm_needed", "Updating changes the factory's files in this project, so it needs a confirm.", CONFIRM_FIX)
@@ -371,8 +515,24 @@ async function readHere(): Promise<Read> {
     next[role] = st ? ("value" in st ? names(st.value) : names((schema.SETTINGS[key] as Setting).default)) : list;
   }
   const agents = [...ROLES, "coding-agent"].flatMap((role) => (now[role] ?? []).map((name) => ({ name, role })));
+  const stFormer = Object.hasOwn(changes, "formerNames") ? changes.formerNames : undefined;
+  const former = formerOf(stFormer ? ("value" in stFormer ? stFormer.value : {}) : valueOf("formerNames"));
 
-  // this machine: never the board's address, only whether one is set
+  // this machine: a choice that waited for the merge applied once this checkout has it (#581); never the board's
+  // address, only whether one is set
+  const settled = settle(fm.machineSettings(), now["coding-agent"] ?? []);
+  if (settled.changed) {
+    try {
+      fm.writeMachineSettings(settled.own);
+    } catch (e) {
+      problems.push({ code: "ui_machine_unsettled", message: `What this machine runs couldn't be brought up to date with the team (${e instanceof Error ? e.message : String(e)}).`,
+        fix: "Check that this machine's settings folder can be written, then reload the page." });
+    }
+  }
+  if (settled.emptied) {
+    problems.push({ code: "ui_machine_runs_every_agent", message: "Every agent this machine ran left the team, so it now runs every agent of the project.",
+      fix: "Choose which agents run here under This machine, or add one on the Team page." });
+  }
   const own = fm.machineSettings();
   const env = (process.env.FACTORY_AGENTS ?? "").split(",").map((n) => n.trim()).filter(Boolean);
   const fromFile = Array.isArray(own.agents) && own.agents.length > 0;
@@ -404,12 +564,12 @@ async function readHere(): Promise<Read> {
   }
 
   return {
-    team: { agents, next },
+    team: { agents, next, former },
     sections,
     staged: { changes: Object.entries(changes).map(([key, c]) => ({ key, name: schema.SETTINGS[key]?.label ?? key,
       ...("value" in c ? { value: c.value } : { unset: true }) })), problem: "problem" in found ? found.problem : null },
     machine: { agents: env.length ? env : fromFile ? fm.machineNames() : [], from: env.length ? "env" : fromFile ? "machine" : "project", board,
-      rows: machineRows },
+      rows: machineRows, pending: pendingOf(own.teamPending) },
     release: { pinned: pin },
     dirty,
     pr,
@@ -417,10 +577,85 @@ async function readHere(): Promise<Read> {
   };
 }
 
+function agentNames(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((n): n is string => typeof n === "string" && AGENT_NAME.test(n)) : [];
+}
+
+/** formerNames as the page takes it: {name: [earlier names]}, anything else left out. */
+function formerOf(v: unknown): Record<string, string[]> {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [k, list] of Object.entries(v)) if (AGENT_NAME.test(k)) out[k] = agentNames(list);
+  return out;
+}
+
+function pendingOf(v: unknown): Pending {
+  const o = typeof v === "object" && v !== null ? (v as Obj) : {};
+  return { join: agentNames(o.join), leave: agentNames(o.leave) };
+}
+
+function withPending(own: Obj, p: Pending): Obj {
+  const out = { ...own };
+  if (p.join.length || p.leave.length) out.teamPending = p;
+  else delete out.teamPending;
+  return out;
+}
+
+/** This machine's file with what waited for the merge applied (#581): a name to join is added to its own list once the
+ * project has it; a name to leave is taken off the list (and off autostartAgents) once the project doesn't. A machine
+ * with no list of its own runs every agent, so only the pending entries are settled. */
+export function settle(own: Obj, project: string[]): { own: Obj; changed: boolean; emptied: boolean } {
+  const p = pendingOf(own.teamPending);
+  const joined = p.join.filter((n) => project.includes(n));
+  const left = p.leave.filter((n) => !project.includes(n));
+  if (!joined.length && !left.length) return { own, changed: false, emptied: false };
+  const out = withPending(own, { join: p.join.filter((n) => !joined.includes(n)), leave: p.leave.filter((n) => !left.includes(n)) });
+  const list = agentNames(own.agents);
+  let emptied = false;
+  if (list.length) {
+    const kept = list.filter((n) => !left.includes(n));
+    const next = [...kept, ...joined.filter((n) => !kept.includes(n))];
+    if (next.length) out.agents = next;
+    else {
+      delete out.agents;
+      emptied = true;
+    }
+  }
+  if (Array.isArray(own.autostartAgents)) {
+    const auto = own.autostartAgents.filter((n) => !left.includes(String(n)));
+    if (auto.length) out.autostartAgents = auto;
+    else delete out.autostartAgents;
+  }
+  return { own: out, changed: true, emptied };
+}
+
+/** `pending <json>`: changes teamPending in this machine's file ({join, leave, drop}: names); writes only on a change. */
+async function pendingHere(raw: string): Promise<void> {
+  const fm = await import("./factory_machine.ts");
+  const change = JSON.parse(raw) as { join?: unknown; leave?: unknown; drop?: unknown };
+  const own = fm.machineSettings();
+  const now = pendingOf(own.teamPending);
+  const drop = agentNames(change.drop);
+  let join = now.join.filter((n) => !drop.includes(n));
+  let leave = now.leave.filter((n) => !drop.includes(n));
+  for (const n of agentNames(change.join)) {
+    leave = leave.filter((x) => x !== n);
+    if (!join.includes(n)) join = [...join, n];
+  }
+  for (const n of agentNames(change.leave)) {
+    join = join.filter((x) => x !== n);
+    if (!leave.includes(n)) leave = [...leave, n];
+  }
+  const out = withPending(own, { join, leave });
+  if (JSON.stringify(out) !== JSON.stringify(own)) fm.writeMachineSettings(out);
+}
+
 if (import.meta.main) {
   const { runMain } = await import("./factory_lib.ts");
   await runMain(async () => {
-    if (process.argv[2] !== "read") throw new Error("usage: factory_ui_settings.ts read");
+    const cmd = process.argv[2];
+    if (cmd === "pending") return pendingHere(process.argv[3] ?? "{}");
+    if (cmd !== "read") throw new Error("usage: factory_ui_settings.ts read | pending <json>");
     console.log(JSON.stringify(await readHere()));
   });
 }

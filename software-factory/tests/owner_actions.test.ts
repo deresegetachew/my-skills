@@ -61,12 +61,13 @@ if ((m = /^issues\/(\d+)$/.exec(p)) && method === "GET") {
 fail("gh: Not Found (HTTP 404) for " + method + " " + path);
 `;
 
-// has-session succeeds when FAKE_HAS is set or a session was started (new-session) and not killed since.
+// has-session succeeds when FAKE_HAS is set, a session was started (new-session) and not killed since, or the session is
+// one of FAKE_RUNNING (space-separated session names).
 const FAKE_TMUX = `#!/usr/bin/env bash
 echo "$*" >>"$FAKE_TMUX_DIR/tmux.log"
 case "$1" in
   -V) echo "tmux 3.4" ;;
-  has-session) [ -n "$FAKE_HAS" ] || [ -e "$FAKE_TMUX_DIR/up" ] ;;
+  has-session) [ -n "$FAKE_HAS" ] || [ -e "$FAKE_TMUX_DIR/up" ] || case " $FAKE_RUNNING " in *" \${3#=} "*) true ;; *) false ;; esac ;;
   list-sessions) if [ -n "$FAKE_HAS" ] || [ -e "$FAKE_TMUX_DIR/up" ]; then echo work-taytu; fi ;;
   new-session) touch "$FAKE_TMUX_DIR/up" ;;
   kill-session) rm -f "$FAKE_TMUX_DIR/up" ;;
@@ -283,6 +284,34 @@ test("owner start refuses a role that is not one of the three, and asks nothing 
   const p = setup();
   refused(owner(p, OWNER, "start", "wizard", "taytu"), "bad_role");
   expect(changedTmux(p)).toEqual([]);
+});
+
+// #581: this machine's maxCodingAgents caps how many coding agents run here at once.
+function capped(p: Proj, max: number): void {
+  write(join(p.root, "config", "software-factory", "work.json"), JSON.stringify({ maxCodingAgents: max }));
+}
+
+test("owner start of one coding agent more than this machine's maxCodingAgents is refused with the fix, and starts nothing", () => {
+  const p = setup();
+  capped(p, 1);
+  const r = owner(p, { FAKE_RUNNING: "work-menelik" }, "start", "coding-agent", "taytu");
+  refused(r, "too_many_agents");
+  expect(err(r).message).toContain("menelik");
+  expect(err(r).message).toContain("at most 1");
+  expect(err(r).fix).toContain("factory owner stop menelik");
+  expect(err(r).fix).toContain("maxCodingAgents 2");
+  expect(tmuxCalled(p, "new-session")).toEqual([]);
+});
+
+test("owner start under the cap starts it, and the dev manager and product owner don't count against it", () => {
+  const p = setup();
+  capped(p, 2);
+  expect(owner(p, { FAKE_RUNNING: "work-menelik work-fasil" }, "start", "coding-agent", "taytu").code).toBe(0);
+  const q = setup();
+  capped(q, 1);
+  const r = owner(q, { FAKE_RUNNING: "work-menelik" }, "start", "dev-manager", "fasil");
+  expect(r.code, r.out).toBe(0);
+  expect(tmuxCalled(q, "new-session")).toHaveLength(1);
 });
 
 test("owner start and stop are the owner's: the dev manager and a coding agent get owner_only and tmux is not changed", () => {
