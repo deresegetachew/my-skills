@@ -807,6 +807,40 @@ export function withAllow(data: Uint8Array, extras: string[]): Uint8Array {
   return new TextEncoder().encode(pyDumps(doc, { indent: 2, ensureAscii: false }) + "\n");
 }
 
+/** The project's allow entries put into the installed agents' settings now, as `factory update` puts them there (#540):
+ * the same bytes an update would write, and the pin's hash of the file follows when the file was the pinned copy, so the
+ * install still matches its pin. A link (a project on the submodule) or a missing file is left alone: the factory adds
+ * the entries when it starts an agent (#258). Returns the entries added. Throws bad_allow_list. */
+export function mergeAllow(root: string): string[] {
+  const path = join(root, SETTINGS_REL);
+  if (isLink(path) || !isFile(path)) return [];
+  const extras = projectAllow(root);
+  const data = new Uint8Array(readFileSync(path));
+  const merged = withAllow(data, extras);
+  if (merged === data) return [];
+  let doc: JsonObj | null = null;
+  try {
+    doc = obj(JSON.parse(new TextDecoder().decode(data)));
+  } catch {
+    return [];
+  }
+  const perms = doc ? obj(doc.permissions) : null;
+  const had = perms && Array.isArray(perms.allow) ? perms.allow : [];
+  const pin = readPin(root);
+  writeFileSync(path, merged);
+  if (pin && pin.files[SETTINGS_REL] === sha256Bytes(data)) {
+    pin.files[SETTINGS_REL] = sha256Bytes(merged);
+    try {
+      writeFileSync(join(root, PIN_PATH), pyDumps(pin, { indent: 2, sortKeys: true }) + "\n");
+    } catch (e) {
+      writeFileSync(path, data); // nothing half done: the settings go back to the bytes the pin still names
+      throw new FactoryError("pin_write_failed", `${PIN_PATH} couldn't be written (${errText(e)}), so ${SETTINGS_REL} was put back as it was.`,
+        `Make ${PIN_PATH} writable, then run it again (or run \`factory update\`, which adds the allow rules too).`);
+    }
+  }
+  return [...new Set(extras)].filter((e) => !had.includes(e));
+}
+
 /** Allow entries the project asks for that settings.json does not have yet (an update puts them there). */
 function allowProblems(root: string): string[] {
   let extras: string[];

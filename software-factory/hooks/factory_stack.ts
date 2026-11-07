@@ -124,6 +124,48 @@ export function allowRules(found: Found): string[] {
   return [`Bash(${prefix}*)`, "Bash(./factory run-check*)"];
 }
 
+/** The allow rules an unattended agent needs to run `command` as it was given, alone (with more arguments after it, such
+ * as one test file) and through `./factory run-check` (#540). Empty for an empty command. */
+export function commandRules(command: string): string[] {
+  const c = command.trim();
+  return c ? [`Bash(${c}*)`, "Bash(./factory run-check*)"] : [];
+}
+
+/** The commands a workflow made from the kit's runs, in order: each step reads its command from .claude/factory.json. */
+const WORKFLOW_COMMANDS = ["install", "typecheck", "lint", "test", "build"] as const;
+
+/** The first line of the kit's pnpm workflow (kit/.github/workflows/ci.yml): only a file that starts with it is changed. */
+export const KIT_CI_HEAD = "# Software factory CI: the pull-request gate merges only when these checks are green.";
+
+/** The kit's pnpm CI workflow made to run the project's own commands (#540): every `pnpm <x>` step becomes a step that
+ * runs `commands.<x>` from .claude/factory.json (`factory_stack.ts run <x>`, which says so and passes when it is empty),
+ * and with no package.json the pnpm and Node setup steps go. Any other workflow, or one already changed, comes back as
+ * it was. */
+export function commandsWorkflow(text: string, hasPackageJson: boolean): string {
+  if (!text.startsWith(KIT_CI_HEAD) || !/^\s*- uses: pnpm\/action-setup@/m.test(text)) return text;
+  const out: string[] = [];
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] as string;
+    const indent = /^(\s*)/.exec(line)?.[1] ?? "";
+    if (!hasPackageJson && /^\s*- uses: pnpm\/action-setup@/.test(line)) continue;
+    if (!hasPackageJson && /^\s*- uses: actions\/setup-node@/.test(line)) {
+      while (i + 1 < lines.length && (lines[i + 1] as string).startsWith(indent + "  ")) i++; // its `with:` block
+      continue;
+    }
+    const run = /^\s*- run: pnpm (?:run )?(\w+)\b/.exec(line);
+    const name = run ? (run[1] === "i" ? "install" : run[1]) : null;
+    if (name && (WORKFLOW_COMMANDS as readonly string[]).includes(name)) {
+      out.push(`${indent}- name: ${name[0]?.toUpperCase()}${name.slice(1)} (commands.${name} in .claude/factory.json)`,
+        `${indent}  run: bun --no-env-file --config=/dev/null .claude/hooks/factory_stack.ts run ${name}`);
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join("\n").replace("# Adjust the setup and the commands to match .claude/factory.json.",
+    "# Each command step runs commands.<name> from .claude/factory.json; an empty one is skipped with a warning.");
+}
+
 function addAllow(doc: JsonObj, rules: readonly string[]): boolean {
   if (!rules.length) return false;
   const perms = (doc.permissions && typeof doc.permissions === "object" && !Array.isArray(doc.permissions)
