@@ -26,7 +26,7 @@
 // board the task must be there; a refusal says how to find its number.
 import { readFileSync } from "node:fs";
 import { boardRepo } from "./core/compose.ts";
-import { type Config, load, taskSource } from "./factory_config.ts";
+import { type Config, load, roleNames, taskSource } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
 import { Exit, die, parseArgs, pyDumps, runMain } from "./factory_lib.ts";
 
@@ -182,7 +182,22 @@ function githubStore(): Store {
   };
 }
 
-async function boardStore(): Promise<Store> {
+/** Who may write what on the board's queue (#552 review): a builder can post on any task, so an entry counts only from
+ * someone allowed to write it. An item or a plan comes from the owner, the product owner or the dev manager; a
+ * confirmation only from the owner, and a result from the owner or the product owner, each as a verdict (an MCP
+ * builder can't post one). The `by=` in a marker is a label, never who it was. */
+export function trustedEntry(m: { kind: string; from: string; body: string }, cfg: Config): boolean {
+  const builders = new Set(roleNames(cfg, "coding-agent"));
+  const po = roleNames(cfg, "product-owner").filter((n) => n && !builders.has(n));
+  const dm = roleNames(cfg, "dev-manager").filter((n) => n && !builders.has(n));
+  const what = MARK.exec(m.body)?.[1];
+  if (what === "signoff" || what === "testplan") return m.kind === "note" && ["owner", ...po, ...dm].includes(m.from);
+  if (what === "testplan-confirm") return m.kind === "verdict" && m.from === "owner";
+  if (what === "signoff-result" || what === "testresult") return m.kind === "verdict" && ["owner", ...po].includes(m.from);
+  return false;
+}
+
+async function boardStore(cfg: Config): Promise<Store> {
   // loaded here, not at the top: an install without the board (tasks on GitHub) never needs it
   const { Board, boardUrl, Numbers, postSignoff, signoffEntries, signoffTask } = await import("../message-board/src/index.ts");
   const url = boardUrl();
@@ -196,7 +211,7 @@ async function boardStore(): Promise<Store> {
   return {
     where: () => "on the message board",
     number: () => null,
-    comments: async () => (await signoffEntries(board, repo)).map((m) => ({ id: m.id, body: m.body, user: { login: m.from },
+    comments: async () => (await signoffEntries(board, repo)).filter((m) => trustedEntry(m, cfg)).map((m) => ({ id: m.id, body: m.body, user: { login: m.from },
       created_at: m.createdAt.toISOString() })),
     post: async (body, verdict) => {
       await postSignoff(board, repo, body, verdict);
@@ -213,7 +228,8 @@ async function boardStore(): Promise<Store> {
 
 /** The queue for `cfg` (default: the project's settings): on the board with `tasks.source` board, else the GitHub issue. */
 export async function storeFor(cfg?: Config): Promise<Store> {
-  return taskSource(cfg ?? load()) === "board" ? boardStore() : githubStore();
+  const c = cfg ?? load();
+  return taskSource(c) === "board" ? boardStore(c) : githubStore();
 }
 
 /** A board refusal ({code, message, fix}), told without loading the board's module. */

@@ -119,7 +119,8 @@ US-2   in progress  0/1   Review the draft guide
 with one comment per item. The state is read from the comments after the item, so nothing is edited. With
 `tasks.source: board` the queue is on the message board instead (#552): a note task of the project, "Sign-off and testing
 queue", with one message per entry, and no GitHub call; the product owner can add an item with its `board_signoff_add`
-tool. A task is named as people see it: `12` or `#12` for issue 12, `b12` for a task made on the board (board only; on the
+tool. An entry counts only from who may write it: an item or a plan from the owner, the product owner or the dev manager;
+a confirmation only from the owner; a result from the owner or the product owner. What a builder posts there is ignored. A task is named as people see it: `12` or `#12` for issue 12, `b12` for a task made on the board (board only; on the
 board the task must be there, and the refusal says how to find its number).
 
 | Command | What it does |
