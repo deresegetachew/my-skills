@@ -454,3 +454,18 @@ test("a session from another machine carries the name set in machines, else the 
   const bare = (snapshot(setup(scenario())).sessions as Row[]).find((r) => r.name === "zemen");
   expect(bare).toMatchObject({ machine: "m-other", machineName: "m-other" });
 }, T);
+
+test("epics that fail to read leave the tasks in the snapshot, with the epics' error beside them (#464)", () => {
+  const s = scenario();
+  s.issues.push({ number: 7, title: "Add the login page", state: "open", labels: [{ name: "factory:ready" }], body: "" });
+  const p = setup(s);
+  const bin = join(p.d, "..", "bin");
+  writeFileSync(join(bin, "gh-fake"), readFileSync(join(bin, "gh")));
+  write(join(bin, "gh"), ["#!/usr/bin/env bash", 'case "$*" in *labels=epic*) echo "gh: HTTP 502" >&2; exit 1;; esac',
+    `exec bun '${join(bin, "gh-fake")}' "$@"`, ""].join("\n"), 0o755);
+  const j = snapshot(p);
+  expect((j.tasks.tasks as Row[]).map((t) => t.id), JSON.stringify(j.tasks)).toContain("7");
+  expect(j.tasks.error).toBeUndefined();
+  expect(j.tasks.epics).toEqual([]);
+  expect(String(j.tasks.epicsError)).toContain("502");
+}, T);
