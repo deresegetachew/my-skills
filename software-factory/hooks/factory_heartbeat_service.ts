@@ -9,7 +9,11 @@
 //   factory heartbeat restart      restart the installed service so it runs the files now on disk (`factory update` does this);
 //                                  says nothing and does nothing when no service is installed
 //
+//   factory heartbeat ensure       install it if it is missing, start it if it is installed but not running, else nothing
+//
 // `factory autostart install` calls install too (unless --no-heartbeat), and `factory autostart uninstall` removes it.
+// The setup paths ensure it (`factory init`, `factory owner start`, the web UI's add-project steps), except in an agent
+// session or with FACTORY_SETUP_HEARTBEAT=off (the factory's own tests set it, so they never touch a real service).
 // Names: <repo>-factory-heartbeat.service (Linux) and dev.software-factory.<repo>-heartbeat (macOS), where <repo> is
 // the folder name of the main clone. Errors are `{code, message, fix}` on stderr.
 import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -154,6 +158,59 @@ export function install(top: string): string[] {
   return out;
 }
 
+/** Why a setup path leaves the service alone, or null: FACTORY_SETUP_HEARTBEAT=off (the factory's own tests set it, so
+ *  they never touch this machine's services), or an agent session (agents can't install or stop it). */
+export function setupSkipped(): string | null {
+  if (process.env.FACTORY_SETUP_HEARTBEAT === "off") return "left alone (FACTORY_SETUP_HEARTBEAT=off)";
+  if (process.env.FACTORY_AGENT || process.env.FACTORY_LOOP) return "left alone: this is an agent session; the owner runs `factory heartbeat install`";
+  return null;
+}
+
+/** Makes sure the service is installed and the daemon runs, for the setup paths (`factory init`, `factory owner start`,
+ *  the web UI's add-project steps); safe to run twice. `running`: the daemon wrote its state file lately. Returns the
+ *  lines to tell the person; throws a ServiceError. */
+export function ensure(top: string, running: boolean): string[] {
+  const mac = AS.platform() === "mac";
+  const name = mac ? agentLabel() : unitName();
+  if (serviceState() !== "enabled") return install(top);
+  if (running) return [`The heartbeat daemon already runs (${name}).`];
+  const [rc, , err] = mac ? AS.run("launchctl", "kickstart", `${AS.domain()}/${agentLabel()}`)
+    : AS.run("systemctl", "--user", "start", unitName());
+  if (rc !== 0) {
+    throw new ServiceError("start-failed", `${name} is installed but could not be started: ${err.slice(0, 200)}`,
+      "Run `factory heartbeat install` to write the service again and start it.");
+  }
+  return [`Started ${name}: the heartbeat daemon was installed but not running.`];
+}
+
+/** ensure(), for a setup path: lines prefixed `heartbeat: `, and a failure told with its fix, never thrown. */
+export function ensureLines(running: boolean): string[] {
+  const skipped = setupSkipped();
+  if (skipped) return [`heartbeat: ${skipped}`];
+  try {
+    return ensure(mainTop(), running).map((l) => `heartbeat: ${l}`);
+  } catch (e) {
+    if (!(e instanceof ServiceError)) throw e;
+    return [`heartbeat: NOT running (${e.code}): ${e.message}`, `  Fix: ${e.fix}`,
+      "  Until then `factory agents ls` works out each agent's state when asked."];
+  }
+}
+
+/** `factory heartbeat ensure`: what the web UI's add-project step runs. Refuses with {code, message, fix} on a failure. */
+export function ensureCli(running: boolean): void {
+  const skipped = setupSkipped();
+  if (skipped) {
+    console.log(`The heartbeat daemon was ${skipped}.`);
+    return;
+  }
+  const top = topOfProject();
+  try {
+    for (const line of ensure(top, running)) console.log(line);
+  } catch (e) {
+    refuseWith(e);
+  }
+}
+
 /** Restarts the installed service so a daemon started before an update runs the new code. Returns the lines to
  * tell the person: none when no service is installed here. Throws a ServiceError. */
 export function restart(): string[] {
@@ -230,14 +287,17 @@ export function uninstallCli(): void {
     "pings and `silent` work as before.");
 }
 
-/** [[level, what, how]] for `factory doctor`. Only in issues mode, where agents report to GitHub. */
+/** [[level, what, how]] for `factory doctor`. In issues mode and with the message board, where agents report their
+ *  state; not with a plan file. */
 export function doctor(cfg: Config): AS.DoctorLine[] {
-  if (taskSource(cfg) !== "issues") return [];
+  if (taskSource(cfg) !== "issues" && taskSource(cfg) !== "board") return [];
   const state = serviceState();
-  if (state === "enabled") return [["ok", "heartbeat daemon", "installed"]];
-  const why = state === "unknown" ? "can't tell whether it is installed here (no usable systemctl --user or launchctl)" : "not installed";
+  const name = AS.platform() === "mac" ? `LaunchAgent ${agentLabel()}` : `systemd user unit ${unitName()}`;
+  if (state === "enabled") return [["ok", "heartbeat daemon", `installed (${name})`]];
+  const why = state === "unknown" ? `can't tell whether ${name} is installed here (no usable systemctl --user or launchctl)`
+    : `${name} is not installed`;
   return [["note", "heartbeat daemon", `${why}: an agent waiting in \`factory wait\` then looks silent, and a crashed one ` +
-    "keeps saying working for 30 minutes. Run `factory heartbeat install` (or `factory autostart install`)."]];
+    "keeps saying working for 30 minutes. Fix: run `factory heartbeat install` (or `factory autostart install`)."]];
 }
 
 function main(argv: string[]): void {

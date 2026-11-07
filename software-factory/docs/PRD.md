@@ -623,12 +623,23 @@ What is planned:
 - **US-30.** As the owner, the CI page gives its verdict first, the runs, the runners with their count and a remove
   with its preconditions. *Decided (#455).*
 - **US-31.** As the owner, the Machines, Health and Usage and cost pages show each machine and its agents and the hub,
-  what works and the fix for what doesn't, and what each agent and task used. *Decided (#455).*
+  what works and the fix for what doesn't, and what each agent and task used. *Partly built (#455): Machines; Health
+  (`factory doctor --json`, its checks grouped by this machine, the project, the board, GitHub and CI runners, each ok,
+  warning or failed with its fix, run on the first look and on "Check again", and kept); Usage and cost (tokens per task
+  against `budget.builder` and per agent from this machine's logs, and the GitHub calls of the last hour). Left: a
+  task's own `Budget:` line, money, flow times from claim to merge, lessons from rework, other machines' logs and
+  checks.*
 - **US-32.** As the owner, Home shows what the team is doing and what needs me on one page, with the How it runs
-  diagram. *Decided (#451).*
+  diagram. *Partly built (#451): needs you (unanswered owner asks, PRs only a person merges, blocked tasks with their
+  reason, failed CI on main, Health's failures), the team with its state and task, progress by epic and the last 10
+  events, each linking to its page, live over the WebSocket. Left: the How it runs diagram and the new-version line.*
 - **US-33.** As the owner, the Inbox holds everything that needs me, and I answer and merge in place. *Decided (#451);
   the owner queue part is built (US-17).*
-- **US-34.** As the owner, Activity shows the team's feed and the open questions. *Decided (#451).*
+- **US-34.** As the owner, Activity shows the team's feed and the open questions. *Partly built (#451): with the board as
+  the record, its events (claims, moves, comments, notes, closes, hand-offs) for the project's tasks, live, beside the
+  pull requests opened and gone from the snapshot; filters by agent, task and kind; with tasks on GitHub issues, what
+  the snapshot knows (pull requests, failed CI, the owner's open asks), and it says so. Left: answering a question in
+  place, and "merged" told apart from "closed" (the snapshot sees only that a PR left the open list).*
 - **US-35.** As the owner, an epic has a page of its own, as in the design's `Epic.dc.html`. *Proposal; no issue yet.*
 - **US-36.** As the owner, Factory settings has tabs: the settings (project changes staged into a pull request, this
   machine's saved at once), Releases and updates (no publish there) and Maintenance. *Built (#456): Your team (add a

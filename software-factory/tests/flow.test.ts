@@ -123,6 +123,60 @@ test("a dry run changes nothing", () => {
   expect(p.stdout).toContain("would make the owner queue issue");
   expect(existsSync(join(work, "docs", "PRD.md"))).toBe(false);
   expect(db(d).posted, "a dry run wrote something").toBeUndefined();
+  expect(p.stdout).toContain("would make sure the heartbeat daemon runs here");
+});
+
+// fake systemctl and loginctl, every call logged; an enabled unit is a file
+const FAKE_SYSTEMCTL = `#!/usr/bin/env bash
+echo "$*" >>"$FAKE_SD/systemctl.log"
+[ "$1" = "--user" ] || exit 1
+case "$2" in
+  enable) u="$3"; [ "$3" = "--now" ] && u="$4"; touch "$FAKE_SD/$u" ;;
+  is-enabled) [ -f "$FAKE_SD/\${4:-$3}" ] ;;
+esac
+`;
+
+function withServices(d: string, env: Env): Env {
+  writeExe(join(d, "bin", "systemctl"), FAKE_SYSTEMCTL);
+  writeExe(join(d, "bin", "loginctl"), '#!/bin/sh\n[ "$1" = show-user ] && echo yes\nexit 0\n');
+  const sd = join(d, "systemd");
+  sh(["mkdir", "-p", sd]);
+  return { ...env, FAKE_SD: sd, FACTORY_SETUP_HEARTBEAT: undefined, FACTORY_AUTOSTART_PLATFORM: "linux",
+    XDG_CONFIG_HOME: join(d, "config"), XDG_STATE_HOME: join(d, "state") };
+}
+
+const systemctl = (d: string): string[] =>
+  existsSync(join(d, "systemd", "systemctl.log")) ? readFileSync(join(d, "systemd", "systemctl.log"), "utf8").split("\n").filter(Boolean) : [];
+
+test("init installs and starts the heartbeat daemon on this machine, and a run while it runs changes nothing", () => {
+  const [d, work, env0] = flowProject();
+  const env = withServices(d, env0);
+  const p = factory(work, env, ["init"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("heartbeat: Installed");
+  expect(systemctl(d)).toContain("--user enable --now work-factory-heartbeat.service");
+  expect(readFileSync(join(d, "config", "systemd", "user", "work-factory-heartbeat.service"), "utf8")).toContain("heartbeat run");
+  // the daemon runs now: it wrote its state file a moment ago
+  writeFileSync(join(d, "state", "work-factory", "heartbeat.json"),
+    JSON.stringify({ updated: Math.floor(Date.now() / 1000), interval: 20, agents: {} }));
+  const calls = systemctl(d).length;
+  const again = factory(work, env, ["init"]);
+  expect(again.code, again.out).toBe(0);
+  expect(again.stdout).toContain("heartbeat: The heartbeat daemon already runs");
+  const changes = (ls: string[]) => ls.filter((l) => /^--user (enable|start|restart) /.test(l));
+  expect(changes(systemctl(d))).toHaveLength(1);
+  expect(changes(systemctl(d).slice(calls))).toEqual([]);
+});
+
+test("init on a machine where the heartbeat daemon can't run says why and the fix, and the scaffold is made", () => {
+  const [d, work, env0] = flowProject();
+  const env = withServices(d, env0);
+  writeExe(join(d, "bin", "systemctl"), '#!/bin/sh\necho "Failed to connect to bus" >&2\nexit 1\n');
+  const p = factory(work, env, ["init"]);
+  expect(p.code, p.out).toBe(0);
+  expect(p.stdout).toContain("heartbeat: NOT running (no-user-manager)");
+  expect(p.stdout).toContain("Fix:");
+  expect(p.stdout).toContain("added    docs/PRD.md");
 });
 
 test("the prd change template in the kit is the one init writes", () => {

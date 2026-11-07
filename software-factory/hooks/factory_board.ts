@@ -472,10 +472,30 @@ async function queue(args: string[]): Promise<number> {
 
 // --- questions to a role -------------------------------------------------------------------------------------------------
 
+/** An open question on the board to one of a role's names, in this repo's project (#549). */
+export interface BoardQuestion {
+  id: number;
+  from: string;
+  to: string;
+  /** The task it is about as people see it ("#101", "b18"), or null. */
+  task: string | null;
+  body: string;
+  /** Seconds since the epoch. */
+  at: number;
+  /** `question m<id> from <who> to <whom> [about <task>] (on the board): <first words>` */
+  line: string;
+}
+
 /** One line per open question on the board addressed to one of `names` in this repo's project (#549), oldest first, so
  * a role whose work check reads GitHub (the dev manager's precheck) also wakes for what an agent asked it through the
  * board's MCP. Empty when this machine has no board or it can't be had: the check goes on with what GitHub says. */
 export async function boardQuestionsFor(names: string[]): Promise<string[]> {
+  return (await boardQuestions(names)).map((q) => q.line);
+}
+
+/** The open questions behind boardQuestionsFor, oldest first: the dev manager's orchestrator starts a sub-manager for
+ * each one addressed to it. */
+export async function boardQuestions(names: string[]): Promise<BoardQuestion[]> {
   const url = boardUrl();
   if (!url || !names.length) return [];
   const repo = boardRepo();
@@ -485,14 +505,16 @@ export async function boardQuestionsFor(names: string[]): Promise<string[]> {
     const open: Message[] = [];
     for (const name of new Set(names)) open.push(...(await board.onMe(name)).messages.filter((m) => m.kind === "question"));
     const numbers = new Numbers(repo || null);
-    const lines: string[] = [];
+    const out: BoardQuestion[] = [];
     for (const m of open.sort((a, b) => a.id - b.id)) {
       const t = m.taskId === null ? null : await board.get(m.taskId);
       if (repo && !isProjects(repo, m, t)) continue;
+      const task = t ? numbers.label(t) : null;
       const words = m.body.replace(/<!--[\s\S]*?-->/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
-      lines.push(`question m${m.id} from ${m.from} to ${m.to}${t ? ` about ${numbers.label(t)}` : ""} (on the board): ${words}`);
+      out.push({ id: m.id, from: m.from, to: m.to ?? "", task, body: m.body, at: Math.floor(m.createdAt.getTime() / 1000),
+        line: `question m${m.id} from ${m.from} to ${m.to}${task ? ` about ${task}` : ""} (on the board): ${words}` });
     }
-    return lines;
+    return out;
   } catch (e) {
     if (e instanceof BoardError) return [];
     throw e;

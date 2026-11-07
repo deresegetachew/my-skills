@@ -1,7 +1,8 @@
 // Adding a project from the web UI (#447): bring a GitHub repo (clone one, make a new one, or a folder already on this
 // machine), install the factory in it, save the owner's answers in its .claude/factory.json, make its labels, owner queue
-// and starter PRD (`factory init`), open a pull request with the setup, list it in the page and run `factory doctor`
-// there. The page shows each step as it goes; a failed step stops the run, and Retry goes
+// and starter PRD (`factory init`), open a pull request with the setup, list it in the page, make sure the heartbeat daemon
+// runs on this machine (`factory heartbeat ensure`; where it can't, the step is skipped with why and the fix) and run
+// `factory doctor` there. The page shows each step as it goes; a failed step stops the run, and Retry goes
 // on from that step. Each step looks first, so running one again adds nothing twice.
 //
 //   GET  /api/add-project                   the owner's repos (gh repo list), the folder new ones go in, the legends
@@ -16,6 +17,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { addedFile, addedPaths, envFor, factoryScript, type Obj, type Problem, projectAt, readJson, type Ran, spawn,
   type UiProject } from "./factory_ui_data.ts";
 import { messagingSettings } from "./core/compose.ts";
+import { archiveName, cacheFolder, DEFAULT_REPO, type Pin, readPin, sha256File } from "./factory_release.ts";
 import type { Config } from "./factory_config.ts";
 
 const HOOKS = import.meta.dir;
@@ -25,6 +27,18 @@ const SETUP_BRANCH = "factory/setup";
 const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 const REPO = /^[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9_.][A-Za-z0-9_.-]*$/;
 const INSTALLER = resolve(HOOKS, "..", "install.sh");
+// A project installed from a release has no install.sh: its own release client puts the same release in the new folder (#537).
+const SERVING_ROOT = resolve(HOOKS, "..", "..");
+const RELEASE_CLIENT = join(HOOKS, "factory_release.ts");
+
+/** The pin of the release that serves the page, or null (a my-skills checkout, or no readable pin). */
+function servingPin(): Pin | null {
+  try {
+    return readPin(SERVING_ROOT);
+  } catch {
+    return null;
+  }
+}
 
 /** The `protected` regex for a path the owner typed: anchored at the start, its dots and brackets taken as they are, and
  * a file (no / at the end) matched whole: "factory" protects ^factory$, not every path with factory in it. */
@@ -210,9 +224,9 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
   if (odd !== undefined) {
     return problem("ui_add_protected", `"${odd}" isn't a path in the repo.`, "Type each protected path from the repo's top, without a leading /, for example migrations/.");
   }
-  if (!existsSync(INSTALLER)) {
-    return problem("ui_add_no_installer", "This factory has no installer beside it, so it can't install itself into another project.",
-      "Start the web UI from a my-skills checkout, then add the project again.");
+  if (!existsSync(INSTALLER) && !servingPin()) {
+    return problem("ui_add_no_installer", "This factory has no installer beside it and no release pin, so it can't install itself into another project.",
+      "Install the factory here from a release (`factory update`), or start the web UI from a my-skills checkout, then add the project again.");
   }
   return { source, repo: source === "folder" ? "" : repo, path, visibility: b.visibility === "public" ? "public" : "private", tasks,
     mainBranch, test: str(b.test), lint: str(b.lint), protected: [...new Set(prot)], team };
@@ -230,6 +244,7 @@ export function plan(req: AddRequest, host: AddHost): { id: string; title: strin
     { id: "init", title: "Labels, owner queue and PRD", detail: `${req.tasks === "issues" ? "The task labels, " : ""}the owner queue issue, a starter PRD and the role folders` },
     { id: "commit", title: "Open the setup pull request", detail: `Everything above on the branch ${SETUP_BRANCH}, for you to merge into ${req.mainBranch}` },
     { id: "list", title: "Show it in the sidebar", detail: `${name} joins the projects on the left` },
+    { id: "heartbeat", title: "Watch its agents", detail: "The heartbeat daemon on this machine, so each agent shows as running, waiting or down" },
     { id: "doctor", title: "Check the project", detail: "Each check the factory needs, with what to do for any that fails" },
   ];
 }
@@ -297,7 +312,41 @@ async function stepRepo(req: AddRequest, step: AddStep): Promise<Done> {
 }
 
 async function stepKit(req: AddRequest, step: AddStep): Promise<Done> {
-  return { state: "done", output: await must(step, ["bash", INSTALLER, req.path], req.path, gitEnv(), "Read what it printed, fix it, then press Retry.") };
+  if (existsSync(INSTALLER)) {
+    return { state: "done", output: await must(step, ["bash", INSTALLER, req.path], req.path, gitEnv(), "Read what it printed, fix it, then press Retry.") };
+  }
+  return releaseKit(req, step);
+}
+
+/** Installs the release that serves the page into the new folder with its own release client: from the download cache
+ * when it holds that exact archive, else by downloading the tag; then the new pin must name that same archive (#537). */
+async function releaseKit(req: AddRequest, step: AddStep): Promise<Done> {
+  const pin = servingPin();
+  const tag = pin?.tag ?? "";
+  const repo = pin?.repo || DEFAULT_REPO;
+  const folder = cacheFolder(repo, tag);
+  const archive = join(folder, archiveName(tag));
+  const fix = `Get the archive of ${tag} (software-factory-${tag.replace(/^v/, "")}.tar.gz and its SHA256SUMS), then in ${req.path} run ` +
+    `\`factory update --archive <archive> --sums <SHA256SUMS>\` and press Retry.`;
+  if (!pin) throw new StepFailed(problem("ui_add_no_installer", "The release that serves this page has no pin any more.", fix), "");
+  const cached = existsSync(archive) && sha256File(archive) === pin.sha256;
+  const args = cached ? ["update", "--archive", archive, "--sums", join(folder, "SHA256SUMS")] : ["update", tag];
+  // the page is the owner's (factory ui refuses FACTORY_AGENT and FACTORY_LOOP), so the owner's own Claude Code session
+  // (CLAUDECODE) is not an agent here; the agent variables are kept, and the client still refuses them
+  const env: Record<string, string> = { ...gitEnv(), FACTORY_RELEASE_REPO: repo };
+  delete env.CLAUDECODE;
+  const out = await must(step, [process.execPath, "--no-env-file", "--config=/dev/null", RELEASE_CLIENT, ...args], req.path, env, fix);
+  let got: Pin | null = null;
+  try {
+    got = readPin(req.path);
+  } catch {
+    got = null;
+  }
+  if (!got || got.sha256 !== pin.sha256) {
+    throw new StepFailed(problem("ui_add_release_differs", `${req.path} didn't get the same ${tag} as this page runs ` +
+      `(${got ? `its archive is ${got.sha256.slice(0, 12)}…, this page's is ${pin.sha256.slice(0, 12)}…` : "no pin was written"}).`, fix), out);
+  }
+  return { state: "done", output: out };
 }
 
 function writeJson(path: string, data: unknown): void {
@@ -403,6 +452,20 @@ function stepList(req: AddRequest, step: AddStep, host: AddHost, run: AddRun): D
   if (!listed) host.list(p);
   run.project = p.id;
   return { state: listed ? "skipped" : "done", output: `${p.name} is on the left.` };
+}
+
+/** `factory heartbeat ensure` in the new project: installed if missing, started if stopped, nothing if it runs. A machine
+ *  where it can't run (no systemd user manager) doesn't stop the setup: the step says why and what to do, and the agents'
+ *  state is then worked out each time it is asked. */
+async function stepHeartbeat(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
+  const p = newProject(req, host);
+  try {
+    return { state: "done", output: await must(step, ["bash", join(req.path, "factory"), "heartbeat", "ensure"], req.path, envFor(p),
+      "Run `factory heartbeat install` in the project.") };
+  } catch (e) {
+    if (!(e instanceof StepFailed)) throw e;
+    return { state: "skipped", output: `The heartbeat daemon couldn't be started here: ${e.problem.message} Fix: ${e.problem.fix}` };
+  }
 }
 
 async function stepDoctor(req: AddRequest, step: AddStep, host: AddHost): Promise<Done> {
@@ -520,6 +583,7 @@ export class AddRuns {
       case "init": return stepInit(req, step, this.host);
       case "commit": return stepCommit(req, step);
       case "list": return stepList(req, step, this.host, run);
+      case "heartbeat": return stepHeartbeat(req, step, this.host);
       default: return stepDoctor(req, step, this.host);
     }
   }

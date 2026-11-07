@@ -188,7 +188,7 @@ function pullRequests(s: Step, missing: Problem[]): Prs {
     // review, notGreen, protected, agent and claim are for the web UI's pull requests channel (#424); head keeps a pull
     // request's page until it changes (#453)
     pulls = data.pulls.map(obj).map((p) => ({ number: p.number, title: p.title, url: p.url ?? null, branch: p.branch,
-      draft: Boolean(p.draft), ci: obj(p.ci).state ?? null, next: obj(p.next).action ?? null, nextText: obj(p.next).text ?? null,
+      draft: Boolean(p.draft), createdAt: p.createdAt ?? null, ci: obj(p.ci).state ?? null, next: obj(p.next).action ?? null, nextText: obj(p.next).text ?? null,
       agent: p.agent ?? null, review: p.headMarker ?? null, gate: p.gate ?? null, head: str(obj(p.head).sha) || null,
       notGreen: Array.isArray(obj(p.ci).notGreen) ? obj(p.ci).notGreen : [], protected: typeof p.protected === "boolean" ? p.protected : null,
       claim: p.claim ?? null, rework: obj(p.rework).agent ?? null, cites: Array.isArray(p.cites) ? p.cites.map(plain).filter(Boolean) : [] }));

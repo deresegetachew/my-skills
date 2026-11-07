@@ -30,6 +30,8 @@
 //                                              comment, request-changes and close (factory_ui_pr.ts)
 //   GET  /api/projects/:p/tasks/:id            a task's page from the message board (#498): the task, its thread and its
 //                                              context entries (404 ui_board_absent when its tasks aren't on a board)
+//   GET  /api/projects/:p/health|usage|activity|home, POST .../health/check: Health, Usage and cost, Activity and Home
+//                                              (factory_ui_ops.ts, #455, #451); the WebSocket gets {type: "health"|"activity", project}
 //   GET|POST /api/add-project[/check|/runs/:id[/retry]]: add a project from the page (factory_ui_add.ts, #447); the
 //                                              WebSocket gets {type: "add-project", run} and {type: "projects"}
 //
@@ -50,6 +52,7 @@ import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { settingsApi } from "./factory_ui_settings.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
 import { BoardFeed } from "./factory_ui_board.ts";
+import { Ops } from "./factory_ui_ops.ts";
 import { ciAction, pullRowOf, Refresher, repoOfProject, taskAction, viewsOf } from "./factory_ui_views.ts";
 import { prAction, PrPages } from "./factory_ui_pr.ts";
 
@@ -179,7 +182,8 @@ export function serve(o: ServeOptions): Running {
   // the tasks, pull requests and CI channels (#424): from the snapshot's cache, sent when they change
   const viewsSent = new Map<string, string>();
   const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
-    changed: (p) => pushViews(p), fellBack: (p, wasLive) => refresher.tasksNeeded(p, wasLive), log: (line) => console.log(line) });
+    changed: (p) => pushViews(p), fellBack: (p, wasLive) => refresher.tasksNeeded(p, wasLive), log: (line) => console.log(line),
+    event: () => { for (const p of list) if (feed.live(p)) publish({ type: "activity", project: p.id }); } });
   const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
   const prPages = new PrPages(); // a pull request's page (#453), kept until its head changes
   void feed.start();
@@ -192,6 +196,12 @@ export function serve(o: ServeOptions): Running {
     viewsSent.set(p.id, text);
     for (const s of servers) s.publish(TOPIC, text);
   }
+  function publish(m: Record<string, unknown>): void {
+    const text = JSON.stringify(m);
+    for (const s of servers) s.publish(TOPIC, text);
+  }
+  const ops = new Ops({ views: (p) => viewsOf(p, refresher.running(p), Date.now(), feed.view(p)), live: (p) => state(p, o.pollSeconds * 1000).then((k) => k.data),
+    queue: (p) => chat.ownerQueue(p), board: feed, publish });
 
   // adding a project (#447)
   const adds = new AddRuns({
@@ -238,6 +248,8 @@ export function serve(o: ServeOptions): Running {
     const talked = await chat.api(req, p, rest, seen(p));
     if (talked) return json(talked.status, talked.body);
     const ttl = o.pollSeconds * 1000;
+    const page = await ops.api(req, p, rest, url); // Health, Usage and cost, Activity, Home (#455, #451)
+    if (page) return json(page.status, page.body);
     if (rest[0] === "docs" && rest.length <= 2) { // the PRD, the decisions and the wiki (#438)
       if (req.method !== "GET") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET.");
       if (rest.length === 1) return json(200, { project: p.id, sections: docsOf(p) });
