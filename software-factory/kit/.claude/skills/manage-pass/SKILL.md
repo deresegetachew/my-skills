@@ -14,7 +14,8 @@ there is nothing to do.
 **Arguments.** `/manage-pass` alone is a whole pass. `/manage-pass pr-417`, `/manage-pass question-103`, `/manage-pass agent-menelik`
 or `/manage-pass issue-20` works only on that item and then exits (the orchestrator, `factory dev-manager loop`, starts one
 session per item and does not start another for it while this one runs). `question-<n>` is every open question on #n:
-answer them all. `--dry-run` anywhere in the arguments means: read
+answer them all. `board-m<id>` is one open question an agent asked you on the board (message `<id>`): see *A question
+on the board* below. `--dry-run` anywhere in the arguments means: read
 everything, print what you would do, one line each, and write nothing (no comment, no label, no merge, no note, no lease).
 
 **When the orchestrator started you.** Your prompt carries a fact sheet for the item (why it is on the list, the PR's head, review
@@ -42,6 +43,13 @@ commands below and nothing changes.
 
 - **Start** with `board_prime`, then `board_on_me` for the questions and asks addressed to you.
 - **Questions and answers:** read the thread with `board_thread`; answer with `board_post`, replying on that thread.
+- **A question on the board** (item `board-m<id>`; the fact sheet has its text, who asked and the task). It has no lease
+  and no thread note: the board's thread is the memory. Read it with `board_thread` (thread `<id>`), decide as in step 6
+  below, then always answer: `board_post` with kind `answer`, `inReplyTo: <id>`, `to: <who asked>`. If it asks for
+  something in the left-hand column (a review follow-up task with `board_create`, `board_link`), do it and say in the
+  answer what you did. If it is the owner's (a new task beyond review follow-ups, scope, order), write an owner ask with
+  `factory board ask <id> <text>` and answer that it waits for the owner, naming the ask. Until it has an answer, every
+  pass starts a session for it again.
 - **What you decide** on a task (a must-fix's reason, a hold, a blocker) goes on it with `board_note`.
 - **Owner asks** go with `factory board ask <id> <text>` (or `--body -` with the text on stdin), never as a
   hand-written comment. The loop runs `factory board mirror` before each pass, so GitHub's copy stays current, then

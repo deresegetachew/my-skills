@@ -39,7 +39,8 @@ import { type Config, load, managerSetting, roleNames, safeAgent, taskLabels, to
 import { comment, type Comment, gh, ghAll, type Issue, taskIssues } from "./factory_issues.ts";
 import * as lease from "./factory_lease.ts";
 import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_roles.ts";
-import { ciState, collect, isoformat, issueOf, isOwn, type Item, minutes, type Pull, reviewState } from "./factory_watch.ts";
+import { ciState, collect, isoformat, issueOf, isOwn, type Item, make, minutes, type Pull, reviewState } from "./factory_watch.ts";
+import { boardOn } from "./factory_mcp.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./factory_lib.ts";
 import { remember, settled } from "./factory_views_cache.ts";
 import { ensureWatcher, freshPrs, prFeedIsOn } from "./factory_pr_feed.ts";
@@ -276,9 +277,12 @@ export function factSheet(_cfg: Config, item: Item, held: lease.Lease | null, no
     const issue = issueOf(p);
     if (issue) lines.push(`Task issue: #${issue}.`);
   }
+  if (item.detail) lines.push(item.detail);
   if (held) lines.push(`Your lease: ${lease.render(held.kind, held.holder, held.key, held.until)}`);
   if (owner) lines.push(`Owner login for an owner-queue ask: @${owner}.`);
-  if (note) {
+  if (item.kind === "board-question") {
+    lines.push("A board question has no thread note: its thread on the board is the memory.");
+  } else if (note) {
     lines.push(`Thread note (comment ${note.id}; edit it with PATCH repos/{owner}/{repo}/issues/comments/` +
       `${note.id} before you exit):\n${note.body}`);
   } else {
@@ -434,13 +438,37 @@ function inWindow(name: string, ref: string, job: Job, limit: number, out: Out):
   }
 }
 
-export function runSub(cfg: Config, name: string, ref: string, interactive = false): number {
+// --- questions on the board ------------------------------------------------------------------------------------------
+
+/** A question on the board is item `board-m<id>`. */
+export const BOARD_ITEM = /^board-m\d+$/;
+
+/** With the board on, one item per open question an agent asked this dev manager on the board, in this project: to its
+ * name, or to `dev-manager` when it is the role's first name (so two dev managers never both take one). The fact sheet
+ * carries the question and how to answer it; once it has an answer it is no longer open, so no pass starts it again. */
+export async function boardItems(cfg: Config, name: string): Promise<Item[]> {
+  if (!boardOn(cfg)) return [];
+  const { boardQuestions } = await import("./factory_board.ts");
+  const first = roleNames(cfg, "dev-manager")[0] ?? name;
+  return (await boardQuestions(name === first ? [name, "dev-manager"] : [name])).map((q) => ({
+    ...make("board-question", `board-m${q.id}`, q.line, { since: q.at, key: `board-m${q.id}` }),
+    detail: [`Board question m${q.id} from ${q.from} to ${q.to}${q.task ? ` about ${q.task}` : ""}, asked ${isoformat(q.at)}:`,
+      q.body.trim(),
+      `Answer it on the board: read its thread with board_thread (thread ${q.id}), then board_post with kind "answer", ` +
+      `inReplyTo ${q.id}, to "${q.from}". If it asks for something that is yours to do (a new task with board_create, a ` +
+      "link with board_link), do it and say in the answer what you did. A decision only the owner may take goes to the " +
+      "owner queue (`factory board ask <id> <text>`), and the answer says so. Always post the answer: until the question " +
+      "has one, every pass starts a sub-manager for it."].join("\n"),
+  }));
+}
+
+export async function runSub(cfg: Config, name: string, ref: string, interactive = false): Promise<number> {
   const out = makeOut(name, false);
   const pidfile = join(stateDir(name), `${ref}.pid`);
   writeFileSync(pidfile, String(process.pid));
   let held: lease.Lease | null = null;
   try {
-    const item = collect(cfg).find((i) => i.ref === ref && i.to === "manager");
+    const item = (BOARD_ITEM.test(ref) ? await boardItems(cfg, name) : collect(cfg)).find((i) => i.ref === ref && i.to === "manager");
     if (!item) {
       out(`${ref}: nothing needs a manager any more`);
       return 0;
@@ -545,7 +573,7 @@ export async function cycle(cfg: Config, name: string, dry = false, interactive 
   const out = makeOut(name, dry);
   const now = lease.now();
   const info: { activity?: number | null } = {};
-  const items = collect(cfg, now, info, prSnapshot(cfg, name, dry, out));
+  const items = [...collect(cfg, now, info, prSnapshot(cfg, name, dry, out)), ...await boardItems(cfg, name)];
   let did = lifecycle(cfg, name, out).length > 0;
   const managers = items.filter((i) => i.to === "manager");
   const owners = items.filter((i) => i.to === "owner");
@@ -597,7 +625,7 @@ export async function cycle(cfg: Config, name: string, dry = false, interactive 
       continue;
     }
     if (interactive) {
-      runSub(cfg, name, i.ref, true);
+      await runSub(cfg, name, i.ref, true);
       started.push(i.ref);
       break;
     }
@@ -638,7 +666,7 @@ export async function main(argv: string[]): Promise<number> {
   const name = safeAgent(given || (roleNames(cfg, "dev-manager")[0] ?? "manager"));
   try {
     if (cmd === "cycle") return await cycle(cfg, name, Boolean(a["dry-run"]), Boolean(a.interactive), Boolean(a.wait));
-    return runSub(cfg, name, a.item as string, Boolean(a.interactive));
+    return await runSub(cfg, name, a.item as string, Boolean(a.interactive));
   } catch (e) { // a gh call that failed: one line; the loop counts it as a failed cycle, or waits when GitHub was busy (#347)
     if (e instanceof Exit && e.text !== null) {
       process.stderr.write(`[${name}] ${e.text}\n`);

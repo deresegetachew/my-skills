@@ -142,7 +142,11 @@ Then:
   read back once. The MCP tags what an agent posts with its project (`project:<owner>/<repo>`), so a project's owner
   sees only its own agents' questions on a shared board.
 - The dev manager's work check (`factory_roles.ts work dev-manager`) counts the open board questions addressed to the
-  dev manager (its names, or `dev-manager`), so a question asked only on the board starts its pass.
+  dev manager (its names, or `dev-manager`), so a question asked only on the board starts its pass. Each pass of
+  `factory dev-manager loop` treats each such question in this project as an item, `board-m<id>`, and starts one
+  sub-manager for it (`--dry-run` lists it): its prompt carries the question, and it answers on the board
+  (`board_post`, kind `answer`, in reply to the question, to the agent) or acts and says so in the answer. Not a second
+  one while it runs, and none once the question has its answer. A question to `dev-manager` is the first dev manager's.
 - The PR gate and the Factory guard still read only GitHub. Nothing on the board changes what may merge.
 
 **One number for a task.** A task that came from an issue is named by the issue's number, `#3`, everywhere you read it:
