@@ -140,7 +140,7 @@ export function TasksChannel(p: ViewProps) {
   const v = p.views;
   const epics = v.epics.epics;
   const tab: TaskTab = picked ?? (epics.length ? "epic" : "agent"); // the design opens by epic; with no epics, by agent
-  const all = v.tasks.tasks;
+  const all = [...v.tasks.tasks, ...(v.tasks.done ?? [])]; // the open work, then what was done this week (#545)
   const withTasks = epics.filter((e) => all.some((t) => t.epic === e.id));
   const chosen = epic && withTasks.some((e) => e.id === epic) ? epic : null;
   const rows = filterRows(all, typed).filter((t) => chosen === null || t.epic === chosen);

@@ -124,6 +124,8 @@ export interface EpicsView extends Origin {
 export interface TasksView extends Origin {
   source: string;
   tasks: TaskRow[];
+  /** The tasks done in the last days, newest first, for the board's Done column (#545): from the message board only. */
+  done: TaskRow[];
   next: string | null;
   problems: Problem[];
 }
@@ -276,7 +278,7 @@ function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], ori
   const prOf = new Map<string, PullView>();
   for (const pr of pulls) if (pr.task && !prOf.has(pr.task)) prOf.set(pr.task, pr);
   let next: string | null = null;
-  const tasks = rows.map((t): TaskRow => {
+  const toRow = (t: Obj): TaskRow => {
     const id = str(t.id);
     const holders = (Array.isArray(t.holders) ? t.holders : []).map(str).filter(Boolean);
     const dependsOn = (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(str).filter(Boolean);
@@ -292,8 +294,10 @@ function tasksView(p: UiProject, part: Obj, repo: string, pulls: PullView[], ori
       url: source === "issues" && repo && /^\d+$/.test(id) ? `https://github.com/${repo}/issues/${id}` : null,
       pr: pr ? { number: pr.number, url: pr.url, checks: pr.checks } : null, next: isNext, actions: actionsFor(str(t.state), source),
       epic: epicOf.get(id) ?? null, cites: strings(t.cites), find: taskText(t) };
-  });
-  return { source, ...origin, tasks, next, problems };
+  };
+  const tasks = rows.map(toRow);
+  const done = list(part.done).filter((t) => str(t.id)).map(toRow); // the board's recently done (#545), never next
+  return { source, ...origin, tasks, done, next, problems };
 }
 
 function reviewOf(p: Obj): PullView["review"] {
@@ -429,7 +433,7 @@ export function viewsOf(p: UiProject, refreshing = false, now = Date.now(), boar
     const ci: CiView = { verdict: null, mode: "", repo: "", label: "", runs: [], runners: [], waiting: [], host: host(),
       settings: { heavy: null, light: null }, actions: [], problems: [] };
     const origin: Origin = { from: "github", every: ttl() };
-    return { generatedAt: null, age: null, refreshing: false, problems: [p.problem], tasks: { source: "", ...origin, tasks: [], next: null, problems: [] },
+    return { generatedAt: null, age: null, refreshing: false, problems: [p.problem], tasks: { source: "", ...origin, tasks: [], done: [], next: null, problems: [] },
       epics: { source: "", ...origin, epics: [], problems: [] },
       pulls: { pulls: [], problems: [] }, ci };
   }

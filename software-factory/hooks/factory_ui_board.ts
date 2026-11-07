@@ -115,8 +115,9 @@ const WORK = new Set(["task", "bug"]);
 /** How long a done task stays on the Board page's Done column (#545: finished work mustn't vanish at once). */
 export const DONE_DAYS = 7;
 
-/** Project `repo`'s tasks part from all the board's tasks, or null when none of them is the project's. The open tasks,
- *  then those done in the last DONE_DAYS (newest first), each with who holds it and who it was handed to. */
+/** Project `repo`'s tasks part from all the board's tasks, or null when none of them is the project's: its open tasks
+ *  (`tasks`) and, apart, those done in the last DONE_DAYS (`done`, newest first), each with who holds it and who it was
+ *  handed to. */
 export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj | null {
   const prefix = prefixOf(repo);
   const ids = new Map<number, string>();
@@ -141,13 +142,15 @@ export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj
   const since = now - DONE_DAYS * 86_400_000;
   const doneAt = (t: Task): number => new Date(t.updatedAt).getTime();
   const recent = work.filter((t) => t.status === "done" && doneAt(t) >= since).sort((a, b) => doneAt(b) - doneAt(a));
-  const tasks = [...work.filter((t) => t.status !== "done"), ...recent].map((t) => {
+  const rowOf = (t: Task): Obj => {
     const epic = epicOf(t);
     const blockedBy = t.status === "done" ? [] : t.blockedBy.map(named);
     return { id: ids.get(t.id), title: t.title, state: stateOf(t), holders: t.holder ? [t.holder] : [], assignee: t.assignee ?? null,
       group: /^Milestone:[ \t]*(.+)$/m.exec(t.body)?.[1]?.trim() ?? "", todos: todos(t.body).map((d) => ({ done: d.done })),
       dependsOn: blockedBy, blockedBy, cites: citesIn(t.body), epic: epic ? ids.get(epic.id) : null };
-  });
+  };
+  const tasks = work.filter((t) => t.status !== "done").map(rowOf);
+  const done = recent.map(rowOf);
   const epics = mine.filter((t) => t.kind === "epic").map((e) => {
     const id = ids.get(e.id) as string;
     const parsed = parseEpic({ number: Number(id), title: e.title, body: e.body, labels: [], closed: e.status === "done", openIds: new Set() });
@@ -156,7 +159,7 @@ export function partOf(all: Task[], repo: string, now: number = Date.now()): Obj
     const stage = e.status === "done" ? "done" : e.status === "deferred" ? "parked" : "";
     return { id, title: e.title, stage, prd: parsed.prd, decisions: parsed.decisions, summary: parsed.summary, cites: parsed.cites, tasks: children, url: null };
   });
-  return { source: "issues", from: "board", tasks, epics };
+  return { source: "issues", from: "board", tasks, done, epics };
 }
 
 /** The one connection to the board, its listen(), and the tasks part of each project, read again on every event. */

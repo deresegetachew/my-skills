@@ -160,9 +160,7 @@ test("the tasks API answers from the board: columns from its status, blocked and
   const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
   expect(json.from, JSON.stringify(json)).toBe("board");
   const t = byId(json);
-  // this repo's open tasks and those done this week (#545); no #99 from GitHub, no epic, no other repo
-  expect(Object.keys(t).sort()).toEqual(["10", "11", "12", "7", "9"]);
-  expect(t["10"]).toMatchObject({ state: "done", holders: [], blockedBy: [], actions: [] });
+  expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9"]); // open tasks of this repo only; no #99 from GitHub, no epic, no other repo
   expect(t["7"]).toMatchObject({ state: "in-progress", holders: ["menelik"], epic: "1", url: `https://github.com/${REPO}/issues/7` });
   expect(t["9"]).toMatchObject({ state: "blocked", holders: [], epic: "1", blockedBy: ["11"] });
   expect(t["11"]).toMatchObject({ state: "ready", group: "Phase 2", epic: null, blockedBy: [] });
@@ -292,7 +290,7 @@ test("a task made on the board for this project (ref factory:<repo>/...) is on t
   const ui = await started(p, url);
   const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
   const t = byId(json);
-  expect(Object.keys(t).sort()).toEqual(["10", "11", "12", "7", "9", `b${mine.id}`]);
+  expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9", `b${mine.id}`]);
   expect(t[`b${mine.id}`]).toMatchObject({ title: "Made on the board", state: "in-progress", holders: ["menelik"], url: null });
   const r = await api(ui, `/api/projects/work/tasks/b${mine.id}/actions/release`, { method: "POST", body: { confirm: true, reason: "try again" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
@@ -639,4 +637,18 @@ test("the server logs that the board can't be read, and that it reconnected once
     reader.releaseLock();
     await finish(ui);
   }
+}, T);
+
+test("the tasks done this week come apart from the open ones, newest first, for the board's Done column (#545)", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const later = await board.create({ title: "Remember the theme", ref: ref(13), priority: 6 });
+  await board.close(later.id, { outcome: "done" });
+  const ui = await started(workProject(), url);
+  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  expect(Object.keys(byId(json)).sort()).toEqual(["11", "12", "7", "9"]); // the open tasks, as before
+  const done = json.done as Row[];
+  expect(done.map((t) => t.id)).toEqual(["13", "10"]); // newest first
+  expect(done[0]).toMatchObject({ state: "done", holders: [], blockedBy: [], actions: [], title: "Remember the theme" });
+  await finish(ui);
 }, T);
