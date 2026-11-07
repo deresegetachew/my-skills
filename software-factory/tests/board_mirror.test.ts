@@ -537,7 +537,7 @@ test("a line recorded but not posted, then a state back where the last posted li
   expect(r.code, r.stderr).toBe(0);
   expect(lines()).toHaveLength(1);
   expect(lines()[0]).toContain("**haile** is working on this");
-  expect(labelsOf(w, 101)).toEqual(["agent:haile", "factory:in-progress"]);
+  expect(labelsOf(w, 101)).toEqual(["agent:haile", "bug", "factory:in-progress"]);
   // and a later change sends its own line, once
   await haile.release(t.id, claim?.token as string, { next: "ready", reason: "done for today" });
   expect(mirror(w).code).toBe(0);

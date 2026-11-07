@@ -271,6 +271,8 @@ export interface Read {
   known: Known[];
   /** The refs already on the board (any status). */
   onBoard: Set<string>;
+  /** What each of them is on the board (a closed issue that is a task there stays one). */
+  kinds?: Map<string, TaskKind>;
 }
 
 export interface Built {
@@ -281,12 +283,23 @@ export interface Built {
 export const issueRef = (repo: string, n: number): string => `github:${repo}#${n}`;
 export const commentRef = (repo: string, id: number): string => `github:${repo}/comments/${id}`;
 
-function kindOf(i: GhIssue, map: GithubMapping): TaskKind {
+/** Whether the factory took issue `i` as a task (#515): it carries one of the factory's labels (ready, in progress, in
+ * review, blocked, or agent:<name>), as a task does in issues mode, where only a labelled issue is ever claimed. */
+export function isFactoryTask(i: GhIssue, map: GithubMapping): boolean {
+  const L = map.labels;
+  return labelNames(i).some((l) => [L.ready, L.inProgress, L.inReview, L.blocked].includes(l) || l.startsWith(L.agentPrefix));
+}
+
+/** What issue `i` is on the board. An open issue the factory didn't take as a task (no factory label: a channel, a bug
+ * report nobody triaged) is a note, never ready. A closed one that is a task or a bug on the board stays one: the
+ * mirror takes the factory's labels off an issue it closes. */
+function kindOf(i: GhIssue, map: GithubMapping, onBoard?: TaskKind): TaskKind {
   const labels = labelNames(i);
   if (labels.some((l) => map.kinds.epic.includes(l))) return "epic";
   if (labels.some((l) => map.kinds.noteLabels.includes(l)) || map.kinds.noteTitles.includes(i.title)) return "note";
+  if (!isFactoryTask(i, map) && !(i.state === "closed" && (onBoard === "task" || onBoard === "bug"))) return "note";
   if (labels.some((l) => map.kinds.bug.includes(l))) return "bug";
-  return "task";
+  return onBoard === "bug" && !isFactoryTask(i, map) ? "bug" : "task";
 }
 
 /** Turn what was read into an ImportBatch: pure, no calls. */
@@ -381,7 +394,7 @@ export function buildBatch(read: Read, map: GithubMapping, options: Record<strin
     skipped.deps += deps.length - blockedBy.length;
     const p = parentOf.get(i.number);
     return {
-      ref: r, title: i.title, body, kind: kindOf(i, map), status, outcome, createdAt: i.created_at ? new Date(i.created_at) : undefined,
+      ref: r, title: i.title, body, kind: kindOf(i, map, read.kinds?.get(r)), status, outcome, createdAt: i.created_at ? new Date(i.created_at) : undefined,
       parentRef: p !== undefined && mine.has(p) ? ref(p) : null, blockedBy, notes: labelNotes ? notes : undefined,
     };
   });
@@ -449,7 +462,7 @@ export async function importFromGithub(board: Board, opts: { repo: string; close
   const comments = pages<GhComment>(gh, `repos/${opts.repo}/issues/comments?per_page=100${since ? `&since=${since}` : ""}`, (c) => c.id);
 
   const known = since ? await knownComments(board, onBoard, comments, issues, opts.repo, map) : [];
-  const built = buildBatch({ repo: opts.repo, closed, issues, comments, known, onBoard: new Set(onBoard.keys()), boardIsRecord }, map,
+  const built = buildBatch({ repo: opts.repo, closed, issues, comments, known, onBoard: new Set(onBoard.keys()), kinds: new Map([...onBoard].map(([r, t]) => [r, t.kind])), boardIsRecord }, map,
     { startedAt: startedAt.toISOString(), closed });
   const result = await board.import(built.batch, { dryRun: opts.dryRun === true, keepBoardStatus: boardIsRecord });
   return { repo: opts.repo, closed, boardIsRecord, result, skipped: { ...built.skipped, gone }, since, calls: gh.calls };
