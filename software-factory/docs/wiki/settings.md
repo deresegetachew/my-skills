@@ -289,7 +289,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `autostart` | bool | `false` | Bring the stack and this machine's agents back after a reboot (`factory autostart`). |
 | `autostartAgents` | list | `[]` | The agents it starts at boot. Empty: the names this machine runs. |
 | `autostartReport` | bool | `true` | Post the boot report on the first started agent's issue (issues mode). |
-| `maxCodingAgents` | int | `null` | How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`) is refused. Empty: no limit. |
+| `maxCodingAgents` | int | `null` | How many coding agents may run on this machine at once: starting one more (Start in the web UI, `factory owner start`, `factory loop -i`, `factory agent`) is refused, and `factory resume` at boot starts at most this many, in the team's order. Empty: no limit. |
 | `ci.runners` | int | `null` | Heavy CI runners for this project on this machine (`factory ci runners <n>`); wins over the project's `ci.runners`. Empty: the project's. |
 
 **Messaging**
