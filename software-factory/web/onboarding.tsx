@@ -55,7 +55,7 @@ const TEAM = [["mentewab", "product-owner", "Product owner"], ["fasil", "dev-man
 export function WelcomePage({ go, skip }: { go: (hash: string) => void; skip: () => void }) {
   return (
     <div className="ap-page">
-      <Top status="Not set up yet" />
+      <Top status="Getting started" />
       <Stepper current={0} />
       <main className="ap-card wide">
         <div className="ob-hero">

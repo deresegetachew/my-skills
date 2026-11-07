@@ -20,9 +20,11 @@ const FAKE = `#!/usr/bin/env bash
 echo "$*" >> "$FAKE_FACTORY_LOG"
 if [ "$1 $2" = "machine join" ]; then
   if [ -f "$FAKE_JOIN_FAIL" ]; then
+    echo "could not redeem $3" >&2
     echo '{"code": "code-expired", "message": "The join code for office-pc has expired.", "fix": "Ask for a new one."}' >&2
     exit 1
   fi
+  echo "Redeemed $3."
   echo "Joined the board at 100.64.0.1:5432 as office-pc."
 fi
 `;

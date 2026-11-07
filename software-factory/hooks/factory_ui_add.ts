@@ -581,10 +581,11 @@ function writeAvatars(req: AddRequest): string[] {
     const f = avatarFile(url);
     if (!f) continue; // checked when the request was read
     mkdirSync(dir, { recursive: true });
-    for (const ext of AVATAR_EXTS) if (ext !== f.ext) rmSync(join(dir, `${name}.${ext}`), { force: true });
     const file = join(dir, `${name}.${f.ext}`);
     writeFileSync(file, f.data);
     chmodSync(file, 0o644);
+    // only once the new one is there, so a failed write leaves the old picture
+    for (const ext of AVATAR_EXTS) if (ext !== f.ext) rmSync(join(dir, `${name}.${ext}`), { force: true });
     out.push(`.claude/factory/avatars/${name}.${f.ext}`);
   }
   return out;
