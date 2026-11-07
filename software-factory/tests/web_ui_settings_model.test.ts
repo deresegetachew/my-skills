@@ -83,6 +83,86 @@ test("removing an agent: it must be stopped and hold no task, each with its own 
   for (const s of [busy, away, free]) expect(words(s)).not.toMatch(COMMAND);
 });
 
+// #589: after a precondition's own button (Stop, Release #n) ran, the open dialog reads the agent again until the
+// condition shows met, so the confirm turns on without closing and opening the dialog.
+type Live = { name: string; state: string; task: string | null; here: boolean; machineName: string | null };
+const menelik = (state: string, task: string | null = null): Live => ({ name: "menelik", state, task, here: true, machineName: null });
+
+function fakeClock(): { sleep: (ms: number) => Promise<void>; waited: number[] } {
+  const waited: number[] = [];
+  return { waited, sleep: async (ms) => { waited.push(ms); } };
+}
+
+test("after its Stop button ran and the agents API then says down, the remove checklist shows it met without reopening", async () => {
+  const { removeAgentAsk, removeFactsOf, recheckAgent, agentOfAnswer } = await mod();
+  const live = menelik("working"); // the live push hasn't caught up yet
+  const before = removeAgentAsk(removeFactsOf("coding-agent", live, null));
+  expect(before.checks[0]).toMatchObject({ met: false, fix: "Stop menelik" });
+  // what GET /api/projects/:p/agents/menelik answers, one read after another
+  const answers: unknown[] = [{ project: "p", agent: menelik("working") }, { project: "p", agent: menelik("working") }, { project: "p", agent: menelik("down") }];
+  let reads = 0;
+  const shown: Live[] = [];
+  const clock = fakeClock();
+  const last = await recheckAgent({ read: async () => agentOfAnswer("menelik", answers[reads++]), done: "stop", seen: (a) => shown.push(a), sleep: clock.sleep });
+  expect(reads).toBe(3);
+  expect(clock.waited).toEqual([2000, 2000]);
+  expect(last?.state).toBe("down");
+  const after = removeAgentAsk(removeFactsOf("coding-agent", live, shown.at(-1) ?? null));
+  expect(after.checks[0]).toMatchObject({ met: true });
+  expect(after.checks[0]?.fix).toBeUndefined();
+  expect(confirmState(after, "menelik").ready).toBe(true);
+});
+
+test("after its Release button ran, the checklist shows the task released once the agents API says so", async () => {
+  const { removeAgentAsk, removeFactsOf, recheckAgent, agentOfAnswer } = await mod();
+  const live = menelik("down", "12");
+  const answers: unknown[] = [{ agent: menelik("down", "12") }, { agent: menelik("down", null) }];
+  let reads = 0;
+  let fresh: Live | null = null;
+  const clock = fakeClock();
+  await recheckAgent({ read: async () => agentOfAnswer("menelik", answers[reads++]), done: "release", seen: (a) => { fresh = a; }, sleep: clock.sleep });
+  expect(reads).toBe(2);
+  const after = removeAgentAsk(removeFactsOf("coding-agent", live, fresh));
+  expect(after.checks.every((c) => c.met)).toBe(true);
+  expect(confirmState(after, "menelik").ready).toBe(true);
+});
+
+test("the recheck reads every 2 s for at most 30 s, and stops when the dialog closes", async () => {
+  const { recheckAgent } = await mod();
+  let reads = 0;
+  const clock = fakeClock();
+  const last = await recheckAgent({ read: async () => { reads++; return menelik("working"); }, done: "stop", seen: () => {}, sleep: clock.sleep });
+  expect(last?.state).toBe("working");
+  expect(clock.waited.every((ms) => ms === 2000)).toBe(true);
+  expect(clock.waited.reduce((a, b) => a + b, 0)).toBe(30_000);
+  expect(reads).toBe(16);
+  let closed = false;
+  reads = 0;
+  await recheckAgent({ read: async () => { reads++; closed = true; return menelik("working"); }, done: "stop", seen: () => {}, sleep: clock.sleep,
+    gone: () => closed });
+  expect(reads).toBe(1);
+});
+
+test("an answer the agents API gives: the agent, down when it isn't reported any more, nothing when the read failed", async () => {
+  const { agentOfAnswer } = await mod();
+  expect(agentOfAnswer("menelik", { agent: menelik("idle", "3") })).toEqual(menelik("idle", "3"));
+  expect(agentOfAnswer("menelik", { code: "ui_agent_unknown", message: "menelik isn't reported in p.", fix: "x" }))
+    .toMatchObject({ name: "menelik", state: "down", task: null });
+  expect(agentOfAnswer("menelik", { code: "unreachable", message: "x", fix: "y" })).toBeNull();
+  expect(agentOfAnswer("menelik", null)).toBeNull();
+});
+
+test("while the dialog waits to see it stopped, the check says so instead of offering Stop again", async () => {
+  const { removeAgentAsk, removeFactsOf } = await mod();
+  const s = removeAgentAsk({ ...removeFactsOf("coding-agent", menelik("working", "12"), null), checking: "stop" });
+  expect(s.checks[0]).toMatchObject({ met: false, waiting: "Checking…" });
+  expect(s.checks[0]?.fix).toBeUndefined();
+  expect(s.checks[1]).toMatchObject({ fix: "Release #12" });
+  // the live push and the fresh read: whichever shows it met wins
+  expect(removeFactsOf("coding-agent", menelik("down"), menelik("working")).running).toBe(false);
+  expect(removeFactsOf("coding-agent", undefined, null).running).toBe(false);
+});
+
 test("proposing the staged changes: one pull request that the owner merges", async () => {
   const { proposeAsk } = await mod();
   const s = proposeAsk(3);

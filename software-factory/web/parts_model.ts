@@ -11,6 +11,8 @@ export interface Check {
   sub?: string;
   /** The label of the button that meets it, when the page has one. */
   fix?: string;
+  /** Shown in place of the fix button while the page checks that its fix took (#589), such as "Checking…". */
+  waiting?: string;
 }
 
 export interface ConfirmSpec {
