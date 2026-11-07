@@ -52,6 +52,10 @@ function translate(e: unknown, connecting = false): unknown {
   const state = err.errno ?? "";
   const msg = (err.message ?? String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
   // 28P01: a wrong password, an expired login (VALID UNTIL) or a role that is gone; 28000: a role that may not log in
+  if (connecting && state === "53300" && /for role/.test(msg)) { // too many connections for this role (a join code allows two), not for the server
+    return new BoardError("login-in-use", `This login is already connected elsewhere as often as it may be (${msg}): if it is a join code's, the code may have been copied.`,
+      "On the hub run `factory machine remove <name>`, then `factory machine add <name> --agent ...` for a new code, and join with that.");
+  }
   if (state === "28P01" || state === "28000" || (connecting && state === "42501")) {
     return new BoardError("login-refused", `${LOGIN_REFUSED} The board said: ${msg}.`, LOGIN_REFUSED_FIX);
   }

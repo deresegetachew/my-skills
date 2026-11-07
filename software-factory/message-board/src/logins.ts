@@ -198,6 +198,12 @@ async function ensure(tx: SQL, db: string): Promise<void> {
     await tx.unsafe(`REVOKE EXECUTE ON FUNCTION ${String(f)} FROM PUBLIC`);
     await tx.unsafe(`GRANT EXECUTE ON FUNCTION ${String(f)} TO ${ident(group)}`);
   }
+  // Large objects: the board has none, and nobody else on this database may make or write one (a role that owns one
+  // used to outlive a remove's REASSIGN OWNED as the board user's).
+  const largeObjects = (await tx`SELECT p.oid::regprocedure::text AS f FROM pg_proc p
+    WHERE p.pronamespace = 'pg_catalog'::regnamespace
+      AND p.proname IN ('lo_create', 'lo_creat', 'lo_from_bytea', 'lo_import', 'lowrite', 'lo_put')`) as Row[];
+  for (const { f } of largeObjects) await tx.unsafe(`REVOKE EXECUTE ON FUNCTION ${String(f)} FROM PUBLIC`);
   // Runs as its owner on every connection to this database; a failure in it must never stop a login.
   await tx.unsafe(`CREATE OR REPLACE FUNCTION mb_login_seen() RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER
     SET search_path = public, pg_temp SET lock_timeout = '1s' AS $f$
@@ -289,11 +295,15 @@ async function oidsOf(sql: SQL, roles: Iterable<string>): Promise<unknown[]> {
 
 /** Cuts `roles` off the board without waiting on anything their sessions hold (a redeem in progress holds the login's
  * row and its role's catalog row, not these): no CONNECT, no redeem, no logins group. A role's open sessions keep
- * running until they are ended; it can't start another. Committed on its own, waiting at most 2 s. */
+ * running until they are ended; it can't start another. Committed on its own, under the board's logins lock, each
+ * statement waiting at most 2 s. */
 async function cutOff(sql: SQL, roles: Iterable<string>): Promise<void> {
   const db = await database(sql);
   const group = groupOf(db);
   await sql.begin(async (tx) => {
+    // the board's logins lock: two changes of the database's or the redeem's grants at once would fail ("tuple
+    // concurrently updated"); only the board's own changes hold it, never a login's session
+    await takeLock(tx, "logins", LOCKS_SECONDS);
     await tx.unsafe(`SET LOCAL lock_timeout = '${LOCK_WAIT_SECONDS}s'`);
     const redeem = ((await tx`SELECT 1 FROM pg_proc WHERE proname = 'mb_redeem_login' AND pronamespace = 'public'::regnamespace`) as Row[]).length > 0;
     for (const r of roles) {
@@ -353,14 +363,14 @@ async function underLock<T>(sql: SQL, what: string, rolesNow: () => Promise<stri
   }
 }
 
-/** Drops `role` with what it owns. Any role may make a large object or set its default privileges without CREATE, and
- * DROP ROLE alone refuses a role that owns anything: so what it owns goes to the board's user and is dropped first (in
- * the board's database, the only one a login reaches). */
+/** Drops `role` with what it owns. A role can own things without CREATE (default privileges it set; a large object from
+ * before #514's review 7), and DROP ROLE alone refuses a role that owns anything: so what it owns is dropped first (in
+ * the board's database, the only one a login reaches), and anything left (a shared object) goes to the board's user. */
 async function disown(tx: SQL, role: string): Promise<void> {
   if (!((await tx`SELECT 1 FROM pg_roles WHERE rolname = ${role}`) as Row[]).length) return;
   await tx.unsafe(`ALTER ROLE ${ident(role)} NOLOGIN`);
-  await tx.unsafe(`REASSIGN OWNED BY ${ident(role)} TO CURRENT_USER`);
   await tx.unsafe(`DROP OWNED BY ${ident(role)}`);
+  await tx.unsafe(`REASSIGN OWNED BY ${ident(role)} TO CURRENT_USER`);
   await tx.unsafe(`DROP ROLE ${ident(role)}`);
 }
 

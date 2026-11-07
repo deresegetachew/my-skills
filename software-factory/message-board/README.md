@@ -89,8 +89,9 @@ touching the others:
      `REVOKE CONNECT` on the database, `REVOKE EXECUTE` on the redeem and `REVOKE` of the logins group.
   2. Their sessions are ended. A redeem one of them held open rolls back, and they can't connect again.
   3. Under the login row's lock, every role the login has now (a redeem that committed meanwhile gave it a fresh one) is
-     made `NOLOGIN`, what it owns is reassigned to the board's user and dropped (any role can make a large object or set
-     its default privileges without CREATE, and `DROP ROLE` alone would refuse it), and it is dropped.
+     made `NOLOGIN`, what it owns is dropped (`DROP OWNED`, then `REASSIGN OWNED` to the board's user for anything
+     left; a role can set its default privileges without CREATE, and `DROP ROLE` alone would refuse it), and it is
+     dropped.
   4. Its sessions are ended again, looking every 200 ms until none show (600 ms to 3 s), even when the drop failed.
 
   Each statement waits at most 2 s for a lock; on a timeout the login's roles are cut off and their sessions ended
@@ -119,8 +120,11 @@ touching the others:
   it.
 - **What a leaked join code can do.** Until it expires (15 minutes by default) or is redeemed, whoever holds it can
   connect to the board's database (two connections at most) and call the redeem; nothing else: no board table, no
-  advisory lock (PUBLIC can't take any on this database), no other database. If they redeem it first, they get the
-  machine's login, and the real machine's join is refused (`code-refused`) or reports `code-compromised`. Either way
+  advisory lock (PUBLIC can't take any on this database), no large object, no other database. If they redeem it first, they get the
+  machine's login, and the real machine's join is refused (`code-refused`) or reports `code-compromised`. Short of
+  that, they can change the code role's own password (`ALTER ROLE ... PASSWORD` is open to any role that can log in), so
+  the real machine's join is refused, or hold its two connections, so the join says `code-in-use` (the board's
+  `login-in-use`: the code may have been copied). Neither is worse than redeeming it first. Either way
   the owner runs `factory machine remove <name>` on the hub, which takes every role of that login away whatever its
   sessions hold, and makes a new code. A code nobody redeems is refused by Postgres when it expires, and the hub's
   `machine ls`, `machine add` and `factory board sweep` drop it.
@@ -142,6 +146,9 @@ What else `login add` changes on the server, each time (safe to run twice):
   other database (`template0` takes no connections anyway). The board's server holds only these databases, and its one
   user is a superuser, whom none of this limits. On a server shared with other databases, those are left as they are;
   a non-superuser that needs `postgres` must then be granted CONNECT there by name.
+- PUBLIC loses EXECUTE on the functions that make or write large objects (`lo_create`, `lo_creat`, `lo_from_bytea`,
+  `lo_import`, `lowrite`, `lo_put`) on the board's database, and nobody gets it back: the board uses none, so no login or
+  code can fill the database with them or own one.
 - PUBLIC loses EXECUTE on the advisory lock functions (`pg_advisory_*`, `pg_try_advisory_*`) on the board's database;
   the logins group gets it, for the board's writes. So a join code's role can take no lock that would stall the board.
 - The password is in the `CREATE ROLE` statement, so that transaction sets `log_statement = 'none'` and

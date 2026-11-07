@@ -14,6 +14,7 @@ export type ErrorCode =
   | "login-redeemed" // a join code's login was already redeemed (or one asked to be removed only if unredeemed was)
   | "login-expired" // a join code's login expired before it was redeemed
   | "login-compromised" // after a redeem the login's new password didn't connect: the code may have been copied
+  | "login-in-use" // a login (a join code's) is connected as often as it may be: the code may have been copied
   | "login-refused" // the board answers but refuses this login (removed, expired, or a wrong password)
   | "no-rights" // the board's user may not do this (making logins needs the board's own user)
   | "busy"; // the write crossed another one at the same moment (a deadlock or serialization failure) and was undone

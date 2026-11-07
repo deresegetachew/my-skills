@@ -72,7 +72,8 @@ The board enforces the code (#514):
   refused (`code-refused`), even one that started logging in just before. After the redeem the join ends every other
   session of the code's role and connects as the fresh role; if either fails, the code may have been copied: the join
   keeps nothing and says so (`code-compromised`).
-- **What the owner does.** If a code leaked, or a join says `code-compromised`, run `factory machine remove <name>` on
+- **What the owner does.** If a code leaked, or a join says `code-compromised` or `code-in-use` (someone else holds
+  the code's connections), or is refused although the code is fresh (a holder can change the code's password), run `factory machine remove <name>` on
   the hub and make a new code. Remove takes every role of that login away and ends their sessions, whatever those
   sessions hold, within about 20 s.
 - **Cleaning up.** A session opened with a code before it expired may stay open until the hub drops the code:

@@ -340,6 +340,9 @@ async function cmdJoin(argv: string[]): Promise<number> {
   try {
     b = await Board.open(p.url, { max: 1 });
   } catch (e) {
+    if (e instanceof BoardError && e.code === "login-in-use") {
+      refuse("code-in-use", `The board at ${address} says ${p.name}'s join code is already in use elsewhere: it may have been copied.`, newCode);
+    }
     if (e instanceof BoardError && e.code === "login-refused") {
       refuse("code-refused", `The board at ${address} refused ${p.name}'s join code: it was used to join already, it expired, or the machine was removed on the hub.`, newCode);
     }
