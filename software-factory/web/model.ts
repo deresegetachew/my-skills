@@ -69,6 +69,18 @@ export function channelHash(project: string, channel: string): string {
   return `#/${encodeURIComponent(project)}/${channel}`;
 }
 
+/** A task opened on the Board page has its own address (#543): `view:tasks/task:b3`, so it can be shared and Back
+ *  closes it. The channel with the task left off, and the task (null with none). */
+export function splitTask(channel: string): { channel: string; task: string | null } {
+  const m = /^(.+)\/task:([A-Za-z0-9._-]{1,40})$/.exec(channel);
+  return m ? { channel: m[1] as string, task: m[2] as string } : { channel, task: null };
+}
+
+/** The channel that opens task `id` on `channel` (view:tasks). */
+export function taskChannel(channel: string, id: string): string {
+  return `${channel}/task:${id}`;
+}
+
 /** The project and channel a hash names, or null. */
 export function parseHash(hash: string): { project: string; channel: string } | null {
   const m = /^#\/([^/]+)\/(.+)$/.exec(hash);

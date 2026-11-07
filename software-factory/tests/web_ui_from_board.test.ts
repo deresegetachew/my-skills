@@ -329,6 +329,60 @@ test("with tasks.source board, Reassign hands the task to the agent on the board
   await finish(ui);
 }, T);
 
+// --- #543, #545, #546: what a person sees on a card and its page ---------------------------------------------------------
+
+test("Reassign to an agent that isn't running: the board hands the task over and the answer says it is taken at the agent's start", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  // the fake factory refuses `say` as the real one does for an agent with no session here
+  writeExe(join(p.d, "factory"), FAKE_FACTORY.replace('echo "$*" >> "$FAKE_FACTORY_LOG"',
+    'echo "$*" >> "$FAKE_FACTORY_LOG"\nif [ "$1" = say ]; then echo \'{"code": "no-such-agent", "message": "No agent called taytu was found.", "fix": "x"}\' >&2; exit 1; fi'));
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/12/actions/reassign", { method: "POST", body: { confirm: true, agent: "taytu" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.json.ok).toBe(true);
+  expect(String(r.json.output)).toBe("#12 is handed to taytu on the message board. taytu isn't running on this machine now, so it takes #12 when it starts.");
+  expect(await board.get(id[12] as number)).toMatchObject({ assignee: "taytu", holder: null });
+  // the card says who it is for: the tasks API carries it
+  const json = await tasksUntil(ui, (j) => byId(j)["12"]?.assignee === "taytu", 15_000);
+  expect(byId(json)["12"]).toMatchObject({ assignee: "taytu", holders: [] });
+  await finish(ui);
+}, T);
+
+test("a task's page has its own words from the board, and when it was made and changed", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const made = await board.create({ title: "Export the list", ref: `factory:${REPO}/e1`, priority: 0, body: "Export the reading list as CSV.\n\nWith a header row." });
+  const ui = await started(workProject(), url);
+  await tasksUntil(ui, (j) => byId(j)[`b${made.id}`] !== undefined, 15_000);
+  const r = await api(ui, `/api/projects/work/tasks/b${made.id}`);
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(r.json.body).toBe("Export the reading list as CSV.\n\nWith a header row.");
+  expect(Number.isNaN(Date.parse(String(r.json.createdAt)))).toBe(false);
+  expect(Number.isNaN(Date.parse(String(r.json.updatedAt)))).toBe(false);
+  await finish(ui);
+}, T);
+
+test("a pull request names the board task it is for by its branch (task/b3-...) or its title (b3: ...), and the card links it", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const a = await board.create({ title: "Slugify", ref: `factory:${REPO}/s1`, priority: 0 });
+  const b = await board.create({ title: "Word count", ref: `factory:${REPO}/w1`, priority: 0 });
+  const p = workProject();
+  const c = JSON.parse(readFileSync(join(p.state, "snapshot.json"), "utf8")) as Row;
+  const pr = (n: number, branch: string, title: string): Row => ({ number: n, title, url: `https://github.com/${REPO}/pull/${n}`, branch, draft: false,
+    ci: "green", next: "none", nextText: "none", agent: "taytu", review: null, gate: null, notGreen: [], protected: null, claim: null });
+  c.pulls = [...(c.pulls as Row[]), pr(39, `task/b${a.id}-slugify`, "Slugify"), pr(41, "taytu/word-count", `b${b.id}: textkit: wordCount(text)`)];
+  write(join(p.state, "snapshot.json"), JSON.stringify(c));
+  const ui = await started(p, url);
+  const json = await tasksUntil(ui, (j) => byId(j)[`b${b.id}`] !== undefined, 15_000);
+  expect((byId(json)[`b${a.id}`]?.pr as Row | null)?.number).toBe(39);
+  expect((byId(json)[`b${b.id}`]?.pr as Row | null)?.number).toBe(41);
+  await finish(ui);
+}, T);
+
 test("with tasks.source board and the board down, an action is refused with the fix and nothing runs on GitHub", async () => {
   const p = workProject(0, BOARD_CONFIG);
   const ui = await started(p, "postgres://nobody:pw@127.0.0.1:1/none");
@@ -583,4 +637,18 @@ test("the server logs that the board can't be read, and that it reconnected once
     reader.releaseLock();
     await finish(ui);
   }
+}, T);
+
+test("the tasks done this week come apart from the open ones, newest first, for the board's Done column (#545)", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const later = await board.create({ title: "Remember the theme", ref: ref(13), priority: 6 });
+  await board.close(later.id, { outcome: "done" });
+  const ui = await started(workProject(), url);
+  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  expect(Object.keys(byId(json)).sort()).toEqual(["11", "12", "7", "9"]); // the open tasks, as before
+  const done = json.done as Row[];
+  expect(done.map((t) => t.id)).toEqual(["13", "10"]); // newest first
+  expect(done[0]).toMatchObject({ state: "done", holders: [], blockedBy: [], actions: [], title: "Remember the theme" });
+  await finish(ui);
 }, T);

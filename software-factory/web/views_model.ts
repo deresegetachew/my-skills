@@ -19,6 +19,8 @@ export interface TaskRow {
   state: string;
   stateText: string;
   holders: string[];
+  /** Who it was handed to (Reassign) while nobody holds it, from the message board (#545); missing or null with nobody. */
+  assignee?: string | null;
   group: string;
   todos: { done: number; all: number };
   dependsOn: string[];
@@ -123,7 +125,8 @@ export interface ViewsData {
   age: number | null;
   refreshing: boolean;
   problems: ProblemView[];
-  tasks: { source: string; tasks: TaskRow[]; next: string | null; problems: ProblemView[] } & Origin;
+  /** `done`: the tasks finished in the last days (the message board's, #545), for the Done column. */
+  tasks: { source: string; tasks: TaskRow[]; done?: TaskRow[]; next: string | null; problems: ProblemView[] } & Origin;
   epics: { source: string; epics: EpicRow[]; problems: ProblemView[] } & Origin;
   pulls: { pulls: PullRow[]; problems: ProblemView[] };
   ci: {
