@@ -17,6 +17,11 @@
 //                                                  runs (409 ui_agent_running) or holds a task (409 ui_agent_holds_task)
 //   GET  /api/projects/:p/settings/release         `factory version --json`: what runs here, the newest, a running update
 //   POST /api/projects/:p/settings/update {confirm} starts `factory update` (202); the release read says how it went
+//   GET  /api/projects/:p/settings/checkout        this machine's checkout against main on GitHub (fetched first): its
+//                                                  branch, how far behind, uncommitted changes, whether it can move
+//   POST /api/projects/:p/settings/checkout {confirm}
+//                                                  Bring this machine up to date: fast-forward it when that is safe
+//                                                  (factory_ui_checkout.ts, #566); 409 with why when not, untouched
 //   POST /api/projects/:p/settings/maintenance/:id {confirm}, .../:id/preview
 //                                                  clean (`factory clean`), ci-clean (`factory ci clean [--apply]`) and
 //                                                  reset-run (`factory reset-run [--apply]`)
@@ -26,6 +31,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { LEGENDS } from "./factory_ui_add.ts";
+import { bringUpToDate, checkoutState } from "./factory_ui_checkout.ts";
 import { type ActionResult, type Agent, envFor, factoryScript, type Obj, resultOf, spawn, type UiProject } from "./factory_ui_data.ts";
 import { compareTags } from "./factory_release.ts";
 import { MACHINE, parse, type Setting, SettingError, SETTINGS } from "./factory_settings_schema.ts";
@@ -270,6 +276,13 @@ async function maintenance(req: Request, p: UiProject, id: string, preview: bool
   return factory(p, c.apply);
 }
 
+/** Bring this machine up to date (#566): the checkout moved forward to main when that is safe; 409 with why when not. */
+async function upToDate(p: UiProject): Promise<ActionResult> {
+  const checkout = await bringUpToDate(p);
+  if (checkout.problem) return { status: 409, body: { ok: false, ...checkout.problem, checkout } };
+  return { status: 200, body: { ok: true, output: checkout.message, checkout } };
+}
+
 /** The answer to `/api/projects/:p/settings[/...]` (`rest` starts with "settings"). */
 export async function settingsApi(req: Request, p: UiProject, rest: string[], host: SettingsHost): Promise<ActionResult> {
   const [, what = "", name = "", verb = ""] = rest;
@@ -281,6 +294,7 @@ export async function settingsApi(req: Request, p: UiProject, rest: string[], ho
     return { status: 200, body: { project: p.id, ...read, team: { ...read.team, free: LEGENDS.filter((n) => !used.includes(n)) } } };
   }
   if (rest.length === 2 && what === "release" && get) return release(p);
+  if (rest.length === 2 && what === "checkout" && get) return { status: 200, body: { project: p.id, ...(await checkoutState(p, true)) } };
   if (get) return problem(405, "method_not_allowed", "GET isn't used here.", "Use POST.");
   if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use GET or POST.");
   let out: ActionResult | null = null;
@@ -303,6 +317,10 @@ export async function settingsApi(req: Request, p: UiProject, rest: string[], ho
     out = (await bodyOf(req)).confirm !== true
       ? problem(400, "confirm_needed", "Updating changes the factory's files in this project, so it needs a confirm.", CONFIRM_FIX)
       : startUpdate(p);
+  } else if (rest.length === 2 && what === "checkout") {
+    out = (await bodyOf(req)).confirm !== true
+      ? problem(400, "confirm_needed", "Bringing this machine up to date moves the project's checkout forward, so it needs a confirm.", CONFIRM_FIX)
+      : await upToDate(p);
   } else if ((rest.length === 3 || (rest.length === 4 && verb === "preview")) && what === "maintenance") {
     out = await maintenance(req, p, name, rest.length === 4);
   }
