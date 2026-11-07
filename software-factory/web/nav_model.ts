@@ -10,7 +10,7 @@ export interface NavItem {
   /** The address it opens (the hash's channel). */
   channel: string;
   on: boolean;
-  /** A count: red for what needs the owner, blue for the rest. */
+  /** A count: red for what needs the owner (the Inbox, and Home's Needs attention, #579), blue for the rest. */
   badge: { count: number; tone: "red" | "blue" } | null;
 }
 
@@ -26,6 +26,8 @@ export interface TeamRow {
   title: string;
   channel: string;
   on: boolean;
+  /** Why it needs attention (#579), shown as a small "stuck" mark; null when nothing does. */
+  stuck: string | null;
 }
 
 export interface TeamInput {
@@ -33,6 +35,8 @@ export interface TeamInput {
   role?: string;
   state?: string;
   detail?: string;
+  /** Why it needs attention (#579), when it does. */
+  stuck?: string | null;
 }
 
 export interface Sidebar {
@@ -104,7 +108,7 @@ function item(page: string, active: string, counts: Record<string, number>): Nav
   const p = PAGES[page];
   const on = page === "settings" ? SETTINGS.includes(active) : page === "docs" ? active === "docs" || active === "artifacts" : page === active;
   const n = counts[page] ?? 0;
-  return { page, label: p?.label ?? page, channel: channelOf(page), on, badge: n > 0 ? { count: n, tone: page === "inbox" ? "red" : "blue" } : null };
+  return { page, label: p?.label ?? page, channel: channelOf(page), on, badge: n > 0 ? { count: n, tone: page === "inbox" || page === "home" ? "red" : "blue" } : null };
 }
 
 /** The sidebar for the page shown, the project's agents (with their live state when known) and the counts known. */
@@ -113,8 +117,9 @@ export function sidebar(o: { page: string; team: TeamInput[]; counts?: Record<st
   const team = [...o.team].sort((a, b) => rank(a.role ?? "") - rank(b.role ?? "") || a.name.localeCompare(b.name)).map((a): TeamRow => {
     const st = agentState(a.state === undefined ? undefined : { state: a.state, detail: a.detail ?? "" }, o.limit ?? null);
     const role = a.role ?? "coding-agent";
-    return { name: a.name, role: ROLE_WORD[role] ?? "Builder", roleId: role, dot: DOT[st.tone] ?? "idle", title: `${a.name}: ${st.text}`,
-      channel: `agent:${a.name}`, on: o.page === a.name };
+    const stuck = a.stuck || null;
+    return { name: a.name, role: ROLE_WORD[role] ?? "Builder", roleId: role, dot: DOT[st.tone] ?? "idle",
+      title: `${a.name}: ${st.text}${stuck ? `. Stuck: ${stuck}` : ""}`, channel: `agent:${a.name}`, on: o.page === a.name, stuck };
   });
   return { main: MAIN.map((p) => item(p, o.page, counts)), team, ops: OPS.map((p) => item(p, o.page, counts)) };
 }

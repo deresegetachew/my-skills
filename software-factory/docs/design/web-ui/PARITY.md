@@ -72,7 +72,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 
 | Command | In the UI | Where | Task |
 |---|---|---|---|
-| `status` | built | Home (Main.dc.html): needs you, the team, progress by epic, recent activity | #451 |
+| `status` | built | Home (Main.dc.html): needs attention (#579), needs you, the team, progress by epic, recent activity | #451 |
 | `snapshot` | built | What the UI reads; refresh asks for it again | |
 | `talk` | built | An agent channel's talk box for the dev manager and the product owner: one turn, answer in the chat | |
 | `owner answer` | built | The owner queue channel: answer, after a confirm | |

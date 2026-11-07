@@ -145,7 +145,8 @@ export function blockersText(t: { blockedBy?: string[] }): string {
   return b.length ? `Blocked by ${b.map((x) => (/^\d+$/.test(x) ? `#${x}` : x)).join(", ")}` : "";
 }
 
-export type TaskAction = "release" | "block" | "reassign";
+/** A card's actions, and Needs attention's close (#579: a task or an epic whose work is done; never on a card). */
+export type TaskAction = "release" | "block" | "reassign" | "close";
 
 /** What a card's action does and doesn't do, in plain words, for its confirm. The commands change the issue's labels
  *  and claim; they don't stop a session already working on the task, so the confirm says so. `agent` is the one picked
@@ -157,6 +158,7 @@ export function taskAsk(action: TaskAction, t: { id: string; holders: string[] }
   const session = who ? "A session already working on it isn't stopped. " : "";
   if (action === "release") return { happens: `${id} goes back to Ready and the next free agent takes it.${claim}`, doesNot: `${session}Its branch and pull request stay.` };
   if (action === "block") return { happens: `${id} moves to Blocked with your reason.${claim}`, doesNot: `${session}Nothing is deleted: Release puts it back to Ready.` };
+  if (action === "close") return { happens: `${id} is closed as done.${claim}`, doesNot: `${session}Its branch and pull request stay, and nothing is deleted.` };
   return { happens: `${id} goes back to Ready, then ${agent || "the agent you pick"} is told to take it.${claim}`,
     doesNot: `${session}${who ? `${who}'s branch stays.` : "Nothing is deleted."}` };
 }

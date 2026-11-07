@@ -378,6 +378,11 @@ export class ChatHub {
     return this.queue(p);
   }
 
+  /** The owner queue as last read, without reading it (#579: Needs attention costs no read of its own); null when not read. */
+  keptQueue(p: UiProject): Queue | null {
+    return this.queues.get(p.id)?.queue ?? null;
+  }
+
   /** One turn of the poll loop for project `p` (only while a page is open). */
   async tick(p: UiProject): Promise<void> {
     if (p.problem) return;

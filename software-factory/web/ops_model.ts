@@ -2,6 +2,7 @@
 // (docs/design/web-ui/Health.dc.html, Usage.dc.html, Activity.dc.html, Main.dc.html). No React here, so
 // tests/web_ui_ops_model.test.ts runs it as it is. The data comes from GET /api/projects/:p/health|usage|activity|home
 // (hooks/factory_ui_ops.ts).
+import type { AttentionItem } from "./attention_model.ts";
 import { agentState, ago, type LimitView, type Tone } from "./model.ts";
 import type { DotState } from "./parts.tsx";
 
@@ -198,6 +199,8 @@ export interface TeamMember {
 }
 
 export interface HomeData {
+  /** Needs attention (#579): anything stuck, each with its reason and one action. */
+  attention?: AttentionItem[];
   needs: NeedRow[];
   team: TeamMember[];
   progress: { done: number; all: number; epics: Array<{ id: string; title: string; done: number; all: number; stage: string }>; noEpic: { done: number; all: number } };
