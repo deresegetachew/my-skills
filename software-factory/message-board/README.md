@@ -18,7 +18,7 @@ go live is on the wiki's [message board page](../docs/wiki/board.md). This page 
 On this page: [what is here](#what-is-here), [setting it up](#setting-it-up), [logins for other machines](#logins-for-other-machines),
 [the API](#the-api), [the rules](#the-rules), [the import from GitHub](#the-import-from-github),
 [the mirror to GitHub](#the-mirror-to-github), [the MCP server](#the-mcp-server),
-[from synchronous code](#from-synchronous-code-the-child), [tests](#tests).
+[who can write as whom](#who-can-write-as-whom), [from synchronous code](#from-synchronous-code-the-child), [tests](#tests).
 
 ## What is here
 
@@ -30,6 +30,7 @@ On this page: [what is here](#what-is-here), [setting it up](#setting-it-up), [l
 | `src/server.ts` | The board's own Postgres container, for the command |
 | `src/child.ts` | One request per process, for synchronous callers (the factory's ports) |
 | `src/mcp.ts` | The MCP server over stdio, for `factory board mcp` |
+| `src/numbers.ts` | How people name a task: `#3` for an issue of the project, `b17` for a task made on the board, read back to a board id (#515) |
 | `src/import.ts` | An import, applied in one transaction (`Board.import`) |
 | `src/logins.ts` | Logins for other machines: one Postgres role each, with only the board's rights (`Board.addLogin`, `logins`, `removeLogin`) |
 | `src/github/import.ts` | The GitHub adapter: a repo's issues and comments as an import, read with the `gh` CLI |
@@ -50,8 +51,18 @@ On this page: [what is here](#what-is-here), [setting it up](#setting-it-up), [l
 - **The schema:** `factory board migrate` applies the migrations not applied yet, each in one transaction, recorded
   in `mb_migrations`. Safe to run twice. `factory board status` says whether it answers, the last migration and the
   task counts.
-- **Backups:** `factory board backup [--out FILE]` runs `pg_dump` inside the container and writes it mode 600. A
-  nightly backup is a job you set up on the machine (cron or a systemd timer) that runs it.
+- **Backups:** `factory board backup [--out FILE]` runs `pg_dump --no-owner --no-privileges` inside the container and
+  writes it mode 600; its default name, `backups/board-<date>-<time>-utc.sql`, is in UTC and says so. A nightly backup
+  is a job you set up on the machine (cron or a systemd timer) that runs it.
+- **Restore:** `factory board restore <file> --yes` (#515) replaces the board's data with a backup's, inside the running
+  container: `psql --single-transaction` drops the `public` schema and loads the dump, so a failure changes nothing.
+  Then it migrates. Without `--yes` it refuses (`needs-yes`). The dump has no owner and no grants, so it loads with no
+  role errors; machine logins (their roles and grants) aren't in it, so each other machine joins again.
+- **Naming tasks:** the CLI's `tasks`, `ready`, `show`, `prime` and `sweep` name a task by its number (#515,
+  `src/numbers.ts`): `#3` for issue 3 of the project (ref `github:<owner>/<repo>#3`), `owner/name#3` for another repo's,
+  `b17` for a task made on the board. `show` takes `3`, `#3`, `b17` or `owner/name#3`. The project's repo is `--repo`,
+  else `GH_REPO` or the git remote `origin` (as the import finds it). `--json` keeps each task's `id` and adds `number`.
+  The board's API keeps taking ids; this is a lookup in front of it.
 - **Stale claims:** `factory board sweep [--quiet-minutes N]` releases them (see the rules). The dev manager's loop runs
   it on each pass (#513), and a builder's loop sends a heartbeat on its claim while its session runs.
 - **Other machines** reach it with a login of their own (next section); `factory machine add` and `factory machine join`
@@ -109,6 +120,8 @@ A board writes as one actor (`as`, default `system`). Every method is async. A r
   A lower priority is claimed first. `ref` is an outside id such as `github:owner/repo#123` (unique).
 - `get(id)`, `tasks({ all? })`, `ready({ for? })`, `edges(id?)` (no id: every edge). `ready()` leaves out tasks handed to someone;
   `ready({ for })` adds the ones handed to that actor.
+- `byRef(ref, { anyRepo? })`: the task whose `ref` is `ref`, in any case, as a list (empty or one); with `anyRepo`, every
+  task whose ref is a GitHub issue of that number in any repo. Read-only: how a person's `#3` finds its task (#515).
 - `update(id, { version, title?, body?, kind?, priority?, parentId?, ref?, status? })`: `version` is the one you read.
   `status` may be `open`, `in_review` or `deferred`; open and deferred clear the outcome (a reopened task).
 - `link(from, to, kind)` and `unlink(from, to, kind)`: kind is `blocks`, `waits_for`, `discovered_from`, `supersedes`,
@@ -215,7 +228,11 @@ reads again, with a comment saying where the factory defines each.
 
 - **Tasks:** open issues (`--closed`: closed ones too, as done, with GitHub's reason as the outcome), each with the ref
   `github:<owner>/<repo>#<n>` (owner and repo in lower case, as GitHub ignores case). Pull requests are left out. Label `epic` makes an epic, `bug` a bug; agent issues and the
-  owner queue are notes (never claimed). The body is kept, with its `PRD:` and `Budget:` lines, and a `Milestone:` line
+  owner queue are notes (never claimed). **Only an issue the factory took as a task** (one of the mapping's labels:
+  ready, in progress, in review, blocked, or `agent:<name>`, as in issues mode, where only a labelled issue is claimed)
+  comes in as a task or bug; any other open issue (a channel, an untriaged report) comes in as a note, which is never
+  ready and which the mirror never labels (#515). A closed issue that is a task or bug on the board stays one: the
+  mirror takes the factory's labels off an issue it closes. The body is kept, with its `PRD:` and `Budget:` lines, and a `Milestone:` line
   is added.
 - **Status:** ready or no label is open; in review is in review; closed is done. **In progress comes in open, with no
   holder,** and a context entry "was in progress on GitHub, claimed by <agent>": a holder needs a claim token, which only
@@ -267,7 +284,9 @@ The factory runs it as `factory board mirror` (its `board.mirror` setting turns 
   comments) and links it instead of posting again, so a crash between the post and the link sends nothing twice. A
   task's line is recorded the same way before it is posted (the state it sends and its line id; not on a first pass,
   which keeps no place until it is done), so a pass killed after posting it finds the line by its id and doesn't post it
-  again (#513).
+  again (#513). Every line recorded and not yet saved is kept (the last 10 a task), and a pass looks for the last of
+  them that is on the issue: when it is the state being sent, nothing is posted, so a state that comes back to the line
+  GitHub shows isn't posted twice (#515).
 - **Its place** is the value `mirror:github:<owner>/<repo>`: the last event read and the state sent per task. It reads
   the events after it, so it is safe to run twice and goes on after downtime; it moves its place only when it read
   something new, so its own write never wakes it again. A GitHub failure keeps the place (with the states it did send)
@@ -288,6 +307,12 @@ only and exits, with the board's connections closed, when stdin closes.
 **The actor is fixed when it starts.** Every write is recorded as `--as`, with `--session` on its events. No tool
 takes a sender, and an input a tool doesn't list is refused, so an agent can't write as the dev manager (decision 0007
 point 8).
+
+**Tasks are named as people see them** (#515): a `task`, `parent`, `blockedBy` or link end takes `3` or `"#3"` (issue 3
+of the project), `"b17"` (a task made on the board) or `"owner/name#3"`, and every result names tasks the same way: a
+task's `id`, `parentId` and `blockedBy`, a message's or a context entry's `taskId`, an edge's ends, an event's subject.
+Message ids stay numbers. The project's repo is `--repo owner/name`, else `GH_REPO` or the git remote `origin`; with
+none, `3` is the task of any repo's issue 3 (refused when two repos have one). A board error names the task the same way.
 
 **The tools**, each with a JSON Schema for its inputs, checked before anything runs:
 
@@ -371,6 +396,18 @@ started. The agents' rules then allow each role only the tools it uses: a coding
 all of them, the product owner all but `board_claim`, `board_heartbeat`, `board_release` and `board_close` (it never
 builds). See the wiki's [agent loops page](../docs/wiki/agent-loops.md#when-the-board-is-on).
 
+## Who can write as whom
+
+The board knows its connections, not its people. Whoever has its URL (the url file, mode 600, or `MB_URL`) connects as
+the board's user or a machine's login, and the actor of each write is a name the caller gives: `Board.open({ as })`,
+`factory board mcp --as`, the CLI's own actors. So **any local process that can run the board's CLI, as the user who
+owns the url file, can write as the actor `owner`** (`factory board mcp --as owner --role owner`, or `factory owner
+answer`). More readers trust `owner` now: the owner queue's answers (`factory prd --stage` takes the owner's approvals
+from them), the web UI's Inbox, and the mirror, which posts them to GitHub. What keeps an agent from doing that is the
+agents' rules (`.claude/factory/settings.json`, which the factory passes to the sessions it starts) and the MCP server
+each session gets, fixed to its own name and role; not the board. Keep the hub and the joined machines to people and
+agents you trust, and remove a machine's login (`factory machine remove`) when it should no longer write.
+
 ## From synchronous code: the child
 
 `src/child.ts` reads one JSON request on stdin (`{ url, as, session?, calls: [{ op, args }] }`), makes the calls as that actor, prints `{ ok, results }` or `{ ok: false, code, message, fix }` on one line and exits. Run it with `Bun.spawnSync`. Besides the methods above it has `find`, the events of a kind since a time whose payload matches, and `wait`, the first such event, waiting up to a number of seconds (`or` lists other kinds and matches that also end it).
@@ -380,8 +417,8 @@ The factory's ports (`TaskTracker`, `Messaging`, `Leases`, `Wakes`) are synchron
 
 ## Tests
 
-`bun tools/run_tests.ts board_rules board_cli board_child board_logins board_mcp board_import`. The import's tests put a fake `gh` on PATH that serves JSON
-fixtures. The tests need a real Postgres:
+`bun tools/run_tests.ts board_rules board_cli board_child board_logins board_mcp board_import board_restore`. The import's tests put a fake `gh` on PATH that serves JSON
+fixtures. The restore's test puts a `docker` on PATH that runs each `pg_dump` and `psql` from `postgres:17-alpine` against the test database. The tests need a real Postgres:
 
 - `MB_TEST_URL` is a server they may create databases on (CI sets it to its `postgres` service).
 - Without it, they start a throwaway `postgres:17-alpine` container with Docker and remove it when they finish.

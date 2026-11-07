@@ -44,7 +44,12 @@ factory doctor            # checks the board for a project that uses it
 
 `factory board up` writes the board's URL (with its password) to `<machine settings folder>/message-board/url`, mode
 600; it is never printed. Back it up with `factory board backup` (a `pg_dump`, mode 600); a nightly backup is a job you
-set up on the hub (cron or a systemd timer) that runs it.
+set up on the hub (cron or a systemd timer) that runs it. The time in a backup's name is UTC, and the name ends `-utc.sql`.
+
+To restore one, on the hub: `factory board restore <file> --yes`. It replaces everything on the board with the backup,
+in one transaction (a failure changes nothing), then migrates it. Take a backup first if you may want what is there now.
+Machine logins aren't in a backup, so each other machine joins again: `factory machine remove <name>` and
+`factory machine add <name> --agent <agent>` on the hub, then `factory machine join <code>` on that machine.
 
 With tasks on the board, a claim whose agent went quiet is freed by `factory board sweep` (its time passed and its agent
 sent no heartbeat for 30 minutes). The dev manager's loop runs it on each pass (below); with no dev manager running, run
@@ -105,6 +110,17 @@ Then:
   before.
 - The PR gate and the Factory guard still read only GitHub. Nothing on the board changes what may merge.
 
+**One number for a task.** A task that came from an issue is named by the issue's number, `#3`, everywhere you read it:
+the web UI, `factory next`, `factory board tasks`, `ready`, `show` and `prime`, and the `board_*` tools. A task made on the
+board (no issue) is `b17`. The commands and the tools take `3`, `#3` or `b17` (`owner/name#3` for another repo's issue);
+the project's repo comes from `--repo`, else `GH_REPO` or the git remote `origin`. The board's own id stays inside the
+mirror's marker on GitHub, where nobody reads it.
+
+**When the board can't be reached** while it is the record (`tasks.source: board`), the web UI says so once ("The
+message board can't be reached, so tasks are unknown until it's back. On the hub, start it again.") and shows no tasks:
+not GitHub's, which are out of date. A project whose tasks aren't on the board falls back to GitHub's snapshot, as
+before. `factory ui` logs when the board can't be read and when it reconnects.
+
 More: [Agent loops](agent-loops.md#when-the-board-is-on).
 
 <br>
@@ -117,11 +133,13 @@ off.
 
 It runs by itself before each dev manager pass, stopped after 300 seconds so a hung `gh` can't stall the pass (the next
 pass sends the rest). A task's line and an ask or answer are recorded as pending before they are posted, so a pass that
-is killed after posting one finds it by its marker on the next run instead of posting it twice. `factory board mirror --watch` on the hub runs it all the time: a pass on each change, and every
+is killed after posting one finds it by its marker on the next run instead of posting it twice. Every line recorded but
+not saved is kept until one is, so a state that comes back to the last line on the issue sends nothing: one line per
+state. An issue the factory never took as a task (no factory label: imported as a note) is never labelled. `factory board mirror --watch` on the hub runs it all the time: a pass on each change, and every
 300 seconds for your answers on GitHub.
 
 What it does not carry: the threads (questions, answers and notes between agents), and tasks made on the board that
-have no issue (`board_create`): they stay on the board. Read them in the web UI, with `factory board show <id>`, or
+have no issue (`board_create`): they stay on the board. Read them in the web UI, with `factory board show b<id>`, or
 `factory messages ls`.
 
 <br>
@@ -132,7 +150,9 @@ Moving an existing factory, whose tasks are GitHub issues, onto the board:
 1. **Start the board on the hub** and check it: `factory board up`, `factory board status`, `factory doctor`. Set up
    the backup job ([Set it up](#set-it-up)), and take a first `factory board backup`.
 2. **Bring the issues in:** `factory board import github --dry-run`, read what it says, then `factory board import github`.
-   Check a few tasks with `factory board tasks` and `factory board show <id>`.
+   Check a few tasks with `factory board tasks` and `factory board show <number>`. Only the issues the factory took as
+   tasks (a `factory:*` or `agent:` label, as in issues mode) come in as tasks; any other open issue comes in as a note,
+   which no agent claims and the mirror leaves alone.
 3. **Turn the board on for the project:** `factory settings set --stage tasks.source board`, then `factory settings pr`.
    The agents read main's settings, so it takes effect when you merge that pull request. Run the import once more just
    before you merge, so the board has GitHub's latest. Before you merge, also check
