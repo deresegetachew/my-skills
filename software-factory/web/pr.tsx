@@ -4,7 +4,7 @@
 // and the box to comment or ask for changes). Merge, Mark ready, Ask for changes, Comment and Close each ask first with
 // their preconditions (pr_model.ts), then go through POST /api/projects/:p/pull-requests/:n/actions/:name. The page is
 // read when it opens (GET .../pull-requests/:n), never on each poll. Nothing here shows a command.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
 import { type DocPage } from "./docs_model.ts";
 import { MarkdownView } from "./docs.tsx";
@@ -32,6 +32,8 @@ interface Props {
   say: Say;
   open: (channel: string, find?: string) => void;
   onMenu: () => void;
+  /** Opened from the Inbox's Merge (#458): ask first, with the preconditions, once the pull request is read. */
+  askFirst?: "merge" | null;
 }
 
 type Tab = "overview" | "checks" | "files" | "conversation";
@@ -55,6 +57,12 @@ export function PrPage(p: Props) {
       .catch(() => setPr({ code: "ui_unreachable", message: "The server can't be reached.", fix: "Check that the web UI still runs on its machine, then reload." }));
   }, [p.get, base]);
   useEffect(() => load(again > 0), [load, p.rowKey, again]);
+  const asked = useRef(false);
+  useEffect(() => {
+    if (asked.current || !p.askFirst || !pr || !("number" in pr) || mainAction(pr) !== p.askFirst) return;
+    asked.current = true;
+    setAsk(p.askFirst);
+  }, [pr, p.askFirst]);
 
   const back = <button className="link back" onClick={() => p.open("view:pull-requests")}>Pull requests</button>;
   if (!pr || !("number" in pr)) {

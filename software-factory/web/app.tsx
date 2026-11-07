@@ -22,6 +22,9 @@ import { type DocHit, DOCS_CSS, DocPageView, docChannel, pagesOf, parseDocChanne
 import type { DocSection } from "./docs_model.ts";
 import { addMachineAsk, agentArgs, plainProblem } from "./machines_model.ts";
 import { addressOf, channelOf, pageHead, pageOf, SETTINGS_TABS, sidebar } from "./nav_model.ts";
+import { inboxCount, ownerMerges, phoneTabs } from "./phone_model.ts";
+import { PHONE_CSS, TabBar } from "./phone.tsx";
+import type { QueueView } from "./chat_model.ts";
 import { ARTIFACTS_CSS, ArtifactsPage } from "./artifacts.tsx";
 import { ActivityPage, dispatchActivity, HealthPage, HomePage, OPS_CSS, type OpsProps, UsagePage } from "./ops.tsx";
 import { MenuIcon } from "./page_head.tsx";
@@ -554,6 +557,7 @@ function App() {
   const [listed, setListed] = useState(0); // goes up when the server's project list changes
   const [pulseBy, setPulseBy] = useState<Record<string, number>>({}); // Home, Activity, Health read again (#455)
   const [attentionBy, setAttentionBy] = useState<Record<string, AttentionItem[]>>({}); // Needs attention (#579)
+  const [queueBy, setQueueBy] = useState<Record<string, QueueView>>({}); // the owner queue, for the Inbox's count (#458)
   const search = useRef<HTMLInputElement>(null);
 
   const signedOut = useCallback((e: unknown) => {
@@ -630,7 +634,11 @@ function App() {
         } else if (m.type === "add-project") setAddRun((m as unknown as { run: AddRun }).run);
         else if (m.type === "projects") setListed((n) => n + 1);
         else if (m.type === "activity") dispatchActivity(m as unknown as { project?: string; items?: unknown }); // the entries themselves (#583)
-        else dispatchLive(m);
+        else {
+          const q = (m as unknown as { queue?: QueueView }).queue;
+          if (m.type === "owner-queue" && m.project && q) setQueueBy((before) => ({ ...before, [m.project as string]: q }));
+          dispatchLive(m);
+        }
       };
       ws.onclose = () => {
         if (stopped) return;
@@ -656,6 +664,21 @@ function App() {
       .then((v) => setViewsBy((before) => (viewProject in before ? before : { ...before, [viewProject]: v })))
       .catch(signedOut);
   }, [token, viewProject, haveViews, signedOut]);
+
+  // the project shown: its owner queue is read once, for the Inbox's count in the sidebar and the phone's tab bar (#458);
+  // the WebSocket keeps it up to date after that
+  const shownProject = projects ? pickProject(projects, route?.project, storedProject())?.id ?? null : null;
+  const haveQueue = shownProject !== null && shownProject in queueBy;
+  useEffect(() => {
+    if (!token || shownProject === null || haveQueue) return;
+    let gone = false;
+    call<QueueView>(token, `/api/projects/${encodeURIComponent(shownProject)}/owner-queue`)
+      .then((q) => { if (!gone && Array.isArray(q.asks)) setQueueBy((before) => (shownProject in before ? before : { ...before, [shownProject]: q })); })
+      .catch(signedOut);
+    return () => {
+      gone = true;
+    };
+  }, [token, shownProject, haveQueue, signedOut]);
 
   // the shell's search also reads the docs of every project (the server does the matching)
   useEffect(() => {
@@ -810,13 +833,15 @@ function App() {
     setAsk({ verb, project: project.id, agent: name, role, spec: verb === "start" ? startAgentAsk(facts) : stopAgentAsk(facts) });
   };
   const startAgent = (name: string): void => askAgent("start", name);
+  const inbox = inboxCount(queueBy[project.id] ?? null, viewsBy[project.id]?.pulls.pulls ?? []);
+  const tabs = phoneTabs({ page, team: agentChannels.map((c) => c.name), inbox });
   const nav = sidebar({
     page,
     team: agentChannels.map((c) => {
       const a = agentOf(c.name);
       return { name: c.name, role: c.role, stuck: marks.agents[c.name] ?? null, ...(a ? { state: a.state, detail: a.detail } : {}) };
     }),
-    counts: { prs: viewsBy[project.id]?.pulls.pulls.length ?? 0, home: attention?.length ?? 0 },
+    counts: { prs: viewsBy[project.id]?.pulls.pulls.length ?? 0, home: attention?.length ?? 0, inbox: inbox },
     limit: live?.limit ?? null,
   });
 
@@ -956,7 +981,8 @@ function App() {
           : ownHead && page === "signoff" ? <SignoffPage key={project.id} project={project} id={signoffId} token={token} get={get} post={post} say={setToast}
             talkers={talkTargets(view.channels.filter((c) => c.kind === "agent"))} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} />
           : ownHead && prNumber !== null ? <PrPage key={`${project.id}/${prNumber}`} project={project} number={prNumber} docs={docPages} get={get} post={post}
-            say={setToast} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} rowKey={prRowKey(viewsBy[project.id], prNumber)} />
+            say={setToast} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} rowKey={prRowKey(viewsBy[project.id], prNumber)}
+            askFirst={find === "merge" ? "merge" : null} />
           : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
           : ownHead && OpsPage ? <OpsPage key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} pulse={pulseBy[project.id] ?? 0}
@@ -970,11 +996,13 @@ function App() {
               agents={live?.agents ?? []} />;
           })()
           : !channel ? <ComingPage page={page} open={(c) => go(project.id, c)} />
-          : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id} />
+          : channel.name === "owner-queue" ? <OwnerQueueChannel token={token} project={project.id}
+            merges={ownerMerges(viewsBy[project.id]?.pulls.pulls ?? [])} open={(c, f) => go(project.id, c, f)} />
           : channel.name === "machines" ? <MachinesChannel live={live} project={project} open={(c) => go(project.id, c)} post={post} />
           : VIEW_CHANNELS[channel.name] ? viewChannel(channel.name)
           : <ComingPage page={page} open={(c) => go(project.id, c)} />}
       </main>
+      <TabBar tabs={tabs} open={(c) => go(project.id, c)} />
       {ask && <ConfirmDialog key={`${ask.verb}/${ask.agent}`} spec={ask.spec} busy={busy} onConfirm={() => void runAsk()} onCancel={() => setAsk(null)} />}
       {toast && (
         <div className="toast" role="status">
@@ -991,6 +1019,6 @@ function App() {
 
 const style = document.createElement("style");
 style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS
-  + OPS_CSS + TEAM_CSS + COSTS_CSS;
+  + OPS_CSS + TEAM_CSS + COSTS_CSS + PHONE_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);
