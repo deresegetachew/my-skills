@@ -11,8 +11,16 @@ export type ErrorCode =
   | "schema-old" // the database hasn't had this version's migrations
   | "login-exists" // a login with that name is already there
   | "login-used" // a login asked to be removed only if unused has been used
+  | "login-redeemed" // a join code's login was already redeemed (or one asked to be removed only if unredeemed was)
+  | "login-expired" // a join code's login expired before it was redeemed
+  | "login-refused" // the board answers but refuses this login (removed, expired, or a wrong password)
   | "no-rights" // the board's user may not do this (making logins needs the board's own user)
   | "busy"; // the write crossed another one at the same moment (a deadlock or serialization failure) and was undone
+
+/** What a refused login means, and what to do (#514): every surface that meets one says this. */
+export const LOGIN_REFUSED = "This machine's board login was refused (removed or expired).";
+export const LOGIN_REFUSED_FIX = "Ask the hub for a new code: on the hub run `factory machine add <name> --agent ...`, then " +
+  "`factory machine join <code>` here — or `factory machine leave` to stop using the board here.";
 
 export class BoardError extends Error {
   constructor(readonly code: ErrorCode, message: string, readonly fix: string) {

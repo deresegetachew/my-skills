@@ -4,27 +4,31 @@
 //   factory machine add <name> --agent <agent>[:role] ... [--ttl minutes] [--json]    (on the machine that runs the board)
 //       makes the machine's own board login (`factory board login add <name>`: a Postgres role with only the board's
 //       rights) and prints one join code. The code carries the board's URL for that login (the board's Tailscale
-//       address and port) and the agents' names; it expires (15 minutes by default): a machine that hasn't connected by
-//       then has its login dropped.
+//       address and port) and the agents' names; it works once and expires (15 minutes by default): a machine that hasn't
+//       joined by then has its login dropped.
 //   factory machine join <code> [--no-tailscale] [--no-doctor]                         (on the new machine)
-//       checks Tailscale, writes the URL to this machine's settings folder (message-board/url: folder 700, file 600),
-//       checks that the login reaches the board, and runs `factory doctor`. With a board set up, messaging.transport
-//       is board by default.
+//       checks Tailscale, redeems the code on the board (its login gets a new password, which only this machine has),
+//       writes the board's URL with it to this machine's settings folder (message-board/url: folder 700, file 600), and
+//       runs `factory doctor`. With a board set up, messaging.transport is board by default.
+//   factory machine leave             (on a machine that joined) stop using the board here: its URL file goes, and the
+//       agent names the join added to this machine's names
 //   factory machine ls [--json]       the machines added: joined, waiting for join, or code expired (login dropped)
 //   factory machine remove <name>     forget the machine and drop its board login (its connections are ended)
 //
 // The hub keeps the records in <machine settings folder>/machines.json (mode 600). The code is the secret: whoever holds
-// a live one can join, so it is shown once and expires. The hub enforces the expiry: `add` and `ls` ask the board which
-// logins were used (`factory board login ls`: the board notes a login's first connection itself). A machine whose login
-// was used is marked joined; one whose code expired and whose login was never used has it dropped (`login remove
-// --unused`; marked revoked, kept so `ls` can say so). When the board doesn't answer nothing is changed. "Works once" is
-// kept where it is redeemed (the machine records the codes it used in machine-joins.json): a copy of the code used
-// elsewhere before it expires reaches the board with the same login, so `machine remove` is what takes it away.
+// a live one can join, so it is shown once, and the board enforces both its expiry and its one use (#514). Its login
+// is made with VALID UNTIL the code's expiry (`factory board login add --valid-for`), so Postgres itself refuses the
+// code's password after that. `join` redeems it (mb_redeem_login on the board): the login's expiry is lifted and it gets
+// a new random password, written only here; the code's own password stops working there, so a second machine with a
+// copy of the code is refused. The redeem is committed only once this machine has written what it keeps, so a join that
+// fails here spends nothing. `add` and `ls` ask the board which logins were redeemed (`factory board login ls`): a
+// machine whose login was redeemed is marked joined; one whose code expired unredeemed has its login dropped (`login
+// remove --unredeemed`; marked revoked, kept so `ls` can say so). When the board doesn't answer nothing is changed.
 // Errors are `{code, message, fix}` on stderr.
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { Board, boardDir, LOGIN_NAME } from "../message-board/src/index.ts";
+import { Board, BoardError, boardDir, LOGIN_NAME } from "../message-board/src/index.ts";
 import { now } from "./factory_clock.ts";
 import { Exit, pyDumps, run, which } from "./factory_lib.ts";
 import { configDir, machineSettings, refuse, saveMachineSettings, writeMachineSettings } from "./factory_machine.ts";
@@ -50,10 +54,12 @@ interface Payload {
 }
 interface Record_ {
   name: string; id: string; createdAt: number; expiresAt: number; agents: AgentName[];
-  joinedAt?: number; // the board first saw its login connect
+  joinedAt?: number; // the board says its code was redeemed (machine join)
   revokedAt?: number; // its code expired before it joined: its login was dropped
 }
-interface BoardLogin { name: string; firstSeen: string | null; connected: boolean }
+interface BoardLogin { name: string; redeemedAt: string | null }
+/** What a join wrote here, so `leave` takes back only that (<board folder>/joined.json). */
+interface Joined { name: string; agents: string[] }
 type Problem = { code: string; message: string; fix: string };
 
 function roleOf(text: string): Role | null {
@@ -163,8 +169,8 @@ function refuseWith(p: Problem): never {
 }
 
 // ---------- the hub enforces the code (sweep) ----------
-/** Marks the machines whose login the board saw connect as joined, and drops the login of those whose code expired
- * unjoined. `checked` is false when the board didn't answer; then nothing changes. */
+/** Marks the machines whose code the board saw redeemed as joined, and drops the login of those whose code expired
+ * unredeemed. `checked` is false when the board didn't answer; then nothing changes. */
 function sweep(): { records: Record_[]; checked: boolean } {
   const records = readRecords();
   const open = records.filter((r) => r.joinedAt === undefined && r.revokedAt === undefined);
@@ -176,13 +182,13 @@ function sweep(): { records: Record_[]; checked: boolean } {
   let changed = false;
   for (const r of open) {
     const l = logins.get(r.name);
-    if (l && (l.firstSeen || l.connected)) {
+    if (l?.redeemedAt) {
       r.joinedAt = t;
       changed = true;
     } else if (t >= r.expiresAt) {
-      const gone = l ? board(["login", "remove", r.name, "--unused"]) : { ok: true as const, stdout: "" };
+      const gone = l ? board(["login", "remove", r.name, "--unredeemed"]) : { ok: true as const, stdout: "" };
       if (gone.ok || gone.problem.code === "not-found") r.revokedAt = t;
-      else if (gone.problem.code === "login-used") r.joinedAt = t; // it connected a moment ago
+      else if (gone.problem.code === "login-redeemed") r.joinedAt = t; // it joined a moment ago
       else continue; // the board stopped answering: try again next time
       changed = true;
     }
@@ -225,7 +231,7 @@ function cmdAdd(argv: string[]): number {
     refuse("agent-taken", `${dup.name} is already named for another machine (or twice here), and one name is one agent.`,
       "Choose a name no other agent uses; `factory machine ls` shows the names machines hold.");
   }
-  const made = board(["login", "add", name, "--json"]);
+  const made = board(["login", "add", name, "--valid-for", String(Math.max(1, Math.ceil(ttl * 60))), "--json"]);
   if (!made.ok) refuseWith(made.problem);
   const { url } = JSON.parse(made.stdout) as { url: string };
   const t = now();
@@ -244,7 +250,7 @@ function cmdAdd(argv: string[]): number {
     console.log(pyDumps({ name, code, expiresAt, agents, command }));
     return 0;
   }
-  console.log(`Join code for ${name} (works once, expires in ${Math.round(ttl)} min: if ${name} hasn't connected by then, its board login is removed). ` +
+  console.log(`Join code for ${name} (works once, expires in ${Math.round(ttl)} min: if ${name} hasn't joined by then, its board login is removed). ` +
     `It holds ${name}'s own login to the message board, for ${agents.map((a) => a.name).join(", ")}: send it over a private channel.`);
   console.log(code);
   console.log(`On ${name}, in the project's folder, run:`);
@@ -257,19 +263,16 @@ function tailscaleUp(): boolean {
   return Boolean(which("tailscale")) && run(["tailscale", "ip", "-4"], { timeoutMs: 10_000 }).code === 0;
 }
 
-/** Why `url` doesn't reach the board, or "" when it does. */
-async function reachError(url: string): Promise<string> {
-  try {
-    const b = await Board.open(url, { max: 1 });
-    try {
-      await b.info();
-    } finally {
-      await b.end().catch(() => {});
-    }
-    return "";
-  } catch (e) {
-    return (e instanceof Error ? e.message : String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
-  }
+/** An error's text with any URL's password masked. */
+function masked(e: unknown): string {
+  return (e instanceof Error ? e.message : String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
+}
+
+/** `url` with `password` in place of its own. */
+function withPassword(url: string, password: string): string {
+  const u = new URL(url);
+  u.password = encodeURIComponent(password);
+  return u.toString();
 }
 
 async function cmdJoin(argv: string[]): Promise<number> {
@@ -300,49 +303,76 @@ async function cmdJoin(argv: string[]): Promise<number> {
       "Install and start Tailscale (tailscale up) and run this again; with another route to the board (a tunnel) add --no-tailscale.");
   }
 
-  // Write the URL, then check that it reaches the board; on any failure put back what was there.
+  // Redeem the code on the board and, inside that transaction, write what this machine keeps: the URL with the login's
+  // new password, the code as used, the agents' names. Anything that fails puts back what was there, and the board
+  // undoes the redeem, so the code still works.
   const file = join(dir, "url");
+  const joinedFile = join(dir, "joined.json");
   const freshDir = !existsSync(dir);
   const before = existsSync(file) ? readFileSync(file, "utf8") : null;
+  const joinedBefore = existsSync(joinedFile) ? readFileSync(joinedFile, "utf8") : null;
+  const settingsBefore = machineSettings();
+  let wroteSettings = false;
   const undo = (): void => {
     if (before === null) rmSync(file, { force: true });
     else writeAtomic(file, before, 0o600);
+    if (joinedBefore === null) rmSync(joinedFile, { force: true });
+    else writeAtomic(joinedFile, joinedBefore, 0o600);
     if (freshDir) rmSync(dir, { recursive: true, force: true });
-  };
-  try {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    chmodSync(dir, 0o700);
-    writeAtomic(file, p.url + "\n", 0o600);
-  } catch (e) {
-    undo();
-    throw e;
-  }
-  const why = await reachError(p.url);
-  if (why) {
-    undo();
-    refuse("board-unreachable", `${p.name}'s login doesn't reach the board at ${address}: ${why.slice(0, 300)}`,
-      "Check that Tailscale is up on both machines and that the board runs (`factory board status` on its machine). " +
-      "Nothing was kept. If the code expired or the machine was removed there, make a new one: factory machine add " + p.name + " --agent ...");
-  }
-  const settingsBefore = machineSettings();
-  try {
-    const mine = settingsBefore.agents;
-    const names = [...new Set([...(Array.isArray(mine) ? mine.map(String) : []), ...p.agents.map((a) => a.name)])];
-    writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
-    saveMachineSettings({ agents: names });
-  } catch (e) {
-    undo(); // nothing half done: without its record the code could be used here again
-    try {
-      writeMachineSettings(settingsBefore);
-    } catch {
-      // it was never written
+    if (wroteSettings) {
+      try {
+        writeMachineSettings(settingsBefore);
+      } catch {
+        // it was never written
+      }
     }
-    refuse("join-not-saved", `Couldn't record the join in ${configDir()}: ${e instanceof Error ? e.message : String(e)}. Nothing was kept.`,
-      `Make ${configDir()} writable for this user (machine-joins.json must be a file), then run this again; the code still works.`);
+  };
+  const newCode = `Ask the hub for a new code: on the hub run \`factory machine remove ${p.name}\` and ` +
+    `\`factory machine add ${p.name} --agent ...\`, then \`factory machine join <code>\` here. Nothing was changed here.`;
+  let b: Board;
+  try {
+    b = await Board.open(p.url, { max: 1 });
+  } catch (e) {
+    if (e instanceof BoardError && e.code === "login-refused") {
+      refuse("code-refused", `The board at ${address} refused ${p.name}'s join code: it was used to join already, it expired, or the machine was removed on the hub.`, newCode);
+    }
+    refuse("board-unreachable", `${p.name}'s login doesn't reach the board at ${address}: ${masked(e).slice(0, 300)}`,
+      "Check that Tailscale is up on both machines and that the board runs (`factory board status` on its machine). Nothing was kept.");
+  }
+  let saving = false;
+  try {
+    await b.redeemLogin((password) => {
+      saving = true;
+      const mine = settingsBefore.agents;
+      const had = Array.isArray(mine) ? mine.map(String) : [];
+      const added = p.agents.map((a) => a.name).filter((n) => !had.includes(n));
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      chmodSync(dir, 0o700);
+      writeAtomic(file, withPassword(p.url, password) + "\n", 0o600);
+      writeAtomic(joinedFile, pyDumps({ name: p.name, agents: added } satisfies Joined) + "\n", 0o600);
+      writeAtomic(usedFile, pyDumps([...used, p.id]) + "\n", 0o600);
+      wroteSettings = true;
+      saveMachineSettings({ agents: [...had, ...added] });
+      saving = false;
+    });
+  } catch (e) {
+    undo();
+    if (e instanceof BoardError && (e.code === "login-redeemed" || e.code === "login-expired")) {
+      refuse(e.code === "login-redeemed" ? "code-used" : "code-expired", `The board refused ${p.name}'s join code: ${masked(e)}`, newCode);
+    }
+    if (saving) {
+      refuse("join-not-saved", `Couldn't record the join in ${configDir()}: ${masked(e)}. Nothing was kept, and the code wasn't used.`,
+        `Make ${configDir()} writable for this user (machine-joins.json must be a file), then run this again; the code still works.`);
+    }
+    if (e instanceof BoardError) refuse(e.code, `${p.name}'s join wasn't finished: ${masked(e)} Nothing was kept.`, e.fix);
+    throw e;
+  } finally {
+    await b.end().catch(() => {});
   }
 
   console.log(`Joined the message board at ${address} as ${p.name}, with ${p.agents.map((a) => `${a.name} (${a.role})`).join(", ")}.`);
-  console.log(`The board's URL, with ${p.name}'s own login: ${file} (folder 700, file 600). With it, messaging.transport is board by default.`);
+  console.log(`The board's URL, with ${p.name}'s own login and a password only this machine has: ${file} (folder 700, file 600). ` +
+    "With it, messaging.transport is board by default. The code is used up: it joins no other machine.");
   if (skipDoctor) return 0;
   const d = run([process.execPath, "--no-env-file", "--config=/dev/null", join(import.meta.dir, "factory_doctor.ts")], { timeoutMs: 120_000 });
   const out = (d.stdout + d.stderr).trim();
@@ -405,9 +435,47 @@ function cmdRemove(argv: string[]): number {
   return 0;
 }
 
+// ---------- leave ----------
+function cmdLeave(argv: string[]): number {
+  noMore([...argv], "factory machine leave");
+  const dir = boardDir();
+  if (existsSync(join(dir, "state.json"))) {
+    refuse("is-hub", "This machine runs the message board, so it can't leave it.",
+      "To stop the board here run `factory board down`; to stop another machine using it run `factory machine remove <name>` here.");
+  }
+  const file = join(dir, "url");
+  const joinedFile = join(dir, "joined.json");
+  if (!existsSync(file) && !existsSync(joinedFile)) {
+    console.log(`This machine doesn't use a message board (there is no ${file}): nothing to do.`);
+    if (process.env.MB_URL) console.log("MB_URL is set in this shell: unset it too to stop using that board.");
+    return 0;
+  }
+  const joined = readJson<Partial<Joined>>(joinedFile, {});
+  const added = Array.isArray(joined.agents) ? joined.agents.map(String) : [];
+  const mine = machineSettings().agents;
+  if (added.length && Array.isArray(mine)) {
+    const kept = mine.map(String).filter((n) => !added.includes(n));
+    saveMachineSettings({ agents: kept }); // first: should it fail, the URL is still there and leave can run again
+  }
+  rmSync(file, { force: true });
+  rmSync(joinedFile, { force: true });
+  try {
+    rmdirSync(dir); // only when nothing else is in it
+  } catch {
+    // other files stay
+  }
+  const name = typeof joined.name === "string" ? joined.name : "<name>";
+  console.log(`This machine no longer uses the message board: removed ${file}` +
+    (added.length ? ` and the agent names its join added (${added.join(", ")})` : "") + ".");
+  console.log(`Its login is still on the board until the hub drops it: on the hub run \`factory machine remove ${name}\`.`);
+  if (process.env.MB_URL) console.log("MB_URL is set in this shell: unset it too to stop using that board.");
+  return 0;
+}
+
 export async function machineMain(cmd: string, rest: string[]): Promise<number> {
   if (cmd === "add") return cmdAdd(rest);
   if (cmd === "join") return await cmdJoin(rest);
+  if (cmd === "leave") return cmdLeave(rest);
   if (cmd === "ls") return cmdLs(rest);
   if (cmd === "remove") return cmdRemove(rest);
   throw new Exit(1);

@@ -534,7 +534,7 @@ export function factory(r: Reporter, cfg: Config): void {
   const only = machineNames();
   const unknown = only.filter((n) => !names.includes(n));
   if (unknown.length) {
-    r.fix("FACTORY_AGENTS / machine names file", `${unknown.join(", ")} aren't in \`agents\` in .claude/factory.json (${names.join(", ")})`);
+    r.fix("FACTORY_AGENTS / machine names file", `${unknown.join(", ")} ${unknown.length === 1 ? "isn't" : "aren't"} in \`agents\` in .claude/factory.json (${names.join(", ")})`);
   } else if (only.length) r.ok(`this machine runs ${only.join(", ")} (FACTORY_AGENTS or the machine names file)`);
   else {
     r.note("FACTORY_AGENTS", "not set; fine on one machine. With several, give each its own names, for example " +

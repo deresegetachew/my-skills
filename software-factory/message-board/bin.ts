@@ -45,13 +45,16 @@ events on Postgres.
                                      --board-is-record: a status the board changed since the last import is kept too
                                      (the factory passes it when tasks.source is board). Comments the board's mirror
                                      wrote are never brought back
-  factory board login add <name> [--json]
+  factory board login add <name> [--valid-for SECONDS] [--json]
                                      on the machine that runs the board: a login of its own for another machine, with
                                      only the board's rights (connect, read and write the board's tables). Prints its URL
-                                     (the board's Tailscale address, and the login's password) once
-  factory board login ls [--json]    each login: when it was first used, or never used, and whether it is connected now
-  factory board login remove <name> [--unused]
-                                     drop the login and end its connections; --unused: only if it was never used
+                                     (the board's Tailscale address, and the login's password) once. --valid-for: a join
+                                     code's login, refused by Postgres after that unless redeemed (factory machine join)
+  factory board login ls [--json]    each login: when it was first used, or never used, whether it is connected now, and
+                                     whether its join code was redeemed
+  factory board login remove <name> [--unused|--unredeemed]
+                                     drop the login and end its connections; --unused: only if it was never used;
+                                     --unredeemed: only if its join code wasn't redeemed
 
 The URL lives in ${join("<machine settings folder>", "message-board", "url")} (MB_URL overrides it).`;
 
@@ -264,7 +267,17 @@ async function status(argv: string[]): Promise<number> {
   try {
     b = await Board.open(url, { max: 1 });
   } catch (e) {
-    print(`server    doesn't answer (${e instanceof BoardError ? e.code : "error"}). Start it: \`factory board up\``);
+    if (e instanceof BoardError && e.code === "login-refused") {
+      if (s) print(`server    answers, but refused the board's own user. Put the password \`factory board up\` wrote back in ${join(boardDir(), "url")} (mode 600).`);
+      else print(`server    answers, but ${e.message} ${e.fix}`);
+      return 1;
+    }
+    const code = e instanceof BoardError ? e.code : "error";
+    if (s) print(`server    doesn't answer (${code}). Start it: \`factory board up\``);
+    else {
+      print(`server    doesn't answer (${code}). The board runs on another machine (the hub): check that Tailscale is up here and ` +
+        "there, and that the board runs (`factory board status` on the hub).");
+    }
     return 1;
   }
   try {
@@ -469,7 +482,7 @@ async function mcp(argv: string[]): Promise<number> {
 }
 
 // ---------- logins ----------
-const LOGIN_USAGE = "factory board login add <name> [--json] | ls [--json] | remove <name> [--unused]";
+const LOGIN_USAGE = "factory board login add <name> [--valid-for SECONDS] [--json] | ls [--json] | remove <name> [--unused|--unredeemed]";
 
 /** A login's URL: the board's address for other machines (its Tailscale address and port), its database, its role. */
 function loginUrl(base: string, s: State, role: string, password: string): string {
@@ -483,8 +496,10 @@ function loginUrl(base: string, s: State, role: string, password: string): strin
 
 async function loginAdd(args: string[]): Promise<number> {
   const asJson = flag(args, "--json");
+  const validText = option(args, "--valid-for");
   const name = args.shift();
-  leftovers(args, "factory board login add <name> [--json]");
+  leftovers(args, "factory board login add <name> [--valid-for SECONDS] [--json]");
+  const validFor = validText === undefined ? undefined : wholeNumber(validText, "--valid-for", 1, 31_536_000);
   if (!name) fail("bad-input", "login add needs a name.", "For example: factory board login add laptop");
   const url = boardUrl();
   if (!url) noBoard();
@@ -498,7 +513,7 @@ async function loginAdd(args: string[]): Promise<number> {
       "Start Tailscale (`tailscale up`), then run `factory board up` again, and this.");
   }
   const password = randomBytes(24).toString("base64url");
-  const made = await withBoard((b) => b.addLogin(name, password));
+  const made = await withBoard((b) => b.addLogin(name, password, { validFor }));
   const link = loginUrl(url, s, made.role, password);
   if (asJson) {
     json({ name: made.name, role: made.role, url: link });
@@ -516,24 +531,25 @@ async function loginLs(args: string[]): Promise<number> {
   const list = await withBoard((b) => b.logins());
   if (asJson) {
     json(list.map((l) => ({ name: l.name, role: l.role, createdAt: l.createdAt.toISOString(), firstSeen: l.firstSeen?.toISOString() ?? null,
-      lastSeen: l.lastSeen?.toISOString() ?? null, connected: l.connected })));
+      lastSeen: l.lastSeen?.toISOString() ?? null, connected: l.connected, redeemedAt: l.redeemedAt?.toISOString() ?? null })));
     return 0;
   }
   if (!list.length) print("No logins. Make one for another machine: factory board login add <name>");
   const at = (d: Date): string => d.toISOString().slice(0, 16).replace("T", " ");
   for (const l of list) {
     const used = l.firstSeen ? `used (first ${at(l.firstSeen)}, last ${at(l.lastSeen ?? l.firstSeen)})` : "never used";
-    print(`${l.name.padEnd(16)} ${used}${l.connected ? ", connected now" : ""}`);
+    print(`${l.name.padEnd(16)} ${used}${l.connected ? ", connected now" : ""}${l.redeemedAt ? `, joined ${at(l.redeemedAt)}` : ""}`);
   }
   return 0;
 }
 
 async function loginRemove(args: string[]): Promise<number> {
   const unused = flag(args, "--unused");
+  const unredeemed = flag(args, "--unredeemed");
   const name = args.shift();
-  leftovers(args, "factory board login remove <name> [--unused]");
+  leftovers(args, "factory board login remove <name> [--unused|--unredeemed]");
   if (!name) fail("bad-input", "login remove needs a name.", "For example: factory board login remove laptop");
-  await withBoard((b) => b.removeLogin(name, { unused }));
+  await withBoard((b) => b.removeLogin(name, { unused, unredeemed }));
   print(`Removed the login ${name}; its connections were ended.`);
   return 0;
 }

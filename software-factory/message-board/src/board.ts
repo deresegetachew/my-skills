@@ -2,10 +2,10 @@
 // that also inserts its event and NOTIFYs mb_events with the event's seq, so a listener re-reads from its cursor.
 import { SQL } from "bun";
 import { randomUUID } from "node:crypto";
-import { BoardError, refuse } from "./errors.ts";
+import { BoardError, LOGIN_REFUSED, LOGIN_REFUSED_FIX, refuse } from "./errors.ts";
 import { GRAPH_LOCK, type NewEvent, reaches, recordEvents } from "./graph.ts";
 import { applyImport } from "./import.ts";
-import { addLogin, listLogins, type Login, removeLogin } from "./logins.ts";
+import { addLogin, listLogins, type Login, redeemLogin, removeLogin } from "./logins.ts";
 import { applied, migrate } from "./migrate.ts";
 import { CONTEXT_COLS, EVENT_COLS, MESSAGE_COLS, type Row, TASK_SELECT, toContext, toEvent, toMessage, toTask } from "./rows.ts";
 import {
@@ -44,12 +44,17 @@ function rows(r: unknown): Row[] {
   return r as Row[];
 }
 
-/** A Postgres or connection error as a BoardError; a BoardError as it is. */
-function translate(e: unknown): unknown {
+/** A Postgres or connection error as a BoardError; a BoardError as it is. `connecting`: the error came while
+ * connecting, where a permission refusal is the login's (it may not reach this database). */
+function translate(e: unknown, connecting = false): unknown {
   if (e instanceof BoardError) return e;
   const err = e as { errno?: string; code?: string; message?: string };
   const state = err.errno ?? "";
   const msg = (err.message ?? String(e)).replace(/\/\/[^@\s]*@/g, "//***@");
+  // 28P01: a wrong password, an expired login (VALID UNTIL) or a role that is gone; 28000: a role that may not log in
+  if (state === "28P01" || state === "28000" || (connecting && state === "42501")) {
+    return new BoardError("login-refused", `${LOGIN_REFUSED} The board said: ${msg}.`, LOGIN_REFUSED_FIX);
+  }
   if (state === "42P01" || state === "42703") return new BoardError("schema-old", `The board's tables are missing or old: ${msg}`, MIGRATE_FIX);
   if (state === "40P01" || state === "40001") {
     return new BoardError("busy", "Another write to the same tasks crossed this one, so the board undid it; nothing was changed.", "Try again.");
@@ -114,7 +119,7 @@ export class Board {
       await sql`SELECT 1`;
     } catch (e) {
       await sql.close().catch(() => {});
-      const t = translate(e);
+      const t = translate(e, true);
       if (t instanceof BoardError) throw t;
       throw new BoardError("no-answer", `The board's database doesn't answer: ${String(translate(e)).replace(/\/\/[^@\s]*@/g, "//***@")}`,
         "Start it (`factory board up`) or check its URL, then try again.");
@@ -132,9 +137,16 @@ export class Board {
     return this.run(() => migrate(this.sql));
   }
 
-  /** Makes a login of its own for another machine (logins.ts); the caller shows `password` once and keeps nothing. */
-  async addLogin(name: string, password: string): Promise<{ name: string; role: string }> {
-    return this.run(() => addLogin(this.sql, name, password));
+  /** Makes a login of its own for another machine (logins.ts); the caller shows `password` once and keeps nothing.
+   * With `validFor` (seconds) it is a join code's login: Postgres refuses it after that, unless it is redeemed first. */
+  async addLogin(name: string, password: string, options: { validFor?: number } = {}): Promise<{ name: string; role: string }> {
+    return this.run(() => addLogin(this.sql, name, password, options));
+  }
+
+  /** Redeems this connection's own join-code login once (logins.ts): `keep` gets its new password before the commit, and
+   * a `keep` that throws undoes the redeem. */
+  async redeemLogin(keep: (password: string) => Promise<void> | void): Promise<void> {
+    return this.run(() => redeemLogin(this.sql, keep));
   }
 
   /** Every login, with when it was first used and whether it is connected now. */
@@ -143,7 +155,7 @@ export class Board {
   }
 
   /** Drops a login and ends its connections; with `unused`, only one that was never used. */
-  async removeLogin(name: string, options: { unused?: boolean } = {}): Promise<{ name: string; role: string }> {
+  async removeLogin(name: string, options: { unused?: boolean; unredeemed?: boolean } = {}): Promise<{ name: string; role: string }> {
     return this.run(() => removeLogin(this.sql, name, options));
   }
 

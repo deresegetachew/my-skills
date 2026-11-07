@@ -61,7 +61,7 @@ On this page: [what is here](#what-is-here), [setting it up](#setting-it-up), [l
 Another machine reaches the board over Tailscale with a login of its own (#504), so one can be taken away without
 touching the others:
 
-- `factory board login add <name> [--json]`, on the machine that runs the board, makes a Postgres role
+- `factory board login add <name> [--valid-for SECONDS] [--json]`, on the machine that runs the board, makes a Postgres role
   `<database>_l_<name>` in the group `<database>_logins`. The group may connect to the board's database and read and
   write its tables (and use their sequences), nothing more: no new tables, no roles, no `mb_logins`, and
   `mb_migrations` only to read. Tables a later migration adds are granted too (default privileges, and each `add`
@@ -70,8 +70,23 @@ touching the others:
 - The board notes when a login is first used itself: a login event trigger (Postgres 17) stamps `mb_logins.first_seen`
   and `last_seen` (at most once a minute), and a login connected now (`pg_stat_activity`) counts too.
   `factory board login ls [--json]` shows it.
-- `factory board login remove <name> [--unused]` drops the role and ends its connections; with `--unused`, only a login
-  that was never used (`login-used` otherwise).
+- `factory board login remove <name> [--unused|--unredeemed]` drops the role and ends its connections; with `--unused`,
+  only a login that was never used (`login-used` otherwise); with `--unredeemed`, only one whose join code wasn't
+  redeemed (`login-redeemed` otherwise).
+- **Join codes (#514).** `login add --valid-for <seconds>` makes the role with `VALID UNTIL` that long from now by the
+  server's clock, so Postgres itself refuses its password afterwards. `mb_redeem_login()` redeems it once
+  (`Board.redeemLogin(keep)`): called by the login itself, it marks `mb_logins.redeemed_at`, sets `VALID UNTIL
+  'infinity'`, gives the role a new random password (two `gen_random_uuid()`, 64 hex characters), ends the role's other
+  connections and returns the password. It refuses a login already redeemed (`login-redeemed`), one that expired
+  (`login-expired`), and a user that isn't a login (`not-found`). The redeem runs in the caller's transaction and
+  `keep` gets the password before the commit: a `keep` that throws undoes it, so the code still works. The function
+  is `SECURITY DEFINER`, owned by the board's user, with `search_path` pinned to `pg_catalog, public, pg_temp`; it
+  touches only the row and role of `session_user`, takes the role's name from `mb_logins` (which logins can't write)
+  and builds its one dynamic statement with `format('%I', '%L')`. Only the logins group may execute it (PUBLIC can't).
+  `factory machine add` makes its login with `--valid-for` (the code's time), `factory machine join` redeems it.
+- A login the board refuses (wrong or rotated password, expired, removed: SQLSTATE 28P01 or 28000, or no CONNECT) is
+  `login-refused`, whose message and fix say to ask the hub for a new code or `factory machine leave`. A board that
+  doesn't answer is still `no-answer`.
 
 Making logins needs the board's own user (a superuser: the one `factory board up` made), because of the roles and the
 login trigger; a login can't make logins (`no-rights`).

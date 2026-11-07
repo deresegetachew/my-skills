@@ -211,11 +211,11 @@ async function main(argv: string[]): Promise<void> {
   else if (cmd === "setup") {
     if (argv.length < 2) refuse("no-names", "No agent names were given.", "factory machine setup haile,tewodros");
     setup(argv[1] as string);
-  } else if (["add", "join", "ls", "remove"].includes(cmd)) {
+  } else if (["add", "join", "leave", "ls", "remove"].includes(cmd)) {
     const { machineMain } = await import("./factory_machine_join.ts"); // loaded here: it imports this file and the message board
     const code = await machineMain(cmd, argv.slice(1));
     if (code) throw new Exit(code);
-  } else refuse("unknown-command", `unknown command ${pyRepr(cmd)}.`, "Use id, show, setup <names>, add, join, ls or remove.");
+  } else refuse("unknown-command", `unknown command ${pyRepr(cmd)}.`, "Use id, show, setup <names>, add, join, leave, ls or remove.");
 }
 
 if (import.meta.main) await runMain(() => main(process.argv.slice(2)));

@@ -54,10 +54,21 @@ hub as a job too (every few minutes), or by hand.
 
 ```sh
 factory machine add dev-pc --agent haile --agent tewodros   # on the hub: prints a join code (works once, 15 min)
-factory machine join <code>                                 # on dev-pc: writes the URL, checks it, runs factory doctor
+factory machine join <code>                                 # on dev-pc: redeems the code, writes the URL, runs factory doctor
 ```
 
-`factory machine ls` shows who joined; `factory machine remove <name>` drops a machine's login.
+The board enforces the code (#514). Its login expires with it (Postgres's `VALID UNTIL`), so after 15 minutes Postgres
+itself refuses the code's password. `machine join` redeems it once: the login's expiry is lifted and it gets a new
+password that only that machine has. The code's own password stops working, so a second machine with a copy of the code
+is refused (`code-refused`). `factory machine ls` shows who joined (a machine joins when its code is redeemed, not
+when something connects with it); `factory machine remove <name>` drops a machine's login.
+
+When the hub removes a machine's login, or it expired, that machine's `factory board status`, `factory next` and
+`factory doctor` say: "This machine's board login was refused (removed or expired). Ask the hub for a new code: on the
+hub run `factory machine add <name> --agent ...`, then `factory machine join <code>` here — or `factory machine
+leave` to stop using the board here." `factory machine leave` removes the board's URL file and the agent names the
+join added, so the board is no longer on by default there. "Start it: `factory board up`" is said only when the board
+doesn't answer at all.
 
 **Bring the issues in**, from the project's folder on any machine that reaches the board:
 
