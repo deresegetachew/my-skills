@@ -66,8 +66,8 @@
 
 <div role="group" aria-label="Editing the hub address" style="display: flex; flex-direction: column; gap: 8px; padding: 20px 4px 0;">
 <label for="url-in" style="font-weight: 600;">Hub address</label>
-<input id="url-in" type="text" value="http://100.99.7.67:4222" aria-invalid="true" aria-describedby="url-err" style="height: 44px; max-width: 420px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font: inherit;">
-<span id="url-err" style="display: inline-flex; gap: 8px; align-items: center; color: var(--text); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot); flex-shrink: 0;"></span>The address must start with nats://. Try nats://100.99.7.67:4222, the hub on dev-pc.</span>
+<input id="url-in" type="text" value="http://100.x.y.z:4222" aria-invalid="true" aria-describedby="url-err" style="height: 44px; max-width: 420px; border: 1px solid var(--border-strong); border-radius: 10px; padding: 0 12px; background: var(--surface); color: var(--text); font: inherit;">
+<span id="url-err" style="display: inline-flex; gap: 8px; align-items: center; color: var(--text); font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: var(--red-dot); flex-shrink: 0;"></span>The address must start with nats://. Try nats://100.x.y.z:4222, the hub on dev-pc.</span>
 <div style="display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px;">
 <button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Stage this change</button>
 <button style="height: 40px; padding: 0 12px; border-radius: 10px; border: none; background: transparent; color: var(--text-2); font: inherit; cursor: pointer;">Cancel</button>
@@ -106,7 +106,7 @@ class Component extends DCLogic {
       ],
       rows: [
         row('How messages travel', 'Messaging hub', 'Through the hub, or as GitHub comments', 'main'),
-        row('Hub address', 'nats://100.99.7.67:4222', 'Where the hub listens; every agent connects here', 'main'),
+        row('Hub address', 'nats://100.x.y.z:4222', 'Where the hub listens; every agent connects here', 'main'),
         row('Messages sent through the hub', 'Questions, answers, claims', 'Which kinds of message use the hub', 'def'),
         row('Check for messages every', '2 min', 'For an agent without the hub', 'staged'),
         row('This machine\'s messaging key', 'Saved', 'Readable only by this machine\'s user', 'machine')

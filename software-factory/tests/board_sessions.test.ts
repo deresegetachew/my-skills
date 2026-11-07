@@ -193,6 +193,18 @@ test("the skills name the board tools to use when the board is on", () => {
   expect(read(join(KIT, ".claude", "skills", "next-task", "SKILL.md"))).toContain(".claude/hooks/next_task.ts");
 });
 
+test("under the loop, next-task's board steps take a merged task to done: review after the PR, close after the merge (#534)", () => {
+  const next = boardSection("next-task");
+  // the loop holds the claim's token, so the session ends the claim through the port, which has it
+  const review = next.indexOf(".claude/hooks/factory_issues.ts review <n>");
+  const close = next.search(/`board_close`[^\n]*outcome `done`[^\n]*no token/);
+  const done = next.indexOf(".claude/hooks/factory_claims.ts done --task issue-<n>");
+  expect(review, next).toBeGreaterThan(-1);
+  expect(close, next).toBeGreaterThan(review);
+  expect(done, next).toBeGreaterThan(close);
+  expect(next).toContain("gh pr create");
+});
+
 // --- the server the config starts -------------------------------------------------------------------------------
 
 let world: BoardWorld | null = null;
@@ -266,6 +278,40 @@ test("a card the owner or the manager makes with board_create is the project's t
   // another project on the same board doesn't get it
   const other = world.tracker([]);
   expect(other.port.list()).toEqual([]);
+}, 300_000);
+
+/** Run the board's MCP server with `args` and call one tool; its result, refused or not. */
+async function callTool(args: string[], url: string, name: string, a: Record<string, unknown>): Promise<{ isError?: boolean; text: string }> {
+  const p = Bun.spawn(["bun", BIN, "mcp", ...args], { stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, MB_URL: url } });
+  const send = (m: unknown): void => {
+    p.stdin.write(JSON.stringify(m) + "\n");
+  };
+  send({ jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "t", version: "1" } } });
+  send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  send({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: a } });
+  await p.stdin.end();
+  const timer = setTimeout(() => p.kill(9), 60_000);
+  const out = await new Response(p.stdout).text();
+  await p.exited;
+  clearTimeout(timer);
+  const r = out.split("\n").filter(Boolean).map((l) => JSON.parse(l) as { id: number; result: { isError?: boolean; content: { text: string }[] } })
+    .find((x) => x.id === 1);
+  expect(r, out).toBeDefined();
+  return { isError: r?.result.isError, text: r?.result.content.map((c) => c.text).join("") ?? "" };
+}
+
+test("a task the loop claimed: the session can't close it while held, and after review through the port it closes it with no token (#534)", async () => {
+  world ??= await boardWorld();
+  const fx = world.tracker([{ title: "Is palindrome" }]);
+  fx.port.pick({ agent: "taytu", machine: "m1" }); // the loop's claim: its token is on this machine, not in the session
+  const as = ["--as", "taytu", "--role", "builder", "--repo", fx.repo];
+  const held = await callTool(as, world.url, "board_close", { task: 101, outcome: "done" });
+  expect(held.isError).toBe(true);
+  expect(held.text).toContain("claim-lost");
+  fx.port.setState("101", "in-review"); // `factory_issues.ts review 101`, as board.md says after `gh pr create`
+  const closed = await callTool(as, world.url, "board_close", { task: 101, outcome: "done", reason: "PR merged" });
+  expect(closed.isError, closed.text).toBeFalsy();
+  expect(fx.port.list().map((t) => t.id)).toEqual([]);
 }, 300_000);
 
 // --- the dev manager's pass keeps GitHub's mirror of the board (#502) ------------------------------------------

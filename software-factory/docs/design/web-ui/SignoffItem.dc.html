@@ -117,7 +117,7 @@ class Component extends DCLogic {
     return {
       theme: this.props.theme ?? 'light',
       steps: [
-        step(1, "On Machines, open dev-pc's web UI to Tailscale.", 'an address on 100.99.7.67 with a token.', true, 'Took two tries, the token was cut off on copy.'),
+        step(1, "On Machines, open dev-pc's web UI to Tailscale.", 'an address on 100.x.y.z with a token.', true, 'Took two tries, the token was cut off on copy.'),
         step(2, 'On your phone, on Tailscale, open that address.', 'the Inbox, without a sign-in, in under 3 seconds.'),
         step(3, "Open fasil's ask about PR #402 and tap Approve.", 'a confirm asking "Merge PR #402?".'),
         step(4, 'Confirm, then look at the Inbox on the Mac.', 'the ask is gone on both screens.')

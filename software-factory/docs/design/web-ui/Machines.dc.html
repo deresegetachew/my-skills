@@ -94,7 +94,7 @@
 <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
 <div style="display: flex; flex-direction: column; gap: 4px;">
 <h2 style="margin: 0; font-size: 15px;">Messaging hub on dev-pc</h2>
-<span style="color: var(--text-2); font-size: 13px;">How agents send claims and messages. Reachable on dev-pc and 100.99.7.67 only.</span>
+<span style="color: var(--text-2); font-size: 13px;">How agents send claims and messages. Reachable on dev-pc and 100.x.y.z only.</span>
 </div>
 <button style="height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); font: inherit; cursor: pointer;">Restart hub</button>
 </div>
@@ -129,7 +129,7 @@ class Component extends DCLogic {
     return {
       theme: this.props.theme ?? 'light',
       machines: [
-        { name: 'dev-pc', line: 'Linux · Tailscale 100.99.7.67 · runs the hub',
+        { name: 'dev-pc', line: 'Linux · Tailscale 100.x.y.z · runs the hub',
           agents: [
             ag('fasil', 'Dev manager', 'working', 'Working', 'Reviewing #402'),
             ag('haile', 'Builder', 'working', 'Working', '#437 An avatar for every agent'),

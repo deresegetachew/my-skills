@@ -17,7 +17,7 @@
 
 <header style="width: 100%; max-width: 880px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
 <span style="display: flex; align-items: center; gap: 10px;"><span style="width: 32px; height: 32px; border-radius: 10px; background: var(--primary); color: var(--on-primary); display: inline-flex; align-items: center; justify-content: center; font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700;">F</span><span style="font-family: 'Space Grotesk', Inter, sans-serif; font-weight: 700; font-size: 18px;">factory</span></span>
-<span style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;">dev-pc · Linux · Tailscale 100.99.7.67</span>
+<span style="display: flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 13px;">dev-pc · Linux · Tailscale 100.x.y.z</span>
 </header>
 
 <ol aria-label="Setup steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 24px;">
@@ -113,7 +113,7 @@ class Component extends DCLogic {
             row('Bun', 'Found; the factory runs on it', 'ok'),
             row('Node', 'Not found. Claude Code needs it.', 'fix', 'Install Node'),
             row('Docker', 'Docker 29, running', 'ok'),
-            row('Tailscale', 'Connected as dev-pc, 100.99.7.67', 'ok'),
+            row('Tailscale', 'Connected as dev-pc, 100.x.y.z', 'ok'),
             row('Claude Code sign-in', 'Not signed in on this machine', 'fix', 'Sign in')
           ]
         },

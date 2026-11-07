@@ -102,7 +102,7 @@ class Component extends DCLogic {
       labelColor: i === cur ? 'var(--text)' : 'var(--text-2)', weight: i === cur ? 600 : 400
     }));
     const items = [
-      ['Connect over Tailscale', 'dev-pc answered at 100.99.7.67.', 'done'],
+      ['Connect over Tailscale', 'dev-pc answered at 100.x.y.z.', 'done'],
       ['Write the board login', 'This Mac’s own login to the message board is saved here, readable only by you.', 'now'],
       ['Reach the board', 'Connects to the message board on dev-pc with that login.', 'next'],
       ['Check this Mac', 'Runs the machine check and shows anything left to fix.', 'next']
@@ -118,7 +118,7 @@ class Component extends DCLogic {
       theme: this.props.theme ?? 'light',
       steps,
       holds: [
-        { label: 'Hub', value: 'dev-pc', sub: '100.99.7.67 · message board' },
+        { label: 'Hub', value: 'dev-pc', sub: '100.x.y.z · message board' },
         { label: 'Project', value: 'my-skills', sub: 'deresegetachew/my-skills' },
         { label: 'Agent', value: 'menelik', sub: 'Builder' },
         { label: 'Board login', value: '••••••••••', sub: 'Kept on this Mac only' }
