@@ -4,11 +4,11 @@
 // through its environment (MB_URL or the url file), never on a command line. With the board off, nothing changes.
 // The agents' rules allow each role the board tools it needs and no more, and the skills name the tools.
 import { afterAll, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { boardWorld, type BoardWorld } from "./board_support.ts";
-import { KIT_AGENT_SETTINGS, mainCopy, quiet } from "./loop_support.ts";
-import { HOOKS, KIT, read, SF, sh, tmp, write } from "./support.ts";
+import { commitAll, KIT_AGENT_SETTINGS, LOGGING_STUB, loopRepo, mainCopy, push, quiet, STUB_HOOKS } from "./loop_support.ts";
+import { HOOKS, KIT, read, SF, sh, tmp, write, writeExe } from "./support.ts";
 
 const MCP = join(HOOKS, "factory_mcp.ts");
 const BIN = join(SF, "message-board", "bin.ts");
@@ -229,3 +229,53 @@ test("the configured server answers as the agent, with its role's tools", async 
   expect(manager.instructions).toContain("You are fasil on the message board, as its manager");
   expect(manager.tools).toEqual([...MANAGER_TOOLS].sort());
 }, 300_000);
+
+// --- the dev manager's pass keeps GitHub's mirror of the board (#502) ------------------------------------------
+
+/** A logging stub (LOGGING_STUB) whose factory_roles names an orchestrating dev manager that idles out at once, and
+ * whose orchestrator finds nothing to do. */
+const ROLE_STUB = LOGGING_STUB.replace('if (name === "next_task.ts") {',
+  'if (name === "factory_roles.ts" && args[0] === "vars") console.log("role_kind=orchestrator\\nrole_idle=0\\nrole_busy=0\\nrole_model_role=manager");\n' +
+  'if (name === "factory_orchestrator.ts") process.exit(3);\n' +
+  'if (name === "next_task.ts") {');
+
+/** One dev manager pass with `factoryJson` on main and a factory_board.ts stub: the log of the hooks it ran. */
+function managerPass(factoryJson: unknown, role = "dev-manager"): string {
+  const stubs = [...STUB_HOOKS, "factory_roles.ts", "factory_orchestrator.ts", "factory_board.ts"];
+  const [d, work] = loopRepo(stubs);
+  for (const s of stubs) writeExe(join(work, ".claude", "hooks", s), ROLE_STUB);
+  write(join(work, ".claude", "factory.json"), JSON.stringify({ waitMinutes: 0, ...(factoryJson as object) }));
+  commitAll(work, "config");
+  push(work);
+  const env: Record<string, string | undefined> = { ...process.env, PATH: `${d}/bin:${process.env.PATH}`, LOOP_LOG: join(d, "log"),
+    LOOP_STATE: join(d, "state"), FACTORY_ROLE: role, STUB_AGENT: "fasil" };
+  for (const k of ["FACTORY_AGENT", "FACTORY_RELOAD_AGENT", "FACTORY_RELOAD_DIR", "FACTORY_NAME", "MB_URL"]) delete env[k];
+  const p = sh(["bash", "./factory-loop.sh", "1"], { cwd: work, env, timeoutMs: 60_000 });
+  expect(p.code, p.out).toBe(0);
+  return existsSync(join(d, "log")) ? read(join(d, "log")) : "";
+}
+
+const mirrors = (log: string): number => log.split("\n").filter((l) => l === "factory_board.ts mirror").length;
+
+test("with the board on, each dev manager pass runs factory board mirror once", () => {
+  const log = managerPass(BOARD_TASKS);
+  expect(log).toContain("factory_orchestrator.ts cycle");
+  expect(mirrors(log)).toBe(1);
+  expect(mirrors(managerPass({ tasks: { source: "issues" }, messaging: { transport: "board" } }))).toBe(1);
+}, 120_000);
+
+test("with the board off, or for another role, no pass runs the mirror", () => {
+  const log = managerPass({ tasks: { source: "issues" }, messaging: { transport: "github" } });
+  expect(log).toContain("factory_orchestrator.ts cycle");
+  expect(mirrors(log)).toBe(0);
+  expect(mirrors(managerPass(BOARD_TASKS, "product-owner"))).toBe(0);
+}, 120_000);
+
+test("the dev manager may post owner asks and run the mirror with factory board", () => {
+  const allow = (JSON.parse(read(join(KIT, ".claude", "manager", "settings.json"))) as { permissions: { allow: string[] } }).permissions.allow;
+  for (const r of ["Bash(factory board ask*)", "Bash(./factory board ask*)", "Bash(factory board mirror*)", "Bash(./factory board mirror*)"]) {
+    expect(allow).toContain(r);
+  }
+  expect(allow.filter((a) => a.includes("factory board")).length).toBe(4); // nothing else of the board's command
+  expect(boardSection("manage-pass")).toContain("`factory board ask");
+});
