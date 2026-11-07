@@ -5,6 +5,7 @@
 import { type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { AttentionList } from "./attention.tsx";
 import { AttentionContext } from "./attention_context.tsx";
+import { CostTable } from "./costs.tsx";
 import { type AttentionItem, attentionLine } from "./attention_model.ts";
 import { Avatar } from "./avatar_view.tsx";
 import { ago } from "./model.ts";
@@ -274,7 +275,12 @@ export function HealthPage(p: OpsProps) {
 // --- Usage and cost ----------------------------------------------------------------------------------------------------
 
 export function UsagePage(p: OpsProps) {
-  const { data, problem } = useLoad<UsageData>(p.get, `${base(p)}/usage`, 0);
+  const { data, problem, reload } = useLoad<UsageData>(p.get, `${base(p)}/usage`, 0);
+  useEffect(() => { // what each task took is read in the background (#580): look again until it is there
+    if (!data?.byTaskUpdating) return;
+    const t = setTimeout(reload, 3000);
+    return () => clearTimeout(t);
+  }, [data, reload]);
   const [tab, setTab] = useState<"task" | "agent" | "day">("task");
   const rows = data ? (tab === "task" ? data.tasks : tab === "agent" ? data.agents : data.days ?? []) : [];
   const max = Math.max(0, ...rows.map((r) => Math.max(r.used, r.budget ?? 0)));
@@ -306,6 +312,13 @@ export function UsagePage(p: OpsProps) {
                     );
                   })}
                 </ul>
+                {tab === "task" && (data.byTask || data.byTaskUpdating) && (
+                  <Section title="What each task took">
+                    <p className="ops-line">Build time is from the first claim to the merge (or done); agent working is its sessions added up. Pick a column to sort by it.
+                      {data.byTaskUpdating ? " Updating…" : ""}</p>
+                    {data.byTask ? <CostTable rows={data.byTask} open={p.open} /> : <p className="empty">Reading what each task took…</p>}
+                  </Section>
+                )}
                 <p className="empty">Tokens count fresh input and output, as a budget does. {data.budget.tokens === null ? "No budget is set, so nothing is compared." :
                   `A dot turns yellow at ${data.budget.warnPercent}% of the budget and red over it; a budget never stops an agent.`}</p>
               </>

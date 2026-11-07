@@ -3,6 +3,7 @@
 // tests/web_ui_ops_model.test.ts runs it as it is. The data comes from GET /api/projects/:p/health|usage|activity|home
 // (hooks/factory_ui_ops.ts).
 import type { AttentionItem } from "./attention_model.ts";
+import type { CostRow } from "./cost_model.ts";
 import { agentState, ago, type LimitView, type Tone } from "./model.ts";
 import type { DotState } from "./parts.tsx";
 
@@ -101,6 +102,10 @@ export interface UsageData {
   total: { used: number; replies: number; tasks: number; cost?: number | null; unpriced?: number };
   budget: { tokens: number | null; source: string | null; warnPercent: number };
   tasks: UsageRow[];
+  /** What each task took (#580): build time, working time, sessions, tokens, cost, CI and reviews. */
+  byTask?: CostRow[] | null;
+  /** True while what each task took is being read (the rows shown are the last ones kept, or none yet). */
+  byTaskUpdating?: boolean;
   agents: UsageRow[];
   days?: UsageRow[];
   pricesAsOf?: string | null;

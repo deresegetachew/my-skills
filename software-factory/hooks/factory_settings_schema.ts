@@ -306,6 +306,9 @@ export const SETTINGS: Record<string, Setting> = table([
   S("attention.dev-manager.maxMinutes", "int", "ui", "Needs attention: a dev manager's session shows when it has been working this many minutes without a pause.", { default: 30 }),
   S("attention.product-owner.maxMinutes", "int", "ui", "Needs attention: a product owner's session shows when it has been working this many minutes without a pause.", { default: 30 }),
   S("attention.idleWithReadyMinutes", "int", "ui", "Needs attention: a coding agent shows when it has been idle this many minutes while a task it may take is ready (on the board, ready this long too).", { default: 10 }),
+  S("attention.spinFactor", "int", "ui", "Needs attention: a task being built shows as spinning when its tokens or its agent's working time pass this many times the median of the done tasks (needs 5 done tasks).", { default: 3 }),
+  S("attention.spinReviewRounds", "int", "ui", "Needs attention: a task being built shows as spinning when it has had this many review rounds with must-fixes.", { default: 3 }),
+  S("attention.spinFailedCi", "int", "ui", "Needs attention: a task being built shows as spinning when this many of its CI runs failed in a row.", { default: 3 }),
   S("tasks.labels", "dict", "issues", "The GitHub labels that mark a task: ready, inProgress, inReview, blocked and the agentPrefix."),
   S("structure.roots", "list", "commands", "Folders the structure check (the hexagonal skill's check_structure script) looks at, when a style uses it.", { default: [] }),
   S("structure.legacy", "str", "commands", "The list of legacy files the structure check leaves alone (it only shrinks).", { default: "" }),
@@ -558,6 +561,17 @@ const MORE: Record<string, More> = {
     "for work by itself, and one whose prompt box still holds text is said to have a message typed but not sent. Its action " +
     "is Start work: after a confirm, `/next-task` goes to the agent's session through `factory say`, as the chat sends it.",
   examples: ["factory settings set attention.idleWithReadyMinutes 20"] },
+  "attention.spinFactor": { long: "What a task took is worked out from this machine's Claude Code logs, the board's claims and " +
+    "the snapshot (factory_task_cost.ts, `factory usage --by task`): its tokens (fresh input and output, as a budget counts " +
+    "them) and its agent's working minutes (its sessions' spans added up). A task in progress or in review is compared with " +
+    "the median of the done tasks, only once 5 tasks are done; with fewer, nothing is compared. Its action opens the agent's output.",
+  examples: ["factory settings set attention.spinFactor 4"] },
+  "attention.spinReviewRounds": { long: "A review round is a head of the task's pull request the dev manager gave must-fixes, as " +
+    "the snapshots read them. Its action opens the agent's output.",
+  examples: ["factory settings set attention.spinReviewRounds 4"] },
+  "attention.spinFailedCi": { long: "Counted from the task's newest finished CI run back, on its branch, as the snapshots read " +
+    "them; a run that passed ends the count. Its action opens the agent's output.",
+  examples: ["factory settings set attention.spinFailedCi 5"] },
   "attention.dev-manager.maxMinutes": { long: "A dev manager's pass is short, so one that has been working much longer is " +
     "likely stuck. Counted from when its state last changed (its heartbeat's since). The item opens its output, where Stop is.",
   examples: ["factory settings set attention.dev-manager.maxMinutes 45"] },

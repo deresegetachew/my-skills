@@ -309,6 +309,7 @@ factory usage                                # the last 7 days, per task
 factory usage --by agent                     # per subagent type: main, reviewer, test-writer, ...
 factory usage --by worker                    # per agent: the folder each session ran in
 factory usage --by day                       # per day (UTC)
+factory usage --by task                      # (the default) also each task's build time, working time, sessions, cost, CI runs and review rounds
 factory usage --by role                      # manager (/manage-pass, or the dev manager marker), product-owner (its marker), builder (all others)
 factory usage --since 2026-10-20 --until 2026-10-24 --record "baseline before token savings"
 ```

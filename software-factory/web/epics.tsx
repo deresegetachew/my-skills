@@ -6,6 +6,8 @@ import { AttentionContext, StuckMark } from "./attention_context.tsx";
 import { Avatar } from "./avatar_view.tsx";
 import { type Chat, useChat } from "./chat.tsx";
 import { itemLabel } from "./chat_model.ts";
+import { epicCostFacts } from "./cost_model.ts";
+import { CostFacts, useCosts } from "./costs.tsx";
 import { Cited } from "./docs.tsx";
 import type { DocPage } from "./docs_model.ts";
 import { epicThread, stageSteps, writtenDown } from "./epics_model.ts";
@@ -63,6 +65,7 @@ export function EpicPage({ epic, tasks, token, project, talkers, docs, open, bac
   const list = tab === "tasks" ? lines : lines.slice(0, 8);
   const links = writtenDown(epic, docs ?? []);
   const latest = epicThread(chat.items, epic.id).filter((x) => x.kind !== "owner").at(-1);
+  const cost = useCosts(project, token)?.epics.find((e) => e.epic === epic.id) ?? null; // what its tasks took (#580)
   return (
     <div className="body epage">
       <button className="link" onClick={back}>‹ All epics</button>
@@ -112,6 +115,7 @@ export function EpicPage({ epic, tasks, token, project, talkers, docs, open, bac
                   ? <button key={l.name} className="elink" onClick={() => open(l.channel ?? "")}><span>{l.name}</span><span className="empty">{l.tag}</span></button>
                   : <span key={l.name} className="elink"><span>{l.name}</span><span className="empty">{l.tag}</span></span>)}
               </section>
+              {cost && <CostFacts title="What it took" facts={epicCostFacts(cost)} />}
               <section>
                 <h3>Latest on the thread</h3>
                 {latest ? <p className="vsub"><strong>{latest.from}</strong> {latest.text}</p> : <p className="empty">Nothing yet.</p>}

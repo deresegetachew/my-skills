@@ -11,9 +11,17 @@
 //   factory usage --by role             manager (sessions that start with /manage-pass, or end with a `factory-role` line naming
 //                                       the dev manager), product-owner (that line names it) against builder (all others)
 //   factory usage --by day              per day (UTC) of each reply
+//   factory usage --by task             (the default) also what each task took (#580): its build time (first claim to
+//                                       merge or done), its agent's working minutes (its sessions' spans added up), its
+//                                       sessions, tokens and cost (with the share of replies without a price), its CI
+//                                       runs (and how many failed) and its review rounds with must-fixes. The times come
+//                                       from the state folder (factory_task_cost.ts): the board's claims and done times
+//                                       the web UI kept, and the snapshot's CI runs and must-fixes. Read only
 //   factory usage --json                the same as JSON, with each group's cost, the days, each session (its id, task,
 //                                       where the task came from, agent, role, first and last reply, tokens, cost: the
-//                                       shape a cost per task joins on), the folders looked in and any problem
+//                                       shape a cost per task joins on), the folders looked in and any problem; by task
+//                                       also task_costs (each task's times, cost, CI and reviews), the done tasks'
+//                                       medians and times_from (the state folder read)
 //   factory usage --task 96 --markdown  one task's tokens per subagent, as a PR comment (the next-task skill posts it);
 //                                       with a budget (#183) it adds used against budget and the top subagent
 //   factory usage --task 96 --budget    the checkpoint: used, budget, what is left and the percent; a warning from 80%.
@@ -44,6 +52,8 @@ import { die, githubCallsLastHour, pyDumps, pyRepr, runMain, splitLines } from "
 import { costOf, findLogs, listLogs, logBases, type Looked, type Price, PRICES_AS_OF, pricesFrom, type Problem, problemsOf,
   PROJECT_FOLDER, type Scope, scopeOf, belongs, workerOf } from "./factory_usage_logs.ts";
 import { limitStatus } from "./factory_views_cache.ts";
+import { stateDir } from "./factory_machine.ts";
+import { duration, eventsIn, mediansOf, sessionsOf, type TaskCost, taskCosts } from "./factory_task_cost.ts";
 
 export { PROJECT_FOLDER };
 
@@ -486,6 +496,29 @@ export function report(groups: Map<string, Group>, total: Total, by: string, sin
   for (const p of problems) out(`\n${p.message} (${p.code})\nFix: ${p.fix}`);
 }
 
+/** What each task took, as a table: build time, working time, sessions, tokens, cost, CI runs and review rounds. */
+export function costsReport(costs: TaskCost[], from: string): void {
+  out(`\nWhat each task took (build: first claim to merge or done; working: its sessions added up), times from ${from}.\n`);
+  out(`${"task".padEnd(10)} ${"build".padStart(12)} ${"working".padStart(9)} ${"sessions".padStart(9)} ${"tokens".padStart(9)} ` +
+    `${"cost".padStart(22)} ${"CI runs".padStart(14)} ${"reviews".padStart(8)}`);
+  for (const c of costs) {
+    const cost = dollars(c.cost, c.replies, c.unpriced);
+    const share = c.unpriced ? `, ${Math.round(c.unpricedShare * 100)}% unpriced` : "";
+    out(`${c.task.slice(0, 10).padEnd(10)} ${(c.doneAt ? duration(c.buildMinutes) : "in progress").padStart(12)} ` +
+      `${duration(c.workingMinutes).padStart(9)} ${String(c.sessions).padStart(9)} ${k(c.used).padStart(9)} ${(cost + share).padStart(22)} ` +
+      `${(c.ci.runs ? `${c.ci.runs} (${c.ci.failed} failed)` : "0").padStart(14)} ${String(c.reviews.rounds).padStart(8)}`);
+  }
+  if (!costs.length) out("No task has a session or a recorded time in these dates.");
+}
+
+function timesFolder(): string {
+  try {
+    return stateDir();
+  } catch {
+    return "";
+  }
+}
+
 /** The checkpoint (`--budget`): used, budget, what is left and the percent, and a warning from 80%. */
 export function checkpoint(task: string, total: Total, budget: number | null, source: string): string {
   const used = counted(total.tokens);
@@ -563,7 +596,10 @@ options:
   --since SINCE         first day (YYYY-MM-DD, UTC); default 7 days ago
   --until UNTIL         day after the last (YYYY-MM-DD, UTC); default tomorrow
   --by {task,agent,model,role,worker,day}
-  --json                also the cost, the days, each session, where it
+                        by task (the default) also lists what each task
+                        took: build time, working time, sessions, cost, CI
+                        runs and review rounds
+  --json               also the cost, the days, each session, where it
                         looked and any problem
   --record LABEL        append a summary row to the usage log
   --task TASK           only the sessions of this task (its id or issue
@@ -717,6 +753,12 @@ function githubReport(json: boolean): number {
   return 0;
 }
 
+/** Each task's cost and times: these sessions with the events kept in the state folder and its snapshot (#580). */
+function costsOf(sessions: Map<string, Session>): { costs: TaskCost[]; from: string } {
+  const from = timesFolder();
+  return { costs: taskCosts(sessionsOf({ sessions: sessionsJson(sessions) }), from ? eventsIn(from) : []), from };
+}
+
 export function main(argv: string[]): number {
   const a = parseArgs(argv);
   if (a.github) return githubReport(a.json);
@@ -739,16 +781,24 @@ export function main(argv: string[]): number {
   if (a.budget) out(checkpoint(id, total, budget.tokens, budget.source));
   else if (a.markdown) out(markdown(id, groups, total, since, budget.tokens));
   else if (a.json) {
+    const costs = a.by === "task" ? costsOf(sessions) : null;
     const g: Record<string, ReturnType<typeof groupJson>> = {};
     for (const [key, x] of groups) g[key] = groupJson(x);
     const days: Record<string, ReturnType<typeof groupJson>> = {};
     for (const [key, x] of [...summarise(sessions, "day")[0]].sort((p, q) => p[0].localeCompare(q[0]))) days[key] = groupJson(x);
     out(pyDumps({ since: isoformat(since), until: isoformat(until), by: a.by, groups: g,
       total: { ...groupJson(total), tasks: [...total.tasks].sort() }, days, sessions: sessionsJson(sessions),
+      ...(costs ? { task_costs: costs.costs, medians: mediansOf(costs.costs), times_from: costs.from } : {}),
       prices_as_of: PRICES_AS_OF, project: found.scope.top,
       looked: found.looked.map((l) => ({ dir: l.dir, why: l.why, state: l.state, folders: l.folders, ...(l.error ? { error: l.error } : {}) })),
       problems: found.problems }, { indent: 2 }));
-  } else report(groups, total, a.by, since, until, found.problems);
+  } else {
+    report(groups, total, a.by, since, until, found.problems);
+    if (a.by === "task") {
+      const costs = costsOf(sessions);
+      costsReport(costs.costs, costs.from || "nowhere (no state folder)");
+    }
+  }
   if (a.record) {
     const log = typeof cfg.usageLog === "string" && cfg.usageLog ? cfg.usageLog : "docs/factory-usage.md";
     record(log, a.record.replace(/\|/g, "/"), total, since, until);

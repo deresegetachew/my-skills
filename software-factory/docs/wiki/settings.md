@@ -313,6 +313,9 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `attention.dev-manager.maxMinutes` | int | `30` | Needs attention: a dev manager's session shows when it has been working this many minutes without a pause. |
 | `attention.product-owner.maxMinutes` | int | `30` | Needs attention: a product owner's session shows when it has been working this many minutes without a pause. |
 | `attention.idleWithReadyMinutes` | int | `10` | Needs attention: a coding agent shows when it has been idle this many minutes while a task it may take is ready (on the board, ready this long too). |
+| `attention.spinFactor` | int | `3` | Needs attention: a task being built shows as spinning when its tokens or its agent's working time pass this many times the median of the done tasks (needs 5 done tasks). |
+| `attention.spinReviewRounds` | int | `3` | Needs attention: a task being built shows as spinning when it has had this many review rounds with must-fixes. |
+| `attention.spinFailedCi` | int | `3` | Needs attention: a task being built shows as spinning when this many of its CI runs failed in a row. |
 <!-- settings:end -->
 
 <br>

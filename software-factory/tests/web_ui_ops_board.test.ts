@@ -3,12 +3,12 @@
 // pull requests the snapshot knows; a write on the board reaches an open page over the WebSocket; Home's blocked task
 // carries the reason it was blocked with. A real Postgres (board_pg.ts), the real server, a fake gh and a fake `factory`.
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
 import { freshDb, type Pg, startPg } from "./board_pg.ts";
 import { api, CONFIG, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
-import { write, writeExe } from "./support.ts";
+import { HOOKS, write, writeExe } from "./support.ts";
 
 const T = 90_000;
 const REPO = "o/work";
@@ -144,4 +144,31 @@ test("a move on the board reaches an open page over the WebSocket, and Home give
     await Bun.sleep(150);
   }
   expect(needs.find((n) => n.kind === "blocked")).toMatchObject({ title: "#12 Pay by card", sub: "needs the card provider's keys", link: "view:tasks" });
+}, T);
+
+test("costs (#580): the board's claims and closes are kept in the state folder and give a task its build time", async () => {
+  const url = await boardUrl();
+  const { id } = await seeded(url);
+  const menelik = await Board.open(url, { as: "menelik", max: 1 });
+  boards.push(menelik);
+  const t12 = await menelik.claim(id[12] as number);
+  await menelik.close(id[12] as number, { outcome: "done", token: t12?.token });
+  const p = workProject();
+  writeExe(join(p.d, "factory"), `#!/usr/bin/env bash
+echo "$*" >> "$FAKE_FACTORY_LOG"
+if [ "\${1:-}" = usage ]; then shift; exec "${process.execPath}" --no-env-file --config=/dev/null "${join(HOOKS, "factory_usage.ts")}" "$@"; fi
+exit 0
+`);
+  const ui = await startUi(p, ["--port", "0"], null, { MB_URL: url });
+  running.push(ui);
+  await activityUntil(ui, (x) => x.from === "board");
+  const r = await api(ui, "/api/projects/work/costs");
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  const kept = JSON.parse(readFileSync(join(p.state, "task-times.json"), "utf8")) as { events: Row[] };
+  expect(kept.events.filter((e) => String(e.id).startsWith("board-")).map((e) => [e.task, e.kind])).toEqual(
+    expect.arrayContaining([["7", "claimed"], ["10", "done"], ["12", "claimed"], ["12", "done"]]));
+  const rows = r.json.tasks as Row[];
+  expect(rows.find((x) => x.task === "12")).toMatchObject({ startFrom: "claim", buildMinutes: 0 });
+  expect(rows.find((x) => x.task === "12")?.doneAt).not.toBeNull();
+  expect(rows.find((x) => x.task === "7")).toMatchObject({ startFrom: "claim", doneAt: null, buildMinutes: null });
 }, T);

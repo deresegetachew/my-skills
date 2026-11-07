@@ -8,6 +8,8 @@ import { useContext, useEffect, useState } from "react";
 import { AttentionContext, StuckMark } from "./attention_context.tsx";
 import { Avatar, AgentsContext } from "./avatar_view.tsx";
 import { agentLaneSub, blockersText, boardOf, cardEdge, cardTag, columnsOf, epicColour, laneColours, type LaneBy, prdText, type TaskAction, taskAsk, taskLabel, unheldText } from "./board_model.ts";
+import { costFacts } from "./cost_model.ts";
+import { CostFacts, useCosts } from "./costs.tsx";
 import { Chips } from "./parts.tsx";
 import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
@@ -125,6 +127,7 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
   const body = typeof got?.body === "string" ? got.body.trim() : "";
   const actions = (t?.actions ?? []).filter((a): a is TaskAction => a in LABELS);
   const stuck = useContext(AttentionContext).tasks[id]; // Needs attention (#579)
+  const cost = useCosts(project.id, token)?.tasks.find((c) => c.task === id) ?? null; // what it took (#580)
   return (
     <div className="overlay" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
       <div className="dialog bthread" role="dialog" aria-modal="true" aria-labelledby="task-page">
@@ -144,6 +147,7 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
           </dl>
           {stuck && <StuckMark reason={stuck} />}
           {actions.length > 0 && <div className="bactions">{actions.map((a) => <button key={a} className="btn small" onClick={() => setAsk({ task: t, action: a })}>{LABELS[a]}</button>)}</div>}
+          {cost && <CostFacts title="What it took" facts={costFacts(cost)} />}
           {got === null && <p className="empty">Reading the task…</p>}
           {failed && <div className="notice bad" role="alert"><div><strong>{String(got?.message ?? "")}</strong><p>{String(got?.fix ?? "")}</p></div></div>}
           {body && <section aria-label="What it is"><p className="bbody">{body}</p></section>}

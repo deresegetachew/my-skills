@@ -583,7 +583,8 @@ function prItem(e: BoardEvent, s: EventScope): ActivityItem | null {
   };
   const it = said[text(e.payload.change)];
   if (!it) return null;
-  return { id: `board-${e.seq}`, at: e.at.toISOString(), agent: null, kind: it[0], text: it[1], task: null, pr, epic: null, link: `pr:${pr}`, find: "" };
+  return { id: `board-${e.seq}`, at: e.at.toISOString(), agent: null, kind: it[0], text: it[1], task: null, pr, epic: null, link: `pr:${pr}`, find: "",
+    ...(text(e.payload.change) === "merged" ? { mark: "done" as const } : {}) };
 }
 
 /** One board event as an Activity item, or null when it isn't about the project (one of its tasks, agents or pull
@@ -616,8 +617,11 @@ export function itemOf(e: BoardEvent, s: EventScope): ActivityItem | null {
     },
     "context.noted": () => `noted a ${text(pay.kind) || "note"} on ${n}`,
   };
+  // a claim and done mark the task's times (#580)
+  const done = (e.kind === "task.closed" && (text(pay.outcome) || "done") === "done") || (e.kind === "task.moved" && text(pay.to) === "done");
+  const mark = e.kind === "task.claimed" ? "claimed" as const : done ? "done" as const : null;
   return { id: `board-${e.seq}`, at: e.at.toISOString(), agent: e.actor || null, kind, text: (words[e.kind] as () => string)(), task: id, pr: null,
-    epic: null, link: "view:tasks", find: n };
+    epic: null, link: "view:tasks", find: n, ...(mark ? { mark } : {}) };
 }
 
 function messageOf(m: Message): Obj {
