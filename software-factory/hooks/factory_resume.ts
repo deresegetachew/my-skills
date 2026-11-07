@@ -10,7 +10,9 @@
 // saved to <state>/backups/<agent>-<branch>-<time>/ (changes.patch, status.txt, unpushed.txt, untracked/), nothing is
 // reset or cleaned, and the agent's first prompt says it is resuming after an unexpected restart (branch, files,
 // backup path). An agent starts only when its worktree's settings resolve, so its hooks and deny rules are on (#46).
-// Agents already running are left alone, so running it by hand is safe.
+// Agents already running are left alone, so running it by hand is safe. It starts them in the team's order (`agents`)
+// and at most this machine's maxCodingAgents in all, counting the ones already running here; each one past that is
+// skipped with a line saying why and how to raise the limit, and is not a problem (#596).
 //
 // The boot report is one line per component in <state>/boot.log (`$XDG_STATE_HOME/<repo>-factory`, else
 // `~/.local/state/<repo>-factory`) and, in issues mode, a comment on the first started agent's issue unless the
@@ -29,7 +31,7 @@ import { findIssue } from "./factory_agents.ts";
 import { comment, taskIssues } from "./factory_issues.ts";
 import { autostartSettings, configDir, machineId, repoKey, stateDir } from "./factory_machine.ts";
 import { bunCmd, Exit, type RunResult, run as runProc, runMain, sleepSync, splitLines, which } from "./factory_lib.ts";
-import { running, sessionName, startWindow, WindowError } from "./factory_window.ts";
+import { type Cap, capText, codingAgentCap, running, sessionName, startWindow, WindowError } from "./factory_window.ts";
 
 const HOOKS = import.meta.dir;
 export const SETTINGS_FIX = "run `git submodule update --init` there, or `bash vendor/my-skills/software-factory/install.sh . " +
@@ -308,6 +310,7 @@ function startAgent(cfg: Config, top: string, agent: string, report: Report, ctx
     const extra = info.changes.length || info.unpushed.length ? `; ${info.changes.length} uncommitted files and ` +
       `${info.unpushed.length} unpushed commits on ${info.branch || "a detached HEAD"} would be backed up first` : "";
     report.add(`agent ${agent}: would start tmux session ${name} in ${path}${extra}`);
+    ctx.started.push(agent); // counted against the limit as if it started (#596)
     return;
   }
   if (!ctx.network) {
@@ -374,6 +377,49 @@ function startAgent(cfg: Config, top: string, agent: string, report: Report, ctx
   registerWorking(cfg, top, agent, report);
 }
 
+/** `agents` in the team's order (`agents` in factory.json); a name not in it last. */
+export function teamOrder(cfg: Config, agents: string[]): string[] {
+  const team = (cfg.agents ?? []) as string[];
+  const at = (n: string) => (team.includes(n) ? team.indexOf(n) : team.length);
+  return [...agents].sort((a, b) => at(a) - at(b));
+}
+
+/** Which of `agents` (in the team's order) this machine's maxCodingAgents leaves out, counting the ones already
+ * running here (#596): [the ones it would start or finds running, the ones it skips]. */
+export function capPlan(cfg: Config, agents: string[]): [string[], string[], Cap | null] {
+  const cap = codingAgentCap();
+  const start: string[] = [];
+  const skip: string[] = [];
+  const busy = [...(cap?.busy ?? [])];
+  for (const agent of teamOrder(cfg, agents)) {
+    if (cap && !busy.includes(agent) && busy.length >= cap.max) skip.push(agent);
+    else {
+      start.push(agent);
+      if (!busy.includes(agent)) busy.push(agent);
+    }
+  }
+  return [start, skip, cap];
+}
+
+/** Starts each agent, at most this machine's maxCodingAgents coding agents in all (#596): one past it is skipped and
+ * said so, not counted as a problem. Returns how many were skipped. */
+function startAll(cfg: Config, top: string, agents: string[], report: Report, ctx: Ctx): number {
+  const cap = codingAgentCap();
+  let skipped = 0;
+  for (const agent of agents) {
+    if (cap && !cap.busy.includes(agent) && !running(sessionName(agent)) && cap.busy.length >= cap.max) {
+      const [message, fix] = capText(cap);
+      report.add(`agent ${agent}: ${ctx.dry ? "would not start" : "not started"}: ${message}. ${fix}`);
+      skipped++;
+      continue;
+    }
+    const before = ctx.started.length;
+    startAgent(cfg, top, agent, report, ctx);
+    if (cap && ctx.started.length > before && !cap.busy.includes(agent)) cap.busy.push(agent);
+  }
+  return skipped;
+}
+
 function main(argv: string[]): number {
   const dry = argv.includes("--dry-run");
   const force = argv.includes("--force");
@@ -404,10 +450,11 @@ function main(argv: string[]): number {
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined && ["PATH", "DOCKER_HOST", "XDG_RUNTIME_DIR"].includes(k)) carry[k] = v;
   Object.assign(carry, readEnvFile(join(configDir(), `${repoKey()}.env`)));
   const ctx: Ctx = { dry, network, state: stateDir(), carry, started: [], stamp: localStamp(true, true), when: localStamp(false, false) };
-  for (const agent of agents) startAgent(cfg, top, agent, report, ctx);
+  const skipped = startAll(cfg, top, teamOrder(cfg, agents), report, ctx);
   if (!dry) {
     if (ctx.started.length && post) postReport(ctx.started[0] as string, report, machineId());
     report.add(`resume: done, ${ctx.started.length} of ${agents.length} agents started` +
+      (skipped ? `, ${skipped} skipped (maxCodingAgents)` : "") +
       (report.failed ? `, ${report.failed} problem${report.failed !== 1 ? "s" : ""}` : ""));
   }
   return report.failed ? 1 : 0;
