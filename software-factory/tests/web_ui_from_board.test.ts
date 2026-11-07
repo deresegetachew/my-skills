@@ -4,7 +4,7 @@
 // a second, and the tasks aren't read from GitHub. A task's thread and context come from the board. Without a board the
 // GitHub path is as before; a board that can't be reached shows a notice and that project falls back to GitHub.
 // A real Postgres (board_pg.ts), the real server (startUi), a fake gh and a fake `factory` that logs what it was asked.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { copyFileSync, cpSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
@@ -23,6 +23,12 @@ const boards: Board[] = [];
 beforeAll(async () => {
   pg = await startPg();
 }, 600_000);
+
+// Each test's servers and connections end with it: CI runs many files at once against one Postgres (max_connections 100).
+afterEach(async () => {
+  for (const r of running.splice(0)) await r.stop().catch(() => {});
+  for (const b of boards.splice(0)) await b.end().catch(() => {});
+}, 120_000);
 
 afterAll(async () => {
   for (const r of running) await r.stop();
@@ -49,8 +55,8 @@ function cache(p: Project, ageSeconds = 0): void {
     ci: { mode: "github", repo: REPO, runners: [], runs: [], errors: [] } }));
 }
 
-function workProject(ageSeconds = 0): Project {
-  const p = project(CONFIG);
+function workProject(ageSeconds = 0, cfg: Row = CONFIG): Project {
+  const p = project(cfg);
   roots.push(p.root);
   writeExe(join(p.d, "factory"), FAKE_FACTORY);
   cache(p, ageSeconds);
@@ -62,7 +68,7 @@ const ref = (n: number) => `github:${REPO}#${n}`;
 /** A board with: epic #1 (tasks #7, #9, #10 under it), #7 held by menelik, #11 blocks #9, #10 done, #12 in no epic, and a
  *  thread and a context entry on #7. Returns the board (as system) and the ids by issue number. */
 async function seeded(url: string): Promise<{ board: Board; id: Record<number, number> }> {
-  const board = await Board.open(url, { as: "system" });
+  const board = await Board.open(url, { as: "system", max: 1 });
   boards.push(board);
   await board.migrate();
   const epic = await board.create({ title: "Sign in", kind: "epic", ref: ref(1), body: "Let people sign in.\n\nPRD: docs/PRD.md\n- [ ] #7\n- [ ] #9" });
@@ -74,7 +80,7 @@ async function seeded(url: string): Promise<{ board: Board; id: Record<number, n
   await board.create({ title: "Another repo's task", ref: "github:x/other#3", priority: 0 });
   await board.link(t11.id, t9.id, "blocks");
   await board.close(t10.id, { outcome: "done" });
-  const menelik = await Board.open(url, { as: "menelik" });
+  const menelik = await Board.open(url, { as: "menelik", max: 1 });
   boards.push(menelik);
   await menelik.claim(t7.id);
   await menelik.post({ task: t7.id, kind: "question", to: "fasil", body: "Which provider do we use for sign in?" });
@@ -237,6 +243,78 @@ test("Release on a board task still runs through the GitHub path", async () => {
   const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(readFileSync(p.factoryLog, "utf8")).toContain("issues release 7 try again");
+}, T);
+
+// --- the board is the record (#502): with tasks.source board the card's actions write to the board ----------------------
+
+const BOARD_CONFIG = { ...CONFIG, tasks: { source: "board" } };
+
+/** Stops the server and closes the test's board connections, so the tests after it have connections to spare. */
+async function finish(ui: Running): Promise<void> {
+  await ui.stop();
+  for (const b of boards.splice(0)) await b.end().catch(() => {});
+}
+
+/** The project's factory commands the server ran, without the snapshots. */
+function factoryRan(p: Project): string[] {
+  return readFileSync(p.factoryLog, "utf8").split("\n").filter((l) => l && !l.startsWith("snapshot"));
+}
+
+test("with tasks.source board, Release takes the task back on the board, with its reason, and runs no factory issues", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(await board.get(id[7] as number)).toMatchObject({ status: "open", holder: null });
+  const back = (await board.events(0, 500, { kind: "task.taken_back" })).find((e) => e.subject === `task:${id[7]}`);
+  expect(back?.payload.reason).toBe("try again");
+  expect(factoryRan(p)).toEqual([]);
+  const json = await tasksUntil(ui, (j) => byId(j)["7"]?.state === "ready", 15_000);
+  expect(byId(json)["7"]?.holders).toEqual([]);
+  await finish(ui);
+}, T);
+
+test("with tasks.source board, Block moves the task to blocked with a blocker note; the board and the tracker both call it blocked", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/12/actions/block", { method: "POST", body: { confirm: true, reason: "needs the card keys" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect((await board.get(id[12] as number)).status).toBe("deferred");
+  expect((await board.contextFor(id[12] as number)).map((c) => [c.kind, c.body])).toContainEqual(["blocker", "needs the card keys"]);
+  expect(factoryRan(p)).toEqual([]);
+  const json = await tasksUntil(ui, (j) => byId(j)["12"]?.state === "blocked", 15_000);
+  expect(byId(json)["12"]?.state).toBe("blocked"); // deferred is blocked, as the task tracker says (not "not ready")
+  expect(byId(json)["12"]?.actions).toEqual(["release"]);
+  await finish(ui);
+}, T);
+
+test("with tasks.source board, Reassign hands the task to the agent on the board, then tells that agent; no factory issues", async () => {
+  const url = await boardUrl();
+  const { board, id } = await seeded(url);
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const r = await api(ui, "/api/projects/work/tasks/7/actions/reassign", { method: "POST", body: { confirm: true, agent: "taytu" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(await board.get(id[7] as number)).toMatchObject({ assignee: "taytu", holder: null, status: "open" });
+  expect(factoryRan(p)).toEqual(["say taytu /next-task issue-7"]);
+  await finish(ui);
+}, T);
+
+test("with tasks.source board and the board down, an action is refused with the fix and nothing runs on GitHub", async () => {
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, "postgres://nobody:pw@127.0.0.1:1/none");
+  const r = await api(ui, "/api/projects/work/tasks/99/actions/release", { method: "POST", body: { confirm: true } });
+  expect(r.status, JSON.stringify(r.json)).toBe(503);
+  expect(r.json.code).toBe("ui_board_unreachable");
+  expect(factoryRan(p)).toEqual([]);
+  await finish(ui);
 }, T);
 
 // --- falling back ------------------------------------------------------------------------------------------------------

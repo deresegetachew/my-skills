@@ -10,7 +10,8 @@
 //   POST /api/projects/:p/ci/actions/:name      {confirm: true[, run: <id>]}: that action's commands (log needs no confirm)
 //   POST /api/projects/:p/refresh               runs `factory snapshot` in the background (202)
 //   POST /api/projects/:p/tasks/:id/actions/:name  {confirm: true[, reason][, agent]}: the board's release, block or
-//                                               reassign (#439), through `factory issues` and `factory say`
+//                                               reassign (#439), through `factory issues` and `factory say`; with
+//                                               tasks.source board, written to the message board (#502)
 //
 // Each row carries `find`: the text the search within a view and across views matches (#392, factory_match.ts).
 // While a page looks at a project, its cache is read again when older than FACTORY_SNAPSHOT_CACHE_SECONDS (300 s),
@@ -489,10 +490,17 @@ const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 /** POST /api/projects/:p/tasks/:id/actions/:name with `body` (#439): release, block or reassign a task issue through the
  *  commands the dev manager runs. Reassign releases it, then tells that agent to take it (`factory say <agent>
  *  "/next-task issue-<n>"`), and says nothing when the release failed. */
-// With the message board (#498) the card comes from the board's tasks part (`part`), and the action still changes the
-// GitHub issue through these commands: GitHub stays the record for tasks until that kind moves (decision 0007 point 9),
-// and the board follows on the next `factory board import github`.
-export async function taskAction(p: UiProject, id: string, name: string, body: unknown, part: Obj | null = null): Promise<Answer> {
+// With the message board (#498) the card comes from the board's tasks part (`part`). While the project's tasks.source is
+// issues the action still changes the GitHub issue through these commands (GitHub is the record), and the board follows on
+// the next `factory board import github`. With tasks.source board the board is the record (#502): the action is written
+// to it through `board` (release and block as moves with their reason, reassign as a hand-off, then `factory say`), never
+// through `factory issues`, and `factory board mirror` carries it to GitHub. A board that can't be reached refuses it.
+export interface TaskBoard {
+  write(p: UiProject, id: string, action: TaskActionName, reason: string, to?: string): Promise<unknown>;
+}
+
+export async function taskAction(p: UiProject, id: string, name: string, body: unknown, part: Obj | null = null,
+  board: TaskBoard | null = null): Promise<Answer> {
   if (!(TASK_ACTIONS as readonly string[]).includes(name)) {
     return refusal(404, "ui_action_unknown", `A task has no action ${name}.`, `Its actions: ${TASK_ACTIONS.join(", ")}.`);
   }
@@ -500,6 +508,11 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
   const b = obj(body);
   if (b.confirm !== true) {
     return refusal(400, "confirm_needed", `To ${action} a task changes who works on it, so it needs a confirm.`, 'Send {"confirm": true} (the page asks you first).');
+  }
+  const onBoard = str(obj(p.config?.tasks).source) === "board";
+  if (onBoard && (!part || !board)) {
+    return refusal(503, "ui_board_unreachable", `${p.name}'s tasks are kept on the message board, and it can't be read now, so #${id} isn't changed.`,
+      "Start the message board on the machine that keeps it (or check its address in this machine's settings), then try again.");
   }
   const tasksPart = part ?? obj(cacheOf(p)?.tasks);
   const task = /^\d+$/.test(id) ? list(tasksPart.tasks).find((t) => str(t.id) === id) : undefined; // an issue number, never an option
@@ -523,11 +536,36 @@ export async function taskAction(p: UiProject, id: string, name: string, body: u
       return refusal(400, "ui_agent_unknown", `${to || "No agent"} isn't one of ${p.name}'s coding agents.`,
         `Pick one of: ${agents.join(", ") || "none (set agents in .claude/factory.json)"}.`);
     }
+    if (onBoard) {
+      const wrote = await onTheBoard(board as TaskBoard, p, id, action, `reassigned to ${to} from the web UI`, to);
+      if (wrote) return wrote;
+      return runSteps(p, [["factory", "say", to, `/next-task issue-${id}`]], TASK_ACTION_TIMEOUT_MS);
+    }
     return runSteps(p, [["factory", "issues", "release", id, `reassigned to ${to} from the web UI`], ["factory", "say", to, `/next-task issue-${id}`]],
       TASK_ACTION_TIMEOUT_MS);
   }
+  if (onBoard) {
+    return (await onTheBoard(board as TaskBoard, p, id, action, action === "block" ? reason : reason || "released from the web UI")) ??
+      { status: 200, body: { ok: true, command: `${action} #${id} on the message board`, output: `#${id}: ${action === "block" ? "blocked" : "released"} on the message board.` } };
+  }
   const step = action === "block" ? ["factory", "issues", "block", id, reason] : ["factory", "issues", "release", id, reason || "released from the web UI"];
   return runSteps(p, [step], TASK_ACTION_TIMEOUT_MS);
+}
+
+/** Writes a card's action to the board; null when it took it, else the refusal (the board's own code, message and fix). */
+async function onTheBoard(board: TaskBoard, p: UiProject, id: string, action: TaskActionName, reason: string, to = ""): Promise<Answer | null> {
+  try {
+    await board.write(p, id, action, reason, to);
+    return null;
+  } catch (e) {
+    const x = obj(e);
+    if (typeof x.code === "string" && typeof x.fix === "string") {
+      const status = x.code === "ui_task_unknown" ? 404 : ["ui_board_unreachable", "no-answer", "busy", "failed"].includes(x.code) ? 503 : 400;
+      return refusal(status, x.code, String(x.message ?? ""), x.fix);
+    }
+    return refusal(503, "ui_board_unreachable", `The message board didn't take it: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300),
+      "Check the message board on the machine that keeps it (`factory board status`), then try again.");
+  }
 }
 
 /** Runs `factory snapshot` in project `p` (its snapshot, written to its cache), at most one at a time per project. */

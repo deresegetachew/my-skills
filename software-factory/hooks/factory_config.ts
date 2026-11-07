@@ -337,6 +337,11 @@ export function taskSource(cfg: Config): string {
   return (isObject(cfg.tasks) && typeof cfg.tasks.source === "string" ? cfg.tasks.source : "plan") || "plan";
 }
 
+/** `board.mirror` (#502): whether `factory board mirror` carries the message board to GitHub. On unless set to false. */
+export function boardMirror(cfg: Config): boolean {
+  return !(isObject(cfg.board) && cfg.board.mirror === false);
+}
+
 export function taskLabels(cfg: Config): TaskLabels {
   const mine = isObject(cfg.tasks) && isObject(cfg.tasks.labels) ? (cfg.tasks.labels as Partial<TaskLabels>) : {};
   return { ...(DEFAULTS.tasks.labels as TaskLabels), ...mine } as TaskLabels;

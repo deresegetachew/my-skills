@@ -12,6 +12,11 @@
 // fill the Board page the same way: status to column, blocked and ready as the board works them out, lanes by epic from
 // parents and by agent from holders, and each card's blockers.
 //
+// With `tasks.source` board the board is the record (#502): a card's Release, Block and Reassign write to it (write()):
+// release is a move to ready with its reason (a held task is taken back from its holder), block a move to blocked with a
+// blocker note (deferred), reassign a hand-off (only that agent may claim it). `factory board mirror` carries each to GitHub.
+// A deferred task is "blocked", as the task tracker says (adapters/board/task_tracker.ts): one word on both.
+//
 // The board's code sits beside the hooks folder (.claude/message-board: linked in my-skills and a linked project,
 // shipped by a release since #500). It is loaded when the server starts, and without it there is no board: the GitHub
 // path, as before.
@@ -24,7 +29,8 @@ import { parseEpic } from "./core/domain/epic.ts";
 import { todos } from "./core/domain/task.ts";
 import type { Obj, Problem, UiProject } from "./factory_ui_data.ts";
 
-/** The actor the web UI reads as. It writes nothing: Release, Block and Reassign go through GitHub (0007 point 9). */
+/** The actor the web UI reads and writes as. It writes only a card's Release, Block and Reassign, and only for a project
+ *  whose tasks.source is board (#502); otherwise those go through GitHub (0007 point 9). */
 export const ACTOR = "web-ui";
 const RETRY_MS = 5_000;
 const CHECK_MS = 5_000;
@@ -82,13 +88,13 @@ function numberOf(t: Task, prefix: string): string | null {
   return /^\d+$/.test(n) ? n : null;
 }
 
-/** The factory's state words for a board task: done, in review, in progress, blocked (the board's blocking edges),
- *  ready (open and not blocked), and not ready for a deferred one. */
+/** The factory's state words for a board task: done, in review, in progress, blocked (the board's blocking edges, or
+ *  deferred: a block sends a task there, #502), and ready (open and not blocked). */
 function stateOf(t: Task): string {
   if (t.status === "done") return "done";
   if (t.status === "in_review") return "in-review";
   if (t.status === "in_progress") return "in-progress";
-  if (t.status === "deferred") return "new";
+  if (t.status === "deferred") return "blocked";
   return t.blocked ? "blocked" : "ready";
 }
 
@@ -178,7 +184,7 @@ export class BoardFeed {
       (this.check as { unref?: () => void }).unref?.();
     }
     try {
-      const board = await this.api.Board.open(this.url, { as: ACTOR, session: `ui-${process.pid}`, max: 3 });
+      const board = await this.api.Board.open(this.url, { as: ACTOR, session: `ui-${process.pid}`, max: 2 });
       if (this.stopped) {
         await board.end();
         return;
@@ -239,6 +245,18 @@ export class BoardFeed {
       await this.fail(e);
       return { status: 503, body: { ...(this.down ?? unreachable(String(e))) } };
     }
+  }
+
+  /** A card's action written to the board (#502): release (to ready, with its reason), block (to blocked, with its reason
+   *  as a blocker note) or reassign (handed to `to`). Throws a Problem-shaped error when the board can't take it. */
+  async write(p: UiProject, id: string, action: "release" | "block" | "reassign", reason: string, to = ""): Promise<Task> {
+    const prefix = prefixOf(this.o.repoOf(p));
+    const board = this.board;
+    if (!board || !this.live(p)) throw this.down ?? unreachable("it isn't open on this server");
+    const task = this.all.find((t) => numberOf(t, prefix) === id);
+    if (!task) throw { code: "ui_task_unknown", message: `#${id} isn't one of ${p.name}'s tasks on the message board.`, fix: "Read the board again, then pick a task it shows." };
+    if (action === "reassign") return board.assign(task.id, to, { reason });
+    return board.move(task.id, { to: action === "block" ? "blocked" : "ready", reason });
   }
 
   stop(): void {

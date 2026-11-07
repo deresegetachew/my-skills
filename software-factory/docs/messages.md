@@ -213,8 +213,21 @@ Postgres every agent already reaches (`factory board up` on one machine, `factor
   reads later may be on the board alone: wake-ups, and claims with their releases (task claims keep their labels).
   Anything the PR gate checks is written on GitHub: questions, answers, hand-offs, verdicts, must-fixes, approvals, the
   dev manager's notes, and the labels the board, `factory next` and the PR gate read.
-- **What stays on GitHub:** all of the above, and reviewer passes, holds, owner asks and answers and the owner queue,
-  the issues and PRs, token usage comments, test plans and sign-offs.
+- **What stays on GitHub:** all of the above, and reviewer passes, holds, the issues and PRs, token usage comments,
+  test plans and sign-offs. Owner asks and answers and the owner queue stay on GitHub too, unless the owner queue is on
+  the board (below).
+- **The owner queue on the board (#502).** With `tasks.source: "board"`, or `ask` in `messaging.kinds` with the board
+  as transport, an owner ask (`factory board ask`, the dev manager's pass, `factory prd --stage --ask`) is a board
+  message of kind `ask`, to `owner`, tagged `owner-ask`, on the task of the owner-queue issue, its body the comment
+  GitHub would hold (`<!-- factory-owner-ask id=<slug> -->` first). `factory board mirror` posts it once to the
+  owner-queue issue (with `<!-- factory-mirror ... -->` under it), so GitHub notifies the owner and today's readers
+  (`factory prs`, the alerts, the web UI's inbox) still find it there. The owner's answer from `factory owner answer` or
+  the web UI is written to the board first (kind `answer`, from `owner`, in reply to the ask, with
+  `<!-- factory-owner-answer id=<slug> -->`), then mirrored; an answer given on GitHub under the ask is read back once.
+  With `board.mirror` false the asks stay on the board only.
+- **Tasks on the board are the record (#502).** With `tasks.source: "board"` a task's state changes on the board (the
+  task tracker, the web UI's Release, Block and Reassign, `board_move`) reach its issue through `factory board mirror`:
+  its labels and one short line per change. `factory board import github` then keeps a status the board changed.
 - **The shape:** a message on the board is posted as its sender, to its addressee, with the board's kind for it (a
   must-fix or an approval is a verdict); its body is the comment GitHub would hold (the envelope, then the text), so it
   is read back exactly as on GitHub. Its tag is `msg:<owner>/<repo>`, so projects sharing a board don't read each

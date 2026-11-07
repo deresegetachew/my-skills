@@ -328,7 +328,7 @@ export function serve(o: ServeOptions): Running {
     }
     if (rest[0] === "tasks" && rest[2] === "actions" && rest.length === 4) {
       if (req.method !== "POST") return problem(405, "method_not_allowed", `${req.method} isn't used here.`, "Use POST with {\"confirm\": true}.");
-      const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null), feed.view(p).part);
+      const r = await taskAction(p, rest[1] as string, rest[3] as string, await req.json().catch(() => null), feed.view(p).part, feed);
       if (r.status === 200 || r.status === 500) refresher.start(p, true); // read again: the board shows what changed
       return json(r.status, r.body);
     }

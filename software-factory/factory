@@ -186,7 +186,15 @@ Check
                          labels as status, "Depends on #n" as edges, epics as parents, comments as threads with the
                          factory's markers as their own kinds; safe to run twice; --dry-run writes nothing
                          GitHub wins on status unless the task is held on the board (done here but open there:
-                         reopened); comments deleted on GitHub stay on the board
+                         reopened); comments deleted on GitHub stay on the board. With tasks.source board the board
+                         is the record: a status it changed since the last import is kept
+  board mirror [--watch] [--every N]
+                         carry the board to GitHub, one way: a task's state change sets its issue's labels with one
+                         short line; owner asks and answers go to the owner-queue issue, and the owner's answers
+                         there come back once. Safe to run twice; board.mirror false turns it off. --watch keeps
+                         going: a pass on each change, and every N seconds (300) for answers on GitHub
+  board ask <id> <text>  ask the owner: with the owner queue on the board (tasks.source board, or ask in
+                         messaging.kinds) written there and mirrored to the owner-queue issue; else a comment there
   board login add <name> | ls | remove <name> [--unused]
                          logins of their own for other machines (factory machine add makes them): a Postgres role
                          with only the board's rights; ls says when each was first used
@@ -429,7 +437,8 @@ case "$cmd" in
              # a linked project, copied by a release (#500).
              mb="$hooks/../message-board/bin"
              [ -f "$mb.ts" ] || { printf '{"code": "board_missing", "message": "This project has no message board: %s.ts is missing.", "fix": "Run `factory update` to a release that ships it (#500), or install.sh --link again in a linked project."}\n' "$mb" >&2; exit 1; }
-             fh "$mb" "${1:-help}" "${@:2}" ;;
+             # mirror, ask and import need the project's settings (#502): the factory's own side runs them.
+             case "${1:-}" in mirror|ask|import) fh "$hooks/factory_board" "$@" ;; *) fh "$mb" "${1:-help}" "${@:2}" ;; esac ;;
   version|releases|rollback|migrate-to-release) fh "$hooks/factory_release" "$cmd" "$@" ;;
   update)
     # Never inside the factory's own repo (my-skills): the releases come from there (#162).

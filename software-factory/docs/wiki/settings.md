@@ -290,9 +290,10 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | Key | Type | Default | What it sets |
 |---|---|---|---|
 | `messaging.transport` | one of github/board | `null` | How agents send each other messages: github (comments, markers and labels, as always) or board (the message board, for the kinds in messaging.kinds). Unset: board on a machine with a board set up, else github. |
-| `messaging.kinds` | list | `[]` | The message kinds that have moved to the board (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr); every other kind stays on GitHub. |
+| `messaging.kinds` | list | `[]` | The message kinds that have moved to the board (question, answer, mustfix, approval, status, claim, release, wake, handoff, pr, ask); every other kind stays on GitHub. ask: owner asks are written to the board and mirrored to the owner-queue issue. |
 | `messaging.githubCopy` | list | `null` | The moved kinds that are still also written to GitHub. Only claim (with its releases) and wake can leave it; every other kind is always written there. Unset: the same as messaging.kinds. |
 | `messaging.pollMinutes` | int | `15` | With wake in messaging.kinds: how long an idle loop or a factory wait listens for a wake-up on the board before it looks at GitHub anyway. |
+| `board.mirror` | bool | `true` | Mirror the message board to GitHub, one way (`factory board mirror`): a task's state change sets its issue's labels with one short line, and owner asks and answers go to the owner-queue issue, whose answers come back. Off: nothing is sent to GitHub. |
 | `messaging.fallback` | one of github/none | `"github"` | When the message board can't be reached: github goes on over GitHub and says so; none stops the command. |
 
 **Web UI**
