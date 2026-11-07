@@ -37,7 +37,7 @@ import { type Comment, type Issue } from "./factory_issues.ts";
 import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 import { breakMarkers, OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
 import { TAG_RE } from "./factory_release.ts";
-import { endTree, liveSubs, type Sub } from "./factory_subs.ts";
+import { dropStale, endTree, liveSubs, type Sub } from "./factory_subs.ts";
 import { running, sessionName, startLoop } from "./factory_window.ts";
 
 const REPO = "repos/{owner}/{repo}";
@@ -394,10 +394,11 @@ function stopProcess(name: string, pid: number): void {
 
 /** Ends a dev manager's one-item sub-manager that has no tmux session of its own (#585): its Claude session, which the
  * orchestrator started. The orchestrator then goes on with its pass; the item comes back at a later one. */
-function stopSub(name: string, sub: Sub): void {
+function stopSub(base: string, name: string, sub: Sub): void {
   if (sub.claude === null) {
+    dropStale(base, name); // a .claude file that names no Claude session of this run is left from an earlier one
     refuse("sub_unreachable", `${name} (${sub.manager}'s sub-manager on ${sub.item}) runs, but its Claude session can't be ` +
-      "found: it was started by an older release, or it is just starting.",
+      "found: it was started by an older release, or it is just starting. Nothing was stopped.",
       `Wait for manager.subManagerMinutes to stop it, or stop ${sub.manager} itself: \`factory owner stop ${sub.manager}\`.`);
   }
   endTree(sub.claude);
@@ -409,8 +410,14 @@ function stop(name: string): void {
   delete process.env.TMUX;
   const session = sessionName(name);
   if (!running(session)) {
-    const sub = liveSubs(join(dirname(claimsDir()), "factory-manager")).get(name);
-    if (sub) return stopSub(name, sub);
+    const base = join(dirname(claimsDir()), "factory-manager");
+    const sub = liveSubs(base).get(name);
+    if (sub) return stopSub(base, name, sub);
+    if (dropStale(base, name).length) { // its files are left from a run that ended; their pids may be another program's now
+      refuse("sub_unreachable", `${name} isn't running: its pid files were left by a run that ended, and their numbers ` +
+        "now belong to other programs, so nothing was stopped. The files are removed.",
+        `Nothing to do. \`factory agents ls\` shows what runs; \`factory owner stop <dev manager>\` stops a dev manager.`);
+    }
     const pid = loopPid(name);
     if (pid !== null) return stopProcess(name, pid);
     console.log(`${name} is not running on this machine (no tmux session ${session}); nothing to stop.`);

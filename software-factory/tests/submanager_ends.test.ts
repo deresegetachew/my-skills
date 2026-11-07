@@ -240,25 +240,79 @@ test("owner stop of a sub-manager whose session it can't find refuses with the f
   }
 });
 
+test("owner stop never signals a pid that a stale .claude or .pid file names: it refuses, the process lives, the files go", async () => {
+  const w = await setUp();
+  const dir = subDir(w);
+  Bun.spawnSync(["mkdir", "-p", dir]);
+  // after a crash the OS gave both numbers to a new program: it started after the files were written
+  const reused = Bun.spawn(["sleep", "60"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  try {
+    for (const ext of [".pid", ".claude"]) {
+      writeFileSync(join(dir, `board-m8${ext}`), String(reused.pid));
+      const old = new Date(Date.now() - 60 * 60_000);
+      utimesSync(join(dir, `board-m8${ext}`), old, old);
+    }
+    const stop = hook(w.work, w.env, "factory_owner.ts", "stop", "lead-board-m8");
+    expect(stop.code, stop.out).toBe(1);
+    expect((JSON.parse(stop.stderr.trim().split("\n").pop() as string) as { code: string }).code).toBe("sub_unreachable");
+    await Bun.sleep(300);
+    expect(reused.exitCode, "the reused pid was signalled").toBeNull();
+    expect(existsSync(join(dir, "board-m8.pid"))).toBe(false);
+    expect(existsSync(join(dir, "board-m8.claude"))).toBe(false);
+  } finally {
+    reused.kill(9);
+  }
+});
+
+test("owner stop never signals a .claude pid that isn't a Claude session, even when the run itself is live", async () => {
+  const w = await setUp();
+  const dir = subDir(w);
+  Bun.spawnSync(["mkdir", "-p", dir]);
+  const run = Bun.spawn(["sleep", "60"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  const other = Bun.spawn(["sleep", "60"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  try {
+    writeFileSync(join(dir, "board-m9.pid"), String(run.pid));
+    writeFileSync(join(dir, "board-m9.claude"), String(other.pid)); // a live program, but not claude
+    const stop = hook(w.work, w.env, "factory_owner.ts", "stop", "lead-board-m9");
+    expect(stop.code, stop.out).toBe(1);
+    expect((JSON.parse(stop.stderr.trim().split("\n").pop() as string) as { code: string }).code).toBe("sub_unreachable");
+    await Bun.sleep(300);
+    expect(other.exitCode).toBeNull();
+    expect(run.exitCode).toBeNull();
+    expect(existsSync(join(dir, "board-m9.claude"))).toBe(false); // the stale one goes
+    expect(existsSync(join(dir, "board-m9.pid"))).toBe(true); // the live run's stays
+  } finally {
+    run.kill(9);
+    other.kill(9);
+  }
+});
+
 // --- agents ls: one past its time is stuck -----------------------------------------------------------------------
 
 test("agents ls shows a sub-manager past manager.subManagerMinutes as stuck, with the command that ends it", async () => {
   const w = await setUp();
-  const stand = Bun.spawn(["sleep", "60"], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  const fake = join(w.d, "standin", "claude"); // a stand-in Claude session: a program named claude
+  Bun.spawnSync(["mkdir", "-p", dirname(fake)]);
+  writeFileSync(fake, "#!/bin/bash\nsleep 60\n", { mode: 0o755 });
+  const stand = Bun.spawn([fake], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
   try {
+    await Bun.sleep(200);
     const dir = subDir(w);
     Bun.spawnSync(["mkdir", "-p", dir]);
     writeFileSync(join(dir, "board-m12.pid"), String(stand.pid));
     writeFileSync(join(dir, "board-m12.claude"), String(stand.pid));
-    const old = new Date(Date.now() - 83 * 60_000);
-    utimesSync(join(dir, "board-m12.pid"), old, old);
-    const ls = hook(w.work, w.env, "factory_agents.ts", "ls", "--json", "--local");
+    const later = { ...w.env, FACTORY_NOW: String(Math.floor(Date.now() / 1000) + 83 * 60) }; // 83 minutes on
+    const ls = hook(w.work, later, "factory_agents.ts", "ls", "--json", "--local");
     const row = (JSON.parse(ls.stdout) as { agents: Record<string, unknown>[] }).agents.find((a) => a.name === "lead-board-m12");
     expect(row?.state, ls.out).toBe("stuck");
+    expect(row?.stoppable).toBe(true);
     expect(String(row?.detail)).toContain("past manager.subManagerMinutes (30)");
     expect(String(row?.detail)).toContain("factory owner stop lead-board-m12");
-    const table = hook(w.work, w.env, "factory_agents.ts", "ls", "--local");
+    const table = hook(w.work, later, "factory_agents.ts", "ls", "--local");
     expect(table.stdout).toMatch(/lead-board-m12\s+sub manager of lead\s+this machine\s+stuck/);
+    const now = hook(w.work, w.env, "factory_agents.ts", "ls", "--json", "--local");
+    expect((JSON.parse(now.stdout) as { agents: Record<string, unknown>[] }).agents.find((a) => a.name === "lead-board-m12")?.state)
+      .not.toBe("stuck");
   } finally {
     stand.kill(9);
   }
