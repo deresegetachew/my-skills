@@ -886,3 +886,37 @@ test("board_close on a done task says to move it back to ready with board_move",
   await po.end();
   expect(await c.end()).toBe(0);
 });
+
+test("errors name tasks by their number: the board's own, the one it is blocked by, and a lookup's are left as written (#515)", async () => {
+  const url = await database();
+  const po = await Board.open(url, { as: "po" });
+  const three = await po.create({ title: "Three", ref: "github:o/r#3", priority: 1 }); // board id 1
+  const seven = await po.create({ title: "Seven", ref: "github:o/r#7", priority: 2 }); // board id 2
+  const filed = await po.create({ title: "Filed", priority: 3 }); // board id 3
+  await po.link(seven.id, three.id, "blocks");
+  expect([three.id, seven.id, filed.id]).toEqual([1, 2, 3]);
+  const c = new Client(url, ["--as", "abebe", "--role", "owner", "--repo", "o/r"]);
+  await c.start();
+
+  // "#1" is issue 1, which isn't on the board: the lookup's message is kept, not turned into "#3" (board id 1)
+  const lookup = await c.refused("board_link", { from: "#3", to: "#1", kind: "related" });
+  expect(lookup.code).toBe("not-found");
+  expect(lookup.message).toBe("There is no task for issue #1 on the board.");
+  expect(lookup.fix).toContain("3 or #3 for issue 3, b17 for a task made on the board");
+
+  // the board's own refusal names the task and its blocker as people see them
+  const blocked = await c.refused("board_claim", { task: 3 });
+  expect(blocked.code).toBe("not-ready");
+  expect(blocked.message).toContain("#3 isn't ready for abebe");
+  expect(blocked.message).toContain("blocked by #7");
+  expect(blocked.message).not.toContain("#2");
+  expect(blocked.text).toContain("blocked by #7");
+
+  const loop = await c.refused("board_link", { from: "#3", to: "#7", kind: "blocks" });
+  expect(loop.code).toBe("cycle");
+  expect(loop.message).toBe("#3 blocks #7 would make a loop: #3 already waits on #7, or is under it.");
+  const self = await c.refused("board_link", { from: `b${filed.id}`, to: `b${filed.id}`, kind: "blocks" });
+  expect(self.message).toContain(`(b${filed.id})`);
+  await po.end();
+  expect(await c.end()).toBe(0);
+});

@@ -604,3 +604,27 @@ test("an open issue without a factory label comes in as a note, not a task: it i
   expect(importGithub(w, ["--closed"]).code).toBe(0);
   expect((await byRef(url)).get(ref(2))).toMatchObject({ kind: "task", status: "done" });
 });
+
+test("a task already on the board whose issue has no factory label stays a task on a re-import, held as it was (#515)", async () => {
+  const url = await migrated();
+  // imported before the factory-label rule: the issue has no label, the board has it as a task, and haile holds it
+  const t = await look(url, (b) => b.create({ title: "Channel", ref: ref(10) }));
+  const haile = await Board.open(url, { as: "haile", max: 1 });
+  try {
+    await haile.claim(t.id);
+  } finally {
+    await haile.end();
+  }
+  const fx = fixture();
+  fx.issues.push(issue(10, "Channel", [], "Where we talk."));
+  const w = world(url, fx);
+  const r = importGithub(w);
+  expect(r.code, r.stderr).toBe(0);
+  expect((await byRef(url)).get(ref(10))).toMatchObject({ kind: "task", status: "in_progress", holder: "haile" });
+  // a new unlabelled issue still comes in as a note
+  fx.issues.push(issue(12, "Another channel", []));
+  writeFileSync(w.dbFile, JSON.stringify(fx));
+  expect(importGithub(w).code).toBe(0);
+  expect((await byRef(url)).get(ref(12))).toMatchObject({ kind: "note" });
+  expect((await byRef(url)).get(ref(10))).toMatchObject({ kind: "task", holder: "haile" });
+});

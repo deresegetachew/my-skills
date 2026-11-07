@@ -127,3 +127,42 @@ test("a backup restores into the running board after --yes: its tasks, messages 
     await after.end();
   }
 });
+
+test("a bad dump (an error midway) is refused with restore-failed, and the board's data is left as it was", async () => {
+  const fresh = await freshDatabase(server as Server);
+  try {
+    const url = fresh.url;
+    const w = world(url);
+    const po = await Board.open(url, { as: "po", max: 1 });
+    await po.migrate();
+    const a = await po.create({ title: "Kept" });
+    await po.post({ task: a.id, kind: "note", body: "still here" });
+    await po.end();
+    const good = join(w.root, "good.sql");
+    expect(board(w.env, ["backup", "--out", good]).code).toBe(0);
+    // the first half of a real dump, then a line psql can't run, then the rest
+    const lines = readFileSync(good, "utf8").split("\n");
+    const half = Math.floor(lines.length / 2);
+    const bad = join(w.root, "bad.sql");
+    writeFileSync(bad, [...lines.slice(0, half), "THIS IS NOT SQL;", ...lines.slice(half)].join("\n"));
+
+    const r = board(w.env, ["restore", bad, "--yes"]);
+    expect(r.code).toBe(1);
+    const e = JSON.parse(r.stderr.trim().split("\n").at(-1) as string) as { code: string; message: string; fix: string };
+    expect(e.code).toBe("restore-failed");
+    expect(e.message).toContain("THIS");
+    expect(e.fix).toContain("Nothing was changed");
+    expect(r.stdout).not.toContain("Restored");
+
+    const after = await Board.open(url, { as: "check", max: 1 });
+    try {
+      expect((await after.tasks()).map((t) => t.title)).toEqual(["Kept"]);
+      expect((await after.thread({ task: a.id })).map((m) => m.body)).toEqual(["still here"]);
+      expect((await after.info()).migrations).toEqual(migrationNames());
+    } finally {
+      await after.end();
+    }
+  } finally {
+    await fresh.drop();
+  }
+});
