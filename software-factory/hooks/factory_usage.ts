@@ -6,7 +6,8 @@
 //   factory usage --since 2026-10-20 --until 2026-10-24
 //   factory usage --by agent            per subagent type (reviewer, test-writer, ...) instead of per task
 //   factory usage --by worker           per agent: the folder each session ran in (`<project>-agents/<name>` is <name>,
-//                                       the project folder itself "(project folder)": the first builder and your own sessions)
+//                                       the project folder itself "(project folder)": your own sessions, and the first
+//                                       builder's from releases before #572)
 //   factory usage --by role             manager (sessions that start with /manage-pass, or end with a `factory-role` line naming
 //                                       the dev manager), product-owner (that line names it) against builder (all others)
 //   factory usage --json                the same as JSON

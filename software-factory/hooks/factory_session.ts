@@ -5,8 +5,8 @@
 // `factory agent taytu` (or `cd "$(bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts worktree 2)" && claude`), for manual
 // work in that agent's folder; to run the queue, use `factory loop -i`, which gives each task a fresh session:
 //
-//   1. Slot and name: slot 1 is the project folder, slot N `<project>-agents/<name>`; the names are `agents` in
-//      factory.json (menelik, taytu, ...).
+//   1. Slot and name: slot N is `<project>-agents/<name>` of the Nth name in `agents` in factory.json (menelik, taytu,
+//      ...); a session in the project folder itself counts as slot 1, though no loop works there (#572).
 //   2. Checkout claim: records this session in the lock file, so factory-loop.sh won't use the same folder, and warns
 //      when another live session already works here.
 //   3. Submodules (`git submodule update --init`), then `commands.install` (worktrees), then `commands.agentSetup`.
@@ -85,8 +85,9 @@ async function main(): Promise<void> {
   env.FACTORY_PID = String(pid);
   const child = { ...process.env, ...env };
   const cmds = (cfg.commands ?? {}) as Record<string, string>;
-  // Each session start (worktrees only): main may have new dependencies since the worktree was last used.
-  if (cmds.install && slot !== 1) {
+  // Each session start (worktrees only, the first agent's too, #572): main may have new dependencies since the
+  // worktree was last used.
+  if (cmds.install && /-agents[/\\][^/\\]+[/\\]?$/.test(root)) {
     if (sh(cmds.install, child).code !== 0) notes.push(`\`${cmds.install}\` failed in this worktree; run it before testing.`);
   }
   if (cmds.agentSetup) {

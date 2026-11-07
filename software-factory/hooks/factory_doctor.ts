@@ -204,6 +204,26 @@ export function originMain(r: Reporter, cfg: Pick<Config, "mainBranch">): void {
   else if (run(["git", "remote", "get-url", "origin"])[0] === 0) r.ok(`origin/${main} exists`);
 }
 
+/** The project folder (the clone's main working tree, also when doctor runs in an agent's worktree) is on the main
+ * branch (#572). Every coding agent works in its own worktree, so the owner, the web UI and `factory update` there run
+ * main's copy of the factory; a task branch there (an older loop's layout) would make them run that branch's copy. */
+export function projectOnMain(r: Reporter, cfg: Pick<Config, "mainBranch">): void {
+  const main = cfg.mainBranch || "main";
+  const [rc, common] = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (rc !== 0 || !common) return;
+  const top = dirname(common);
+  const [, branch] = run(["git", "-C", top, "symbolic-ref", "--short", "-q", "HEAD"]);
+  if (branch === main) {
+    r.ok(`the project folder is on ${main}`);
+    return;
+  }
+  const on = branch ? `on ${branch}` : "on a detached HEAD";
+  r.note(`the project folder is ${on}, not ${main}`, "the web UI, `factory update` and your own commands there run " +
+    `that checkout's copy of the factory. Every coding agent works in ${top}-agents/<name>, so if an agent was building ` +
+    "here (an older release put the first agent here), let it finish its task: its loop moves to its own folder when it " +
+    `starts again. Then run \`git -C ${top} switch ${main} && git -C ${top} pull --ff-only\``);
+}
+
 function readText(path: string): string {
   return readFileSync(path, "utf8");
 }
@@ -866,6 +886,7 @@ export async function main(argv: string[]): Promise<number> {
   if (cfg) {
     r.section("project");
     project(r, cfg);
+    projectOnMain(r, cfg);
     r.section("github");
     originMain(r, cfg);
     mainBranch(r, cfg);

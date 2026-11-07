@@ -53,8 +53,15 @@ and dashes:
 "agents": ["ada", "grace", "linus"]
 ```
 
-- The first agent works in the project folder. The others get git worktrees in `<project>-agents/<name>`, next to the
-  project, created on first use and reused after that.
+- Every agent works in its own git worktree, `<project>-agents/<name>`, next to the project, created on first use and
+  reused after that. The first agent too (#572): the project folder stays on the main branch, for you, the web UI, the
+  `factory` commands you run there and `factory update`, so they always run main's copy of the factory and its
+  `.claude/factory.json`, never an agent's branch.
+- **Moving from an older release**, where the first agent worked in the project folder: its loop takes its worktree the
+  next time it starts. A loop already running there finishes its current task first, then moves when it restarts
+  itself between tasks (which it does once main brings this release's `factory-loop.sh`); its branch and anything it
+  left in the project folder are not touched. `factory doctor` notes when the project folder is not on the main
+  branch, with the commands that put it back.
 - A new loop takes the first name that no live loop on this clone holds. `factory agent 2` means the second name.
 - **Several machines:** give each machine its own names, never in `factory.json`. Either
   `export FACTORY_AGENTS=menelik,taytu` in the shell profile, or run `factory machine setup menelik,taytu`, which writes

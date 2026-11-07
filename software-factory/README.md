@@ -164,7 +164,7 @@ flowchart LR
         dm["Dev manager<br/>factory dev-manager loop"]
         loop["factory loop, loop -i<br/>or factory agent"]
         subgraph folders["One folder per agent"]
-            a1["menelik<br/>the project folder"]
+            a1["menelik<br/>project-agents/menelik"]
             a2["taytu<br/>project-agents/taytu"]
         end
         hooks["Hooks in every session<br/>start, before and after tools,<br/>stop, end"]

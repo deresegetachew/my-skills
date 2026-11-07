@@ -8,8 +8,8 @@ import { join } from "node:path";
 import {
   calls, EMPTY, type Env, fakeClaude, flag, hookShape, KIT_AGENT_SETTINGS, loopProject, mainCopy, NO_CONNECTORS, quiet, startedSettings,
 } from "./loop_support.ts";
-import { readdirSync, symlinkSync } from "node:fs";
-import { HOOKS, read, SF, sh, tmp, write } from "./support.ts";
+import { readdirSync, realpathSync, symlinkSync } from "node:fs";
+import { HOOKS, read, scriptCmd, SF, sh, tmp, write } from "./support.ts";
 
 /** Only the project's MCP servers, connectors off, and the agents' rules from main on top of the project's own
  * settings (#258): never --setting-sources, which would drop the project's own .claude/settings.json. */
@@ -124,17 +124,22 @@ test("factory agent starts claude isolated and passes its own arguments on", () 
   quiet(["git", "init", "-q", "--bare", "-b", "main", origin]);
   quiet(["git", "remote", "add", "origin", origin], work);
   quiet(["git", "push", "-q", "origin", "HEAD:main"], work);
-  write(join(work, ".mcp.json"), JSON.stringify(EVIL)); // the agent's edit, not on main
+  // menelik works in its own worktree, the first agent too (#572); the agent's edit there is not on main.
+  const made = sh([...scriptCmd(join(HOOKS, "factory_claims")), "worktree", "menelik"], { cwd: work, timeoutMs: 60_000 });
+  expect(made.code, made.out).toBe(0);
+  const agentDir = made.stdout.trim().split("\n").pop() as string;
+  write(join(agentDir, ".mcp.json"), JSON.stringify(EVIL));
   const env = fakeClaude(d);
   const p = sh(["bash", join(SF, "factory"), "agent", "menelik", "--resume"], { cwd: work, env, timeoutMs: 60_000 });
   expect(p.code, p.out).toBe(0);
   const got = calls(env);
   expect(got.length).toBe(1);
   const args = got[0] as string[];
-  assertIsolated(args, mainCopy(work));
-  expect(JSON.parse(read(mainCopy(work)))).toEqual(DOCS);
+  const copy = join(realpathSync(work), ".git", "worktrees", "menelik", "factory-mcp.json"); // that worktree's git folder
+  assertIsolated(args, copy);
+  expect(JSON.parse(read(copy))).toEqual(DOCS);
   expect(args[args.length - 1]).toBe("--resume");
-});
+}, 60_000);
 
 // With the board on (#501), the one server allowed in is the board's, for this agent: main's .mcp.json is not used.
 const BOARD_ON = '{"waitMinutes": 0, "tasks": {"source": "board"}}';
@@ -193,4 +198,4 @@ test("factory agent with the board on starts claude with only the board's server
   expect(got.length).toBe(1);
   const a = boardOnly(got[0] as string[]);
   expect(a.slice(0, 5)).toEqual(["mcp", "--as", "menelik", "--role", "builder"]);
-});
+}, 60_000); // it makes menelik's worktree first (#572)
