@@ -527,9 +527,19 @@ test("a code joins exactly once: a second machine is refused, and the code's own
 
 test("an expired code's password is refused by Postgres itself, whatever the clocks say", async () => {
   const h = await hub();
-  const a = add(h, "laptop", ["haile"], ["--ttl", "0.05"]); // 3 seconds
-  expect(await connects(codeUrl(a.code))).toBe(true);
-  await Bun.sleep(4000);
+  const a = add(h, "laptop", ["haile"], ["--ttl", "10"]);
+  const role = decodeURIComponent(new URL(codeUrl(a.code)).username);
+  const sql = new SQL(h.url, { max: 1 });
+  try { // --ttl reaches the server as the code role's VALID UNTIL; then it passes (set in the past, not slept past: #525)
+    const [r] = (await sql`select extract(epoch from rolvaliduntil - now())::float8 as left,
+      (now() - interval '1 minute')::text as past from pg_roles where rolname = ${role}`) as { left: number; past: string }[];
+    expect(r?.left).toBeLessThanOrEqual(600);
+    expect(r?.left).toBeGreaterThan(600 - 120);
+    expect(await connects(codeUrl(a.code))).toBe(true);
+    await sql.unsafe(`alter role "${role}" valid until '${r?.past}'`);
+  } finally {
+    await sql.close();
+  }
   expect(await connects(codeUrl(a.code))).toBe(false);
   const m = world(); // its clock (FACTORY_NOW) says the code is still good: the board refuses it anyway
   refused(machine(m, ["join", a.code, "--no-doctor"]), "code-refused");
