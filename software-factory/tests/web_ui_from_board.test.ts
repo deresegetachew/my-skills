@@ -278,6 +278,27 @@ test("with tasks.source board, Release takes the task back on the board, with it
   await finish(ui);
 }, T);
 
+test("a task made on the board for this project (ref factory:<repo>/...) is on the Board page as b<id>, and Release works on it (#528)", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const mine = await board.create({ title: "Made on the board", ref: `factory:${REPO}/0f3c`, priority: 0 });
+  await board.create({ title: "Another repo's board task", ref: "factory:x/other/9a1b", priority: 0 });
+  const menelik = await Board.open(url, { as: "menelik", max: 1 });
+  boards.push(menelik);
+  await menelik.claim(mine.id);
+  const p = workProject(0, BOARD_CONFIG);
+  const ui = await started(p, url);
+  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const t = byId(json);
+  expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9", `b${mine.id}`]);
+  expect(t[`b${mine.id}`]).toMatchObject({ title: "Made on the board", state: "in-progress", holders: ["menelik"], url: null });
+  const r = await api(ui, `/api/projects/work/tasks/b${mine.id}/actions/release`, { method: "POST", body: { confirm: true, reason: "try again" } });
+  expect(r.status, JSON.stringify(r.json)).toBe(200);
+  expect(await board.get(mine.id)).toMatchObject({ status: "open", holder: null });
+  expect(factoryRan(p)).toEqual([]);
+  await finish(ui);
+}, T);
+
 test("with tasks.source board, Block moves the task to blocked with a blocker note; the board and the tracker both call it blocked", async () => {
   const url = await boardUrl();
   const { board, id } = await seeded(url);
