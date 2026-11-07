@@ -367,7 +367,14 @@ export async function work(cfg: Config, role: string, _name = ""): Promise<strin
     }
     return [...lines, ...await poQuestions(cfg), ...await productAsks(cfg), ...signoffDigest(cfg), ...await planning(cfg)];
   }
-  if (role === "dev-manager") return (await import("./factory_wait.ts")).precheck(cfg);
+  if (role === "dev-manager") {
+    const github = (await import("./factory_wait.ts")).precheck(cfg);
+    // with the board on, an agent's question to the dev manager may be on the board only (#549)
+    const { boardOn } = await import("./factory_mcp.ts");
+    if (!boardOn(cfg)) return github;
+    const { boardQuestionsFor } = await import("./factory_board.ts");
+    return [...github, ...await boardQuestionsFor([...roleNames(cfg, role), role])];
+  }
   die("factory: a coding agent's work is `factory next`.");
 }
 

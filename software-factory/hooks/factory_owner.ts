@@ -8,7 +8,8 @@
 //                                            that commit (the one a screen showed, #309), else `pr_changed`
 //   factory owner label <n> <label> [--remove]
 //                                            adds (or removes) a label that exists on the repository
-//   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`; with the
+//   factory owner answer <ask-id> <text>     answers an owner-queue ask with `<!-- factory-owner-answer id=<ask-id> -->`; m<n> is
+//                                            board message n, a question an agent asked the owner (#549); with the
 //                                            owner queue on the message board (#502) it is written there first, then mirrored
 //                                            to the owner-queue issue (factory_board.ts)
 //   factory owner release <X.Y.Z>            tags main's commit vX.Y.Z and pushes the tag, when software-factory/VERSION
@@ -222,7 +223,12 @@ async function answer(id: string | undefined, text: string): Promise<void> {
   if (ownerQueueOnBoard(cfg)) {
     // the board first (decision 0007 point 5); an ask the board doesn't have is answered on GitHub, as before
     const { answerOnBoard } = await import("./factory_board.ts");
-    if ((await answerOnBoard(cfg, id, text)) !== "absent") return;
+    const done = await answerOnBoard(cfg, id, text);
+    if (done === "no-question") {
+      refuse("no_such_question", `There is no ask \`${id}\` and no question ${id.slice(1)} to the owner on the message board.`,
+        "`factory board queue` lists what waits for you, with each one's id.");
+    }
+    if (done !== "absent") return;
   }
   const queue = apiAll<Issue & Row>(`${REPO}/issues?state=open`)
     .find((i) => str(i.title).startsWith(OWNER_QUEUE_TITLE) && !("pull_request" in i && i.pull_request));

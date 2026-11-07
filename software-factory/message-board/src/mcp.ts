@@ -25,7 +25,7 @@
 import { createInterface } from "node:readline";
 import type { Board } from "./board.ts";
 import { BoardError, refuse } from "./errors.ts";
-import { HOW_TO_NAME, Numbers } from "./numbers.ts";
+import { HOW_TO_NAME, Numbers, projectTag } from "./numbers.ts";
 import { CONTEXT_KINDS, EDGE_KINDS, type EdgeKind, MOVE_TARGETS, type MoveTarget, type Outcome, OUTCOMES } from "./types.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
@@ -255,9 +255,11 @@ export const TOOLS: Tool[] = [
       to: text("Who it is for (optional).", 200),
       inReplyTo: messageId("The id of the message it answers or follows (optional)."),
     }, ["kind", "body"]),
-    run: async (b, a) => ({
+    // tagged with the project when the server knows it (#549): a message on no task still says whose it is, so a project's
+    // owner sees the questions its agents ask and not another project's on a shared board
+    run: async (b, a, n) => ({
       message: await b.post({ kind: str(a, "kind") as (typeof POST_KINDS)[number], body: str(a, "body"), task: optNum(a, "task"),
-        to: optStr(a, "to"), inReplyTo: optNum(a, "inReplyTo") }),
+        to: optStr(a, "to"), inReplyTo: optNum(a, "inReplyTo"), ...(n.repo ? { tag: projectTag(n.repo) } : {}) }),
     }),
   },
   {

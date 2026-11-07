@@ -36,7 +36,8 @@ import { comment } from "./factory_issues.ts";
 import { countGithubCall, Exit, pyDumps, runMain } from "./factory_lib.ts";
 import { OWNER_TITLE, ownerLogin, ownerQueue } from "./factory_orchestrator.ts";
 import { breakMarkers, ownerAskIds, trustedOf } from "./factory_prs.ts";
-import { Board, BoardError, boardUrl, ghCli, GithubError, type Message, type MirrorSummary, mirrorToGithub, type Task } from "../message-board/src/index.ts";
+import { Board, BoardError, boardUrl, ghCli, GithubError, isProjects, type Message, type MirrorSummary, mirrorToGithub, Numbers,
+  type Task } from "../message-board/src/index.ts";
 
 const BIN = join(import.meta.dir, "..", "message-board", "bin.ts");
 const MIRROR_ACTOR = "github-mirror";
@@ -83,8 +84,10 @@ export async function mirrorOnce(cfg: Config, board?: Board): Promise<MirrorSumm
   const repo = repoOf();
   const b = board ?? (await open(MIRROR_ACTOR));
   try {
-    // its gh calls go to the factory's hourly call log, as the factory's own do (#371, #520)
-    return await mirrorToGithub(b, { repo, trusted: [...trustedOf(cfg)], gh: ghCli({ onCall: (a) => countGithubCall(a) }) });
+    // its gh calls go to the factory's hourly call log, as the factory's own do (#371, #520); an agent's question to the
+    // owner goes on the owner-queue issue (#549), found on the board, else on GitHub (made on demand, as an ask's is)
+    return await mirrorToGithub(b, { repo, trusted: [...trustedOf(cfg)], gh: ghCli({ onCall: (a) => countGithubCall(a) }),
+      ownerQueue: () => queueIssue(cfg, b, repo) });
   } finally {
     if (!board) await b.end().catch(() => {});
   }
@@ -219,6 +222,31 @@ async function queueTask(board: Board, repo: string, n: number): Promise<Task> {
   return found ?? board.create({ title: OWNER_TITLE, kind: "note", ref });
 }
 
+/** The open owner-queue issue as the board has it (its newest open owner-queue task), else the one GitHub has (made when
+ * there is none, and its task made on the board, so the next pass asks GitHub nothing). */
+async function queueIssue(cfg: Config, board: Board, repo: string): Promise<number> {
+  const prefix = `github:${repo}#`;
+  const open = (await board.tasks({ all: true, limit: 1_000_000 })).filter((t) => t.title === OWNER_TITLE && t.status !== "done" &&
+    /^\d+$/.test((t.ref ?? "").slice(prefix.length)) && (t.ref ?? "").startsWith(prefix)).map((t) => Number((t.ref as string).slice(prefix.length)));
+  if (open.length) return Math.max(...open);
+  const n = ownerQueue(cfg, true) as number;
+  await queueTask(board, repo, n);
+  return n;
+}
+
+/** Question `id` on the board when it is one an agent asked the owner in this repo's project (#549), else null. */
+async function ownerQuestion(board: Board, repo: string, id: number): Promise<Message | null> {
+  let m: Message;
+  try {
+    m = await board.message(id);
+  } catch (e) {
+    if (e instanceof BoardError && e.code === "not-found") return null;
+    throw e;
+  }
+  if (m.kind !== "question" || m.to !== OWNER) return null;
+  return isProjects(repo, m, m.taskId === null ? null : await board.get(m.taskId)) ? m : null;
+}
+
 /** The asks on this project's owner-queue tasks on the board, newest last. */
 async function boardAsks(board: Board, repo: string): Promise<Message[]> {
   const prefix = `github:${repo}#`;
@@ -262,8 +290,10 @@ async function mirrorAfter(cfg: Config, board: Board, where: string): Promise<vo
 }
 
 /** `factory owner answer` with the owner queue on the board: the answer is written to the board first, then mirrored.
- * "absent" when the board has no such ask (the caller answers on GitHub, as before). */
-export async function answerOnBoard(cfg: Config, id: string, text: string): Promise<"answered" | "already" | "absent"> {
+ * "absent" when the board has no such ask (the caller answers on GitHub, as before). An id `m<n>` that is no ask names
+ * board message n, a question an agent asked the owner (#549): the answer goes in reply to it, to its sender, and marks
+ * it answered; "no-question" when the board has no such question for this project. */
+export async function answerOnBoard(cfg: Config, id: string, text: string): Promise<"answered" | "already" | "absent" | "no-question"> {
   const repo = repoOf();
   const board = await open(OWNER);
   try {
@@ -274,8 +304,10 @@ export async function answerOnBoard(cfg: Config, id: string, text: string): Prom
         if (!(e instanceof GithubError) && !(e instanceof BoardError)) throw e;
       }
     }
-    const ask = (await boardAsks(board, repo)).filter((m) => ownerAskIds(m.body).includes(id)).at(-1);
-    if (!ask) return "absent";
+    const asked = (await boardAsks(board, repo)).filter((m) => ownerAskIds(m.body).includes(id)).at(-1);
+    const n = /^m(\d+)$/.exec(id)?.[1];
+    const ask = asked ?? (n === undefined ? null : await ownerQuestion(board, repo, Number(n)));
+    if (!ask) return n === undefined ? "absent" : "no-question";
     if (ask.state !== "open") {
       console.log(`${id} is already answered on the message board; nothing written.`);
       return "already";
@@ -342,6 +374,8 @@ export interface QueueComment {
   html_url: string | null;
   kind: string;
   state: string;
+  /** The task it is about, as people name it (#101, b17), when an agent's question has one (#549). */
+  task: string | null;
 }
 
 export interface BoardQueue {
@@ -352,25 +386,52 @@ export interface BoardQueue {
   comments: QueueComment[];
 }
 
-/** The messages on this repo's owner-queue tasks on the board, oldest first. An answer read back from GitHub keeps
- * GitHub's time, so the order is the one the issue shows. The board's `owner` actor is the owner. */
+const OWNER_ANSWER_MARK = /<!--\s*factory-owner-answer\b/;
+
+/** The messages on this repo's owner-queue tasks on the board, and every question an agent asked the owner in this repo's
+ * project with the answers to it (#549), oldest first. A question is shown as ask `m<id>` (its words with any marker
+ * broken), and an answer without a marker gets the one of what it answers, so each reader pairs them as the board does.
+ * An answer read back from GitHub keeps GitHub's time, so the order is the one the issue shows. The board's `owner`
+ * actor is the owner. */
 async function boardQueue(board: Board, repo: string): Promise<BoardQueue> {
   const prefix = `github:${repo}#`;
-  const queues = (await board.tasks({ all: true, limit: 1_000_000 })).filter((t) => t.title === OWNER_TITLE && (t.ref ?? "").startsWith(prefix))
+  const tasks = await board.tasks({ all: true, limit: 1_000_000 });
+  const queues = tasks.filter((t) => t.title === OWNER_TITLE && (t.ref ?? "").startsWith(prefix))
     .sort((a, b) => Number((a.ref as string).slice(prefix.length)) - Number((b.ref as string).slice(prefix.length)));
   const newest = queues.filter((t) => t.status !== "done").at(-1) ?? queues.at(-1);
   const issue = newest ? Number((newest.ref as string).slice(prefix.length)) : null;
-  const messages: Message[] = [];
-  for (const q of queues) messages.push(...(await board.thread({ task: q.id })));
-  messages.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
+  const byId = new Map<number, Message>();
+  for (const q of queues) for (const m of await board.thread({ task: q.id })) byId.set(m.id, m);
+  const taskOf = new Map(tasks.map((t) => [t.id, t]));
+  const all = (await board.messages()).messages;
+  const questions = new Set(all.filter((m) => m.kind === "question" && m.to === OWNER &&
+    isProjects(repo, m, m.taskId === null ? null : taskOf.get(m.taskId) ?? null)).map((m) => m.id));
+  for (const m of all) if (questions.has(m.id) || (m.kind === "answer" && m.inReplyTo !== null && questions.has(m.inReplyTo))) byId.set(m.id, m);
+  const messages = [...byId.values()].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.id - b.id);
+  const slugOf = new Map<number, string>();
+  for (const m of messages) {
+    const slug = questions.has(m.id) ? `m${m.id}` : m.kind === "ask" ? ownerAskIds(m.body)[0] : undefined;
+    if (slug) slugOf.set(m.id, slug);
+  }
+  const bodyOf = (m: Message): string => {
+    if (questions.has(m.id)) return `<!-- factory-owner-ask id=m${m.id} -->\n${breakMarkers(m.body.trim())}`;
+    const answers = m.kind === "answer" && m.inReplyTo !== null ? slugOf.get(m.inReplyTo) : undefined;
+    return answers && !OWNER_ANSWER_MARK.test(m.body) ? `<!-- factory-owner-answer id=${answers} -->\n\n${m.body}` : m.body;
+  };
+  const queueIds = new Set(queues.map((q) => q.id));
+  const numbers = new Numbers(repo);
   const link = (m: Message): string | null => {
     const c = /\/comments\/(\d+)$/.exec(m.ref ?? "")?.[1];
-    const n = queues.find((q) => q.id === m.taskId)?.ref?.slice(prefix.length);
+    const n = m.taskId !== null && queueIds.has(m.taskId) ? taskOf.get(m.taskId)?.ref?.slice(prefix.length) : issue; // a question is on the queue's issue
     return c && n ? `https://github.com/${repo}/issues/${n}#issuecomment-${c}` : null;
   };
+  const about = (m: Message): string | null => {
+    const t = m.taskId === null || queueIds.has(m.taskId) ? undefined : taskOf.get(m.taskId);
+    return t ? numbers.label(t) : null;
+  };
   return { source: "board", issue, url: issue === null ? null : `https://github.com/${repo}/issues/${issue}`,
-    comments: messages.map((m) => ({ id: m.id, body: m.body, user: { login: m.from }, created_at: m.createdAt.toISOString(), html_url: link(m),
-      kind: m.kind, state: m.state })) };
+    comments: messages.map((m) => ({ id: m.id, body: bodyOf(m), user: { login: m.from }, created_at: m.createdAt.toISOString(), html_url: link(m),
+      kind: m.kind, state: m.state, task: about(m) })) };
 }
 
 /** `factory board queue [--json]`: the owner queue as the board has it. Exit 3 (NO_BOARD_EXIT) when the board can't be
@@ -387,14 +448,47 @@ async function queue(args: string[]): Promise<number> {
       console.log(JSON.stringify(q, null, 2));
       return 0;
     }
-    if (q.issue === null) console.log("The message board has no owner queue for this repo yet.");
     const answered = new Set(q.comments.flatMap((c) => [...c.body.matchAll(/<!--\s*factory-owner-answer\s+id=([\w.-]+)\s*-->/g)].map((m) => m[1] as string)));
-    for (const c of q.comments) {
-      for (const id of ownerAskIds(c.body)) console.log(`${id.padEnd(24)} ${answered.has(id) ? "answered" : "open    "} asked by ${c.user.login}, ${c.created_at.slice(0, 16).replace("T", " ")}`);
+    const asks = q.comments.flatMap((c) => ownerAskIds(c.body).map((id): [string, QueueComment] => [id, c]));
+    if (!asks.length) console.log("Nothing waits for the owner on the message board. Questions the agents ask the owner appear here.");
+    for (const [id, c] of asks) {
+      console.log(`${id.padEnd(24)} ${answered.has(id) ? "answered" : "open    "} asked by ${c.user.login}${c.task ? ` about ${c.task}` : ""}, ` +
+        c.created_at.slice(0, 16).replace("T", " "));
     }
     return 0;
   } finally {
     await board.end().catch(() => {});
+  }
+}
+
+// --- questions to a role -------------------------------------------------------------------------------------------------
+
+/** One line per open question on the board addressed to one of `names` in this repo's project (#549), oldest first, so
+ * a role whose work check reads GitHub (the dev manager's precheck) also wakes for what an agent asked it through the
+ * board's MCP. Empty when this machine has no board or it can't be had: the check goes on with what GitHub says. */
+export async function boardQuestionsFor(names: string[]): Promise<string[]> {
+  const url = boardUrl();
+  if (!url || !names.length) return [];
+  const repo = boardRepo();
+  let board: Board | null = null;
+  try {
+    board = await Board.open(url, { as: "factory", session: `factory-board-${process.pid}`, max: 1 });
+    const open: Message[] = [];
+    for (const name of new Set(names)) open.push(...(await board.onMe(name)).messages.filter((m) => m.kind === "question"));
+    const numbers = new Numbers(repo || null);
+    const lines: string[] = [];
+    for (const m of open.sort((a, b) => a.id - b.id)) {
+      const t = m.taskId === null ? null : await board.get(m.taskId);
+      if (repo && !isProjects(repo, m, t)) continue;
+      const words = m.body.replace(/<!--[\s\S]*?-->/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+      lines.push(`question m${m.id} from ${m.from} to ${m.to}${t ? ` about ${numbers.label(t)}` : ""} (on the board): ${words}`);
+    }
+    return lines;
+  } catch (e) {
+    if (e instanceof BoardError) return [];
+    throw e;
+  } finally {
+    await board?.end().catch(() => {});
   }
 }
 
