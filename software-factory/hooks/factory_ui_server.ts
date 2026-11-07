@@ -31,7 +31,8 @@
 //   GET  /api/projects/:p/tasks/:id            a task's page from the message board (#498): the task, its thread and its
 //                                              context entries (404 ui_board_absent when its tasks aren't on a board)
 //   GET  /api/projects/:p/health|usage|activity|home, POST .../health/check: Health, Usage and cost, Activity and Home
-//                                              (factory_ui_ops.ts, #455, #451); the WebSocket gets {type: "health"|"activity", project}
+//                                              (factory_ui_ops.ts, #455, #451); the WebSocket gets {type: "health", project} and
+//                                              {type: "activity", project, items}, Activity's new entries (#583)
 //   GET  /api/projects/:p/attention            Needs attention (#579, factory_ui_attention.ts): anything stuck, with its reason
 //                                              and one action; the WebSocket gets {type: "attention", project, items} when it
 //                                              changes (worked out from what the server already holds, no GitHub call)
@@ -179,6 +180,7 @@ export function serve(o: ServeOptions): Running {
       refresher.ifStale(p);
       pushViews(p);
       pushAttention(p);
+      pushActivity(p);
       await chat.tick(p);
     }
   }
@@ -187,7 +189,7 @@ export function serve(o: ServeOptions): Running {
   const viewsSent = new Map<string, string>();
   const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
     changed: (p) => pushViews(p), fellBack: (p, wasLive) => refresher.tasksNeeded(p, wasLive), log: (line) => console.log(line),
-    event: () => { for (const p of list) if (feed.live(p)) publish({ type: "activity", project: p.id }); } });
+    event: (p, items) => publish({ type: "activity", project: p.id, items: ops.pushed(p, items) }) });
   const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
   const prPages = new PrPages(); // a pull request's page (#453), kept until its head changes
   void feed.start();
@@ -212,6 +214,12 @@ export function serve(o: ServeOptions): Running {
     if (attentionSent.get(p.id) === text) return;
     attentionSent.set(p.id, text);
     for (const s of servers) s.publish(TOPIC, text);
+  }
+  // Activity (#583): what the snapshot's cache newly knows (a pull request opened, its CI or review), pushed as entries
+  function pushActivity(p: UiProject): void {
+    if (!clients) return;
+    const items = ops.freshFromSnapshot(p);
+    if (items.length) publish({ type: "activity", project: p.id, items });
   }
   function publish(m: Record<string, unknown>): void {
     const text = JSON.stringify(m);
@@ -432,6 +440,7 @@ export function serve(o: ServeOptions): Running {
       if (!timer) timer = setInterval(() => void tick(), o.pollSeconds * 1000);
       for (const p of list) {
         refresher.ifStale(p);
+        pushActivity(p); // the first time, Activity keeps what the snapshot knows, so only what is new later is pushed (#583)
         if (ws.readyState === 1) ws.send(viewsMessage(p));
         const s = await state(p, o.pollSeconds * 1000);
         if (ws.readyState === 1) ws.send(message(p, s.data));

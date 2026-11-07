@@ -233,7 +233,7 @@ test("activity: with tasks on GitHub, what the snapshot knows, newest first, and
   expect(texts).toContain("asked you: Which database for the cache?");
   const ats = items.map((x) => String(x.at ?? ""));
   expect(ats).toEqual([...ats].sort().reverse());
-  expect(items.find((x) => x.text === "opened PR #22: PR 22")).toMatchObject({ kind: "pr", agent: "taytu", task: "8", pr: 22, link: "view:pull-requests",
+  expect(items.find((x) => x.text === "opened PR #22: PR 22")).toMatchObject({ kind: "pr", agent: "taytu", task: "8", pr: 22, link: "pr:22",
     at: "2026-11-07T07:00:00Z" });
   expect(r.json.kinds).toEqual(["pr", "ci", "ask"]);
   expect(r.json.agents).toEqual(["menelik", "taytu"]);
@@ -262,6 +262,54 @@ test("activity: a pull request that leaves the snapshot's open list shows as no 
     text: "PR #22 is no longer open (merged or closed): PR 22" });
   // still there on the next look
   expect(((await api(ui, "/api/projects/work/activity")).json.items as Row[]).filter((x) => String(x.text).includes("no longer open")).length).toBe(1);
+}, T);
+
+test("activity: a pull request's CI and review changes between snapshots are events that open its page, by epic, with no GitHub call", async () => {
+  const p = workProject();
+  cache(p, { pulls: [pull(21, "task/7-login", { createdAt: "2026-11-07T08:00:00Z", ci: "running" }),
+    pull(22, "task/8-settings", { agent: "taytu", createdAt: "2026-11-07T07:00:00Z" })] });
+  const ui = await started(p);
+  const first = (await api(ui, "/api/projects/work/activity")).json.items as Row[];
+  expect(first.filter((x) => x.kind === "review" || String(x.text).startsWith("CI passed"))).toEqual([]); // the first look only keeps what it saw
+  const ghBefore = readFileSync(p.ghLog, "utf8");
+  cache(p, { pulls: [pull(21, "task/7-login", { createdAt: "2026-11-07T08:00:00Z", ci: "green", review: "factory-mustfix" }),
+    pull(22, "task/8-settings", { agent: "taytu", createdAt: "2026-11-07T07:00:00Z", review: "factory-approved" })] });
+  const r = (await api(ui, "/api/projects/work/activity")).json;
+  const items = r.items as Row[];
+  expect(items.find((x) => x.text === "CI passed on PR #21")).toMatchObject({ kind: "ci", agent: "menelik", pr: 21, task: "7", epic: "1", link: "pr:21" });
+  expect(items.find((x) => x.text === "PR #21 got must-fixes")).toMatchObject({ kind: "review", pr: 21, link: "pr:21" });
+  expect(items.find((x) => x.text === "PR #22 was approved")).toMatchObject({ kind: "review", agent: "taytu", pr: 22, task: "8", epic: null, link: "pr:22" });
+  expect(r.kinds).toContain("review");
+  expect(r.epics).toEqual([{ id: "1", title: "Sign in" }]);
+  // the same change isn't told twice
+  const again = (await api(ui, "/api/projects/work/activity")).json.items as Row[];
+  expect(again.filter((x) => x.text === "CI passed on PR #21").length).toBe(1);
+  const byEpic = (await api(ui, "/api/projects/work/activity?epic=1")).json.items as Row[];
+  expect(byEpic.length).toBeGreaterThan(0);
+  expect(byEpic.every((x) => x.epic === "1")).toBe(true);
+  expect(byEpic.map((x) => x.text)).not.toContain("PR #22 was approved");
+  expect(readFileSync(p.ghLog, "utf8")).toBe(ghBefore);
+}, T);
+
+test("activity: a snapshot change reaches an open page over the WebSocket as the new entries", async () => {
+  const p = workProject();
+  cache(p, { pulls: [pull(21, "task/7-login", { createdAt: "2026-11-07T08:00:00Z", ci: "running" })] });
+  const ui = await started(p);
+  const ws = new WebSocket(ui.url.replace("http", "ws") + `/api/ws?token=${ui.token}`);
+  const pushed: Row[] = [];
+  ws.onmessage = (e) => {
+    const m = JSON.parse(String(e.data)) as Row;
+    if (m.type === "activity" && m.project === "work") pushed.push(m);
+  };
+  await new Promise((r) => { ws.onopen = r; });
+  await until(() => api(ui, "/api/projects/work/tasks").then((x) => x.json), (j) => Array.isArray(j.tasks));
+  await Bun.sleep(1500); // the page has had the views as they are
+  cache(p, { pulls: [pull(21, "task/7-login", { createdAt: "2026-11-07T08:00:00Z", ci: "green" })] });
+  const all = (): Row[] => pushed.flatMap((m) => (Array.isArray(m.items) ? (m.items as Row[]) : []));
+  await until(async () => all(), (xs) => xs.some((x) => x.text === "CI passed on PR #21"), 40_000); // the server reads again each poll
+  ws.close();
+  expect(all().find((x) => x.text === "CI passed on PR #21")).toMatchObject({ kind: "ci", pr: 21, task: "7", link: "pr:21" });
+  expect(all().filter((x) => x.text === "opened PR #21: PR 21")).toEqual([]); // only what is new is pushed
 }, T);
 
 // --- Home --------------------------------------------------------------------------------------------------------------
