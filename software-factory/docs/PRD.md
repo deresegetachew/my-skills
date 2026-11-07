@@ -2,7 +2,7 @@
 
 Status: merged (#151). Written 25 Oct 2026 against `main` at commit `b956dbf`; the status wording (what is built, what is
 in a pull request, what is published) was brought up to date on 27 Oct 2026 against `main` at commit `973ccda` and the
-releases page. It replaces the draft in PR #39 (see [What happened to PR #39](#what-happened-to-pr-39)). Task
+releases page. The web UI section (4.13) and "no tmux" (D16) were added on 7 Nov 2026 from the owner's answers on #293. It replaces the draft in PR #39 (see [What happened to PR #39](#what-happened-to-pr-39)). Task
 issues: #150, #187.
 
 This is the scope of the factory: what it is for, who uses it, what is decided, what is in and out, and what is later
@@ -44,7 +44,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 
 | # | Decision | Source |
 |---|---|---|
-| D1 | *Replaced by the web UI, `factory ui` (decision 0005, 5 Nov 2026); the cockpit was retired in #425 (6 Nov 2026), and `factory cockpit` now only says it moved there. As decided before:* **One terminal window, the cockpit** (`factory cockpit`), built on tmux. The left side lists the sessions and the views. The right side is the selected agent's real Claude Code session, or a view. tmux hosts the live sessions and provides popups, the status line and keys; the sidebar and views are Ink (React for terminals) components, bundled into one file at release, so a project still installs no npm package (decision 0002, 31 Oct 2026). The cockpit needs tmux 3.2 or newer. Every screen is built on one core of factory commands, and the plain text commands (`factory status`, `factory agents ls`, `factory follow`, `factory prs`) stay. It replaces the earlier D1, "No custom UI" (the Claude app plus a Remote Control `-i` session as the UI). A web console, Claude Code's agent view and VS Code's Agents window were set aside. | #295 (owner, 28 Oct 2026), [decisions/0001-cockpit.md](decisions/0001-cockpit.md), [0002](decisions/0002-cockpit-ink.md) (owner, 31 Oct 2026), [0005](decisions/0005-web-ui.md) (owner, 5 Nov 2026), #425; earlier: #114, #97, #101, #106 |
+| D1 | **The web UI, `factory ui`, is the one window** (decision 0005, 5 Nov 2026): a Bun server on the owner's machine serves one page, laid out like Slack, with the projects, each project's pages and one channel per agent; it is bound to localhost (and the Tailscale address with `--host`) and needs a token. Its stories are section 4.13. The plain text commands stay. *The cockpit it replaced was retired in #425 (PR #459, 6 Nov 2026), and `factory cockpit` now only says it moved. As decided before:* **One terminal window, the cockpit** (`factory cockpit`), built on tmux. The left side lists the sessions and the views. The right side is the selected agent's real Claude Code session, or a view. tmux hosts the live sessions and provides popups, the status line and keys; the sidebar and views are Ink (React for terminals) components, bundled into one file at release, so a project still installs no npm package (decision 0002, 31 Oct 2026). The cockpit needs tmux 3.2 or newer. Every screen is built on one core of factory commands, and the plain text commands (`factory status`, `factory agents ls`, `factory follow`, `factory prs`) stay. It replaces the earlier D1, "No custom UI" (the Claude app plus a Remote Control `-i` session as the UI). A web console, Claude Code's agent view and VS Code's Agents window were set aside. | [0005](decisions/0005-web-ui.md) (owner, 5 Nov 2026), #420, #425, PR #459; earlier: #295 (owner, 28 Oct 2026), [decisions/0001-cockpit.md](decisions/0001-cockpit.md), [0002](decisions/0002-cockpit-ink.md) (owner, 31 Oct 2026), #114, #97, #101, #106 |
 | D2 | **The factory installs from numbered releases** of my-skills: an archive plus a SHA-256 checksum file, on GitHub. The submodule goes away (the old submodule step keeps working until a project migrates). | #113 (owner, option D) |
 | D3 | **The installed factory is committed in the project's repo** as real files with a pin file saying which release, so a fresh clone works and an update is a reviewable diff. *Recorded.* | #113 |
 | D4 | **Versions are semantic**, such as `v1.4.0`. *Recorded.* | #113, `software-factory/VERSION` |
@@ -59,6 +59,7 @@ call" or "do what u think is best" and an agent wrote down its choice; the owner
 | D13 | **The factory's runtime is Bun.** Every script is TypeScript run by Bun (Bun and Node built-ins only, no npm package at runtime), plus bash. The one exception is build time: the web UI's React and react-dom are bundled into one JavaScript file at release (decision 0005, as decision 0002 first did for the cockpit's Ink and React), so a project installs nothing and gets no `node_modules`; no package is added this way without the owner. The plugin mechanism of decision 0004 (an npm package inside `software-factory/plugins/<name>/`, bundled at release) existed only for the NATS client and went with it (#504). There is no Python in the factory. It replaces the earlier rule "Python 3 standard library only" (3.11 syntax at most). A project's own code may still be Python. | #252 (owner, 26 Oct 2026), decisions 0002 and 0005, `CLAUDE.md` |
 | D14 | **The agents' rules are passed only to the sessions the factory starts.** `factory loop` and `factory agent` start Claude with `--settings`: `.claude/factory/settings.json` and the `permissions.allow` from `.claude/factory.json`, both read from `main` on origin, never from the agent's own folder. A project's own `.claude/settings.json` stays the project's and still applies. The Stop check runs only in a factory run. So the owner's own sessions in a project are not governed by the agents' rules. | #258, #256 (owner, 27 Oct 2026) |
 | D15 | **Token budgets are per task and advisory.** The unit is one task (issue); it counts fresh input (input + cache writes) + output as `factory usage` reports them, never money or cache reads. It is set by a `Budget:` line in the task issue, else `budget.builder` in factory.json. The budget is taken from the issue when the task is claimed, and a coding agent may not change it. Over 80% the checkpoint warns; there is no hard stop, because stopping mid-change leaves broken branches. An overrun is the dev manager's call at review; CI never fails on it. | #183 (owner, 28 Oct 2026) |
+| D16 | **No tmux.** Unattended loops (`factory dev-manager loop`, `product-owner loop`, `coding-agent <name> loop`) run as background services (LaunchAgents on macOS, systemd user services on Linux, as the CI runners do), each with a log file; `factory owner start` and `stop` and the web UI's Start and Stop start and stop the service; `factory follow <name>` reads the log, live. Interactive sessions (`loop -i`, `factory agent`) run in the current terminal. tmux comes out of the bootstrap, `factory doctor` and the docs. It replaces the tmux windows of US-3 and US-4. *Decided, not built yet (#526).* | #526 (owner, 7 Nov 2026, answering `tmux-optional-setup-2026-10-29` on #293) |
 
 **Owner-only actions.** An agent or manager writes these as a proposal ("this needs your yes: ...") and waits. A yes for
 one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
@@ -328,7 +329,10 @@ until he agrees them."
   kept. `factory doctor` checks that the workflow matches `factory.json` (#205, #224). *Built,
   including `factory init` for an empty folder (#148).* (#102, #103, #199, #205)
 - **U13.** As the owner, the machines come back after a reboot: `factory autostart` starts the dev stack and this machine's
-  agents in detached tmux sessions. *Built.* (#88)
+  agents in detached tmux sessions. *Built.* (#88) *No tmux (D16, #526) moves this to background services.*
+
+Planned, after #526: one compiled `factory` binary (`bun build --compile`) with the kit files embedded and the hooks
+run as `factory hook <name>`. *Decided (owner, 7 Nov 2026); decision 0008, not written yet.*
 
 ### 4.7 CI runners
 
@@ -412,11 +416,13 @@ The core first: every screen needs it.
 - **US-2.** As the owner, the heartbeat covers every role, not only coding agents: dev managers, product owners and
   sub-managers each have a row with their role, and `factory agents ls` shows them. *Decided.* (#295; L1)
 - **US-3.** As the owner, every session the factory starts runs in its own tmux window, through one shared step used by
-  `factory owner start`, `factory autostart`, resume and `loop -i` (today `loop -i` runs in the current terminal). *Decided.* (#295)
+  `factory owner start`, `factory autostart`, resume and `loop -i` (today `loop -i` runs in the current terminal). *Decided.* (#295) *Replaced by no tmux (D16, #526): an
+  unattended session runs as a background service with a log file, and an interactive one in the current terminal.*
 - **US-4.** As the owner, I can see what a sub-manager is doing: it runs in its own tmux window, started through the
   shared step of US-3, and `tmux attach -r -t =<session>` (the orchestrator prints it) shows that window read-only
   (`factory cockpit watch` until #425). Today a sub-manager runs as `claude -p` with no
-  screen. *Decided.* (#295; owner's answer in #293, 28 Oct 2026)
+  screen. *Decided.* (#295; owner's answer in #293, 28 Oct 2026) *Replaced by no tmux (D16, #526): what a session
+  does is read from its log, with `factory follow`.*
 - **US-5.** As the owner, `factory follow <name>` finds a session on this machine directly, not only through an ssh
   remote. *Decided.* (#295; O5)
 - **US-6.** As the owner, what I do by hand is a factory command, so the web UI and the command line share it:
@@ -460,7 +466,7 @@ guard, rereview record and reply, the `manager-claims` actions). (#295)
 ### 4.11 The factory's own record (decision 0007)
 
 From #472 (owner, 6 Nov 2026) and [decisions/0007](decisions/0007-own-record.md). The numbers start at US-40, so the
-web UI section proposed on #293 (US-14 onward) keeps its range. The owner accepted 0007 on 6 Nov 2026.
+web UI section (4.13, US-14 onward) keeps its range. The owner accepted 0007 on 6 Nov 2026.
 
 - **US-40.** As the owner, the factory's tasks, epics, dependencies, claims and every conversation about them (questions,
   answers, hand-offs, the PO's proposals, the owner queue, the dev manager's notes, a pull request's back-and-forth) are
@@ -500,7 +506,9 @@ web UI section proposed on #293 (US-14 onward) keeps its range. The owner accept
   fix. Another machine joins with a login of its own (`factory machine add` and `join`), which `machine remove` drops.
   Moving to a hosted Postgres later is a change of address. *Built: `factory board up|down|status|backup` (#489), the
   doctor's check (#500), and machines joining with board logins (#504). The nightly backup is a job the owner sets up on
-  the hub that runs `factory board backup`; the factory doesn't install it.* (#472; 0007 points 3 and 8)
+  the hub that runs `factory board backup`; the factory doesn't install it.* The hub's address lives only on each
+  machine: `MB_URL`, else `<machine settings folder>/message-board/url` (written by `factory board up` or `factory
+  machine join`), never in the repo; docs and designs write `100.x.y.z` (owner, 7 Nov 2026, #293). (#472; 0007 points 3 and 8)
 - **US-45.** As the owner, the move happens one kind at a time with both copies kept: for a period each moved kind is
   written to the database and to GitHub, misses are counted, and I stop the GitHub copy when nothing was missed.
   *Built differently (#500, #502):* `messaging.kinds` moves the kinds one at a time, and a moved kind is written to the
@@ -526,8 +534,8 @@ web UI section proposed on #293 (US-14 onward) keeps its range. The owner accept
 ### 4.12 Agents' prompts, skills and workflows
 
 From #477 (owner, 6 Nov 2026, on the web UI design canvas): "An agent has two important parts. The first is its
-prompt ... The second is its skills and context ... The other aspect of an agent is its workflow." The numbers start at
-US-60, so the web UI section proposed on #293 (US-14 onward) and decision 0007's section (US-40 onward, PR #481) keep
+prompt ... The second is its skills and context ... The other aspect of an agent is its workflow." The numbers start
+at US-60, so the web UI section (4.13, US-14 onward) and decision 0007's section (US-40 onward, PR #481) keep
 their ranges. One rule shapes every story here: agents cannot change what governs them (D11), and a change under
 `.claude/` is merged by the owner (#247). So nothing is written live: an edit in the web UI opens a pull request, which
 also gives versions and diffs.
@@ -556,10 +564,87 @@ also gives versions and diffs.
   and the agent's history shows it. So I can compare runs before and after a change, with numbers read from `factory
   usage` and `factory report`. *Decided (owner, 6 Nov).* (#477; T1)
 
+### 4.13 The web UI (decision 0005)
+
+From decision 0005 (owner, 5 Nov 2026), the epic #420 and the owner's answers on #293 (7 Nov 2026): the web UI is the
+one window, and the PRD covers it. The design is the owner's reference in `docs/design/web-ui/` (#449); the commands it
+covers are listed in its `PARITY.md`. Every page follows the same rules: no command shown on screen, light and dark,
+and every remove, stop or merge shows its preconditions, what will happen and what won't. These stories use the range
+kept for the web UI (US-14 to US-39).
+
+What is built:
+
+- **US-14.** As the owner, `factory ui` opens the factory in a browser: a Bun server on my machine, bound to localhost
+  (and its Tailscale address with `--host`), with a token, one page laid out like Slack (projects on the far left, the
+  project's pages and one channel per agent), live over a WebSocket while a page is open. Starting it is mine; an
+  agent session is refused. *Built (#428; #421, #422).* (D1, decision 0005)
+- **US-15.** As the owner, the page uses my palette in light and dark, a sidebar (Home, Inbox, Board, Epics, Pull
+  requests, PRD and decisions, Sign-off and testing, Activity, Your team, Run the factory, Factory settings) and shared
+  parts: tabs, chips, list rows, a talk box and a confirm that shows its preconditions. A page not built yet says what
+  it will hold. *Built (#487; #450).* (#449)
+- **US-16.** As the owner, every agent has an avatar drawn from its name and role, or my own picture from
+  `.claude/factory/avatars/`. *Built (#442; #437).*
+- **US-17.** As the owner, an agent's channel is a chat: what it asked, answered and handed on, and what I sent. I send
+  a coding agent one line, and the dev manager or the product owner one turn of a talk. The Inbox shows each owner ask
+  with its options as buttons, and my answer runs `factory owner answer`. *Built (#429; #423). The Inbox reads the owner
+  queue from the message board when it is there (#516; #513).*
+- **US-18.** As the owner, the tasks, pull requests and CI are channels: each pull request with its checks, reviews and
+  protected files, and CI with its verdict first, its runs and its runner actions behind a confirm. The search box finds
+  a channel or a row in any project. *Built (#430; #424).*
+- **US-19.** As the owner, the PRD, the decisions and the wiki are one click away, as readable pages, and a task or
+  pull request that cites a decision or a story links to it. *Built (#448; #438).*
+- **US-20.** As the owner, epics sit above tasks: each with its stage, a bar of tasks done and links to its tasks.
+  *Built (#460; #440); follow-ups are #464.*
+- **US-21.** As the owner, Board shows the tasks with a column per state and swim lanes by epic or by agent, a card per
+  task with who holds it, its status, its pull request and its checks; lanes are plain and cards carry their epic's
+  colour. Release, Block and Reassign ask first, then answer at once, and the board is read again. *Built (#478, #505,
+  #522; #439, #519).*
+- **US-22.** As the owner, with a message board on my machine, Board and Epics come from it, live, with no GitHub calls
+  for the tasks; a board that can't be reached shows a notice and the project falls back to GitHub. *Built (#499, #524;
+  #498, #523).* (US-43)
+- **US-23.** As the owner, Sign-off and testing lists what waits for me, what is ready to test and the results, and
+  Designs and artifacts shows each artifact's copy and whether it is current. *Built (#488; #454).*
+- **US-24.** As the owner, the + in the rail adds a project: clone one of my repos, make a new one or pick a checkout,
+  answer the setup questions, and Create installs the factory and opens the setup pull request, step by step with Retry.
+  It starts no agent. *Built (#480; #447).*
+- **US-25.** As the owner, the machines channel adds a machine: a name and its agents give a join code and the one
+  command to run on the new machine; removing one drops its board login. *Built (#490; #445).*
+- **US-26.** As the owner, every command in `factory help` has a row saying how the web UI covers it (built, planned,
+  agents only or terminal only), and a test fails when a command has no row. *Built (#479; #446).*
+- **US-27.** As the owner, the tmux cockpit is gone: `factory cockpit` only says it moved to `factory ui`, its snapshot
+  is `factory snapshot` and its chat is `factory talk`. *Built (#459; #425).* (D1)
+
+What is planned:
+
+- **US-28.** As the owner, a first launch walks me through: welcome, a check of this machine, joining the hub, a new
+  project and its kickoff, with the issue import of US-41. *Decided (#457).* (US-41)
+- **US-29.** As the owner, I choose the team on first launch: a team size, the 12 legends or my own agents, and each
+  one's name and picture, kept as project settings. *Decided (#457).*
+- **US-30.** As the owner, the CI page gives its verdict first, the runs, the runners with their count and a remove
+  with its preconditions. *Decided (#455).*
+- **US-31.** As the owner, the Machines, Health and Usage and cost pages show each machine and its agents and the hub,
+  what works and the fix for what doesn't, and what each agent and task used. *Decided (#455).*
+- **US-32.** As the owner, Home shows what the team is doing and what needs me on one page, with the How it runs
+  diagram. *Decided (#451).*
+- **US-33.** As the owner, the Inbox holds everything that needs me, and I answer and merge in place. *Decided (#451);
+  the owner queue part is built (US-17).*
+- **US-34.** As the owner, Activity shows the team's feed and the open questions. *Decided (#451).*
+- **US-35.** As the owner, an epic has a page of its own, as in the design's `Epic.dc.html`. *Proposal; no issue yet.*
+- **US-36.** As the owner, Factory settings has tabs: the settings (project changes staged into a pull request, this
+  machine's saved at once), Releases and updates (no publish there) and Maintenance. *Decided (#456).*
+- **US-37.** As the owner, an Integrations tab lists what the factory connects to and what each agent may use, and a
+  change to what governs an agent is proposed as a pull request I merge. *Proposal (#441).*
+- **US-38.** As the owner, a task, a pull request and an agent each have a page of their own, and search covers
+  everything. *Decided (#452, #453).*
+- **US-39.** As the owner, the web UI works on a phone: a bottom tab bar and big buttons for approvals, and every page
+  fits at phone width. *Decided (#458).*
+
+No tmux (D16, #526) changes how an agent's channel shows its output: from its log file, not a tmux pane.
+
 ## 5. Out of scope
 
-- **A custom UI other than the web UI** (`factory ui`, decision 0005, which replaced the terminal cockpit, #425): no
-  second dashboard or console, no phone queue. (D1; #114, #295)
+- **A second UI.** The web UI (`factory ui`) is the one window (decision 0005); it replaced the terminal cockpit (#425)
+  and is planned to work on a phone (US-39). No other dashboard, console or phone app is built. (D1; #114, #295)
 - **New dependencies.** The factory is TypeScript on Bun, with Bun and Node built-ins only, and bash. An npm package
   is used only at build time, bundled at release, and only with the owner's yes. (D13, `CLAUDE.md`)
 - **An agent changing the process.** Agents do not edit the gate, the guard, the agents' rules, agent definitions or
@@ -616,6 +701,9 @@ processes per test) still apply.
 
 ### C. Other things that are later or not agreed
 
+- **Agent runtime** (owner, 7 Nov 2026): Claude Code is the only supported agent; its hooks are the Claude adapter. The
+  real locks stay server-side (branch protection, the CI guard, the board), so another agent (Codex, Gemini) can be
+  added later without hooks. (The compiled `factory` binary is planned: section 4.6, decision 0008.)
 - **A VS Code extension on stable APIs**, as a second screen on the same core as the web UI. (#295)
 - **An A2A adapter** for the message envelope, in the heartbeat daemon, beside the GitHub and board transports; a later
   step that needs no format change. (wiki/agent-loops.md "Messages between agents"; `docs/messages.md`)

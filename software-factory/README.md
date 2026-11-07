@@ -205,7 +205,9 @@ that has nothing to do sleeps instead of asking a model.
 With the [message board](docs/wiki/board.md#the-message-board) on (decision 0007), a Postgres on one machine that the
 others reach over Tailscale holds the tasks, their threads, the claims and the owner queue instead of the task issues;
 GitHub keeps the code, the pull requests, CI and the gate's labels, and a mirror of each task's state and of the owner
-queue.
+queue. The agents talk to each other there too: claims, wake-ups and the pull request feed (there is no NATS). The
+hub's address lives only on each machine (`MB_URL`, or the url file that `factory board up` or `factory machine join`
+writes), never in the repo; the docs write it as `100.x.y.z`.
 
 <br>
 ## Where things stand
@@ -214,12 +216,21 @@ The factory is released in numbered versions; `v0.2.0` was the first full releas
 the newest. The `v0.1.0` pre-releases are the old Python factory, and `v0.2.0-alpha.1` was the first on Bun
 ([Updating from releases](docs/wiki/updating.md#updating-from-releases)).
 
-The interface is the web UI (`factory ui`), the Claude app with Remote Control, and the plain-text commands
-(`factory status`, `factory prs`, `factory follow`). The message board is built; a project moves onto it when you choose
-([Going live](docs/wiki/board.md#going-live)).
+**The web UI is the one window** ([decision 0005](docs/decisions/0005-web-ui.md)). Run `factory ui` on your machine
+and open the address it prints (it carries a token). It shows every project, its board, pull requests, CI, the owner
+queue, the machines and a chat with each agent, and every action asks first. It listens on this machine only;
+`--host` adds its Tailscale address. The plain-text commands (`factory status`, `factory prs`, `factory follow`) and
+the Claude app with Remote Control still work. The terminal cockpit is gone.
+
+**The message board** is the factory's own record: the tasks, their threads, the claims and the owner queue, on a
+Postgres on one machine, mirrored to GitHub ([The message board](docs/wiki/board.md)). It is built; a project moves
+onto it when you choose ([Going live](docs/wiki/board.md#going-live)).
 
 Not built yet:
 
+- No tmux: agent loops will run as background services with a log file that `factory follow` reads (#526). Today some
+  sessions still start in tmux.
+- The web UI's first launch, Home, Activity, settings pages and phone layout (PRD, section 4.13).
 - `factory bootstrap` runs on Linux only.
 - One command to bump the pin for a whole team.
 - A Slack or Mattermost bridge. It is an idea, not scheduled (PRD, sections 5 and 6).
@@ -325,8 +336,8 @@ factory doctor                      # what's missing on this machine, and how to
 ### 5. Start the other roles
 
 Every role is a factory command ([Roles](docs/wiki/roles.md#roles)). The table above lists them. `factory loop -i` in a terminal with no
-role asks which role and which name. From the Claude app, reach a running session through Remote Control; there is no
-web console.
+role asks which role and which name. Then `factory ui` shows them all in a browser, and you can start, stop and talk to
+each one there. From the Claude app, reach a running session through Remote Control.
 
 ### Where to read next
 

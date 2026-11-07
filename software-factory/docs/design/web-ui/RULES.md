@@ -13,7 +13,7 @@ Read these first, then copy their structure exactly:
 epics, asks the owner), the **dev manager** (fasil, reviews and merges PRs), **builders** (haile, taytu, menelik:
 claim a task, write failing tests first, open a PR). The **owner** (the human user) approves what only a person may:
 merging protected files, product decisions, releases. Messages and claims go over the message board (Postgres) on a machine called
-dev-pc (Tailscale 100.99.7.67); other machines (the owner's Mac) join it. Each project is a GitHub repo
+dev-pc (Tailscale 100.x.y.z); other machines (the owner's Mac) join it. Each project is a GitHub repo
 (my-skills, remanual). Tasks are GitHub issues with labels factory:ready / in-progress / in-review / blocked.
 
 ## Look (keep it identical across screens) — read project/theme.css and project/Palette.dc.html first
@@ -79,7 +79,7 @@ card, a stepper on top. Phone screens: fixed root 390×844, no sidebar, a bottom
 Agents: mentewab (Product owner, dev-pc, idle until PR #402 merges), fasil (Dev manager, dev-pc, reviewing #402),
 haile (builder, dev-pc, #437 An avatar for every agent), taytu (builder, dev-pc, #425 Retire the tmux cockpit),
 menelik (builder, the owner's Mac, #438 The PRD and decisions one click away).
-Machines: dev-pc (Linux, Tailscale 100.99.7.67, hub: the message board, 3 CI runners + light lane, Docker 29),
+Machines: dev-pc (Linux, Tailscale 100.x.y.z, hub: the message board, 3 CI runners + light lane, Docker 29),
 Mac (macOS, joined via tunnel; menelik). Projects: my-skills (active), remanual (paused by the owner).
 Open PRs: #402 Product owner: try what was built (protected .claude/, needs owner), #434 [PLACEHOLDER title].
 Epics: Web UI: the one window #420 (Building, 3 of 14), Epics above tasks #440 (Investigating), Agent messaging
