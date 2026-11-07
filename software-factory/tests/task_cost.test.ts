@@ -115,3 +115,20 @@ test("--by agent leaves the per task times out", () => {
   expect("task_costs" in (JSON.parse(p.stdout) as Row)).toBe(false);
   expect(usage(s, "--by", "agent").stdout).not.toContain("What each task took");
 });
+
+test("--by task: a board task (b<n>) gets its sessions, CI runs and review rounds from its task/b<n>- branch (#604)", () => {
+  const s = setup();
+  const wt = s.root + "-agents/taytu";
+  write(join(s.logs, slugOf(wt), "s4.jsonl"), [reply("c1", "task/b27-goal", wt, "2026-10-24T13:20:00Z"),
+    reply("c2", "task/b27-goal", wt, "2026-10-24T13:35:00Z")].join("\n") + "\n");
+  write(join(s.state, "snapshot.json"), JSON.stringify({ generatedAt: "2026-10-24T14:00:00.000Z",
+    tasks: { source: "board", tasks: [], epics: [] },
+    pulls: [{ number: 30, branch: "task/b27-goal", head: "aaa1111", review: "factory-mustfix" }],
+    ci: { runs: [{ id: 11, branch: "task/b27-goal", state: "failure", minutesAgo: 40 },
+      { id: 12, branch: "task/b27-goal", state: "success", minutesAgo: 20 }] } }));
+  const p = usage(s, "--by", "task", "--json");
+  expect(p.code, p.out).toBe(0);
+  const data = JSON.parse(p.stdout) as { task_costs: Row[] };
+  expect(data.task_costs.find((t) => t.task === "b27")).toMatchObject({ sessions: 1, replies: 2, workingMinutes: 15,
+    ci: { runs: 2, failed: 1, failedInARow: 0 }, reviews: { rounds: 1 } });
+});
