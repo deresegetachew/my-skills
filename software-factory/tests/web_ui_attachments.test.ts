@@ -154,6 +154,17 @@ test("behind the same token as the API; ids and targets are checked", async () =
   expect(post.status).toBe(405);
 });
 
+test("an entry under this project's key that names another project is never served (#637 security review)", async () => {
+  const w = await world();
+  const a = w.by["phone.png"] as Attachment;
+  const forged = { ...a, id: "0123456789ab", project: "other/repo" };
+  await w.board.setValue(`attachment:${REPO}:pr:12:${forged.id}`, forged);
+  const r = await get(w, `/api/projects/work/attachments/${forged.id}/file`);
+  expect(r.status).toBe(404);
+  const list = await api(w.ui, "/api/projects/work/attachments?target=pr:12");
+  expect((list.json.attachments as Row[]).some((x) => x.id === forged.id)).toBe(false);
+});
+
 test("the page lets in only images and video it fetched itself (blob:), and a server with no board says how to get one", async () => {
   const p = project(CONFIG);
   const ui = await startUi(p);

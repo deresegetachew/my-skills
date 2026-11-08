@@ -14,12 +14,14 @@
 //   factory attach prune
 //       drops what is past `attachments.retentionDays` now (each attach does it too).
 //
+// Only regular files inside this checkout are read (links followed to where they point), never a .env file or anything
+// in .git or .claude, and each file's size is checked before it is read (attach_path_refused). The limits and `ui.url`
+// come from main's settings on GitHub, never the worktree's (attach_settings_unreadable when GitHub can't say).
 // Limits: `attachments.maxFileMb` per file, `attachments.maxProjectMb` for all the project keeps. Errors are one JSON
 // line {code, message, fix} on stderr, exit 1; nothing is written on a refusal.
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname } from "node:path";
 import { boardRepo } from "./core/compose.ts";
-import { type Config, load } from "./factory_config.ts";
+import { type Config, load, loadFromMain } from "./factory_config.ts";
 import { gh, ghAll } from "./factory_issues.ts";
 import { junitSummary } from "./factory_junit.ts";
 import { Exit, pyDumps, run, runMain } from "./factory_lib.ts";
@@ -129,12 +131,19 @@ function size(n: number): string {
   return `${Math.round((n / (1024 * 1024)) * 10) / 10} MB`;
 }
 
-function readFiles(paths: string[]): { name: string; bytes: Uint8Array }[] {
-  return paths.map((f) => {
-    const path = resolve(f);
-    if (!existsSync(path) || !statSync(path).isFile()) refuse("attach_no_file", `${f} isn't a file.`, "Give the path of a file that exists.");
-    return { name: path, bytes: new Uint8Array(readFileSync(path)) };
-  });
+/** The files, each a regular file inside this checkout and within the cap, checked before any is read. */
+function readFiles(cfg: Config, m: Mod, paths: string[]): { name: string; bytes: Uint8Array }[] {
+  return m.readConfined(paths, process.cwd(), limits(cfg, m), (message, fix) => refuse("attach_path_refused", message, fix));
+}
+
+/** The settings as main has them on GitHub (#637): an agent's worktree can't raise its own caps or change the link. */
+function mainSettings(): Config {
+  try {
+    return loadFromMain(load());
+  } catch (e) {
+    return refuse("attach_settings_unreadable", `Main's settings can't be read from GitHub: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}`,
+      "Check `gh auth status` and the network, then run it again.");
+  }
 }
 
 async function add(cfg: Config, m: Mod, args: string[]): Promise<number> {
@@ -145,7 +154,7 @@ async function add(cfg: Config, m: Mod, args: string[]): Promise<number> {
   if (paths.some((x) => x.startsWith("--"))) refuse("attach_bad_input", `${paths.find((x) => x.startsWith("--"))} isn't an option here.`, `Usage:\n${USAGE}`);
   if (!paths.length) refuse("attach_bad_input", "Name the files to attach.", `Usage:\n${USAGE}`);
   const target = m.targetOf(kind, id);
-  const files = readFiles(paths);
+  const files = readFiles(cfg, m, paths);
   const repo = repoOf(m);
   const head = target.kind === "pr" ? (headGiven ?? prHead(target.id)) : headGiven ?? null;
   const b = await openBoard(m);
@@ -238,7 +247,7 @@ export async function main(argv: string[]): Promise<number> {
     return 1;
   }
   try {
-    const cfg = load();
+    const cfg = mainSettings();
     if (args[0] === "ls") return await ls(cfg, m, args.slice(1));
     if (args[0] === "prune") return await prune(cfg, m);
     return await add(cfg, m, args);

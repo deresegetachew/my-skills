@@ -23,6 +23,12 @@ const db: Row = JSON.parse(readFileSync(pathDb, "utf8"));
 const a = process.argv.slice(2);
 appendFileSync(process.env.LOOP_LOG || "/dev/null", "gh " + a.join(" ") + "\n");
 if (a[0] === "auth" && a[1] === "token" && db.repo) { console.log("gho_fake"); process.exit(0); }
+// main's settings as GitHub has them (#637): mainSettings in the file, else a 404 (no factory.json on main)
+if (a[0] === "repo" && a[1] === "view" && db.repo) { console.log("main"); process.exit(0); }
+if (a[0] === "api" && a.some((x) => x.includes("contents/.claude/factory.json"))) {
+  if (db.mainSettings === undefined) { console.error("gh: Not Found (HTTP 404)"); process.exit(1); }
+  process.stdout.write(JSON.stringify(db.mainSettings)); process.exit(0);
+}
 if (a[0] !== "api") process.exit(1);
 if (process.env.FAKE_GH_FAIL === "1") { console.error("gh: Bad Gateway (HTTP 502)"); process.exit(1); }
 if (process.env.FAKE_GH_FAIL_WRITES === "1" && a.some((x, i) => (x === "-X" || x === "--method") && a[i + 1] !== "GET")) {

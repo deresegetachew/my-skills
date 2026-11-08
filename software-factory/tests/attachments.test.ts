@@ -6,7 +6,7 @@
 // reads a JUnit report. A real Postgres (board_pg.ts), the stateful fake gh (fakegh.ts) and the real `factory`.
 import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
 import { freshDb, type Pg, startPg } from "./board_pg.ts";
@@ -68,7 +68,8 @@ async function world(settings: Row = {}, hub = true): Promise<World> {
   symlinkSync(join(SF, "factory"), join(d, "factory"));
   const bin = installFakeGh(root);
   const dbFile = join(root, "db.json");
-  writeFileSync(dbFile, JSON.stringify({ repo: REPO, issues: [], comments: {}, pulls: [{ number: 12, head: { sha: HEAD } }] }));
+  const mainSettings = { tasks: { source: "board" }, agents: ["menelik"], ...settings }; // main has the same settings unless a test says not
+  writeFileSync(dbFile, JSON.stringify({ repo: REPO, issues: [], comments: {}, pulls: [{ number: 12, head: { sha: HEAD } }], mainSettings }));
   const log = join(root, "gh.log");
   writeFileSync(log, "");
   const cfg = join(root, "cfg");
@@ -82,7 +83,7 @@ async function world(settings: Row = {}, hub = true): Promise<World> {
   const board = await Board.open(db.url, { as: "system", max: 1 });
   boards.push(board);
   await board.migrate();
-  const shots = join(root, "shots");
+  const shots = join(d, "shots"); // inside the worktree: attach reads nothing outside it
   mkdirSync(shots);
   writeFileSync(join(shots, "home-phone.png"), PNG);
   writeFileSync(join(shots, "results.xml"), JUNIT);
@@ -196,7 +197,7 @@ test("bad input is refused with a fix and writes nothing", async () => {
   const cases: [string[], string][] = [
     [["pr", "nope", join(w.shots, "run.log")], "pull request's number"],
     [["thing", "1", join(w.shots, "run.log")], "task, a pr"],
-    [["task", "7", join(w.shots, "missing.png")], "isn't a file"],
+    [["task", "7", join(w.shots, "missing.png")], "it isn't there"],
     [["task", "7"], "Name the files"],
     [["signoff", "../x", join(w.shots, "run.log")], "sign-off item's id"],
   ];
@@ -242,6 +243,8 @@ test("retention: an attachment past attachments.retentionDays is dropped with it
   const aged = { ...(old?.value as Row), at: new Date(Date.now() - 8 * 86_400_000).toISOString() };
   await w.board.setValue(old?.key as string, aged);
   expect(attach(w, "ls", "task", "7").stdout).toContain("Nothing is attached"); // hidden at once
+  const past = new Date(Date.now() - 3600_000); // the files are past the grace a fresh file gets from a prune
+  for (const f of stored(w)) utimesSync(f, past, past);
   const p = attach(w, "prune");
   expect(p.code, p.out).toBe(0);
   expect(p.stdout).toContain("Dropped 1 attachment past 7 days.");
@@ -305,10 +308,84 @@ test("board_attach: a builder attaches files from its folder to a pull request's
   // a file that isn't there, and one past the cap it was started with
   const missing = await mcp(w, w.shots, "board_attach", { target: "task", id: "b3", files: ["nope.png"] });
   expect(missing.isError).toBe(true);
-  expect((missing.out.error as Row).code).toBe("not-found");
+  expect(String((missing.out.error as Row).message)).toContain("it isn't there");
   writeFileSync(join(w.shots, "big.log"), "x".repeat(1024 * 1024 + 1));
   const big = await mcp(w, w.shots, "board_attach", { target: "task", id: "b3", files: ["big.log"] }, ["--attach-limits", "1,2000,30"]);
   expect(big.isError).toBe(true);
   expect(String((big.out.error as Row).message)).toContain("one file may be at most 1 MB");
   expect(await w.board.values(`attachment:${REPO}:task:b3:`)).toEqual([]);
+});
+
+// --- what may be read: only regular files inside the worktree, never secrets (#637 security review) -------------------
+
+/** Paths an injected task might ask for: outside the worktree, through a link, secrets inside it, a folder. */
+function forbidden(w: World): string[] {
+  write(join(w.root, "outside.txt"), "secret outside");
+  symlinkSync(join(w.root, "outside.txt"), join(w.shots, "link-out.png"));
+  write(join(w.d, ".env"), "TOKEN=x");
+  write(join(w.d, ".env.local"), "TOKEN=y");
+  write(join(w.d, ".claude", "notes.md"), "rules");
+  mkdirSync(join(w.shots, "a-folder"));
+  return ["/etc/hosts", "../outside.txt", join(w.shots, "link-out.png"), ".env", ".env.local", ".git/config", ".claude/notes.md",
+    join(w.shots, "a-folder")];
+}
+
+test("factory attach reads only regular files inside the worktree: outside it, a link out, .env, .git and .claude are refused", async () => {
+  const w = await world();
+  for (const path of forbidden(w)) {
+    const p = attach(w, "task", "7", join(w.shots, "run.log"), path);
+    expect(p.code, `${path}: ${p.out}`).toBe(1);
+    const e = err(p);
+    expect(e.code, path).toBe("attach_path_refused");
+    expect(String(e.fix), path).not.toBe("");
+  }
+  expect(await w.board.values("attachment")).toEqual([]);
+  expect(stored(w)).toEqual([]);
+});
+
+test("board_attach reads only regular files inside the worktree too", async () => {
+  const w = await world();
+  for (const path of forbidden(w)) {
+    const r = await mcp(w, w.d, "board_attach", { target: "task", id: "b3", files: ["shots/run.log", path] });
+    expect(r.isError, path).toBe(true);
+    expect(String((r.out.error as Row).message), path).toContain("can't be attached");
+  }
+  expect(await w.board.values("attachment")).toEqual([]);
+  expect(stored(w)).toEqual([]);
+});
+
+test("a file past the cap is refused from its size, before it is read", async () => {
+  const w = await world({ attachments: { maxFileMb: 1 } });
+  const big = join(w.shots, "big.log");
+  writeFileSync(big, "x".repeat(1024 * 1024 + 1));
+  chmodSync(big, 0o000); // unreadable: a check that read it first would fail another way
+  const p = attach(w, "task", "7", big);
+  chmodSync(big, 0o600);
+  expect(p.code, p.out).toBe(1);
+  expect(String(err(p).message)).toContain("one file may be at most 1 MB");
+});
+
+test("factory attach takes its limits and ui.url from main's settings, not the worktree's", async () => {
+  const w = await world({ attachments: { maxFileMb: 1 } });
+  write(join(w.d, ".claude", "factory.json"), JSON.stringify({ tasks: { source: "board" }, agents: ["menelik"], attachments: { maxFileMb: 999 },
+    ui: { url: "http://evil.example" } }));
+  writeFileSync(join(w.shots, "big.log"), "x".repeat(1024 * 1024 + 1));
+  const p = attach(w, "task", "7", join(w.shots, "big.log"));
+  expect(p.code, p.out).toBe(1);
+  expect(String(err(p).message)).toContain("one file may be at most 1 MB");
+  expect(attach(w, "pr", "12", join(w.shots, "run.log")).code).toBe(0);
+  expect(comments(w, 12)[0]).not.toContain("evil.example");
+});
+
+test("prune leaves a file written in the last minutes alone, so it can't race an attach", async () => {
+  const w = await world();
+  // a file in the store with no attachment yet: an attach between writing the file and recording it
+  const fresh = join(w.cfg, "message-board", "attachments", "acme__shop", "aa", "a".repeat(64));
+  write(fresh, "in flight");
+  expect(attach(w, "prune").code).toBe(0);
+  expect(existsSync(fresh)).toBe(true);
+  const old = new Date(Date.now() - 3600_000);
+  utimesSync(fresh, old, old);
+  expect(attach(w, "prune").code).toBe(0);
+  expect(existsSync(fresh)).toBe(false);
 });

@@ -27,9 +27,7 @@ import type { Board } from "./board.ts";
 import { BoardError, refuse } from "./errors.ts";
 import { HOW_TO_NAME, Numbers, projectTag } from "./numbers.ts";
 import { addSignoff } from "./signoff.ts";
-import { type AttachLimits, attach, DEFAULT_LIMITS, MAX_FILES, NOTE_MAX, TARGET_KINDS, targetOf } from "./attachments.ts";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { type AttachLimits, attach, DEFAULT_LIMITS, MAX_FILES, NOTE_MAX, readConfined, TARGET_KINDS, targetOf } from "./attachments.ts";
 import { CONTEXT_KINDS, EDGE_KINDS, type EdgeKind, MOVE_TARGETS, type MoveTarget, type Outcome, OUTCOMES } from "./types.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
@@ -332,17 +330,14 @@ export const TOOLS: Tool[] = [
       target: oneOf(TARGET_KINDS, "What they go on: task, pr, signoff or epic."),
       id: text("Which one: a task's or an epic's number (12, #12, b3), a pull request's number, or a sign-off item's id.", 64),
       files: { type: "array", items: { type: "string", maxLength: 1_000 }, minItems: 1, maxItems: MAX_FILES,
-        description: "The files' paths on this machine (relative to this folder, or absolute)." },
+        description: "The files' paths, inside this checkout (relative to this folder). Never a .env file or anything in .git or .claude; a link out of the checkout is refused." },
       note: text("What they show, in a sentence (optional).", NOTE_MAX),
       head: { type: "string", minLength: 7, maxLength: 64, description: "For a pull request: its head commit's SHA (optional; default this folder's HEAD)." },
     }, ["target", "id", "files"]),
     run: async (b, a, numbers, ctx) => {
       const target = targetOf(str(a, "target"), str(a, "id"));
-      const files = (a.files as string[]).map((f) => {
-        const path = resolvePath(process.cwd(), f);
-        if (!existsSync(path) || !statSync(path).isFile()) refuse("not-found", `${f} isn't a file on this machine.`, "Give the path of a file that exists here.");
-        return { name: path, bytes: new Uint8Array(readFileSync(path)) };
-      });
+      // only regular files inside this checkout, never a secret (this server isn't under Claude's permission rules)
+      const files = readConfined(a.files as string[], process.cwd(), ctx.attach, (message, fix) => refuse("bad-input", message, fix));
       let head = optStr(a, "head") ?? null;
       if (target.kind === "pr" && !head) {
         const p = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });

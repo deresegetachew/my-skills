@@ -36,6 +36,10 @@ interface Node {
 }
 
 const MOST_FAILURES = 200;
+/** The largest report summarised (a bigger one is a download only), and how deep its elements may nest: the summary
+ *  runs in the web UI's request, so a hostile report must stay cheap (#637 review). */
+const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_DEPTH = 256;
 const TEXT_MAX = 4000;
 
 function decode(s: string): string {
@@ -50,7 +54,36 @@ function decode(s: string): string {
   });
 }
 
-const ATTR = /([A-Za-z_:][\w:.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+const NAME_START = /[A-Za-z_:]/;
+const NAME_CHAR = /[\w:.-]/;
+
+/** A tag's attributes, read once from left to right (a regex here was quadratic on a long tag, #637 review). What isn't
+ *  `name="value"` or `name='value'` is skipped. */
+function attributes(s: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  let i = 0;
+  const n = s.length;
+  while (i < n) {
+    if (!NAME_START.test(s[i] as string)) {
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < n && NAME_CHAR.test(s[i] as string)) i++;
+    const name = s.slice(start, i);
+    while (i < n && /\s/.test(s[i] as string)) i++;
+    if (s[i] !== "=") continue;
+    i++;
+    while (i < n && /\s/.test(s[i] as string)) i++;
+    const q = s[i];
+    if (q !== '"' && q !== "'") continue;
+    const end = s.indexOf(q, i + 1);
+    if (end < 0) break;
+    out[name] = decode(s.slice(i + 1, end));
+    i = end + 1;
+  }
+  return out;
+}
 
 /** The document's root element, or a string saying why it can't be read. */
 export function parseXml(xml: string): Node | string {
@@ -106,10 +139,13 @@ export function parseXml(xml: string): Node | string {
       const name = /^[A-Za-z_:][\w:.-]*/.exec(inner)?.[0];
       if (!name) return "a tag has no name";
       const attrs: Record<string, string> = {};
-      for (const m of inner.slice(name.length).matchAll(ATTR)) attrs[m[1] as string] = decode(m[2] ?? m[3] ?? "");
+      Object.assign(attrs, attributes(inner.slice(name.length)));
       const node: Node = { name, attrs, children: [], text: "" };
       top().children.push(node);
-      if (!selfClosing) stack.push(node);
+      if (!selfClosing) {
+        if (stack.length > MAX_DEPTH) return `its elements are nested deeper than ${MAX_DEPTH}`;
+        stack.push(node);
+      }
       i = end + 1;
     }
   }
@@ -133,6 +169,15 @@ function empty(why: string): JunitSummary {
 
 /** The summary of a JUnit XML report. */
 export function junitSummary(xml: string): JunitSummary {
+  if (xml.length > MAX_BYTES) return empty(`It is too large to summarise (more than ${MAX_BYTES / (1024 * 1024)} MB); download it instead.`);
+  try {
+    return summarise(xml);
+  } catch (e) {
+    return empty(`It can't be read: ${(e instanceof Error ? e.message : String(e)).slice(0, 200)}.`);
+  }
+}
+
+function summarise(xml: string): JunitSummary {
   const root = parseXml(xml);
   if (typeof root === "string") return empty(`It isn't well-formed XML: ${root}.`);
   if (local(root.name) !== "testsuites" && local(root.name) !== "testsuite") return empty(`Its root is <${root.name}>, not <testsuites> or <testsuite>.`);

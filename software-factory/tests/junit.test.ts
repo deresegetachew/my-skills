@@ -40,6 +40,23 @@ test("what isn't a JUnit report, or isn't well-formed, is said and not thrown", 
   expect(junitSummary("<!-- open").why).toContain("comment isn't closed");
 });
 
+test("hostile reports finish fast and never throw: a 1 MB tag, 10 000 levels deep, and more than 5 MB", () => {
+  const t0 = performance.now();
+  const tag = junitSummary(`<testsuite ${"a".repeat(1024 * 1024)}><testcase name="x"/></testsuite>`);
+  expect(performance.now() - t0).toBeLessThan(500);
+  expect(tag.ok).toBe(true);
+  const t1 = performance.now();
+  const attrs = junitSummary(`<testsuite>${`<testcase ${'a="1" '.repeat(150_000)}/>`}</testsuite>`);
+  expect(performance.now() - t1).toBeLessThan(500);
+  expect(attrs.passed).toBe(1);
+  const deep = junitSummary(`<testsuite>${"<a>".repeat(10_000)}${"</a>".repeat(10_000)}</testsuite>`);
+  expect(deep).toMatchObject({ ok: false, tests: 0 });
+  expect(deep.why).toContain("deeper than 256");
+  const big = junitSummary(`<testsuite>${"<testcase name=\"x\"/>".repeat(300_000)}</testsuite>`);
+  expect(big).toMatchObject({ ok: false });
+  expect(big.why).toContain("too large to summarise");
+});
+
 test("the failures listed stop at 200, and a failure's text at 4000 characters", () => {
   const many = Array.from({ length: 250 }, (_, i) => `<testcase name="t${i}"><failure>${"x".repeat(5000)}</failure></testcase>`).join("");
   const s = junitSummary(`<testsuite>${many}</testsuite>`);

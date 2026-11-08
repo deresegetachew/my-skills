@@ -14,8 +14,8 @@
 // - The content type comes from the file's name, from a fixed list, and an image's or a video's first bytes must match
 //   it; anything else is a download. What the agent says about a file is never trusted.
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Board } from "./board.ts";
 import { refuse } from "./errors.ts";
 import { boardDir } from "./server.ts";
@@ -209,8 +209,9 @@ function isAttachment(v: unknown): v is Attachment {
 export async function listAttachments(board: Board, repo: string, target?: Target, retentionDays = DEFAULT_LIMITS.retentionDays): Promise<Attachment[]> {
   const r = repoKey(repo);
   const since = Date.now() - retentionDays * 86_400_000;
+  // an entry under this project's key must also say it is this project's: its bytes are found by the project it names
   return (await board.values(prefixOf(r, target))).map((x) => x.value).filter(isAttachment)
-    .filter((a) => Date.parse(a.at) >= since).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+    .filter((a) => a.project === r && Date.parse(a.at) >= since).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
 }
 
 /** One attachment of the project by its id, or null. */
@@ -219,8 +220,11 @@ export async function attachmentById(board: Board, repo: string, id: string, ret
   return (await listAttachments(board, repo, undefined, retentionDays)).find((a) => a.id === id) ?? null;
 }
 
+/** How long a new file or new bytes are safe from a prune. */
+const FRESH_MS = 10 * 60_000;
+
 /** Drops what is past the retention, the bytes on the board nothing points to, and on the hub the files nothing points
- *  to. Returns how many attachments it dropped. */
+ *  to (older than FRESH_MS). Returns how many attachments it dropped. */
 export async function pruneAttachments(board: Board, repo: string, retentionDays: number, hub = isHub()): Promise<number> {
   const r = repoKey(repo);
   const since = Date.now() - retentionDays * 86_400_000;
@@ -232,14 +236,19 @@ export async function pruneAttachments(board: Board, repo: string, retentionDays
       if (await board.dropValue(row.key)) dropped++;
     } else keep.add(a.sha256);
   }
+  // bytes and files written in the last minutes are left alone: an attach writes them just before its metadata
+  const settled = Date.now() - FRESH_MS;
   for (const row of await board.values(`attachment-bytes:${r}:`)) {
     const sha = row.key.slice(`attachment-bytes:${r}:`.length);
-    if (!keep.has(sha)) await board.dropValue(row.key);
+    if (!keep.has(sha) && row.updatedAt.getTime() < settled) await board.dropValue(row.key);
   }
   if (hub) {
     const root = join(storeDir(), r.replace("/", "__"));
     for (const two of existsSync(root) ? readdirSync(root) : []) {
-      for (const f of readdirSync(join(root, two))) if (!keep.has(f)) rmSync(join(root, two, f), { force: true });
+      for (const f of readdirSync(join(root, two))) {
+        const path = join(root, two, f);
+        if (!keep.has(f) && statSync(path).mtimeMs < settled) rmSync(path, { force: true });
+      }
     }
   }
   return dropped;
@@ -248,6 +257,64 @@ export async function pruneAttachments(board: Board, repo: string, retentionDays
 export interface NewFile {
   name: string;
   bytes: Uint8Array;
+}
+
+const FILE_FIX = "Attach a screenshot, report or log saved inside this checkout (for example tmp/design-check/home-phone.png), " +
+  "never a secret, a file outside it, or a link to one.";
+
+/** The checkout's top folder for `cwd` (its real path), or null outside a git checkout. */
+export function checkoutRoot(cwd: string): string | null {
+  const p = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const top = p.exitCode === 0 ? p.stdout.toString().trim() : "";
+  if (!top) return null;
+  try {
+    return realpathSync(top);
+  } catch {
+    return null;
+  }
+}
+
+/** Why `path` (from `cwd`) may not be attached, or its real path and size. Only a regular file inside `root` (links
+ *  followed to where they really point) may be, and never a .env file or anything in .git or .claude. Read by an agent's
+ *  attach on its own machine, outside Claude's permission rules, so this is what keeps a secret off the hub (#637). */
+export function confine(path: string, cwd: string, root: string): { ok: true; real: string; size: number } | { ok: false; why: string } {
+  let real: string;
+  try {
+    // the folder's real path, then the file's own name, followed only when it is a link: so its size is known without
+    // opening it
+    const abs = resolve(cwd, path);
+    const inDir = join(realpathSync(dirname(abs)), basename(abs));
+    real = lstatSync(inDir).isSymbolicLink() ? realpathSync(inDir) : inDir;
+  } catch {
+    return { ok: false, why: "it isn't there" };
+  }
+  const rel = relative(root, real);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return { ok: false, why: "it is outside this checkout (a link is followed to where it points)" };
+  const parts = rel.split(sep);
+  if (parts.includes(".git") || parts.includes(".claude")) return { ok: false, why: "files in .git and .claude are never attached" };
+  if (parts.some((x) => /^\.env/i.test(x))) return { ok: false, why: ".env files are never attached" };
+  const st = statSync(real);
+  if (!st.isFile()) return { ok: false, why: "it isn't a regular file" };
+  return { ok: true, real, size: st.size };
+}
+
+/** The message for a file past the cap. */
+export function tooBigMessage(name: string, size: number, limits: AttachLimits): string {
+  return `${name} is ${mb(size)}; one file may be at most ${mb(limits.maxFileBytes)}.`;
+}
+export const TOO_BIG_FIX = "Make it smaller (a phone and a desktop screenshot, a shorter log), or raise attachments.maxFileMb in the project's settings.";
+
+/** The files at `paths`, each checked (confine, then its size) before any is read; `refuse` says why one can't be. */
+export function readConfined(paths: string[], cwd: string, limits: AttachLimits, refuseWith: (message: string, fix: string) => never): NewFile[] {
+  const root = checkoutRoot(cwd);
+  if (!root) refuseWith("Files are attached from inside a git checkout, and this folder isn't one.", "Run it in the project's checkout or the agent's worktree.");
+  const checked = paths.map((p) => {
+    const c = confine(p, cwd, root);
+    if (!c.ok) return refuseWith(`${p} can't be attached: ${c.why}.`, FILE_FIX);
+    if (c.size > limits.maxFileBytes) return refuseWith(tooBigMessage(safeName(c.real), c.size, limits), TOO_BIG_FIX);
+    return c;
+  });
+  return checked.map((c) => ({ name: c.real, bytes: new Uint8Array(readFileSync(c.real)) }));
 }
 
 export interface AttachInput {
@@ -278,8 +345,7 @@ export async function attach(board: Board, repo: string, input: AttachInput, lim
   const files = input.files.map((f) => ({ name: safeName(f.name), bytes: f.bytes, sha: createHash("sha256").update(f.bytes).digest("hex") }));
   for (const f of files) {
     if (f.bytes.byteLength > limits.maxFileBytes) {
-      refuse("bad-input", `${f.name} is ${mb(f.bytes.byteLength)}; one file may be at most ${mb(limits.maxFileBytes)}.`,
-        "Make it smaller (a phone and a desktop screenshot, a shorter log), or raise attachments.maxFileMb in the project's settings.");
+      refuse("bad-input", tooBigMessage(f.name, f.bytes.byteLength, limits), TOO_BIG_FIX);
     }
   }
   const kept = await listAttachments(board, r, undefined, limits.retentionDays);
