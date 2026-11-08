@@ -13,3 +13,7 @@ export { boardDir, boardUrl } from "./server.ts";
 export type { Answer as ChildAnswer, Call as ChildCall, EventRule, Request as ChildRequest, WaitFor } from "./child.ts";
 /** The factory's sign-off and testing queue on the board (#552). */
 export { addSignoff, postSignoff, SIGNOFF_TITLE, signoffEntries, signoffIds, signoffItemBody, signoffQueue, signoffQueueRef, signoffTask } from "./signoff.ts";
+/** Attachments (#637): files on a task, a pull request (with its head), a sign-off item or an epic, kept on the hub. */
+export { ATTACHMENT_ID, ATTACHMENT_KINDS, type AttachInput, type AttachLimits, type Attachment, type AttachmentKind, attach, attachmentById,
+  classify, CONTENT_TYPES, DEFAULT_LIMITS, INLINE_TYPES, isHub, limitsOf, listAttachments, MAX_FILES, type NewFile, pruneAttachments, readBytes,
+  repoKey, safeName, storeDir, storePath, type Target, TARGET_KINDS, type TargetKind, targetOf } from "./attachments.ts";

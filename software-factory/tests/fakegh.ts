@@ -75,6 +75,12 @@ if (m1 && method === "PATCH") {
 }
 if (m1 && method === "GET") out((db.issues ?? []).find((i: Row) => i.number === Number(m1[1])) ?? {});
 if (p === "pulls") out(page === 1 ? db.pulls ?? [] : []);
+const mp = /^pulls\/(\d+)$/.exec(p);
+if (mp && method === "GET") {
+  const pr = (db.pulls ?? []).find((x: Row) => x.number === Number(mp[1]));
+  if (!pr) { console.error("gh: Not Found (HTTP 404)"); process.exit(1); }
+  out(pr);
+}
 const m = /^issues\/(\d+)\/comments$/.exec(p);
 if (m && method === "POST") {
   const k = m[1] as string;

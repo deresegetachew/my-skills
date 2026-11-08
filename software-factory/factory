@@ -299,6 +299,10 @@ Maintain
   artifacts pull|status|list
                          the project's artifacts and designs as reviewed copies in the repo, with a manifest of where
                          each came from; status says which copy is older than its artifact
+  attach <task|pr|signoff|epic> <id> <files...> [--note <text>] [--head <sha>] | attach ls <task|pr|signoff|epic> <id> | attach prune
+                         files (screenshots, JUnit reports, logs, videos) on a task, a PR (for its head commit), a
+                         sign-off item or an epic, kept on the hub, never in git, and shown in the web UI; a PR gets
+                         one comment with the link. ls says which are for the PR's head
   handover snapshot [--json]
                          what a manager hands over, read from GitHub: open PRs, tasks, owner asks, what needs a manager
                          now, agents and numbers in use (the runbook is docs/manager-handover.md)
@@ -469,6 +473,7 @@ case "$cmd" in
   watch)     fh "$hooks/factory_watch" "$@" ;;
   prd)       fh "$hooks/factory_prd" "$@" ;;
   artifacts) fh "$hooks/factory_artifacts" "$@" ;;
+  attach)    fh "$hooks/factory_attach" "$@" ;;
   handover)  fh "$hooks/factory_handover" "$@" ;;
   signoff)   fh "$hooks/factory_signoff" "$@" ;;
   manage-tick) fh "$hooks/factory_tick" "$@" ;;

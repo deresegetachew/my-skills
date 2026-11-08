@@ -3,6 +3,7 @@
 // or fail, a note), its outcome, its history and the "Talk about this" box. The rules are in signoff_model.ts; the data
 // and the actions go through GET|POST /api/projects/:p/signoff. Nothing here shows a command.
 import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { Attachments } from "./attachments.tsx";
 import { Avatar } from "./avatar_view.tsx";
 import { useChat } from "./chat.tsx";
 import { itemLabel } from "./chat_model.ts";
@@ -332,6 +333,7 @@ function ItemPage(p: Props & { item: SignoffItem; base: string; reload: () => vo
                 {last[2] && <p className="stext">{last[2]}</p>}
               </div>
             )}
+            <Attachments project={p.project.id} target={`signoff:${item.id}`} token={p.token} />
           </section>
 
           <aside className="saside">

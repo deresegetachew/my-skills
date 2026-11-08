@@ -21,6 +21,8 @@
 //   GET  /api/projects/:p/tasks|pull-requests|ci, POST .../ci/actions/:name and .../refresh: factory_ui_views.ts (#424)
 //   GET|POST /api/projects/:p/signoff, POST .../signoff/:id/confirm|result: the sign-off and testing queue (factory_ui_signoff.ts, #454)
 //   GET  /api/projects/:p/artifacts, POST .../artifacts/pull: designs and artifacts (factory_ui_artifacts.ts, #454)
+//   GET  /api/projects/:p/attachments[?target=pr:12&head=], .../attachments/:id/file: files on a task, a pull request, a
+//                                              sign-off item or an epic, served as untrusted (factory_ui_attachments.ts, #637)
 //   GET|POST /api/projects/:p/settings[/...]   Factory settings, releases and updates, maintenance (factory_ui_settings.ts,
 //                                              #456): the team, project settings staged and proposed as one pull request,
 //                                              this machine's saved at once, update, the clean-ups
@@ -58,6 +60,7 @@ import { type Answer, FOREIGN, foreign, readSessions, SignIn } from "./factory_u
 import { ChatHub } from "./factory_ui_chat.ts";
 import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, refreshConfig, roleOf, type UiProject } from "./factory_ui_data.ts";
 import { artifactsApi } from "./factory_ui_artifacts.ts";
+import { attachmentsApi, fileResponse } from "./factory_ui_attachments.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
 import { settingsApi } from "./factory_ui_settings.ts";
 import { signoffApi } from "./factory_ui_signoff.ts";
@@ -119,7 +122,9 @@ const HEADERS = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "no-referrer",
-  "content-security-policy": "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+  // blob: holds an attachment's bytes the page fetched with its token (#637): an image or a video only, never a page
+  "content-security-policy": "default-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+    "media-src 'self' blob:; " +
     "frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
 };
 
@@ -343,6 +348,10 @@ export function serve(o: ServeOptions): Running {
         },
       });
       return json(r.status, r.body);
+    }
+    if (rest[0] === "attachments") { // files on a task, a pull request, a sign-off item or an epic (#637)
+      const r = await attachmentsApi(req, url, p, rest, feed.handle(), repoOfProject(p));
+      return r.kind === "file" ? fileResponse(r, { "referrer-policy": "no-referrer", "x-frame-options": "DENY" }) : json(r.status, r.body);
     }
     if (rest[0] === "artifacts") { // designs and artifacts (#454)
       const r = await artifactsApi(req, p, rest);

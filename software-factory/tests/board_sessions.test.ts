@@ -17,7 +17,7 @@ const SECRET = "s3cret-pw-501";
 const URL_WITH_PASSWORD = `postgres://factory:${SECRET}@127.0.0.1:1/board`;
 
 const BUILDER_TOOLS = ["board_prime", "board_ready", "board_claim", "board_heartbeat", "board_release", "board_close",
-  "board_show", "board_post", "board_thread", "board_note", "board_on_me", "board_delegated"];
+  "board_show", "board_post", "board_thread", "board_note", "board_on_me", "board_delegated", "board_attach"];
 const MANAGER_TOOLS = [...BUILDER_TOOLS, "board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment", "board_signoff_add"];
 // The product owner never builds (#511): no claim, heartbeat, release or close; a task dropped is moved to done as wont_do.
 const PO_TOOLS = MANAGER_TOOLS.filter((t) => !["board_claim", "board_heartbeat", "board_release", "board_close"].includes(t));
@@ -72,6 +72,14 @@ test("with tasks on the board a session gets only the board's server, as its age
   expect(s.command).toBe(process.execPath);
   expect(boardArgs(s)).toEqual(["mcp", "--as", "menelik", "--role", "builder", "--session", "s-1"]);
   expect(r.out).not.toContain("docs-server");
+});
+
+test("main's attachment limits reach the board's server as --attach-limits; a worktree's own settings don't (#637)", () => {
+  const work = project({ ...BOARD_TASKS, attachments: { maxFileMb: 5, retentionDays: 7 } });
+  write(join(work, ".claude", "factory.json"), JSON.stringify({ ...BOARD_TASKS, attachments: { maxFileMb: 999 } })); // not on main
+  const r = mcpFor(work, ["--as", "menelik", "--role", "coding-agent", "--session", "s-1"]);
+  expect(r.code, r.err).toBe(0);
+  expect(boardArgs(boardServer(r.out))).toEqual(["mcp", "--as", "menelik", "--role", "builder", "--session", "s-1", "--attach-limits", "5,2000,7"]);
 });
 
 test("each factory role gets its board role", () => {

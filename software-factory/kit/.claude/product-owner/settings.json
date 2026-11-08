@@ -67,6 +67,7 @@
       "mcp__board__board_note",
       "mcp__board__board_on_me",
       "mcp__board__board_delegated",
+      "mcp__board__board_attach",
       "mcp__board__board_move",
       "mcp__board__board_create",
       "mcp__board__board_assign",

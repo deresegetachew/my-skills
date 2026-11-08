@@ -57,7 +57,8 @@
       "mcp__board__board_thread",
       "mcp__board__board_note",
       "mcp__board__board_on_me",
-      "mcp__board__board_delegated"
+      "mcp__board__board_delegated",
+      "mcp__board__board_attach"
     ],
     "deny": [
       "Read(./.env)",

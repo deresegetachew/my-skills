@@ -121,6 +121,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `signoff plan` | agents only | Sign-off item (SignoffItem.dc.html): the product owner writes the plan; you confirm it or ask for a change | |
 | `signoff confirm` | built | Sign-off item (SignoffItem.dc.html): Confirm plan | #454 |
 | `signoff result` | built | Sign-off item (SignoffItem.dc.html): Passed, Failed | #454 |
+| `attach` | built | Attachments on the pull request page (a tab), the task page and the sign-off item: images, video, test results, logs, downloads. Agents attach (board_attach); the page shows | #637 |
 | `artifacts pull` | built | Artifacts (Artifacts.dc.html): Pull new copy, Add an artifact (each opens a pull request) | #454 |
 | `artifacts status` | built | Artifacts (Artifacts.dc.html): each copy's state, Check for new versions | #454 |
 | `artifacts list` | built | Artifacts (Artifacts.dc.html) | #454 |

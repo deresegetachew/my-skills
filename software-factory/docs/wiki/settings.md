@@ -313,6 +313,10 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `ui.projects` | list | `[]` | Other factory projects on this machine the web UI shows beside this one: the path of each one's checkout. |
 | `ui.port` | int | `4747` | The port `factory ui` listens on (`--port` wins for one run). |
 | `ui.pollSeconds` | int | `5` | How often `factory ui` reads the agents and machines again and pushes what changed to the open pages. |
+| `ui.url` | str | `""` | The web UI's address as people open it (for example http://hub:4747), for the link `factory attach` puts on a pull request. Never with a token. Empty: the comment says where to find the page instead. |
+| `attachments.maxFileMb` | int | `25` | The largest file `factory attach` and the board's `board_attach` take, in MB. |
+| `attachments.maxProjectMb` | int | `2000` | How many MB of attachments the project may keep on the hub, counting each distinct file once. An attach past it is refused. |
+| `attachments.retentionDays` | int | `30` | How many days an attachment is kept; older ones, and files nothing points to, are dropped on the next attach or listing. |
 | `attention.taskQuietMinutes` | int | `60` | Needs attention: a task in progress shows when nothing has moved on it (no heartbeat from a holder working on it, no change on the board) for this many minutes. |
 | `attention.prWaitHours` | int | `24` | Needs attention: a pull request shows when it has been open this many hours with red checks, no review, a must-fix nobody picked up, or a merge only a person can do. |
 | `attention.coding-agent.maxMinutes` | int | `120` | Needs attention: a coding agent's session shows when it has been working this many minutes without a pause. |

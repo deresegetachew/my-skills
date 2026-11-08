@@ -342,6 +342,11 @@ export class BoardFeed {
     }
   }
 
+  /** The board this server has open, or null while there is none (attachments, #637, read it directly). */
+  handle(): Board | null {
+    return this.board;
+  }
+
   /** A card's action written to the board (#502): release (to ready, with its reason), block (to blocked, with its reason
    *  as a blocker note), reassign (handed to `to`), or Needs attention's close (to done, #579). Throws a Problem-shaped error when the board can't take it. */
   async write(p: UiProject, id: string, action: "release" | "block" | "reassign" | "close", reason: string, to = ""): Promise<Task> {

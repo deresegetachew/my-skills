@@ -12,6 +12,8 @@ import { costFacts } from "./cost_model.ts";
 import { CostFacts, useCosts } from "./costs.tsx";
 import { Chips } from "./parts.tsx";
 import { authHeaders } from "./signin_model.ts";
+import { Attachments } from "./attachments.tsx";
+import { targetParam } from "./attachments_model.ts";
 import { ago, type Tone } from "./model.ts";
 import { checksText, checksTone, type EpicRow, type PullRow, type TaskRow, taskTone } from "./views_model.ts";
 import type { Post, Say, ViewProps } from "./views.tsx";
@@ -168,6 +170,8 @@ export function TaskPage({ id, t, project, token, open, post, say, close }: { id
               </li>
             ))}</ul> : <p className="empty">Nothing said on this task yet.</p>}
           </section>}
+          <Attachments project={project.id} target={targetParam("task", id)} token={token} />
+          {t.epic && <Attachments project={project.id} target={targetParam("epic", t.epic)} token={token} title="On its epic" />}
         </>}
         <div className="actions"><button className="btn" onClick={close} autoFocus>Close</button></div>
       </div>

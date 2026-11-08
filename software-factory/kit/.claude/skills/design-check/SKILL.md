@@ -21,4 +21,8 @@ Arguments: the screen(s) to check, named after `/design-check` in your prompt.
    intentional. If the PRD and the reference disagree, the PRD wins: note it in the pull request.
 6. **Accessibility pass:** axe (`@axe-core/playwright`), 44 px tap targets, a visible focus ring, and RTL if
    the product supports right-to-left languages.
-7. Put the final phone and desktop screenshots in the pull request description.
+7. Attach the final phone and desktop screenshots to the pull request once its head is pushed: the board tool
+   `board_attach` (`target: "pr"`, `id`, `files`, `note: "phone and desktop"`), or `factory attach pr <n> <files>` where
+   your rules allow it. They are kept on the
+   hub and shown in the web UI; GitHub can't take an image from an agent, and none goes in git. Attach again after a
+   new push: the dev manager counts only images for the head.
