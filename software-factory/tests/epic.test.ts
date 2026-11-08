@@ -75,3 +75,8 @@ test("progress counts the tasks done and all of them; an epic with none is 0 of 
   expect(progress(e)).toEqual({ done: 1, all: 3 });
   expect(progress(parse({ body: "" }))).toEqual({ done: 0, all: 0 });
 });
+
+test("an open epic labelled epic:done is done (#464)", () => {
+  expect(parse({ labels: ["epic", "epic:done"] }).stage).toBe("done");
+  expect(parse({ labels: ["epic", "epic:building", "epic:done"] }).stage).toBe("done");
+});

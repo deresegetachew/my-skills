@@ -1,13 +1,13 @@
 // Epics through the TaskTracker port (#440): the GitHub adapter reads the issues labelled `epic` (open and closed), keeps
 // them out of the task list; the plan and memory adapters have none.
 import { afterAll, expect, test } from "bun:test";
-import { rmSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { GithubTaskTracker } from "../hooks/core/adapters/github/task_tracker.ts";
 import { MemoryTaskTracker } from "../hooks/core/adapters/memory/task_tracker.ts";
 import { PlanTaskTracker } from "../hooks/core/adapters/plan/task_tracker.ts";
 import type { Config } from "../hooks/factory_config.ts";
-import { FAKE_GH, type IssueRow, issue } from "./issues_support.ts";
+import { agentIssue, FAKE_GH, type IssueRow, issue, pull } from "./issues_support.ts";
 import { tmp, write, writeExe } from "./support.ts";
 
 const dirs: string[] = [];
@@ -59,6 +59,33 @@ test("github: an epic is not a task: the task list leaves it out", () => {
 test("github: no epic issues, no epics", () => {
   world([issue(1)]);
   expect(new GithubTaskTracker(cfg).epics()).toEqual([]);
+});
+
+/** A `gh` that writes each call's arguments to a log, then answers as the fake. */
+function logged(issues: IssueRow[]): string {
+  world(issues);
+  const d = tmp();
+  dirs.push(d);
+  const log = join(d, "calls.log");
+  const real = join((process.env.PATH as string).split(":")[0] as string, "gh");
+  writeExe(join(d, "bin", "gh"), ["#!/usr/bin/env bash", `echo "$*" >> '${log}'`, `exec '${real}' "$@"`, ""].join("\n"));
+  process.env.PATH = `${d}/bin:${process.env.PATH}`;
+  return log;
+}
+
+test("github: epics are fetched by their label, not by paging through every issue ever opened (#464)", () => {
+  const log = logged([epic(9, [], "- [ ] #2 x"), issue(2, ["factory:ready"]), { ...issue(3, []), state: "closed" }]);
+  expect(new GithubTaskTracker(cfg).epics().map((e) => e.id)).toEqual(["9"]);
+  const calls = readFileSync(log, "utf8").trim().split("\n");
+  for (const c of calls.filter((x) => x.includes("state=all"))) expect(c).toContain("labels=epic");
+  expect(calls.some((c) => c.includes("labels=epic") && c.includes("state=all"))).toBe(true);
+});
+
+test("github: a line naming an open pull request, agent issue or sub-epic is not done; closed, it is (#464)", () => {
+  world([epic(9, [], "- [ ] #2 pr\n- [ ] #3 agent\n- [ ] #10 sub-epic\n- [ ] #4 merged pr\n- [ ] #11 done sub-epic"),
+    pull(2), agentIssue(3, "menelik", "x"), epic(10, []), pull(4, "closed"), epic(11, [], "", "closed")]);
+  expect(new GithubTaskTracker(cfg).epics().find((e) => e.id === "9")?.tasks).toEqual([
+    { id: "2", done: false }, { id: "3", done: false }, { id: "10", done: false }, { id: "4", done: true }, { id: "11", done: true }]);
 });
 
 test("memory: no epics", () => {

@@ -2,7 +2,7 @@
 // thread, and the thread itself. No React here, so tests/epic_detail.test.ts runs it as it is.
 import type { ChatItemView } from "./chat_model.ts";
 import { citeLinks, type DocPage } from "./docs_model.ts";
-import { itemThread, talkText as itemTalkText } from "./parts_model.ts";
+import { itemThread, talkBody, talkText as itemTalkText } from "./parts_model.ts";
 
 /** The stages in the order an epic walks them (a parked epic is none of them), with the words the page shows. */
 export const STAGE_FLOW: Array<[string, string]> = [["investigating", "Investigating"], ["prd", "PRD written"], ["decision", "Decision"],
@@ -65,4 +65,26 @@ export function talkText(epic: { id: string; title: string }, text: string): str
 /** The epic's thread out of a chat: the owner's messages about it, and the answers that follow each. */
 export function epicThread(items: ChatItemView[], epicId: string): ChatItemView[] {
   return itemThread(items, { kind: "epic", id: epicId });
+}
+
+/** A thread line as the epic's page shows it: without the "About epic #n (title): " that leads the owner's lines (#464). */
+export function threadText(epic: { id: string; title: string }, text: string): string {
+  return talkBody({ kind: "epic", ...epic }, text);
+}
+
+export type EpicChoice<T> = { show: "list" } | { show: "page"; epic: T } | { show: "missing"; id: string };
+
+/** Whether the epics were read without a problem: the snapshot has them, and neither the tasks nor the epics failed. */
+export function epicsRead(v: { problems: unknown[]; epics: { from?: string; problems: unknown[] } }): boolean {
+  return v.epics.from !== "unknown" && !v.problems.length && !v.epics.problems.length;
+}
+
+/** What the epics channel shows for the epic it was asked for (`#n`, or a click): its page, a "not found" when no epic
+ * has that number (#464), or the list when none was asked for. When the epics were not read (`read` false), a number
+ * no epic has shows the list, whose problems say why, never "not found". */
+export function epicChoice<T extends { id: string }>(all: T[], chosen: string | null, read = true): EpicChoice<T> {
+  if (chosen === null) return { show: "list" };
+  const epic = all.find((e) => e.id === chosen);
+  if (epic) return { show: "page", epic };
+  return read ? { show: "missing", id: chosen } : { show: "list" };
 }

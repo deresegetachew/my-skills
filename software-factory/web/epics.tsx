@@ -10,7 +10,7 @@ import { epicCostFacts } from "./cost_model.ts";
 import { CostFacts, useCosts } from "./costs.tsx";
 import { Cited } from "./docs.tsx";
 import type { DocPage } from "./docs_model.ts";
-import { epicThread, stageSteps, writtenDown } from "./epics_model.ts";
+import { epicThread, stageSteps, threadText, writtenDown } from "./epics_model.ts";
 import { StatusDot, type Talker, Tabs, TalkBox } from "./parts.tsx";
 import type { EpicRow, TaskRow } from "./views_model.ts";
 
@@ -43,7 +43,7 @@ function Thread({ chat, epic }: { chat: Chat; epic: EpicRow }) {
         return (
           <li key={x.id}>
             {l.mine ? <span className="you">You</span> : <Avatar name={x.from} size={28} />}
-            <p><strong>{l.who}</strong> {x.text.replace(/^About epic #\d+ \([^)]*\): /, "")}{l.what ? ` (${l.what})` : ""}</p>
+            <p><strong>{l.who}</strong> {threadText(epic, x.text)}{l.what ? ` (${l.what})` : ""}</p>
           </li>
         );
       })}

@@ -262,12 +262,21 @@ async function tasksData(): Promise<Obj> {
     const tasks = tracker.list().map((t) => ({ id: plain(t.id), title: plain(t.title), state: t.state,
       holders: t.holders.map(plain), group: plain(t.group), todos: t.todos.map((d) => ({ done: d.done })), dependsOn: t.dependsOn.map(plain),
       cites: (t.cites ?? []).map(plain), ...(t.waitsForPrd ? { waitsForPrd: plain(t.waitsForPrd) } : {}) }));
-    const epics = tracker.epics().map((e) => ({ id: plain(e.id), title: plain(e.title), stage: e.stage, prd: plain(e.prd),
-      decisions: e.decisions.map(plain), summary: plain(e.summary), cites: e.cites.map(plain), tasks: e.tasks.map((t) => ({ id: plain(t.id), done: t.done })), url: e.url }));
-    return { ...base, tasks, epics };
+    // the epics fail on their own (#464): the tasks still show, and the epics channel says why it has none
+    try {
+      const epics = tracker.epics().map((e) => ({ id: plain(e.id), title: plain(e.title), stage: e.stage, prd: plain(e.prd),
+        decisions: e.decisions.map(plain), summary: plain(e.summary), cites: e.cites.map(plain), tasks: e.tasks.map((t) => ({ id: plain(t.id), done: t.done })), url: e.url }));
+      return { ...base, tasks, epics };
+    } catch (e) {
+      return { ...base, tasks, epics: [], epicsError: errorText(e, "the tracker gave no epics") };
+    }
   } catch (e) {
-    return { ...base, error: plain(e instanceof Error ? e.message : String(e)) || "the tracker gave no tasks" };
+    return { ...base, error: errorText(e, "the tracker gave no tasks") };
   }
+}
+
+function errorText(e: unknown, none: string): string {
+  return plain(e instanceof Error ? e.message : String(e)) || none;
 }
 
 /** The tasks part, as `--tasks` printed it; null when it printed no data. A tracker that can't be read gives its error

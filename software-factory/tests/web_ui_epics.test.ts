@@ -103,3 +103,19 @@ test("channels: epics is in the sidebar right after tasks", async () => {
   expect(views.map((c) => c.name).slice(0, 3)).toEqual(["tasks", "epics", "pull-requests"]);
   expect(views.find((c) => c.name === "epics")).toEqual({ id: "view:epics", kind: "view", name: "epics", title: "Epics" });
 }, T);
+
+test("epics that could not be read say so on the epics channel, and the tasks still show (#464)", async () => {
+  const p = project();
+  roots.push(p.root);
+  write(join(p.state, "snapshot.json"), JSON.stringify({ generatedAt: new Date().toISOString(), sessions: [], needsYou: [], missing: [],
+    tasks: { source: "issues", tasks: TASKS, epicsError: "gh: HTTP 502" },
+    pulls: [], ci: { mode: "local", repo: "o/work", label: "", runners: [], runs: [], errors: [] } }));
+  const ui = await startUi(p, ["--port", "0"]);
+  running.push(ui);
+  const epics = await api(ui, "/api/projects/work/epics");
+  expect(epics.json.epics).toEqual([]);
+  expect((epics.json.problems as Row[]).map((x) => x.code)).toContain("ui_epics_unreadable");
+  const tasks = await api(ui, "/api/projects/work/tasks");
+  expect((tasks.json.tasks as Row[]).map((t) => t.id)).toEqual(["7", "9", "11"]);
+  expect((tasks.json.problems as Row[]).map((x) => x.code)).not.toContain("ui_tasks_unreadable");
+}, T);
