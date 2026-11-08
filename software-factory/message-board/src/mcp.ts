@@ -27,6 +27,7 @@ import type { Board } from "./board.ts";
 import { BoardError, refuse } from "./errors.ts";
 import { HOW_TO_NAME, Numbers, projectTag } from "./numbers.ts";
 import { addSignoff } from "./signoff.ts";
+import { type AttachLimits, attach, DEFAULT_LIMITS, MAX_FILES, NOTE_MAX, readConfined, TARGET_KINDS, targetOf } from "./attachments.ts";
 import { CONTEXT_KINDS, EDGE_KINDS, type EdgeKind, MOVE_TARGETS, type MoveTarget, type Outcome, OUTCOMES } from "./types.ts";
 
 export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"] as const;
@@ -50,8 +51,8 @@ interface Prop {
   enum?: readonly string[];
   minLength?: number;
   maxLength?: number;
-  /** For an array: its items (tasks' numbers) and how many. */
-  items?: { type: "task" };
+  /** For an array: its items (tasks' numbers, or text such as a file's path) and how many. */
+  items?: { type: "task" } | { type: "string"; maxLength: number };
   minItems?: number;
   maxItems?: number;
 }
@@ -71,8 +72,14 @@ interface Tool {
   title: string;
   description: string;
   inputSchema: InputSchema;
-  /** `numbers`: how the project names tasks, and the ref a card made for it gets (#528). */
-  run(board: Board, args: Args, numbers: Numbers): Promise<Out>;
+  /** `numbers`: how the project names tasks, and the ref a card made for it gets (#528); `ctx`: the server's own settings. */
+  run(board: Board, args: Args, numbers: Numbers, ctx: Ctx): Promise<Out>;
+}
+
+/** What a tool may need from how the server was started. */
+interface Ctx {
+  /** The attachment limits (#637): the project's, given with --attach-limits, else the defaults. */
+  attach: AttachLimits;
 }
 
 const ID_MAX = Number.MAX_SAFE_INTEGER;
@@ -84,6 +91,7 @@ const messageId = (what: string): Prop => ({ type: "integer", minimum: 1, maximu
 function wire(p: Prop): Record<string, unknown> {
   const { items, ...rest } = p;
   if (p.type === "task") return { ...rest, type: ["integer", "string"] };
+  if (items?.type === "string") return { ...rest, items: { type: "string", maxLength: items.maxLength } };
   if (items) return { ...rest, items: { type: ["integer", "string"] } };
   return rest;
 }
@@ -126,7 +134,13 @@ export function checkInput(tool: { name: string; inputSchema: InputSchema }, inp
     if (p.type === "array") {
       const lo = p.minItems ?? 0;
       const hi = p.maxItems ?? 1000;
-      if (!Array.isArray(value) || !value.every(isTaskNumber)) {
+      const its = p.items;
+      if (its?.type === "string") {
+        if (!Array.isArray(value) || !value.every((x) => typeof x === "string" && x.trim() !== "" && x.length <= its.maxLength)) {
+          refuse("bad-input", `${key} must be a list of text, each at most ${its.maxLength} characters, not ${JSON.stringify(value).slice(0, 200)}.`,
+            `Pass ${key} as a list, like ["shots/home-phone.png"].`);
+        }
+      } else if (!Array.isArray(value) || !value.every(isTaskNumber)) {
         refuse("bad-input", `${key} must be a list of tasks' numbers, not ${JSON.stringify(value)}.`, `Pass ${key} as a list, like [12] or ["#12", "b3"]. ${HOW_TO_NAME}`);
       }
       if (value.length < lo || value.length > hi) {
@@ -304,6 +318,35 @@ export const TOOLS: Tool[] = [
       "still open. Read-only.",
     inputSchema: schema({}),
     run: async (b) => ({ ...(await b.delegated(b.as)) }),
+  },
+  {
+    name: "board_attach",
+    title: "Attach files",
+    description: "Attach files from this machine (screenshots, a JUnit XML report, a log, a short video) to a task, a pull " +
+      "request, a sign-off item or an epic (#637). They are kept on the hub, never in git, and the owner sees them in the " +
+      "web UI. For a pull request the files are for its head commit (head; left out, this folder's HEAD): the dev " +
+      "manager's screenshot rule is met by images for the head. Refused when a file is too big or the project's space is used up.",
+    inputSchema: schema({
+      target: oneOf(TARGET_KINDS, "What they go on: task, pr, signoff or epic."),
+      id: text("Which one: a task's or an epic's number (12, #12, b3), a pull request's number, or a sign-off item's id.", 64),
+      files: { type: "array", items: { type: "string", maxLength: 1_000 }, minItems: 1, maxItems: MAX_FILES,
+        description: "The files' paths, inside this checkout (relative to this folder). Never a .env file or anything in .git or .claude; a link out of the checkout is refused." },
+      note: text("What they show, in a sentence (optional).", NOTE_MAX),
+      head: { type: "string", minLength: 7, maxLength: 64, description: "For a pull request: its head commit's SHA (optional; default this folder's HEAD)." },
+    }, ["target", "id", "files"]),
+    run: async (b, a, numbers, ctx) => {
+      const target = targetOf(str(a, "target"), str(a, "id"));
+      // only regular files inside this checkout, never a secret (this server isn't under Claude's permission rules)
+      const files = readConfined(a.files as string[], process.cwd(), ctx.attach, (message, fix) => refuse("bad-input", message, fix));
+      let head = optStr(a, "head") ?? null;
+      if (target.kind === "pr" && !head) {
+        const p = Bun.spawnSync(["git", "rev-parse", "HEAD"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+        head = p.exitCode === 0 ? p.stdout.toString().trim() : null;
+      }
+      const made = await attach(b, numbers.repo ?? "", { target, head, files, note: optStr(a, "note") }, ctx.attach);
+      return { attachments: made.map((x) => ({ id: x.id, name: x.name, kind: x.kind, size: x.size, head: x.head })),
+        target: `${target.kind} ${target.id}`, where: "The web UI shows them on the page of what they are attached to, under Attachments." };
+    },
   },
 ];
 
@@ -521,6 +564,8 @@ export interface McpOptions {
   version: string;
   /** How tasks are named (#515): the project's repo makes 3 and #3 its issue 3. Left out: no repo is known. */
   numbers?: Numbers;
+  /** board_attach's limits (#637); left out, DEFAULT_LIMITS. */
+  attach?: AttachLimits;
 }
 
 /** One connection's state: whether `initialize` was answered. Messages are handled one at a time, in order. */
@@ -550,7 +595,7 @@ export class McpSession {
       const v = args[key];
       if (v === undefined) continue;
       if (p.type === "task") out[key] = await one(v);
-      else if (p.type === "array" && Array.isArray(v)) {
+      else if (p.type === "array" && p.items?.type !== "string" && Array.isArray(v)) {
         const ids: number[] = [];
         for (const x of v) ids.push(await one(x));
         out[key] = ids;
@@ -630,7 +675,7 @@ export class McpSession {
     const labels = new Map<number, string>();
     try {
       const args = await this.resolve(tool, checkInput(tool, params.arguments), labels);
-      const raw = JSON.parse(JSON.stringify(await tool.run(this.o.board, args, this.numbers))) as Out;
+      const raw = JSON.parse(JSON.stringify(await tool.run(this.o.board, args, this.numbers, { attach: this.o.attach ?? DEFAULT_LIMITS }))) as Out;
       const out = await present(this.o.board, this.numbers, raw, labels);
       return ok(id, { content: [{ type: "text", text: JSON.stringify(out) }], structuredContent: out });
     } catch (e) {

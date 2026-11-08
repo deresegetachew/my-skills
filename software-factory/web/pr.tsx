@@ -5,6 +5,7 @@
 // their preconditions (pr_model.ts), then go through POST /api/projects/:p/pull-requests/:n/actions/:name. The page is
 // read when it opens (GET .../pull-requests/:n), never on each poll. Nothing here shows a command.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Attachments } from "./attachments.tsx";
 import { Avatar } from "./avatar_view.tsx";
 import { type DocPage } from "./docs_model.ts";
 import { MarkdownView } from "./docs.tsx";
@@ -34,9 +35,11 @@ interface Props {
   onMenu: () => void;
   /** Opened from the Inbox's Merge (#458): ask first, with the preconditions, once the pull request is read. */
   askFirst?: "merge" | null;
+  /** The page's sign-in, for the attachments' bytes (#637). */
+  token: string;
 }
 
-type Tab = "overview" | "checks" | "files" | "conversation";
+type Tab = "overview" | "checks" | "files" | "conversation" | "attachments";
 
 function Ext({ href, children }: { href: string | null; children: string }) {
   return href ? <a className="ext" href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <>{children}</>;
@@ -49,6 +52,7 @@ export function PrPage(p: Props) {
   const [busy, setBusy] = useState(false);
   const [text, setText] = useState("");
   const [again, setAgain] = useState(0);
+  const [shots, setShots] = useState<number | null>(null); // how many attachments (#637), once read
   // after a merge here: why this machine's checkout was left as it is (#566), until the page is left
   const [leftAlone, setLeftAlone] = useState<Problem | null>(null);
   const base = `/api/projects/${encodeURIComponent(p.project.id)}/pull-requests/${encodeURIComponent(p.number)}`;
@@ -117,7 +121,12 @@ export function PrPage(p: Props) {
         )}
         <Tabs label="Pull request views" value={tab} onChange={setTab} tabs={[{ id: "overview", label: "Overview" },
           { id: "checks", label: "Checks", count: pr.checks.list.length }, { id: "files", label: "Files", count: pr.files.length },
-          { id: "conversation", label: "Conversation", count: pr.comments.length }]} />
+          { id: "conversation", label: "Conversation", count: pr.comments.length },
+          { id: "attachments", label: "Attachments", ...(shots !== null ? { count: shots } : {}) }]} />
+        {/* read once the page opens, so the tab's count shows; drawn only on its tab */}
+        <div hidden={tab !== "attachments"}>
+          <Attachments project={p.project.id} target={`pr:${pr.number}`} head={pr.head} token={p.token} onCount={setShots} />
+        </div>
         {tab === "overview" && <Overview pr={pr} {...p} setTab={setTab} />}
         {tab === "checks" && <Checks pr={pr} open={p.open} />}
         {tab === "files" && <Files pr={pr} docs={p.docs} open={p.open} />}

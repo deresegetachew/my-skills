@@ -5,7 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFileSync, closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { Board, type BoardEvent, BoardError, type ContextEntry, migrationNames, type Task } from "./src/index.ts";
+import { Board, type BoardEvent, BoardError, type ContextEntry, DEFAULT_LIMITS, limitsOf, migrationNames, type Task } from "./src/index.ts";
 import { PROTOCOL_VERSIONS, type Role, ROLES, serveMcp } from "./src/mcp.ts";
 import { Numbers } from "./src/numbers.ts";
 import {
@@ -573,7 +573,8 @@ async function prime(argv: string[]): Promise<number> {
   return 0;
 }
 
-const MCP_USAGE = "factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder] [--repo owner/name]";
+const MCP_USAGE = "factory board mcp --as <actor> [--session <id>] [--role owner|manager|builder] [--repo owner/name] " +
+  "[--attach-limits <file MB>,<project MB>,<days>]";
 
 const MCP_HELP = `${MCP_USAGE}
 
@@ -582,7 +583,10 @@ recorded as --as, with --session on its events; no tool takes a sender.
 
   --role builder (the default)  an agent's tools: board_prime, board_ready, board_claim, board_heartbeat,
                                 board_release, board_close, board_show, board_post, board_thread, board_note,
-                                board_on_me, board_delegated
+                                board_on_me, board_delegated, board_attach (files on a task, a pull request, a
+                                sign-off item or an epic, kept on the hub: #637)
+  --attach-limits 25,2000,30    board_attach's size cap per file and per project in MB, and how many days an
+                                attachment is kept (these are the defaults)
   --role owner | manager        those, and the tools that run the board without the web UI:
                                 board_move     a task to ready, in_review, deferred, done or blocked
                                                (a held task is taken back from its holder, with a reason)
@@ -619,7 +623,16 @@ async function mcp(argv: string[]): Promise<number> {
   const session = option(args, "--session");
   const roleText = option(args, "--role") ?? "builder";
   const numbers = numbersFor(args);
+  const limitsText = option(args, "--attach-limits");
   leftovers(args, MCP_USAGE);
+  let attachLimits = DEFAULT_LIMITS;
+  if (limitsText !== undefined) {
+    const [fileMb, projectMb, days] = limitsText.split(",").map((x) => wholeNumber(x, "--attach-limits' each number", 1, 1_000_000));
+    if (fileMb === undefined || projectMb === undefined || days === undefined || limitsText.split(",").length !== 3) {
+      fail("bad-input", "--attach-limits takes three numbers: <file MB>,<project MB>,<days>.", "For example: --attach-limits 25,2000,30");
+    }
+    attachLimits = limitsOf({ maxFileMb: fileMb, maxProjectMb: projectMb, retentionDays: days });
+  }
   if (!(ROLES as readonly string[]).includes(roleText)) {
     fail("bad-input", `--role must be owner, manager or builder, not ${JSON.stringify(roleText)}.`, `Use --role owner, --role manager or --role builder (the default). Usage: ${MCP_USAGE}`);
   }
@@ -643,7 +656,7 @@ async function mcp(argv: string[]): Promise<number> {
   process.stdout.on("error", () => shutdown(0, gone));
   console.error(`factory board mcp: serving the message board to ${as} (${role}) over stdio (MCP ${PROTOCOL_VERSIONS[0]}).`);
   try {
-    await serveMcp({ board: b, role, numbers, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
+    await serveMcp({ board: b, role, numbers, attach: attachLimits, version: (migrationNames().at(-1) ?? "none").replace(/\.sql$/, "") }, {
       input: process.stdin,
       // A failed write never resolves: the shutdown under way exits the process.
       write: (line) => new Promise<void>((done) => {

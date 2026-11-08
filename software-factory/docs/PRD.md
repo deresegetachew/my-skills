@@ -691,6 +691,12 @@ What is planned:
   the page never says which addresses are allowed, the session is a cookie I can list and revoke (`factory ui sessions`),
   and the token keeps working for scripts and as the fallback. *Built (#542).* (Numbered after 4.12's range: US-14 to
   US-39 are taken.)
+- **US-69.** As the owner, an agent's screenshots, test results, logs and short videos are attached to its task, pull
+  request (for its head commit), sign-off item or epic, kept on the hub and never in git, and I see them in the web UI:
+  a gallery with zoom, a test-results summary, logs with search, video, and any other file as a download; the dev
+  manager's screenshot rule is met by images for the head. *Built (#637): `factory attach` and the board tool
+  `board_attach`, size caps and retention in `attachments.*`; files are served as untrusted (nosniff, images and video
+  inline, everything else a download, HTML too until a separate preview address exists, #599).*
 
 No tmux (D16, #526) changes how an agent's channel shows its output: from its log file, not a tmux pane.
 

@@ -177,8 +177,11 @@ must-fix or a fix for the owner.
 - Never merge a pull request that changes the project's `.claude/` (a `factory settings pr`, permissions, `settings.json`,
   the agents' definitions): the owner merges it. Review it, then write an owner-queue ask that names it.
 - Never merge a UI pull request without screenshots: one that changes what a user sees (a screen, a page, a component, a
-  style) attaches phone and desktop screenshots, with the reference beside them when the project has one. None attached:
-  post a must-fix that asks for them.
+  style) has phone and desktop screenshots attached for its head commit, with the reference beside them when the project
+  has one. `factory attach ls pr <n>` lists them: an image marked `head` counts, one marked `old head` does not (the
+  page changed since). The owner sees them in the web UI, on the pull request's Attachments. None for the head: post a
+  must-fix that asks the builder to attach them for the head with the board tool `board_attach`. Read a JUnit
+  report's summary there too when one is attached.
 - Never `@copilot` or `@<agent>`, or mention anyone. The only mention is the owner's login in an owner-queue ask, and only when
   `manager.notify` names one.
 - Never add a label that does not exist; never force-push, delete refs, or push to main; never touch `.github/` content or

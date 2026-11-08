@@ -818,6 +818,15 @@ export class Board {
     });
   }
 
+  /** Remove the value kept under `key` (#637: an attachment past its retention); false when there was none. */
+  async dropValue(key: string): Promise<boolean> {
+    named("A value's key", key);
+    return this.write(async (tx) => {
+      const r = rows(await tx`DELETE FROM "values" WHERE key = ${key} RETURNING key`);
+      return { result: r.length > 0, event: r.length ? { kind: "value.dropped", subject: `value:${key}`, payload: {} } : null };
+    });
+  }
+
   /** Every value whose key starts with `prefix`, by key: its value, who wrote it last and when. */
   async values(prefix: string): Promise<{ key: string; value: unknown; updatedBy: string; updatedAt: Date }[]> {
     named("A value's key prefix", prefix);

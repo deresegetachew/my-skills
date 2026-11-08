@@ -38,6 +38,7 @@ import { SignInGate } from "./signin.tsx";
 import { type AuthInfo, authHeaders, SESSION, wsAddress } from "./signin_model.ts";
 import { TEAM_CSS, TeamPage } from "./team.tsx";
 import { PR_CSS, PrPage } from "./pr.tsx";
+import { ATTACH_CSS } from "./attachments.tsx";
 import { COSTS_CSS } from "./costs.tsx";
 import { CSS } from "./style.ts";
 import { THEME_CSS } from "./theme.ts";
@@ -998,7 +999,7 @@ function App() {
             talkers={talkTargets(view.channels.filter((c) => c.kind === "agent"))} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} />
           : ownHead && prNumber !== null ? <PrPage key={`${project.id}/${prNumber}`} project={project} number={prNumber} docs={docPages} get={get} post={post}
             say={setToast} open={(c, f) => go(project.id, c, f)} onMenu={() => setMenu(true)} rowKey={prRowKey(viewsBy[project.id], prNumber)}
-            askFirst={find === "merge" ? "merge" : null} />
+            askFirst={find === "merge" ? "merge" : null} token={token} />
           : ownHead && page === "artifacts" ? <ArtifactsPage key={project.id} project={project} get={get} post={post} say={setToast}
             open={(c) => go(project.id, c)} onMenu={() => setMenu(true)} />
           : ownHead && OpsPage ? <OpsPage key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} pulse={pulseBy[project.id] ?? 0}
@@ -1034,7 +1035,7 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + ONBOARDING_CSS + SETTINGS_CSS + PR_CSS
+style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + ONBOARDING_CSS + SETTINGS_CSS + PR_CSS + ATTACH_CSS
   + OPS_CSS + TEAM_CSS + COSTS_CSS + PHONE_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

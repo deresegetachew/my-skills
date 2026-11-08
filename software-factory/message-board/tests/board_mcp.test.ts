@@ -13,7 +13,7 @@ const BIN = join(import.meta.dir, "..", "bin.ts");
 /** A task made on the board, by its number as tools take and give it (#515): b<board id>. */
 const n = (t: { id: number }): string => `b${t.id}`;
 const TOOLS = ["board_prime", "board_ready", "board_claim", "board_heartbeat", "board_release", "board_close", "board_show",
-  "board_post", "board_thread", "board_note", "board_on_me", "board_delegated"];
+  "board_post", "board_thread", "board_note", "board_on_me", "board_delegated", "board_attach"];
 let server: Server | null = null;
 const dbs: { url: string; drop(): Promise<void> }[] = [];
 const clients: Client[] = [];

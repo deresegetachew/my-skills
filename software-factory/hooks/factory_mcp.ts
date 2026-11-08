@@ -34,7 +34,7 @@ export const BOARD_BIN = join(import.meta.dir, "..", "message-board", "bin.ts");
 /** The board tools each board role's server offers (message-board/src/mcp.ts), as the agents' rules allow them. */
 export const BOARD_TOOLS = {
   builder: ["board_prime", "board_ready", "board_claim", "board_heartbeat", "board_release", "board_close", "board_show",
-    "board_post", "board_thread", "board_note", "board_on_me", "board_delegated"],
+    "board_post", "board_thread", "board_note", "board_on_me", "board_delegated", "board_attach"],
   manager: ["board_move", "board_create", "board_assign", "board_link", "board_unlink", "board_comment", "board_signoff_add"],
 };
 
@@ -89,9 +89,21 @@ export function boardOn(cfg: unknown): boolean {
   return typeof t === "string" && t ? t === "board" : boardSetUp();
 }
 
-/** The config with only the board's server, for `as` in its board role and session. */
-export function boardConfig(as: string, role: string, session: string): string {
-  const args = ["--no-env-file", "--config=/dev/null", BOARD_BIN, "mcp", "--as", as, "--role", boardRole(role), "--session", session];
+/** `--attach-limits <file MB>,<project MB>,<days>` for board_attach (#637) when main's settings set any of
+ *  `attachments.maxFileMb`, `maxProjectMb` or `retentionDays`, else nothing (the board's defaults are the settings'). */
+export function attachLimitsArgs(cfg: unknown): string[] {
+  const a = typeof cfg === "object" && cfg !== null ? (cfg as Record<string, unknown>).attachments : undefined;
+  if (typeof a !== "object" || a === null) return [];
+  const o = a as Record<string, unknown>;
+  const whole = (v: unknown, d: number): number => (typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : d);
+  if (o.maxFileMb === undefined && o.maxProjectMb === undefined && o.retentionDays === undefined) return [];
+  return ["--attach-limits", `${whole(o.maxFileMb, 25)},${whole(o.maxProjectMb, 2000)},${whole(o.retentionDays, 30)}`];
+}
+
+/** The config with only the board's server, for `as` in its board role and session (`cfg`: main's settings). */
+export function boardConfig(as: string, role: string, session: string, cfg: unknown = {}): string {
+  const args = ["--no-env-file", "--config=/dev/null", BOARD_BIN, "mcp", "--as", as, "--role", boardRole(role), "--session", session,
+    ...attachLimitsArgs(cfg)];
   return JSON.stringify({ mcpServers: { board: { type: "stdio", command: process.execPath, args } } });
 }
 
@@ -102,7 +114,7 @@ function option(args: string[], name: string): string | undefined {
 }
 
 /** The board's config for this session, or EMPTY with the reason on stderr when it can't be had. */
-function boardFor(args: string[]): string {
+function boardFor(args: string[], cfg: unknown): string {
   const as = option(args, "--as") ?? "";
   if (!ACTOR.test(as)) {
     process.stderr.write(pyDumps({ code: "board_actor", message: `The board's server needs the agent it serves, and ${JSON.stringify(as)} isn't a name it takes; this session starts without it.`,
@@ -115,7 +127,7 @@ function boardFor(args: string[]): string {
     return EMPTY;
   }
   const given = option(args, "--session");
-  return boardConfig(as, option(args, "--role") || "coding-agent", given && ACTOR.test(given) ? given : `${as}-${randomUUID()}`);
+  return boardConfig(as, option(args, "--role") || "coding-agent", given && ACTOR.test(given) ? given : `${as}-${randomUUID()}`, cfg);
 }
 
 function mainFile(path: string): Buffer | null {
@@ -152,7 +164,7 @@ export function main(args: string[] = []): number {
       return 0;
     }
     if (boardOn(cfg)) {
-      console.log(boardFor(args));
+      console.log(boardFor(args, cfg));
       return 0;
     }
     const shown = mainFile(".mcp.json");
