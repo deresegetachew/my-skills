@@ -120,6 +120,22 @@ function link(host: string, port: number, t: string): string {
   return `http://${host}:${port}/?token=${t}`;
 }
 
+/** Tests only (#527): with FACTORY_UI_OWNER_PID set, the server stops within a second of that process going away, so a
+ * test process that is killed (SIGKILL skips its cleanup) leaves no server behind, even through `factory ui`. */
+function watchOwner(stop: () => void): void {
+  const owner = Number(process.env.FACTORY_UI_OWNER_PID);
+  if (!Number.isInteger(owner) || owner <= 1) return;
+  const timer = setInterval(() => {
+    try {
+      process.kill(owner, 0);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "ESRCH") return; // there, as another user
+      clearInterval(timer);
+      stop();
+    }
+  }, 1000);
+}
+
 async function main(argv: string[]): Promise<number> {
   const sub = argv[0] === "sessions" || argv[0] === "mail" ? argv[0] : null;
   if (!sub && (argv.includes("-h") || argv.includes("--help"))) {
@@ -168,6 +184,7 @@ async function main(argv: string[]): Promise<number> {
     };
     process.on("SIGINT", stop);
     process.on("SIGTERM", stop);
+    watchOwner(stop);
   });
   return 0;
 }

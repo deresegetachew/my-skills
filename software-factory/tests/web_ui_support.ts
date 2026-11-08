@@ -121,7 +121,8 @@ process.on("exit", stopAll);
 
 /** Runs `factory ui` (the hook itself, or through `cmd`) in the project and waits for its address and token. */
 export async function startUi(p: Project, args: string[] = ["--port", "0"], cmd: string[] | null = null, env: Env = {}): Promise<Running> {
-  const full = { ...p.env, ...env };
+  // the server stops when this test process is gone, even if it was killed before afterAll ran (#527)
+  const full = { ...p.env, FACTORY_UI_OWNER_PID: String(process.pid), ...env };
   const clean: Record<string, string> = {};
   for (const [k, v] of Object.entries(full)) if (v !== undefined) clean[k] = v;
   const proc = Bun.spawn([...(cmd ?? [...BUN, join(HOOKS, "factory_ui.ts")]), ...args], { cwd: p.d, env: clean, stdin: "ignore",
