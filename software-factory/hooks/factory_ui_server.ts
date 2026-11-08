@@ -222,8 +222,15 @@ export function serve(o: ServeOptions): Running {
 
   // the tasks, pull requests and CI channels (#424): from the snapshot's cache, sent when they change
   const viewsSent = new Map<string, string>();
+  // the board fell back while no page was open (#473): its read from GitHub waits for the next page, so nobody looking
+  // costs no GitHub call; the value is whether the tasks were read from the board until then
+  const fellBackAway = new Map<string, boolean>();
+  function fellBack(p: UiProject, wasLive: boolean): void {
+    if (clients) refresher.tasksNeeded(p, wasLive);
+    else fellBackAway.set(p.id, (fellBackAway.get(p.id) ?? false) || wasLive);
+  }
   const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
-    changed: (p) => pushViews(p), fellBack: (p, wasLive) => refresher.tasksNeeded(p, wasLive), log: (line) => console.log(line),
+    changed: (p) => pushViews(p), fellBack, log: (line) => console.log(line),
     event: (p, items) => publish({ type: "activity", project: p.id, items: ops.pushed(p, items) }) });
   const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
   const prPages = new PrPages(); // a pull request's page (#453), kept until its head changes
@@ -495,6 +502,11 @@ export function serve(o: ServeOptions): Running {
       ws.send(JSON.stringify({ type: "hello", pollSeconds: o.pollSeconds, projects: list.map((p) => p.id) }));
       if (!timer) timer = setInterval(() => void tick(), o.pollSeconds * 1000);
       for (const p of list) {
+        const away = fellBackAway.get(p.id);
+        if (away !== undefined) {
+          fellBackAway.delete(p.id);
+          refresher.tasksNeeded(p, away);
+        }
         refresher.ifStale(p);
         pushActivity(p); // the first time, Activity keeps what the snapshot knows, so only what is new later is pushed (#583)
         if (ws.readyState === 1) ws.send(viewsMessage(p));

@@ -112,11 +112,11 @@ export function transportRemoved(): CoreError {
 
 function messagingPort(s: MessagingSettings, warn: (e: CoreError) => void): Messaging {
   if (s.transport === "nats") throw transportRemoved();
-  if (s.transport !== "board") return new GithubMessaging();
+  if (s.transport !== "board") return new GithubMessaging(githubThreadsFile());
   boardBusState ??= checkedBoardBus();
-  if (boardBusState.port) return new RoutedMessaging(new GithubMessaging(), boardMessaging(), s.kinds, warn);
+  if (boardBusState.port) return new RoutedMessaging(new GithubMessaging(githubThreadsFile()), boardMessaging(), s.kinds, warn);
   fallBack(s, boardBusState.error as CoreError, "Messages go", warn);
-  return new GithubMessaging();
+  return new GithubMessaging(githubThreadsFile());
 }
 
 /** A board that can't be had: thrown with fallback "none", else `warn` hears what goes over GitHub instead. */
@@ -189,6 +189,15 @@ export function boardTokensFile(cwd: string = process.cwd()): string {
   const p = spawnSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" });
   const common = p.status === 0 && p.stdout.trim() ? p.stdout.trim() : resolve(cwd, ".git");
   return join(common, "factory", "board-claims.json");
+}
+
+/** Where `messages` on GitHub keeps each thread's comments between reads (#473): the project's state folder on this
+ * machine, `$XDG_STATE_HOME/<repo>-factory/github-threads.json` (else under ~/.local/state). */
+export function githubThreadsFile(cwd: string = process.cwd()): string {
+  const p = spawnSync("git", ["-C", cwd, "rev-parse", "--path-format=absolute", "--git-common-dir"], { encoding: "utf8" });
+  const common = p.status === 0 && p.stdout.trim() ? p.stdout.trim() : resolve(cwd, ".git");
+  const base = process.env.XDG_STATE_HOME || join(homedir(), ".local", "state");
+  return join(base, `${basename(dirname(common))}-factory`, "github-threads.json");
 }
 
 let boardBusState: { port: (Leases & Wakes & PrFeed) | null; error: CoreError | null } | null = null; // one per process

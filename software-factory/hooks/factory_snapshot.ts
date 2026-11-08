@@ -310,14 +310,26 @@ function otherProjects(): Obj[] {
   return out;
 }
 
-/** The snapshot. `keptTasks`: the tasks part to give without reading the tracker (FACTORY_SNAPSHOT_TASKS=board). */
-export async function snapshot(keptTasks?: Obj | null): Promise<Obj> {
+/** The doctor part of the `last` snapshot while it is younger than FACTORY_SNAPSHOT_DOCTOR_SECONDS (#473): the web UI's
+ *  reads set it, so its doctor's GitHub checks run at most that often; without it, doctor runs at each snapshot. */
+export function keptDoctor(last: Obj | null, now = Date.now()): { doctor: Obj; at: string } | null {
+  const max = Number(process.env.FACTORY_SNAPSHOT_DOCTOR_SECONDS ?? "");
+  if (!(max > 0) || last === null) return null;
+  const at = str(last.doctorAt);
+  const t = parseIso(at);
+  if (t === null || now / 1000 - t > max || typeof last.doctor !== "object" || last.doctor === null) return null;
+  return { doctor: last.doctor as Obj, at };
+}
+
+/** The snapshot. `keptTasks`: the tasks part to give without reading the tracker (FACTORY_SNAPSHOT_TASKS=board).
+ *  `kept`: doctor's part to give without running it (keptDoctor). */
+export async function snapshot(keptTasks?: Obj | null, kept: { doctor: Obj; at: string } | null = null): Promise<Obj> {
   const skip = keptTasks !== undefined;
   const [ls, prs, ciStep, doc, taskStep] = await Promise.all([
     step(hook("factory_agents", "ls", "--json")),
     step(hook("factory_prs", "--json", "--fresh")), // read now: this snapshot is the web UI's own cache
     step(["bash", join(HOOKS, "..", "ci", "ci.sh"), "status", "--json"]),
-    step(hook("factory_doctor")),
+    kept ? Promise.resolve(null) : step(hook("factory_doctor")),
     skip ? Promise.resolve(null) : step(hook("factory_snapshot", "--tasks")),
   ]);
   const missing: Problem[] = [];
@@ -325,12 +337,13 @@ export async function snapshot(keptTasks?: Obj | null): Promise<Obj> {
   const p = pullRequests(prs, missing);
   const needs = needsYou(p);
   const ciData = ci(ciStep, missing);
-  const checks = doctor(doc, missing);
+  const checks = kept ? kept.doctor : doctor(doc as Step, missing);
+  const doctorAt = kept ? kept.at : checks ? isoUtc(Date.now() / 1000) : null;
   const ver = version(missing);
   const limit = limited(missing);
   return {
     generatedAt: isoUtc(Date.now() / 1000), version: ver, sessions: rows ?? [], projects: otherProjects(), needsYou: needs, pulls: p.pulls, ci: ciData,
-    doctor: checks, tasks: taskStep ? tasks(taskStep) : keptTasks ?? null, counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
+    doctor: checks, doctorAt, tasks: taskStep ? tasks(taskStep) : keptTasks ?? null, counts: { sessions: (rows ?? []).length, working: (rows ?? []).filter((r) => r.state === "working").length,
       pulls: (p.pulls ?? []).length, needYou: needs.length },
     missing: limit?.missing ?? missing,
     ...(limit ? { limit: limit.limit } : {}),
@@ -367,7 +380,7 @@ export async function main(argv: string[]): Promise<number> {
   }
   const last = readCache();
   const fromBoard = process.env.FACTORY_SNAPSHOT_TASKS === "board";
-  const snap = keepLast(await snapshot(fromBoard ? (last?.tasks as Obj | null | undefined) ?? null : undefined), last);
+  const snap = keepLast(await snapshot(fromBoard ? (last?.tasks as Obj | null | undefined) ?? null : undefined, keptDoctor(last)), last);
   try {
     writeCache(snap);
   } catch (e) {

@@ -675,6 +675,10 @@ async function onTheBoard(board: TaskBoard, p: UiProject, id: string, action: Ta
   }
 }
 
+/** How long the web UI's snapshots keep doctor's checks before running them again (#473): about a dozen GitHub calls
+ *  each, so at most once an hour while a page is open. */
+export const DOCTOR_SECONDS = 3600;
+
 /** Runs `factory snapshot` in project `p` (its snapshot, written to its cache), at most one at a time per project. */
 export class Refresher {
   private readonly busy = new Map<string, Promise<void>>();
@@ -714,8 +718,9 @@ export class Refresher {
     this.count.set(p.id, this.reads(p) + 1);
   }
 
-  /** Starts a read unless one runs; `force` (the page's read again) ignores when the last one started. */
-  start(p: UiProject, force = false, queued = false): boolean {
+  /** Starts a read unless one runs; `force` (the page's read again) ignores when the last one started. Doctor's part
+   *  is kept from the last read for up to DOCTOR_SECONDS (#473), except on a read again after a change (`fresh`). */
+  start(p: UiProject, force = false, queued = false, fresh = false): boolean {
     if (p.problem || this.busy.has(p.id)) return false;
     const last = this.started.get(p.id) ?? 0;
     if (!force && Date.now() - last < ttl() * 1000) return false; // one that failed is not tried again at each tick
@@ -724,7 +729,7 @@ export class Refresher {
     const skip = this.fromBoard(p) !== false;
     if (skip) this.skipped.add(p.id);
     else this.skipped.delete(p.id);
-    const env = { ...envFor(p), FACTORY_SNAPSHOT_TASKS: skip ? "board" : "" };
+    const env = { ...envFor(p), FACTORY_SNAPSHOT_TASKS: skip ? "board" : "", FACTORY_SNAPSHOT_DOCTOR_SECONDS: fresh ? "" : String(DOCTOR_SECONDS) };
     const job = spawn(["bash", factoryScript(p), "snapshot"], p.path, env, REFRESH_TIMEOUT_MS)
       .then(() => undefined).finally(() => {
         this.busy.delete(p.id);
@@ -742,7 +747,7 @@ export class Refresher {
     if (p.problem) return Promise.resolve();
     const now = this.busy.get(p.id);
     if (!now) {
-      this.start(p, true);
+      this.start(p, true, false, true);
       return this.busy.get(p.id) ?? Promise.resolve();
     }
     let next = this.after.get(p.id);
@@ -750,7 +755,7 @@ export class Refresher {
       this.counted(p);
       next = now.then(() => {
         this.after.delete(p.id);
-        this.start(p, true, true); // already running when one queued by tasksNeeded() began first: that one is after the change too
+        this.start(p, true, true, true); // already running when one queued by tasksNeeded() began first: that one is after the change too
         return this.busy.get(p.id);
       });
       this.after.set(p.id, next);
