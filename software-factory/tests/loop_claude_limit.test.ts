@@ -76,8 +76,11 @@ function setup(extra: Record<string, string> = {}): Setup {
   return { work, env, state: join(stateHome, "work-factory", "claude-limit.json"), log: join(d, "log") };
 }
 
-function hhmm(t: number): string {
-  return new Date(t * 1000).toISOString().slice(11, 16);
+// The clock the command prints (TZ is UTC here): HH:MM on the same day, the date first on another day.
+function hhmm(t: number, from: number = Date.now() / 1000): string {
+  const iso = new Date(t * 1000).toISOString();
+  const sameDay = iso.slice(0, 10) === new Date(from * 1000).toISOString().slice(0, 10);
+  return sameDay ? iso.slice(11, 16) : `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
 function count(text: string, part: string): number {
@@ -158,12 +161,15 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 }
 
 test("a product owner's pass that ends on the limit three times is not an item that came up 3 times in a row", () => {
-  const s = setup({ FACTORY_ROLE: "product-owner", LIMITED_RUNS: "9", RESET_IN: "1" });
+  // Each fake limit resets an hour ahead, and the test clock stands still (FACTORY_NOW, which also makes the wait say its
+  // line without sleeping), so every pass after one on the limit finds it active however slow the machine is.
+  const s = setup({ FACTORY_ROLE: "product-owner", LIMITED_RUNS: "9", RESET_IN: "3600" });
+  s.env.FACTORY_NOW = String(Math.floor(Date.now() / 1000));
   const p = sh(["bash", "./factory-loop.sh", "4"], { cwd: s.work, env: s.env, timeoutMs: 90_000 });
   expect(p.code, p.out).toBe(0);
   expect(p.out).not.toContain("came up 3 times in a row");
   expect(p.out).not.toContain("passes failed in a row");
   expect(claudeRuns(s)).toBe(4);
   expect(count(p.stdout, "The session ended on Claude's usage limit")).toBe(4);
-  expect(count(p.stdout, "Claude limit reached; waiting until")).toBeGreaterThanOrEqual(3); // each pass after one on the limit waits first
+  expect(count(p.stdout, "Claude limit reached; waiting until")).toBe(3); // passes 2, 3 and 4 each wait first; pass 1 finds no limit
 });
