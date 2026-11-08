@@ -73,6 +73,18 @@ test("a refusal is {code, message, fix}, and the URL's password is never printed
   expect(JSON.parse(none.stdout.toString())).toMatchObject({ ok: false, code: "no-answer" });
 });
 
+test("an answer bigger than a pipe holds comes back whole: the child exits only after its line is written (#639)", async () => {
+  // A board with long task bodies gives a `tasks` answer of a megabyte or more. The child used to write it and exit at
+  // once, so a pipe's reader got the first part only, and the caller saw "the child exited 0".
+  const big = "x".repeat(3_000_000);
+  const b = await Board.open(url(), { as: "haile" });
+  const made = await b.create({ title: title("big"), body: big }).finally(() => b.end());
+  const r = child({ url: url(), calls: [{ op: "get", args: [made.id] }] });
+  expect(r.out.endsWith("\n")).toBe(true);
+  const [got] = results(r.answer) as [{ id: number; body: string }];
+  expect(got.body).toHaveLength(big.length);
+});
+
 test("edges() with no id gives every edge on the board", async () => {
   const b = await Board.open(url(), { as: "system" });
   try {
