@@ -1090,7 +1090,7 @@ test("ls shows a loop waiting on Claude's limit with the reset time from the sha
     const out = w.cli("factory_agents", ["ls", "--json", "--local"], undefined, { TZ: "UTC" });
     expect(out.code, out.out).toBe(0);
     const row = (JSON.parse(out.stdout) as { agents: Array<Record<string, unknown>> }).agents.find((r) => r.name === "taytu");
-    expect([row?.state, row?.detail, row?.on]).toEqual(["waiting", `waiting on the Claude limit until ${iso(reset).slice(11, 16)}`, "claude-limit"]);
+    expect([row?.state, row?.detail, row?.on]).toEqual(["waiting", `waiting on the Claude limit until ${iso(reset).slice(0, 10) === iso(w.clock).slice(0, 10) ? iso(reset).slice(11, 16) : iso(reset).slice(0, 10) + " " + iso(reset).slice(11, 16)}`, "claude-limit"]);
   } finally {
     sh(["pkill", "-P", String(p.pid)]);
     p.kill(9);
