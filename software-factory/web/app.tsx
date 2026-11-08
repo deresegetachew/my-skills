@@ -633,7 +633,7 @@ function App() {
           setLiveBy((before) => ({ ...before, [project as string]: data }));
         } else if (m.type === "views" && m.project) {
           const { type: _t, project, ...data } = m as unknown as { type: string; project: string } & ViewsData;
-          setViewsBy((before) => ({ ...before, [project]: data }));
+          setViewsBy((before) => ({ ...before, [project]: { ...data, receivedAt: Date.now() } })); // its age counts on from here (#529)
         } else if (m.type === "attention" && m.project) {
           const { items } = m as unknown as { items: AttentionItem[] };
           setAttentionBy((before) => ({ ...before, [m.project as string]: Array.isArray(items) ? items : [] }));

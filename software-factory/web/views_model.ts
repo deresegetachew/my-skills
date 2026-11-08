@@ -130,7 +130,11 @@ export interface ActionRow {
 
 export interface ViewsData {
   generatedAt: string | null;
+  /** Seconds since the snapshot was written, when the server sent this. */
   age: number | null;
+  /** When this page got it (ms, this page's clock): the server sends views only when they change, not when `age` grows
+   *  (#529), so the page counts the age on from here (ageNow). */
+  receivedAt?: number;
   refreshing: boolean;
   problems: ProblemView[];
   /** `done`: the tasks finished in the last days (the message board's, #545), for the Done column. */
@@ -166,6 +170,13 @@ function everyText(seconds: number): string {
 }
 
 /** "From the message board, live", or "From GitHub, read every 5 min"; "" when the server doesn't say. */
+/** How old the views are now, in seconds: the age the server sent plus the time since it came (#529); null with none. */
+export function ageNow(v: Pick<ViewsData, "age" | "receivedAt">, nowMs: number): number | null {
+  if (v.age === null) return null;
+  const since = v.receivedAt === undefined ? 0 : Math.max(Math.round((nowMs - v.receivedAt) / 1000), 0);
+  return v.age + since;
+}
+
 export function originText(o: Origin): string {
   if (o.from === "board") return "From the message board, live";
   if (o.from === "github") return typeof o.every === "number" && o.every > 0 ? `From GitHub, read every ${everyText(o.every)}` : "From GitHub";
