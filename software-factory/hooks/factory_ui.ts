@@ -134,6 +134,7 @@ function watchOwner(stop: () => void): void {
       stop();
     }
   }, 1000);
+  timer.unref(); // the server keeps the process alive; after a stop the watch must not
 }
 
 async function main(argv: string[]): Promise<number> {
