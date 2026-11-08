@@ -99,3 +99,73 @@ test("starts a child, then waits", async () => {
   await Bun.sleep(300);
   expect(alive(mark), "a child is still running after Ctrl-C on the runner").toEqual([]);
 });
+
+/** Every process below `root` (its children, theirs, and so on), from `ps`. */
+function below(root: number): number[] {
+  const kids = new Map<number, number[]>();
+  for (const line of sh(["ps", "-axo", "pid=,ppid="]).stdout.split("\n")) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (!pid || ppid === undefined) continue;
+    kids.set(ppid, [...(kids.get(ppid) ?? []), pid]);
+  }
+  const out: number[] = [];
+  for (let todo = [...(kids.get(root) ?? [])]; todo.length;) {
+    const pid = todo.shift() as number;
+    out.push(pid);
+    todo.push(...(kids.get(pid) ?? []));
+  }
+  return out;
+}
+
+const gone = (pid: number): boolean => sh(["kill", "-0", String(pid)]).code !== 0;
+
+/** Runs a web UI test file with plain `bun test`, waits for its server, kills the test process alone with SIGKILL (as a
+ * cancelled CI job or a killed runner can), and returns the processes it had started that are still running. */
+async function killedMidway(start: string, setup = ""): Promise<{ left: number[]; out: string }> {
+  const dir = tmp("cleanup-");
+  const file = join(dir, "ui_killed.test.ts");
+  const outFile = join(dir, "out.txt");
+  write(file, `import { test } from "bun:test";
+import { project, startUi } from ${JSON.stringify(join(SF, "tests", "web_ui_support.ts"))};
+import { join } from "node:path";
+import { mkdirSync, symlinkSync } from "node:fs";
+const SF = ${JSON.stringify(SF)};
+test("starts the UI, then never ends", async () => {
+  const p = project();
+  mkdirSync(join(p.d, ".claude"), { recursive: true });
+  ${setup}
+  const ui = await ${start};
+  console.log("UI_URL=" + ui.url);
+  await new Promise(() => {});
+}, 120_000);
+`);
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
+  const proc = Bun.spawn([process.execPath, "test", file], { cwd: ROOT, env, stdin: "ignore", stdout: Bun.file(outFile),
+    stderr: Bun.file(outFile) });
+  let out = "";
+  for (let i = 0; i < 300 && !out.includes("UI_URL="); i++) {
+    await Bun.sleep(100);
+    out = await Bun.file(outFile).text().catch(() => "");
+  }
+  const started = below(proc.pid);
+  proc.kill("SIGKILL");
+  await proc.exited;
+  for (let i = 0; i < 50 && !started.every(gone); i++) await Bun.sleep(100);
+  const left = started.filter((pid) => !gone(pid));
+  for (const pid of left) sh(["kill", "-9", String(pid)]); // a red run leaves nothing either
+  return { left, out: `${out}\nstarted: ${started.join(" ")}` };
+}
+
+test("a web UI test file killed in the middle leaves no factory ui server behind (#527)", async () => {
+  const r = await killedMidway("startUi(p)");
+  expect(r.out).toContain("UI_URL=");
+  expect(r.left, `still running after the test process was killed:\n${r.out}`).toEqual([]);
+}, 60_000);
+
+test("a web UI test file killed in the middle leaves no server when it ran `factory ui` (#527)", async () => {
+  const r = await killedMidway(`startUi(p, ["ui", "--port", "0"], ["bash", join(SF, "factory")])`,
+    `symlinkSync(join(SF, "hooks"), join(p.d, ".claude", "hooks"));`);
+  expect(r.out).toContain("UI_URL=");
+  expect(r.left, `still running after the test process was killed:\n${r.out}`).toEqual([]);
+}, 60_000);
