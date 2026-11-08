@@ -40,6 +40,8 @@ if (p === "repos/{owner}/{repo}") out(db.repo ?? { owner: { login: "boss", type:
 if (p === "pulls") { const want = q.get("state") ?? "open"; paged(db.pulls.filter((x: any) => (x.state ?? "open") === want)); }
 let m = /^pulls\/(\d+)$/.exec(p);
 if (m) out(db.pulls.find((x: any) => x.number === Number(m![1])));
+m = /^pulls\/(\d+)\/files$/.exec(p);
+if (m) paged(((db.files ?? {})[m[1] as string] ?? []).map((filename: string) => ({ filename })));
 if (p === "issues" && method === "GET") {
   let items = db.issues; const st = q.get("state") ?? "open";
   if (st !== "all") items = items.filter((x: any) => (x.state ?? "open") === st);

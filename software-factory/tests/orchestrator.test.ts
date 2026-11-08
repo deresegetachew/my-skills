@@ -119,6 +119,64 @@ test("check 4 approved and green is a merge item but the manager's own pr goes t
   expect("pr-5" in watch(work, env), "CI still running is not green").toBe(false);
 });
 
+test("an approved green pr that touches a protected file waits for the owner and starts no sub manager (#474)", () => {
+  const ok = { commits: { [H]: iso(60) }, checks: { [H]: [okRun()] }, comments: { "5": [comment(1, `<!-- factory-approved sha=${H} -->`, 30)] },
+    files: { "5": [".claude/hooks/thing.ts", "README.md"] } };
+  const [d, work, env] = world({ db: { pulls: [pr(5)], ...ok } });
+  const got = watch(work, env);
+  expect("pr-5" in got, JSON.stringify(got)).toBe(false);
+  const own = Object.values(got).find((i) => i.kind === "owner" && i.pr === 5) as Row;
+  expect(own?.to).toBe("owner");
+  expect(own?.line).toContain("waits for the owner to merge");
+  expect(own?.line).toContain(".claude/hooks/thing.ts");
+  let p = cycle(work, env, "--wait");
+  expect(p.code, p.out).toBe(0);
+  expect(prompts(env), "no sub-manager for a pr only the owner may merge").toEqual([]);
+  expect(posted(d, 5).filter((b) => b.includes("-claim ")), "no review claim taken").toEqual([]);
+  const asks = () => ownerComments(d)[1].filter((b) => b.includes("PR #5"));
+  expect(asks().length, ownerComments(d)[1].join("\n---\n")).toBe(1);
+  expect(asks()[0]).toContain("waits for the owner to merge");
+  p = cycle(work, env, "--wait");
+  expect(p.code, p.out).toBe(0);
+  expect(prompts(env), "a second cycle starts none either").toEqual([]);
+  expect(asks().length, "the ask is posted once").toBe(1);
+  put(d, { pulls: [pr(5, { sha: H2 })], commits: { [H]: iso(60), [H2]: iso(30) } });
+  expect(watch(work, env)["pr-5"]?.kind, "a new commit is a new review").toBe("review");
+});
+
+test("a pr whose body says a person merges it waits for the owner too (#474)", () => {
+  const [, work, env] = world({ db: { pulls: [pr(5, { body: "Closes #3\n\nA person merges this one: it changes the gate." })],
+    commits: { [H]: iso(60) }, checks: { [H]: [okRun()] }, comments: { "5": [comment(1, `<!-- factory-approved sha=${H} -->`, 30)] },
+    files: { "5": ["src/app.ts"] } } });
+  const got = watch(work, env);
+  expect("pr-5" in got, JSON.stringify(got)).toBe(false);
+  expect(Object.values(got).some((i) => i.kind === "owner" && i.pr === 5)).toBe(true);
+});
+
+test("a red pr the manager already explained starts one sub manager at most until something changes (#474)", () => {
+  const failed = (ago: number, id = 2): Row => ({ ...badRun("lint"), id, started_at: iso(ago + 5), completed_at: iso(ago) });
+  const [d, work, env] = world({ db: { pulls: [pr(5)], commits: { [H]: iso(60) }, checks: { [H]: [failed(50)] } } });
+  let p = cycle(work, env, "--wait");
+  expect(p.code, p.out).toBe(0);
+  expect(prompts(env).length, "the first cycle looks at it").toBe(1);
+  expect(skipComments(d, 5).length, posted(d, 5).join("\n---\n")).toBe(1);
+  p = cycle(work, env, "--wait");
+  expect(p.code, p.out).toBe(0);
+  expect(prompts(env).length, "nothing changed: no second sub-manager\n" + p.out).toBe(1);
+  expect("pr-5" in watch(work, env)).toBe(false);
+  const skip = comment(9, `<!-- factory-manager-skip sha=${H} -->\nDev manager lead looked at this pull request and did not review it.`, 10);
+  put(d, { comments: { "5": [skip] } });
+  expect("pr-5" in watch(work, env), "a skip on the head settles it").toBe(false);
+  put(d, { comments: { "5": [skip, comment(10, "I fixed the runner, please look again.", 5)] } });
+  expect("pr-5" in watch(work, env), "a new comment after the skip restarts it").toBe(true);
+  put(d, { comments: { "5": [skip, comment(10, `<!-- factory-review-claim manager=lead sha=${H} until=${iso(3)} -->`, 5)] } });
+  expect("pr-5" in watch(work, env), "a claim is bookkeeping, not a new comment").toBe(false);
+  put(d, { comments: { "5": [skip] }, checks: { [H]: [failed(2, 3)] } });
+  expect("pr-5" in watch(work, env), "a CI result newer than the skip restarts it").toBe(true);
+  put(d, { checks: { [H]: [failed(50)] }, pulls: [pr(5, { sha: H2 })], commits: { [H]: iso(60), [H2]: iso(30) } });
+  expect(watch(work, env)["pr-5"]?.kind, "a new commit restarts it").toBe("review");
+});
+
 test("check 5 a pull request that waited long for the product owner goes to the owner", () => {
   const cfg = { roles: { "product-owner": { workLabel: "factory:needs-product" } } };
   const [d, work, env] = world({ cfg, db: { pulls: [pr(5, { draft: true, labels: ["factory:needs-product"] })], commits: { [H]: iso(600) },
