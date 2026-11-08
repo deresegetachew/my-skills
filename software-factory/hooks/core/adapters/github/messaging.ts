@@ -5,6 +5,12 @@
 // The cursor holds, for each thread, its newest comment's time and the ids of the comments at that time, so a comment
 // is read once even when several share a second, and a comment on one thread is never hidden by a newer one on
 // another. A card is what an agent is now, not something said: it is read only with no cursor.
+//
+// Each thread's comments are kept between reads in a file on this machine (#473), with the issue's `updated_at` and
+// comment count when they were read: a thread whose two are unchanged is not asked for its comments again, so a read
+// where nothing moved costs one call (the list of open issues and PRs).
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { type Comment, gh, ghAll, type Issue } from "../../../factory_issues.ts";
 import { CoreError } from "../../domain/error.ts";
 import { badCursor, commentBody, type CommentLike, type Message, messagesOf, needsRef, parseComment, REF, refNumber,
@@ -18,8 +24,18 @@ interface Mark {
   ids: string[]; // the comments read at that time
 }
 
+/** A thread's comments as last read, and what its issue said then. */
+interface Kept {
+  updated: string;
+  count: number;
+  comments: Comment[];
+}
+
 export class GithubMessaging implements Messaging {
   private known = new Set<string>();
+
+  /** `threadsFile`: where each thread's comments are kept between reads; null keeps nothing (each read asks for all). */
+  constructor(private readonly threadsFile: string | null = null) {}
 
   send(m: Message, text: string): Message {
     const ref = REF.exec(m.ref);
@@ -33,6 +49,8 @@ export class GithubMessaging implements Messaging {
     const after = cursor === null ? null : decode(cursor);
     const marks: Record<string, Mark> = { ...(after ?? {}) };
     const messages: Message[] = [];
+    const kept = this.keptThreads();
+    const seen: Record<string, Kept> = scope.ref ? { ...kept } : {}; // a whole read drops the threads that closed
     for (const item of items(scope.ref)) {
       const thread = (item.pull_request ? "pr#" : "issue#") + item.number;
       const ids = new Set<string>(); // per thread, as fold reads it: the same message twice (posted again) is read once
@@ -49,7 +67,7 @@ export class GithubMessaging implements Messaging {
         continue;
       }
       if (!(item.comments ?? 1)) continue; // nothing was said there: no call
-      const comments = once(ghAll<Comment>(`repos/{owner}/{repo}/issues/${item.number}/comments`));
+      const comments = this.commentsOf(item, kept[thread], (k) => { seen[thread] = k; });
       const before = after?.[thread] ?? null;
       const mark: Mark = { at: before?.at ?? "", ids: [...(before?.ids ?? [])] };
       comments.forEach((c, i) => {
@@ -62,7 +80,44 @@ export class GithubMessaging implements Messaging {
       });
       if (mark.at) marks[thread] = mark;
     }
+    this.keep(seen);
     return { messages, cursor: PREFIX + Buffer.from(JSON.stringify(marks)).toString("base64url") };
+  }
+
+  /** `item`'s comments: the kept ones while its `updated_at` and comment count are what they were, else read now. */
+  private commentsOf(item: Issue, before: Kept | undefined, keep: (k: Kept) => void): Comment[] {
+    const updated = item.updated_at ?? "";
+    const count = item.comments ?? -1;
+    if (before && updated && before.updated === updated && before.count === count) {
+      keep(before);
+      return before.comments;
+    }
+    const comments = once(ghAll<Comment>(`repos/{owner}/{repo}/issues/${item.number}/comments`));
+    if (updated) keep({ updated, count, comments });
+    return comments;
+  }
+
+  private keptThreads(): Record<string, Kept> {
+    if (!this.threadsFile) return {};
+    try {
+      const data = JSON.parse(readFileSync(this.threadsFile, "utf8")) as unknown;
+      return typeof data === "object" && data !== null && !Array.isArray(data) ? (data as Record<string, Kept>) : {};
+    } catch {
+      return {}; // none yet, or unreadable: read every thread
+    }
+  }
+
+  /** Writes the kept threads; one that can't be written only means the next read asks again. */
+  private keep(threads: Record<string, Kept>): void {
+    if (!this.threadsFile) return;
+    try {
+      mkdirSync(dirname(this.threadsFile), { recursive: true });
+      const tmp = `${this.threadsFile}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(threads), { mode: 0o600 });
+      renameSync(tmp, this.threadsFile);
+    } catch {
+      // said above
+    }
   }
 
   ack(id: string): void {
