@@ -296,7 +296,8 @@ export function checkoutRoot(cwd: string, projectDir = process.env.CLAUDE_PROJEC
   } catch {
     real = top;
   }
-  if (real && real !== root) {
+  if (!real) return { ok: false, why: `${root} isn't a git checkout` };
+  if (real !== root) {
     return { ok: false, why: `git says the checkout is ${real}, which isn't the checkout this runs in (${root})` };
   }
   return { ok: true, root };

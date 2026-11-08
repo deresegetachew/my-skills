@@ -443,3 +443,18 @@ test("a hard link to a file outside the checkout is refused", async () => {
   expect(r.isError).toBe(true);
   expect(await w.board.values("attachment")).toEqual([]);
 });
+
+test("a folder that isn't a git checkout is refused, and nothing is written", async () => {
+  const w = await world();
+  const plain = join(w.root, "plain"); // above the worktree: no git checkout
+  mkdirSync(plain);
+  writeFileSync(join(plain, "shot.png"), PNG);
+  const r = await mcp(w, plain, "board_attach", { target: "task", id: "b3", files: ["shot.png"] });
+  expect(r.isError).toBe(true);
+  expect(String((r.out.error as Row).message)).toContain("isn't a git checkout");
+  const p = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(HOOKS, "factory_attach.ts"), "task", "7", "shot.png"],
+    { cwd: plain, env: w.env, timeoutMs: 120_000 });
+  expect(p.code, p.out).toBe(1);
+  expect(await w.board.values("attachment")).toEqual([]);
+  expect(stored(w)).toEqual([]);
+});
