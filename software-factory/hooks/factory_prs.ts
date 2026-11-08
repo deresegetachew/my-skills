@@ -418,9 +418,20 @@ export function nextAction(p: PullRow, held: boolean, runsByJob: Map<string, num
 // --- assembling the list -----------------------------------------------------------------------------------------
 
 function isProtected(number: number, body: unknown, cfg: Config): boolean {
-  if (str(body).toLowerCase().includes(PERSON_MERGES)) return true;
-  const files = fi.ghAll<Obj>(`repos/{owner}/{repo}/pulls/${number}/files`).map((f) => str(f.filename));
-  return files.some((f) => !cfg.alwaysAllowed.includes(f) && cfg.protected.some((rx) => new RegExp(rx).test(f)));
+  return personMerges(cfg, body, prFiles(number)) !== null;
+}
+
+/** The files a pull request changes, as GitHub lists them. */
+export function prFiles(number: number): string[] {
+  return fi.ghAll<Obj>(`repos/{owner}/{repo}/pulls/${number}/files`).map((f) => str(f.filename));
+}
+
+/** Why only a person may merge a pull request, the test the PR gate uses: its body says "a person merges this one"
+ * (an empty list), or the protected files it changes. null when an agent may merge it. */
+export function personMerges(cfg: Config, body: unknown, files: string[]): string[] | null {
+  if (str(body).toLowerCase().includes(PERSON_MERGES)) return [];
+  const hit = files.filter((f) => !cfg.alwaysAllowed.includes(f) && cfg.protected.some((rx) => new RegExp(rx).test(f)));
+  return hit.length ? hit : null;
 }
 
 export function trustedOf(cfg: Config): Set<string> {

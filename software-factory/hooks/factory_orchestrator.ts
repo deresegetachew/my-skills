@@ -39,7 +39,8 @@ import { type Config, load, managerSetting, roleNames, safeAgent, taskLabels, to
 import { comment, type Comment, gh, ghAll, type Issue, taskIssues } from "./factory_issues.ts";
 import * as lease from "./factory_lease.ts";
 import { permissionFlags, prompt as rolePrompt, sessionFlags } from "./factory_roles.ts";
-import { ciState, collect, isoformat, issueOf, isOwn, type Item, make, minutes, type Pull, reviewState } from "./factory_watch.ts";
+import { BOOKKEEPING, ciState, collect, isoformat, issueOf, isOwn, type Item, make, minutes, type Pull, reviewState,
+  SKIP_RX } from "./factory_watch.ts";
 import { boardOn } from "./factory_mcp.ts";
 import { claudeBin } from "./factory_claude.ts";
 import { bunCmd, Exit, GITHUB_BUSY, parseArgs, run, runMain, which } from "./factory_lib.ts";
@@ -317,9 +318,6 @@ export function running(name: string): string[] {
 }
 
 // --- a skipped pull request --------------------------------------------------------------------------------------------
-
-export const SKIP_RX = /<!--\s*factory-manager-skip\s+sha=(\w+)\s*-->/;
-export const BOOKKEEPING = /<!--\s*factory-(?:review-claim|claim-release|manager-note|answer-claim|item-claim)\b/;
 
 /** [reason, next step] for a pull request the sub-manager left without a verdict, from facts alone. */
 export function skipReason(prObj: Partial<Pull>, head: string): [string, string] {
