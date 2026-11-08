@@ -240,6 +240,29 @@ test("a write on the board reaches an open WebSocket within a second", async () 
   }
 }, T);
 
+test("with nothing changing, an open WebSocket gets no second views over a few polls; a board write sends one (#529)", async () => {
+  const url = await boardUrl();
+  const { board } = await seeded(url);
+  const ui = await started(workProject(), url);
+  const { ws, next } = socket(ui);
+  const views: string[] = [];
+  ws.addEventListener("message", (e) => {
+    const m = JSON.parse(String(e.data)) as Row;
+    if (m.type === "views" && m.project === "work") views.push(String(e.data));
+  });
+  try {
+    expect(await next(fromBoardViews, 15_000), "the first views from the board").not.toBeNull();
+    await Bun.sleep(1_500); // let the reads the start began settle
+    const settled = views.length;
+    await Bun.sleep(4_500); // four of the server's reads at ui.pollSeconds (1 s)
+    expect(views.slice(settled), "nothing changed, so nothing is sent again").toEqual([]);
+    await board.create({ title: "Reset the password", ref: ref(20), priority: 9 });
+    expect(await next((x) => fromBoardViews(x) && rowsOf(x.tasks as Row).some((t) => t.id === "20"), 3_000), "the write is sent").not.toBeNull();
+  } finally {
+    ws.close();
+  }
+}, T);
+
 test("with a board, the server asks the snapshot not to read tasks from GitHub, and no GitHub call reads them", async () => {
   const url = await boardUrl();
   await seeded(url);
