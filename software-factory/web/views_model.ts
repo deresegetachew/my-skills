@@ -169,7 +169,6 @@ function everyText(seconds: number): string {
   return `${Math.round(seconds / 3600)} h`;
 }
 
-/** "From the message board, live", or "From GitHub, read every 5 min"; "" when the server doesn't say. */
 /** How old the views are now, in seconds: the age the server sent plus the time since it came (#529); null with none. */
 export function ageNow(v: Pick<ViewsData, "age" | "receivedAt">, nowMs: number): number | null {
   if (v.age === null) return null;
@@ -177,6 +176,7 @@ export function ageNow(v: Pick<ViewsData, "age" | "receivedAt">, nowMs: number):
   return v.age + since;
 }
 
+/** "From the message board, live", or "From GitHub, read every 5 min"; "" when the server doesn't say. */
 export function originText(o: Origin): string {
   if (o.from === "board") return "From the message board, live";
   if (o.from === "github") return typeof o.every === "number" && o.every > 0 ? `From GitHub, read every ${everyText(o.every)}` : "From GitHub";
