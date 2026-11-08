@@ -12,7 +12,7 @@
 //   POST /api/add-project/runs/:id/retry    {confirm: true}: go on from the failed step
 //
 // Every change is pushed to the page as {type: "add-project", run}; {type: "projects"} once the new project is listed.
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { addedFile, addedPaths, envFor, factoryScript, type Obj, type Problem, projectAt, readJson, type Ran, spawn,
   type UiProject } from "./factory_ui_data.ts";
@@ -71,7 +71,47 @@ export interface AddRequest {
   /** The GitHub login whose reviews count (trustedReviewers); empty: the login signed in on this machine. */
   reviewer: string;
   protected: string[];
+  /** A solo team (#457) has one builder and no dev manager or product owner: both are "". */
   team: { devManager: string; productOwner: string; builders: string[] };
+  /** The agents' pictures (#457), by name, as data URLs checked by avatarsOf; written to .claude/factory/avatars/. */
+  avatars: Record<string, string>;
+}
+
+/** The pictures the setup takes, by data URL type: the file's extension and its first bytes (#457). SVG isn't taken
+ * from the page, since it can carry a script. */
+const AVATAR_KINDS: Record<string, { ext: string; magic: (b: Buffer) => boolean }> = {
+  "image/png": { ext: "png", magic: (b) => b.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
+  "image/jpeg": { ext: "jpg", magic: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+  "image/webp": { ext: "webp", magic: (b) => b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP" },
+  "image/gif": { ext: "gif", magic: (b) => b.subarray(0, 4).toString("latin1") === "GIF8" },
+};
+const AVATAR_MAX_BYTES = 256 * 1024;
+const AVATARS_DIR = ".claude/factory/avatars";
+/** Every extension an owner's picture can have (factory_ui_data.ts reads these), so a new one replaces any other. */
+const AVATAR_EXTS = ["png", "jpg", "jpeg", "webp", "gif", "svg"];
+
+/** A picture's extension and bytes from its data URL, or null when it isn't a picture the setup takes. */
+function avatarFile(url: unknown): { ext: string; data: Buffer } | null {
+  const m = typeof url === "string" ? /^data:([a-z/+]+);base64,([A-Za-z0-9+/=]+)$/.exec(url) : null;
+  const kind = m ? AVATAR_KINDS[m[1] as string] : undefined;
+  if (!m || !kind) return null;
+  const data = Buffer.from(m[2] as string, "base64");
+  return data.length > 0 && data.length <= AVATAR_MAX_BYTES && kind.magic(data) ? { ext: kind.ext, data } : null;
+}
+
+/** The request's pictures, each for an agent on the team and a picture the setup takes, or the problem. */
+function avatarsOf(raw: unknown, names: string[]): { avatars: Record<string, string> } | { problem: Problem } {
+  if (raw === undefined || raw === null) return { avatars: {} };
+  const bad = (what: string): { problem: Problem } => ({ problem: problem("ui_add_avatar", what,
+    "Give each agent on the team a PNG, JPEG, WebP or GIF picture of 256 KB at most, or none.") });
+  if (typeof raw !== "object" || Array.isArray(raw)) return bad("The pictures aren't a list by agent name.");
+  const out: Record<string, string> = {};
+  for (const [name, url] of Object.entries(raw as Obj)) {
+    if (!names.includes(name)) return bad(`"${name}" has a picture but isn't on the team.`);
+    if (!avatarFile(url)) return bad(`${name}'s picture isn't a PNG, JPEG, WebP or GIF of 256 KB at most.`);
+    out[name] = url as string;
+  }
+  return { avatars: out };
 }
 
 /** The commands a request gives, in the order factory.json keeps them. */
@@ -292,13 +332,16 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
   const t: Obj = typeof b.team === "object" && b.team !== null ? (b.team as Obj) : {};
   const team = { devManager: str(t.devManager), productOwner: str(t.productOwner),
     builders: Array.isArray(t.builders) ? t.builders.map(str) : [] };
-  const names = [team.devManager, team.productOwner, ...team.builders];
+  const solo = team.devManager === "" && team.productOwner === ""; // one builder; the owner reviews and merges (#457)
+  const names = solo ? team.builders : [team.devManager, team.productOwner, ...team.builders];
   const bad = names.find((n) => !AGENT_NAME.test(n));
   if (!team.builders.length || bad !== undefined || new Set(names).size !== names.length) {
     return problem("ui_add_team", !team.builders.length ? "The team has no builder." : bad !== undefined
       ? `"${bad}" isn't an agent name.` : "Two agents have the same name.",
       "Pick at least one builder, and give every agent its own name: lowercase letters, digits and dashes.");
   }
+  const pictures = avatarsOf(b.avatars, names);
+  if ("problem" in pictures) return pictures.problem;
   const prot = Array.isArray(b.protected) ? b.protected.map(str).filter(Boolean) : [];
   const odd = prot.find((p) => /[\u0000-\u001f\u007f]/.test(p) || p.startsWith("/"));
   if (odd !== undefined) {
@@ -310,7 +353,7 @@ export async function validate(body: unknown, host: AddHost): Promise<AddRequest
   }
   return { source, repo: source === "folder" ? "" : repo, path, visibility: b.visibility === "public" ? "public" : "private", tasks,
     mainBranch, install: str(b.install), typecheck: str(b.typecheck), lint: str(b.lint), test: str(b.test), build: str(b.build),
-    reviewer, protected: [...new Set(prot)], team };
+    reviewer, protected: [...new Set(prot)], team, avatars: pictures.avatars };
 }
 
 /** The commands a request gives, in words: "test `bun test`, lint `x`", or that none is given. */
@@ -499,6 +542,7 @@ async function reviewerOf(req: AddRequest): Promise<string> {
 function writeAnswers(req: AddRequest, step: AddStep, host: AddHost, reviewer: string): string {
   const file = join(req.path, ".claude", "factory.json");
   step.command = `write ${file}`;
+  refuseLinkedAvatars(req);
   let cfg: Obj = {};
   if (existsSync(file)) {
     const raw = readJson(file);
@@ -521,12 +565,52 @@ function writeAnswers(req: AddRequest, step: AddStep, host: AddHost, reviewer: s
   cfg.protected = [...new Set([...had, ...req.protected.map(protectedRegex)])];
   cfg.agents = req.team.builders;
   const roles = objAt(cfg, "roles");
-  objAt(roles, "dev-manager").names = [req.team.devManager];
-  objAt(roles, "product-owner").names = [req.team.productOwner];
+  objAt(roles, "dev-manager").names = req.team.devManager ? [req.team.devManager] : [];
+  objAt(roles, "product-owner").names = req.team.productOwner ? [req.team.productOwner] : [];
   if (req.tasks === "board" || namesBoard(host.serving)) objAt(cfg, "messaging").transport = "board";
   writeJson(file, cfg);
-  return [`Saved in ${file}.`, reviewer ? `Trusted reviewer: ${reviewer}.`
+  const pictures = writeAvatars(req);
+  return [`Saved in ${file}.`, ...(pictures.length ? [`Pictures: ${pictures.join(", ")}.`] : []), reviewer ? `Trusted reviewer: ${reviewer}.`
     : "No trusted reviewer: GitHub didn't say who is signed in here. Set one with `factory settings set trustedReviewers '[\"<your-login>\"]'`."].join("\n");
+}
+
+/** The agents' pictures (#457) in .claude/factory/avatars/<name>.<ext>, readable by all (the UI's server reads them, and
+ * they are committed); another picture the agent had is taken away, so this one is shown. The repo paths written. Each is
+ * written to a new temp file and renamed over the target, so a link the repo ships there is replaced, never followed. */
+function writeAvatars(req: AddRequest): string[] {
+  const dir = join(req.path, AVATARS_DIR);
+  const out: string[] = [];
+  for (const [name, url] of Object.entries(req.avatars)) {
+    const f = avatarFile(url);
+    if (!f) continue; // checked when the request was read
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, `${name}.${f.ext}`);
+    const tmp = `${file}.${process.pid}.tmp`;
+    try {
+      writeFileSync(tmp, f.data, { flag: "wx", mode: 0o644 });
+      chmodSync(tmp, 0o644);
+      renameSync(tmp, file);
+    } finally {
+      rmSync(tmp, { force: true });
+    }
+    // only once the new one is there, so a failed write leaves the old picture
+    for (const ext of AVATAR_EXTS) if (ext !== f.ext) rmSync(join(dir, `${name}.${ext}`), { force: true });
+    out.push(`${AVATARS_DIR}/${name}.${f.ext}`);
+  }
+  return out;
+}
+
+/** Refuses the pictures, before anything is written, when a folder on the way to the avatars folder (or that folder) is a
+ * link: the repo may be one just cloned, and writing through its link would change files outside it. */
+function refuseLinkedAvatars(req: AddRequest): void {
+  if (!Object.keys(req.avatars).length) return;
+  let at = req.path;
+  for (const part of AVATARS_DIR.split("/")) {
+    at = join(at, part);
+    if (!isLink(at)) continue;
+    throw new StepFailed(problem("ui_add_avatar_link", `${at} is a link, so the team's pictures can't be written there safely.`,
+      `Replace the link with a real folder (rm ${at} && mkdir -p ${join(req.path, AVATARS_DIR)}) and commit that, then press Retry.`), "");
+  }
 }
 
 /** The allow rules for the commands an agent runs unattended (#540): each check command, alone and through run-check. */

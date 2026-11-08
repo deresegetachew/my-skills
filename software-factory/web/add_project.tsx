@@ -4,8 +4,10 @@
 // the rules are in add_project_model.ts. It is drawn with the theme's variables and the shared parts (parts.tsx): underline
 // tabs, list rows with a status, the buttons and the confirm dialog before Create. No command is shown on screen.
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { addProtected, createsOf, emptyForm, filterRepos, type Form, LEGENDS, type Problem, type Repo, requestOf, type Run,
-  runProgress, SETUP_STEPS, setupProblem, SOURCES, sourceProblem, TEAM_SIZES, teamOf, WIZARD, withRepo } from "./add_project_model.ts";
+import { addPick, addProtected, avatarProblem, createsOf, emptyForm, filterRepos, type Form, LEGEND_WHO, LEGENDS, picksOf, presetOf, type Problem,
+  renamePick, type Repo, requestOf, roleNameOf, type Run, runProgress, SETUP_STEPS, setupProblem, SOURCES, sourceProblem, TEAM_PRESETS, togglePick,
+  WIZARD, withPreset, withRepo } from "./add_project_model.ts";
+import { Avatar } from "./avatar_view.tsx";
 import { ConfirmDialog, type DotState, ListRow, StatusDot, Tabs } from "./parts.tsx";
 import type { ConfirmSpec } from "./parts_model.ts";
 
@@ -23,7 +25,7 @@ interface Info {
 
 type Post = (path: string, body: unknown) => Promise<Record<string, unknown>>;
 
-function Check() {
+export function Check() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M5 12l5 5 9-10" />
@@ -31,7 +33,7 @@ function Check() {
   );
 }
 
-function Stepper({ current }: { current: number }) {
+export function Stepper({ current }: { current: number }) {
   return (
     <ol className="ap-steps" aria-label="Setup steps">
       {SETUP_STEPS.map((label, i) => (
@@ -218,48 +220,113 @@ function TasksTab({ form, set, board }: { form: Form; set: (f: Form) => void; bo
   );
 }
 
+function PlusIcon() {
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+/** Choose your team (#457, ChooseTeam.dc.html): a team size, the 12 legends (tap to add or take out), your own agent. */
 function TeamTab({ form, set }: { form: Form; set: (f: Form) => void }) {
-  const t = form.team;
-  const others = (but: string) => LEGENDS.filter((n) => n === but || (n !== t.devManager && n !== t.productOwner && !t.builders.includes(n)));
-  const toggle = (n: string): void => {
-    const builders = t.builders.includes(n) ? t.builders.filter((b) => b !== n) : [...t.builders, n];
-    set({ ...form, team: { ...t, builders } });
-  };
+  const picks = picksOf(form.team);
+  const preset = presetOf(form.team);
+  const own = picks.filter((n) => !LEGENDS.includes(n));
   return (
     <div className="ap-section">
-      <fieldset className="ap-fieldset">
-        <legend>How big a team?</legend>
-        <div role="radiogroup" aria-label="Team size" className="ap-grid">
-          {TEAM_SIZES.map((s) => (
-            <Choice key={s.builders} name="ap-size" checked={t.builders.length === s.builders} onPick={() => set({ ...form, team: teamOf(s.builders) })}
-              title={s.title}>{s.detail}</Choice>
-          ))}
-        </div>
-      </fieldset>
-      <div className="ap-grid">
-        <Field id="ap-dm" label="Dev manager" hint="Reviews and merges the pull requests.">
-          <select id="ap-dm" value={t.devManager} onChange={(e) => set({ ...form, team: { ...t, devManager: e.target.value } })}>
-            {others(t.devManager).map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </Field>
-        <Field id="ap-po" label="Product owner" hint="Keeps the PRD and asks you what only you decide.">
-          <select id="ap-po" value={t.productOwner} onChange={(e) => set({ ...form, team: { ...t, productOwner: e.target.value } })}>
-            {others(t.productOwner).map((n) => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </Field>
+      <div className="ap-head">
+        <h2 className="ap-h2 big">Choose your team</h2>
+        <p>Pick how many agents work on this project and who they are. Start small: you can add or rename agents later.</p>
       </div>
-      <fieldset className="ap-fieldset">
-        <legend>Builders</legend>
-        <span className="ap-hint">Each one claims a task, writes the failing tests first and opens a pull request. They run on this machine.</span>
-        <div className="ap-chips">
-          {LEGENDS.filter((n) => n !== t.devManager && n !== t.productOwner).map((n) => (
-            <label key={n} className={`ap-pick${t.builders.includes(n) ? " on" : ""}`}>
-              <input type="checkbox" checked={t.builders.includes(n)} onChange={() => toggle(n)} />{n}
-            </label>
-          ))}
-        </div>
-      </fieldset>
+      <div role="group" aria-label="Team size" className="ct-presets">
+        {TEAM_PRESETS.map((p) => (
+          <button key={p.id} type="button" aria-pressed={preset === p.id} className={`ct-preset${preset === p.id ? " on" : ""}`}
+            onClick={() => set(withPreset(form, p.id))}>
+            <strong>{p.name}</strong>
+            <span className="ap-hint">{p.what}</span>
+            <span className="ct-count">{(p.picks ?? picks).length} {(p.picks ?? picks).length === 1 ? "agent" : "agents"}</span>
+          </button>
+        ))}
+      </div>
+      <div className="ct-legends-head">
+        <h3 className="ap-h2">The legends</h3>
+        <span className="ap-hint">Tap to add or remove</span>
+      </div>
+      <div className="ct-legends">
+        {[...LEGENDS, ...own].map((n) => {
+          const on = picks.includes(n);
+          return (
+            <button key={n} type="button" aria-pressed={on} className={`ct-legend${on ? " on" : ""}`} onClick={() => set(togglePick(form, n))}>
+              <Avatar name={n} role={roleIdOf(picks.indexOf(n), picks.length)} size={64} image={form.avatars[n]} />
+              <strong>{n}</strong>
+              <span className="ap-hint">{LEGEND_WHO[n] ?? "Your own"}</span>
+              {on && <span className="ct-tick" aria-hidden="true"><Check /></span>}
+            </button>
+          );
+        })}
+        <button type="button" className="ct-legend ct-own" onClick={() => set(addPick(form))}>
+          <span className="ct-plus"><PlusIcon /></span>
+          <strong>Your own</strong>
+          <span className="ap-hint">Any name, your picture</span>
+        </button>
+      </div>
     </div>
+  );
+}
+
+/** The role's id for the avatar's drawing: the `i`th of `n` picks. */
+function roleIdOf(i: number, n: number): string {
+  const r = roleNameOf(Math.max(i, 0), n);
+  return r === "Product owner" ? "product-owner" : r === "Dev manager" ? "dev-manager" : "coding-agent";
+}
+
+/** Your team (n), beside Choose your team: each agent's name to rename, its role, and its picture. */
+function YourTeam({ form, set }: { form: Form; set: (f: Form) => void }) {
+  const picks = picksOf(form.team);
+  const [names, setNames] = useState<Record<string, string>>({});
+  const [bad, setBad] = useState<{ name: string; text: string } | null>(null);
+  const pick = (name: string, file: File | undefined): void => {
+    if (!file) return;
+    const wrong = avatarProblem({ type: file.type, size: file.size });
+    if (wrong) {
+      setBad({ name, text: wrong });
+      return;
+    }
+    setBad(null);
+    const reader = new FileReader();
+    reader.onload = () => set({ ...form, avatars: { ...form.avatars, [name]: String(reader.result) } });
+    reader.readAsDataURL(file);
+  };
+  return (
+    <aside aria-label="Your team" className="ap-aside">
+      <h2 className="ap-h2">Your team ({picks.length})</h2>
+      <ul className="ct-team">
+        {picks.map((n, i) => (
+          <li key={`${i}-${n}`}>
+            <Avatar name={n} role={roleIdOf(i, picks.length)} size={36} image={form.avatars[n]} />
+            <span className="ap-grow">
+              <input type="text" aria-label={`Name for the ${roleNameOf(i, picks.length).toLowerCase()}`} value={names[n] ?? n}
+                onChange={(e) => setNames({ ...names, [n]: e.target.value })}
+                onBlur={() => {
+                  const to = (names[n] ?? n).trim();
+                  setNames({});
+                  if (to && to !== n) set(renamePick(form, n, to));
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              <span className="ap-hint">{roleNameOf(i, picks.length)}</span>
+            </span>
+            <label className="btn ct-pic">
+              Picture
+              <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" aria-label={`Change picture for ${n}`}
+                onChange={(e) => pick(n, e.target.files?.[0])} />
+            </label>
+          </li>
+        ))}
+      </ul>
+      {bad && <p className="ap-hint" role="alert"><span className="ap-ink">{bad.name}:</span> {bad.text}</p>}
+      <p className="ap-hint">The first one plans the product, the next reviews and merges, the rest build. Just a builder: you review and merge yourself.</p>
+    </aside>
   );
 }
 
@@ -461,7 +528,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
                 </div>
                 {last && blocked && <p className="ap-hint" role="status">{blocked}</p>}
               </div>
-              <aside aria-label="What will be created" className="ap-aside">
+              {tab === 2 ? <YourTeam form={form} set={setForm} /> : <aside aria-label="What will be created" className="ap-aside">
                 <h2 className="ap-h2">What will be created</h2>
                 <ul className="lrows ap-rows">
                   {createsOf(form).map((c) => (
@@ -469,7 +536,7 @@ export function AddProjectPage({ get, post, run, setRun, open, close, live }: {
                   ))}
                 </ul>
                 <p className="ap-hint">Nothing is pushed until you press Create on Review. Running it twice adds nothing twice.</p>
-              </aside>
+              </aside>}
             </div>
           </>
         )}
@@ -523,7 +590,7 @@ export const ADD_CSS = String.raw`
 .ap-field label, .ap-fieldset legend { font-weight: 600; }
 .ap-fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .ap-fieldset legend { font-size: 20px; margin-bottom: 4px; padding: 0; }
-.ap-page input:not([type]), .ap-page input[type="text"], .ap-page select { height: 44px; border: 1px solid var(--border-strong);
+.ap-page input:not([type]), .ap-page input[type="text"], .ap-page input[type="password"], .ap-page select { height: 44px; border: 1px solid var(--border-strong);
   border-radius: 10px; padding: 0 12px; font: inherit; background: var(--surface); color: var(--text); min-width: 0; width: 100%; }
 .ap-search input:not([type]) { border: 0; height: auto; padding: 0; }
 .ap-page .mono { font-family: var(--mono); font-size: 13px; }
@@ -564,5 +631,30 @@ export const ADD_CSS = String.raw`
 .ap-facts dt { font-size: 13px; color: var(--text-3); }
 .ap-facts dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
 .ap-problem { display: flex; gap: 10px; align-items: baseline; }
+.ap-h2.big { font-size: 20px; }
+.ct-presets { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 12px; }
+.ct-preset { text-align: left; border: 1px solid var(--border-strong); border-radius: 14px; padding: 16px; background: var(--surface); color: var(--text);
+  font: inherit; display: flex; flex-direction: column; gap: 6px; cursor: pointer; min-height: 44px; }
+.ct-preset.on { border: 2px solid var(--text); padding: 15px; }
+.ct-count { font-size: 12px; color: var(--text-3); margin-top: auto; }
+.ct-legends-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.ct-legends { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
+.ct-legend { position: relative; border: 1px solid var(--border); border-radius: 14px; padding: 16px 8px 12px; background: var(--surface); color: var(--text);
+  font: inherit; display: flex; flex-direction: column; align-items: center; gap: 6px; cursor: pointer; text-align: center; min-width: 0; }
+.ct-legend.on { border: 2px solid var(--text); padding: 15px 7px 11px; }
+.ct-legend strong { overflow-wrap: anywhere; }
+.ct-legend .ap-hint { font-size: 12px; }
+.ct-tick { position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary); color: var(--on-primary);
+  display: inline-flex; align-items: center; justify-content: center; }
+.ct-tick svg { width: 12px; height: 12px; }
+.ct-own { border-style: dashed; }
+.ct-plus { width: 64px; height: 64px; border-radius: 50%; border: 1px dashed var(--border-strong); display: inline-flex; align-items: center;
+  justify-content: center; color: var(--text-2); }
+.ct-team { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ct-team li { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.ct-team input[type="text"] { height: 36px; }
+.ct-pic { position: relative; flex: none; cursor: pointer; }
+.ct-pic input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+.ct-pic:focus-within { outline: 2px solid var(--text); outline-offset: 2px; }
 @media (max-width: 640px) { .ap-card { padding: 24px 18px; } .ap-head h1 { font-size: 26px; } .ap-split { gap: 32px; } }
 `;

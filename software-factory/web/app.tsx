@@ -12,6 +12,8 @@ import { createRoot } from "react-dom/client";
 import { agentState, ago, channelHash, type ChannelView, type LimitView, parseHash, pickProject, type ProjectView, ROLE_TITLE,
   roleLine, searchChannels, splitTask, taskChannel, type Tone } from "./model.ts";
 import { ADD_CSS, AddProjectPage } from "./add_project.tsx";
+import { JoinPage, MachineCheckPage, ONBOARDING_CSS, opensWelcome, WelcomePage } from "./onboarding.tsx";
+import { onboardingRoute, type OnboardingPage } from "./onboarding_model.ts";
 import { AttentionContext, STUCK_CSS } from "./attention_context.tsx";
 import { type AttentionItem, stuckMarks } from "./attention_model.ts";
 import type { Run as AddRun } from "./add_project_model.ts";
@@ -553,6 +555,9 @@ function App() {
   const [toast, setToast] = useState<{ title: string; text: string; tone: Tone } | null>(null);
   const [menu, setMenu] = useState(false);
   const [adding, setAdding] = useState(() => location.hash === ADD_HASH); // Add a project (#447)
+  // first launch (#457): Welcome, Machine check, Join; Welcome opens by itself on a browser's first visit
+  const [onboarding, setOnboarding] = useState<OnboardingPage | null>(() => onboardingRoute(location.hash) ??
+    (opensWelcome(storedProject(), location.hash) ? "welcome" : null));
   const [addRun, setAddRun] = useState<AddRun | null>(null);
   const [listed, setListed] = useState(0); // goes up when the server's project list changes
   const [pulseBy, setPulseBy] = useState<Record<string, number>>({}); // Home, Activity, Health read again (#455)
@@ -703,6 +708,7 @@ function App() {
     const onHash = (): void => {
       setRoute(routeOf(location.hash));
       setAdding(location.hash === ADD_HASH);
+      setOnboarding(onboardingRoute(location.hash));
     };
     addEventListener("hashchange", onHash);
     return () => removeEventListener("hashchange", onHash);
@@ -757,6 +763,16 @@ function App() {
       onSession={() => { setWrong(false); setToken(SESSION); }} />;
   }
   if (!projects) return <main className="gate"><p>Loading…</p></main>;
+  if (onboarding) {
+    const go = (hash: string): void => {
+      location.hash = hash;
+      setOnboarding(onboardingRoute(hash));
+    };
+    const here = pickProject(projects, route?.project, storedProject()) as Project;
+    if (onboarding === "machine") return <MachineCheckPage project={here.id} get={get} post={postStable} go={go} />;
+    if (onboarding === "join") return <JoinPage post={postStable} go={go} />;
+    return <WelcomePage go={go} skip={() => { location.hash = ""; setOnboarding(null); }} />;
+  }
   if (adding) {
     return <AddProjectPage get={get} post={postStable} run={addRun} setRun={setAddRun} live={conn === "live"}
       close={() => { location.hash = ""; setAdding(false); }}
@@ -1018,7 +1034,7 @@ function App() {
 }
 
 const style = document.createElement("style");
-style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + SETTINGS_CSS + PR_CSS
+style.textContent = THEME_CSS + CSS + STUCK_CSS + PARTS_CSS + VIEWS_CSS + DOCS_CSS + BOARD_CSS + AVATAR_CSS + SIGNOFF_CSS + ARTIFACTS_CSS + ADD_CSS + ONBOARDING_CSS + SETTINGS_CSS + PR_CSS
   + OPS_CSS + TEAM_CSS + COSTS_CSS + PHONE_CSS;
 document.head.append(style);
 createRoot(document.getElementById("root") as HTMLElement).render(<StrictMode><App /></StrictMode>);

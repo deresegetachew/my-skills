@@ -26,8 +26,8 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `ui mail show` | terminal only | The mail settings, read on the hub machine, with no secret shown | #542 |
 | `ui mail test` | terminal only | Sends a test mail, before anyone can sign in with a code | #542 |
 | `install-shim` | terminal only | Puts `factory` on the PATH, before there is a UI to open; Welcome (Welcome.dc.html) says how | #457 |
-| `doctor` | built | Health (Health.dc.html): each check grouped, with its fix, and Check again (`factory doctor --json`); Machine check (MachineCheck.dc.html) is #457 | #455 |
-| `bootstrap machine` | terminal only | Needs sudo; Machine check (MachineCheck.dc.html) shows the one admin step to type | #457 |
+| `doctor` | built | Health (Health.dc.html): each check grouped, with its fix, and Check again (`factory doctor --json`); Machine check (MachineCheck.dc.html, #457) shows this machine's, the board's and GitHub's checks on first launch | #455 |
+| `bootstrap machine` | terminal only | Needs sudo; Machine check (MachineCheck.dc.html, built) shows the one admin step to type, with Copy | #457 |
 | `bootstrap all` | terminal only | Needs sudo, as bootstrap machine | #457 |
 | `bootstrap uninstall` | terminal only | Needs sudo; removes the sandbox user and its guard | |
 | `bootstrap project` | planned | Machine check (MachineCheck.dc.html) | #457 |
@@ -55,7 +55,7 @@ A new command gets its row in the same pull request. When a screen ships, its ro
 | `agents` | built | The agents in the sidebar; sweep stays with the dev manager | |
 | `machine` | planned | Machines (Machines.dc.html); agent names in Choose team (ChooseTeam.dc.html) | #455 |
 | `machine add` | built | Add machine (AddMachine.dc.html): the join code and the one command to run there | #445 |
-| `machine join` | terminal only | Runs on the new machine, before it has a UI; Join hub (JoinHub.dc.html) says what it does | #445 |
+| `machine join` | built | Join my factory (JoinHub.dc.html), on the new machine's own web UI: paste the code, see what it connects to, Join after a confirm (`POST /api/setup/join`) | #457 |
 | `machine leave` | terminal only | Runs on a machine that joined, to stop using the board there; machine administration, like join | #514 |
 | `machine ls` | built | Machines (Machines.dc.html): each machine added and whether it joined, its code is still waiting, or its code expired (its board login removed) | #445 |
 | `machine remove` | planned | Machines (Machines.dc.html), after a confirm | #455 |

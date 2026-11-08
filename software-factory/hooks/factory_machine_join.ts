@@ -29,29 +29,15 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Board, BoardError, boardDir, LOGIN_NAME } from "../message-board/src/index.ts";
+import { AGENT_NAME, type AgentName, encodeCode, parseCode, type Payload, roleOf, VERSION } from "./factory_join_code.ts";
 import { now } from "./factory_clock.ts";
 import { Exit, pyDumps, run, which } from "./factory_lib.ts";
 import { configDir, machineSettings, refuse, saveMachineSettings, writeMachineSettings } from "./factory_machine.ts";
 
-const PREFIX = "FM1-";
-const VERSION = 2; // 1 carried NATS keys (#445); 2 carries a board login (#504)
 const DEFAULT_TTL_MINUTES = 15;
 const ADD_USAGE = "factory machine add <name> --agent <agent>[:role] [--agent ...] [--ttl minutes] [--json]";
 const BOARD_BIN = join(import.meta.dir, "..", "message-board", "bin.ts");
-const AGENT_NAME = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const ROLES = ["builder", "manager", "po", "owner"] as const;
-type Role = (typeof ROLES)[number];
-const ROLE_ALIASES: Record<string, Role> = { "coding-agent": "builder", "dev-manager": "manager", "product-owner": "po" };
 
-interface AgentName { name: string; role: Role }
-interface Payload {
-  v: typeof VERSION;
-  id: string;
-  name: string;
-  exp: number;
-  url: string; // the board for this machine's login, password included
-  agents: AgentName[];
-}
 interface Record_ {
   name: string; id: string; createdAt: number; expiresAt: number; agents: AgentName[];
   joinedAt?: number; // the board says its code was redeemed (machine join)
@@ -62,41 +48,13 @@ interface BoardLogin { name: string; redeemedAt: string | null }
 interface Joined { name: string; agents: string[] }
 type Problem = { code: string; message: string; fix: string };
 
-function roleOf(text: string): Role | null {
-  if ((ROLES as readonly string[]).includes(text)) return text as Role;
-  return ROLE_ALIASES[text] ?? null;
-}
-
-// ---------- the code ----------
-export function encodeCode(p: Payload): string {
-  return PREFIX + Buffer.from(JSON.stringify(p), "utf8").toString("base64url");
-}
-
-function boardUrlOk(text: unknown): boolean {
-  try {
-    const u = new URL(String(text));
-    return (u.protocol === "postgres:" || u.protocol === "postgresql:") && Boolean(u.hostname && u.username && u.password);
-  } catch {
-    return false;
-  }
-}
+// ---------- the code (factory_join_code.ts) ----------
+export { encodeCode };
 
 /** The code's content, or a `bad-code` refusal for anything that isn't one (a code from before #504 included). */
 export function decodeCode(text: string): Payload {
-  const bad = (): never => refuse("bad-code", "That isn't a join code.",
+  return parseCode(text) ?? refuse("bad-code", "That isn't a join code.",
     "Copy the whole code that `factory machine add <name>` printed on the machine that runs the board (it starts with FM1-).");
-  const t = text.trim();
-  if (!t.startsWith(PREFIX)) return bad();
-  let p: Payload;
-  try {
-    p = JSON.parse(Buffer.from(t.slice(PREFIX.length), "base64url").toString("utf8")) as Payload;
-  } catch {
-    return bad();
-  }
-  const ok = p && p.v === VERSION && typeof p.id === "string" && LOGIN_NAME.test(String(p.name)) && typeof p.exp === "number" &&
-    boardUrlOk(p.url) && Array.isArray(p.agents) && p.agents.length > 0 &&
-    p.agents.every((a) => AGENT_NAME.test(String(a.name)) && roleOf(String(a.role)));
-  return ok ? p : bad();
 }
 
 // ---------- small helpers ----------

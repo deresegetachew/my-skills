@@ -736,3 +736,10 @@ test("a redeem held open by a copy of the code doesn't stall machine remove, and
   refused(machine(m, ["join", a.code, "--no-doctor"]), "code-refused");
   expect(existsSync(m.board)).toBe(false);
 });
+
+test("the join code's own copy of a board login's name pattern is the message board's (#457)", async () => {
+  const code = await import("../hooks/factory_join_code.ts");
+  const board = await import("../message-board/src/index.ts");
+  expect(code.LOGIN_NAME.source).toBe(board.LOGIN_NAME.source);
+  expect(code.LOGIN_NAME.flags).toBe(board.LOGIN_NAME.flags);
+});
