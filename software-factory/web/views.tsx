@@ -13,7 +13,7 @@ import { epicChoice, epicsRead } from "./epics_model.ts";
 import { Tabs } from "./parts.tsx";
 import type { DocPage } from "./docs_model.ts";
 import type { Tone } from "./model.ts";
-import { type ActionRow, checksText, checksTone, epicBar, type EpicRow, epicTone, filterRows, groupByEpic, minutesText, type Origin, originText, type ProblemView, protectedText, type PullRow, reviewTone,
+import { type ActionRow, ageNow, checksText, checksTone, epicBar, type EpicRow, epicTone, filterRows, groupByEpic, minutesText, type Origin, originText, type ProblemView, protectedText, type PullRow, reviewTone,
   type RunRow, runnerText, runnerTone, runStateText, runTone, type TaskRow, taskTone, verdictTone, type ViewsData } from "./views_model.ts";
 
 export type Post = (path: string, body: unknown) => Promise<Record<string, unknown>>;
@@ -59,10 +59,21 @@ function Ext({ href, children }: { href: string | null; children: ReactNode }) {
   return href ? <a className="ext" href={href} target="_blank" rel="noreferrer noopener">{children}</a> : <>{children}</>;
 }
 
-function ageText(v: ViewsData): string {
+function ageText(v: ViewsData, nowMs: number): string {
   if (v.refreshing) return "reading now…";
-  if (v.age === null) return "no snapshot yet";
-  return v.age < 60 ? "as of now" : `as of ${minutesText(v.age / 60)} ago`;
+  const age = ageNow(v, nowMs);
+  if (age === null) return "no snapshot yet";
+  return age < 60 ? "as of now" : `as of ${minutesText(age / 60)} ago`;
+}
+
+/** The time now, again every 30 s: the server no longer sends the views just because they got older (#529). */
+function useNow(everyMs = 30_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(t);
+  }, [everyMs]);
+  return now;
 }
 
 /** The filter box and how old the data is, with a read again. `origin` (the tasks and epics, #498): where they come
@@ -71,7 +82,8 @@ function Toolbar({ typed, setTyped, views, project, post, say, what, origin }: {
   views: ViewsData; project: { id: string }; post: Post; say: Say; what: string; origin?: Origin }) {
   const from = origin ? originText(origin) : "";
   const live = origin?.from === "board"; // the board pushes every change, so there is nothing to read again (#543)
-  const age = live ? from : [from, ageText(views)].filter(Boolean).join(" · ");
+  const now = useNow();
+  const age = live ? from : [from, ageText(views, now)].filter(Boolean).join(" · ");
   const again = async (): Promise<void> => {
     const r = await post(`/api/projects/${encodeURIComponent(project.id)}/refresh`, {});
     if (r.ok !== true) say({ title: String(r.message ?? "It didn't start."), text: String(r.fix ?? ""), tone: "bad" });
@@ -474,7 +486,7 @@ export async function loadViews(get: (path: string) => Promise<Record<string, un
   const base = `/api/projects/${encodeURIComponent(project)}`;
   const [t, ep, pr, ci] = await Promise.all([get(`${base}/tasks`), get(`${base}/epics`), get(`${base}/pull-requests`), get(`${base}/ci`)]);
   const own = (x: Record<string, unknown>) => (Array.isArray(x.problems) ? x.problems : []) as ProblemView[];
-  return { generatedAt: (t.generatedAt as string | null) ?? null, age: (t.age as number | null) ?? null, refreshing: t.refreshing === true,
+  return { generatedAt: (t.generatedAt as string | null) ?? null, age: (t.age as number | null) ?? null, receivedAt: Date.now(), refreshing: t.refreshing === true,
     problems: [], tasks: { ...(t as unknown as ViewsData["tasks"]), problems: own(t) },
     epics: { source: String(ep.source ?? ""), epics: (ep.epics ?? []) as EpicRow[], problems: own(ep) },
     pulls: { pulls: (pr.pulls ?? []) as PullRow[], problems: own(pr) }, ci: { ...(ci as unknown as ViewsData["ci"]), problems: own(ci) } };

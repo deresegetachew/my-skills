@@ -236,12 +236,19 @@ export function serve(o: ServeOptions): Running {
   const prPages = new PrPages(); // a pull request's page (#453), kept until its head changes
   void feed.start();
   function viewsMessage(p: UiProject): string {
-    return JSON.stringify({ type: "views", project: p.id, ...viewsOf(p, refresher.running(p), Date.now(), feed.view(p)) });
+    return JSON.stringify(viewsObject(p));
+  }
+  function viewsObject(p: UiProject): Record<string, unknown> {
+    return { type: "views", project: p.id, ...viewsOf(p, refresher.running(p), Date.now(), feed.view(p)) };
   }
   function pushViews(p: UiProject): void {
-    const text = viewsMessage(p);
-    if (viewsSent.get(p.id) === text) return;
-    viewsSent.set(p.id, text);
+    const v = viewsObject(p);
+    // `age` grows every second on its own and the page counts it on from when the message came (#529): a clock that
+    // moved is not a change, so it is left out of what is compared
+    const key = JSON.stringify({ ...v, age: null });
+    if (viewsSent.get(p.id) === key) return;
+    viewsSent.set(p.id, key);
+    const text = JSON.stringify(v);
     for (const s of servers) s.publish(TOPIC, text);
     pushAttention(p);
   }

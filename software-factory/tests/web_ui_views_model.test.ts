@@ -1,7 +1,7 @@
 // The web app's search within the tasks, pull requests and CI channels and across them (#424, matching #392: every
 // word typed is in the row's text, in any case), from web/views_model.ts, which has no React in it.
 import { expect, test } from "bun:test";
-import { checksText, filterRows, originText, searchRows, type ViewsData } from "../web/views_model.ts";
+import { ageNow, checksText, filterRows, originText, searchRows, type ViewsData } from "../web/views_model.ts";
 
 const task = (id: string, title: string, find: string) => ({ id, title, state: "ready", stateText: "ready", holders: [], group: "",
   todos: { done: 0, all: 0 }, dependsOn: [], url: null, pr: null, next: false, epic: null, find });
@@ -55,4 +55,13 @@ test("the tasks say where they come from (#498): the message board, live, or Git
   expect(originText({ from: "github", every: 7200 })).toBe("From GitHub, read every 2 h");
   expect(originText({})).toBe(""); // an older server says nothing
   expect(originText({ from: "unknown", every: null })).toBe(""); // the board is the record and down: one notice says so (#515)
+});
+
+test("the views' age counts on from when the page got them, since the server no longer resends them as they age (#529)", () => {
+  const at = 1_000_000;
+  expect(ageNow({ age: 30, receivedAt: at }, at)).toBe(30);
+  expect(ageNow({ age: 30, receivedAt: at }, at + 90_000)).toBe(120);
+  expect(ageNow({ age: 30, receivedAt: at }, at - 5_000), "a clock that went back adds nothing").toBe(30);
+  expect(ageNow({ age: 30 }, at), "no stamp: the age as sent").toBe(30);
+  expect(ageNow({ age: null, receivedAt: at }, at + 90_000), "no snapshot stays none").toBeNull();
 });
