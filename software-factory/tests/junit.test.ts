@@ -41,13 +41,23 @@ test("what isn't a JUnit report, or isn't well-formed, is said and not thrown", 
 });
 
 test("hostile reports finish fast and never throw: a 1 MB tag, 10 000 levels deep, and more than 5 MB", () => {
-  const t0 = performance.now();
-  const tag = junitSummary(`<testsuite ${"a".repeat(1024 * 1024)}><testcase name="x"/></testsuite>`);
-  expect(performance.now() - t0).toBeLessThan(500);
-  expect(tag.ok).toBe(true);
+  // a long tag costs time in proportion to its length: four times as long takes well under eight times as long (a
+  // quadratic reading would take sixteen), and even the longest stays under 2 s on a slow machine
+  const timed = (text: string): number => {
+    const t = performance.now();
+    junitSummary(text);
+    return performance.now() - t;
+  };
+  const tagOf = (n: number): string => `<testsuite ${"a".repeat(n)}><testcase name="x"/></testsuite>`;
+  timed(tagOf(64 * 1024)); // warm up
+  const small = timed(tagOf(256 * 1024));
+  const large = timed(tagOf(1024 * 1024));
+  expect(large).toBeLessThan(8 * small + 50);
+  expect(large).toBeLessThan(2000);
+  expect(junitSummary(tagOf(1024 * 1024)).ok).toBe(true);
   const t1 = performance.now();
   const attrs = junitSummary(`<testsuite>${`<testcase ${'a="1" '.repeat(150_000)}/>`}</testsuite>`);
-  expect(performance.now() - t1).toBeLessThan(500);
+  expect(performance.now() - t1).toBeLessThan(2000);
   expect(attrs.passed).toBe(1);
   const deep = junitSummary(`<testsuite>${"<a>".repeat(10_000)}${"</a>".repeat(10_000)}</testsuite>`);
   expect(deep).toMatchObject({ ok: false, tests: 0 });

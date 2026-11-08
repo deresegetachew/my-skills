@@ -14,7 +14,7 @@
 // - The content type comes from the file's name, from a fixed list, and an image's or a video's first bytes must match
 //   it; anything else is a download. What the agent says about a file is never trusted.
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Board } from "./board.ts";
 import { refuse } from "./errors.ts";
@@ -184,7 +184,14 @@ export function storePath(repo: string, sha: string): string {
 
 function writeStore(repo: string, sha: string, bytes: Uint8Array): void {
   const path = storePath(repo, sha);
-  if (existsSync(path)) return;
+  try {
+    // already kept: made fresh, so a prune running now leaves it for this attach
+    const now = new Date();
+    utimesSync(path, now, now);
+    return;
+  } catch {
+    // not there (or gone just now, under a prune): write it
+  }
   const dir = join(path, "..");
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const tmp = `${path}.tmp-${process.pid}`;
@@ -220,6 +227,15 @@ export async function attachmentById(board: Board, repo: string, id: string, ret
   return (await listAttachments(board, repo, undefined, retentionDays)).find((a) => a.id === id) ?? null;
 }
 
+/** A file's last change in ms, or now when it is gone (so a prune never trips on a file another removed). */
+function mtimeOf(path: string): number {
+  try {
+    return statSync(path).mtimeMs;
+  } catch {
+    return Date.now();
+  }
+}
+
 /** How long a new file or new bytes are safe from a prune. */
 const FRESH_MS = 10 * 60_000;
 
@@ -247,7 +263,7 @@ export async function pruneAttachments(board: Board, repo: string, retentionDays
     for (const two of existsSync(root) ? readdirSync(root) : []) {
       for (const f of readdirSync(join(root, two))) {
         const path = join(root, two, f);
-        if (!keep.has(f) && statSync(path).mtimeMs < settled) rmSync(path, { force: true });
+        if (!keep.has(f) && mtimeOf(path) < settled) rmSync(path, { force: true });
       }
     }
   }
@@ -263,21 +279,33 @@ const FILE_FIX = "Attach a screenshot, report or log saved inside this checkout 
   "never a secret, a file outside it, or a link to one.";
 
 /** The checkout's top folder for `cwd` (its real path), or null outside a git checkout. */
-export function checkoutRoot(cwd: string): string | null {
+export function checkoutRoot(cwd: string, projectDir = process.env.CLAUDE_PROJECT_DIR): { ok: true; root: string } | { ok: false; why: string } {
+  // the folder the session runs in (Claude's project folder, else where it was started), never what git says alone:
+  // an agent can write its worktree's .git file and point it at a git folder whose core.worktree is the home folder
+  let root: string;
+  try {
+    root = realpathSync(projectDir || cwd);
+  } catch {
+    return { ok: false, why: `${projectDir || cwd} isn't there` };
+  }
   const p = Bun.spawnSync(["git", "-C", cwd, "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const top = p.exitCode === 0 ? p.stdout.toString().trim() : "";
-  if (!top) return null;
+  let real = "";
   try {
-    return realpathSync(top);
+    real = top ? realpathSync(top) : "";
   } catch {
-    return null;
+    real = top;
   }
+  if (real && real !== root) {
+    return { ok: false, why: `git says the checkout is ${real}, which isn't the checkout this runs in (${root})` };
+  }
+  return { ok: true, root };
 }
 
 /** Why `path` (from `cwd`) may not be attached, or its real path and size. Only a regular file inside `root` (links
  *  followed to where they really point) may be, and never a .env file or anything in .git or .claude. Read by an agent's
  *  attach on its own machine, outside Claude's permission rules, so this is what keeps a secret off the hub (#637). */
-export function confine(path: string, cwd: string, root: string): { ok: true; real: string; size: number } | { ok: false; why: string } {
+export function confine(path: string, cwd: string, root: string): { ok: true; real: string; size: number; dev: number; ino: number } | { ok: false; why: string } {
   let real: string;
   try {
     // the folder's real path, then the file's own name, followed only when it is a link: so its size is known without
@@ -295,7 +323,8 @@ export function confine(path: string, cwd: string, root: string): { ok: true; re
   if (parts.some((x) => /^\.env/i.test(x))) return { ok: false, why: ".env files are never attached" };
   const st = statSync(real);
   if (!st.isFile()) return { ok: false, why: "it isn't a regular file" };
-  return { ok: true, real, size: st.size };
+  if (st.nlink > 1) return { ok: false, why: "it is a hard link, which may be to a file outside this checkout" };
+  return { ok: true, real, size: st.size, dev: st.dev, ino: st.ino };
 }
 
 /** The message for a file past the cap. */
@@ -306,15 +335,29 @@ export const TOO_BIG_FIX = "Make it smaller (a phone and a desktop screenshot, a
 
 /** The files at `paths`, each checked (confine, then its size) before any is read; `refuse` says why one can't be. */
 export function readConfined(paths: string[], cwd: string, limits: AttachLimits, refuseWith: (message: string, fix: string) => never): NewFile[] {
-  const root = checkoutRoot(cwd);
-  if (!root) refuseWith("Files are attached from inside a git checkout, and this folder isn't one.", "Run it in the project's checkout or the agent's worktree.");
+  const at = checkoutRoot(cwd);
+  if (!at.ok) refuseWith(`Files can't be attached from here: ${at.why}.`, "Run it from the top folder of the project's checkout or the agent's worktree.");
+  const root = at.root;
   const checked = paths.map((p) => {
     const c = confine(p, cwd, root);
     if (!c.ok) return refuseWith(`${p} can't be attached: ${c.why}.`, FILE_FIX);
     if (c.size > limits.maxFileBytes) return refuseWith(tooBigMessage(safeName(c.real), c.size, limits), TOO_BIG_FIX);
     return c;
   });
-  return checked.map((c) => ({ name: c.real, bytes: new Uint8Array(readFileSync(c.real)) }));
+  return checked.map((c) => {
+    // the file read is the one checked: opened, then its handle's device and inode compared, so nothing swapped in
+    // between the check and the read is read
+    const fd = openSync(c.real, "r");
+    try {
+      const now = fstatSync(fd);
+      if (now.dev !== c.dev || now.ino !== c.ino || !now.isFile() || now.size > limits.maxFileBytes) {
+        return refuseWith(`${c.real} changed between the check and the read.`, "Attach it again once nothing is writing it.");
+      }
+      return { name: c.real, bytes: new Uint8Array(readFileSync(fd)) };
+    } finally {
+      closeSync(fd);
+    }
+  });
 }
 
 export interface AttachInput {
@@ -377,7 +420,11 @@ export async function attach(board: Board, repo: string, input: AttachInput, lim
 export async function readBytes(board: Board, a: Attachment, hub = isHub()): Promise<Uint8Array | null> {
   const r = repoKey(a.project);
   const path = storePath(r, a.sha256);
-  if (existsSync(path) && statSync(path).isFile()) return new Uint8Array(readFileSync(path));
+  try {
+    if (statSync(path).isFile()) return new Uint8Array(readFileSync(path));
+  } catch {
+    // not in this store (or gone just now): the board may still have it
+  }
   const v = await board.value(bytesKey(r, a.sha256));
   const b64 = typeof v === "object" && v !== null ? (v as { base64?: unknown }).base64 : null;
   if (typeof b64 !== "string") return null;

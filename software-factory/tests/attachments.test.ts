@@ -6,7 +6,7 @@
 // reads a JUnit report. A real Postgres (board_pg.ts), the stateful fake gh (fakegh.ts) and the real `factory`.
 import { afterAll, afterEach, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Board } from "../message-board/src/index.ts";
 import { freshDb, type Pg, startPg } from "./board_pg.ts";
@@ -275,9 +275,9 @@ test("without a board on this machine factory attach says how to get one", async
 });
 
 /** One tool call through the board's MCP server as `as` (a builder), from folder `cwd`; the tool's result. */
-async function mcp(w: World, cwd: string, name: string, args: Row, extra: string[] = []): Promise<{ isError: boolean; out: Row; listed: string[] }> {
+async function mcp(w: World, cwd: string, name: string, args: Row, extra: string[] = [], projectDir?: string): Promise<{ isError: boolean; out: Row; listed: string[] }> {
   const p = Bun.spawn([process.execPath, "--no-env-file", BIN, "mcp", "--as", "menelik", "--repo", REPO, ...extra],
-    { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, MB_URL: w.env.MB_URL, FACTORY_CONFIG_DIR: w.cfg } });
+    { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...process.env, CLAUDE_PROJECT_DIR: projectDir ?? cwd, MB_URL: w.env.MB_URL, FACTORY_CONFIG_DIR: w.cfg } });
   const send = (m: unknown): void => {
     p.stdin.write(JSON.stringify(m) + "\n");
   };
@@ -298,7 +298,7 @@ async function mcp(w: World, cwd: string, name: string, args: Row, extra: string
 
 test("board_attach: a builder attaches files from its folder to a pull request's head, within the limits it was started with", async () => {
   const w = await world();
-  const r = await mcp(w, w.shots, "board_attach", { target: "pr", id: "12", files: ["home-phone.png", "results.xml"], head: HEAD, note: "phone" });
+  const r = await mcp(w, w.d, "board_attach", { target: "pr", id: "12", files: ["shots/home-phone.png", "shots/results.xml"], head: HEAD, note: "phone" });
   expect(r.isError, JSON.stringify(r.out)).toBe(false);
   expect(r.listed).toContain("board_attach");
   expect((r.out.attachments as Row[]).map((a) => [a.name, a.kind, a.head])).toEqual([["home-phone.png", "image", HEAD], ["results.xml", "junit", HEAD]]);
@@ -306,11 +306,11 @@ test("board_attach: a builder attaches files from its folder to a pull request's
   const meta = (await w.board.values(`attachment:${REPO}:pr:12:`)).map((v) => v.value as Row);
   expect(meta.every((m) => m.by === "menelik")).toBe(true);
   // a file that isn't there, and one past the cap it was started with
-  const missing = await mcp(w, w.shots, "board_attach", { target: "task", id: "b3", files: ["nope.png"] });
+  const missing = await mcp(w, w.d, "board_attach", { target: "task", id: "b3", files: ["shots/nope.png"] });
   expect(missing.isError).toBe(true);
   expect(String((missing.out.error as Row).message)).toContain("it isn't there");
   writeFileSync(join(w.shots, "big.log"), "x".repeat(1024 * 1024 + 1));
-  const big = await mcp(w, w.shots, "board_attach", { target: "task", id: "b3", files: ["big.log"] }, ["--attach-limits", "1,2000,30"]);
+  const big = await mcp(w, w.d, "board_attach", { target: "task", id: "b3", files: ["shots/big.log"] }, ["--attach-limits", "1,2000,30"]);
   expect(big.isError).toBe(true);
   expect(String((big.out.error as Row).message)).toContain("one file may be at most 1 MB");
   expect(await w.board.values(`attachment:${REPO}:task:b3:`)).toEqual([]);
@@ -388,4 +388,58 @@ test("prune leaves a file written in the last minutes alone, so it can't race an
   utimesSync(fresh, old, old);
   expect(attach(w, "prune").code).toBe(0);
   expect(existsSync(fresh)).toBe(false);
+});
+
+test("attaching a file the store already has makes it fresh again, so a prune can't take it from under the attach", async () => {
+  const w = await world();
+  expect(attach(w, "task", "7", join(w.shots, "run.log")).code).toBe(0);
+  const [file] = stored(w);
+  const old = new Date(Date.now() - 3600_000);
+  utimesSync(file as string, old, old);
+  expect(attach(w, "task", "8", join(w.shots, "run.log")).code).toBe(0);
+  expect(statSync(file as string).mtimeMs).toBeGreaterThan(Date.now() - 60_000);
+});
+
+// --- the checkout is where the session runs, not where a forged .git says (#637, second review) -------------------------
+
+/** A folder `inner` in the worktree whose `.git` file points at a forged git folder that says the checkout is `w.root`,
+ *  the folder above the worktree (a stand-in for the home folder). */
+function forgedCheckout(w: World): string {
+  const inner = join(w.d, "inner");
+  mkdirSync(inner);
+  const fake = join(w.d, "fake-gitdir");
+  sh(["git", "init", "-q", "--bare", fake]);
+  sh(["git", "-C", fake, "config", "core.bare", "false"]);
+  sh(["git", "-C", fake, "config", "core.worktree", w.root]);
+  writeFileSync(join(inner, ".git"), `gitdir: ${fake}\n`);
+  expect(sh(["git", "-C", inner, "rev-parse", "--show-toplevel"]).stdout.trim()).toBe(sh(["realpath", w.root]).stdout.trim());
+  write(join(w.root, "secret.txt"), "the home folder's secret");
+  return inner;
+}
+
+test("a forged .git that moves the checkout to a folder above it is refused, by factory attach and board_attach", async () => {
+  const w = await world();
+  const inner = forgedCheckout(w);
+  // the hook itself: the factory script would look for its hooks where the forged .git says
+  const p = sh([process.execPath, "--no-env-file", "--config=/dev/null", join(HOOKS, "factory_attach.ts"), "task", "7", "../../secret.txt"],
+    { cwd: inner, env: w.env, timeoutMs: 120_000 });
+  expect(p.code, p.out).toBe(1);
+  expect(err(p).code, p.stderr).toBe("attach_path_refused");
+  const r = await mcp(w, inner, "board_attach", { target: "task", id: "b3", files: ["../../secret.txt"] });
+  expect(r.isError).toBe(true);
+  expect(String((r.out.error as Row).message)).toContain("isn't the checkout");
+  expect(await w.board.values("attachment")).toEqual([]);
+  expect(stored(w)).toEqual([]);
+});
+
+test("a hard link to a file outside the checkout is refused", async () => {
+  const w = await world();
+  write(join(w.root, "outside.txt"), "secret outside");
+  linkSync(join(w.root, "outside.txt"), join(w.shots, "hard.log"));
+  const p = attach(w, "task", "7", join(w.shots, "hard.log"));
+  expect(p.code, p.out).toBe(1);
+  expect(String(err(p).message)).toContain("hard link");
+  const r = await mcp(w, w.d, "board_attach", { target: "task", id: "b3", files: ["shots/hard.log"] });
+  expect(r.isError).toBe(true);
+  expect(await w.board.values("attachment")).toEqual([]);
 });

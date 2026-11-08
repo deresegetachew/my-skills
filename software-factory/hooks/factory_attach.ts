@@ -15,7 +15,9 @@
 //       drops what is past `attachments.retentionDays` now (each attach does it too).
 //
 // Only regular files inside this checkout are read (links followed to where they point), never a .env file or anything
-// in .git or .claude, and each file's size is checked before it is read (attach_path_refused). The limits and `ui.url`
+// in .git or .claude, and each file's size is checked before it is read (attach_path_refused). The checkout is the folder
+// the session runs in (CLAUDE_PROJECT_DIR, else where the command started); when git names another top folder (a forged
+// .git file) it is refused. Hard links are refused, and the file read is the one checked (its device and inode). The limits and `ui.url`
 // come from main's settings on GitHub, never the worktree's (attach_settings_unreadable when GitHub can't say).
 // Limits: `attachments.maxFileMb` per file, `attachments.maxProjectMb` for all the project keeps. Errors are one JSON
 // line {code, message, fix} on stderr, exit 1; nothing is written on a refusal.
@@ -32,6 +34,10 @@ factory attach ls <task|pr|signoff|epic> <id> [--head <sha>] [--json]
 factory attach prune`;
 
 export const COMMENT_MARK = "<!-- factory-attachments -->";
+
+/** The folder the command was started in. Loading the settings moves to what git says is the checkout, and a forged
+ *  .git file could point that anywhere, so files are found from here (#637). */
+const STARTED_IN = process.cwd();
 
 class Refusal extends Error {
   constructor(readonly code: string, message: string, readonly fix: string) {
@@ -133,7 +139,7 @@ function size(n: number): string {
 
 /** The files, each a regular file inside this checkout and within the cap, checked before any is read. */
 function readFiles(cfg: Config, m: Mod, paths: string[]): { name: string; bytes: Uint8Array }[] {
-  return m.readConfined(paths, process.cwd(), limits(cfg, m), (message, fix) => refuse("attach_path_refused", message, fix));
+  return m.readConfined(paths, STARTED_IN, limits(cfg, m), (message, fix) => refuse("attach_path_refused", message, fix));
 }
 
 /** The settings as main has them on GitHub (#637): an agent's worktree can't raise its own caps or change the link. */
