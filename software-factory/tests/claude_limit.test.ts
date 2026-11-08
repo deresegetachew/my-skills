@@ -84,8 +84,11 @@ function cmd(w: World, args: string[], extra: Record<string, string> = {}) {
   return runHook("factory_claude_limit", args, { cwd: w.repo, env: { ...w.env, ...extra } });
 }
 
-function hhmm(t: number): string {
-  return new Date(t * 1000).toISOString().slice(11, 16);
+// The clock the command prints (TZ is UTC here): HH:MM on the same day, the date first on another day.
+function hhmm(t: number, from: number = Date.now() / 1000): string {
+  const iso = new Date(t * 1000).toISOString();
+  const sameDay = iso.slice(0, 10) === new Date(from * 1000).toISOString().slice(0, 10);
+  return sameDay ? iso.slice(11, 16) : `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
 test("check reads the session's last reply and writes the reset time to the shared file", () => {
