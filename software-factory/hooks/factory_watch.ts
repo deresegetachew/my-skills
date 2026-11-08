@@ -16,7 +16,10 @@
 //                to=dev-manager -->` as #107 defines it)
 //   3 fix        a must-fix, failing CI or a merge conflict on a PR with no new commit for `staleMinutes` (15); failing CI
 //                does not count when a must-fix on the head is newer than the CI result (#361)
-//   4 merge      an approved, green, unmerged PR (a PR the manager opened itself waits for the owner instead)
+//   4 merge      an approved, green, unmerged PR (a PR the manager opened itself, or one only a person may merge because
+//                it changes a `protected` file or says "a person merges this one", waits for the owner instead, #474)
+//   checks 1 and 3 start nothing for a head a sub-manager already skipped (factory-manager-skip) until a new CI result
+//   or a new comment that is not bookkeeping (#474)
 //   5 owner-wait a PR labelled for the product owner (`roles.product-owner.workLabel`) or the owner (`factory:needs-owner`)
 //                that has waited `ownerWaitMinutes` (120)
 //   6 agent      a coding agent silent (for a manager), or down, or idle for `agentIdleMinutes` (45) while tasks are ready
@@ -31,6 +34,7 @@ import { type Config, load, managerSetting, roleSetting, toFloat } from "./facto
 import { agentIssues, current, fields, nameOf, roleOf, stateOf } from "./factory_agents.ts";
 import { judge, JudgeError, resultAt, type Row, stateAt as judgeState, type Verdict } from "./factory_ci_judge.ts";
 import { asPull } from "./factory_pr_feed.ts";
+import { personMerges, prFiles } from "./factory_prs.ts";
 import type { PrSnapshot } from "./core/ports/messaging.ts";
 import { type Comment, gh, ghAll, type Issue, readyIssues } from "./factory_issues.ts";
 import { now as leaseNow } from "./factory_lease.ts";
@@ -114,6 +118,24 @@ export function issueOf(pr: { body?: string | null; head?: { ref?: string } }): 
   if (m) return Number(m[1]);
   const b = /^task\/(\d+)-/.exec(pr.head?.ref ?? "");
   return b ? Number(b[1]) : null;
+}
+
+/** A sub-manager's "looked at it and did not review it" comment (#195), and the comments that are only bookkeeping. */
+export const SKIP_RX = /<!--\s*factory-manager-skip\s+sha=(\w+)\s*-->/;
+export const BOOKKEEPING = /<!--\s*factory-(?:review-claim|claim-release|manager-note|answer-claim|item-claim)\b/;
+
+/** True when a sub-manager already said why it left this head (a skip on it) and nothing changed since (#474): no newer
+ * CI result, and no comment after it from a person or an agent. A new commit is a new head, so it never settles. */
+export function skipSettles(comments: Comment[], head: string, ciAt: number | null): boolean {
+  let last = -1;
+  comments.forEach((c, i) => {
+    const sha = SKIP_RX.exec(c.body || "")?.[1];
+    if (sha && (head.startsWith(sha) || sha.startsWith(head))) last = i;
+  });
+  if (last < 0) return false;
+  const at = when((comments[last] as Comment).created_at);
+  if (ciAt !== null && (at === null || ciAt > at)) return false;
+  return comments.slice(last + 1).every((c) => BOOKKEEPING.test(c.body || ""));
 }
 
 export function isOwn(pr: { body?: string | null; head?: { ref?: string } }): boolean {
@@ -229,6 +251,7 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
       const p = byPr.get(ref as number) as Pull;
       const t = commitTime(p.head.sha);
       if (t && minutes(t, now) < quiet) continue; // the agent may still be pushing: give it a few minutes
+      if (skipSettles(commentsOf(ref as number), p.head.sha, ciState(p.head.sha)[2])) continue; // said why already (#474)
       const since = t ? t + quiet * 60 : null;
       items.push(make("review", `pr-${ref}`, text, { since, target: ref as number, key: p.head.sha, leaseKind: "review", pr: ref as number }));
     } else if (kind === "question") {
@@ -308,13 +331,23 @@ export function collect(cfg: Config, nowArg: number | null = null, info: Info | 
         green = false; // approved and green, but it cannot merge as it is
       }
     }
+    // Only a person may merge it (protected files, or its body says so; the PR gate's test): a sub-manager could do
+    // nothing with it, so it goes to the owner once per head (#474). The files of a head never change.
+    const person = green && !isOwn(p)
+      ? personMerges(cfg, p.body, remember(cfg, `files-${n}`, head, () => prFiles(n)))
+      : null;
     if (green && isOwn(p)) {
       items.push(make("owner", `own-${n}`, `PR #${n} is approved and green, but the manager opened it: it waits ` +
         "for the owner to merge", { to: "owner", since: markedAt, target: n, key: `own-${n}`, pr: n }));
+    } else if (person) {
+      const why = person.length ? `it changes protected files (${person.join(", ")})` : "its description says a person merges it";
+      const id = `person-merges-${n}-${head.slice(0, 7)}`;
+      items.push(make("owner", id, `PR #${n} is approved and green at ${head.slice(0, 7)}, but ${why}: it waits for the owner ` +
+        "to merge", { to: "owner", since: markedAt, target: n, key: id, pr: n }));
     } else if (green) {
       items.push(make("merge", `pr-${n}`, `PR #${n}: approved and green, merge pending`, { since: markedAt, target: n, key: head,
         leaseKind: "review", pr: n }));
-    } else if (reasons.length) {
+    } else if (reasons.length && !skipSettles(commentsOf(n), head, ciAt)) { // a skip that nothing followed waits (#474)
       items.push(make("fix", `pr-${n}`, `PR #${n}: ` + reasons.join("; "), { since: t ? t + stale * 60 : null, target: n, key: head,
         leaseKind: "review", pr: n }));
     }

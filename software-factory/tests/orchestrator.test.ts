@@ -161,7 +161,7 @@ test("a red pr the manager already explained starts one sub manager at most unti
   expect(prompts(env).length, "the first cycle looks at it").toBe(1);
   expect(skipComments(d, 5).length, posted(d, 5).join("\n---\n")).toBe(1);
   p = cycle(work, env, "--wait");
-  expect(p.code, p.out).toBe(0);
+  expect(p.code, "nothing needs a manager: " + p.out).toBe(3);
   expect(prompts(env).length, "nothing changed: no second sub-manager\n" + p.out).toBe(1);
   expect("pr-5" in watch(work, env)).toBe(false);
   const skip = comment(9, `<!-- factory-manager-skip sha=${H} -->\nDev manager lead looked at this pull request and did not review it.`, 10);
