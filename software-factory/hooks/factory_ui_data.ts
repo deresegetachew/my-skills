@@ -70,6 +70,38 @@ export interface Agent {
   /** Its Claude session's prompt box, on this machine (#591): "empty" (idle at its prompt), "unsent" (text typed there
    *  but not sent), or null (no Claude session at its prompt, or not known). */
   prompt: string | null;
+  /** A question its Claude session asks in the interactive picker, on this machine (#644): the question and the options
+   *  (the key that picks each one); null when none. */
+  ask: AgentAsk | null;
+  /** Why its loop stopped at start (#640), on this machine while it is down; null when none. */
+  down: AgentDown | null;
+}
+
+export interface AgentAsk {
+  question: string;
+  options: { key: string; label: string }[];
+}
+
+export interface AgentDown {
+  code: string;
+  message: string;
+  fix: string;
+  lines: string[];
+}
+
+/** An agent row's picker question, checked: null unless it has a question and options with a one- or two-digit key. */
+export function askOf(v: unknown): AgentAsk | null {
+  const a = obj(v);
+  const options = (Array.isArray(a.options) ? a.options : []).map(obj)
+    .filter((o) => /^\d{1,2}$/.test(str(o.key)) && str(o.label)).map((o) => ({ key: str(o.key), label: str(o.label) }));
+  return str(a.question) && options.length ? { question: str(a.question), options } : null;
+}
+
+/** An agent row's down reason, checked: null unless it has a code, a message and a fix. */
+export function downOf(v: unknown): AgentDown | null {
+  const d = obj(v);
+  if (!str(d.code) || !str(d.message) || !str(d.fix)) return null;
+  return { code: str(d.code), message: str(d.message), fix: str(d.fix), lines: (Array.isArray(d.lines) ? d.lines : []).map(str).filter(Boolean).slice(0, 20) };
 }
 
 export interface Machine {
@@ -450,7 +482,8 @@ export async function live(p: UiProject): Promise<Live> {
       detail: str(a.detail) || str(a.state), task, taskTitle: task ? titles.get(task) ?? null : null, on: strOrNull(a.on),
       machine: strOrNull(a.machine), machineName: strOrNull(a.machineName), here, runs: str(a.runs), session: strOrNull(a.session),
       since: strOrNull(a.since), lastSeen: strOrNull(a.lastSeen), log: here ? await logOf(a) : [], parent: strOrNull(a.parent),
-      item: strOrNull(a.item), stoppable: typeof a.stoppable === "boolean" ? a.stoppable : null, prompt: strOrNull(a.prompt) };
+      item: strOrNull(a.item), stoppable: typeof a.stoppable === "boolean" ? a.stoppable : null, prompt: strOrNull(a.prompt),
+      ask: here ? askOf(a.ask) : null, down: here ? downOf(a.down) : null };
   }));
   const now = Date.now() / 1000;
   return { agents, machines: machinesOf(agents, strOrNull(data.machine)), runners: runnersOf(cache), limit: limitOf(state, cache, now),
@@ -475,6 +508,39 @@ export async function owner(p: UiProject, args: string[]): Promise<ActionResult>
   const command = `factory owner ${args.join(" ")}`;
   const r = await spawn(["bash", factoryScript(p), "owner", ...args], p.path, envFor(p), ACTION_TIMEOUT_MS);
   return resultOf(p, command, r, (r.stdout + r.stderr).trim());
+}
+
+/** How long the web UI's Start watches a started loop (#640): FACTORY_UI_START_CHECK_SECONDS, else 5 (0: not at all). */
+export function startCheckSeconds(): number {
+  const n = Number(process.env.FACTORY_UI_START_CHECK_SECONDS ?? "");
+  return process.env.FACTORY_UI_START_CHECK_SECONDS !== undefined && Number.isFinite(n) && n >= 0 ? Math.min(n, 60) : 5;
+}
+
+/** After `factory owner start` (#640): watches for `seconds` whether the agent's loop said it stopped at start (its down
+ * reason in `<git-common-dir>/factory/down-<name>.json`, written at `since` or later), reading its tmux session's last lines
+ * while it lives. The reason with those lines, or null when it is still running (or said nothing). */
+export async function startCheck(p: UiProject, name: string, since: number, session: string | null, seconds: number): Promise<AgentDown | null> {
+  const common = run(["git", "-C", p.path, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (common.code !== 0) return null;
+  const file = join(common.stdout.trim(), "factory", `down-${name}.json`);
+  let screen: string[] = [];
+  const deadline = Date.now() + seconds * 1000;
+  for (;;) {
+    let got: AgentDown | null = null;
+    try {
+      const d = obj(JSON.parse(readFileSync(file, "utf8")) as unknown);
+      if (Number(d.at) >= since - 1) got = downOf(d);
+    } catch {
+      // nothing said
+    }
+    if (got) return { ...got, lines: [...got.lines, ...screen].slice(-LOG_LINES) };
+    if (Date.now() >= deadline) return null;
+    if (session && Bun.which("tmux")) {
+      const r = await spawn(["tmux", "capture-pane", "-p", "-J", "-t", `=${session}:`, "-S", "-30"], "/", { ...process.env } as Record<string, string>, 5_000);
+      if (r.code === 0 && r.stdout.trim()) screen = lastLines(r.stdout);
+    }
+    await Bun.sleep(500);
+  }
 }
 
 /** Runs `factory machine <args>` in project `p` (#445: add a machine, remove one) and says how it went. */

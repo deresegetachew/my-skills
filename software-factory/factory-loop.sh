@@ -20,7 +20,12 @@
 #                                already started. When the task is done the session closes by itself and the
 #                                next one starts after a 10 s countdown (q stops). If the session closes before
 #                                the task is done (/exit, a crash), it also carries on after 10 s; when it ended on
-#                                Claude's usage limit, it waits for the reset instead (#614, factory_claude_limit.ts)
+#                                Claude's usage limit, it waits for the reset instead (#614, factory_claude_limit.ts).
+#                                In tmux, a coding agent's session that finished its task but did not close, or that
+#                                sits at an empty prompt with no task for loop.idleNextTaskMinutes while one is ready,
+#                                gets /next-task typed in (#640, factory_loop_watch.ts)
+# A loop that can't start (leftover changes in its folder, #640) says why on screen and to the heartbeat
+# (`down: <reason>`), so the web UI's Needs attention offers the fix.
 #   (or: ./factory loop [-i] [N])
 #
 # Several loops can run at once: start this script again in another terminal. Each loop gets its own checkout
@@ -120,10 +125,30 @@ else
 fi
 # On exit: stop the claim's keeper, drop the local claims, and say this agent is down (on GitHub in issues mode, on the
 # message board with tasks.source board; a no-op otherwise). A wait on Claude's limit (#614) is stopped too.
-keeper=""; limit_pid=""
-trap '[ -n "${limit_pid:-}" ] && kill "$limit_pid" 2>/dev/null; type keep_stop >/dev/null 2>&1 && keep_stop; fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1' EXIT
+keeper=""; limit_pid=""; watcher=""; started_ok=0; loop_started=$(date +%s)
+# A loop that stops before its first task says why, unless it already did (loop_down below; #640): the heartbeat shows it
+# as `down: <reason>`, and the web UI's Start says so.
+on_exit() {
+  local rc=$?
+  [ -n "${limit_pid:-}" ] && kill "$limit_pid" 2>/dev/null
+  type keep_stop >/dev/null 2>&1 && keep_stop
+  type watch_stop >/dev/null 2>&1 && watch_stop
+  if [ "$started_ok" = 0 ] && [ "$rc" != 0 ] && [ "$rc" != 130 ] && [ -n "${agent:-}" ] && [ -f "$hooks/factory_loop_watch.ts" ]; then
+    fh "$hooks/factory_loop_watch" down --agent "$agent" --role "$role" --code exited --exit "$rc" --since "$loop_started" >/dev/null 2>&1
+  fi
+  fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; fh "$hooks/factory_agents" down --agent "$agent" >/dev/null 2>&1
+}
+trap on_exit EXIT
 trap 'exit 130' INT TERM
 main=$(setting mainBranch main)
+# The loop can't prepare its folder (#640): say why ($1: dirty_worktree or checkout_failed) on screen and to the heartbeat, so
+# Needs attention offers the fix (save the leftover changes aside and start). A release without the script says it plainly.
+loop_down() {
+  if [ -f "$hooks/factory_loop_watch.ts" ]; then
+    fh "$hooks/factory_loop_watch" down --agent "$agent" --role "$role" --code "$1" --dir "$dir" --main "$main" && return 0
+  fi
+  echo "[$agent] Could not check out origin/$main in $dir (uncommitted changes there?). Clean it up, or remove it: git worktree remove $dir"
+}
 if [ "$dir" != "$PWD" ]; then
   # A new worktree has no untracked local files: bring the local env files over, then install.
   for f in .env.local .env.*.local; do [ -f "$f" ] && [ ! -e "$dir/$f" ] && cp "$f" "$dir/$f"; done
@@ -133,8 +158,9 @@ if [ "$dir" != "$PWD" ]; then
   if [ "$resume_first" = 1 ]; then
     git fetch -q origin || true  # resuming after a restart: stay on the agent's branch with its changes
   else
+    # Leftovers from an earlier run that stop the checkout (a half-done merge, #640): say why, on screen and to the heartbeat.
     git fetch -q origin && git checkout -q --detach "origin/$main" || {
-      echo "[$agent] Could not check out origin/$main in $dir (uncommitted changes there?). Clean it up, or remove it: git worktree remove $dir"
+      if [ -n "$(git status --porcelain --ignore-submodules=all 2>/dev/null)" ]; then loop_down dirty_worktree; else loop_down checkout_failed; fi
       exit 1; }
   fi
   [ -f .gitmodules ] && git submodule update --init -q  # skills from my-skills, for example
@@ -179,6 +205,8 @@ if [ "$rc" = 3 ]; then
   trap - EXIT; fh "$hooks/factory_claims" release --agent "$agent" >/dev/null 2>&1; exit 1
 fi
 rm -f "${TMPDIR:-/tmp}/factory-register.$$"
+# It got going: a reason it gave for an earlier failed start goes (#640).
+[ -f "$hooks/factory_loop_watch.ts" ] && fh "$hooks/factory_loop_watch" up --agent "$agent" >/dev/null 2>&1
 if [ "$role" = coding-agent ]; then echo "[$agent] working in $PWD ${FACTORY_SLOT:+(slot $FACTORY_SLOT)}"
 else echo "[$agent] $role working in $PWD"; fi
 
@@ -340,6 +368,21 @@ keep_stop() {
   kill "$keeper" 2>/dev/null; wait "$keeper" 2>/dev/null; keeper=""
 }
 
+# Beside an interactive coding agent's session in tmux (#640), factory_loop_watch.ts types /next-task into it when its task
+# is done but the session did not close, or when it sits at an empty prompt with no task for `loop.idleNextTaskMinutes`
+# while one is ready. Never into a prompt that holds text, nor while a question waits in its picker. Outside tmux, or with
+# a release without the script, nothing runs.
+watch_start() {
+  watch_stop
+  [ "$role" = coding-agent ] && [ -n "${TMUX_PANE:-}" ] && [ -f "$hooks/factory_loop_watch.ts" ] && command -v bun >/dev/null 2>&1 || return 0
+  bun --no-env-file --config=/dev/null "$hooks/factory_loop_watch.ts" watch --agent "$agent" --pid $$ --pane "$TMUX_PANE" >/dev/null 2>&1 &
+  watcher=$!
+}
+watch_stop() {
+  [ -n "${watcher:-}" ] || return 0
+  kill "$watcher" 2>/dev/null; wait "$watcher" 2>/dev/null; watcher=""
+}
+
 # Claude's usage limit (#614). A session that ends on the login's 5-hour or weekly limit would end again at once, so the
 # loop waits for the reset instead of starting one every 10 s. claude_limit_check $1 (when the session started) reads
 # the session's transcript (factory_claude_limit.ts says which messages count) and writes the reset time to the shared
@@ -427,6 +470,7 @@ give_back() {
 }
 
 last=""; repeats=0; last_item=""; fails=0; busy=0
+started_ok=1  # from here on a stop is the loop's own (3 failures, nothing to do), said on screen, not a failed start
 for ((n = 1; n <= limit; n++)); do
   if [ "$resume_first" = 1 ]; then
     echo "[$agent] resuming after a restart: leaving $PWD as it is (branch $(git branch --show-current 2>/dev/null))."
@@ -512,12 +556,14 @@ for ((n = 1; n <= limit; n++)); do
     # type into it (/exit included) from your phone.
     rc="${FACTORY_REMOTE_CONTROL:-}"; [ -n "$rc" ] || rc="$(fh "$hooks/factory_machine" remote 2>/dev/null || echo 1)"
     keep_start "$id"
+    watch_start
     started=$(date +%s)
     if [ "$rc" = 1 ]; then
       "$claude_bin" "${claude_flags[@]}" --remote-control="$agent $id" "$prompt" || true
     else
       "$claude_bin" "${claude_flags[@]}" "$prompt" || true
     fi
+    watch_stop
     keep_stop
     stty sane 2>/dev/null
     fh "$hooks/factory_claims" release --agent "$agent" --tasks-only >/dev/null

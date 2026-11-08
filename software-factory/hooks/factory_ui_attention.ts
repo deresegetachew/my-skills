@@ -12,6 +12,11 @@
 //   claude-limit    Claude's usage limit is reached: every agent waits for its reset, one item for the team (#614)
 //                                                                                          (no action: it ends by itself)
 //   claude-budget   the last 5 hours passed claudeLimit.softTokens5h: the loops start no new task (#614)   (no action)
+//   agent-asks      an agent's Claude session shows a question in its interactive picker
+//                   (#644): the question, and its options as buttons that type the choice
+//                   into its session (`factory say <name> --choose <key>`)                 one per option
+//   agent-cant-start an agent's loop stopped at start because its folder has leftover
+//                   changes (#640)                                                         Save them aside and start
 //   agent-down      an agent is down while it holds a task                                 Start
 //   role-down       no dev manager or product owner runs while its queue has items        Start
 //   task-pr-gone    a task whose PR is no longer open (merged or closed) isn't done        Close
@@ -37,17 +42,21 @@ import { SETTINGS } from "./factory_settings_schema.ts";
 import type { Views } from "./factory_ui_views.ts";
 import { type Medians, spinReason, type TaskCost } from "./factory_task_cost.ts";
 
-export const ATTENTION_KINDS = ["board-down", "runners-down", "claude-limit", "claude-budget", "agent-down", "role-down", "task-pr-gone", "task-quiet", "session-long", "task-spinning", "idle-ready",
+export const ATTENTION_KINDS = ["board-down", "runners-down", "claude-limit", "claude-budget", "agent-asks", "agent-cant-start", "agent-down", "role-down", "task-pr-gone", "task-quiet", "session-long", "task-spinning", "idle-ready",
   "epic-done", "prd-open", "pr-waiting"] as const;
 export type AttentionKind = (typeof ATTENTION_KINDS)[number];
 
 /** The one thing an item offers. A task action (release, close) runs on `task`; start on `agent`; say sends `text` to
  *  `agent`'s session; open goes to `link`; none: nothing to do, it ends by itself (Claude's limit). */
 export interface AttentionAction {
-  kind: "release" | "close" | "start" | "say" | "open" | "none";
+  kind: "release" | "close" | "start" | "say" | "choose" | "open" | "none";
   label: string;
   task?: string;
   agent?: string;
+  /** For start: save the agent's leftover changes aside first (`git stash push -u`, #640). */
+  stash?: boolean;
+  /** For choose: the key typed into the agent's picker (an option's number, #644). */
+  key?: string;
   /** For say: the one line sent (`/next-task`). */
   text?: string;
   /** For open: the page (`agent:fasil`, `pr:21`, `view:ci`, `page:health`). */
@@ -65,6 +74,8 @@ export interface AttentionItem {
   pr: number | null;
   epic: string | null;
   action: AttentionAction;
+  /** More than one choice (#644): each option of a question the agent asks in its picker. */
+  options?: AttentionAction[];
 }
 
 /** A pull request that left the snapshot's open list (factory_ui_ops.ts pullsGone): merged or closed. */
@@ -195,6 +206,24 @@ export function attentionOf(i: AttentionInput): AttentionItem[] {
     return !a || DOWN.has(a.state);
   };
 
+  // an agent waiting at a question in its picker (#644): each option types its key into the session
+  const cantStart = new Set<string>();
+  for (const a of agents ?? []) {
+    if (a.state === "waiting" && a.ask && a.ask.options.length) {
+      const options: AttentionAction[] = a.ask.options.map((o) => ({ kind: "choose", label: o.label, agent: a.name, key: o.key }));
+      item("agent-asks", a.name, { title: `${a.name} asks: ${a.ask.question}`, agent: a.name, task: a.task,
+        reason: `${a.name} waits for an answer in its session, and does nothing until it has one. Pick one: it is typed there as if you chose it.`,
+        action: options[0] as AttentionAction, options });
+    }
+    // an agent whose loop stopped at start (#640): leftover changes in its folder, saved aside with one button
+    if (DOWN.has(a.state) && a.down?.code === "dirty_worktree") {
+      cantStart.add(a.name);
+      item("agent-cant-start", a.name, { title: `${a.name} can't start: leftover changes in its folder`, agent: a.name,
+        reason: `${a.down.message}${a.down.lines.length ? ` (${a.down.lines.slice(0, 5).join(", ")}${a.down.lines.length > 5 ? ", …" : ""})` : ""}`,
+        action: { kind: "start", label: "Save them aside and start", agent: a.name, stash: true } });
+    }
+  }
+
   // an agent down while it holds work
   if (agents) {
     const held = new Map<string, string[]>();
@@ -202,7 +231,7 @@ export function attentionOf(i: AttentionInput): AttentionItem[] {
     // only one of the project's agents can be started; a task another holder keeps shows as held below (Release)
     const known = new Set([...ROLES.flatMap((r) => namesOf(i.config, r)), ...agents.map((a) => a.name)]);
     for (const [name, ids] of held) {
-      if (!isDown(name) || !known.has(name)) continue;
+      if (!isDown(name) || !known.has(name) || cantStart.has(name)) continue;
       item("agent-down", name, { title: `${name} is down`, agent: name, task: ids[0] ?? null,
         reason: `${name} ${row.has(name) ? "is down" : "isn't running on any machine"} but holds ${ids.map(named).join(", ")}.`,
         action: { kind: "start", label: `Start ${name}`, agent: name } });

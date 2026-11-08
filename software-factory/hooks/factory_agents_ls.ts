@@ -19,7 +19,8 @@
 // when it is down (#366); runs, how it runs (tmux, nohup, cloud, or "" when not known), and log, the file a loop
 // outside tmux writes to (#395); parent, item and stoppable for a dev manager's sub-manager (#585), which shows as
 // `stuck` once it has run longer than manager.subManagerMinutes, with the command that ends it; and prompt, for an idle
-// agent here whose Claude session waits at its prompt: "empty", or "unsent" when text sits typed in it (#591).
+// agent here whose Claude session waits at its prompt: "empty", or "unsent" when text sits typed in it (#591); ask, the question
+// its session shows in the interactive picker, with its options (#644); and down, why its loop stopped at start (#640).
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { dirname, join } from "node:path";
@@ -70,6 +71,10 @@ export interface LsRow {
   stoppable: boolean | null;
   /** An idle agent's Claude session at its prompt, on this machine (#591): "empty", "unsent" (text typed, not sent), or null. */
   prompt: string | null;
+  /** A question its Claude session asks in the interactive picker (#644), on this machine; null when none. */
+  ask: HeartbeatRow["ask"] | null;
+  /** Why its loop stopped at start (#640), on this machine while it is down; null when none. */
+  down: HeartbeatRow["down"] | null;
 }
 
 /** The name to show for machine `id` (#383): `machines.<id>.name` in factory.json, else the hostname it posted (only
@@ -104,7 +109,7 @@ function localRows(cfg: Config): [LsRow[], DaemonInfo] {
       task: r.task ?? null, on: r.on ?? null, since: r.since ?? null, lastSeen: r.state !== "down" ? iso(seen) : null,
       follow: r.follow ?? null, session: r.session ?? null, activity: iso(r.activity), machine: mine, machineName: myName,
       source: "local", expected: names.includes(name), runs: r.runs ?? "", log: r.log ?? null, parent: r.parent ?? null,
-      item: r.item ?? null, stoppable: typeof r.stoppable === "boolean" ? r.stoppable : null, prompt: r.prompt ?? null });
+      item: r.item ?? null, stoppable: typeof r.stoppable === "boolean" ? r.stoppable : null, prompt: r.prompt ?? null, ask: r.ask ?? null, down: r.down ?? null });
   }
   return [rows, { running: fresh, updated: Object.keys(data).length ? iso(data.updated as number | undefined) : null,
     errors: fresh ? ((data.errors as string[] | undefined) || []) : [] }];
@@ -188,7 +193,7 @@ function remoteRows(cfg: Config, issues: Issue[], localNames: Set<string>): LsRo
       task: f.task ?? null, on: f.on ?? null, since: f.since || iso(ping), lastSeen: iso(ping), follow: f.follow ?? null,
       session: f.session ?? null, activity: null, machine,
       machineName: cloud ? "cloud" : nameOf(cfg, machine, f.where || null), source: "github", expected: false,
-      runs: cloud ? "cloud" : f.runs || (f.session ? "tmux" : ""), log: null, parent: null, item: null, stoppable: null, prompt: null });
+      runs: cloud ? "cloud" : f.runs || (f.session ? "tmux" : ""), log: null, parent: null, item: null, stoppable: null, prompt: null, ask: null, down: null });
   }
   return rows;
 }

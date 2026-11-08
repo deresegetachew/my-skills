@@ -32,6 +32,8 @@ agent by its name, wherever it runs: on this machine (its own tmux, no remote ne
                                             A busy session is waited for (20 s at most), and Enter is pressed again
                                             while the text still sits in its prompt box (\`say-unsent\` if it stays);
                                             the same text already in the box is sent, not typed twice
+  factory say <agent> --choose N [--on R]   answer the question its session shows in Claude Code's picker with option N
+                                            (#644): typed only while such a question is on its screen
   --on R                                    only remote R; --on local is this machine (the name local is kept for it)
   factory agent <name> --detach             start that agent in a detached tmux session (what the commands above find)
 
@@ -369,6 +371,59 @@ function cmdSay(agent: string, message: string, on: string | null): number {
   return 0;
 }
 
+/** The bash script `factory say --choose` runs where the session is (#644): it answers a question the session shows in
+ *  Claude Code's picker by typing the option's number, as a person at the screen would. Nothing is typed when no picker
+ *  is on the screen (NOPICKER, exit 6) or it has no option with that number (NOOPTION, exit 7). When the number only
+ *  moved the cursor (the screen is the same but for the cursor), Enter picks it; when the screen changed (it was chosen,
+ *  or the next question came up) nothing more is sent. No session: NOSESSION, exit 3; tmux failing: exit 4. The use is
+ *  logged there (who, when, which session, which number). */
+export function chooseScript(session: string, who: string, key: string): string {
+  return [
+    `S=${shQuote(session)}; T="=$S:"; k=${shQuote(key)}`,
+    'tmux has-session -t "=$S" 2>/dev/null || { echo NOSESSION; exit 3; }',
+    'pane() { tmux capture-pane -p -J -t "$T" 2>/dev/null | tail -n 40; }',
+    'flat() { pane | sed "s/❯/ /g"; }',
+    "pane | grep -Eq '❯[[:space:]]*[0-9]+\\. ' || { echo NOPICKER; exit 6; }",
+    "pane | grep -Eq \"^[[:space:]│]*(❯[[:space:]]*)?$k\\. \" || { echo NOOPTION; exit 7; }",
+    'before=$(flat)',
+    'tmux send-keys -t "$T" -l -- "$k" || exit 4',
+    'd="${XDG_STATE_HOME:-$HOME/.local/state}/software-factory"; mkdir -p "$d"',
+    `printf '%s from=%s via=%s agent=%s choose=%s\\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" ${shQuote(who)} "\${SSH_CLIENT%% *}" "$S" "$k" >>"$d/say.log"`,
+    'sleep 0.5 2>/dev/null || true',
+    '[ "$(flat)" = "$before" ] && { tmux send-keys -t "$T" Enter || exit 4; }',
+    'exit 0',
+  ].join("\n");
+}
+
+function cmdChoose(agent: string, key: string, on: string | null): number {
+  agentsMayNot("answer another session's question (`factory say --choose`)");
+  const [cfg, repo] = project();
+  const [kind, remote, target, session] = R.find(agent, cfg as unknown as Cfg, repo, on);
+  if (kind === "cloud") {
+    return refuse(new RemoteError("cloud-agent", `${agent} runs in the cloud, so there is no session to type into from here.`,
+      "Open its Remote Control link (`factory follow " + agent + "`) in the Claude app and answer there."));
+  }
+  if (target) R.ensureSandboxTarget(target);
+  const who = `${process.env.USER || process.env.LOGNAME || "unknown"}@${hostname()}`;
+  const [rc, out, err] = R.runOn(target, chooseScript(session, who, key), null, 30);
+  if (rc === 3 || out.includes("NOSESSION")) return refuse(gone(session, remote));
+  if (rc === 6 || out.includes("NOPICKER")) {
+    return refuse(new RemoteError("say-no-question", `${agent}'s session on ${remote} shows no question now, so nothing was typed.`,
+      `It was answered or went away. See its screen with \`factory follow ${agent}\`.`));
+  }
+  if (rc === 7 || out.includes("NOOPTION")) {
+    return refuse(new RemoteError("say-no-option", `The question on ${agent}'s screen has no option ${key}; nothing was typed.`,
+      `Look at its options with \`factory follow ${agent}\`, then choose one of them.`));
+  }
+  if (rc !== 0) {
+    const lines = splitLines(err.trim());
+    return refuse(new RemoteError("say-failed", `Could not answer in ${session} on ${remote}.`,
+      (lines.length ? lines[lines.length - 1] as string : "Try again.").slice(0, 140)));
+  }
+  console.log(`Chose ${key} in ${agent}'s session on ${remote} (logged there).`);
+  return 0;
+}
+
 function agentSession(agent: string, cfg: Config): [string, string] {
   if (/^\d+$/.test(agent)) {
     const names = cfg.agents ?? [];
@@ -441,7 +496,7 @@ function cmdRemote(argv: string[]): number {
   return 0;
 }
 
-const SAY_USAGE = "usage: factory say [--on ON] agent message";
+const SAY_USAGE = "usage: factory say [--on ON] agent message\n       factory say [--on ON] agent --choose N";
 const FOLLOW_USAGE = "usage: factory follow [--on ON] [--read] [--all] [--log] [--messages] [--json]\n" +
   "                      [--polls POLLS]\n" +
   "                      [agent]";
@@ -452,15 +507,17 @@ function argError(usage: string, prog: string, text: string): never {
 }
 
 /** argparse for `follow` and `say`, by hand: --on (and for follow its flags), then the positionals. */
-function parseCommand(cmd: "say" | "follow", rest: string[]): { on: string | null; flags: Set<string>; polls: number | null; pos: string[] } {
+function parseCommand(cmd: "say" | "follow", rest: string[]): { on: string | null; flags: Set<string>; polls: number | null; pos: string[];
+  choose: string | null } {
   const usage = cmd === "say" ? SAY_USAGE : FOLLOW_USAGE;
   const prog = `factory ${cmd}`;
   const flags = new Set<string>();
   let on: string | null = null;
   let polls: number | null = null;
+  let choose: string | null = null;
   const pos: string[] = [];
   const extra: string[] = [];
-  const valued = cmd === "say" ? ["--on"] : ["--on", "--polls"];
+  const valued = cmd === "say" ? ["--on", "--choose"] : ["--on", "--polls"];
   const boolFlags = cmd === "say" ? [] : ["--read", "--all", "--log", "--messages", "--json"];
   for (let i = 0; i < rest.length; i++) {
     const x = rest[i] as string;
@@ -470,7 +527,10 @@ function parseCommand(cmd: "say" | "follow", rest: string[]): { on: string | nul
       const v = eq > 0 ? x.slice(eq + 1) : rest[++i];
       if (v === undefined || (eq < 0 && v.startsWith("-") && v !== "-" && !/^-\d/.test(v))) argError(usage, prog, `argument ${key}: expected one argument`);
       if (key === "--on") on = v;
-      else {
+      else if (key === "--choose") {
+        if (!/^\d{1,2}$/.test(v)) argError(usage, prog, `argument --choose: the number of an option, not '${v}'`);
+        choose = v;
+      } else {
         if (!/^\s*[+-]?\d+\s*$/.test(v)) argError(usage, prog, `argument --polls: invalid int value: '${v}'`);
         polls = Number(v);
       }
@@ -478,13 +538,13 @@ function parseCommand(cmd: "say" | "follow", rest: string[]): { on: string | nul
     else if (x.startsWith("-") && x !== "-" && !/^-\d/.test(x) && !x.includes(" ")) extra.push(x); // argparse: a word with a space is a value
     else pos.push(x);
   }
-  const want = cmd === "say" ? 2 : 1;
-  if (cmd === "say" && pos.length < 2) {
-    argError(usage, prog, `the following arguments are required: ${["agent", "message"].slice(pos.length).join(", ")}`);
+  const want = cmd === "say" && choose === null ? 2 : 1;
+  if (cmd === "say" && pos.length < want) {
+    argError(usage, prog, `the following arguments are required: ${["agent", "message"].slice(pos.length, want).join(", ")}`);
   }
   if (pos.length > want) extra.push(...pos.splice(want));
   if (extra.length) argError(usage, prog, `unrecognized arguments: ${extra.join(" ")}`);
-  return { on, flags, polls, pos };
+  return { on, flags, polls, pos, choose };
 }
 
 export function main(argv: string[]): number {
@@ -498,6 +558,7 @@ export function main(argv: string[]): number {
     if (cmd === "detach") return cmdDetach(rest);
     if (cmd === "say") {
       const a = parseCommand("say", rest);
+      if (a.choose !== null) return cmdChoose(a.pos[0] as string, a.choose, a.on);
       return cmdSay(a.pos[0] as string, a.pos[1] as string, a.on);
     }
     if (cmd === "follow") {

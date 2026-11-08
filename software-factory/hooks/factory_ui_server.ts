@@ -7,7 +7,10 @@
 //                                              per view
 //   GET  /api/projects/:p/agents[/:name]       the agents live (factory_ui_data.ts live()), limit, githubCalls (the last hour)
 //   GET  /api/projects/:p/machines             the machines, their agents and the CI runners
-//   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>
+//   POST /api/projects/:p/agents/:name/start   {confirm: true}: factory owner start <role> <name>; with stash: true,
+//                                              `--stash` (#640): its leftover changes are saved aside first. For a few
+//                                              seconds after (FACTORY_UI_START_CHECK_SECONDS, 5) it watches whether the
+//                                              loop stopped at once: then 500 ui_start_died, with its reason and last lines
 //   POST /api/projects/:p/agents/:name/stop    {confirm: true}: factory owner stop <name>
 //   POST /api/projects/:p/machines             {confirm: true, name, agents: ["haile", "taytu:manager"]}: factory machine add
 //                                              <name> --json --agent ...; the answer carries `join` (code, command, expiresAt) (#445)
@@ -58,7 +61,8 @@ import type { Notifier } from "./core/ports/notifications.ts";
 import { AddRuns } from "./factory_ui_add.ts";
 import { type Answer, FOREIGN, foreign, readSessions, SignIn } from "./factory_ui_auth.ts";
 import { ChatHub } from "./factory_ui_chat.ts";
-import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, refreshConfig, roleOf, type UiProject } from "./factory_ui_data.ts";
+import { type Agent, channels, live, type Live, machineCommand, owner, type Problem, refreshConfig, roleOf, startCheck, startCheckSeconds,
+  type UiProject } from "./factory_ui_data.ts";
 import { artifactsApi } from "./factory_ui_artifacts.ts";
 import { attachmentsApi, fileResponse } from "./factory_ui_attachments.ts";
 import { docsOf, pageById, searchDocs } from "./factory_ui_docs.ts";
@@ -424,7 +428,21 @@ export function serve(o: ServeOptions): Running {
         return problem(400, "confirm_needed", `${rest[2] === "start" ? "Starting" : "Stopping"} ${name} changes what runs on this machine, so it needs a confirm.`,
           'Send {"confirm": true} (the page asks you first).');
       }
-      const r = await owner(p, rest[2] === "start" ? ["start", role, name] : ["stop", name]);
+      // {stash: true} (#640): its loop stopped at start for leftover changes in its folder; save them aside, then start
+      const stash = rest[2] === "start" && (body as { stash?: unknown }).stash === true;
+      const since = Date.now() / 1000;
+      const r = await owner(p, rest[2] === "start" ? ["start", role, name, ...(stash ? ["--stash"] : [])] : ["stop", name]);
+      // a loop that stops at once (#640): Start says so, with its reason and last lines, instead of "Started"
+      const seconds = startCheckSeconds();
+      if (rest[2] === "start" && r.status === 200 && seconds > 0) {
+        const session = /tmux session (\S+?)\.?$/m.exec(String(r.body.output ?? ""))?.[1] ?? null;
+        const died = await startCheck(p, name, since, session, seconds);
+        if (died) {
+          kept.delete(p.id);
+          return json(500, { ok: false, command: r.body.command, code: "ui_start_died", message: `${name} started, but its loop stopped at once: ${died.message}.`,
+            fix: died.fix, output: [String(r.body.output ?? ""), ...died.lines].filter(Boolean).join("\n") });
+        }
+      }
       kept.delete(p.id); // read again: the next look shows what changed
       if (clients) void tick();
       return json(r.status, r.body);

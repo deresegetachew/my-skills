@@ -28,7 +28,7 @@
 import { existsSync, mkdirSync, readFileSync, readSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Config, DEFAULTS, load, ROLE_NAMES, roleNames, roleSetting, roleWait, rolesDir, safeAgent, taskLabels, taskSource, toFloat } from "./factory_config.ts";
-import { ARTIFACT_TOOLS } from "./factory_agent_settings.ts";
+import { ARTIFACT_TOOLS, PICKER_TOOL } from "./factory_agent_settings.ts";
 import { mainBranch } from "./factory_mcp.ts";
 import { flags as modelFlags, ModelsError, validate } from "./factory_models.ts";
 // What reads GitHub is loaded when a command needs it, so `vars`, `prompt`, `permission-flags` and `claude-flags` (the
@@ -297,13 +297,15 @@ export function artifactsAllowed(role: string): boolean {
   }
 }
 
-/** `settings` with the artifact tools denied, or, when `allowed`, with no deny rule for them (a profile's own too). */
+/** `settings` with the artifact tools denied, or, when `allowed`, with no deny rule for them (a profile's own too). The
+ * interactive picker is always denied (#644): a question there waits in a terminal nobody watches. */
 export function withArtifacts(settings: Record<string, unknown>, allowed: boolean): Record<string, unknown> {
   const { permissions, ...rest } = settings;
   const perms = typeof permissions === "object" && permissions !== null && !Array.isArray(permissions)
     ? { ...permissions as Record<string, unknown> } : {};
-  const deny = (Array.isArray(perms.deny) ? perms.deny : []).filter((d) => !ARTIFACT_TOOLS.includes(d as string));
+  const deny = (Array.isArray(perms.deny) ? perms.deny : []).filter((d) => !ARTIFACT_TOOLS.includes(d as string) && d !== PICKER_TOOL);
   if (!allowed) deny.push(...ARTIFACT_TOOLS);
+  deny.push(PICKER_TOOL);
   if (deny.length) perms.deny = deny;
   else delete perms.deny;
   return Object.keys(perms).length ? { permissions: perms, ...rest } : rest;

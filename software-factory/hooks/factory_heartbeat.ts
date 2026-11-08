@@ -24,7 +24,11 @@
 // <item>.pid`), named `<manager>-<item>`. A sub-manager's row stays on this machine: it has no agent issue, and one
 // that exits in seconds is simply gone at the next look.
 //   down      no live loop or Claude process holds the agent's checkout, and none runs in its tmux session
-//   waiting   alive, and a `factory wait` runs below it: deliberately blocked (a PR slot, CI, an answer, a merge)
+//   waiting   alive, and a `factory wait` runs below it: deliberately blocked (a PR slot, CI, an answer, a merge); or its
+//             Claude session shows a question in its interactive picker (#644): "asks the owner: <question>", on
+//             `owner`, with the question and its options in `ask`
+//   (down)    a loop that stopped at start wrote why (#640, factory_claims.ts writeDown): "down: <message>", with the
+//             reason in `down`
 //   working   alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (#366); also a
 //             dev manager or product owner the owner is talking to (`factory talk`, factory_talks.ts): "talking with
 //             the owner"
@@ -73,7 +77,7 @@ import { basename, dirname, join } from "node:path";
 import { type Config, load, managerSetting, roleNames, taskSource, toFloat } from "./factory_config.ts";
 import { liveSubs } from "./factory_subs.ts";
 import { now as clockNow } from "./factory_clock.ts";
-import { alive as claimAlive, type Claim, isLoopCommand, pidAlive, stateDir as claimsStateDir } from "./factory_claims.ts";
+import { alive as claimAlive, type Claim, downAgents, isLoopCommand, pidAlive, readDown, stateDir as claimsStateDir } from "./factory_claims.ts";
 import { TALKING, talksNow } from "./factory_talks.ts";
 import { agentIssues, current, fields, nameOf, recall, remember, update } from "./factory_agents.ts";
 import { ensureCli, ensureLines, installCli, restartCli, serviceText, uninstallCli } from "./factory_heartbeat_service.ts";
@@ -246,6 +250,54 @@ export function promptOf(screen: string | null | undefined): "empty" | "unsent" 
   return typedAfter(line.slice(line.indexOf("❯") + 1)) ? "unsent" : "empty";
 }
 
+/** A question a Claude session asks in its interactive picker (#644): the question's first line and the options. */
+export interface Picker {
+  question: string;
+  /** Each option: the key that picks it (its number) and its words. "Type something" and "Chat about this" are left out:
+   *  they open a text box instead of answering. */
+  options: { key: string; label: string }[];
+}
+
+const OPTION = /^(❯\s*)?(\d{1,2})\.\s+(\S.*)$/;
+const FREE_TEXT = /^(type something|chat about this|other)\b/i;
+
+/** The text of a screen line without the box Claude Code draws around a dialog (`│ ... │`). */
+function unboxed(line: string): string {
+  return line.replace(/^\s*[│┃|]\s?/, "").replace(/\s*[│┃|]\s*$/, "").trim();
+}
+
+/** A picker on a Claude session's screen (#644): a run of numbered options (1., 2., ...) near the bottom of the screen with
+ *  the cursor (`❯`) on one of them, as AskUserQuestion and the permission prompts draw it, and the question is the line
+ *  above the first option. Null when the screen shows none. A prompt box with typed text is one line, never a run. */
+export function pickerOf(screen: string | null | undefined): Picker | null {
+  const lines = splitLines(plain(screen || "")).map(unboxed).filter((l) => l && !/^[─━╌┄╭╮╰╯\s]+$/.test(l));
+  const tail = lines.slice(-40);
+  let first = -1;
+  let last = -1;
+  let cursor = false;
+  const options: { key: string; label: string }[] = [];
+  for (let i = tail.length - 1; i >= 0; i--) { // from the bottom up: the last run of options 1..n on the screen
+    const m = OPTION.exec(tail[i] as string);
+    if (!m) {
+      if (last >= 0 && i < first - 3) break; // more than a description or two between options: not the same run
+      continue;
+    }
+    const n = Number(m[2]);
+    if (last < 0) {
+      if (tail.length - 1 - i > 8) return null; // the options are not at the bottom: an old screen, not a question now
+      last = i;
+    } else if (n !== Number(options[0]?.key) - 1) break;
+    first = i;
+    cursor ||= Boolean(m[1]);
+    options.unshift({ key: m[2] as string, label: (m[3] as string).trim() });
+    if (n === 1) break;
+  }
+  if (options.length < 2 || options[0]?.key !== "1" || !cursor) return null;
+  const above = tail.slice(0, first).reverse().find((l) => !/^[☐☒✔✓←→\s]/.test(l) && !/^\W*$/.test(l));
+  const question = (above ?? "").replace(/^[●⏺*\s]+/, "").trim();
+  return { question: question || "a question", options: options.filter((o) => !FREE_TEXT.test(o.label)) };
+}
+
 /** When Claude last wrote to a session log of the project folder `path`, or null. */
 function transcriptActivity(path: string | null | undefined): number | null {
   const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
@@ -360,6 +412,10 @@ export interface HeartbeatRow extends Derived {
   /** An idle agent's Claude session at its prompt (#591): "empty", or "unsent" when its prompt box holds text nobody sent;
    *  null when no Claude session waits at its prompt in its tmux session. */
   prompt?: string | null;
+  /** A question its Claude session asks in the interactive picker (#644): then it is `waiting`, on `owner`. */
+  ask?: Picker | null;
+  /** Why its loop stopped at start (#640), while it is down: {code, message, fix}, the folder and the lines that show why. */
+  down?: { code: string; message: string; fix: string; dir: string | null; lines: string[] } | null;
 }
 
 export interface LocalState {
@@ -450,7 +506,7 @@ function confirmSeconds(cfg: Cfg): number {
 /** The agents to look at: the names this machine runs, whoever holds a checkout here, and any agent whose last
  * report was not `down` (it may have crashed since). */
 function knownAgents(checkouts: Record<string, Claim>): string[] {
-  const names = [...machineNames(), ...Object.keys(checkouts)];
+  const names = [...machineNames(), ...Object.keys(checkouts), ...downAgents()];
   try {
     const d = claimsStateDir();
     for (const f of readdirSync(d)) {
@@ -622,13 +678,29 @@ export function observe(cfg: Cfg, procs: Procs | null = null): Record<string, He
       if (alive) {
         const screen = tmux("capture-pane", "-p", "-e", "-J", "-S", "-300", "-t", `=${session}`);
         row.follow = followUrl(plain(screen ?? ""));
+        const claude = inSession(ps, session, isClaude) !== null;
+        // a question in Claude Code's picker waits for a person at the session (#644): waiting on the owner, whatever it held
+        const ask = claude ? pickerOf(screen) : null;
+        if (ask) {
+          row.state = "waiting";
+          row.on = "owner";
+          row.detail = `asks the owner: ${ask.question}`;
+          row.ask = ask;
+        }
         // an idle agent whose Claude session waits at its prompt never looks for work by itself, and text left in its
         // prompt box was never sent (#591): say which, so the web UI can tell it from a loop that waits for a task
-        const prompt = row.state === "idle" && inSession(ps, session, isClaude) !== null ? promptOf(screen) : null;
+        const prompt = row.state === "idle" && claude ? promptOf(screen) : null;
         if (prompt) {
           row.prompt = prompt;
           row.detail = prompt === "unsent" ? "idle: a message is typed in its session but not sent" : "idle at its prompt";
         }
+      }
+    }
+    if (!alive) { // a loop that stopped at start said why (#640)
+      const why = readDown(name);
+      if (why) {
+        row.detail = `down: ${why.message}`;
+        row.down = { code: why.code, message: why.message, fix: why.fix, dir: why.dir, lines: why.lines };
       }
     }
     if (alive) {

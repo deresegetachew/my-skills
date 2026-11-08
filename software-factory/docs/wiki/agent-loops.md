@@ -31,6 +31,17 @@ On this page:
   10 seconds and starts the next task; type `q` and Enter to stop. If the session ends before the task is done
   (`/exit`, a crash), the loop also carries on after the same 10 s countdown, so it never waits all night for a key.
   If it ended on Claude's usage limit, the loop waits for the reset instead (see "Claude's limit" below).
+  **It carries on by itself** (#640): in tmux, beside each coding agent's session, the loop watches its screen. When the
+  task is marked done but the session is still open at an empty prompt a minute later, or when the session has sat at an
+  empty prompt with no task for `loop.idleNextTaskMinutes` (5; 0 turns this half off) while a task is ready
+  (`next_task.ts --no-claim`, asked at most once in that time), it types `/next-task` there. It never types into a prompt
+  box that holds text, while Claude works, or while a question waits in its picker.
+- **No questions in Claude Code's picker** (#644). Every factory session is denied the picker tool (`AskUserQuestion`,
+  the "1. … (Recommended) 2. … Enter to select" menu): a question there waits in a terminal nobody watches. A question
+  for the owner is an owner ask on the board (`factory board ask`), and the agent carries on with its recommended option
+  or parks the task. A session that still shows a picker (an older release, a permission prompt) is `waiting`, "asks
+  the owner: <question>", and Needs attention shows the question with each option as a button that types it there
+  (`factory say <name> --choose <n>`).
 - **`factory agent <name>`**: your own Claude session in that agent's folder, for manual work there (a fix by hand,
   a look around). The SessionStart hook claims the folder, runs the install (in a worktree) and `agentSetup`, sets the
   agent's ports and database, and (issues mode) registers the agent. Started with no other arguments, it says in one
@@ -108,6 +119,14 @@ as defaults.
   in one line (`factory_remote.ts`). The old address still reads, but API writes to it answer `307`.
 - **Back to main.** The loop checks out `origin/main` (detached), cleans leftovers in agent worktrees (never in the
   project folder), updates the submodules and deletes local task branches whose task is done.
+- **Leftovers at start** (#640). A loop whose folder still has uncommitted changes from an earlier run that stop its
+  checkout of main (a half-done merge, a staged deletion) prints `[haile] can't start: leftover changes in its folder
+  <dir>` with `git status --short` and the fix, writes the reason where the heartbeat reads it (`factory agents ls`
+  shows `down: leftover changes in its folder <dir>`), and exits without touching them. Needs attention in the web UI shows "haile can't start:
+  leftover changes in its folder" with **Save them aside and start**, which runs `factory owner start <role> haile
+  --stash`: `git stash push -u -m "<reason>"` in that folder only, then the start. A folder that can't be brought to
+  main for another reason says so too, and any other stop before the first task gives its exit code. The web UI's Start
+  watches a started loop for a few seconds: one that stopped at once shows its reason and last lines, not "Started".
 - **Self-update.** If main brought a different `factory-loop.sh`, the loop restarts itself with the new one, as the
   same agent in the same folder. No need to stop and start it.
 - **Waiting.** When nothing is ready (every task done, blocked or taken), the loop checks again every `waitMinutes`
@@ -493,9 +512,9 @@ which tmux session and Remote Control link it has, and when it last produced out
 | State | Meaning |
 |---|---|
 | `working` | Alive and holds a task, or its tmux session or transcript changed in the last 2 minutes (a dev manager reviewing, a coding agent on its PR); or a dev manager or product owner the owner is talking to (`factory talk`, the web UI's chat), doing "talking with the owner" |
-| `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge) |
+| `waiting` | Alive and deliberately blocked in a `factory wait` (a PR slot, CI, an answer, a merge); or its Claude session shows a question in its picker (#644): "asks the owner: <question>", on `owner`, with the question and its options in `ask` (`factory agents ls --json`) |
 | `idle` | Alive, no task, and quiet for 2 minutes. When its Claude session waits at its prompt (a `claude` process in its tmux session, the `❯` line on screen) the detail says "idle at its prompt", or "idle: a message is typed in its session but not sent" when the prompt box holds text (`prompt` in `factory agents ls --json`: `empty` or `unsent`, #591). Such a session never looks for work by itself: the loop looks only between sessions |
-| `down` | No live process holds its checkout and none runs in its tmux session (a killed session, a power cut after a reboot) |
+| `down` | No live process holds its checkout and none runs in its tmux session (a killed session, a power cut after a reboot). A loop that stopped at start says why: "down: <reason>", with `down` (code, message, fix, lines) in `factory agents ls --json` (#640) |
 
 A loop is alive by its checkout claim, or, when no live claim names it, by a factory loop (or Claude session) running in
 its tmux session `<repo>-<name>`. Without the daemon, `factory agents ls` works this out when asked, so the web UI shows a
@@ -573,6 +592,7 @@ factory follow haile --log                        # stream the output without a 
 factory follow haile --messages                   # the messages from and to haile as they are said (Ctrl-C stops)
 factory follow haile --on local                   # only this machine (--on dev-pc: only that remote)
 factory say haile "check the failing test first"  # one message, as if typed, without attaching
+factory say haile --choose 2                      # answer the question on its screen (Claude Code's picker) with option 2
 factory agent haile --detach                      # on the factory machine: start the agent in a detached tmux session
 factory remote cloud abebe https://claude.ai/code/session_...   # a cloud agent: follow prints its link
 ```

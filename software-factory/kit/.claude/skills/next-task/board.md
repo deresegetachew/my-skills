@@ -10,6 +10,7 @@ commands: nothing changes.
   `board_heartbeat` while you work (a claim lasts 30 minutes), to `board_release` when you give the task back (say what
   happens next), and to `board_close` when it is done or won't be done.
 - **Questions and answers** go with `board_post` (to the dev manager, on the task); read a thread with `board_thread`.
+  A question only the owner can answer is an owner ask (`questions.md`), never Claude Code's picker.
 - **Discoveries** (a decision, a blocker, a result the next agent needs) go on the task with `board_note`.
 - The pull request, its review, CI and the gate stay on GitHub, as `SKILL.md` says. Your task's id is the issue number
   (`3`), or `b17` for a task made on the board.

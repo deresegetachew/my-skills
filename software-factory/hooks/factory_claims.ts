@@ -464,6 +464,63 @@ export function markDone(agent: string, task: string): void {
   writeFileSync(doneFile(agent), task);
 }
 
+/** Why a loop could not start (#640): {code, message, fix}, the folder it could not prepare, the lines that show why
+ * (`git status --short`), and when. Written by the loop when it stops at start, removed once a loop starts; the heartbeat
+ * shows it as `down: <message>` and the web UI's Needs attention offers the fix. */
+export interface DownReason {
+  code: string;
+  message: string;
+  fix: string;
+  dir: string | null;
+  lines: string[];
+  at: number;
+}
+
+/** Where `agent`'s down reason is kept: this clone's state folder, or `folder` (another project's, for the web UI). */
+export function downFile(agent: string, folder: string | null = null): string {
+  return join(folder ?? stateDir(), `down-${safeAgent(agent)}.json`);
+}
+
+/** The folder of `agent`'s own worktree: `<project>-agents/<name>`, whatever its role (it may not exist yet). */
+export function agentFolder(agent: string): string {
+  return join(mainTopDir() + "-agents", safeAgent(agent));
+}
+
+export function writeDown(agent: string, reason: DownReason): void {
+  const path = downFile(agent);
+  writeFileSync(`${path}.tmp`, JSON.stringify(reason, null, 1) + "\n");
+  renameSync(`${path}.tmp`, path);
+}
+
+/** The reason `agent`'s loop last stopped at start, or null (none, or not readable). */
+export function readDown(agent: string, folder: string | null = null): DownReason | null {
+  try {
+    const d = JSON.parse(readFileSync(downFile(agent, folder), "utf8")) as Partial<DownReason>;
+    if (typeof d.code !== "string" || typeof d.message !== "string" || typeof d.fix !== "string") return null;
+    return { code: d.code, message: d.message, fix: d.fix, dir: typeof d.dir === "string" ? d.dir : null,
+      lines: Array.isArray(d.lines) ? d.lines.filter((l): l is string => typeof l === "string") : [], at: Number(d.at) || 0 };
+  } catch {
+    return null;
+  }
+}
+
+export function clearDown(agent: string): void {
+  try {
+    unlinkSync(downFile(agent));
+  } catch {
+    // none
+  }
+}
+
+/** The agents with a reason on file, for the heartbeat: a loop that stopped at start has no claim left to find it by. */
+export function downAgents(): string[] {
+  try {
+    return readdirSync(stateDir()).map((f) => /^down-([a-z0-9][a-z0-9-]*)\.json$/.exec(f)?.[1]).filter((n): n is string => Boolean(n));
+  } catch {
+    return [];
+  }
+}
+
 /** The task an agent marked done, removing the mark; '' when there is none. */
 export function takeDone(agent: string): string {
   const p = doneFile(agent);

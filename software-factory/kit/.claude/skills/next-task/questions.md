@@ -17,6 +17,23 @@ take numbers too). Run `bun --no-env-file --config=/dev/null .claude/hooks/facto
 next free number. The PR gate runs the same check and won't open the PR until the numbers are free. Migrations
 (`numberedDirs` in `.claude/factory.json`) follow the same rule.
 
+## Questions for the owner: an owner ask, never the picker
+
+Never use Claude Code's picker (the AskUserQuestion tool, a "1. … (Recommended) 2. … Enter to select" menu) or a question
+typed in the terminal: in a factory session nobody watches it, and the session waits there for hours. Your rules deny the
+picker. When only the owner can decide (scope, a split, closing a task, anything the dev manager can't answer):
+
+1. Ask on the board as an owner ask, one question per ask, with an id of letters, digits, dots and dashes:
+   `bun --no-env-file --config=/dev/null .claude/hooks/factory_board.ts ask <task>-<topic> "<the question>. Options: 1. <first> (recommended: why) 2. <second> ..."`.
+   It lands in the owner queue (Home and the Inbox in the web UI), on the board or on GitHub, whichever the project uses.
+   Say which task it is about.
+2. **It doesn't block the task:** carry on with your recommended option, and write it in the PR body under
+   "Choices I made", naming the ask. If the owner answers otherwise, that is a follow-up.
+3. **It blocks the task:** park it. Block the task with the question (plan mode: the blocked list; issues mode:
+   `factory_issues.ts block`, see `issues-mode.md`; on the board: `board_release` with what it waits for), drop your claim,
+   and take the next task (under `factory-loop.sh`, end the run; in an interactive loop, mark it done as `waiting.md`
+   says, so the loop moves on).
+
 ## Questions go to the dev manager, not the terminal
 
 The owner isn't watching your terminal; the dev manager is watching the repo. Whenever you need a decision (the docs
