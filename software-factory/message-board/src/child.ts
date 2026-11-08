@@ -178,6 +178,9 @@ if (import.meta.main) {
   } catch {
     req = { url: "", calls: [] };
   }
-  process.stdout.write(JSON.stringify(await answer(req)) + "\n");
+  // Wait until the whole line is written before exiting: on a pipe, a write is finished in the background, and exiting
+  // at once cut an answer of a few hundred kilobytes short, which the caller saw as "the child exited 0" (#639).
+  const line = JSON.stringify(await answer(req)) + "\n";
+  await new Promise<void>((done) => process.stdout.write(line, () => done()));
   process.exit(0);
 }

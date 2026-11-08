@@ -22,10 +22,26 @@ export interface ChildOptions {
 export const UNREACHABLE_FIX = "Start it (`factory board up` on the machine that keeps it) or check its address (MB_URL, or " +
   "`factory board status`); `factory doctor` checks it. Or set `factory settings set tasks.source issues` to use GitHub.";
 
+const masked = (text: string): string => text.replace(/\/\/[^@\s]*@/g, "//***@");
+
 function unreachable(why: string): CoreError {
-  return new CoreError("board-unreachable", `The message board can't be reached: ${why.replace(/\/\/[^@\s]*@/g, "//***@").slice(0, 300)}`,
-    UNREACHABLE_FIX);
+  return new CoreError("board-unreachable", `The message board can't be reached: ${masked(why).slice(0, 300)}`, UNREACHABLE_FIX);
 }
+
+/** The child ended without its one JSON line (#639). Not "can't be reached": the board may have answered and the
+ * calls may have run, so a caller must not fall back to GitHub on it. Says the exit code, how much it printed and the
+ * end of its stderr. */
+function noAnswer(exitCode: number | null, out: string, err: string): CoreError {
+  const printed = out ? `printed ${Buffer.byteLength(out)} bytes that are not one JSON line (cut short?)` : "printed nothing";
+  const tail = masked(err.trim()).split("\n").slice(-5).join(" | ").slice(-500);
+  return new CoreError("board-child-failed",
+    `The message board's child (${CHILD_NAME}) exited ${exitCode ?? "without a code"} and ${printed}, so its calls may have run ` +
+      `but their answer was lost.${tail ? ` Its stderr: ${tail}` : " Its stderr was empty."}`,
+    "Run `factory board status` to check the board. If it answers, run the same command again; if this repeats, report " +
+      "it with this message (a factory bug, not the board).");
+}
+
+const CHILD_NAME = "message-board/src/child.ts";
 
 export class BoardChild {
   constructor(readonly opts: ChildOptions = {}) {}
@@ -48,15 +64,16 @@ export class BoardChild {
     } catch (e) {
       throw unreachable(e instanceof Error ? e.message : String(e));
     }
+    const out = (p.stdout ?? Buffer.alloc(0)).toString();
     let answer: ChildAnswer | null = null;
     try {
-      answer = JSON.parse((p.stdout ?? Buffer.alloc(0)).toString().trim().split("\n").at(-1) ?? "") as ChildAnswer;
+      answer = JSON.parse(out.trim().split("\n").at(-1) ?? "") as ChildAnswer;
     } catch {
       answer = null;
     }
-    if (!answer) {
-      const err = (p.stderr ?? Buffer.alloc(0)).toString().trim().split("\n").at(-1);
-      throw unreachable(p.signalCode ? `it took longer than ${Math.round(timeout / 1000)} s` : err || `the child exited ${p.exitCode}`);
+    if (!answer || typeof answer !== "object") {
+      if (p.signalCode) throw unreachable(`it took longer than ${Math.round(timeout / 1000)} s`);
+      throw noAnswer(p.exitCode, out, (p.stderr ?? Buffer.alloc(0)).toString());
     }
     if (answer.ok) return answer.results;
     if (answer.code === "no-answer") throw unreachable(answer.message);

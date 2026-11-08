@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, expect, setDefaultTimeout, test } from "bun:test";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Message as BoardMessage, Task as BoardTask } from "../message-board/src/index.ts";
+import { Board, type Message as BoardMessage, type Task as BoardTask } from "../message-board/src/index.ts";
 import { type BoardWorld, boardWorld } from "./board_support.ts";
 import { doctor, lines, machine, project as doctorProject } from "./doctor_support.ts";
 import { FAKE_GH } from "./issues_support.ts";
@@ -255,4 +255,27 @@ test("a task made on the board (b<n>) goes through review, block, release and sh
   const bad = hook(d, env, "factory_issues", "review", "x1");
   expect(bad.code).toBe(2);
   expect(bad.stderr).toContain("invalid int value: 'x1'");
+});
+
+test("review and the messages read work when the board's answers are bigger than a pipe holds (#639)", async () => {
+  // On dev-pc the board's tasks and messages came to about a megabyte, and `factory_issues.ts review` failed with "the
+  // child exited 0": the child's answer was cut short. Long task bodies and messages elsewhere on the board make every
+  // list as big. They are written in this process, not through the child under test.
+  const p = boardProject();
+  const other = world.repo();
+  const b = await Board.open(world.url, { as: "system" });
+  try {
+    for (const k of [1, 2, 3]) await b.create({ title: `Long ${k}`, body: "y".repeat(1_000_000), ref: `github:${other}#${k}` });
+    await b.post({ kind: "note", body: "z".repeat(1_000_000) });
+  } finally {
+    await b.end();
+  }
+  expect(hook(p.d, p.env, "next_task", "--claim", "haile", "--pid", "123").stdout).toBe("101 One");
+  const review = hook(p.d, p.env, "factory_issues", "review", "101");
+  expect(review.code, review.out).toBe(0);
+  expect(review.stdout).toContain("101 is in review");
+  expect(onBoard(p.ids[0] as number)).toMatchObject({ holder: null, status: "in_review" });
+  const ls = hook(p.d, p.env, "factory_messages", "ls", "--kind", "all", "--all");
+  expect(ls.code, ls.out).toBe(0);
+  expect(ls.out).not.toContain("board-unreachable");
 });
