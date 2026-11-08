@@ -100,8 +100,8 @@ question an agent asked the dev manager on the board is an item too, `board-m<id
 |---|---|---|---|
 | 1 | an unreviewed head commit | a sub-manager | the PR has no verdict or `pr-watch` for its head, and the commit is older than `manager.quietMinutes` (5) |
 | 2 | an open question | a sub-manager | a `factory-question` (or `factory-msg kind=question to=dev-manager`) has no later answer |
+| 3 | must-fix, red CI, a conflict | a sub-manager | the head was reviewed and the problem is older than `manager.staleMinutes` (15); red CI does not count when a must-fix on the head is newer than the CI result (#361) |
 | 4 | approved and green | a sub-manager to merge; the owner queue if the manager opened the PR, or if only a person may merge it (it changes a `protected` file, or its description says "a person merges this one"), once per head (#474) | the verdict names the head and CI is green by the manager's rule |
-| 4 | approved and green | a sub-manager to merge; the owner if the manager opened the PR | the verdict names the head and CI is green by the manager's rule |
 | 5 | an owner wait | the owner queue | a PR has had `roles.product-owner.workLabel` or `factory:needs-owner` for `manager.ownerWaitMinutes` (120) |
 | 6 | agents | a sub-manager (silent agent); the owner queue (down, or idle) | a coding agent is silent, down, or idle for `manager.agentIdleMinutes` (45) while tasks are ready |
 | 7 | queued CI | the owner queue | Actions runs queued for `manager.ciQueuedMinutes` (10), with "no runner online" when it can see that |
@@ -134,8 +134,8 @@ When the reason is "no reason given" (the session ended with nothing a person or
 head is not started again, so later pull requests are not starved; a new commit is reviewed as usual. Whatever the reason, a
 skip on the head stops checks 1 and 3 from starting another sub-manager for that pull request until something changes (#474):
 a new commit, a CI result newer than the skip, or a comment after it from a person or an agent (claims and notes do not
-count). When more pull requests
-need a manager than there are places (`manager.maxSubManagers`), the ones whose CI is green go first.
+count). When more pull requests need a manager than there are places (`manager.maxSubManagers`), the ones whose CI is green
+go first.
 
 **What a sub-manager may run.** It runs headless on `.claude/manager/settings.json`, so anything the profile does not allow
 stops it. The verdict goes through `gh api -X POST repos/{owner}/{repo}/issues/<n>/comments` (a longer body from
