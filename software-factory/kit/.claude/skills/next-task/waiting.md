@@ -32,12 +32,14 @@ Read this after shipping a task, or when you have to wait.
 - **Fresh context per task:** if the owner started you with `./factory-loop.sh` (or `factory loop`), do exactly one
   task and stop; the loop starts a fresh run for the next one. Keep anything the next run needs in git, the PR or the
   issue, not in your memory.
-- **Interactive loop** (`FACTORY_INTERACTIVE=1`, from `factory loop -i`): the owner may be at the terminal. You may
-  ask them short questions there, but decisions still go in the PR or a decision file, so the next fresh session sees
+- **Interactive loop** (`FACTORY_INTERACTIVE=1`, from `factory loop -i`): the owner may look in, but don't count on
+  it. Never ask in the picker (AskUserQuestion) or wait for an answer typed here: a question for the owner is an owner
+  ask on the board (`questions.md`), and decisions go in the PR or a decision file, so the next fresh session sees
   them. When the task is done (PR opened, claim dropped), mark it done with
   `bun --no-env-file --config=/dev/null .claude/hooks/factory_claims.ts done --task <id>` and end with one line:
   `Task <id> done: <PR link>.` The session then closes by itself and the loop starts the next task. Don't start
-  another task in this session.
+  another task in this session yourself: if the session stays open, the loop types `/next-task` into it a minute later
+  (and into a session idle at its prompt with no task while one is ready), and that is when you take the next one.
 - Stop and report only when every remaining task is blocked, a "Done when" check or CI fails in a way you can't fix,
   or a task would break one of the rules in `CLAUDE.md`.
 - The report is short: tasks done (with PR links), tasks blocked, and questions still open (with links to their

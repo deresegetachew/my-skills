@@ -52,7 +52,7 @@ A PR with the `factory-hold` label is being reviewed by the dev manager: don't r
 ## 2. Check what you need
 
 Anything only a person can provide, or a gap the docs leave open: `questions.md`. Questions go to the dev manager as
-`<!-- factory-question -->` PR comments, never only to the terminal, and you keep working around them.
+`<!-- factory-question -->` PR comments, never the terminal or the picker (AskUserQuestion); owner asks: `questions.md`.
 
 ## 3. Build it
 

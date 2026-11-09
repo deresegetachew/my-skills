@@ -8,6 +8,8 @@
 //                                                    manager or the product owner: one turn of a talk,
 //                                                    `factory talk <role> <text> [<history>]` (202); its
 //                                                    answer arrives over the WebSocket
+//   POST /api/projects/:p/agents/:name/chat {choose}  to a coding agent waiting at a question in its picker (#644): types
+//                                                    the option's number there, `factory say <name> --choose <n>` (200)
 //   GET  /api/projects/:p/owner-queue                each ask on the owner queue ("Dev manager: needs the owner"): its
 //                                                    text, its options (its list lines), open or
 //                                                    answered, and the answer. With the owner queue on the
@@ -420,6 +422,7 @@ export class ChatHub {
   }
 
   private async send(p: UiProject, agent: string, role: string, given: Obj): Promise<Reply> {
+    if (given.choose !== undefined) return this.choose(p, agent, role, given.choose);
     const raw = typeof given.text === "string" ? given.text.replace(/[\x00-\x09\x0b-\x1f\x7f]/g, " ").trim() : "";
     if (!raw || raw.length > TEXT_MAX) {
       return problem(400, "chat_text_needed", `A message is some text, up to ${TEXT_MAX} characters.`, 'Send {"text": "..."}: type it in the box and press Enter.');
@@ -430,6 +433,23 @@ export class ChatHub {
     const r = outcome(p, command, await factory(p, ["say", agent, text], SAY_MS));
     if (r.status !== 200) return r;
     const said = item("owner", agent, "owner", text);
+    keep(p, agent, said);
+    this.push(p, agent, [said]);
+    return { status: 200, body: { ...r.body, item: said } };
+  }
+
+  /** An answer to a question an agent asks in its picker (#644): the option's number typed into its session. */
+  private async choose(p: UiProject, agent: string, role: string, key: unknown): Promise<Reply> {
+    if (typeof key !== "string" || !/^\d{1,2}$/.test(key)) {
+      return problem(400, "chat_choice_needed", "An answer to a question is the number of one of its options.", 'Send {"choose": "1"}: pick one of the buttons.');
+    }
+    if (TALKS.includes(role)) {
+      return problem(400, "chat_no_picker", `${agent} answers in a talk, not in a session you can type into.`, "Write your answer as a message instead.");
+    }
+    const command = `factory say ${agent} --choose ${key}`;
+    const r = outcome(p, command, await factory(p, ["say", agent, "--choose", key], SAY_MS));
+    if (r.status !== 200) return r;
+    const said = item("owner", agent, "owner", `(chose ${key})`);
     keep(p, agent, said);
     this.push(p, agent, [said]);
     return { status: 200, body: { ...r.body, item: said } };

@@ -18,7 +18,9 @@
 //                                            the step `factory loop -i` uses (factory_window.ts), without attaching (#309).
 //                                            A name already running here is refused (`already_running`), and a coding
 //                                            agent past this machine's maxCodingAgents (`too_many_agents`, #581, #596). It makes sure
-//                                            the heartbeat daemon runs (`factory heartbeat ensure`) before it starts one
+//                                            the heartbeat daemon runs (`factory heartbeat ensure`) before it starts one.
+//                                            --stash (#640): the leftover changes in its own folder are saved aside first
+//                                            (`git stash push -u -m <reason>`), when its loop stopped for them
 //   factory owner stop <name>                ends that session's tmux session on this machine; one already ended is said so.
 //                                            A loop outside tmux (nohup, #395) is ended by its checkout claim's pid
 //
@@ -29,12 +31,12 @@
 // refused before anything is read or written. Errors are one JSON line `{code, message, fix}` on stderr.
 import { dirname, join } from "node:path";
 import { state as judgeState, JudgeError } from "./factory_ci_judge.ts";
-import { isLoop, stateDir as claimsDir } from "./factory_claims.ts";
+import { agentFolder, clearDown, isLoop, readDown, stateDir as claimsDir } from "./factory_claims.ts";
 import { ownerQueueOnBoard } from "./core/compose.ts";
 import { type Config, load, loadFromMain } from "./factory_config.ts";
 import { ensureDaemon, processes } from "./factory_heartbeat.ts";
 import { type Comment, type Issue } from "./factory_issues.ts";
-import { Exit, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
+import { Exit, isoUtc, pyDumps, pyQuote, run, runMain } from "./factory_lib.ts";
 import { breakMarkers, OWNER_QUEUE_TITLE, openOwnerAsks, ownerAskIds, trustedOf } from "./factory_prs.ts";
 import { TAG_RE } from "./factory_release.ts";
 import { dropStale, endTree, liveSubs, type Sub } from "./factory_subs.ts";
@@ -50,8 +52,10 @@ const USAGE = `factory owner <command>
                               add a label that exists on the repository to an issue or pull request (--remove: take it off)
   answer <ask-id> <text>      answer an ask in the owner queue ("Dev manager: needs the owner")
   release <X.Y.Z>             tag main vX.Y.Z and push the tag, when ${VERSION_FILE} on main says X.Y.Z
-  start <role> [name]         start a coding-agent, dev-manager or product-owner session (factory loop -i) in its own tmux
-                              window on this machine, without attaching (one already running is refused)
+  start <role> [name] [--stash]
+                              start a coding-agent, dev-manager or product-owner session (factory loop -i) in its own tmux
+                              window on this machine, without attaching (one already running is refused). --stash: save
+                              the leftover changes in its folder aside first (git stash push -u), when its loop can't start
   stop <name>                 end that session's tmux session on this machine (one already ended: nothing to stop)
 
 The owner runs these; the dev manager may merge and label, under the manager gate. Coding agents can't.`;
@@ -329,11 +333,41 @@ function agentName(name: string | undefined, example: string): string {
   return name;
 }
 
-function start(role: string | undefined, name: string | undefined): void {
+/** `--stash` (#640): the leftover changes in `who`'s own folder (`<project>-agents/<name>`, never the project folder) are
+ * saved aside with `git stash push -u` before it starts, with the reason its loop gave as the message. Refuses, starting
+ * nothing, when that folder is not one of this repository's worktrees or the stash fails. */
+function stashLeftovers(who: string): void {
+  const dir = agentFolder(who);
+  const mine = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.trim();
+  const theirs = run(["git", "-C", dir, "rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  if (theirs.code !== 0 || theirs.stdout.trim() !== mine) {
+    refuse("no_folder", `${dir} is not one of this project's agent folders, so nothing was saved aside or started.`,
+      `Start ${who} without --stash: \`factory owner start <role> ${who}\`.`);
+  }
+  const status = run(["git", "-C", dir, "status", "--porcelain"]);
+  if (status.code === 0 && !status.stdout.trim()) {
+    console.log(`${dir} has no leftover changes; nothing to save aside.`);
+    clearDown(who);
+    return;
+  }
+  const why = readDown(who);
+  const message = `factory owner start --stash ${who}: ${why?.message ?? "leftover changes"} (${isoUtc(Date.now() / 1000)})`;
+  const r = run(["git", "-C", dir, "stash", "push", "-u", "-m", message]);
+  const left = run(["git", "-C", dir, "status", "--porcelain", "--untracked-files=no", "--ignore-submodules=all"]);
+  if (r.code !== 0 || left.stdout.trim()) {
+    refuse("stash_failed", `The leftover changes in ${dir} could not be saved aside (${(r.stderr.trim().split("\n").pop() || "they are still there").slice(0, 160)}); nothing was started.`,
+      `Look at them with \`git -C ${dir} status\`, then commit, stash or remove them yourself and start ${who} again.`);
+  }
+  clearDown(who);
+  console.log(`Saved the leftover changes in ${dir} aside: \`git -C ${dir} stash list\` shows them ("${message}"), \`git -C ${dir} stash apply\` brings them back.`);
+}
+
+function start(role: string | undefined, name: string | undefined, stash = false): void {
   if (!role || !ROLES.includes(role)) {
     refuse("bad_role", `Say which role to start: ${ROLES.join(", ")} (got ${role ? `\`${role}\`` : "nothing"}).`,
       "factory owner start coding-agent taytu");
   }
+  if (stash && !name) refuse("bad_args", "--stash needs the agent's name: whose folder to tidy.", `factory owner start ${role} taytu --stash`, 2);
   delete process.env.TMUX;
   const who = name === undefined ? "" : agentName(name, `factory owner start ${role} taytu`);
   if (who && running(sessionName(who))) {
@@ -346,6 +380,7 @@ function start(role: string | undefined, name: string | undefined): void {
       `Stop it first with \`factory owner stop ${who}\`.`);
   }
   if (role === "coding-agent") checkCap(who);
+  if (stash) stashLeftovers(who);
   for (const line of ensureDaemon()) console.log(line); // so the agent's state shows as it runs, from its first minute
   startLoop(role, who, ["-i"]);
   console.log("`factory follow <name>` shows it, or its channel in `factory ui`.");
@@ -451,11 +486,13 @@ export async function main(argv: string[]): Promise<number> {
   }
   else if (cmd === "start" || cmd === "stop") {
     if (me === "dev-manager") ownerOnly(cmd === "start" ? "Starting a session" : "Stopping a session");
-    if (rest.length > (cmd === "start" ? 2 : 1)) {
+    const stash = cmd === "start" && rest.includes("--stash");
+    const words = stash ? rest.filter((w) => w !== "--stash") : rest;
+    if (words.length > (cmd === "start" ? 2 : 1)) {
       refuse("bad_args", `factory owner ${cmd} takes ${cmd === "start" ? "a role and a name" : "one name"}, not \`${rest.join(" ")}\`.`,
         cmd === "start" ? "factory owner start coding-agent taytu" : "factory owner stop taytu", 2);
     }
-    if (cmd === "start") start(rest[0], rest[1]);
+    if (cmd === "start") start(words[0], words[1], stash);
     else stop(agentName(rest[0], "factory owner stop taytu"));
   } else if (cmd === "label") {
     const remove = rest.includes("--remove");

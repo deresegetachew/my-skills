@@ -15,6 +15,13 @@ Run `/product-pass` alone for a whole pass (non-interactive: triage only). Under
 PRD"): answer from the PRD, show the numbers below, and write down what was decided. `--dry-run` anywhere means: read, print
 what you would do, one line each, write nothing.
 
+**Never ask in Claude Code's picker** (the AskUserQuestion tool, a "1. … (Recommended) 2. … Enter to select" menu; your
+settings deny it). In a chat, ask in plain words in your answer. Outside one, nobody watches the terminal: a question for
+the owner is an owner ask (`for=product`, as below), with
+your proposal. If it doesn't
+block what you are doing, go on with your recommendation and say so; if it does, leave that item waiting on the ask and
+take the next one.
+
 ## When the board is on
 
 With `tasks.source` or `messaging.transport` set to `board` (or no transport set, on a machine with a board), your

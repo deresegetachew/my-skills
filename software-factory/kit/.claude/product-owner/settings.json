@@ -186,7 +186,8 @@
       "Bash(gh pr ready*)",
       "Edit(./.github/**)",
       "Artifact",
-      "DesignSync"
+      "DesignSync",
+      "AskUserQuestion"
     ]
   },
   "hooks": {

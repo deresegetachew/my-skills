@@ -383,15 +383,19 @@ export function pointHooksAt(settings: JsonObj, folder: string): JsonObj | null 
  * when `roles.product-owner.artifacts` is on, as main has it (factory_roles.ts). */
 export const ARTIFACT_TOOLS = ["Artifact", "DesignSync"];
 
+/** Claude Code's interactive picker (#644): a question asked there waits in a terminal nobody watches. Every factory
+ * session is denied it; a question for the owner goes to the board as an owner ask (the skills say how). */
+export const PICKER_TOOL = "AskUserQuestion";
+
 /** The agents' settings with `extras` added to permissions.allow after the file's own (no repeats), the artifact tools
- * denied (#104; also when main's file comes from a release without those rules), connectors off. */
+ * and the picker denied (#104, #644; also when main's file comes from a release without those rules), connectors off. */
 export function merged(settings: JsonObj, extras: string[]): JsonObj {
   const doc = structuredClone(settings);
   const perms = obj(doc.permissions) ?? (doc.permissions = {}) as JsonObj;
   const allow = (Array.isArray(perms.allow) ? perms.allow : (perms.allow = [])) as unknown[];
   for (const e of extras) if (!allow.includes(e)) allow.push(e);
   const deny = (Array.isArray(perms.deny) ? perms.deny : (perms.deny = [])) as unknown[];
-  for (const t of ARTIFACT_TOOLS) if (!deny.includes(t)) deny.push(t);
+  for (const t of [...ARTIFACT_TOOLS, PICKER_TOOL]) if (!deny.includes(t)) deny.push(t);
   doc.disableClaudeAiConnectors = true;
   return doc;
 }

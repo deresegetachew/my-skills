@@ -34,6 +34,11 @@ again, then:
 - *Owner items.* Items for the owner (a queued CI, a down or idle agent, the manager's own approved PR) are posted by the
   orchestrator. Do not repeat them; if your item needs the owner, post one `factory-owner-ask` with its own `id`.
 
+**Never ask in Claude Code's picker** (the AskUserQuestion tool, a "1. … (Recommended) 2. … Enter to select" menu; your
+settings deny it), and never wait for an answer typed in the terminal: nobody watches it, and the item would wait for hours.
+A question for the owner is an owner ask (`factory board ask <id> <text>`, below). If it doesn't block the item, go on with
+your recommendation and say so in the thread note; if it does, leave the item waiting on the ask and exit.
+
 ## When the board is on
 
 With `tasks.source` or `messaging.transport` set to `board` (or no transport set, on a machine with a board), your

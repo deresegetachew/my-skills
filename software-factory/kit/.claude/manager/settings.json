@@ -178,7 +178,8 @@
       "Bash(./factory heartbeat run*)",
       "Bash(*factory_heartbeat*)",
       "Artifact",
-      "DesignSync"
+      "DesignSync",
+      "AskUserQuestion"
     ]
   },
   "hooks": {
