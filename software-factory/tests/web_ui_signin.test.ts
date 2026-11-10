@@ -622,3 +622,67 @@ test("an open WebSocket is closed (4401) once its session has expired; a token s
   expect(tokenClosed).toBe(false);
   tokenWs.close();
 }, T);
+
+// --- takeovers are one at a time; the wait is bounded (#607) -----------------------------------------------------------
+
+function revokeAllEnv(p: Project, extra: Record<string, string>) {
+  const env = Object.fromEntries(Object.entries({ ...p.env, ...extra }).filter((e): e is [string, string] => e[1] !== undefined));
+  return Bun.spawn([...BUN, join(HOOKS, "factory_ui.ts"), "sessions", "revoke", "all"], { cwd: p.d, env, stdout: "pipe", stderr: "pipe" });
+}
+
+test("a stale lock is taken over one waiter at a time: while another process holds the takeover flock the revoke waits", async () => {
+  const { p, ui, config } = await hub();
+  const lock = join(config, "ui", "sessions.json.lock");
+  const takeover = join(config, "ui", "sessions.json.lock.takeover");
+  await signedIn(ui);
+  write(lock, `${await deadPid()}\n`);
+  const script = join(p.d, "hold_takeover.ts");
+  const ready = join(p.d, "takeover.ready");
+  write(script, `import { openSync, writeFileSync } from "node:fs";
+import { flock } from ${JSON.stringify(join(HOOKS, "factory_lib.ts"))};
+const fd = openSync(${JSON.stringify(takeover)}, "a");
+flock(fd, true);
+writeFileSync(${JSON.stringify(ready)}, "held");
+await Bun.sleep(60000);
+`);
+  const holder = Bun.spawn([...BUN, script], { stdout: "ignore", stderr: "ignore" });
+  const revoking = revokeAll(p);
+  try {
+    for (let i = 0; i < 50 && !existsSync(ready); i++) await Bun.sleep(100);
+    expect(existsSync(ready), "the helper never took the takeover flock").toBe(true);
+    await Bun.sleep(1000);
+    expect(revoking.exitCode, "the revoke finished while another process held the takeover flock").toBe(null);
+    holder.kill();
+    await holder.exited;
+    const code = await Promise.race([revoking.exited, Bun.sleep(8000).then(() => -1)]);
+    expect(code).toBe(0);
+    expect(await new Response(revoking.stdout).text()).toContain("Revoked 1 session.");
+  } finally {
+    holder.kill();
+    revoking.kill();
+  }
+}, T);
+
+test("the wait for a lock is bounded: FACTORY_UI_LOCK_WAIT_MS, then exit 1 with ui_sessions_locked naming the lock file", async () => {
+  const { p, ui, config } = await hub();
+  const lock = join(config, "ui", "sessions.json.lock");
+  const file = join(config, "ui", "sessions.json");
+  const cookie = await signedIn(ui);
+  const before = readFileSync(file, "utf8");
+  const holder = sleeper();
+  oldLock(lock, holder.pid, 0);
+  const revoking = revokeAllEnv(p, { FACTORY_UI_LOCK_WAIT_MS: "1500" });
+  try {
+    const code = await Promise.race([revoking.exited, Bun.sleep(5000).then(() => null)]);
+    expect(code, "the revoke was still waiting after 5 s; the wait is not bounded").toBe(1);
+    const err = JSON.parse((await new Response(revoking.stderr).text()).trim()) as { code: string; message: string; fix: string };
+    expect(err.code).toBe("ui_sessions_locked");
+    expect(err.message).toContain(lock);
+    expect(err.fix.length).toBeGreaterThan(0);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect((await get(ui, "/api/projects", { cookie })).status).toBe(200);
+  } finally {
+    revoking.kill();
+    holder.kill();
+  }
+}, T);
