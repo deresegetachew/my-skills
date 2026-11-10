@@ -19,7 +19,7 @@ test("the first command of the install section installs the checked archive with
   expect(cmd).toContain("bun --no-env-file --config=/dev/null");
   expect(cmd).toMatch(/hooks\/factory_release\.ts update --archive \S+/);
   // the checksum file is named with its folder: the command runs in the project, and the files are outside it
-  expect(cmd).toMatch(/--sums \S*SHA256SUMS(\s|$)/);
+  expect(cmd).toMatch(/--sums \S+\/SHA256SUMS(\s|$)/);
   expect(cmd, "the command must not download by version").not.toMatch(/factory_release\.ts update <version>/);
 });
 

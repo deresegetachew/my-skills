@@ -56,7 +56,9 @@ test("update <version> from an unpacked release that differs from the download w
   expect(mine).not.toBe(served);
   expect(out, "the unpacked commit").toContain(mine.slice(0, 7));
   expect(out, "what was installed instead").toContain(served.slice(0, 7));
-  expect(out, "the fix").toMatch(/update --archive \S+ --sums \S*SHA256SUMS(\s|$)/);
+  // the fix names both files by their path beside the unpacked folder: the command runs in the project, outside it
+  const beside = dirname(folder);
+  expect(out, "the fix").toContain(`update --archive ${join(beside, "software-factory-1.0.0.tar.gz")} --sums ${join(beside, "SHA256SUMS")}`);
 });
 
 test("no warning when the downloaded release has the same manifest as the unpacked one", async () => {
