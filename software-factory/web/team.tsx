@@ -7,6 +7,7 @@
 import { useMemo, useState } from "react";
 import { Avatar } from "./avatar_view.tsx";
 import { ConfirmDialog, ListRow } from "./parts.tsx";
+import type { LimitView } from "./model.ts";
 import type { ConfirmSpec } from "./parts_model.ts";
 import { Notice, PrNotice, type Props, StagedBar, useAct, useFixDialog, useSettingsData } from "./settings.tsx";
 import { addAgentAsk, nameProblem, removeAgentAsk } from "./settings_model.ts";
@@ -17,6 +18,8 @@ export interface TeamProps extends Props {
   machines: { name: string; here: boolean }[];
   /** Start or Stop through the shell's confirm; a start passes this machine's limit (#581). */
   askAgent: (verb: "start" | "stop", name: string, atOnce: { max: number; running: string[] } | null) => void;
+  /** GitHub's limit while it is used up: the dots then say what the sidebar says (#611). */
+  limit: LimitView | null;
 }
 
 type Dialog = { kind: "remove" | "rename"; name: string; role: string; to?: string };
@@ -32,7 +35,7 @@ export function TeamPage(p: TeamProps) {
   if (!data) return <div className="body">{problem ? <Notice p={problem} /> : <p className="empty">Reading the team…</p>}</div>;
 
   const hereName = p.machines.find((m) => m.here)?.name ?? null;
-  const rows = teamRows({ team: data.team, live: p.agents, machine: data.machine, hereName });
+  const rows = teamRows({ team: data.team, live: p.agents, machine: data.machine, hereName, limit: p.limit });
   const taken = [...new Set([...data.team.agents.map((a) => a.name), ...Object.values(data.team.next).flat()])];
   const running = codingHere(data.team.agents, p.agents);
   const maxRow = data.machine.rows.find((r) => r.key === "maxCodingAgents");
@@ -97,7 +100,7 @@ function TeamRow({ r, busy, openAgent, start, stop, rename, remove }: { r: TeamR
   const settled = r.change === null;
   return (
     <ListRow avatar={{ name: r.name, role: r.role }} title={<button className="link" onClick={openAgent}>{r.name}</button>} sub={sub}
-      status={{ state: r.change === "joins" ? "waiting" : r.running ? "working" : "idle", text: r.change === "joins" ? "Staged" : r.stateText }}
+      status={{ state: r.dot, text: r.change === "joins" ? "Staged" : r.stateText }}
       action={settled ? (
         <span className="row-actions">
           {r.running && !r.here ? <span className="tag quiet">on {r.machine}</span>

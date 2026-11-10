@@ -122,7 +122,7 @@ test("611: a team row's dot is the sidebar's dot for the same agent and state, f
     const row = rows.find((r) => r.name === "menelik") as unknown as { dot: string };
     const side = sidebar({ page: "team", team: [{ name: "menelik", role: "coding-agent", state, detail: "" }], limit: null }).team[0];
     expect(row.dot).toBe(dot);
-    expect(side?.dot).toBe(row.dot);
+    expect(side?.dot as string | undefined).toBe(row.dot);
   }
 });
 
