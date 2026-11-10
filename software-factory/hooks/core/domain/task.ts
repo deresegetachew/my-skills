@@ -34,6 +34,21 @@ export function prdChangeIn(text: string): string | null {
   return m ? ((m[1] ?? m[2]) as string) : null;
 }
 
+/** The words before a task a pull request closes, as GitHub reads them: close(s|d), fix(es|ed), resolve(s|d), any case,
+ * with an optional colon. Followed by the task's name (`b25` or `#7`). */
+export const CLOSES = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+`;
+
+/** The tasks `text` (a pull request's body) closes, as people name them: `b25` for a task made on the board, `7` for
+ * issue 7; in the order they appear, each once (#545). */
+export function closedIn(text: string): string[] {
+  const out: string[] = [];
+  for (const m of text.matchAll(new RegExp(`${CLOSES}(b\\d+|#\\d+)\\b`, "gi"))) {
+    const name = (m[1] as string).toLowerCase().replace(/^#/, "");
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
 /** The note for the ready tasks a pick or a look skipped because their PRD change hasn't merged: one line each, or
  * undefined for none. `name` is how the task is called ("#5", "b12", "1.3"). */
 export function prdSkipNote(skipped: { name: string; pr: string }[]): string | undefined {
