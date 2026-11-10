@@ -490,7 +490,8 @@ export class SignIn {
         await updateSessionsAsync((now) => [...now, s], this.now());
       } catch (e) {
         if (!(e instanceof SessionsLocked)) throw e;
-        if (p) this.pending.set(email, p); // nothing was written: the code still works until it runs out
+        // nothing was written: the code still works until it runs out, unless a newer code was asked for meanwhile
+        if (p && !this.pending.has(email)) this.pending.set(email, p);
         return problem(503, e.code, BUSY_MESSAGE, "Try the same code again in a minute.");
       }
       return { status: 200, body: { ok: true, email }, headers: { "set-cookie": this.setCookie(value, limits.sessionDays * 86_400, secure) } };
