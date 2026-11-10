@@ -211,3 +211,10 @@ export function mainAction(pr: PrPageData): PrAction | null {
   if (pr.state !== "open") return null;
   return pr.draft ? "ready" : "merge";
 }
+
+/** The pull request as the page shows it (#611): once this page merged head `mergedHead`, a read that still says it is
+ *  open at that head (it was asked before GitHub said merged) shows it merged, so Merge doesn't come back. A commit
+ *  pushed after it, or nothing merged here, shows the read as it is. */
+export function shownPr(pr: PrPageData, mergedHead: string | null): PrPageData {
+  return mergedHead !== null && pr.head === mergedHead && pr.state === "open" ? { ...pr, state: "merged", merged: true } : pr;
+}

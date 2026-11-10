@@ -64,6 +64,16 @@ export function agentState(agent: { state: string; detail: string } | undefined,
   return { text, tone: "quiet" };
 }
 
+/** The dot beside an agent's name. */
+export type StateDot = "working" | "waiting" | "idle" | "down";
+
+const DOT: Record<Tone, StateDot> = { good: "working", warn: "waiting", bad: "down", quiet: "idle" };
+
+/** An agent's dot, from the same state and tone as its words: the sidebar and the Team page both use it (#611). */
+export function agentDot(agent: { state: string; detail: string } | undefined, limit: LimitView | null): StateDot {
+  return DOT[agentState(agent, limit).tone];
+}
+
 /** The hash that opens `channel` of `project`. */
 export function channelHash(project: string, channel: string): string {
   return `#/${encodeURIComponent(project)}/${channel}`;

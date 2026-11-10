@@ -2,7 +2,9 @@
 // Your team, Run the factory (Team first, #581), and Factory settings with its tabs; which item is selected for an address, and the address
 // each item opens. The views built before this page (tasks, epics, pull requests, CI, the owner queue, machines) keep
 // their addresses; a page not built yet is `page:<id>`. No React here, so tests/web_ui_nav.test.ts runs it as it is.
-import { agentState, type LimitView } from "./model.ts";
+import { agentDot, agentState, type LimitView, type StateDot } from "./model.ts";
+
+export type { StateDot };
 
 export interface NavItem {
   page: string;
@@ -13,8 +15,6 @@ export interface NavItem {
   /** A count: red for what needs the owner (the Inbox, and Home's Needs attention, #579), blue for the rest. */
   badge: { count: number; tone: "red" | "blue" } | null;
 }
-
-export type StateDot = "working" | "waiting" | "idle" | "down";
 
 export interface TeamRow {
   name: string;
@@ -98,7 +98,6 @@ export function pageHead(page: string): { title: string; purpose: string } {
 
 const ROLE_WORD: Record<string, string> = { "product-owner": "Product", "dev-manager": "Manager", "coding-agent": "Builder" };
 const ROLE_ORDER = ["product-owner", "dev-manager", "coding-agent"];
-const DOT: Record<string, StateDot> = { good: "working", warn: "waiting", bad: "down", quiet: "idle" };
 
 function rank(role: string): number {
   const i = ROLE_ORDER.indexOf(role);
@@ -116,10 +115,11 @@ function item(page: string, active: string, counts: Record<string, number>): Nav
 export function sidebar(o: { page: string; team: TeamInput[]; counts?: Record<string, number>; limit?: LimitView | null }): Sidebar {
   const counts = o.counts ?? {};
   const team = [...o.team].sort((a, b) => rank(a.role ?? "") - rank(b.role ?? "") || a.name.localeCompare(b.name)).map((a): TeamRow => {
-    const st = agentState(a.state === undefined ? undefined : { state: a.state, detail: a.detail ?? "" }, o.limit ?? null);
+    const agent = a.state === undefined ? undefined : { state: a.state, detail: a.detail ?? "" };
+    const st = agentState(agent, o.limit ?? null);
     const role = a.role ?? "coding-agent";
     const stuck = a.stuck || null;
-    return { name: a.name, role: ROLE_WORD[role] ?? "Builder", roleId: role, dot: DOT[st.tone] ?? "idle",
+    return { name: a.name, role: ROLE_WORD[role] ?? "Builder", roleId: role, dot: agentDot(agent, o.limit ?? null),
       title: `${a.name}: ${st.text}${stuck ? `. Stuck: ${stuck}` : ""}`, channel: `agent:${a.name}`, on: o.page === a.name, stuck };
   });
   return { main: MAIN.map((p) => item(p, o.page, counts)), team, ops: OPS.map((p) => item(p, o.page, counts)) };

@@ -108,3 +108,45 @@ test("the coding agents running on this machine", async () => {
   expect(codingHere(TEAM.agents, [live("menelik", "working"), live("taytu", "down"), live("fasil", "idle"), live("haile", "idle", { here: false })]))
     .toEqual(["menelik"]);
 });
+
+// #611: the Team page's dots are the sidebar's dots.
+const dotMachine = { agents: ["menelik"], from: "machine", pending: { join: [], leave: [] } };
+const dotTeam = { agents: [{ name: "menelik", role: "coding-agent" }, { name: "taytu", role: "coding-agent" }], next: { "coding-agent": ["menelik", "taytu"] }, former: {} };
+
+test("611: a team row's dot is the sidebar's dot for the same agent and state, for every state", async () => {
+  const { teamRows } = await mod();
+  const { sidebar } = await import("../web/nav_model.ts");
+  const expected: Record<string, string> = { working: "working", waiting: "waiting", idle: "idle", down: "down", stuck: "down" };
+  for (const [state, dot] of Object.entries(expected)) {
+    const rows = teamRows({ team: dotTeam, live: [live("menelik", state)], machine: dotMachine, hereName: "dev-pc", limit: null });
+    const row = rows.find((r) => r.name === "menelik") as unknown as { dot: string };
+    const side = sidebar({ page: "team", team: [{ name: "menelik", role: "coding-agent", state, detail: "" }], limit: null }).team[0];
+    expect(row.dot).toBe(dot);
+    expect(side?.dot as string | undefined).toBe(row.dot);
+  }
+});
+
+test("611: a running agent that is idle shows the idle dot, not green", async () => {
+  const { teamRows } = await mod();
+  const rows = teamRows({ team: dotTeam, live: [live("menelik", "idle")], machine: dotMachine, hereName: "dev-pc" });
+  expect(rows.find((r) => r.name === "menelik")).toMatchObject({ running: true, dot: "idle" });
+});
+
+test("611: with the GitHub limit hit a working agent is waiting, as in the sidebar", async () => {
+  const { teamRows } = await mod();
+  const { sidebar } = await import("../web/nav_model.ts");
+  const limit = { reset: 1_800_000_000, message: "rate limited" };
+  const rows = teamRows({ team: dotTeam, live: [live("menelik", "working")], machine: dotMachine, hereName: "dev-pc", limit });
+  const side = sidebar({ page: "team", team: [{ name: "menelik", role: "coding-agent", state: "working", detail: "" }], limit }).team[0];
+  expect(rows.find((r) => r.name === "menelik")).toMatchObject({ dot: "waiting" });
+  expect(side?.dot).toBe("waiting");
+});
+
+test("611: an agent with no live entry is idle, and one staged to join is waiting", async () => {
+  const { teamRows } = await mod();
+  const team = { ...dotTeam, next: { "coding-agent": ["menelik", "taytu", "haile"] } };
+  const rows = teamRows({ team, live: [live("menelik", "working")], machine: dotMachine, hereName: "dev-pc" });
+  const by = (n: string): string => (rows.find((r) => r.name === n) as unknown as { dot: string }).dot;
+  expect(by("taytu")).toBe("idle");
+  expect(by("haile")).toBe("waiting");
+});

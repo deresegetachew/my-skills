@@ -12,7 +12,7 @@ import { ConfirmDialog, ListRow, StatusDot, Tabs } from "./parts.tsx";
 import type { Check, ConfirmSpec } from "./parts_model.ts";
 import { agentOfAnswer, type CheckoutFacts, checkoutText, fieldOf, type Fixing, fromText, inputOf, type LiveAgent, MAINTENANCE,
   machineAgentsText, maintenanceAsk, proposeAsk, rawOf, recheckAgent, removeFactsOf, searchSettings, type SettingRow,
-  type Staged, stagedText, syncAsk, updateAsk, valueText } from "./settings_model.ts";
+  type Staged, stagedText, stagedUndos, syncAsk, updateAsk, valueText } from "./settings_model.ts";
 import type { Post, Say } from "./views.tsx";
 
 export interface Problem {
@@ -139,6 +139,10 @@ export function StagedBar({ changes, busy, act, ask }: { changes: SettingsData["
       <StatusDot state="waiting" />
       <span className="staged-n">{stagedText(changes.length)}</span>
       <span className="staged-what">{changes.map((c) => c.name).join(", ")}.</span>
+      {/* each change's own Undo (#611); Drop all still drops every one */}
+      {stagedUndos(changes).map((u) => (
+        <button key={u.key} className="btn small" disabled={busy} onClick={() => void act("settings/unstage", u.body, { title: u.done })}>{u.label}</button>
+      ))}
       <button className="btn small" disabled={busy} onClick={() => void act("settings/unstage", {}, { title: "Dropped the staged changes." })}>Drop all</button>
       <button className="btn small primary" disabled={busy}
         onClick={() => ask({ spec: proposeAsk(changes.length), run: () => act("settings/pr", { confirm: true }, { title: "Pull request opened." }) })}>

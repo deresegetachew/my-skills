@@ -1006,7 +1006,7 @@ function App() {
             attention={attention} startAgent={startAgent}
             open={(c, f) => go(project.id, addressOf(c), f)} onMenu={() => setMenu(true)} />
           : !channel && page === "team" ? <TeamPage key={`${project.id}/team`} project={project} get={get} post={post} say={setToast}
-            open={(c) => go(project.id, c)} agents={live?.agents ?? []} machines={live?.machines ?? []} askAgent={askAgent} />
+            open={(c) => go(project.id, c)} agents={live?.agents ?? []} machines={live?.machines ?? []} askAgent={askAgent} limit={live?.limit ?? null} />
           : !channel && SETTINGS_PAGES[page] ? (() => {
             const Page = SETTINGS_PAGES[page] as typeof SettingsPage;
             return <Page key={`${project.id}/${page}`} project={project} get={get} post={post} say={setToast} open={(c) => go(project.id, c)}

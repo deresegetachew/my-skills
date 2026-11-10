@@ -3,7 +3,7 @@
 // renaming an agent and setting the limit, each saying what will and won't happen. Adding and removing use the confirms
 // of settings_model.ts, and Start and Stop those of parts_model.ts. No command is shown on screen (the owner's rule).
 // No React here, so tests/web_ui_team_model.test.ts runs it as it is.
-import { ROLE_TITLE } from "./model.ts";
+import { agentDot, type LimitView, ROLE_TITLE, type StateDot } from "./model.ts";
 import { andList, type ConfirmSpec } from "./parts_model.ts";
 import { idleChecks, type RemoveFacts } from "./settings_model.ts";
 
@@ -44,6 +44,8 @@ export interface TeamRowView {
   here: boolean;
   state: string;
   stateText: string;
+  /** Its dot: the sidebar's for the same agent (#611); one staged to join waits. */
+  dot: StateDot;
   task: string | null;
   former: string[];
   /** Staged to join or to leave the team. */
@@ -65,7 +67,8 @@ export function whereText(name: string, live: TeamLive | undefined, m: TeamMachi
 }
 
 /** Every role in one list: the product owner, the dev manager, then each coding agent, those staged to join last. */
-export function teamRows(o: { team: TeamFacts; live: TeamLive[]; machine: TeamMachine; hereName: string | null }): TeamRowView[] {
+export function teamRows(o: { team: TeamFacts; live: TeamLive[]; machine: TeamMachine; hereName: string | null; limit?: LimitView | null }):
+  TeamRowView[] {
   const next = Object.values(o.team.next).flat();
   const joining = Object.entries(o.team.next).flatMap(([role, names]) => names.filter((n) => !o.team.agents.some((a) => a.name === n))
     .map((name) => ({ name, role })));
@@ -78,7 +81,9 @@ export function teamRows(o: { team: TeamFacts; live: TeamLive[]; machine: TeamMa
     const state = running ? live?.state ?? "working" : "down";
     const joins = joining.some((j) => j.name === name);
     return { name, role, roleTitle: ROLE_TITLE[role] ?? role, machine: whereText(name, live, o.machine, o.hereName), running,
-      here: live?.here ?? false, state, stateText: STATE_TEXT[state] ?? state, task: live?.task ?? null, former: o.team.former[name] ?? [],
+      here: live?.here ?? false, state, stateText: STATE_TEXT[state] ?? state,
+      dot: joins ? "waiting" : agentDot(live ? { state: live.state, detail: "" } : undefined, o.limit ?? null),
+      task: live?.task ?? null, former: o.team.former[name] ?? [],
       change: joins ? "joins" : next.includes(name) ? null : "leaves" };
   });
 }
