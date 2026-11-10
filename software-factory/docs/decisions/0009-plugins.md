@@ -23,11 +23,12 @@ All of them are built in and chosen by a setting in `core/compose.ts`, the only 
 (`tools/check_skills.ts` enforces it). The plugin loader of decision 0004 (an npm package in
 `software-factory/plugins/<name>/`, run in a child Bun) existed only for the NATS client and went with it (#504).
 
-Everything about pull requests, checks and CI is still outside the ports. Counted on main on 10 Nov 2026:
-- 30 files in `hooks/` call `gh pr ...` or read `pulls` and check runs, the PR gate (`pr-gate.ts`) and the dev manager's
+Everything about pull requests, checks and CI is still outside the ports. Counted roughly with grep on main on 10 Nov
+2026 (the numbers move with the pattern; #243's inventory step makes the exact list):
+- about 30 files in `hooks/` call `gh pr ...` or read `pulls` and check runs, the PR gate (`pr-gate.ts`) and the dev manager's
   gate (`manager_gate.ts`) among them;
-- 9 files read Actions runs, jobs or runners;
-- 45 files outside `core/adapters/github/` call `gh` in some form, through the shared `gh`/`ghAll` in
+- at least 9 files read Actions runs, jobs or runners;
+- about 45 files outside `core/adapters/github/` call `gh` in some form, through the shared `gh`/`ghAll` in
   `factory_issues.ts` and `factory_lib.ts` or a call of their own.
 
 The PR gate decides merges by reading the agent's shell command: it allows `gh pr merge <n> --match-head-commit <sha>`
