@@ -28,7 +28,9 @@
 // the server reads it on each request, so a revoke takes effect at once. A request that comes with the cookie must come
 // from the UI's own page: one with another Origin, or that the browser marks as sent from another site, is refused.
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+  writeSync } from "node:fs";
+import { flock } from "./factory_lib.ts";
 import { dirname, join } from "node:path";
 import type { Notifier } from "./core/ports/notifications.ts";
 import { configDir, machineSettings } from "./factory_machine.ts";
@@ -101,46 +103,135 @@ export function readSessions(now = Date.now()): Session[] {
   }
 }
 
-/** A lock older than this was left by a process that died while holding it: it is taken over. */
+/** A lock that names no pid (one written before #607) is taken over once it is older than this. */
 const STALE_LOCK_MS = 10_000;
 
-/** Runs `fn` holding <sessions file>.lock (made with O_EXCL), so a sign-in and a revoke in two processes never undo
- * each other: each re-reads the file inside the lock. Waits for a held lock; takes over one left by a dead process. */
-function locked<T>(fn: () => T): T {
-  const lock = `${sessionsFile()}.lock`;
+function lockPath(): string {
+  return `${sessionsFile()}.lock`;
+}
+
+/** Tries once to take <sessions file>.lock (O_EXCL, holding this process's pid). True when taken. A lock whose holder
+ * is gone (its pid is dead, or it names no pid and is older than STALE_LOCK_MS) is removed so the next try can take it
+ * (#607), one taker at a time: the taker holds a kernel flock on <lock>.takeover (released when its process ends, so it
+ * never goes stale), and only while holding it looks at the lock again and removes it if its holder is still gone. So two
+ * waiters can't both judge the same stale lock and remove a fresh one between them, however the file system reuses
+ * inodes. The flock is only tried, never waited on, so the server is never blocked. */
+function tryLock(): boolean {
+  const lock = lockPath();
   const dir = dirname(lock);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  for (;;) {
-    try {
-      closeSync(openSync(lock, "wx", 0o600));
-      break;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      let age = 0;
-      try {
-        age = Date.now() - statSync(lock).mtimeMs;
-      } catch {
-        continue; // it went in the meantime
-      }
-      if (age > STALE_LOCK_MS) rmSync(lock, { force: true });
-      else Bun.sleepSync(10);
-    }
-  }
   try {
-    return fn();
+    const fd = openSync(lock, "wx", 0o600);
+    try {
+      writeSync(fd, `${process.pid}\n`);
+    } finally {
+      closeSync(fd);
+    }
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
+  if (!staleNow(lock)) return false;
+  const fd = openSync(`${lock}.takeover`, "a", 0o600);
+  try {
+    if (!flock(fd, false)) return false; // another waiter is taking it over: try again
+    if (staleNow(lock)) rmSync(lock, { force: true }); // looked at again under the takeover lock
   } finally {
-    rmSync(lock, { force: true });
+    closeSync(fd); // releases the flock
+  }
+  return false; // the stale lock is gone: the next try takes it with O_EXCL
+}
+
+/** Whether the lock at `lock` is there and its holder is gone. */
+function staleNow(lock: string): boolean {
+  try {
+    const st = statSync(lock);
+    return holderGone(readFileSync(lock, "utf8"), st.mtimeMs);
+  } catch {
+    return false; // it went in the meantime
   }
 }
 
+/** How long a sessions write waits for the lock before it gives up (#607): a lock naming a pid that was reused by
+ * another program would otherwise hold every sign-in and revoke for ever. */
+function lockWaitMs(): number {
+  const v = Number(process.env.FACTORY_UI_LOCK_WAIT_MS);
+  return Number.isFinite(v) && v > 0 ? v : 60_000;
+}
+
+/** What the server answers a page when a sessions write gave up on the lock: no file path, which is this machine's
+ * business, not the visitor's (the CLI's SessionsLocked names it for the owner). */
+const BUSY_MESSAGE = "Sign-in is busy on this machine, so nothing was changed.";
+
+/** The error a write gives when the lock stays held past lockWaitMs: {code, message, fix}. */
+export class SessionsLocked extends Error {
+  readonly code = "ui_sessions_locked";
+  readonly fix: string;
+  constructor(lock: string) {
+    super(`The sign-in sessions file is locked by another process (${lock}), and it stayed locked for ` +
+      `${Math.round(lockWaitMs() / 1000)} s, so nothing was changed.`);
+    this.fix = `Try again in a minute. If no \`factory ui\` server or \`factory ui sessions\` command is running here, remove ${lock}, then try again.`;
+  }
+}
+
+/** Whether the lock's holder is gone: its pid is dead; or, for a lock that names no pid, it is older than STALE_LOCK_MS. */
+function holderGone(text: string, mtimeMs: number): boolean {
+  const m = /^\s*(\d+)\s*$/.exec(text);
+  if (!m) return Date.now() - mtimeMs > STALE_LOCK_MS;
+  try {
+    process.kill(Number(m[1]), 0);
+    return false; // alive (or alive as another user's process: not ours to take)
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+/** Removes the lock when it is still this process's: never one another process holds now. */
+function unlock(): void {
+  try {
+    if (readFileSync(lockPath(), "utf8").trim() !== String(process.pid)) return;
+  } catch {
+    return; // already gone
+  }
+  rmSync(lockPath(), { force: true });
+}
+
+/** The change itself, inside the lock: re-read, change, write through a temporary file and a rename. */
+function apply(change: (list: Session[]) => Session[], now: number): Session[] {
+  const next = change(readSessions(now));
+  writePrivate(sessionsFile(), JSON.stringify({ sessions: next }, null, 1) + "\n");
+  return next;
+}
+
 /** Changes the sessions: `change` gets the file as it is now (read inside the lock, expired ones left out) and returns
- * the new list, written through a temporary file and a rename (mode 600, in a folder of mode 700). */
+ * the new list, written through a temporary file and a rename (mode 600, in a folder of mode 700). Holding
+ * <sessions file>.lock, so a sign-in and a revoke in two processes never undo each other. Blocks while it waits: for the
+ * `factory ui sessions` command; the web UI's server uses updateSessionsAsync. */
 export function updateSessions(change: (list: Session[]) => Session[], now = Date.now()): Session[] {
-  return locked(() => {
-    const next = change(readSessions(now));
-    writePrivate(sessionsFile(), JSON.stringify({ sessions: next }, null, 1) + "\n");
-    return next;
-  });
+  const until = Date.now() + lockWaitMs();
+  while (!tryLock()) {
+    if (Date.now() > until) throw new SessionsLocked(lockPath());
+    Bun.sleepSync(10);
+  }
+  try {
+    return apply(change, now);
+  } finally {
+    unlock();
+  }
+}
+
+/** updateSessions for the web UI's server: it waits for the lock without blocking the server (#607). */
+export async function updateSessionsAsync(change: (list: Session[]) => Session[], now = Date.now()): Promise<Session[]> {
+  const until = Date.now() + lockWaitMs();
+  while (!tryLock()) {
+    if (Date.now() > until) throw new SessionsLocked(lockPath());
+    await Bun.sleep(10);
+  }
+  try {
+    return apply(change, now);
+  } finally {
+    unlock();
+  }
 }
 
 /** Writes `text` to `file` through a temporary file, mode 600 in a mode-700 folder; nothing half written is left. */
@@ -321,7 +412,14 @@ export class SignIn {
     const secure = url.protocol === "https:" || req.headers.get("x-forwarded-proto") === "https";
     if (what === "signout") {
       const s = this.session(req);
-      if (s) updateSessions((now) => now.filter((x) => x.id !== s.id), this.now());
+      if (s) {
+        try {
+          await updateSessionsAsync((now) => now.filter((x) => x.id !== s.id), this.now());
+        } catch (e) {
+          if (e instanceof SessionsLocked) return problem(503, e.code, BUSY_MESSAGE, "Sign out again in a minute.");
+          throw e;
+        }
+      }
       return { status: 200, body: { ok: true }, headers: { "set-cookie": this.setCookie("", 0, secure) } };
     }
     const text = await bodyText(req, MAX_BODY);
@@ -371,7 +469,7 @@ export class SignIn {
     return { status: 202, body: { ok: true, message: `If this address is allowed, a code is on its way. It works for ${CODE_MINUTES} minutes.` } };
   }
 
-  private verify(email: string, code: string, ip: string, secure: boolean): Answer {
+  private async verify(email: string, code: string, ip: string, secure: boolean): Promise<Answer> {
     const { limits } = this.settings();
     if (this.isLocked(`a:${email}`) || this.isLocked(`ip:${ip}`)) {
       return problem(429, "ui_signin_locked", "Too many wrong codes: signing in is locked for a while.",
@@ -388,7 +486,14 @@ export class SignIn {
       const created = new Date(this.now());
       const s: Session = { id: randomBytes(5).toString("hex"), hash: sha256(value), email, created: created.toISOString(),
         expires: new Date(created.getTime() + limits.sessionDays * 86_400_000).toISOString(), ip };
-      updateSessions((now) => [...now, s], this.now());
+      try {
+        await updateSessionsAsync((now) => [...now, s], this.now());
+      } catch (e) {
+        if (!(e instanceof SessionsLocked)) throw e;
+        // nothing was written: the code still works until it runs out, unless a newer code was asked for meanwhile
+        if (p && !this.pending.has(email)) this.pending.set(email, p);
+        return problem(503, e.code, BUSY_MESSAGE, "Try the same code again in a minute.");
+      }
       return { status: 200, body: { ok: true, email }, headers: { "set-cookie": this.setCookie(value, limits.sessionDays * 86_400, secure) } };
     }
     if (p && !live) this.pending.delete(email);
@@ -469,11 +574,16 @@ export function sessionsCli(argv: string[], refuse: (r: Refusal) => never): numb
     const id = rest[0] ?? "";
     if (!id || rest.length > 1) refuse({ code: "ui_sessions_usage", message: "factory ui sessions revoke takes one id, or all.", fix: "`factory ui sessions ls` lists the ids." });
     let gone = 0;
-    updateSessions((now) => {
-      const left = id === "all" ? [] : now.filter((s) => s.id !== id);
-      gone = now.length - left.length;
-      return left;
-    });
+    try {
+      updateSessions((now) => {
+        const left = id === "all" ? [] : now.filter((s) => s.id !== id);
+        gone = now.length - left.length;
+        return left;
+      });
+    } catch (e) {
+      if (e instanceof SessionsLocked) refuse({ code: e.code, message: e.message, fix: e.fix });
+      throw e;
+    }
     if (id === "all") {
       console.log(`Revoked ${gone} session${gone === 1 ? "" : "s"}.`);
       return 0;
