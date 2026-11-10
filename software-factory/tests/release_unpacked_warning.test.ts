@@ -3,7 +3,8 @@
 //
 // The expected warning is a line starting with two spaces and "warning:" that contains "not the release you unpacked",
 // the folder name "software-factory-<version>", the first 7 characters of the unpacked MANIFEST's source_commit and of
-// the installed one's, and the text "update --archive <archive> --sums SHA256SUMS".
+// the installed one's, and the text "update --archive <archive> --sums <folder>/SHA256SUMS" (both files with their path:
+// the command runs in the project, and they sit beside the unpacked folder, outside it).
 import { expect, test } from "bun:test";
 import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -55,7 +56,7 @@ test("update <version> from an unpacked release that differs from the download w
   expect(mine).not.toBe(served);
   expect(out, "the unpacked commit").toContain(mine.slice(0, 7));
   expect(out, "what was installed instead").toContain(served.slice(0, 7));
-  expect(out, "the fix").toMatch(/update --archive \S+ --sums SHA256SUMS/);
+  expect(out, "the fix").toMatch(/update --archive \S+ --sums \S*SHA256SUMS(\s|$)/);
 });
 
 test("no warning when the downloaded release has the same manifest as the unpacked one", async () => {

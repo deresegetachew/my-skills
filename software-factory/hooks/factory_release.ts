@@ -1582,12 +1582,14 @@ function unpackedWarning(installed: Manifest, tag: string): string[] {
   const got = installed as unknown as JsonObj;
   if (manifestKey(here.manifest) === manifestKey(got)) return [];
   const version = String(here.manifest.version);
+  // the archive and SHA256SUMS sit beside the unpacked folder, outside the project the command runs in: both with their path
   const archive = join(dirname(here.folder), `software-factory-${version}.tar.gz`);
+  const sums = join(dirname(here.folder), "SHA256SUMS");
   return [
     `  warning: ${tag} as published (commit ${shortCommit(got)}) was installed, not the release you unpacked: ` +
       `${basename(here.folder)} (v${version}, commit ${shortCommit(here.manifest)}).`,
     "  To install the archive you checked instead, run:",
-    `    bun --no-env-file --config=/dev/null ${join(here.folder, "hooks", "factory_release.ts")} update --archive ${archive} --sums SHA256SUMS`,
+    `    bun --no-env-file --config=/dev/null ${join(here.folder, "hooks", "factory_release.ts")} update --archive ${archive} --sums ${sums}`,
   ];
 }
 
