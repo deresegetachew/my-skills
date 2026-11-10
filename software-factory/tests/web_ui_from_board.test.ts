@@ -13,7 +13,8 @@ import { freshDb, migrateUpTo, type Pg, startPg } from "./board_pg.ts";
 import { api, CONFIG, project, type Project, type Row, startUi, type Running } from "./web_ui_support.ts";
 import { CI, copyHookFolders, HOOKS, SF, write, writeExe } from "./support.ts";
 
-const T = 90_000;
+// a test's limit: room for the server's start (up to a minute on a starved machine) and its read of the board (#532)
+const T = 180_000;
 const REPO = "o/work";
 let pg: Pg;
 const running: Running[] = [];
@@ -149,6 +150,18 @@ async function tasksUntil(ui: Running, ok: (json: Row) => boolean, ms: number): 
   return last;
 }
 
+/** How long a test gives the server to read the board after it starts. It returns as soon as the tasks come from it, so
+ *  this costs nothing when the machine is fast; on a starved one the read took over 15 s (#532). */
+const LIVE_MS = 60_000;
+
+/** GET tasks until they come from the board, and fails here if they don't: an action sent before the server has read
+ *  the board is refused by design (#523), and that refusal would hide that the server was only slow (#532). */
+async function fromBoard(ui: Running): Promise<Row> {
+  const json = await tasksUntil(ui, (j) => j.from === "board", LIVE_MS);
+  expect(json.from, `the server hadn't read the board ${LIVE_MS / 1000} s after it started: ${JSON.stringify(json).slice(0, 300)}`).toBe("board");
+  return json;
+}
+
 function socket(ui: Running): { ws: WebSocket; next: (want: (m: Row) => boolean, ms: number) => Promise<Row | null> } {
   const ws = new WebSocket(ui.url.replace("http", "ws") + `/api/ws?token=${ui.token}`);
   const seen: Row[] = [];
@@ -185,7 +198,7 @@ test("the tasks API answers from the board: columns from its status, blocked and
   const url = await boardUrl();
   await seeded(url);
   const ui = await started(workProject(), url);
-  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const json = await fromBoard(ui);
   expect(json.from, JSON.stringify(json)).toBe("board");
   const t = byId(json);
   expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9"]); // open tasks of this repo only; no #99 from GitHub, no epic, no other repo
@@ -210,7 +223,7 @@ test("when an epic's last task is done on the board, the Epics page shows its st
   await board.close(id[9] as number, { outcome: "done" });
   expect((await board.get(id[1] as number)).status).toBe("done");
   const ui = await started(workProject(), url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const epics = (await api(ui, "/api/projects/work/epics")).json;
   const e = (epics.epics as Row[]).find((x) => x.id === "1") as Row;
   expect(e).toMatchObject({ stage: "done", done: 3, all: 3 });
@@ -222,7 +235,7 @@ test("a task that waits for its PRD change's card shows as waiting, with a link 
   const card = await board.create({ title: "PRD change: #62 (Shelf v1.1)", kind: "note", body: "PRD change: #62", ref: `factory:${REPO}/prd-62` });
   await board.link(id[12] as number, card.id, "waits_for");
   const ui = await started(workProject(), url);
-  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const json = await fromBoard(ui);
   const t = byId(json);
   expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9"]); // the card is not a task
   expect(t["12"]).toMatchObject({ state: "blocked", stateText: "waits for its PRD", blockedBy: [], next: false,
@@ -238,7 +251,7 @@ test("a task's thread and context come from the board", async () => {
   const url = await boardUrl();
   await seeded(url);
   const ui = await started(workProject(), url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const r = await api(ui, "/api/projects/work/tasks/7");
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect((r.json.task as Row).title).toBe("Add the login page");
@@ -318,7 +331,7 @@ test("Release on a board task still runs through the GitHub path", async () => {
   await seeded(url);
   const p = workProject();
   const ui = await started(p, url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(readFileSync(p.factoryLog, "utf8")).toContain("issues release 7 try again");
@@ -344,7 +357,7 @@ test("with tasks.source board, Release takes the task back on the board, with it
   const { board, id } = await seeded(url);
   const p = workProject(0, BOARD_CONFIG);
   const ui = await started(p, url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(await board.get(id[7] as number)).toMatchObject({ status: "open", holder: null });
@@ -366,7 +379,7 @@ test("a task made on the board for this project (ref factory:<repo>/...) is on t
   await menelik.claim(mine.id);
   const p = workProject(0, BOARD_CONFIG);
   const ui = await started(p, url);
-  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const json = await fromBoard(ui);
   const t = byId(json);
   expect(Object.keys(t).sort()).toEqual(["11", "12", "7", "9", `b${mine.id}`]);
   expect(t[`b${mine.id}`]).toMatchObject({ title: "Made on the board", state: "in-progress", holders: ["menelik"], url: null });
@@ -382,7 +395,7 @@ test("with tasks.source board, Block moves the task to blocked with a blocker no
   const { board, id } = await seeded(url);
   const p = workProject(0, BOARD_CONFIG);
   const ui = await started(p, url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const r = await api(ui, "/api/projects/work/tasks/12/actions/block", { method: "POST", body: { confirm: true, reason: "needs the card keys" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect((await board.get(id[12] as number)).status).toBe("deferred");
@@ -399,7 +412,7 @@ test("with tasks.source board, Reassign hands the task to the agent on the board
   const { board, id } = await seeded(url);
   const p = workProject(0, BOARD_CONFIG);
   const ui = await started(p, url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const r = await api(ui, "/api/projects/work/tasks/7/actions/reassign", { method: "POST", body: { confirm: true, agent: "taytu" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(await board.get(id[7] as number)).toMatchObject({ assignee: "taytu", holder: null, status: "open" });
@@ -417,7 +430,7 @@ test("Reassign to an agent that isn't running: the board hands the task over and
   writeExe(join(p.d, "factory"), FAKE_FACTORY.replace('echo "$*" >> "$FAKE_FACTORY_LOG"',
     'echo "$*" >> "$FAKE_FACTORY_LOG"\nif [ "$1" = say ]; then echo \'{"code": "no-such-agent", "message": "No agent called taytu was found.", "fix": "x"}\' >&2; exit 1; fi'));
   const ui = await started(p, url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const r = await api(ui, "/api/projects/work/tasks/12/actions/reassign", { method: "POST", body: { confirm: true, agent: "taytu" } });
   expect(r.status, JSON.stringify(r.json)).toBe(200);
   expect(r.json.ok).toBe(true);
@@ -578,7 +591,7 @@ test("with a board, the read after a release starts at once (leaving tasks out),
   for (let i = 0; i < 5; i++) {
     const p = workProject();
     const ui = await started(p, url);
-    await tasksUntil(ui, (j) => j.from === "board", 15_000); // the card is the board's
+    await fromBoard(ui); // the card is the board's
     const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true } });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
     expect(readFileSync(p.factoryLog, "utf8").split("\n"), `run ${i + 1}`).toContain("snapshot tasks=board");
@@ -646,7 +659,7 @@ test("with tasks.source board and a board with none of the project's tasks yet, 
   boards.push(b);
   await b.migrate();
   const ui = await started(workProject(0, BOARD_CONFIG), url);
-  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const json = await fromBoard(ui);
   expect(json.from).toBe("board");
   expect(rowsOf(json)).toEqual([]);
   expect(problemsOf(json)).toEqual([]);
@@ -678,7 +691,7 @@ test("with tasks.source board, the board isn't shown as live until its tasks are
     expect(problemsOf(opening)).toEqual([]); // opening, not down
     unlock();
     await tx;
-    await tasksUntil(ui, (j) => j.from === "board", 15_000);
+    await fromBoard(ui);
     const r = await api(ui, "/api/projects/work/tasks/7/actions/release", { method: "POST", body: { confirm: true, reason: "try again" } });
     expect(r.status, JSON.stringify(r.json)).toBe(200);
     await finish(ui);
@@ -696,7 +709,7 @@ test("tasks from a healthy board show no 'no snapshot yet' banner; the pull requ
   rmSync(join(p.state, "snapshot.json")); // no snapshot: the repo comes from the git remote
   Bun.spawnSync(["git", "-C", p.d, "remote", "add", "origin", `https://github.com/${REPO}.git`]);
   const ui = await started(p, url);
-  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const json = await fromBoard(ui);
   expect(problemsOf(json)).not.toContain("ui_no_snapshot");
   expect(problemsOf((await api(ui, "/api/projects/work/epics")).json)).not.toContain("ui_no_snapshot");
   expect(problemsOf((await api(ui, "/api/projects/work/pull-requests")).json)).toContain("ui_no_snapshot");
@@ -744,7 +757,7 @@ test("the tasks done this week come apart from the open ones, newest first, for 
   const later = await board.create({ title: "Remember the theme", ref: ref(13), priority: 6 });
   await board.close(later.id, { outcome: "done" });
   const ui = await started(workProject(), url);
-  const json = await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  const json = await fromBoard(ui);
   expect(Object.keys(byId(json)).sort()).toEqual(["11", "12", "7", "9"]); // the open tasks, as before
   const done = json.done as Row[];
   expect(done.map((t) => t.id)).toEqual(["13", "10"]); // newest first
@@ -759,7 +772,7 @@ test("an answer about a task made on the board names it b3, not #b3 (#546)", asy
   await board.close(mine.id, { outcome: "done" });
   const p = workProject(0, BOARD_CONFIG);
   const ui = await started(p, url);
-  await tasksUntil(ui, (j) => j.from === "board", 15_000);
+  await fromBoard(ui);
   const gone = await api(ui, "/api/projects/work/tasks/b99999/actions/release", { method: "POST", body: { confirm: true } });
   expect(gone.status).toBe(404);
   expect(String(gone.json.message)).toStartWith("b99999 isn't one of");
