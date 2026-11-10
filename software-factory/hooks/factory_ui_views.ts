@@ -349,11 +349,12 @@ function reviewOf(p: Obj): PullView["review"] {
 }
 
 /** The task a pull request is for: its branch (`task/7-login`, or `task/b3-slug` for a task made on the board), else
- *  its title's start (`b3: ...`, `#7: ...`), as the agents name them (#545). */
-export function taskOfPull(branch: string, title: string): string | null {
+ *  its title's start (`b3: ...`, `#7: ...`), as the agents name them, else the first task its body closes (`Closes b3`,
+ *  `factory prs`'s `closes`) (#545). */
+export function taskOfPull(branch: string, title: string, closes: string[] = []): string | null {
   const fromBranch = branchTask(branch) ?? /^task\/(b\d+)(?:-|$)/.exec(branch)?.[1];
   if (fromBranch) return fromBranch;
-  return /^(b\d+|#?\d+)\s*:/.exec(title.trim())?.[1]?.replace(/^#/, "") ?? null;
+  return /^(b\d+|#?\d+)\s*:/.exec(title.trim())?.[1]?.replace(/^#/, "") ?? closes[0] ?? null;
 }
 
 function pullsView(p: UiProject, cache: Obj): PullsView {
@@ -363,7 +364,7 @@ function pullsView(p: UiProject, cache: Obj): PullsView {
     const author = authorOf(p.config, { branch, agent: str(x.agent) || null });
     const truth = truthOf({ action: str(x.next) || "none", text: str(x.nextText) || str(x.next) || "none" }, author);
     return { number: num(x.number), title: str(x.title), url: str(x.url) || null, branch, draft: x.draft === true,
-      agent: str(x.agent) || null, author, head: str(x.head) || null, createdAt: str(x.createdAt) || null, task: taskOfPull(branch, str(x.title)), checks: { state: str(x.ci) || "unknown",
+      agent: str(x.agent) || null, author, head: str(x.head) || null, createdAt: str(x.createdAt) || null, task: taskOfPull(branch, str(x.title), strings(x.closes)), checks: { state: str(x.ci) || "unknown",
         failing: list(x.notGreen).filter((j) => str(j.state) === "red").map((j) => str(j.name)) },
       review: reviewOf(x), protected: typeof x.protected === "boolean" ? x.protected : null,
       ...truth, rework: str(x.rework) || null,

@@ -164,7 +164,9 @@ project's (`#3`) and those made on the board for it (`b17`, #528), from Ready to
 and in the Done column the ones finished in the last 7 days, newest first (#545). A task handed to an agent that hasn't taken it yet
 says "For <agent>" and sits in that agent's lane. A click on a card opens the task's page (its words, who has it, its
 epic, what blocks it, its pull request, its actions, its context and its thread) at its own address,
-`#/<project>/view:tasks/task:b17`, so it can be shared and Back closes it; Escape closes it too (#543). A live board has no
+`#/<project>/view:tasks/task:b17`, so it can be shared and Back closes it; Escape closes it too (#543). A pull request
+belongs to a card by its branch (`task/b17-...`), else its title (`b17: ...`), else the first task its body closes
+(`Closes b17`, `Fixes #3`; `factory prs --json` gives these as `closes`, #545). A live board has no
 "Read again" button: every change on the board reaches the page within a second. `factory board status` counts every
 task on the board, done ones too, and `factory board tasks --all` lists them (`factory board tasks` lists the open ones,
 and marks an open note, an issue that isn't work, as `note`) (#520).

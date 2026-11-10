@@ -8,7 +8,7 @@
 //
 // A PRD change's card (#578: a note with a `PRD change: #62` line, which the tasks from that change wait for) is closed
 // the same way once its pull request merges, so those tasks become ready. One call per open card, none while there is none.
-import { prdChangeIn } from "./core/domain/task.ts";
+import { CLOSES, prdChangeIn } from "./core/domain/task.ts";
 import { branchTask } from "./factory_config.ts";
 import type { Board, Gh, Task } from "../message-board/src/index.ts";
 import { Numbers } from "../message-board/src/index.ts";
@@ -29,7 +29,6 @@ export interface ClosedAfterMerge {
 }
 
 const REASON = "closed after merge by the dev manager";
-const CLOSES = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+`;
 
 function escape(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
