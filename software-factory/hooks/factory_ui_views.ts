@@ -257,7 +257,8 @@ function repoOf(p: UiProject, ci: Obj): string {
   if (/^[\w.-]+\/[\w.-]+$/.test(given)) return given;
   const kept = repos.get(p.id);
   if (kept !== undefined) return kept;
-  const r = run(["git", "-C", p.path, "remote", "get-url", "origin"]);
+  // the URL as configured, not after a `url.<base>.insteadOf` rewrite (a mirror, or a local copy): that is GitHub's name (#539)
+  const r = run(["git", "-C", p.path, "config", "--get", "remote.origin.url"]);
   const m = /github\.com[:/]([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(r?.code === 0 ? r.stdout.trim() : "");
   const repo = m ? (m[1] as string) : "";
   repos.set(p.id, repo);

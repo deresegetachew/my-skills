@@ -342,6 +342,12 @@ export class BoardFeed {
     }
   }
 
+  /** A project was added to the list this feed was given (#539): its tasks part is worked out from a fresh read, so its
+   *  Board comes from the board without a restart. Nothing to do while the board isn't open. */
+  added(): void {
+    if (this.board) this.schedule();
+  }
+
   /** The board this server has open, or null while there is none (attachments, #637, read it directly). */
   handle(): Board | null {
     return this.board;
