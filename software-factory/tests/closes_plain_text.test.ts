@@ -117,3 +117,13 @@ test("tasksOf: a code-spanned or quoted Part of is not listed, a plain one is", 
   expect(tasksOf("taytu/x", "> Part of #9")).toEqual([]);
   expect(tasksOf("taytu/x", "Part of #9")).toEqual(["9"]);
 });
+
+// #668 must-fixes: text GitHub still reads must not be stripped
+test("closedIn: a line starting with inline triple backticks is not a fence; the Closes after it counts", () => {
+  expect(closedIn("```npm test``` passes\n\nCloses #7")).toEqual(["7"]);
+});
+
+test("closedIn: a closing fence longer than the opener closes the block; the Closes after it counts", () => {
+  expect(closedIn("```\nx\n````\nCloses #7")).toEqual(["7"]);
+  expect(closedIn("~~~\nFixes #9\n~~~~~\nCloses #7")).toEqual(["7"]);
+});
