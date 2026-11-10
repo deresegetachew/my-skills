@@ -28,8 +28,9 @@
 // the server reads it on each request, so a revoke takes effect at once. A request that comes with the cookie must come
 // from the UI's own page: one with another Origin, or that the browser marks as sent from another site, is refused.
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { chmodSync, closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+import { chmodSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
   writeSync } from "node:fs";
+import { flock } from "./factory_lib.ts";
 import { dirname, join } from "node:path";
 import type { Notifier } from "./core/ports/notifications.ts";
 import { configDir, machineSettings } from "./factory_machine.ts";
@@ -110,9 +111,11 @@ function lockPath(): string {
 }
 
 /** Tries once to take <sessions file>.lock (O_EXCL, holding this process's pid). True when taken. A lock whose holder
- * is gone (its pid is dead, or it names no pid and is older than STALE_LOCK_MS) is taken over safely (#607): it is
- * renamed away first, and only the waiter whose rename moved that very file (same inode) goes on, so two waiters can't
- * both take it over, and a fresh lock someone else just made is put back. */
+ * is gone (its pid is dead, or it names no pid and is older than STALE_LOCK_MS) is removed so the next try can take it
+ * (#607), one taker at a time: the taker holds a kernel flock on <lock>.takeover (released when its process ends, so it
+ * never goes stale), and only while holding it looks at the lock again and removes it if its holder is still gone. So two
+ * waiters can't both judge the same stale lock and remove a fresh one between them, however the file system reuses
+ * inodes. The flock is only tried, never waited on, so the server is never blocked. */
 function tryLock(): boolean {
   const lock = lockPath();
   const dir = dirname(lock);
@@ -128,33 +131,43 @@ function tryLock(): boolean {
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
   }
-  let seen: { ino: number; text: string; mtimeMs: number };
+  if (!staleNow(lock)) return false;
+  const fd = openSync(`${lock}.takeover`, "a", 0o600);
   try {
-    const st = statSync(lock);
-    seen = { ino: st.ino, text: readFileSync(lock, "utf8"), mtimeMs: st.mtimeMs };
-  } catch {
-    return false; // it went in the meantime: try again
-  }
-  if (!holderGone(seen.text, seen.mtimeMs)) return false;
-  const aside = `${lock}.stale-${process.pid}-${randomBytes(4).toString("hex")}`;
-  try {
-    renameSync(lock, aside);
-  } catch {
-    return false; // another waiter moved it first
-  }
-  try {
-    if (statSync(aside).ino !== seen.ino) {
-      // between the look and the rename, someone took the lock fresh: give it back where it was
-      try {
-        linkSync(aside, lock);
-      } catch {
-        // a third lock is there already; its holder goes on, and the one moved aside removes only a lock naming it (unlock)
-      }
-    }
+    if (!flock(fd, false)) return false; // another waiter is taking it over: try again
+    if (staleNow(lock)) rmSync(lock, { force: true }); // looked at again under the takeover lock
   } finally {
-    rmSync(aside, { force: true });
+    closeSync(fd); // releases the flock
   }
   return false; // the stale lock is gone: the next try takes it with O_EXCL
+}
+
+/** Whether the lock at `lock` is there and its holder is gone. */
+function staleNow(lock: string): boolean {
+  try {
+    const st = statSync(lock);
+    return holderGone(readFileSync(lock, "utf8"), st.mtimeMs);
+  } catch {
+    return false; // it went in the meantime
+  }
+}
+
+/** How long a sessions write waits for the lock before it gives up (#607): a lock naming a pid that was reused by
+ * another program would otherwise hold every sign-in and revoke for ever. */
+function lockWaitMs(): number {
+  const v = Number(process.env.FACTORY_UI_LOCK_WAIT_MS);
+  return Number.isFinite(v) && v > 0 ? v : 60_000;
+}
+
+/** The error a write gives when the lock stays held past lockWaitMs: {code, message, fix}. */
+export class SessionsLocked extends Error {
+  readonly code = "ui_sessions_locked";
+  readonly fix: string;
+  constructor(lock: string) {
+    super(`The sign-in sessions file is locked by another process (${lock}), and it stayed locked for ` +
+      `${Math.round(lockWaitMs() / 1000)} s, so nothing was changed.`);
+    this.fix = `Try again in a minute. If no \`factory ui\` server or \`factory ui sessions\` command is running here, remove ${lock}, then try again.`;
+  }
 }
 
 /** Whether the lock's holder is gone: its pid is dead; or, for a lock that names no pid, it is older than STALE_LOCK_MS. */
@@ -191,7 +204,11 @@ function apply(change: (list: Session[]) => Session[], now: number): Session[] {
  * <sessions file>.lock, so a sign-in and a revoke in two processes never undo each other. Blocks while it waits: for the
  * `factory ui sessions` command; the web UI's server uses updateSessionsAsync. */
 export function updateSessions(change: (list: Session[]) => Session[], now = Date.now()): Session[] {
-  while (!tryLock()) Bun.sleepSync(10);
+  const until = Date.now() + lockWaitMs();
+  while (!tryLock()) {
+    if (Date.now() > until) throw new SessionsLocked(lockPath());
+    Bun.sleepSync(10);
+  }
   try {
     return apply(change, now);
   } finally {
@@ -201,7 +218,11 @@ export function updateSessions(change: (list: Session[]) => Session[], now = Dat
 
 /** updateSessions for the web UI's server: it waits for the lock without blocking the server (#607). */
 export async function updateSessionsAsync(change: (list: Session[]) => Session[], now = Date.now()): Promise<Session[]> {
-  while (!tryLock()) await Bun.sleep(10);
+  const until = Date.now() + lockWaitMs();
+  while (!tryLock()) {
+    if (Date.now() > until) throw new SessionsLocked(lockPath());
+    await Bun.sleep(10);
+  }
   try {
     return apply(change, now);
   } finally {
@@ -387,7 +408,14 @@ export class SignIn {
     const secure = url.protocol === "https:" || req.headers.get("x-forwarded-proto") === "https";
     if (what === "signout") {
       const s = this.session(req);
-      if (s) await updateSessionsAsync((now) => now.filter((x) => x.id !== s.id), this.now());
+      if (s) {
+        try {
+          await updateSessionsAsync((now) => now.filter((x) => x.id !== s.id), this.now());
+        } catch (e) {
+          if (e instanceof SessionsLocked) return problem(503, e.code, e.message, e.fix);
+          throw e;
+        }
+      }
       return { status: 200, body: { ok: true }, headers: { "set-cookie": this.setCookie("", 0, secure) } };
     }
     const text = await bodyText(req, MAX_BODY);
@@ -454,7 +482,12 @@ export class SignIn {
       const created = new Date(this.now());
       const s: Session = { id: randomBytes(5).toString("hex"), hash: sha256(value), email, created: created.toISOString(),
         expires: new Date(created.getTime() + limits.sessionDays * 86_400_000).toISOString(), ip };
-      await updateSessionsAsync((now) => [...now, s], this.now());
+      try {
+        await updateSessionsAsync((now) => [...now, s], this.now());
+      } catch (e) {
+        if (e instanceof SessionsLocked) return problem(503, e.code, e.message, e.fix);
+        throw e;
+      }
       return { status: 200, body: { ok: true, email }, headers: { "set-cookie": this.setCookie(value, limits.sessionDays * 86_400, secure) } };
     }
     if (p && !live) this.pending.delete(email);
@@ -535,11 +568,16 @@ export function sessionsCli(argv: string[], refuse: (r: Refusal) => never): numb
     const id = rest[0] ?? "";
     if (!id || rest.length > 1) refuse({ code: "ui_sessions_usage", message: "factory ui sessions revoke takes one id, or all.", fix: "`factory ui sessions ls` lists the ids." });
     let gone = 0;
-    updateSessions((now) => {
-      const left = id === "all" ? [] : now.filter((s) => s.id !== id);
-      gone = now.length - left.length;
-      return left;
-    });
+    try {
+      updateSessions((now) => {
+        const left = id === "all" ? [] : now.filter((s) => s.id !== id);
+        gone = now.length - left.length;
+        return left;
+      });
+    } catch (e) {
+      if (e instanceof SessionsLocked) refuse({ code: e.code, message: e.message, fix: e.fix });
+      throw e;
+    }
     if (id === "all") {
       console.log(`Revoked ${gone} session${gone === 1 ? "" : "s"}.`);
       return 0;
