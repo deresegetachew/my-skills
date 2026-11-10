@@ -291,13 +291,16 @@ flowchart LR
 1. **Download and check the release.** From the [releases page](https://github.com/deresegetachew/my-skills/releases)
    take `software-factory-<version>.tar.gz` and `SHA256SUMS` into one folder outside the project, run
    `sha256sum -c SHA256SUMS`, and unpack the archive there.
-2. **Install it.** In the project's folder, in a terminal of your own (an agent session is refused), on a clean tree:
+2. **Install it.** In the project's folder, in a terminal of your own (an agent session is refused), on a clean tree,
+   install the archive you just checked:
 
    ```bash
-   bun --no-env-file --config=/dev/null <unpacked folder>/hooks/factory_release.ts update <version>
+   bun --no-env-file --config=/dev/null <unpacked folder>/hooks/factory_release.ts update --archive <folder>/software-factory-<version>.tar.gz --sums <folder>/SHA256SUMS
    ```
 
-   `<version>` is the release you unpacked (a pre-release is only taken by name). The release client needs only Bun,
+   Online, `... factory_release.ts update <version>` downloads that release from GitHub instead of using your archive;
+   run from an unpacked release, it warns when what it downloaded is not the archive you unpacked. A pre-release is only
+   taken by name. The release client needs only Bun,
    so it can install into a project that has no factory yet. It checks the archive's checksum, writes the shared files (`.claude/hooks`, `.claude/ci`, the agents, the
    skills, the agents' rules `.claude/factory/settings.json`, `factory`, `factory-loop.sh`) as real files, writes the pin `.claude/factory/release.json`
    and, on a first install, adds the templates you fill in, never over a file that exists. It commits nothing.
