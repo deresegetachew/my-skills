@@ -36,6 +36,7 @@ import { judge, JudgeError, resultAt, type Row, stateAt as judgeState, type Verd
 import { asPull } from "./factory_pr_feed.ts";
 import { personMerges, prFiles } from "./factory_prs.ts";
 import type { PrSnapshot } from "./core/ports/messaging.ts";
+import { closedIn } from "./core/domain/task.ts";
 import { type Comment, gh, ghAll, type Issue, readyIssues } from "./factory_issues.ts";
 import { now as leaseNow } from "./factory_lease.ts";
 import { parseComment, verdicts } from "./factory_messages.ts";
@@ -112,10 +113,11 @@ export function reviewState(comments: Comment[], head: string): [string, number 
   return got;
 }
 
-/** The task issue a PR closes (`Closes #n`, else its task/<n>-... branch), else null. */
+/** The task issue a PR closes (`Closes #n`, read as the board closer reads it: not in code or quotes, b233), else its
+ * task/<n>-... branch, else null. */
 export function issueOf(pr: { body?: string | null; head?: { ref?: string } }): number | null {
-  const m = /\b(?:closes|fixes|resolves)\s+#(\d+)/i.exec(pr.body || "");
-  if (m) return Number(m[1]);
+  const n = closedIn(pr.body || "").find((t) => /^\d+$/.test(t));
+  if (n) return Number(n);
   const b = /^task\/(\d+)-/.exec(pr.head?.ref ?? "");
   return b ? Number(b[1]) : null;
 }

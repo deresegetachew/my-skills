@@ -38,11 +38,40 @@ export function prdChangeIn(text: string): string | null {
  * with an optional colon. Followed by the task's name (`b25` or `#7`). */
 export const CLOSES = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+`;
 
+/** `text` (Markdown) without what GitHub doesn't read closing keywords in (b233): fenced code blocks (``` or ~~~), inline
+ * code spans and `>` quoted lines. Each is replaced by a blank, so the words around it stay apart. */
+export function plainText(text: string): string {
+  return withoutFences(text)
+    .replace(/(`+)[\s\S]*?\1/g, " ")
+    .replace(/^[ \t]*>.*$/gm, " ");
+}
+
+/** `text` with its fenced code blocks blanked, as CommonMark reads them (#668): a fence is three or more backticks or
+ * tildes at the start of a line; a backtick fence's info string has no backtick (so "```npm test``` passes" is inline
+ * code, not a fence); a block closes on a line of the same character at least as long, or at the end of the text. */
+function withoutFences(text: string): string {
+  let open: { ch: string; len: number } | null = null;
+  return text.split("\n").map((raw) => {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw; // CRLF bodies (GitHub's web editor) read the same
+    if (open) {
+      const close = /^[ \t]*(`+|~+)[ \t]*$/.exec(line);
+      if (close && (close[1] as string)[0] === open.ch && (close[1] as string).length >= open.len) open = null;
+      return " ";
+    }
+    const m = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line);
+    if (!m) return raw;
+    const fence = m[1] as string;
+    if (fence[0] === "`" && (m[2] as string).includes("`")) return raw; // inline code, not a fence
+    open = { ch: fence[0] as string, len: fence.length };
+    return " ";
+  }).join("\n");
+}
+
 /** The tasks `text` (a pull request's body) closes, as people name them: `b25` for a task made on the board, `7` for
- * issue 7; in the order they appear, each once (#545). */
+ * issue 7; in the order they appear, each once (#545). Code and quotes don't count, as on GitHub (b233). */
 export function closedIn(text: string): string[] {
   const out: string[] = [];
-  for (const m of text.matchAll(new RegExp(`${CLOSES}(b\\d+|#\\d+)\\b`, "gi"))) {
+  for (const m of plainText(text).matchAll(new RegExp(`${CLOSES}(b\\d+|#\\d+)\\b`, "gi"))) {
     const name = (m[1] as string).toLowerCase().replace(/^#/, "");
     if (!out.includes(name)) out.push(name);
   }
