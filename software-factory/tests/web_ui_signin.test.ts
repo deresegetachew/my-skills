@@ -533,3 +533,92 @@ test("with no mail set up the server says so, and the token is the way in", asyn
   expect(r.json.code).toBe("ui_mail_unset");
   expect((await api(ui, "/api/projects")).status).toBe(200);
 }, T);
+
+// --- the sessions lock names its holder (#607) ------------------------------------------------------------------------
+
+import { writeFileSync } from "node:fs";
+
+/** A process that stays alive until killed: its pid is a live holder for a lock. */
+function sleeper() {
+  return Bun.spawn(["sleep", "60"], { stdout: "ignore", stderr: "ignore" });
+}
+
+/** The pid of a process that has already exited. */
+async function deadPid(): Promise<number> {
+  const s = Bun.spawn(["true"]);
+  await s.exited;
+  return s.pid;
+}
+
+function revokeAll(p: Project) {
+  return Bun.spawn([...BUN, join(HOOKS, "factory_ui.ts"), "sessions", "revoke", "all"], { cwd: p.d,
+    env: Object.fromEntries(Object.entries(p.env).filter((e): e is [string, string] => e[1] !== undefined)), stdout: "pipe", stderr: "pipe" });
+}
+
+function oldLock(lock: string, pid: number, ageMs: number): void {
+  write(lock, `${pid}\n`);
+  const t = new Date(Date.now() - ageMs);
+  utimesSync(lock, t, t);
+}
+
+test("a lock naming a live process is never taken over, however old; it is when that process is gone", async () => {
+  const { p, ui, config } = await hub();
+  const lock = join(config, "ui", "sessions.json.lock");
+  const cookie = await signedIn(ui);
+  const holder = sleeper();
+  oldLock(lock, holder.pid, 60_000);
+  const revoking = revokeAll(p);
+  await Bun.sleep(1200);
+  expect(revoking.exitCode).toBe(null); // still waiting: the holder is alive
+  expect((await get(ui, "/api/projects", { cookie })).status).toBe(200);
+  holder.kill();
+  await holder.exited;
+  expect(await revoking.exited).toBe(0);
+  expect(await new Response(revoking.stdout).text()).toContain("Revoked 1 session.");
+}, T);
+
+test("a lock naming a process that died is taken over at once, even when it is fresh", async () => {
+  const { p, ui, config } = await hub();
+  const lock = join(config, "ui", "sessions.json.lock");
+  await signedIn(ui);
+  write(lock, `${await deadPid()}\n`); // mtime is now
+  const started = Date.now();
+  const revoking = revokeAll(p);
+  expect(await revoking.exited).toBe(0);
+  expect(Date.now() - started).toBeLessThan(5000);
+  expect(await new Response(revoking.stdout).text()).toContain("Revoked 1 session.");
+}, T);
+
+test("the server keeps answering while one of its own session writes waits for the lock", async () => {
+  const { ui, config } = await hub();
+  const lock = join(config, "ui", "sessions.json.lock");
+  const cookie = await signedIn(ui);
+  const holder = sleeper();
+  oldLock(lock, holder.pid, 0); // fresh: today it is waited for, with the server frozen
+  const signingOut = post(ui, "/api/auth/signout", {}, { cookie });
+  await Bun.sleep(200);
+  const started = Date.now();
+  const other = await Promise.race([api(ui, "/api/projects"), Bun.sleep(3000).then(() => null)]);
+  expect(other, "the server did not answer while a sign-out waited for the lock").not.toBe(null);
+  expect(other?.status).toBe(200);
+  expect(Date.now() - started).toBeLessThan(1500);
+  holder.kill();
+  await holder.exited;
+  expect((await signingOut).status).toBe(200);
+}, T);
+
+test("an open WebSocket is closed (4401) once its session has expired; a token socket stays open", async () => {
+  const { ui, config } = await hub();
+  const file = join(config, "ui", "sessions.json");
+  const cookie = await signedIn(ui);
+  const s = await openSocket(ui, cookie);
+  const tokenWs = new WebSocket(ui.url.replace("http", "ws") + `/api/ws?token=${ui.token}`);
+  let tokenClosed = false;
+  tokenWs.onclose = () => { tokenClosed = true; };
+  const data = JSON.parse(readFileSync(file, "utf8")) as { sessions: Row[] };
+  for (const x of data.sessions) x.expires = new Date(Date.now() - 60_000).toISOString();
+  writeFileSync(file, JSON.stringify(data), { mode: 0o600 });
+  expect(await s.closed(6000)).toBe(4401);
+  expect(tokenClosed).toBe(false);
+  tokenWs.close();
+}, T);
