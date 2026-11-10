@@ -38,11 +38,20 @@ export function prdChangeIn(text: string): string | null {
  * with an optional colon. Followed by the task's name (`b25` or `#7`). */
 export const CLOSES = String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+`;
 
+/** `text` (Markdown) without what GitHub doesn't read closing keywords in (b233): fenced code blocks (``` or ~~~), inline
+ * code spans and `>` quoted lines. Each is replaced by a blank, so the words around it stay apart. */
+export function plainText(text: string): string {
+  return text
+    .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[ \t]*$|(?![\s\S]))/gm, " ")
+    .replace(/(`+)[\s\S]*?\1/g, " ")
+    .replace(/^[ \t]*>.*$/gm, " ");
+}
+
 /** The tasks `text` (a pull request's body) closes, as people name them: `b25` for a task made on the board, `7` for
- * issue 7; in the order they appear, each once (#545). */
+ * issue 7; in the order they appear, each once (#545). Code and quotes don't count, as on GitHub (b233). */
 export function closedIn(text: string): string[] {
   const out: string[] = [];
-  for (const m of text.matchAll(new RegExp(`${CLOSES}(b\\d+|#\\d+)\\b`, "gi"))) {
+  for (const m of plainText(text).matchAll(new RegExp(`${CLOSES}(b\\d+|#\\d+)\\b`, "gi"))) {
     const name = (m[1] as string).toLowerCase().replace(/^#/, "");
     if (!out.includes(name)) out.push(name);
   }

@@ -26,6 +26,7 @@
 // must-fix marker on the head (`<!-- factory-mustfix sha=<head> -->`, as the dev manager's verdicts do, so the author
 // reworks it) and, with the message board, a verdict message to the author on its task's thread.
 import { branchTask, type Config, DEFAULTS } from "./factory_config.ts";
+import { plainText } from "./core/domain/task.ts";
 import { bringUpToDate, mainBranchOf, mainOf } from "./factory_ui_checkout.ts";
 import { type ActionResult, envFor, factoryScript, type Obj, resultOf, spawn, type UiProject } from "./factory_ui_data.ts";
 
@@ -105,12 +106,13 @@ export function truthOf(next: { action: string; text: string }, author: Author):
   return { next, needsYou: false };
 }
 
-/** The tasks a pull request is for: its branch's (`task/<n>-...`), then each `Closes #n`, `Fixes #n` or `Part of #n`. */
+/** The tasks a pull request is for: its branch's (`task/<n>-...`), then each `Closes #n`, `Fixes #n` or `Part of #n`,
+ * not counting those in code or quotes (b233). */
 export function tasksOf(branch: string, body: string): string[] {
   const out: string[] = [];
   const own = branchTask(branch);
   if (own) out.push(own);
-  for (const m of body.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|part of)\s+#(\d+)\b/gi)) {
+  for (const m of plainText(body).matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|part of)\s+#(\d+)\b/gi)) {
     if (!out.includes(m[1] as string)) out.push(m[1] as string);
   }
   return out;

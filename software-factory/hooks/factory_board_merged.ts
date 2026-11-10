@@ -8,7 +8,7 @@
 //
 // A PRD change's card (#578: a note with a `PRD change: #62` line, which the tasks from that change wait for) is closed
 // the same way once its pull request merges, so those tasks become ready. One call per open card, none while there is none.
-import { CLOSES, prdChangeIn } from "./core/domain/task.ts";
+import { CLOSES, plainText, prdChangeIn } from "./core/domain/task.ts";
 import { branchTask } from "./factory_config.ts";
 import type { Board, Gh, Task } from "../message-board/src/index.ts";
 import { Numbers } from "../message-board/src/index.ts";
@@ -36,7 +36,7 @@ function escape(text: string): string {
 
 /** Whether pull request `p` names the task people call `label` ("b25" for a task made on the board, "#7" for issue 7). */
 export function names(label: string, p: Pick<MergedPull, "title" | "body" | "branch">): boolean {
-  const text = `${p.title}\n${p.body}`;
+  const text = plainText(`${p.title}\n${p.body}`); // code and quotes name nothing, as on GitHub (b233)
   const board = /^b(\d+)$/.exec(label)?.[1];
   if (board) {
     const b = `b${board}`;
