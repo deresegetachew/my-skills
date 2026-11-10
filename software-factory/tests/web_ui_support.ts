@@ -128,7 +128,8 @@ export async function startUi(p: Project, args: string[] = ["--port", "0"], cmd:
   const proc = Bun.spawn([...(cmd ?? [...BUN, join(HOOKS, "factory_ui.ts")]), ...args], { cwd: p.d, env: clean, stdin: "ignore",
     stdout: "pipe", stderr: "pipe" });
   RUNNING.add(proc);
-  const out = await readUntil(proc.stdout as ReadableStream<Uint8Array>, (t) => t.includes("Ctrl-C stops it."), 20_000);
+  // it returns as soon as the server says it is up; on a starved machine that took over 20 s (#532)
+  const out = await readUntil(proc.stdout as ReadableStream<Uint8Array>, (t) => t.includes("Ctrl-C stops it."), 60_000);
   const url = /(http:\/\/127\.0\.0\.1:\d+)\//.exec(out)?.[1] ?? "";
   const token = /token: (\S+)/.exec(out)?.[1] ?? "";
   const stop = async (): Promise<void> => {
