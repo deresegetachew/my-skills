@@ -51,16 +51,17 @@ export function plainText(text: string): string {
  * code, not a fence); a block closes on a line of the same character at least as long, or at the end of the text. */
 function withoutFences(text: string): string {
   let open: { ch: string; len: number } | null = null;
-  return text.split("\n").map((line) => {
+  return text.split("\n").map((raw) => {
+    const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw; // CRLF bodies (GitHub's web editor) read the same
     if (open) {
       const close = /^[ \t]*(`+|~+)[ \t]*$/.exec(line);
       if (close && (close[1] as string)[0] === open.ch && (close[1] as string).length >= open.len) open = null;
       return " ";
     }
     const m = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line);
-    if (!m) return line;
+    if (!m) return raw;
     const fence = m[1] as string;
-    if (fence[0] === "`" && (m[2] as string).includes("`")) return line; // inline code, not a fence
+    if (fence[0] === "`" && (m[2] as string).includes("`")) return raw; // inline code, not a fence
     open = { ch: fence[0] as string, len: fence.length };
     return " ";
   }).join("\n");
