@@ -23,6 +23,7 @@ const boards: Board[] = [];
 
 beforeAll(async () => {
   pg = await startPg();
+  seed = await makeSeed();
 }, 600_000);
 
 // Each test's servers and connections end with it: CI runs many files at once against one Postgres (max_connections 100).
@@ -66,27 +67,54 @@ function workProject(ageSeconds = 0, cfg: Row = CONFIG): Project {
 
 const ref = (n: number) => `github:${REPO}#${n}`;
 
-/** A board with: epic #1 (tasks #7, #9, #10 under it), #7 held by menelik, #11 blocks #9, #10 done, #12 in no epic, and a
- *  thread and a context entry on #7. Returns the board (as system) and the ids by issue number. */
+/** The seeded board every test starts from, made once for the file (beforeAll): its database name and the ids by issue
+ *  number. A test gets its own copy (seeded), so a slow database costs the file its ~300 round trips once, not each test (#532). */
+let seed: { name: string; id: Record<number, number> } | null = null;
+
+/** Migrates and fills a new database with: epic #1 (tasks #7, #9, #10 under it), #7 held by menelik, #11 blocks #9, #10
+ *  done, #12 in no epic, and a thread and a context entry on #7. Ends its connections, so it can be copied. */
+async function makeSeed(): Promise<{ name: string; id: Record<number, number> }> {
+  const db = await freshDb(pg);
+  drops.push(db.drop);
+  const board = await Board.open(db.url, { as: "system", max: 1 });
+  const menelik = await Board.open(db.url, { as: "menelik", max: 1 });
+  try {
+    await board.migrate();
+    const epic = await board.create({ title: "Sign in", kind: "epic", ref: ref(1), body: "Let people sign in.\n\nPRD: docs/PRD.md\n- [ ] #7\n- [ ] #9" });
+    const t7 = await board.create({ title: "Add the login page", ref: ref(7), parentId: epic.id, priority: 1 });
+    const t9 = await board.create({ title: "Remember me", ref: ref(9), parentId: epic.id, priority: 2 });
+    const t10 = await board.create({ title: "Sign out", ref: ref(10), parentId: epic.id, priority: 3 });
+    const t11 = await board.create({ title: "Index the users", ref: ref(11), priority: 4, body: "Milestone: Phase 2" });
+    const t12 = await board.create({ title: "Pay by card", ref: ref(12), priority: 5 });
+    await board.create({ title: "Another repo's task", ref: "github:x/other#3", priority: 0 });
+    await board.link(t11.id, t9.id, "blocks");
+    await board.close(t10.id, { outcome: "done" });
+    // held for a day: every copy is made from this one, however long the file runs
+    await menelik.claim(t7.id, { ttlSeconds: 86_400 });
+    await menelik.post({ task: t7.id, kind: "question", to: "fasil", body: "Which provider do we use for sign in?" });
+    await menelik.note(t7.id, { kind: "decision", body: "Sessions live in a cookie." });
+    return { name: new URL(db.url).pathname.slice(1), id: { 1: epic.id, 7: t7.id, 9: t9.id, 10: t10.id, 11: t11.id, 12: t12.id } };
+  } finally {
+    await board.end().catch(() => {});
+    await menelik.end().catch(() => {});
+  }
+}
+
+/** Makes the empty database at `url` a copy of the seeded board (one CREATE DATABASE ... TEMPLATE on the server). Returns
+ *  the board (as system) and the ids by issue number. */
 async function seeded(url: string): Promise<{ board: Board; id: Record<number, number> }> {
+  if (!seed) throw new Error("the seeded board isn't made: beforeAll failed");
+  const name = new URL(url).pathname.slice(1);
+  const admin = new SQL(pg.url, { max: 1 });
+  try {
+    await admin.unsafe(`drop database if exists ${name} with (force)`);
+    await admin.unsafe(`create database ${name} template ${seed.name}`);
+  } finally {
+    await admin.close();
+  }
   const board = await Board.open(url, { as: "system", max: 1 });
   boards.push(board);
-  await board.migrate();
-  const epic = await board.create({ title: "Sign in", kind: "epic", ref: ref(1), body: "Let people sign in.\n\nPRD: docs/PRD.md\n- [ ] #7\n- [ ] #9" });
-  const t7 = await board.create({ title: "Add the login page", ref: ref(7), parentId: epic.id, priority: 1 });
-  const t9 = await board.create({ title: "Remember me", ref: ref(9), parentId: epic.id, priority: 2 });
-  const t10 = await board.create({ title: "Sign out", ref: ref(10), parentId: epic.id, priority: 3 });
-  const t11 = await board.create({ title: "Index the users", ref: ref(11), priority: 4, body: "Milestone: Phase 2" });
-  const t12 = await board.create({ title: "Pay by card", ref: ref(12), priority: 5 });
-  await board.create({ title: "Another repo's task", ref: "github:x/other#3", priority: 0 });
-  await board.link(t11.id, t9.id, "blocks");
-  await board.close(t10.id, { outcome: "done" });
-  const menelik = await Board.open(url, { as: "menelik", max: 1 });
-  boards.push(menelik);
-  await menelik.claim(t7.id);
-  await menelik.post({ task: t7.id, kind: "question", to: "fasil", body: "Which provider do we use for sign in?" });
-  await menelik.note(t7.id, { kind: "decision", body: "Sessions live in a cookie." });
-  return { board, id: { 1: epic.id, 7: t7.id, 9: t9.id, 10: t10.id, 11: t11.id, 12: t12.id } };
+  return { board, id: { ...seed.id } };
 }
 
 async function boardUrl(): Promise<string> {
