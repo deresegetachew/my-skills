@@ -411,7 +411,7 @@ function stopProcess(name: string, pid: number): void {
     }
   }
   console.log(`Stopped ${name} (pid ${pid}, outside tmux). Its task stays claimed for it: start it again to go on, ` +
-    `or \`factory release ${name}\` to give its claims back.`);
+    "or use Release on its task in the web UI to give it back.");
 }
 
 /** Ends a dev manager's one-item sub-manager that has no tmux session of its own (#585): its Claude session, which the
@@ -451,7 +451,7 @@ function stop(name: string): void {
       `Run \`tmux ls\` to see it, then \`tmux kill-session -t ${session}\`.`);
   }
   console.log(`Stopped ${name} (tmux session ${session}). Its task stays claimed for it: start it again to go on, ` +
-    `or \`factory release ${name}\` to give its claims back.`);
+    "or use Release on its task in the web UI to give it back.");
 }
 
 // --- the command ----------------------------------------------------------------------------------------------------

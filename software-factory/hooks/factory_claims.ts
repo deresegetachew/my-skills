@@ -41,6 +41,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { agentName, agentSlot, branchTask, type Config, load, roleNames, safeAgent, taskSource, tasks as planTasks,
   toFloat } from "./factory_config.ts";
 import * as fi from "./factory_issues.ts";
+import { taskTracker } from "./core/compose.ts";
 import { claimCopy, claimKey, holderIsMe, holderName, leasesOn } from "./factory_leases.ts";
 import { machineId, machineNames } from "./factory_machine.ts";
 import { isClaude } from "./factory_session.ts";
@@ -408,6 +409,49 @@ export function release(agent: string, tasksOnly = false): [boolean, string[]] {
     for (const t of tids) delete data.tasks[t];
     return [had, tids];
   });
+}
+
+/** Whether `pid` is this process or one of its parents: the loop that runs this command (its exit trap releasing
+ * itself, factory-loop.sh), not someone else releasing it. Unknown (no `ps`): false. */
+function ancestor(pid: number): boolean {
+  let at = process.pid;
+  for (let step = 0; step < 64 && at > 1; step++) {
+    if (at === pid) return true;
+    const p = run(["ps", "-o", "ppid=", "-p", String(at)]);
+    const up = Number(p.stdout.trim());
+    if (p.code !== 0 || !Number.isInteger(up) || up <= 0 || up === at) return false;
+    at = up;
+  }
+  return false;
+}
+
+/** The checkout claim of `agent` when its loop runs on this machine, and whether that loop is the one asking (#554). */
+function runningHere(agent: string, staleHours: number): { held: boolean; self: boolean } {
+  const c = locked((data) => data.checkouts[agent] ?? null);
+  if (!c || c.host !== HOST || !alive(c, staleHours, true)) return { held: false, self: false };
+  return { held: true, self: ancestor(toPid(c.pid ?? 0) ?? 0) };
+}
+
+/** With the tasks on the message board, gives `agent`'s board claims back (to ready) with the token this machine keeps
+ * (#554), so a stopped agent's task doesn't stay held. Returns the lines to print. */
+function releaseBoardClaims(cfg: Config, agent: string): string[] {
+  if (taskSource(cfg) !== "board") return [];
+  const tracker = taskTracker(cfg, "board");
+  const held = tracker.list().filter((t) => t.holders.includes(agent) && t.state === "in-progress");
+  const given: string[] = [];
+  const lines: string[] = [];
+  for (const t of held) {
+    const name = /^\d+$/.test(t.id) ? `#${t.id}` : t.id;
+    try {
+      tracker.release(t.id, `released with factory release ${agent}`);
+      given.push(name);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      lines.push(`Could not give ${name} back on the message board: ${m}`);
+    }
+  }
+  if (given.length) lines.unshift(`Gave back on the message board: ${given.join(", ")}.`);
+  return lines;
 }
 
 /** The one line `release` prints: what it let go, or that there was nothing to release. */
@@ -806,9 +850,18 @@ function main(argv: string[]): void {
   else if (cmd === "free") console.log(freeNames((a.role as string | undefined) ?? "coding-agent", stale).join("\n"));
   else if (cmd === "release") {
     const tasksOnly = Boolean(a["tasks-only"]);
-    const [had, tids] = release(s("agent"), tasksOnly);
-    console.log(releaseMessage(s("agent"), tasksOnly, had, tids));
-    releaseReworks(cfg, s("agent"), tids);
+    const agent = s("agent");
+    // #554: freeing the checkout of a loop that runs here would make it look down, with its task still held. Its own
+    // loop (the exit trap) may; anyone else stops it first. --tasks-only keeps the checkout, so it is never refused.
+    const here = tasksOnly ? { held: false, self: false } : runningHere(agent, stale);
+    if (here.held && !here.self) {
+      refuse("release_running", `${agent} is running here; releasing its checkout would make it look down.`,
+        `Stop it first (factory owner stop ${agent}), then release.`);
+    }
+    const [had, tids] = release(agent, tasksOnly);
+    console.log(releaseMessage(agent, tasksOnly, had, tids));
+    releaseReworks(cfg, agent, tids);
+    if (!tasksOnly && !here.self) for (const line of releaseBoardClaims(cfg, agent)) console.log(line);
   } else {
     locked((data) => {
       for (const kind of ["checkouts", "tasks"] as const) {

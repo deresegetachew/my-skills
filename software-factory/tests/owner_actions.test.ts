@@ -379,3 +379,13 @@ test("the commands page has rows for owner start and owner stop, and the owner m
   const row = page.split("\n").find((l) => l.startsWith("| `factory owner merge")) ?? "";
   expect(row).toContain("--head");
 });
+
+test("owner stop's message names no command for giving claims back: it points to Release on the task in the web UI (#554)", () => {
+  const p = setup({ has: true });
+  const r = owner(p, OWNER, "stop", "taytu");
+  expect(r.code, r.out).toBe(0);
+  expect(r.stdout).toContain("Stopped taytu");
+  expect(r.stdout).not.toContain("factory release");
+  expect(r.stdout).toContain("Release");
+  expect(r.stdout).toContain("web UI");
+});
