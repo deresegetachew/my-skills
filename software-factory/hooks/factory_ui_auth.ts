@@ -159,6 +159,10 @@ function lockWaitMs(): number {
   return Number.isFinite(v) && v > 0 ? v : 60_000;
 }
 
+/** What the server answers a page when a sessions write gave up on the lock: no file path, which is this machine's
+ * business, not the visitor's (the CLI's SessionsLocked names it for the owner). */
+const BUSY_MESSAGE = "Sign-in is busy on this machine, so nothing was changed.";
+
 /** The error a write gives when the lock stays held past lockWaitMs: {code, message, fix}. */
 export class SessionsLocked extends Error {
   readonly code = "ui_sessions_locked";
@@ -412,7 +416,7 @@ export class SignIn {
         try {
           await updateSessionsAsync((now) => now.filter((x) => x.id !== s.id), this.now());
         } catch (e) {
-          if (e instanceof SessionsLocked) return problem(503, e.code, e.message, e.fix);
+          if (e instanceof SessionsLocked) return problem(503, e.code, BUSY_MESSAGE, "Sign out again in a minute.");
           throw e;
         }
       }
@@ -485,8 +489,9 @@ export class SignIn {
       try {
         await updateSessionsAsync((now) => [...now, s], this.now());
       } catch (e) {
-        if (e instanceof SessionsLocked) return problem(503, e.code, e.message, e.fix);
-        throw e;
+        if (!(e instanceof SessionsLocked)) throw e;
+        if (p) this.pending.set(email, p); // nothing was written: the code still works until it runs out
+        return problem(503, e.code, BUSY_MESSAGE, "Try the same code again in a minute.");
       }
       return { status: 200, body: { ok: true, email }, headers: { "set-cookie": this.setCookie(value, limits.sessionDays * 86_400, secure) } };
     }

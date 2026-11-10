@@ -686,3 +686,33 @@ test("the wait for a lock is bounded: FACTORY_UI_LOCK_WAIT_MS, then exit 1 with 
     holder.kill();
   }
 }, T);
+
+test("a sign-in whose session write gives up on the lock answers 503 with no file path, and the same code works after (#607)", async () => {
+  const p = project();
+  roots.push(p.root);
+  const config = join(p.root, "config", "software-factory");
+  write(join(config, "ui", "mail.json"), JSON.stringify({ kind: "http", preset: "", url: mailApi(), header: "Authorization: Bearer {{secret}}",
+    body: '{"from": {{from}}, "to": [{{to}}], "subject": {{subject}}, "text": {{text}}}', from: "Factory <factory@example.com>", secret: SECRET }), 0o600);
+  write(join(config, "work.json"), JSON.stringify({ "ui.signIn.allowed": [OWNER] }));
+  p.env.FACTORY_UI_LOCK_WAIT_MS = "1000";
+  const ui = await startUi(p);
+  running.push(ui);
+  const lock = join(config, "ui", "sessions.json.lock");
+  const since = got.length;
+  expect((await post(ui, "/api/auth/code", { email: OWNER })).status).toBe(202);
+  const code = await codeFor(OWNER, since);
+  const holder = sleeper();
+  oldLock(lock, holder.pid, 0);
+  try {
+    const busy = await post(ui, "/api/auth/verify", { email: OWNER, code });
+    expect(busy.status, JSON.stringify(busy.json)).toBe(503);
+    expect(busy.json.code).toBe("ui_sessions_locked");
+    expect(JSON.stringify(busy.json), "the page is told no path on this machine").not.toContain(config);
+    expect(String(busy.json.fix).length).toBeGreaterThan(0);
+  } finally {
+    holder.kill();
+    await holder.exited;
+  }
+  const again = await post(ui, "/api/auth/verify", { email: OWNER, code });
+  expect(again.status, JSON.stringify(again.json)).toBe(200);
+}, T);
