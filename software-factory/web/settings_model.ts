@@ -100,6 +100,12 @@ export function stagedText(n: number): string {
   return `${n} change${n === 1 ? "" : "s"} staged`;
 }
 
+/** Each staged change's own Undo (#611), in the order they are listed: its button, what it sends to
+ *  POST .../settings/unstage (that change alone), and the toast once it is dropped. Drop all still drops every one. */
+export function stagedUndos(changes: Array<{ key: string; name: string }>): Array<{ key: string; label: string; body: { key: string }; done: string }> {
+  return changes.map((c) => ({ key: c.key, label: `Undo ${c.name}`, body: { key: c.key }, done: `Dropped the staged change to ${c.name}.` }));
+}
+
 const AFTER_MERGE = "Propose the staged changes as one pull request; once you merge it here, this machine's checkout is brought up to date " +
   "(when it is on main with nothing uncommitted; else This machine says what to do), and ";
 
