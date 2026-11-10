@@ -89,3 +89,33 @@ test("each action asks first, saying what happens and what doesn't; close asks f
   expect(confirmState(close, "#42").ready).toBe(true);
   expect(askOf("request-changes", pr()).happens).toContain("mentewab is told");
 });
+
+// #611: a page doesn't offer Merge on a pull request this page already merged.
+type ShownPr = (p: PrPageData, mergedHead: string | null) => PrPageData;
+const shown = async (): Promise<ShownPr> => (await import("../web/pr_model.ts") as unknown as { shownPr: ShownPr }).shownPr;
+
+test("611: an open pull request whose head was merged here shows merged, with no Merge", async () => {
+  const shownPr = await shown();
+  const open = pr({ draft: false });
+  const s = shownPr(open, open.head);
+  expect(mainAction(s)).toBe(null);
+  expect(s).toMatchObject({ state: "merged", merged: true });
+  expect(statusOf(s)).toEqual(statusOf({ ...open, state: "merged", merged: true }));
+  expect(statusOf(s).text).toBe("Merged");
+});
+
+test("611: with nothing merged here, or a commit pushed after the merge, the pull request is shown as read", async () => {
+  const shownPr = await shown();
+  const open = pr({ draft: false });
+  expect(shownPr(open, null)).toEqual(open);
+  expect(mainAction(shownPr(open, null))).toBe("merge");
+  expect(shownPr(open, "ffffffffffff")).toEqual(open);
+  expect(mainAction(shownPr(open, "ffffffffffff"))).toBe("merge");
+});
+
+test("611: a draft whose head was merged here is not offered Mark ready", async () => {
+  const shownPr = await shown();
+  const draft = pr();
+  expect(mainAction(draft)).toBe("ready");
+  expect(mainAction(shownPr(draft, draft.head))).toBe(null);
+});

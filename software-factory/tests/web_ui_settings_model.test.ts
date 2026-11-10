@@ -259,3 +259,15 @@ test("the staged-change words say the merge brings this machine up to date, not 
   expect(s.happens).not.toContain("pulled");
   expect(s.happens).toContain("up to date");
 });
+
+test("611: each staged change has its own Undo, in order, that drops just that change", async () => {
+  const { stagedUndos } = await mod() as unknown as { stagedUndos: (c: Array<{ key: string; name: string }>) => Array<{ key: string; label: string; body: { key: string }; done: string }> };
+  expect(stagedUndos([{ key: "agents.coding", name: "Coding agents" }, { key: "ci.mode", name: "CI mode" }])).toEqual([
+    { key: "agents.coding", label: "Undo Coding agents", body: { key: "agents.coding" }, done: "Dropped the staged change to Coding agents." },
+    { key: "ci.mode", label: "Undo CI mode", body: { key: "ci.mode" }, done: "Dropped the staged change to CI mode." }]);
+});
+
+test("611: no staged changes give no Undo", async () => {
+  const { stagedUndos } = await mod() as unknown as { stagedUndos: (c: Array<{ key: string; name: string }>) => unknown[] };
+  expect(stagedUndos([])).toEqual([]);
+});
