@@ -12,7 +12,7 @@ import { MarkdownView } from "./docs.tsx";
 import { PageHead } from "./page_head.tsx";
 import { ConfirmDialog, StatusDot, Tabs } from "./parts.tsx";
 import { askOf, checkDot, checkWord, diffLines, factsLine, fileWord, isMarkdownFile, mainAction, type PrAction, type PrFile, type PrPageData,
-  statusOf } from "./pr_model.ts";
+  shownPr, statusOf } from "./pr_model.ts";
 import type { Post, Say } from "./views.tsx";
 
 interface Problem {
@@ -46,7 +46,7 @@ function Ext({ href, children }: { href: string | null; children: string }) {
 }
 
 export function PrPage(p: Props) {
-  const [pr, setPr] = useState<PrPageData | Problem | null>(null);
+  const [read, setPr] = useState<PrPageData | Problem | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
   const [ask, setAsk] = useState<PrAction | null>(null);
   const [busy, setBusy] = useState(false);
@@ -55,32 +55,41 @@ export function PrPage(p: Props) {
   const [shots, setShots] = useState<number | null>(null); // how many attachments (#637), once read
   // after a merge here: why this machine's checkout was left as it is (#566), until the page is left
   const [leftAlone, setLeftAlone] = useState<Problem | null>(null);
+  // the head this page merged (#611): a read that still says it is open at that head shows it merged (shownPr)
+  const [mergedHead, setMergedHead] = useState<string | null>(null);
+  // only the newest read is shown (#611): one asked before a merge can answer after the read asked once it merged
+  const asks = useRef(0);
   const base = `/api/projects/${encodeURIComponent(p.project.id)}/pull-requests/${encodeURIComponent(p.number)}`;
   const load = useCallback((fresh: boolean) => {
-    p.get<PrPageData | Problem>(`${base}${fresh ? "?fresh=1" : ""}`).then(setPr)
-      .catch(() => setPr({ code: "ui_unreachable", message: "The server can't be reached.", fix: "Check that the web UI still runs on its machine, then reload." }));
+    const mine = ++asks.current;
+    const show = (x: PrPageData | Problem): void => {
+      if (mine === asks.current) setPr(x);
+    };
+    p.get<PrPageData | Problem>(`${base}${fresh ? "?fresh=1" : ""}`).then(show)
+      .catch(() => show({ code: "ui_unreachable", message: "The server can't be reached.", fix: "Check that the web UI still runs on its machine, then reload." }));
   }, [p.get, base]);
   useEffect(() => load(again > 0), [load, p.rowKey, again]);
   const asked = useRef(false);
   useEffect(() => {
-    if (asked.current || !p.askFirst || !pr || !("number" in pr) || mainAction(pr) !== p.askFirst) return;
+    if (asked.current || !p.askFirst || !read || !("number" in read) || mainAction(shownPr(read, mergedHead)) !== p.askFirst) return;
     asked.current = true;
     setAsk(p.askFirst);
-  }, [pr, p.askFirst]);
+  }, [read, mergedHead, p.askFirst]);
 
   const back = <button className="link back" onClick={() => p.open("view:pull-requests")}>Pull requests</button>;
-  if (!pr || !("number" in pr)) {
+  if (!read || !("number" in read)) {
     return (
       <>
         <PageHead title={`#${p.number}`} onMenu={p.onMenu} before={<nav className="crumbs" aria-label="Breadcrumb">{back}<span aria-hidden="true">/</span><span>#{p.number}</span></nav>} />
         <div className="body">
-          {!pr ? <p className="empty">Reading the pull request from GitHub…</p>
-            : <div className="notice bad" role="alert"><StatusDot state="red" /><div><strong>{pr.message}</strong><p>{pr.fix}</p></div></div>}
+          {!read ? <p className="empty">Reading the pull request from GitHub…</p>
+            : <div className="notice bad" role="alert"><StatusDot state="red" /><div><strong>{read.message}</strong><p>{read.fix}</p></div></div>}
         </div>
       </>
     );
   }
 
+  const pr = shownPr(read, mergedHead);
   const status = statusOf(pr);
   const first = mainAction(pr);
   const run = async (): Promise<void> => {
@@ -95,7 +104,10 @@ export function PrPage(p: Props) {
       if (ask !== "merge" && ask !== "ready") setText("");
       const co = r.checkout;
       const why = typeof co === "object" && co !== null ? (co as { problem?: unknown }).problem : null;
-      if (ask === "merge") setLeftAlone(typeof why === "object" && why !== null && "fix" in why ? why as Problem : null);
+      if (ask === "merge") {
+        setMergedHead(pr.head);
+        setLeftAlone(typeof why === "object" && why !== null && "fix" in why ? why as Problem : null);
+      }
     } else p.say({ title: String(r.message ?? "It didn't run."), text: String(r.fix ?? ""), tone: "bad" });
     setAsk(null);
     setAgain((n) => n + 1);
