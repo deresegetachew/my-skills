@@ -127,3 +127,9 @@ test("closedIn: a closing fence longer than the opener closes the block; the Clo
   expect(closedIn("```\nx\n````\nCloses #7")).toEqual(["7"]);
   expect(closedIn("~~~\nFixes #9\n~~~~~\nCloses #7")).toEqual(["7"]);
 });
+
+test("closedIn: fences with CRLF line ends are read as fences (bodies from the web editor)", () => {
+  expect(closedIn("~~~\r\nCloses #5\r\n~~~\r\nCloses #7")).toEqual(["7"]);
+  expect(closedIn("```\r\nCloses #5\r\n```\r\nCloses #7")).toEqual(["7"]);
+  expect(closedIn("```\r\nx\r\n````\r\nCloses #7")).toEqual(["7"]);
+});
