@@ -26,6 +26,7 @@ import { load, taskSource } from "./factory_config.ts";
 import { isFresh, type LocalState } from "./factory_heartbeat.ts";
 import { isoUtc, parseIso, pyDumps, runMain } from "./factory_lib.ts";
 import { refuse, stateDir } from "./factory_machine.ts";
+import { keepEvents, snapshotEvents } from "./factory_task_cost.ts";
 import { type Limit, limitStatus } from "./factory_views_cache.ts";
 
 const HOOKS = import.meta.dir;
@@ -362,6 +363,13 @@ function writeCache(snap: Obj): void {
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, pyDumps(snap, { indent: 1 }));
   renameSync(tmp, path);
+  // A task's CI runs and must-fix rounds are listed only while its pull request is open, so they are kept beside the cache
+  // each time it is written (#615): a task merged before anyone read its costs still counts them. Never fails the snapshot.
+  try {
+    keepEvents(dirname(path), snapshotEvents(snap));
+  } catch {
+    // the costs keep what they had; the next snapshot tries again
+  }
 }
 
 function readCache(): Obj | null {

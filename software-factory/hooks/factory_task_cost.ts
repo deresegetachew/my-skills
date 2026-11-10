@@ -8,7 +8,8 @@
 //     keeps), and from the snapshot (`snapshot.json`): a claim and a done time the board's tasks part gives, each
 //     finished CI run on the task's branch, and each head of its pull request the dev manager gave must-fixes (one review
 //     round). A run or a round is kept by its id, so one seen in many snapshots counts once and an old one stays when the
-//     snapshot no longer lists it.
+//     snapshot no longer lists it. `factory snapshot` keeps them each time it writes the cache (#615), since a snapshot lists
+//     a task's runs only while its pull request is open; the web UI's costs read keeps them too.
 //   - The build time is from the first claim to when it was done (merged or closed done); with no claim recorded, from
 //     its first session's first reply (`startFrom` says which).
 //
