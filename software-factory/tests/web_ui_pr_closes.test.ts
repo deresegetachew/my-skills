@@ -70,7 +70,7 @@ async function linked(pulls: Row[]): Promise<(card: number) => number | undefine
     await Bun.sleep(150);
   }
   const byId = Object.fromEntries((json.tasks as Row[]).map((t) => [String(t.id), t]));
-  return (card) => (byId[`b${ids[card]}`]?.pr as Row | null)?.number;
+  return (card) => (byId[`b${ids[card]}`]?.pr as Row | null)?.number as number | undefined;
 }
 
 test("a pull request with an unrelated branch and title but closes b<id> is linked to that card", async () => {
