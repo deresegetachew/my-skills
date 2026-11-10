@@ -1,6 +1,9 @@
 # 0003: The factory's core as ports and adapters; GitHub is one adapter
 
-Date: 31 Oct 2026. Status: proposed (#374); the owner approves it. The owner's direction: "if you're going to build
+Date: 31 Oct 2026. Status: **built in part** (proposed on #374). `hooks/core/` holds the domain, the ports and
+`compose.ts`: `TaskTracker` (#377, the board's #500), `Messaging` with `Leases`, `Wakes` and `PrFeed` (#404, #500),
+`AgentRoster` (#500) and `Notifier` (#542) are built. `CodeHost`, `GateRecord`, `Ci` and `RepoConfig` are not; decision
+0009 (#538) orders them and replaces point 5 (plugins). The owner's direction: "if you're going to build
 things as plugins you need to use hexagonal and DDD; IoC is important. The source of issues can be Jira tomorrow, not
 GitHub: think big."
 
@@ -81,6 +84,9 @@ The PR gate and `manager_gate.ts` decide merges from `GateRecord` and `RepoConfi
 - There is no DI framework: plain functions and objects, built-ins only.
 
 ### 5. Plugins
+
+*Replaced by decision 0009 (#538): this mechanism went with NATS (#504); built-in adapters are chosen by a setting, and
+an outside adapter is a command speaking JSON.*
 
 An adapter that needs an npm package (the NATS client, a Jira client) is a **plugin**: its own folder
 (`software-factory/plugins/<name>/`, with its own `package.json`), bundled at release into one JavaScript file with
