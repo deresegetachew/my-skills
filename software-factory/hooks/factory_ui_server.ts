@@ -203,6 +203,7 @@ export function serve(o: ServeOptions): Running {
   async function tick(): Promise<void> {
     dropEndedSessions();
     for (const p of list) {
+      refreshConfig(p); // a factory.json changed on disk (tasks.source board after a pull) shows at this poll (#539)
       const before = kept.get(p.id)?.text;
       const now = await state(p, 0);
       if (now.text !== before) for (const s of servers) s.publish(TOPIC, message(p, now.data));
@@ -233,7 +234,8 @@ export function serve(o: ServeOptions): Running {
     if (clients) refresher.tasksNeeded(p, wasLive);
     else fellBackAway.set(p.id, (fellBackAway.get(p.id) ?? false) || wasLive);
   }
-  const feed: BoardFeed = new BoardFeed(o.projects, { url: o.boardUrl, repoOf: repoOfProject,
+  // the feed reads `list`, which grows when a project is added from the page (#539), so a new one's tasks come from the board
+  const feed: BoardFeed = new BoardFeed(list, { url: o.boardUrl, repoOf: repoOfProject,
     changed: (p) => pushViews(p), fellBack, log: (line) => console.log(line),
     event: (p, items) => publish({ type: "activity", project: p.id, items: ops.pushed(p, items) }) });
   const refresher = new Refresher((p) => pushViews(p), (p) => (feed.settled() ? feed.live(p) : null));
@@ -288,6 +290,7 @@ export function serve(o: ServeOptions): Running {
     list: (p) => {
       list.push(p);
       byId.set(p.id, p);
+      feed.added(); // its tasks part, when the board holds them (#539)
       for (const s of servers) s.publish(TOPIC, JSON.stringify({ type: "projects" }));
       if (clients) void tick();
     },
