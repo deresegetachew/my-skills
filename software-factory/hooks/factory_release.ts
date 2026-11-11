@@ -1549,6 +1549,50 @@ export function notInstalled(root: string, pin: Pin, files: Files, manifest: Man
     .map((t) => isFile(join(root, t)) ? `${t} is not in the pin (${pin.tag} ships it)` : `${t} is missing (${pin.tag} ships it)`);
 }
 
+/** The release this client runs from when it was unpacked from its archive (#541): the folder `software-factory-<version>/`
+ * holds MANIFEST.json beside hooks/. Null for a client installed in a project or run from a checkout. */
+function unpackedRelease(): { folder: string; manifest: JsonObj } | null {
+  const folder = resolve(import.meta.dir, "..");
+  const path = join(folder, "MANIFEST.json");
+  if (!isFile(path)) return null;
+  try {
+    const manifest = obj(JSON.parse(readFileSync(path, "utf8")));
+    return manifest && manifest.schema === MANIFEST_SCHEMA ? { folder, manifest } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A manifest's identity: its version, its source commit and each file with its checksum. */
+function manifestKey(m: JsonObj): string {
+  const files = (Array.isArray(m.files) ? m.files : []).map((f) => obj(f) ?? {})
+    .map((f) => `${String(f.path)} ${String(f.sha256)}`).sort();
+  return JSON.stringify([m.version, m.source_commit, files]);
+}
+
+function shortCommit(m: JsonObj): string {
+  return typeof m.source_commit === "string" && m.source_commit ? m.source_commit.slice(0, 7) : "unknown";
+}
+
+/** The warning when `update <version>` ran from an unpacked release but installed a download that isn't it (#541):
+ * the person checked one archive and got another. Empty when they match, or when the client isn't an unpacked release. */
+function unpackedWarning(installed: Manifest, tag: string): string[] {
+  const here = unpackedRelease();
+  if (!here) return [];
+  const got = installed as unknown as JsonObj;
+  if (manifestKey(here.manifest) === manifestKey(got)) return [];
+  const version = String(here.manifest.version);
+  // the archive and SHA256SUMS sit beside the unpacked folder, outside the project the command runs in: both with their path
+  const archive = join(dirname(here.folder), `software-factory-${version}.tar.gz`);
+  const sums = join(dirname(here.folder), "SHA256SUMS");
+  return [
+    `  warning: ${tag} as published (commit ${shortCommit(got)}) was installed, not the release you unpacked: ` +
+      `${basename(here.folder)} (v${version}, commit ${shortCommit(here.manifest)}).`,
+    "  To install the archive you checked instead, run:",
+    `    bun --no-env-file --config=/dev/null ${join(here.folder, "hooks", "factory_release.ts")} update --archive ${archive} --sums ${sums}`,
+  ];
+}
+
 async function cmdUpdate(args: Args, rollback = false): Promise<number> {
   const root = projectRoot();
   const command = rollback ? "rollback" : "update";
@@ -1653,6 +1697,7 @@ async function cmdUpdate(args: Args, rollback = false): Promise<number> {
       } else if (!releases.length && !local) say("    (the release notes need the network; `factory releases` shows them later)");
     }
     say(`  Installed ${tag}: ${installed.added.length} new, ${installed.changed.length} changed, ${installed.removed.length} removed file(s).`);
+    if (!local && !rollback) for (const line of unpackedWarning(manifest, tag)) say(line);
     if (installed.stack) {
       for (const line of await stackLines(installed.stack)) say("  " + line);
       for (const line of tasksLines(args.tasks)) say("  " + line);
