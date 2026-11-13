@@ -93,7 +93,7 @@ files stay in the submodule, and `.claude/` points to them:
 | Shared: links into `vendor/my-skills` | The project's own |
 |---|---|
 | The agents: reviewer, architecture-reviewer, test-writer, safety-auditor, security-reviewer | `.claude/factory.json`: commands, paths, protected files, ports, which paths need which review |
-| The skills: next-task, design-check, eval | `.claude/factory/notes/<agent or skill>.md`: what an agent needs that only this project knows |
+| The skills: next-task, design-check, design-brief, eval | `.claude/factory/notes/<agent or skill>.md`: what an agent needs that only this project knows |
 | The hooks, `.claude/ci/`, `settings.json`, `factory`, `factory-loop.sh` | `CLAUDE.md`, the PRD, the plan, the decisions, the CI workflow |
 | Style-guide skills you link from my-skills | The `.gitmodules` entry and the pinned commit |
 

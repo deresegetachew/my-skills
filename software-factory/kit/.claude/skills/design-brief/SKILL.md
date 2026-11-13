@@ -58,7 +58,7 @@ People take in a page from its pictures, and a buyer gives it a few seconds. A r
 
 - Take the customer groups from the PRD or the business canvas. Write one reviewer per group as a named role: who they are, what they sell, how many people, what they are afraid of. Include the roles that can say no (for example safety or compliance, support, brand) as well as the one who buys.
 - Each reviewer gets the screenshots (phone first, then laptop) and the page. They answer the same questions for every option:
-  1. What did I see in the first ten seconds, and did I get it?
+  1. What did I see at first look, and did I get it?
   2. Do I trust it? What raised or lowered trust?
   3. What confused or annoyed me?
   4. Would I press the button? What stops me?
@@ -92,13 +92,13 @@ People take in a page from its pictures, and a buyer gives it a few seconds. A r
 
 ### 5.5 The fix round
 
-Turn the shared findings into a short rules file for the first screen and give every builder the same one. The rules that have held so far:
+Turn the shared findings into a short rules file for the first screen and give every builder the same one. Start from these and change any that this round's findings contradict:
 
-- **The picture is the message:** the before, the after and one gesture joining them, on the phone too, not behind a tab.
+- **The picture is the message:** it shows what the product does (for example the before, the after and one gesture joining them), on the phone too, not behind a tab.
 - **The product picture is big:** full width on a phone, at least a third of the width on a laptop.
 - **A phone first screen holds five things:** the headline, up to two lines on who it is for and what they get, the picture, one supporting line and one full-width button. Everything else moves down the page.
-- **One background, one accent.** No black fields. Warnings are calm and worded the same wherever they appear.
-- **Cut decoration** that is not the product. A demo brand never reads as the company's own name.
+- **One background, one accent.** For example: no black fields, and a warning is calm and worded the same wherever it appears.
+- **Cut decoration** that is not the product. For example, a demo brand never reads as the company's own name.
 - **One main button,** the same colour everywhere.
 
 Each builder proves the fix with new glance shots and a before and after count of the things on the first screen. Then run 5.2 and 5.3 again on the fixed pages to see whether the score moved.
