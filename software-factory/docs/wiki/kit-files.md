@@ -124,7 +124,7 @@ software-factory/
     .claude/factory/lessons.md            template: the curated lessons file (empty)
     .claude/factory/settings.json         the agents' rules (permissions and hooks); the factory passes it when it starts an agent, a plain session never loads it (#258)
     .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
-    .claude/skills/                       next-task, design-check, eval
+    .claude/skills/                       next-task, design-check, design-brief, eval
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
     .claude/skills/product-pass/          the product owner's standing rules (one page)
     .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main); a release installs and updates it

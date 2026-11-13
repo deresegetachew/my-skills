@@ -26,3 +26,5 @@ Arguments: the screen(s) to check, named after `/design-check` in your prompt.
    your rules allow it. They are kept on the
    hub and shown in the web UI; GitHub can't take an image from an agent, and none goes in git. Attach again after a
    new push: the dev manager counts only images for the head.
+
+For new design work (a brief, a round of options, scoring designs) use the `design-brief` skill; this one only checks a built screen against its reference.

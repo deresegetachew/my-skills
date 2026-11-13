@@ -1,0 +1,1 @@
+../../../software-factory/kit/.claude/skills/design-brief/SKILL.md
