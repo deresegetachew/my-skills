@@ -1,0 +1,1 @@
+../../../../software-factory/kit/.claude/skills/design-iterate/references/pre-publish-scan.md
