@@ -1,6 +1,6 @@
 ---
 name: design-iterate
-description: Take one chosen design (a home page, a landing page, a key screen) to a target score with a panel of buyer agents, the owner's comments on the live page and a builder agent that keeps working round after round. Covers the interviews to run before building, the skim review that stops the page filling with text, the round loop, reading the owner's page comments, noise and stop rules, and the page rules that held. Use after a direction is picked with design-brief, whenever the owner asks to "iterate until the reviewers score it above N", or when a design keeps getting reworked without the score moving. Skip for a first round of options (design-brief) or for checking a built screen against its reference (design-check).
+description: Take one chosen design (a home page, a landing page, a key screen) to a target score with a panel of buyer agents, the owner's comments on the live page and a builder agent that keeps working round after round. Starts by settling the business the page describes (a real customer story, a signed fact sheet, a panel by segment plus the end customer, pricing tested with costs, how the design reaches the real product). Covers the interviews to run before building, slogan tests, the skim review that stops the page filling with text, the round loop, reading the owner's page comments, noise and stop rules, and the page rules that held. Use after a direction is picked with design-brief, whenever the owner asks to "iterate until the reviewers score it above N", or when a design keeps getting reworked without the score moving. Skip for a first round of options (design-brief) or for checking a built screen against its reference (design-check).
 ---
 
 **Project notes:** if `<notes>/design-iterate.md` exists (`notes` in `.claude/factory.json`, by default `.claude/factory/notes`), read it first. It holds this project's additions. A note adds detail; it never removes a rule here.
@@ -16,7 +16,36 @@ It comes from a home page that took 25 rounds. Most of those rounds were lost to
 - **Missed comments.** The owner's comments on the live page went unread, because page comments do not notify.
 - **Noise read as signal.** One buyer's score swings by up to 8 points between two identical rounds, and small moves were treated as wins or losses.
 
-Doing it in the order below would have got there in about 8 rounds.
+After round 25 the page was rebuilt again, because the business under it changed:
+- **The product grew.** It went from "assembly guide" to selling, building and after-sales.
+- **The price changed four times:** plans, per product, traffic tiers, then one price.
+- **Claims didn't match the PRD.** "Not built yet" items read as a roadmap, and auto-replies to comments promised features nobody had planned.
+- **The page drifted from the real site.** The design page and the real site were edited separately, so every change was made twice.
+
+That second half took as long as the first. Section A below would have prevented most of it.
+
+## A. Settle the business before the page (do this first)
+
+Design can't converge while what it describes keeps moving. Before round 1:
+
+1. **One real story from the owner.** Ask: "Show me one real case where this went wrong for a customer: an email thread, a review, a return." One real thread (a broken part and ten emails over six weeks) reshaped the product more than ten review rounds. Keep it as the page's reference case.
+2. **A one-page fact sheet, signed by the owner** (`references/business-fact-sheet.md`):
+   - the value across the customer's whole journey, not only the first use;
+   - the price model;
+   - what is built, what is planned (PRD story) and what is not planned;
+   - the data and privacy rules;
+   - the promises: guarantees, liability, what happens if the customer stops paying or the company closes;
+   - the headline.
+
+   Every page claim must trace to this sheet or to a PRD story. If it can't, it doesn't go on the page.
+3. **A panel by segment, not only by role.** Cover the main kinds of customer company (for example furniture, baby gear, fitness, appliances, marketplace sellers), plus **the end customer**. Roles inside one segment agree too easily; other segments and the end customer bring the asks that change the product: their helpdesk, the version per box, safety triage, "no app".
+4. **Price it with the panel before the page** (`references/pricing-interview.md`):
+   - Put 2–3 of the *simplest* models to the panel and ask for their real numbers: catalogue size, traffic, what they would pay, what makes them say no.
+   - Work out the **cost per unit** (hosting per open, model calls per draft) before any limit goes on the price card. A worry about traffic cost can vanish with the right host, or kill the margin with the wrong one.
+   - Expect buyers to reject meters and tiers they can't predict. The page shows one number when it can.
+5. **Decide how the design reaches the real product.** Either the design page is the source and is ported into the app as a task, or the design is done in the app. Never edit both by hand.
+
+Only then start the rounds. Doing A first, then the order below, would have finished in about 10 rounds instead of 30-odd and a week of rework.
 
 ## 0. Set up once
 
@@ -28,7 +57,7 @@ Doing it in the order below would have got there in about 8 rounds.
 
 ## 1. The buyer panel
 
-- Take five roles from the PRD's customer groups: the one who pays, plus the roles that can say no. For a B2B tool that is, for example, the owner, support lead, e-commerce manager, the person who makes the content, and operations. Keep the same five roles every round.
+- Take five roles from the PRD's customer groups: the one who pays, plus the roles that can say no. For a B2B tool that is, for example, the owner, support lead, e-commerce manager, the person who makes the content, and operations. Keep the same five roles every round. For interviews (section 2) and pricing, add the other segments and the end customer from section A.3.
 - **They skim; they do not read.** Use `references/skim-review-brief.md`:
   - they give the page about a minute: headlines and pictures first;
   - they open the details page only if something made them want to, and say why.
@@ -94,8 +123,18 @@ Start from these. Change one only when the owner or the panel contradicts it twi
 - A section that pins while scrolling becomes a carousel with Previous and Next buttons on phones.
 - The picture is centred, and no gap between sections is taller than 160 px.
 
+**Words: test them small**
+
+- **Headlines and slogans: a two-round skim test** (`references/slogan-test.md`), not a full review round.
+  - Round 1: 5–6 candidates, each scored out of 10. Each person says what the unclear word means to them and offers their own rewrite.
+  - Round 2: the winners and the panel's rewrites, plus a sub-line.
+  - Ten minutes, and the owner still picks.
+- **Small wording goes through the owner's page comments:** change, publish, reply and resolve in one step. Don't bundle it into a round.
+- If an auto-reply on a comment proposes wording, check it against the fact sheet before applying it. Auto-replies have promised unbuilt features.
+
 **Honesty**
 
+- Every claim maps to the fact sheet (section A) or a PRD story; anything else is marked "coming later" or cut. A "not built yet" list is not a roadmap: show only what the PRD plans, as "coming later", on the details page.
 - No invented numbers, people, quotes, results or legal facts. A claim about laws or markets needs a source.
 - Keep a claim → source list each round.
 - Never raise a score by making the reviewers easier or the claims bigger.
@@ -149,8 +188,14 @@ Each round's check runs the page in Playwright on every theme, at 320, 390, 768,
 
 The check is only ever extended. When the owner changes a decision, change the assertion that guarded the old one.
 
+## 6b. Keep the machine and the loop light
+
+- The design loop (the page, its check, the review agents) runs alone. Don't run the product's factory, CI or builders on the same laptop at the same time. Load from those made test timeouts look like failures and slowed every round.
+- Heavy builds and tests run on a server from the start, never "for now" on the laptop.
+
 ## 7. Checklist
 
+- [ ] Section A first: the real story, a signed fact sheet, a panel by segment plus the end customer, pricing tested with costs worked out, and the route from design to the real product
 - [ ] One page, one live link, one builder agent resumed every round, each round committed
 - [ ] Target and stop rule agreed with the owner
 - [ ] Five buyer roles from the PRD, the same every round, skimming rather than reading
@@ -160,3 +205,5 @@ The check is only ever extended. When the owner changes a decision, change the a
 - [ ] Scan and own look at the phone and laptop first screens before every publish
 - [ ] Changes judged on the panel average, never on one reviewer
 - [ ] A plateau reported as facts needed, not more rounds of wording
+- [ ] Headlines by a two-round slogan test; small wording through page comments
+- [ ] Every claim traced to the fact sheet or a PRD story

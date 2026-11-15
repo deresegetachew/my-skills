@@ -12,6 +12,7 @@ Weak design rounds usually come from the brief, not from the designer. A brief b
 ## 1. Before writing the brief: is design the right next step?
 
 - If the product the design shows is not good yet (a guide that mismatches its manual, a screen that doesn't work), fix the product first. A site or film can only show what the product does; every scene should be real product.
+- **For a marketing page, settle the business first:** what is sold across the customer's whole journey, the price, what is built, and the promises. Use section A of `design-iterate` (a real customer story, a fact sheet the owner signs, pricing tested with a panel). A page designed before these settle gets redesigned when they move. On one project that cost a week.
 - **Original brand identity** (logo, logo animation, brand colour) goes to a human identity designer, with a brief written by these rules. AI design is used for product UI, motion, pages and drafts of identity ideas.
 
 ## 2. Settle the idea before any visuals
