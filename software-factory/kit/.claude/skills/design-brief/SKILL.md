@@ -65,6 +65,7 @@ People take in a page from its pictures, and a buyer gives it a few seconds. A r
   5. Do I believe the demo, and does it fit my products?
   6. Three changes.
 - They say what they did not look at. They write in their own voice, not as a designer.
+- **They skim, they do not read.** Give them about a minute, headlines and pictures first. A reviewer told to read the page rewards text, and the page grows into a document. Use the skim brief in `design-iterate/references/skim-review-brief.md`.
 
 ### 5.2 Glance test, blind, twice
 
@@ -102,6 +103,8 @@ Turn the shared findings into a short rules file for the first screen and give e
 - **One main button,** the same colour everywhere.
 
 Each builder proves the fix with new glance shots and a before and after count of the things on the first screen. Then run 5.2 and 5.3 again on the fixed pages to see whether the score moved.
+
+Once one option is picked, take it to "done" with the `design-iterate` skill: buyer interviews before building, a skim panel every round, the owner's page comments, and stop rules.
 
 ## 6. Running the rounds
 
