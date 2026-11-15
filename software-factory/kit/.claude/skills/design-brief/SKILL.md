@@ -11,7 +11,8 @@ Weak design rounds usually come from the brief, not from the designer. A brief b
 
 ## 1. Before writing the brief: is design the right next step?
 
-- If the product the design shows is not good yet (a guide that mismatches its manual, a screen that doesn't work), fix the product first. A site or film can only show what the product does; every scene should be real product.
+- If the product the design shows is not good yet (output that doesn't match its source, a screen that doesn't work), fix the product first. A site or film can only show what the product does; every scene should be real product.
+- **For a marketing page, settle the business first:** what is sold across the customer's whole journey, the price, what is built, and the promises. Use section A of `design-iterate` (a real customer story, a fact sheet the owner signs, pricing tested with a panel). A page designed before these settle gets redesigned when they move. On one project that cost a week.
 - **Original brand identity** (logo, logo animation, brand colour) goes to a human identity designer, with a brief written by these rules. AI design is used for product UI, motion, pages and drafts of identity ideas.
 
 ## 2. Settle the idea before any visuals
@@ -21,9 +22,9 @@ Weak design rounds usually come from the brief, not from the designer. A brief b
 
 ## 3. Write the brief in this order
 
-1. **The idea and the feeling,** in one or two lines. Example: "A person signs off what the machine drafted: warm, honest, a serious tool."
+1. **The idea and the feeling,** in one or two lines. Example: "A person stays in charge of what the machine does: warm, honest, a serious tool."
 2. **Who it is for and the facts the work must carry.** Real features, real numbers and real limits only, from the PRD. **Demo content comes from the buyers:** the example products, brands and documents shown are the kind the biggest target customer groups sell, taken from the PRD or the business canvas (ask the product owner). Not whatever is easiest to draw.
-3. **2–3 references at the bar,** with what to take from each. Use real products the owner names or approved, such as "how the logo is the product's action". If the owner gave none, ask for them.
+3. **The bar, from the competitor review** (`design-iterate/references/competitor-review.md`): the strong suits the customer panel found in competitors' pages, the weak spots to avoid, and the gap nobody fills. Don't use references someone happens to like.
 4. **Where to work:** the real product or the real code with real data. No mock-up page of a product that already exists in code.
 5. **One direction, carried all the way.** If options are needed, at most 3, each developed through every surface: the mark alone at 16 px, on dark and light, in use, in motion. Never "ten quick options". The one exception is a wide first round for a page, run as section 4 says.
 6. **Hard constraints that are facts, and nothing else.** Examples:
@@ -34,7 +35,7 @@ Weak design rounds usually come from the brief, not from the designer. A brief b
    - placeholders for what only the owner knows.
 
    Leave style (palette, type, layout, illustration) to the designer unless the project's design system already decides it.
-7. **What "done" means, judged by using it:** on a phone, in motion, against the references. A screenshot alone is not done.
+7. **What "done" means, judged by using it:** on a phone, in motion, against the bar from the competitor review. A screenshot alone is not done.
 8. **What to send back:** the file or PR, one paragraph per direction, the designer's recommendation, and what still needs a human hand.
 
 ## 4. A wide first round, when the owner wants to choose
@@ -47,6 +48,9 @@ A wide round works only when every option is a different idea, not a variation. 
 - **Shoot and self-critique at least twice.** Each designer screenshots phone and laptop, lists what is weak and fixes it, two rounds or more.
 - **Look at every shot yourself** before the owner does.
 - **Show all options side by side** as screenshots on one canvas, numbered, so the owner picks by number.
+
+- **Go wide for real:** about 20 alternatives worked, ideally from more than one designer or model, so the range isn't one model's taste. Fewer than ten tends to give variations of one idea.
+- **Brief the wide round from the customers.** The prompt carries what the panel interviews found (what buyers need to hear, the real story, the facts), and the owner's taste (the `design` skill's OWNER-TASTE.md, when installed). A wide round without that gives pretty pages that say the wrong thing.
 
 The owner's picks then go through section 5 before any is built in full.
 
@@ -118,7 +122,7 @@ Once one option is picked, take it to "done" with the `design-iterate` skill: bu
 ## 7. Checklist
 
 - [ ] The idea and the feeling come first
-- [ ] 2–3 references at the bar, with what to take from each
+- [ ] The bar from the competitor review: strong suits, weak spots, the gap
 - [ ] Real product or real code, real data; demo content from the target customers
 - [ ] One direction deep (at most 3, each complete), or a wide round with a world per option
 - [ ] Only factual constraints
