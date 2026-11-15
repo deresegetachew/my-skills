@@ -42,6 +42,9 @@ A wide round works only when every option is a different idea, not a variation. 
 - **Look at every shot yourself** before the owner does.
 - **Show all options side by side** as screenshots on one canvas, numbered, so the owner picks by number.
 
+- **Go wide for real:** about 20 alternatives worked, ideally from more than one designer or model, so the range isn't one model's taste. Fewer than ten tends to give variations of one idea.
+- **Brief the wide round from the customers.** The prompt carries what the panel interviews found (what buyers need to hear, the real story, the facts), and the owner's taste (OWNER-TASTE.md). A wide round without that gives pretty pages that say the wrong thing.
+
 The owner's picks then go through section 5 before any is built in full.
 
 ## 5. Reviewing a round: three reviews, then one score

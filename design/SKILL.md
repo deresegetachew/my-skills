@@ -45,6 +45,30 @@ You use them three ways:
 
 The owner decides; the panel only informs. When their scores stop moving, what's left is facts or product, not design.
 
+## What unlocked it
+
+The page got good when the steps ran in this order:
+1. **Understand the customers first.** Use the panel interviews: what they need to hear, what it's worth to them, and the real story.
+2. **Run a wide round of about 20 truly different alternatives** on one canvas, each in its own "world" (a material, place or metaphor from the product's life), ideally from other designers or models, not one. The owner picked 3–4 by number.
+3. **Build the picks in full,** score them with the panel and the glance tests, and choose one.
+4. **Iterate the chosen one** with skimming reviewers and the owner's page comments until the score plateaus.
+
+Skipping step 1 gave pretty pages that said the wrong thing. Skipping step 2 gave safe variations of one idea.
+
+## Words and reviews
+
+- **Words:** a home page holds 1,200 visible words at most, counted as rendered. Everything else goes on a details page. A section is a headline of 8 words or fewer, one line of 20 words or fewer, and a picture.
+- **Reviewers skim:** about a minute, headlines and pictures first, and the details page only if something pulls them there. Reviewers who read every word rewarded text; the page grew from 2,500 to 4,600 words while the score sat at 65.
+- **Visual review is its own review,** separate from the customer panel:
+  - **Blind glance tests:** the first screen shrunk to about 480 px (laptop) and 190 px (phone), five seconds, no copy.
+  - **An art-director critique** from screenshots only.
+  - **Phone first:** a phone first screen that fails at a glance fails the option.
+- **Look at the shots yourself before anyone else does.** Full-page screenshots lie about pinned or animated sections, so render those as static lists for review.
+
+## The owner's taste
+
+See [OWNER-TASTE.md](OWNER-TASTE.md): what this owner liked and rejected in feel, colour, type, motion, pages, words and ways of working. Read it before any brief.
+
 ## The rules that matter most
 
 - **No design before the business is settled.** If the product, the price or the promises are still moving, the page will be redesigned when they move.
