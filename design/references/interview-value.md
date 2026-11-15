@@ -11,7 +11,7 @@ So far you have talked about risk. Now forget the risk and talk only about what 
 Answer as that person, plainly:
 1. What outcome would make this worth paying for, in your terms? For example: revenue, conversion, fewer returns, better reviews, customer satisfaction, fewer contacts, time saved. Rank your top three.
 2. For each of the three: what would you need to believe? What claim or picture on a home page would make you believe it before there are real customer numbers?
-3. How do your customers feel about the current way (`<e.g. paper manuals>`)? What would they say after using this? Give one line in a customer's voice.
+3. How do your customers feel about the current way (`<e.g. how they do it today>`)? What would they say after using this? Give one line in a customer's voice.
 4. How does this make you look next to competitors who don't have it? Does that matter, and how much?
 5. If the home page led with value, what should its first line say to you? Give one headline and one sub-line.
 6. Your score out of 100 if the page made the value case your way, assuming the risk answers were already fine.

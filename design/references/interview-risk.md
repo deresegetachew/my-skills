@@ -16,8 +16,8 @@ Open questions. For each one give the answer you need to hear before you start, 
 1. What should the company tell you about itself? Who, where, contact, size, support hours: what actually matters to you?
 2. Your data: what must the company say about how your content and your customers' data are used?
 3. Proof: there are no customers yet. What would you accept instead of a result?
-4. `<a product-specific question, e.g. what the support email must carry>`
-5. `<a product-specific question, e.g. translations of safety text>`
+4. `<a product-specific question, e.g. what a hand-off to their team must contain>`
+5. `<a product-specific question, e.g. who approves content that carries their name>`
 6. Integrations and dates: which one or two matter to you? Is "available on request" or a quarter-level date enough?
 7. Anything else that would stop you starting, which nobody has asked about.
 

@@ -30,7 +30,7 @@ Then: what none of them gives me that I'd pay for.
 Reply with only the scores, the strongest and weakest point per competitor, and the gap.
 ```
 
-Also run the blind glance test (BRIEF.md 5.2) on their first screens, so the visual bar is measured too.
+Also run the blind glance test (`design-brief` 5.2) on their first screens, so the visual bar is measured too.
 
 ## 4. Write down the bar
 
@@ -39,4 +39,4 @@ Also run the blind glance test (BRIEF.md 5.2) on their first screens, so the vis
 - **The gap:** what no one offers. That becomes the positioning, and often the headline.
 - The scores give a baseline: our page should beat the best competitor's average with the same panel.
 
-The brief carries this bar in place of "references at the bar". The product owner keeps it with the PRD and re-runs it when a competitor changes or when we pivot.
+The brief (`design-brief`) carries this bar in place of "references at the bar". The product owner keeps it with the PRD and re-runs it when a competitor changes or when we pivot.

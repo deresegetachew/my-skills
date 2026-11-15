@@ -7,28 +7,25 @@ description: Take one chosen design (a home page, a landing page, a key screen) 
 
 # Design iterate
 
-`design-brief` gets you to a chosen direction. This skill takes that one direction to "done": buyers say they would start, and the owner is happy with it on their own phone.
+`design-brief` gets you to a chosen direction. This part takes that one direction to "done": buyers say they would start, and the owner is happy with it on their own phone.
 
-It comes from a home page that took 25 rounds. Most of those rounds were lost to four mistakes:
+Rounds are usually lost to the same mistakes:
 
-- **Reviewers who read every word.** They rewarded text, so the page grew from 2,500 to 4,600 words while the score sat at 65.
-- **Facts asked for too late.** The buyers' biggest questions needed facts that only the owner had, but they were only asked after 10 rounds.
-- **Missed comments.** The owner's comments on the live page went unread, because page comments do not notify.
-- **Noise read as signal.** One buyer's score swings by up to 8 points between two identical rounds, and small moves were treated as wins or losses.
+- **Reviewers who read every word.** They reward text, so the page fills up while the score stalls.
+- **Facts asked for too late.** The buyers' biggest questions need facts only the owner has. Ask for them before round 1, not after round 10.
+- **Missed comments.** The owner's comments on the live page go unread, because page comments don't notify.
+- **Noise read as signal.** One reviewer's score swings by several points between identical rounds, and small moves get treated as wins or losses.
+- **The business moving under the page.** The product's scope, the price or the promises change mid-way, and the page is rebuilt each time.
+- **Claims that don't match the plan.** "Not built yet" lists read as a roadmap, and replies promise features nobody planned.
+- **Two copies of the design.** A design page and the real site are edited separately, so every change is made twice.
 
-After round 25 the page was rebuilt again, because the business under it changed:
-- **The product grew.** It went from "assembly guide" to selling, building and after-sales.
-- **The price changed four times:** plans, per product, traffic tiers, then one price.
-- **Claims didn't match the PRD.** "Not built yet" items read as a roadmap, and auto-replies to comments promised features nobody had planned.
-- **The page drifted from the real site.** The design page and the real site were edited separately, so every change was made twice.
-
-That second half took as long as the first. Section A below would have prevented most of it.
+Section A prevents the last four, and the sections after it prevent the rest.
 
 ## A. Settle the business before the page (do this first)
 
 Design can't converge while what it describes keeps moving. Before round 1:
 
-1. **One real story from the owner.** Ask: "Show me one real case where this went wrong for a customer: an email thread, a review, a return." One real thread (a broken part and ten emails over six weeks) reshaped the product more than ten review rounds. Keep it as the page's reference case.
+1. **One real story from the owner.** Ask: "Show me one real case where this went wrong for a customer: an email thread, a review, a return." One real case often reshapes the product more than many review rounds. Keep it as the page's reference case.
 2. **A one-page fact sheet, signed by the owner** (`references/business-fact-sheet.md`):
    - the value across the customer's whole journey, not only the first use;
    - the price model;
@@ -39,14 +36,14 @@ Design can't converge while what it describes keeps moving. Before round 1:
 
    Every page claim must trace to this sheet or to a PRD story. If it can't, it doesn't go on the page.
 3. **Score the competitors with the panel first** (`references/competitor-review.md`): their strong suits, weak spots and the gap. That's the bar the page must beat.
-4. **A panel by segment, not only by role.** Cover the main kinds of customer company (for example furniture, baby gear, fitness, appliances, marketplace sellers), plus **the end customer**. Roles inside one segment agree too easily; other segments and the end customer bring the asks that change the product: their helpdesk, the version per box, safety triage, "no app".
+4. **A panel by segment, not only by role.** Cover the main kinds of customer, plus **the end user**. Roles inside one segment agree too easily. Other segments and the end user bring the asks that change the product: how it fits their tools, the edge cases of their products, what the end user refuses to do.
 5. **Price it with the panel before the page** (`references/pricing-interview.md`):
-   - Put 2–3 of the *simplest* models to the panel and ask for their real numbers: catalogue size, traffic, what they would pay, what makes them say no.
-   - Work out the **cost per unit** (hosting per open, model calls per draft) before any limit goes on the price card. A worry about traffic cost can vanish with the right host, or kill the margin with the wrong one.
+   - Put 2–3 of the *simplest* models to the panel and ask for their real numbers: how many units they'd use, how much use each gets, what they'd pay, what makes them say no.
+   - Work out the **cost per unit** (for example hosting, compute or model calls per use) before any limit goes on the price card. A worry about traffic cost can vanish with the right host, or kill the margin with the wrong one.
    - Expect buyers to reject meters and tiers they can't predict. The page shows one number when it can.
 6. **Decide how the design reaches the real product.** Either the design page is the source and is ported into the app as a task, or the design is done in the app. Never edit both by hand.
 
-Only then start the rounds. Doing A first, then the order below, would have finished in about 10 rounds instead of 30-odd and a week of rework.
+Only then start the rounds.
 
 ## 0. Set up once
 
@@ -58,14 +55,14 @@ Only then start the rounds. Doing A first, then the order below, would have fini
 
 ## 1. The buyer panel
 
-- Take five roles from the PRD's customer groups: the one who pays, plus the roles that can say no. For a B2B tool that is, for example, the owner, support lead, e-commerce manager, the person who makes the content, and operations. Keep the same five roles every round. For interviews (section 2) and pricing, add the other segments and the end customer from section A.3.
+- Take five roles from the PRD's customer groups: the one who pays, plus the roles that can say no. For a business tool that is, for example, the owner who pays, plus support, sales, operations and whoever makes the content. Keep the same five roles every round. For interviews (section 2) and pricing, add the other segments and the end customer from section A.3.
 - **They skim; they do not read.** Use `references/skim-review-brief.md`:
   - they give the page about a minute: headlines and pictures first;
   - they open the details page only if something made them want to, and say why.
 
   A reviewer who reads every word asks for more words, and the page turns into a document. Real buyers skim.
 - **One score:** "This page convinces me to start" out of 100, where 90 means "I'd start today". Below that, each reviewer lists what keeps them under 90 with its points, and marks each item (a) design or wording, or (b) needs a fact from the company.
-- **Read the panel's average, never one score.** One reviewer moves by up to 8 points between identical rounds. Treat a change in the average as real only if it is over 3 points, or holds for two rounds.
+- **Read the panel's average, never one score.** One reviewer can move several points between identical rounds. Treat a change in the average as real only if it is bigger than that noise (measure it: run the same round twice), or holds for two rounds.
 - **Tell the panel what is settled.** When the owner confirms something that will exist at launch (company details, a contact), say so in the brief, so reviewers don't mark down its absence on a pre-launch page.
 - **Fix the review method when it misleads.** For example, a full-page screenshot cannot show a section that pins while you scroll, so every reviewer saw an "empty block". Render that section as a static list for review shots only.
 
@@ -80,12 +77,12 @@ These interviews find, in one hour, the facts that design can't supply. Run them
    - the headline they would want.
 
    Ask about value in its own interview: a list of risk questions makes buyers talk only about risk.
-3. **"Why" follow-ups.** When an ask surprises the owner (for example "why do they care about AI training?"), ask the panel why in one line each before arguing about it.
+3. **"Why" follow-ups.** When an ask surprises the owner (for example a data or privacy worry the owner didn't expect), ask the panel why in one line each before arguing about it.
 
 Turn the answers into **one fact list for the owner**, asked in a single batch. For each item, give:
 
 - the question in plain words;
-- a one-line example of what it means (owners misread "pilot offer" and "translated warnings" when they were given bare);
+- a one-line example of what it means (owners misread jargon such as "pilot offer" when it is given bare);
 - the points it is worth.
 
 Record each answer as a fact, with "owner, date" as its source. Some answers will be "no, and don't ask again". Write those down and move on.
@@ -96,31 +93,28 @@ Start from these. Change one only when the owner or the panel contradicts it twi
 
 **Text**
 
-- At most **1,200 visible words** on the home page, counted as rendered, including text inside demo devices.
+- A tight word budget for the main page, counted as rendered (including text inside demo devices). About 1,200 visible words was enough for a full product home page; less is better.
 - Everything else goes on a linked **details page**: every fact, limit, "not built yet" item and placeholder. **Never put a placeholder on the home page.**
 - Each section gets a headline of 8 words or fewer, at most one line of 20 words or fewer, and a picture that carries the meaning. Think slides, not paragraphs.
-- Benefits, not technology. "Interactive 3D, works on any screen", not "an iframe" or the hosting provider's name.
-- An outcome with no proof is an aim: "Built to cut returns", never "Fewer returns".
+- Benefits, not technology. "Works on any screen", not the framework, the embedding method or the hosting provider.
+- An outcome with no proof is an aim: "Built to cut support calls", never "Fewer support calls".
 - Limits are said once, in one "not built yet" list, not scattered across the page. Scattered limits make the page read as unfinished.
-- Do not narrow the audience in the first screen (for example "for furniture brands") unless the owner chose that audience.
+- Do not narrow the audience in the first screen (for example one industry) unless the owner chose that audience.
 - A headline must be about what the buyer cares about. If the owner asks "do they really care about that?", the interviews in section 2 answer it.
 
 **Structure**
 
 - One "What you get" grid of equal cards: icon, a 3–5 word title and one line each. This works better than separate team blocks plus a promise strip.
 - A story told in moments says who each moment is for, for example "You" and "Your customer".
-- A demo is the product working:
-  - an animation of the product doing its job;
-  - a device that plays itself while it is in view;
-  - languages cycling.
-- Use a vertical list of demos with filter pills that scroll sideways, and a device of fixed size beside it.
-- Secondary modes (for example a parts check) are a tab or step inside the device, not a toggle below it.
+- A demo is the product working: an animation of the product doing its job, or a device that plays itself while it is in view.
+- Several demos: a list to pick from, and one device of fixed size beside it.
+- Secondary modes are a tab or step inside the device, not a toggle below it.
 - No forms or calculators the buyer must fill in on a home page. An owner rejected one as "makes no sense".
 
 **Phone.** The owner will look at it on their own phone, so design the phone first.
 
 - The first screen is calm: headline, a short line, ticks, then the picture. Move buttons into the top bar if the screen is crowded.
-- Warnings in a demo device are a one-line note over the picture that opens on tap, not a block that hides the product.
+- Notices inside a demo device are a one-line note that opens on tap, not a block that hides the product.
 - A section that pins while scrolling becomes a carousel with Previous and Next buttons on phones.
 - The picture is centred, and no gap between sections is taller than 160 px.
 
@@ -171,7 +165,7 @@ Start from these. Change one only when the owner or the panel contradicts it twi
 
 - **A plateau means the design is done.** The points left are facts, product features or real proof. Say so plainly, with the fact list and the points each item is worth, and stop spending rounds on wording.
 - **Check the method before the page.** Look for reading rather than skimming, screenshots that hide motion or pinning, and reviewers who weren't told what is settled.
-- **Expect the ceiling.** A pre-launch page with honest limits and no customers lands in the mid-70s to high-70s with these panels. The interviews predicted the low-80s for a page that answers every fact. A real customer result is what moves it towards 90.
+- **Expect the ceiling.** A pre-launch page with honest limits and no customers plateaus below a high target. The risk interview's "score if every answer went your way" predicts the ceiling. A real customer result is what moves it further.
 
 ## 6. The check script
 
@@ -191,7 +185,7 @@ The check is only ever extended. When the owner changes a decision, change the a
 
 ## 6b. Keep the machine and the loop light
 
-- The design loop (the page, its check, the review agents) runs alone. Don't run the product's factory, CI or builders on the same laptop at the same time. Load from those made test timeouts look like failures and slowed every round.
+- The design loop (the page, its check, the review agents) runs alone. Don't run the product's build agents, CI or dev servers on the same laptop at the same time. Load from those made test timeouts look like failures and slowed every round.
 - Heavy builds and tests run on a server from the start, never "for now" on the laptop.
 
 ## 7. Checklist
@@ -201,7 +195,7 @@ The check is only ever extended. When the owner changes a decision, change the a
 - [ ] Target and stop rule agreed with the owner
 - [ ] Five buyer roles from the PRD, the same every round, skimming rather than reading
 - [ ] Risk and value interviews done before the first build; one fact list to the owner, with examples
-- [ ] Home page at 1,200 words or fewer, details page for the rest, no placeholders on home
+- [ ] Main page within its word budget, details page for the rest, no placeholders on the main page
 - [ ] Owner's page comments read in full every round; threads answered and resolved
 - [ ] Scan and own look at the phone and laptop first screens before every publish
 - [ ] Changes judged on the panel average, never on one reviewer
