@@ -1,21 +1,18 @@
 # Pre-publish scan
 
-Run this on every page file (the home page and the details page) before each publish. Fix whatever fails, then scan again.
+Run these on each page file (the home page, then the details page) before each publish. Put the file's name where it says `<page>.html`. Fix whatever fails, then scan again.
 
 ```bash
-for F in index.html details.html; do
-  echo "== $F"
-  # 1. Only the hosts you allow, for example the font hosts
-  grep -oE 'https?://[a-zA-Z0-9.-]+' "$F" | sort -u
-  # 2. Must print 0: no network calls, storage, frames, forms or inline handlers
-  grep -cE 'fetch\(|XMLHttpRequest|eval\(|localStorage|sessionStorage|<iframe|<form|document\.cookie|new Function| on[a-z]+="' "$F"
-  # 3. Words the owner banned (fill in the list); must print nothing
-  grep -oiE '<banned words, e.g. small|cheap>' "$F"
-  # 4. Required phrases and their exact counts
-  grep -o '<required phrase>' "$F" | wc -l
-  # 5. The page title
-  grep -o '<title>[^<]*' "$F"
-done
+# 1. Only the hosts you allow, for example the font hosts
+grep -oE 'https?://[a-zA-Z0-9.-]+' <page>.html | sort -u
+# 2. Must print 0: no network calls, storage, frames, forms or inline handlers
+grep -cE 'fetch\(|XMLHttpRequest|eval\(|localStorage|sessionStorage|<iframe|<form|document\.cookie|new Function| on[a-z]+="' <page>.html
+# 3. Words the owner banned (fill in the list); must print nothing
+grep -oiE '<banned word>|<another banned word>' <page>.html
+# 4. Required phrases and their exact counts
+grep -o '<required phrase>' <page>.html | wc -l
+# 5. The page title
+grep -o '<title>[^<]*' <page>.html
 ```
 
 After the scan:
