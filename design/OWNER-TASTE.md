@@ -1,62 +1,50 @@
-# The owner's taste
+# The owner's design principles
 
-What the owner liked and rejected across the remanual brand, logo and home page work (Nov 2026). Read it before writing any brief, and give the designer the parts that matter. These are this owner's preferences: they inform a brief, they don't replace references or the owner's call.
+These are the general principles behind what the owner accepted and rejected. They hold across products. The specifics change with each product and its audience: colours, materials, fonts and mood come from the stakeholders and the competitor review (ITERATE.md section A), never from an earlier project. A kids' app can be playful; a safety tool for business buyers can't. Fit the audience first.
 
-## What worked
+## Look and feel
 
-**Feel**
-- **Credible and premium, with life.** The buyers are founders who care about safety and their brand. Plain "paper and ink" was too dull, and a cute page lost their trust. The aim is the balance: a calm base, then one confident accent and real motion.
-- **Warm, honest, crafted, calm** (the chosen brand idea "By hand, again": a person checks, a person builds). It must not drift into craft-shop or cosy. Trust and safety stay sharp.
+- **Fit the audience's trust level.** Match how serious the buyer's decision is. When the buyer carries risk (money, safety, their brand), the page must look credible and premium. Childish or cute styling for a serious audience is the most common miss.
+- **Life, with restraint.** A plain page is dull, and a loud one cheapens it. Use a calm base, one confident accent, and character from motion and real content, not from decoration.
+- **One idea, carried all the way.** A distinctive idea taken from the product's real world beats safe variations. Avoid stock layouts (the split hero, a label above the headline, card grids) and stock icon sets.
+- **No literal category pictures for identity.** A logo that draws the category's objects is "very limited". Start an identity from what the brand stands for, and draw the marks only for the chosen idea.
+- **Type with weight and clarity:** a strong headline face, a quiet text face and small labels that read as labels. Pick the faces for the audience; never use a novelty face for a serious product.
 
-**Colour and material**
-- A paper or off-white base, dark ink text and **one confident accent** (yellow worked). White or smoky backgrounds were liked.
-- Materials from the product's real life, for example cardboard (a carton) with a tape line that peels as you scroll.
-- Colour themes are compared as variants of one page with a switcher, never as separate pages.
+## Pictures, motion and structure
 
-**Type**
-- A strong grotesk sans for headlines, heavy and tight (Schibsted Grotesk on the chosen page).
-- A mono face for small labels and eyebrows (Spline Sans Mono).
-- Short, punchy headlines with a full stop: "Your manual, re-imagined."
+- **The picture carries the message.** Pages read like slides, not documents. Show the product, not something about it.
+- **Motion shows the product working:** the real flow, self-playing demos while in view, steps that advance as you scroll. Never motion for its own sake. Respect reduced motion.
+- **Consistency:** the same illustration style, devices and components all down the page. A device keeps its size when its content changes.
+- **Phone first.** The owner checks on their own phone:
+  - a calm first screen;
+  - centred pictures;
+  - no crowding;
+  - no unintended gaps;
+  - carousels with Previous and Next where desktop scrolls.
+- **One clear offer.** A single, confident pricing block when there's one price, with what's included inside it.
 
-**Pictures and motion**
-- The picture carries the message. Think slides, not paragraphs.
-- **Real product motion:** the assembly animation, parts flying in one at a time, demos that play themselves while in view, languages cycling.
-- Steps that advance as you scroll on desktop. On a phone, a carousel with Previous and Next buttons.
-- The same illustrations reused across the page, for example one box-and-QR drawing everywhere.
-- A device of fixed size whose content changes inside it.
-- One confident, centred price card when there is one price, with what's included inside it.
+## Words
 
-**References the owner pointed to**
-- Bygga: one idea, real product footage, motion.
-- An agency site in yellow, with motion that tells a story.
-- A dark, technical, HUD-style site with a 3D point-cloud hero. Ask which product a reference is for: the owner meant the product site, not internal tools.
+- **Few words.** Short headlines with a full stop, one line under each, everything else on a details page. A page that needs reading has failed.
+- **Plain, buyer-side language.** What the buyer gets, not how it's built: no technology or provider names, and no buzzwords the owner has banned.
+- **Never shrink or talk down to the buyer.** Describe the audience by what they do, not by their size.
+- **Honest claims only.** An outcome without proof is an aim. Never present a roadmap as a promise, or an unbuilt feature as live. Example values are always labelled.
+- **Say who each step is for** ("You" or "Your customer") when a story mixes the two.
+- **Don't narrow the audience** to one product or category unless the owner chose that.
 
-## What was rejected
+## Things to leave out of a sales page
 
-**Style**
-- **Childish.** A toy mascot, a candy palette, rounded fat display fonts: "feels like a children's juice website".
-- **Generic or safe.** Isometric icon sets. Logos that draw the product category (boxes, hex keys, QR codes), judged "very limited": "a human designer would come up with something out of the box". Stock layouts: a split hero, a small label above the headline, card grids.
-- **"Weird" concept screens** that don't show the product.
-
-**Pages and screens**
-- Text-heavy pages: "a human will never read all this text". Keep to 1,200 words on a home page at most.
-- Dense screens with "a looooot of details". The first screen shows only what matters, with detail one click away.
-- Sections collapsed behind toggles, steps hidden behind "next" clicks on desktop, and secondary content in expandable boxes.
-- Forms or calculators on a sales page ("makes no sense"), blocks of example numbers, and a button that copies a fake placeholder snippet.
-- Unintended empty space, devices that change size between steps, device frames that are neither a phone nor anything else, pictures that aren't centred, and a crowded phone first screen.
-- A story that mixes "you" and "your customer" without saying which is which.
-- A story tied to one product ("a bed that stands") when the product serves many categories.
-
-**Words**
-- "Small" about the buyers: it shrinks the market and talks down to them.
-- Technology names (iframe, the hosting provider) and "AI". Say "your manual, your data".
-- Claims without proof (write them as aims), a roadmap presented as promises, and features that aren't built.
-- Pricing buyers can't predict: tiers, traffic meters, add-ons.
+- Forms and calculators the visitor must fill in.
+- Blocks of example numbers.
+- Placeholder buttons.
+- Collapsed sections that hide the main content.
+- Detail that a click could reveal instead.
+- Anything that needs the visitor to work.
 
 ## How the owner likes to work
 
-- Replies of 2–5 lines, plain words, no questions the owner has already answered, and no asking the owner about a feature that exists.
-- Act on stated direction: "don't ask, just do". Report what changed.
-- The owner reviews on the live page and leaves comments there. Read every one, apply the change, reply and resolve.
-- Re-brief cleanly after a rejection; never patch rejected work.
-- For a wide range of ideas, the owner wanted options from other designers (about 20 on one canvas), not only from Claude.
+- Replies of 2–5 lines, plain words, no questions already answered, and no asking about features that exist.
+- Act on the direction given ("don't ask, just do") and report what changed.
+- The owner reviews on the live page and leaves comments there. Read every one, apply it, reply and resolve.
+- After a rejection, re-brief cleanly. Never patch the rejected work.
+- For range, the owner wants options from more than one designer or model, laid out side by side.

@@ -55,6 +55,7 @@ project, never only in chat. `factory prd --stage` shows where you are and what 
 1. **Vision and PRD.** Ask who it is for, what they can do that they could not, what must never break, what is out of scope.
    Write `docs/PRD.md` (the `prd` path; `factory init` made a stub): vision, users, stories numbered once and never reused
    (`- US-1: ...`), the rules, out of scope. Commit it in a pull request. Then `factory prd --stage --ask vision`.
+   **Customers and competitors.** Before the vision goes for approval, name the customer segments, the roles inside each that can say no, and the end user. Run them as a panel of agents: interview them (what they need to hear, what it's worth, what they'd pay), and have them score 4–8 competitors' pages for strong suits, weak spots and the gap nobody fills (method: the `design` skill's `references/competitor-review.md`, or the same steps by hand). The gap is the positioning; record the findings next to the PRD.
 2. **Design.** Only after the vision is approved. Write the design brief from the PRD, the design-system file (STYLE) and the
    screens that matter into the project's `design/` folder (a reference copy of any artifact: `factory artifacts pull`).
    Then `factory prd --stage --ask design`.

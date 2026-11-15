@@ -17,7 +17,7 @@ Weak design rounds usually come from the brief, not from the designer. A brief b
 
 1. **The idea and the feeling,** in one or two lines. Example: "A person signs off what the machine drafted: warm, honest, a serious tool."
 2. **Who it is for and the facts the work must carry.** Real features, real numbers and real limits only, from the PRD. **Demo content comes from the buyers:** the example products, brands and documents shown are the kind the biggest target customer groups sell, taken from the PRD or the business canvas (ask the product owner). Not whatever is easiest to draw.
-3. **2–3 references at the bar,** with what to take from each. Use real products the owner names or approved, such as "how the logo is the product's action". If the owner gave none, ask for them.
+3. **The bar, from the competitor review** (`references/competitor-review.md`): the strong suits the customer panel found in competitors' pages, the weak spots to avoid, and the gap nobody fills. Don't use references someone happens to like.
 4. **Where to work:** the real product or the real code with real data. No mock-up page of a product that already exists in code.
 5. **One direction, carried all the way.** If options are needed, at most 3, each developed through every surface: the mark alone at 16 px, on dark and light, in use, in motion. Never "ten quick options". The one exception is a wide first round for a page, run as section 4 says.
 6. **Hard constraints that are facts, and nothing else.** Examples:
@@ -115,7 +115,7 @@ Once one option is picked, take it to "done" with ITERATE.md: buyer interviews b
 ## 7. Checklist
 
 - [ ] The idea and the feeling come first
-- [ ] 2–3 references at the bar, with what to take from each
+- [ ] The bar from the competitor review: strong suits, weak spots, the gap
 - [ ] Real product or real code, real data; demo content from the target customers
 - [ ] One direction deep (at most 3, each complete), or a wide round with a world per option
 - [ ] Only factual constraints

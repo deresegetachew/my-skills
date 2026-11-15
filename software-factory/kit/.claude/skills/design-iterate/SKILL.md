@@ -38,12 +38,13 @@ Design can't converge while what it describes keeps moving. Before round 1:
    - the headline.
 
    Every page claim must trace to this sheet or to a PRD story. If it can't, it doesn't go on the page.
-3. **A panel by segment, not only by role.** Cover the main kinds of customer company (for example furniture, baby gear, fitness, appliances, marketplace sellers), plus **the end customer**. Roles inside one segment agree too easily; other segments and the end customer bring the asks that change the product: their helpdesk, the version per box, safety triage, "no app".
-4. **Price it with the panel before the page** (`references/pricing-interview.md`):
+3. **Score the competitors with the panel first** (`references/competitor-review.md`): their strong suits, weak spots and the gap. That's the bar the page must beat.
+4. **A panel by segment, not only by role.** Cover the main kinds of customer company (for example furniture, baby gear, fitness, appliances, marketplace sellers), plus **the end customer**. Roles inside one segment agree too easily; other segments and the end customer bring the asks that change the product: their helpdesk, the version per box, safety triage, "no app".
+5. **Price it with the panel before the page** (`references/pricing-interview.md`):
    - Put 2–3 of the *simplest* models to the panel and ask for their real numbers: catalogue size, traffic, what they would pay, what makes them say no.
    - Work out the **cost per unit** (hosting per open, model calls per draft) before any limit goes on the price card. A worry about traffic cost can vanish with the right host, or kill the margin with the wrong one.
    - Expect buyers to reject meters and tiers they can't predict. The page shows one number when it can.
-5. **Decide how the design reaches the real product.** Either the design page is the source and is ported into the app as a task, or the design is done in the app. Never edit both by hand.
+6. **Decide how the design reaches the real product.** Either the design page is the source and is ported into the app as a task, or the design is done in the app. Never edit both by hand.
 
 Only then start the rounds. Doing A first, then the order below, would have finished in about 10 rounds instead of 30-odd and a week of rework.
 

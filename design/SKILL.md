@@ -16,7 +16,8 @@ Doing the steps below in order avoids all three.
 
 | Step | What | Where |
 |---|---|---|
-| 1 | **Settle the business** before any design: a real customer story, a fact sheet the owner signs, a panel by segment plus the end customer, pricing tested with the cost per unit, and how the design reaches the real product | [ITERATE.md](ITERATE.md) section A, [business fact sheet](references/business-fact-sheet.md), [pricing interview](references/pricing-interview.md) |
+| 1 | **Identify the stakeholders and score the competitors** with the customer panel: their strong suits, weak spots and the gap nobody fills. This sets the bar | [competitor review](references/competitor-review.md) |
+| 1b | **Settle the business** before any design: a real customer story, a fact sheet the owner signs, a panel by segment plus the end customer, pricing tested with the cost per unit, and how the design reaches the real product | [ITERATE.md](ITERATE.md) section A, [business fact sheet](references/business-fact-sheet.md), [pricing interview](references/pricing-interview.md) |
 | 2 | **Interview the buyers** about risk, then separately about value; send the owner one batch of fact questions, each with an example | [ITERATE.md](ITERATE.md) section 2, [risk](references/interview-risk.md), [value](references/interview-value.md) |
 | 3 | **Write the brief:** the idea and the feeling first, 2–3 references, real product and data, one direction deep, only factual constraints | [BRIEF.md](BRIEF.md) sections 1–3 |
 | 4 | **Wide first round** when the owner wants to choose: a world per option, plans first, self-critique, all options side by side | [BRIEF.md](BRIEF.md) section 4 |
@@ -67,7 +68,7 @@ Skipping step 1 gave pretty pages that said the wrong thing. Skipping step 2 gav
 
 ## The owner's taste
 
-See [OWNER-TASTE.md](OWNER-TASTE.md): what this owner liked and rejected in feel, colour, type, motion, pages, words and ways of working. Read it before any brief.
+See [OWNER-TASTE.md](OWNER-TASTE.md): the general principles behind what the owner accepted and rejected (fit the audience's trust level, life with restraint, the picture carries the message, few honest words) and how they like to work. They hold across products. The specific colours, fonts and mood come from each product's stakeholders and competitor review.
 
 ## The rules that matter most
 
