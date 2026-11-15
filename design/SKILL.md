@@ -24,6 +24,27 @@ Doing the steps below in order avoids all three.
 | 6 | **Take the chosen one to done:** one page and one link, one builder resumed every round, the owner's page comments read every round, the panel average (never one score), stop when it plateaus | [ITERATE.md](ITERATE.md) sections 0–7, [builder brief](references/builder-round-brief.md), [pre-publish scan](references/pre-publish-scan.md) |
 | 7 | **Words:** headlines by a two-round slogan test; small wording through page comments; every claim traced to the fact sheet or the PRD | [ITERATE.md](ITERATE.md) section 3, [slogan test](references/slogan-test.md) |
 
+## The core idea: your customers as agents
+
+The engine of this skill is a **panel of agents, each role-playing one customer**:
+- one per customer segment, and the roles inside a customer that can say no (the payer, support, operations…);
+- the end customer.
+
+You use them three ways:
+1. **Interview them before designing.** Ask:
+   - what they need to hear;
+   - what it's worth to them;
+   - what they'd pay;
+   - what would make them start today.
+2. **Score every round.** Each one skims the page and gives one score ("this convinces me to start", out of 100). Then they list **exactly what would raise it, with the points each item is worth**, each marked as either a design fix or a fact only the owner has.
+3. **Iterate on their answers:**
+   - fix the design items;
+   - send the fact items to the owner in one batch, each with an example;
+   - test words and prices with them in quick rounds;
+   - re-score, and judge on the panel's average.
+
+The owner decides; the panel only informs. When their scores stop moving, what's left is facts or product, not design.
+
 ## The rules that matter most
 
 - **No design before the business is settled.** If the product, the price or the promises are still moving, the page will be redesigned when they move.
