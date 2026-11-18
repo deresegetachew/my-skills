@@ -86,7 +86,7 @@ test("the steward never merges, approves, adds a guard label or skips a test", (
 test("runner trouble is a proposal to the owner, with numbers, never a change", () => {
   const s = flat(SKILL);
   for (const need of ["factory-owner-ask id=<id>", "factory board ask", "factory ci status --json", "uptime",
-    "factory ci runners <n>", "timeout-minutes", "you only propose"]) {
+    "factory ci runners <n>", "timeout-minutes", "you only propose", "this needs your yes: ", "manager.notify"]) {
     expect(s, need).toContain(need);
   }
 });
