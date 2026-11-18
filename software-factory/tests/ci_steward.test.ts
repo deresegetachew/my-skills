@@ -91,6 +91,18 @@ test("runner trouble is a proposal to the owner, with numbers, never a change", 
   }
 });
 
+test("slow jobs are measured per step first, and setup time is fixed before capacity", () => {
+  const s = flat(SKILL);
+  for (const need of ["**Measure first.**", "started_at", "completed_at", "per-step table",
+    "Never propose more runners or a higher limit before that table exists", "**Setup is waste to remove.**",
+    "more than about a minute", "baked into the runner image", "git mirror", "pulled ahead of time", "keyed on the lockfile"]) {
+    expect(s, need).toContain(need);
+  }
+  const wiki = flat(join(WIKI, "ci.md"));
+  expect(wiki).toContain("**Measure first.**");
+  expect(wiki).toContain("**Setup is waste to remove.**");
+});
+
 test("the skill names no project", () => {
   for (const path of [SKILL, AGENT]) expect(read(path).toLowerCase(), path).not.toContain("remanual");
 });

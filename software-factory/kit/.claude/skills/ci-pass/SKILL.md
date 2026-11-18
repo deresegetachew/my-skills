@@ -131,10 +131,29 @@ first sighting goes into the status only.
 - jobs keep being cancelled at their limit (two passes in a row, or three jobs in an hour) even after you lowered your cap;
 - no runner is online, or jobs have been queued for longer than `manager.ciQueuedMinutes`.
 
-Start the ask with "this needs your yes: " and what you propose, then write what you saw (runners online and busy, jobs queued, jobs cancelled at their limit in the last hour, the load and the
-core count) and your recommendation with its trade-off: fewer heavy runners per machine (`factory ci runners <n>`), a higher
-`timeout-minutes`, or splitting the slow job into shards. These are the owner's: a workflow is under `.github/` and runner
-settings are the owner's; you only propose. With the board on: `factory board ask <id> <text>`. Otherwise post a comment
+**Measure first.** Before any ask about slow jobs or jobs cancelled at their limit, time each step of the slow job on 3 to
+5 recent runs. The jobs API gives every step's `started_at` and `completed_at`:
+`gh api "repos/{owner}/{repo}/actions/runs/<run id>/jobs" -q '.jobs[] | {name, steps: [.steps[] | {name, started_at, completed_at}]}'`.
+Put the per-step table (step, minutes on each run, the median) in the ask. Never propose more runners or a higher limit
+before that table exists.
+
+**Setup is waste to remove.** On self-hosted runners, setup (checkout, toolchain install, package install, pulling service
+images) should take seconds. If setup steps together take more than about a minute, propose that fix first, before any
+capacity change:
+- the toolchain pinned and baked into the runner image (or installed once for the runner user), so the job only checks
+  versions;
+- the package store and a git mirror or reference repository on persistent volumes that survive between jobs;
+- service images pulled ahead of time;
+- dependency layers keyed on the lockfile.
+
+A real case: one project spent about 7.5 of its 15 minutes per job on setup (checkout 2 minutes, package install 3,
+a toolchain install 1.5), in every job, for days. More runners or a higher limit would only have hidden that.
+
+Start the ask with "this needs your yes: " and what you propose, then write what you saw (runners online and busy, jobs
+queued, jobs cancelled at their limit in the last hour, the load and the core count, and the per-step table) and your
+recommendation with its trade-off: removing setup time first, then fewer heavy runners per machine
+(`factory ci runners <n>`), a higher `timeout-minutes`, or splitting the slow job into shards. These are the owner's: a
+workflow is under `.github/` and runner settings are the owner's; you only propose. With the board on: `factory board ask <id> <text>`. Otherwise post a comment
 `<!-- factory-owner-ask id=<id> -->` on the owner-queue issue ("Dev manager: needs the owner"), after checking no comment
 there already has that `id`. Mention only the owner, by the login in `manager.notify`, and only in an owner ask, as
 `manage-pass` does.

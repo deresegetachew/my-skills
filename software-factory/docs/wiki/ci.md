@@ -220,8 +220,19 @@ pull request's checks on its head commit and sorts each red job:
 **The re-run cap.** It never has more than `ci.steward.maxReruns` re-runs going at once, and starts more only as they
 finish. Re-running many pull requests at once on a few runners sharing a machine's cores pushes every job past its time
 limit, so each is cancelled again. When jobs keep being cancelled at their limit it lowers its own cap and writes an owner
-ask with the numbers (runners online and busy, jobs queued, the load) and one proposed fix: fewer heavy runners
-(`factory ci runners <n>`), a higher `timeout-minutes`, or sharding the slow job. Changing those is the owner's.
+ask with the numbers (runners online and busy, jobs queued, the load) and one proposed fix. Changing runners, limits or
+workflows is the owner's.
+
+**Measure first.** Before it proposes anything for slow jobs, the steward times each step of the slow job on a few recent
+runs (the jobs API gives each step's start and end) and puts the per-step table in the ask. It never proposes more runners
+or a higher limit without that table.
+
+**Setup is waste to remove.** On self-hosted runners, setup (checkout, toolchain, package install, service images) should
+take seconds. When it takes more than about a minute, that fix comes before any capacity change: the toolchain pinned and
+baked into the runner image, the package store and a git mirror on volumes that survive between jobs, service images
+pulled ahead of time, and dependency layers keyed on the lockfile. One project spent about 7.5 of its 15 minutes per job on
+setup (checkout 2 minutes, package install 3, a toolchain install 1.5), in every job, for days. Only after that come fewer
+heavy runners (`factory ci runners <n>`), a higher `timeout-minutes`, or sharding the slow job.
 
 **What it never does.** It never merges, approves or adds `tests-reviewed` or `deps-reviewed`; it says which pull
 requests are green on their head and which wait only on a person's label. Its status is one open issue, "CI steward:
