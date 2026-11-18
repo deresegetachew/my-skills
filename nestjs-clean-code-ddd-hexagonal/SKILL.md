@@ -212,6 +212,38 @@ They do NOT:
 
 ---
 
+### `app-long-work-is-a-job` (CRITICAL)
+A use case triggered by a request finishes in milliseconds. If it needs slow or unbounded work, it splits into a
+command that records intent and enqueues a job in the same transaction, and a job handler that runs in a worker.
+Slow or unbounded work means:
+- a model or agent call;
+- file processing or a build;
+- a third-party fan-out;
+- anything whose duration another system controls.
+
+- **The request side** returns an id (`202`), and the client follows progress by polling or SSE.
+- **The job handler** has a deadline, capped retries with backoff, and an idempotency key. On its last failure it
+  leaves a visible failed state.
+- **Never** a use case that awaits a model call, or any port whose latency it doesn't control, inside a request.
+
+See nestjs-best-practices `rel-no-long-work-in-requests`.
+
+---
+
+### `app-side-effects-after-commit` (CRITICAL)
+"Handles transactions" means **database work only** inside the transaction. A port that talks to another system
+(mail, storage, CDN, billing, search, models, another bounded context) is never called inside a unit of work.
+- **Inside the transaction:** the use case records an event in a transactional outbox (or a queue table written by
+  the same transaction), and an idempotent handler performs the effect after commit.
+- **Order:** effects that make something live (a pointer switch, a publish) come last, after the effects they depend
+  on have succeeded.
+- **Reactions between bounded contexts** go through these events, never through calls into another context's
+  internals.
+
+See nestjs-best-practices `rel-no-network-in-transactions`, `rel-transactional-outbox`, `rel-durable-background-work`.
+
+---
+
 ## 4. Ports & Adapters (Hexagonal)
 
 ### `ports-repositories`
@@ -230,6 +262,9 @@ External systems (APIs, queues, storage):
 - Must be accessed via ports
 - Must not leak third-party models into the domain
 - Must be wrapped behind adapters
+- Adapters own the resilience policy: an explicit timeout on every call, retries with backoff only where the call
+  is safe to repeat, and a circuit breaker on paths a user waits on. A port's contract test proves the timeout
+  against a fake that never answers (nestjs-best-practices `rel-timeouts-everywhere`).
 
 ---
 
@@ -381,6 +416,10 @@ Every port must have:
 - No circular dependencies across layers
 - No leaking persistence models into domain
 - No second class, and no stray functions, in a file (section 7b)
+- No slow or unbounded work (model calls, file processing, third-party fan-out) awaited inside an HTTP request
+- No network call inside a database transaction; cross-system effects go through an outbox and a durable queue
+- No outbound call without an explicit timeout; no unbounded DB pool or query
+- No fire-and-forget promises, in-memory retries, `setInterval` schedulers or in-memory dedupe for background work
 
 ---
 
@@ -396,6 +435,12 @@ Before marking work complete:
 - [ ] Controllers are thin
 - [ ] Domain tests run without NestJS
 - [ ] `scripts/check_structure.py` passes: one class per file, kebab-case names, a pure domain
+- [ ] Every new endpoint answers within its budget. Slow work is a queued job, with a status the client can follow.
+- [ ] Every transaction does database work only. Effects are enqueued in it and run after commit by idempotent
+      handlers, with retries, a dead letter and an alert.
+- [ ] Every new outbound call, through its adapter, has a timeout, and a test that proves it.
+- [ ] Background work and schedules are durable and run once across replicas: no in-process timers or Sets.
+- [ ] New flows emit a request id, traces and metrics, and failures that cost money or data raise an alert.
 
 ---
 
