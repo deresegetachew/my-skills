@@ -90,6 +90,7 @@ one is not a yes for the next (DEV-MANAGER.md; `manage-pass` skill).
 | **Dev manager** | Orchestrator (no model) plus one-item sub-managers (a Claude session each). Reviews, merges within the owner's rule, answers questions, sweeps dead agents. | `factory dev-manager loop [-i]` on any machine | #97, #109, #102 |
 | **Product owner (PO)** | Generic role for product questions, the PRD, task order proposals and sign-off. | `factory product-owner loop [-i]` | #101, #110, #102 |
 | **Reviewer subagents** | `reviewer`, `architecture-reviewer`, `safety-auditor`, `security-reviewer`, and the `test-writer`. | Inside a builder's or manager's session | wiki/reviews-and-gates.md "Reviews and gates" |
+| **CI steward** | A subagent that sorts red CI, re-runs within a cap and reports; never merges. | Inside a manager's session, or `/ci-pass` on a loop | #675, wiki/ci.md "The CI steward" |
 | **CI runner** | GitHub's, or the owner's own machine. | `factory ci` | #40 and the issues in section 4.7 |
 
 ## 4. User stories
@@ -362,6 +363,11 @@ run as `factory hook <name>`. *Decided (owner, 7 Nov 2026); decision 0008, not w
   so it is not a security boundary. The mitigations are a private repo, fork PR workflows off, and (recommended on Linux)
   a dedicated user with rootless Docker. Running the runner in a separate VM is the follow-up in Remanual #150. *Built
   (documented); the VM is open.* (wiki/ci.md "The known risk")
+- **C9.** As the owner, a CI steward (the `ci-steward` agent and its `ci-pass` skill) keeps CI moving: it sorts each red
+  job into infrastructure, flaky or real, re-runs the first two with never more re-runs at once than `ci.steward.maxReruns`,
+  tells the author about a real failure once, files a flaky test seen twice as an issue, and writes runner trouble to the
+  owner queue with a proposed fix. It never merges or adds a guard label; the dev manager starts it and merges. *Built
+  (#675).* (wiki/ci.md "The CI steward")
 
 ### 4.8 Settings
 

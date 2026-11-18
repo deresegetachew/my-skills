@@ -260,7 +260,7 @@ The long parts of this guide are wiki pages in [`docs/wiki/`](docs/wiki). Each p
 
 **Machines**
 
-- [CI and the build cache](docs/wiki/ci.md): GitHub's runners or your own Mac, and a shared build cache.
+- [CI and the build cache](docs/wiki/ci.md): GitHub's runners or your own Mac, the CI steward, and a shared build cache.
 - [A sandboxed machine](docs/wiki/sandboxed-machine.md): `factory bootstrap` and security notes.
 - [The message board](docs/wiki/board.md): the factory's own record on Postgres: set it up, go live, go back.
 

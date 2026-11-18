@@ -255,9 +255,16 @@ a new CI job can arrive with a PR, and older branches won't have it.
 `factory prs` judges CI by this rule for you: per job name the newest run that was not skipped decides, so a re-run
 replaces a failure; the PR is green only when every job is.
 
-Flaky test (passes locally, times out once on CI): re-run the failed job once (`POST .../actions/runs/{id}/rerun-failed-jobs`)
-only if the project's role README lists it as a known flake, or it is a timeout under load. If it flakes again, fix the cause
-(a longer timeout for a cold start, for example) in a small PR.
+Red, cancelled or stuck CI: start the `ci-steward` agent with `/ci-pass` (the `ci-pass` skill, #675) instead of re-running
+by hand. It sorts each red job into infrastructure, flaky or real; re-runs the first two with no more re-runs at once than
+`ci.steward.maxReruns`, because more re-runs than the runners can finish inside a job's time limit get cancelled again;
+tells the author about a real failure once; files a flaky test seen twice as an issue (never a skip); and writes runner
+trouble to the owner queue with a proposed fix. It does not merge or add `tests-reviewed`: it tells you which pull requests
+are green on their head. Its status is the open issue "CI steward: status".
+
+Without the steward (an older project): re-run a flaky job once (`POST .../actions/runs/{id}/rerun-failed-jobs`) only if the
+project's role README lists it as a known flake, or it is a timeout under load. If it flakes again, fix the cause (a longer
+timeout for a cold start, for example) in a small PR.
 
 ## Keeping the coding agent busy
 
