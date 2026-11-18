@@ -123,10 +123,11 @@ software-factory/
     .claude/factory/notes/                template: the project's notes for the agents
     .claude/factory/lessons.md            template: the curated lessons file (empty)
     .claude/factory/settings.json         the agents' rules (permissions and hooks); the factory passes it when it starts an agent, a plain session never loads it (#258)
-    .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer
+    .claude/agents/                       reviewer, architecture-reviewer, safety-auditor, security-reviewer, test-writer, ci-steward
     .claude/skills/                       next-task, design-check, design-brief, design-iterate, eval
     .claude/skills/manage-pass/           the dev manager's standing rules (one page)
     .claude/skills/product-pass/          the product owner's standing rules (one page)
+    .claude/skills/ci-pass/               the CI steward's rules: sort red jobs, re-run within a cap, report (#675)
     .claude/manager/settings.json         the dev manager's settings profile (gh api, read-only git, no pushes to main); a release installs and updates it
     .claude/product-owner/settings.json   the product owner's settings profile (gh api, issues and comments, its own branch and draft PR, the PR gate; no merge, no review labels, no pushes to main, no .claude/ edits); a release installs and updates it
     .github/                              template: CI workflow (Node or Python), factory-task issue template, PRD-change PR template, CODEOWNERS

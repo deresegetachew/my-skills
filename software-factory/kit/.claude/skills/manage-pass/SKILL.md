@@ -171,9 +171,16 @@ Each marker is the first line of a comment. `<head>` is the full head sha of the
 
 For a head commit take its check runs, and for each job name only the newest run that is not `skipped`. The commit is green
 only when every one of those succeeded (and there is at least one). Anything still queued or running is not green: wait with
-`factory wait ci <pr>`. Re-run a failed job (`POST .../actions/runs/<id>/rerun-failed-jobs`) only for a flake the project's
-note lists, or a timeout under load, and only after reading the job's steps. A second failure is not a flake: it is a
-must-fix or a fix for the owner.
+`factory wait ci <pr>`. A second failure is not a flake: it is a must-fix or a fix for the owner.
+
+**Red, cancelled or stuck CI goes to the CI steward** (#675). Don't re-run jobs yourself: start the `ci-steward` agent
+(the Agent tool) with `/ci-pass` in a whole pass, or `/ci-pass pr-<n>` for your item, once per pass. It sorts each red job
+(infrastructure, flaky, real), re-runs within a cap on re-runs at once (`ci.steward.maxReruns`) so the runners are not
+swamped, tells the author about a real failure, files flaky tests, and reports runner trouble to the owner queue. It
+never merges or adds `tests-reviewed`: its reply lists the pull requests green on their head, and you merge them by the
+rules above. Its status is the open issue "CI steward: status". Only when the project has no `ci-steward` agent, re-run a
+failed job yourself (`POST .../actions/runs/<id>/rerun-failed-jobs`), and only for a flake the project's note lists or a
+timeout under load, after reading the job's steps.
 
 ## Never
 

@@ -7,6 +7,7 @@ Back to the [wiki home](../../README.md#wiki)
 On this page:
 
 - [CI: GitHub's runners or your own Mac](#ci-githubs-runners-or-your-own-mac)
+- [The CI steward](#the-ci-steward)
 - [A shared build cache](#a-shared-build-cache)
 
 <br>
@@ -203,6 +204,49 @@ so it is not a security boundary: a job that tries can reach Docker Desktop's VM
 data, the folders Docker Desktop shares (by default all of `/Users`), and services on your Mac's `localhost`. Only
 people who can push to the repository (you and the agents) run code on it. Running the runner in a separate VM is
 the follow-up ([remanual #150](https://github.com/deresegetachew/remanual/issues/150)).
+<a id="the-ci-steward"></a>
+
+## The CI steward
+
+The `ci-steward` agent keeps CI moving and honest (#675). Its rules are the `ci-pass` skill. One pass reads every open
+pull request's checks on its head commit and sorts each red job:
+
+- **infrastructure** (cancelled at its time limit, a lost runner, never picked up, a service container that did not
+  start): re-run, up to `ci.steward.rerunsPerRun` times per run;
+- **flaky** (a job in `manager.flakes`, or a test that fails on unrelated pull requests too): re-run once; seen twice, it
+  gets a "Flaky test: <name>" issue, never a skip or a retry;
+- **real** (the change broke a test or the build): one comment to the author per head commit, with the first error lines.
+
+**The re-run cap.** It never has more than `ci.steward.maxReruns` re-runs going at once, and starts more only as they
+finish. Re-running many pull requests at once on a few runners sharing a machine's cores pushes every job past its time
+limit, so each is cancelled again. When jobs keep being cancelled at their limit it lowers its own cap and writes an owner
+ask with the numbers (runners online and busy, jobs queued, the load) and one proposed fix. Changing runners, limits or
+workflows is the owner's.
+
+**Measure first.** Before it proposes anything for slow jobs, the steward times each step of the slow job on a few recent
+runs (the jobs API gives each step's start and end) and puts the per-step table in the ask. It never proposes more runners
+or a higher limit without that table.
+
+**Setup is waste to remove.** On self-hosted runners, setup (checkout, toolchain, package install, service images) should
+take seconds. When it takes more than about a minute, that fix comes before any capacity change: the toolchain pinned and
+baked into the runner image, the package store and a git mirror on volumes that survive between jobs, service images
+pulled ahead of time, and dependency layers keyed on the lockfile. One project spent about 7.5 of its 15 minutes per job on
+setup (checkout 2 minutes, package install 3, a toolchain install 1.5), in every job, for days. Only after that come fewer
+heavy runners (`factory ci runners <n>`), a higher `timeout-minutes`, or sharding the slow job.
+
+**What it never does.** It never merges, approves or adds `tests-reviewed` or `deps-reviewed`; it says which pull
+requests are green on their head and which wait only on a person's label. Its status is one open issue, "CI steward:
+status", rewritten each pass.
+
+**How it runs.** The dev manager starts it from its pass when CI is red, cancelled or stuck (`manage-pass`). To run it on
+its own, under the dev manager's settings and gate:
+
+```sh
+claude --settings .claude/manager/settings.json -p "/ci-pass"   # one pass (cron or a timer can run this)
+claude --settings .claude/manager/settings.json                 # then type: /loop 15m /ci-pass
+```
+
+`/ci-pass --dry-run` prints what it would do and writes nothing.
 <a id="a-shared-build-cache"></a>
 
 ## A shared build cache
