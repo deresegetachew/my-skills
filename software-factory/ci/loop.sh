@@ -15,7 +15,8 @@
 # machine's registrations), and on Linux DOCKER_HOST when Docker is rootless. With several loops on one machine
 # (ci.runners, and the light lane), each also gets its own CI_PROJECT (compose project: its dind, volumes and
 # workspace), CI_RUNNER_PREFIX (registration names), CI_COMPOSE (compose.yaml, or compose-light.yaml for the light
-# lane) and CI_LOG; without them it is the single runner it always was.
+# lane) and CI_LOG; without them it is the single runner it always was. CI_PROJECT_IMAGE=1 (ci.projectImage, heavy
+# runners): the jobs run in <name>-runner:project when it is there, and project-image.sh keeps it at main's lockfile.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -73,6 +74,18 @@ ensure_caches() {
   docker network connect "$CI_CACHE_NETWORK" "$CI_MIRROR" >/dev/null 2>&1 || true  # already there: fine
 }
 
+# CI_PROJECT_IMAGE=1: the image for this round's job. The project image when one has been built (the last good one),
+# else the base image. The check for a newer lockfile on main runs beside the job, never in front of it; when it
+# builds a new image, the rounds after it use that.
+PROJECT_IMAGE="$CI_NAME-runner:project"
+round_image() {
+  image="${RUNNER_IMAGE:-}"
+  [ "${CI_PROJECT_IMAGE:-0}" = 1 ] && [ -n "$image" ] || return 0
+  # Its lines go to this log. Not inside $( ): that would wait for the build.
+  /bin/bash "$here/project-image.sh" &
+  if docker image inspect "$PROJECT_IMAGE" >/dev/null 2>&1; then image="$PROJECT_IMAGE"; fi
+}
+
 wait_and_retry() {
   log "$1; trying again in ${backoff} s"
   # In the background: bash runs the TERM trap only once a foreground command ends.
@@ -110,9 +123,10 @@ while true; do
 
   ensure_caches
   round=$((round + 1))
-  log "round $round: starting a runner for one job"
+  round_image
+  log "round $round: starting a runner for one job${image:+ in $image}"
   # The token goes through this command's environment only (compose passes RUNNER_TOKEN through).
-  RUNNER_TOKEN="$token" RUNNER_REPO="$RUNNER_REPO" RUNNER_NAME="$prefix-$(date +%s)" RUNNER_LABEL="$CI_LABEL" \
+  RUNNER_IMAGE="$image" RUNNER_TOKEN="$token" RUNNER_REPO="$RUNNER_REPO" RUNNER_NAME="$prefix-$(date +%s)" RUNNER_LABEL="$CI_LABEL" \
     "${compose[@]}" up --abort-on-container-exit --exit-code-from runner &
   wait $!
   code=$?

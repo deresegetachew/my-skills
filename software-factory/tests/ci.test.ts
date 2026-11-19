@@ -85,11 +85,13 @@ echo "$*" >>"$FAKE_DB.docker.log"
 case " $* " in
   *" build "*) [ -z "\${FAKE_DOCKER_BUILD_FAILS:-}" ] || exit 1 ;;
   *" info "*"MemTotal"*) [ -n "\${FAKE_DOCKER_MEMTOTAL:-}" ] && echo "$FAKE_DOCKER_MEMTOTAL"; exit 0 ;;
+  *" image inspect"*" \${FAKE_DOCKER_NO_IMAGE:-no such image} "*) exit 1 ;;  # the one image that is not on this machine
   *" image inspect "*) [ -n "\${FAKE_DOCKER_IMAGE_LABELS:-}" ] || exit 1; echo "$FAKE_DOCKER_IMAGE_LABELS"; exit 0 ;;
   *" run "*) [ -z "\${FAKE_DOCKER_RUN_FAILS:-}" ] || { echo "bash: /opt/factory-ci/entrypoint.sh: Permission denied" >&2; exit 126; } ;;
   *" up "*)  # one round: say whether the runner got the given token, then fail registration (code 3)
     [ "\${RUNNER_TOKEN:-}" = "given-token" ] && echo "token ok" >>"$FAKE_DB.docker.log"
     echo "name $RUNNER_NAME label $RUNNER_LABEL" >>"$FAKE_DB.docker.log"
+    echo "image \${RUNNER_IMAGE:-}" >>"$FAKE_DB.docker.log"
     exit 3 ;;
 esac
 exit 0
@@ -1215,4 +1217,96 @@ test("factory help and the commands page list ci status --json", () => {
   const out = sh(["bash", join(SF, "factory"), "help"], { cwd: project().d }).stdout;
   expect(out).toContain("ci status [--json]");
   expect(readFileSync(join(SF, "docs", "wiki", "commands.md"), "utf8")).toContain("| `factory ci status [--json]` |");
+});
+
+// --- the project image: main's packages in a layer of the runner image (ci.projectImage) -----------------------------
+
+/** Waits until the fake gh was asked for something (the loop starts project-image.sh beside the job, not before it). */
+async function ghAsked(db: string, what: string): Promise<boolean> {
+  for (let i = 0; i < 100; i++) {
+    if (log(db, "gh").includes(what)) return true;
+    await Bun.sleep(100);
+  }
+  return false;
+}
+
+test("the project image is off by default and nothing about it runs", async () => {
+  const { d, db, env } = tooledProject();
+  expect(names(d, env).CI_PROJECT_IMAGE).toBe("0");
+  const [rc, out] = ci(d, env, "install");
+  expect(rc, out).toBe(0);
+  lacks(out, "Project image", "ci.projectImage");
+  const heavy = plistEnv(env, "dev.software-factory.widget-ci");
+  expect(heavy.CI_PROJECT_IMAGE).toBe("0");
+  const n = names(d, env);
+  // A round with the project image there, even: the job still runs in the plain built image, and main is not asked.
+  runLoopOnce({ ...env, FAKE_DOCKER_IMAGE_LABELS: "x" }, heavy, join(n.CI_INSTALLED as string, "widget-ci"), n.CI_INSTALLED as string);
+  await Bun.sleep(500);
+  contains(log(db, "docker"), "image widget-ci-runner:latest");
+  lacks(log(db, "docker"), "runner:project");
+  lacks(log(db, "gh"), "git/trees");
+  update(db, { vars: { CI_RUNS_ON: '["self-hosted","widget-local"]' } });
+  runsAndPulls(db, [run("main")], [], []);
+  expect(ci(d, env, "status")[1]).not.toContain("Project image");
+});
+
+test("with ci.projectImage the heavy runners use the project image and check mains lockfile each round", async () => {
+  const { d, db, env } = tooledProject({ ci: { projectImage: true } });
+  expect(names(d, env).CI_PROJECT_IMAGE).toBe("1");
+  const [rc, out] = ci(d, env, "install");
+  expect(rc, out).toBe(0);
+  expect(out).toContain("Project image: the heavy runners keep widget-ci-runner:project at main's lockfile");
+  const heavy = plistEnv(env, "dev.software-factory.widget-ci");
+  const light = plistEnv(env, "dev.software-factory.widget-ci-light");
+  expect([heavy.CI_PROJECT_IMAGE, heavy.RUNNER_IMAGE]).toEqual(["1", "widget-ci-runner:latest"]);
+  expect([light.CI_PROJECT_IMAGE, light.RUNNER_IMAGE]).toEqual(["0", ""]); // the light lane stays plain
+  // The two files are copied for the loop's own user only (it runs one with bash and gives the other to docker
+  // build); neither is mounted into a container, so neither needs to be readable by anyone else (#111).
+  const n = names(d, env);
+  const installed = n.CI_INSTALLED as string;
+  for (const f of ["project.Dockerfile", "project-image.sh"]) expect(mode(join(installed, f)), f).toBe(0o600);
+  expect(mountedFiles(installed)).not.toContain("project-image.sh");
+  expect(ci(d, env, "check")[0]).toBe(0);
+
+  // Round 1: no project image yet, so the job runs in the built image; main's tree is asked for beside it.
+  const exe = join(installed, "widget-ci");
+  runLoopOnce({ ...env, FAKE_DOCKER_IMAGE_LABELS: "sha256:x", FAKE_DOCKER_NO_IMAGE: "widget-ci-runner:project" }, heavy, exe, installed);
+  contains(log(db, "docker"), "image widget-ci-runner:latest");
+  lacks(log(db, "docker"), "image widget-ci-runner:project");
+  expect(await ghAsked(db, "repos/acme/Widget/git/trees/HEAD")).toBe(true);
+  // A later round, once the image is there: the job runs in it.
+  runLoopOnce({ ...env, FAKE_DOCKER_IMAGE_LABELS: "sha256:x" }, heavy, exe, installed);
+  contains(log(db, "docker"), "image widget-ci-runner:project");
+
+  // status says what the image holds, and uninstall removes it.
+  update(db, { vars: { CI_RUNS_ON: '["self-hosted","widget-local"]' } });
+  runsAndPulls(db, [run("main")], [], []);
+  expect(ci(d, { ...env, FAKE_DOCKER_IMAGE_LABELS: "9c5979d2fb3a38666ddeac8ee52e404d28fcdaef" }, "status")[1])
+    .toContain("Project image: widget-ci-runner:project holds the packages of main's lockfile 9c5979d2fb3a.");
+  expect(ci(d, env, "status")[1]).toContain("Project image: not built yet.");
+  expect(ci(d, env, "uninstall")[0]).toBe(0);
+  contains(log(db, "docker"), "image rm widget-ci-runner:project widget-ci-runner:latest");
+});
+
+test("the project image needs the built runner image and says so without one", async () => {
+  const { d, db, env } = tooledProject({ ci: { projectImage: true, image: "base" } });
+  const [rc, out] = ci(d, env, "install");
+  expect(rc, out).toBe(0);
+  expect(out).toContain("Warning: ci.projectImage is on, but there is no built runner image");
+  const heavy = plistEnv(env, "dev.software-factory.widget-ci");
+  const n = names(d, env);
+  runLoopOnce({ ...env, FAKE_DOCKER_IMAGE_LABELS: "x" }, heavy, join(n.CI_INSTALLED as string, "widget-ci"), n.CI_INSTALLED as string);
+  await Bun.sleep(500);
+  lacks(log(db, "docker"), "runner:project");
+  lacks(log(db, "gh"), "git/trees");
+});
+
+test("linux units carry the project image setting", () => {
+  const { d, env } = linuxProject({ ci: { projectImage: true } });
+  const [rc, out] = ci(d, env, "install");
+  expect(rc, out).toBe(0);
+  const n = names(d, env);
+  const unitDir = dirname(n.CI_UNIT_FILE as string);
+  expect(readFileSync(join(unitDir, "widget-ci.service"), "utf8")).toContain('Environment="CI_PROJECT_IMAGE=1"');
+  expect(readFileSync(join(unitDir, "widget-ci-light.service"), "utf8")).toContain('Environment="CI_PROJECT_IMAGE=0"');
 });

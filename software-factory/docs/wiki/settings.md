@@ -261,6 +261,7 @@ change the table there, not here. `factory settings help <key>` has the long hel
 | `ci.light` | bool | `true` | Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`. |
 | `ci.image` | str | `"build"` | The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base. |
 | `ci.caches` | bool | `true` | Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets). |
+| `ci.projectImage` | bool | `false` | Run the heavy runners' jobs in an image that also holds the packages of main's pnpm lockfile, so jobs install from local disk. Built on the machine from main only, read-only to jobs; needs ci.image build. |
 | `turbo.api` | str | `""` | The shared Turborepo cache's address, as agents and CI reach it: http://<Tailscale or LAN address>:3335. Empty: no shared cache. `factory turbo install` starts it. |
 | `turbo.team` | str | `""` | The cache's team name (default: the repository's name). |
 | `turbo.bind` | str | `"127.0.0.1"` | The address the cache server listens on, on the machine that runs it. 127.0.0.1 reaches only that machine; use its Tailscale or LAN address for others. |
