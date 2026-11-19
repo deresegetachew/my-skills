@@ -114,8 +114,8 @@ software-factory/
     factory_turbo.ts                    `factory turbo`: the shared Turborepo cache (status, install, down, env, ci-env)
   ci/                                     `factory ci`: ci.sh (the commands), loop.sh (installed as <name>),
                                           compose.yaml, compose-light.yaml, compose-caches.yaml, compose-turbo.yaml,
-                                          runner.Dockerfile, install-tools.sh, entrypoint.sh, ci_names.ts,
-                                          ci_status.ts
+                                          runner.Dockerfile, install-tools.sh, project.Dockerfile,
+                                          project-image.sh, entrypoint.sh, ci_names.ts, ci_status.ts
   kit/                                    what a project is given (templates, agents, skills, settings); no
                                           factory code and no symlinks (the forwarders went in #176)
     CLAUDE.factory.md                     template for the project's CLAUDE.md

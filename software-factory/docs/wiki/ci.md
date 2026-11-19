@@ -34,7 +34,8 @@ install under another LaunchAgent label (`factory ci install` unloads it and rem
 
 ```json
 "ci": {"name": "widget-ci", "label": "widget-local", "repo": "acme/widget", "replaces": ["com.example.old-runner"],
-       "runners": 3, "light": true, "lightLabel": "widget-light", "image": "build", "caches": true}
+       "runners": 3, "light": true, "lightLabel": "widget-light", "image": "build", "caches": true,
+       "projectImage": false}
 ```
 
 **Several Macs.** Run `factory ci install` on each: they register with the same label and GitHub gives each job to
@@ -56,7 +57,8 @@ still `bash`.
 <a id="ci-faster"></a>
 
 **Faster rounds: a pre-built image and a registry mirror (#60).** A fresh runner per job used to download everything
-again: Node, pnpm, the service images (Postgres ...) and Playwright's browser. Two things now carry over.
+again: Node, pnpm, the service images (Postgres ...) and Playwright's browser. Two things now carry over, and a
+third, the project's packages, when you turn it on.
 
 1. **The runner image** (`ci.image`, default `"build"`). `factory ci install` builds `<name>-runner:latest` from
    `runner.Dockerfile`: GitHub's runner image plus what this checkout asks for.
@@ -73,6 +75,38 @@ again: Node, pnpm, the service images (Postgres ...) and Playwright's browser. T
    pinned `registry:2.8.3`, one per project and machine, and dind uses it as its registry mirror. Each instance
    reaches it over a network of its own (`<project>-cache`), so two jobs never share a network, and their
    published service ports stay apart.
+3. **The project image** (`ci.projectImage`, off by default; heavy runners only; needs `ci.image` `"build"`). The
+   packages in main's `pnpm-lock.yaml`, already downloaded, in an image layer: `<name>-runner:project`, built from
+   `project.Dockerfile` on top of the runner image. A job copies them from local disk instead of downloading the
+   whole pnpm store.
+   - **Built from main only.** Before each job, beside it and never in front of it, the runner loop
+     (`project-image.sh`) asks GitHub for the git hashes of `pnpm-lock.yaml`, `pnpm-workspace.yaml` and `.npmrc` on
+     the default branch. The build context is those files, downloaded by hash and checked against it. It never holds
+     a pull request's files, this machine's checkout, or a `package.json`.
+   - **No script runs.** A fetch stage runs `pnpm fetch --ignore-scripts` into a store; the final stage only copies
+     that store to `/opt/factory-ci/cache/pnpm-store`, owned by root and not writable by the jobs' user.
+   - **Rebuilt only when main's lockfile changes.** The image is labelled `factory.lockfile` (the lockfile's git
+     hash) and `factory.project-key` (that, the other two files and the runner image's id). The same key: no build
+     is started. A new one: `docker build`, where Docker's layer cache reuses whatever did not change. One loop
+     builds at a time; the others carry on. The rounds after the build use the new image, and the image it
+     replaced is removed.
+   - **A failed build changes nothing.** The tag still names the last image that built (the runner image when none
+     has), and the runner's log gets one `{code, message, fix}` line (`project_image_build_failed`,
+     `project_image_github`, `project_image_no_lockfile` or `project_image_no_base`). It is tried again after ten
+     minutes.
+   - **The workflow's side.** A job step copies the store when it is there, then installs as usual:
+
+     ```sh
+     src=/opt/factory-ci/cache/pnpm-store
+     if [ -d "$src/v3" ]; then store="$(pnpm store path --silent)"; mkdir -p "$store"; cp -a "$src/v3/." "$store/"; fi
+     pnpm install --frozen-lockfile
+     ```
+
+     (`v3` is pnpm 9's store folder; look at what `pnpm store path` ends with for another pnpm.) On GitHub's
+     runners the folder is absent and the step does nothing. A pull request that changes the lockfile downloads
+     only the packages it adds, into its own store.
+   - `factory ci status` says which lockfile the image holds. Turn it on with `factory settings set ci.projectImage
+     true` (a PR), then `factory ci install` on each machine.
 
 **What persists, and who can write it.** Only the mirror's store of image layers, and only the mirror writes it,
 from Docker Hub.
@@ -82,9 +116,15 @@ from Docker Hub.
 - No workspace, build output, environment variable, token or secret is written there.
 - **No pnpm store is shared.** Job steps could write into one, and pnpm doesn't re-check a stored file's hash, so one
   pull request could plant code that later jobs (main pushes too) would run. Each job's pnpm store is new.
+- **The project image keeps that rule** (`ci.projectImage`). Its store is written once, by a build on the machine,
+  from main's lockfile, with no package script run; no job takes part in the build. A job gets it inside its own
+  container, read-only to the jobs' user, and copies it into its own store. Whatever a job does to its container
+  (it can become root there) is removed with the container: a container can't write to the image, and the machine's
+  Docker, where the image lives, is not the job's Docker. What a job can do to the machine through the privileged
+  dind is the known risk below, unchanged by this.
 - dind's data (the job's own images, containers and volumes), the runner's workspace and the job's networks are
   removed by `down --volumes` after every job, so a job never sees another job's files.
-- `factory ci uninstall` removes the mirror, its networks and the image too.
+- `factory ci uninstall` removes the mirror, its networks and both images too.
 - The Turborepo results of the **[shared build cache](#a-shared-build-cache)** are a separate, opt-in service on the
   host (`factory turbo install`), not part of a runner; it has its own security notes.
 - **`factory ci start`** (one loop by hand) uses neither: it runs GitHub's plain image with no mirror. Use `install`

@@ -20,6 +20,8 @@
 //   CI_IMAGE     "ci.image": "build" (default: build runner.Dockerfile with the project's Node, pnpm and Playwright)
 //                or "base" (GitHub's plain runner image)
 //   CI_CACHES    1 unless "ci.caches" is false: a pull-through Docker Hub mirror outlives a job
+//   CI_PROJECT_IMAGE 1 only when "ci.projectImage" is true: the heavy runners' jobs run in an image that also holds
+//                the packages of main's lockfile (project.Dockerfile, built by the runner loop)
 // On Linux (FACTORY_CI_PLATFORM=linux, set by ci.sh) a systemd --user service runs it instead of launchd:
 //   CI_UNIT      <name>.service
 //   CI_UNIT_FILE ~/.config/systemd/user/<name>.service  ($XDG_CONFIG_HOME)
@@ -177,6 +179,7 @@ export function names(cfg: CiSettings): Record<string, string> {
   const image = cfg.image ? String(cfg.image) : "build";
   if (image !== "build" && image !== "base") die(`factory ci: ci.image is ${pyRepr(image)}; use "build" or "base".`);
   const caches = cfg.caches !== false;
+  const projectImage = cfg.projectImage === true;
   for (const [what, value] of [["name", name], ["label", label], ["lightLabel", lightLabel]] as const) {
     if (!SAFE.test(value)) {
       die(`factory ci: the ${what} ${pyRepr(value)} must be lowercase letters, digits, dots, dashes or ` +
@@ -212,6 +215,7 @@ export function names(cfg: CiSettings): Record<string, string> {
     CI_LIGHT_LABEL: lightLabel,
     CI_IMAGE: image,
     CI_CACHES: caches ? "1" : "0",
+    CI_PROJECT_IMAGE: projectImage ? "1" : "0",
   };
 }
 

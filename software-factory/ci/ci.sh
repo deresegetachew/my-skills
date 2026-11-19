@@ -71,8 +71,8 @@ use_instance() {
   # `foo` is <name>-foo.2-..., never the same as instance 1 on a machine called `foo-2` (<name>-foo-2-...).
   I_PREFIX="$CI_NAME-$host${sfx/#-/.}"
   I_LOG="$CI_STATE/runner$sfx.log"
-  if [ "$1" = light ]; then I_COMPOSE=compose-light.yaml; I_LABEL="$CI_LIGHT_LABEL"; I_CACHES=0; I_IMAGE=""
-  else I_COMPOSE=compose.yaml; I_LABEL="$CI_LABEL"; I_CACHES="$CI_CACHES"; I_IMAGE="${RUNNER_IMAGE_BUILT:-}"; fi
+  if [ "$1" = light ]; then I_COMPOSE=compose-light.yaml; I_LABEL="$CI_LIGHT_LABEL"; I_CACHES=0; I_IMAGE=""; I_PROJECT_IMAGE=0
+  else I_COMPOSE=compose.yaml; I_LABEL="$CI_LABEL"; I_CACHES="$CI_CACHES"; I_IMAGE="${RUNNER_IMAGE_BUILT:-}"; I_PROJECT_IMAGE="$CI_PROJECT_IMAGE"; fi
 }
 
 # The versions runner.Dockerfile bakes in, from this checkout: Node from .nvmrc, pnpm from package.json's
@@ -110,6 +110,25 @@ image_note() {
   want="node=$node pnpm=$pnpm playwright=$pw"
   if [ "$built" != "$want" ]; then
     echo "Runner image: built for $built, and this checkout wants $want. Run \`factory ci install\` to rebuild it."
+  fi
+}
+
+# ci.projectImage: which lockfile of main the project image holds. The runner loops build it (project-image.sh).
+project_image_note() {
+  [ "$CI_PROJECT_IMAGE" = 1 ] || return 0
+  local sha
+  sha="$(docker image inspect --format '{{index .Config.Labels "factory.lockfile"}}' "$CI_NAME-runner:project" 2>/dev/null || true)"
+  if [ -n "$sha" ]; then echo "Project image: $CI_NAME-runner:project holds the packages of main's lockfile ${sha:0:12}."
+  else echo "Project image: not built yet. A heavy runner builds it when its next round starts (see \`factory ci logs\`)."; fi
+}
+
+# ci.projectImage needs the built runner image under it (that is where pnpm is). Says so when there is none.
+project_image_install_note() {
+  [ "$CI_PROJECT_IMAGE" = 1 ] || return 0
+  if [ -n "${RUNNER_IMAGE_BUILT:-}" ]; then
+    echo "Project image: the heavy runners keep $CI_NAME-runner:project at main's lockfile and run their jobs in it."
+  else
+    echo "Warning: ci.projectImage is on, but there is no built runner image to put it on (ci.image is base, or the build failed), so it is not used."
   fi
 }
 
@@ -217,7 +236,10 @@ mounted_files() { sed -n 's#^[[:space:]]*-[[:space:]]*\./\([^:[:space:]]*\):.*#\
 service_files() {
   local f mounted
   printf '%s\t%s\t%s\n' "$kit/loop.sh" "$exe" 700
-  for f in compose.yaml compose-light.yaml compose-caches.yaml runner.Dockerfile install-tools.sh; do
+  # project.Dockerfile and project-image.sh: read on this machine by the loop's own user (`bash <file>`, `docker
+  # build --file`), never mounted into a container, so 0600 like the rest.
+  for f in compose.yaml compose-light.yaml compose-caches.yaml runner.Dockerfile install-tools.sh project.Dockerfile \
+           project-image.sh; do
     printf '%s\t%s\t%s\n' "$kit/$f" "$CI_INSTALLED/$f" 600
   done
   # 0644, not 0600: the runner container's user (uid 1001) is not whoever installed, and bash must read this file
@@ -346,7 +368,8 @@ write_unit() {
     echo "WorkingDirectory=$(sd_path "$CI_INSTALLED")"
     for kv in "PATH=$path" "CI_NAME=$CI_NAME" "CI_LABEL=$I_LABEL" "CI_HOST=$host" "CI_STATE=$CI_STATE" \
               "RUNNER_REPO=$CI_REPO" "CI_PROJECT=$I_PROJECT" "CI_RUNNER_PREFIX=$I_PREFIX" "CI_COMPOSE=$I_COMPOSE" \
-              "CI_LOG=$I_LOG" "CI_CACHES=$I_CACHES" ${I_IMAGE:+"RUNNER_IMAGE=$I_IMAGE"} ${dh:+"DOCKER_HOST=$dh"}; do
+              "CI_LOG=$I_LOG" "CI_CACHES=$I_CACHES" "CI_PROJECT_IMAGE=$I_PROJECT_IMAGE" ${I_IMAGE:+"RUNNER_IMAGE=$I_IMAGE"} \
+              ${dh:+"DOCKER_HOST=$dh"}; do
       echo "Environment=\"$(sd "$kv")\""
     done
     echo "Restart=always"
@@ -460,6 +483,8 @@ write_plist() {
     <string>$(xml "$I_CACHES")</string>
     <key>RUNNER_IMAGE</key>
     <string>$(xml "$I_IMAGE")</string>
+    <key>CI_PROJECT_IMAGE</key>
+    <string>$(xml "$I_PROJECT_IMAGE")</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -619,6 +644,7 @@ cmd_install() {
     done
   fi
   build_image
+  project_image_install_note
   keep_installed_runners
   memory_note
   # Scale down first: instances this machine has but no longer wants.
@@ -717,7 +743,7 @@ cmd_uninstall() {
   done
   [ "$platform" = linux ] && { systemctl --user daemon-reload 2>/dev/null || true; }
   rm -rf "$CI_INSTALLED"
-  # The caches (compose-caches.yaml) and the built image go too.
+  # The caches (compose-caches.yaml) and the built images go too.
   if docker info >/dev/null 2>&1; then
     docker rm -f "$CI_NAME-mirror" >/dev/null 2>&1 || true
     for id in $(seq 1 16) light; do
@@ -726,7 +752,7 @@ cmd_uninstall() {
     done
     # <name>-pnpm-store: left by an earlier version, which shared a pnpm store.
     docker volume rm "$CI_NAME-mirror-data" "$CI_NAME-pnpm-store" >/dev/null 2>&1 || true
-    docker image rm "$CI_NAME-runner:latest" >/dev/null 2>&1 || true
+    docker image rm "$CI_NAME-runner:project" "$CI_NAME-runner:latest" >/dev/null 2>&1 || true
   fi
   cmd_stop
 }
@@ -914,7 +940,7 @@ cmd_status() {
       echo "  $CI_RUNNERS heavy runner(s) ($(runners_from))$([ "$CI_LIGHT" = 1 ] && echo " and the light lane") make $want instance(s) here; \`factory ci install\` brings it to that."
     if docker info >/dev/null 2>&1; then
       docker=1
-      [ -n "$json" ] || { echo "Docker: running"; image_note; }
+      [ -n "$json" ] || { echo "Docker: running"; image_note; project_image_note; }
     else
       docker=0
       say "Docker: not running. Jobs for $machine wait in GitHub's queue until it is."
@@ -959,7 +985,7 @@ case "${1:-status}" in
   stop) cmd_stop ;;
   logs) shift; cmd_logs "$@" ;;
   names) for v in CI_REPO CI_NAME CI_LABEL CI_AGENT CI_PLIST CI_INSTALLED CI_STATE CI_REPLACES CI_UNIT CI_UNIT_FILE \
-               CI_RUNNERS CI_RUNNERS_FROM CI_LIGHT CI_LIGHT_LABEL CI_IMAGE CI_CACHES; do
+               CI_RUNNERS CI_RUNNERS_FROM CI_LIGHT CI_LIGHT_LABEL CI_IMAGE CI_CACHES CI_PROJECT_IMAGE; do
       echo "$v=${!v}"
     done
     echo "CI_HOST=$host" ;;

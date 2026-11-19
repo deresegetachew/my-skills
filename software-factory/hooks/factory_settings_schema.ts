@@ -289,6 +289,7 @@ export const SETTINGS: Record<string, Setting> = table([
   S("ci.light", "bool", "ci", "Also run one small runner without Docker for light jobs (the Factory guard), label `<repo>-light`.", { default: true }),
   S("ci.image", "str", "ci", "The heavy runners' image: build (with the project's Node, pnpm and Playwright, faster jobs) or base.", { options: ["build", "base"], default: "build" }),
   S("ci.caches", "bool", "ci", "Keep a pull-through Docker Hub mirror between jobs (heavy runners; read-only to jobs, no workspace or secrets).", { default: true }),
+  S("ci.projectImage", "bool", "ci", "Run the heavy runners' jobs in an image that also holds the packages of main's pnpm lockfile, so jobs install from local disk. Built on the machine from main only, read-only to jobs; needs ci.image build.", { default: false }),
   S("turbo.api", "str", "ci", "The shared Turborepo cache's address, as agents and CI reach it: http://<Tailscale or LAN address>:3335. Empty: no shared cache. `factory turbo install` starts it.", { default: "" }),
   S("turbo.team", "str", "ci", "The cache's team name (default: the repository's name).", { default: "" }),
   S("turbo.bind", "str", "ci", "The address the cache server listens on, on the machine that runs it. 127.0.0.1 reaches only that machine; use its Tailscale or LAN address for others.", { default: "127.0.0.1" }),
@@ -524,6 +525,12 @@ const MORE: Record<string, More> = {
     "own count (`factory ci runners <n>`, saved outside the repo) wins over it, and `FACTORY_CI_RUNNERS` wins over both " +
     "for one shell. Run `factory ci install` again after changing it.",
   examples: ["factory settings set ci.runners 3"] },
+  "ci.projectImage": { long: "The runner loops build `<name>-runner:project` on top of the runner image: a pnpm store " +
+    "at `/opt/factory-ci/cache/pnpm-store`, fetched from the default branch's `pnpm-lock.yaml` with no package script run. " +
+    "They rebuild it only when main's lockfile changes, and keep the last good image when a build fails. A job can " +
+    "read the store and can't change the image; a workflow copies it into the job's own store before `pnpm install`. " +
+    "Run `factory ci install` again after changing it.",
+  examples: ["factory settings set ci.projectImage true"] },
   "ci.runners@machine": { long: "How many heavy CI runners this machine runs for this project (#282). `factory ci runners " +
     "<n>` saves it and reinstalls the runners; `factory ci install` and `factory update` keep it. `FACTORY_CI_RUNNERS` " +
     "wins over it for one shell. Unset: the project's `ci.runners`, else 1.",
