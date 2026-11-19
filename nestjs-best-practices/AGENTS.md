@@ -14,7 +14,7 @@ January 2026
 
 ## Abstract
 
-Comprehensive best practices and architecture guide for NestJS applications, designed for AI agents and LLMs. Contains 40 rules across 10 categories, prioritized by impact from critical (architecture, dependency injection) to incremental (DevOps patterns). Each rule includes detailed explanations, real-world examples comparing incorrect vs. correct implementations, and specific impact metrics to guide automated refactoring and code generation.
+Comprehensive best practices and architecture guide for NestJS applications, designed for AI agents and LLMs. Contains 46 rules across 12 categories, prioritized by impact from critical (architecture, reliability and async flows, dependency injection) to incremental (DevOps patterns). Each rule includes detailed explanations, real-world examples comparing incorrect vs. correct implementations, and specific impact metrics to guide automated refactoring and code generation.
 
 ---
 
@@ -70,6 +70,14 @@ Comprehensive best practices and architecture guide for NestJS applications, des
    - 10.1 [Implement Graceful Shutdown](#101-implement-graceful-shutdown)
    - 10.2 [Use ConfigModule for Environment Configuration](#102-use-configmodule-for-environment-configuration)
    - 10.3 [Use Structured Logging](#103-use-structured-logging)
+11. [Reliability & Async Flows](#11-reliability--async-flows) — **CRITICAL**
+   - 11.1 [Never Do Slow or Unbounded Work Inside an HTTP Request](#111-never-do-slow-or-unbounded-work-inside-an-http-request)
+   - 11.2 [Every Outbound Call, Query and Server Socket Has a Timeout](#112-every-outbound-call-query-and-server-socket-has-a-timeout)
+   - 11.3 [Never Call the Network Inside a Database Transaction](#113-never-call-the-network-inside-a-database-transaction)
+   - 11.4 [Side Effects Go Through a Transactional Outbox and a Durable Queue](#114-side-effects-go-through-a-transactional-outbox-and-a-durable-queue)
+   - 11.5 [No In-Memory Background Work, Timers or Dedupe](#115-no-in-memory-background-work-timers-or-dedupe)
+12. [Observability](#12-observability) — **HIGH**
+   - 12.1 [Traces, Metrics, Request IDs and Alerts from Day One](#121-traces-metrics-request-ids-and-alerts-from-day-one)
 
 ---
 
@@ -5942,6 +5950,293 @@ export class UsersService {
 ```
 
 Reference: [NestJS Logger](https://docs.nestjs.com/techniques/logger)
+
+---
+
+## 11. Reliability & Async Flows
+
+**Section Impact: CRITICAL**
+
+### 11.1 Never Do Slow or Unbounded Work Inside an HTTP Request
+
+**Impact: CRITICAL** — Long requests time out at the proxy, keep billing after the user leaves, and do not scale
+
+A request handler validates, records intent, enqueues a durable job and answers. It never waits for slow or unbounded work. That means:
+- a model or agent call;
+- file or PDF processing;
+- bundle builds;
+- fan-out to third parties;
+- anything that can take more than about a second, or whose duration you don't control.
+
+Proxies and CDNs cut requests at 30–60 s. The work keeps running and costs money. The user sees an error. One slow dependency then holds a connection per user.
+
+**The test:** if the handler awaits something whose duration depends on another system's speed or on input size, it belongs in a worker.
+
+**Incorrect (an AI agent runs while the request waits):**
+
+```typescript
+@Post(':id/instructions')
+async give(@Param('id') id: string, @Body() dto: InstructionDto) {
+  // Can run for minutes; the CDN returns 504 at 30 s while the model keeps billing.
+  const result = await this.ownerAgent.run(id, dto.text);
+  return result;
+}
+```
+
+**Correct (accept, enqueue in the same transaction, answer 202, report progress):**
+
+```typescript
+@Post(':id/instructions')
+@HttpCode(202)
+async give(@Param('id') id: string, @Body() dto: InstructionDto) {
+  const runId = await this.commandBus.execute(new GiveInstructionCommand(id, dto.text));
+  return { runId, status: 'queued' }; // the client polls GET /runs/:runId or listens on SSE
+}
+
+// Handler: one transaction writes the run row and enqueues the job (outbox or the queue's own table).
+// Worker: runs the agent with a hard deadline, retries with backoff, writes the result, idempotent on runId.
+```
+
+Rules:
+- **Accept and answer:** the request answers within its budget (aim for under 1 s), with `202` and an id when work is queued.
+- **Progress:** the client gets progress through polling or SSE, never a held-open request.
+- **Workers:** model calls, LLM agents and batch jobs run only in workers, with a deadline (`AbortSignal.timeout`), capped retries, structured-output validation, and per-run cost logging.
+- **Failure:** a failed or timed-out job leaves a visible state ("failed, retry") and never hangs silently.
+
+Reference: [rel-timeouts-everywhere](rules/rel-timeouts-everywhere.md), [rel-transactional-outbox](rules/rel-transactional-outbox.md), [micro-use-queues](rules/micro-use-queues.md)
+
+---
+
+### 11.2 Every Outbound Call, Query and Server Socket Has a Timeout
+
+**Impact: CRITICAL** — A missing timeout turns one slow dependency into an outage
+
+SDK defaults are minutes, or forever. One hung dependency then holds every request, connection and worker slot until the whole service stops. Set an explicit budget everywhere, and fail fast with a clear error.
+
+**Incorrect (defaults everywhere):**
+
+```typescript
+const ses = new SESv2Client({});                         // no request timeout
+const anthropic = new Anthropic();                       // 10-minute default
+const pool = new Pool({ connectionString });             // unbounded pool, no statement timeout
+await fetch(url);                                        // waits forever
+await app.listen(3000);                                  // Node default server timeouts
+```
+
+**Correct (explicit budgets, retries with backoff, breakers):**
+
+```typescript
+const ses = new SESv2Client({ requestHandler: new NodeHttpHandler({ connectionTimeout: 2_000, requestTimeout: 5_000 }) });
+const anthropic = new Anthropic({ timeout: 120_000, maxRetries: 2 });   // only ever called from workers
+const pool = new Pool({ connectionString, max: 20, idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 5_000, statement_timeout: 10_000 });
+await fetch(url, { signal: AbortSignal.timeout(5_000) });
+
+const server = app.getHttpServer();
+server.requestTimeout = 30_000;
+server.headersTimeout = 35_000;
+server.keepAliveTimeout = 65_000;   // longer than the load balancer's idle timeout
+```
+
+Rules:
+- **Timeouts:**
+  - Every outbound client gets a connect timeout and a total timeout, set from config, never left to the SDK default: HTTP, SDKs, mail, storage, CDN, models, billing.
+  - The database pool has a `max`, and a connection and `statement_timeout`. Long reports run in workers, with their own higher limit.
+  - The HTTP server sets `requestTimeout`, `headersTimeout` and `keepAliveTimeout`. A global interceptor cuts handlers at the request budget.
+- **Retries and breakers:**
+  - Retries are only for safe or idempotent calls: exponential backoff with jitter and a cap.
+  - Calls a user waits on get a circuit breaker, so a down dependency fails in milliseconds, not seconds. Use a library such as `@nestjs/resilience`, or a small wrapper; either way it's one shared policy, not ad hoc code per call site.
+- **Errors:** a timeout produces a typed error the caller can act on (`{code, message, fix}` for people), and a log line with the dependency's name and the time it took.
+- **Tests:** each adapter's contract test proves the timeout against a fake that never answers.
+
+Reference: [rel-no-long-work-in-requests](rules/rel-no-long-work-in-requests.md), [obs-traces-metrics-alerts](rules/obs-traces-metrics-alerts.md)
+
+---
+
+### 11.3 Never Call the Network Inside a Database Transaction
+
+**Impact: CRITICAL** — External effects can't roll back; the system ends up pointing at data that doesn't exist
+
+A transaction can roll back, but an upload, an email, a payment or a CDN change can't. If you call them inside a transaction and the commit then fails, the outside world points at a state the database never kept. Meanwhile the transaction holds row locks, and a pool connection, for as long as the slowest network call takes.
+
+**Incorrect (upload and switch pointers, then commit):**
+
+```typescript
+await this.db.transaction(async (tx) => {
+  const version = await this.versions.create(tx, guideId);
+  const bundle = await this.compiler.build(version);       // CPU-heavy work while holding locks
+  await this.storage.put(bundle);                          // network
+  await this.edge.setPointer(guideId, version.id);         // network: now live
+  await this.guides.markPublished(tx, guideId, version.id);
+}); // if this commit fails, the live pointer names a rolled-back version
+```
+
+**Correct (commit the decision and an outbox event; effects follow in idempotent jobs, last step last):**
+
+```typescript
+await this.db.transaction(async (tx) => {
+  const version = await this.versions.create(tx, guideId, { state: 'publishing' });
+  await this.outbox.add(tx, new GuidePublishRequested(guideId, version.id));
+});
+// Worker, retried with backoff:
+//   build and upload the bundle, using a key per version so a re-run overwrites the same object;
+//   switch the pointer, only after the upload succeeded;
+//   mark the version live in its own short transaction, or mark it failed and alert after the last retry.
+```
+
+Rules:
+- **Inside a transaction:** only database work. No HTTP, SDK, storage, mail, queue publish or `await` on another system, unless that system is the same database (for example a queue table such as pg-boss's, written through the same transaction).
+- **After commit:** effects go through the outbox ([rel-transactional-outbox](rules/rel-transactional-outbox.md)). Order the steps so a partial failure leaves the old state working: upload, then switch the pointer, then mark live.
+- **Keep it short:** a transaction lasts milliseconds. Move CPU-heavy work (builds, image processing) out of it, and usually into a worker.
+- **Visible states:** the user sees the intermediate state ("publishing…") until the effect is done.
+
+---
+
+### 11.4 Side Effects Go Through a Transactional Outbox and a Durable Queue
+
+**Impact: CRITICAL** — Without it, effects are lost on crash, sent twice, or sent for data that rolled back
+
+When a state change must cause something elsewhere, record the intent **in the same transaction** as the change. A relay then delivers it to a durable queue, and idempotent workers carry it out. Examples:
+- an email or webhook;
+- a billing quantity sync;
+- a cache or CDN purge;
+- a search index update;
+- a stats event;
+- another module's reaction.
+
+This is eventual consistency done on purpose.
+
+A Postgres queue (pg-boss, Graphile Worker, or `@nestjs/outbox`) can be the outbox and the queue at once, because enqueueing is just a row in the same transaction. Postgres then plays the part SNS and SQS play elsewhere.
+
+**Incorrect (inline effect after commit; lost on crash, no retry):**
+
+```typescript
+await this.repo.save(account);                 // committed
+await this.stripe.setQuantity(account.id, n);  // throws → logged, never retried → billing drifts
+```
+
+**Correct:**
+
+```typescript
+await this.db.transaction(async (tx) => {
+  await this.repo.save(tx, account);
+  await this.queue.send(tx, 'billing.sync-quantity', { accountId: account.id }, {
+    singletonKey: `qty:${account.id}`, retryLimit: 8, retryBackoff: true,
+  });
+});
+
+@Processor('billing.sync-quantity')
+async handle({ accountId }) {
+  const n = await this.counts.billable(accountId);         // read the current truth, not the event's snapshot
+  await this.stripe.setQuantity(accountId, n, { idempotencyKey: `qty:${accountId}:${n}` });
+}
+```
+
+Rules:
+- **Same transaction:** every cross-system or cross-module effect is enqueued in the transaction that made the change. Never "save, then call".
+- **Handlers:**
+  - Handlers are idempotent: keyed on the entity, an idempotency key, or a check of current state. They run at least once, sometimes twice.
+  - A handler reads the current state when it can, rather than trusting a stale payload.
+  - Use singleton or dedupe keys where only one run may be in flight: per pack, per account, per guide.
+- **Retries and dead letters:**
+  - Retries back off exponentially, with a cap.
+  - Exhausted jobs go to a dead letter that raises an alert ([obs-traces-metrics-alerts](rules/obs-traces-metrics-alerts.md)) and can be retried from an admin screen.
+- **Events between modules:** modules react to each other through these events, not by importing each other's internals.
+
+Reference: [rel-durable-background-work](rules/rel-durable-background-work.md), [arch-use-events](rules/arch-use-events.md), [micro-use-queues](rules/micro-use-queues.md)
+
+---
+
+### 11.5 No In-Memory Background Work, Timers or Dedupe
+
+**Impact: CRITICAL** — In-process work vanishes on deploy and doubles with a second replica
+
+Work that outlives the request must survive a restart, and must run once when there are two replicas. In-process promises, `setTimeout` or `setInterval` schedulers, in-memory retry loops and in-memory "already running" sets fail both tests.
+- A deploy drops the work.
+- A second replica runs it again, and pays for it twice.
+
+**Incorrect:**
+
+```typescript
+void this.translatePack(packId);                  // fire-and-forget: lost on restart
+const running = new Set<string>();                // dedupe per process only
+setTimeout(() => this.purgeCdn(paths), 30_000);   // retry held in memory
+setInterval(() => this.sendWeeklyStats(), WEEK);  // runs once per replica
+```
+
+**Correct:**
+
+```typescript
+await this.queue.send('translate.pack', { packId }, { singletonKey: `pack:${packId}` });
+await this.queue.send('cdn.purge', { paths }, { retryLimit: 10, retryBackoff: true });
+await this.queue.schedule('stats.weekly', '0 7 * * MON', {}, { tz: 'UTC' });   // one run cluster-wide
+```
+
+Rules:
+- **No in-process background work:** no `void promise`, no un-awaited background calls, no in-memory retry loops in request or application code. Background work is a durable job.
+- **Schedules:** use the queue's cron, or a lock, so they run once across replicas. Never `setInterval` or chained `setTimeout`.
+- **Dedupe:** use the queue's singleton keys, a unique constraint, or an advisory lock. Never an in-memory Set or Map.
+- **Shutdown:** graceful shutdown stops taking new jobs and finishes or releases the current ones ([devops-graceful-shutdown](rules/devops-graceful-shutdown.md)).
+- **Tests:**
+  - A restart in the middle of a job leaves it to be picked up again.
+  - Two workers on the same key run it once.
+
+---
+
+## 12. Observability
+
+**Section Impact: HIGH**
+
+### 12.1 Traces, Metrics, Request IDs and Alerts from Day One
+
+**Impact: HIGH** — Failures nobody sees are failures nobody fixes
+
+Logs alone are not monitoring. Every service ships with:
+- structured logs that carry a request id;
+- distributed traces across HTTP, jobs and outbound calls;
+- metrics for rates, errors, durations and queue depth;
+- alerts on the events that mean money or data is at risk.
+
+Use OpenTelemetry (OTLP) so the backend can be swapped freely. Locally: a collector with Grafana, Tempo, Loki and Prometheus. In production: a hosted or self-run backend.
+
+**Incorrect:**
+
+```typescript
+this.logger.warn('job dead-lettered', jobId);   // a log line nobody watches
+// no request id, no trace, no metric, no alert; AI spend unknown
+```
+
+**Correct:**
+
+```typescript
+// main.ts: OTel SDK started before Nest (auto-instrument http, pg, queue, fetch); off unless OTEL_EXPORTER_OTLP_ENDPOINT is set.
+// A global interceptor sets the request id (incoming header, else a new one), puts it on the response and in the log context,
+// and adds it to every job enqueued, so a job's logs and spans link back to the request.
+this.logger.error({ event: 'job_dead_lettered', queue, jobId, requestId, attempts });
+this.metrics.counter('jobs_dead_lettered_total').add(1, { queue });
+this.metrics.histogram('model_call_cost_usd').record(cost, { model, purpose });
+```
+
+Rules:
+- **Logs:** structured JSON (the built-in JSON logger in NestJS 11+, or pino) with `requestId`, `traceId`, a stable `event` name and the entity ids. Never secrets or personal data.
+- **Traces:** traces cover incoming requests, jobs, database queries and every outbound call. A trace continues from a request into the jobs it enqueued.
+- **Metrics:**
+  - request rate, errors and latency per route;
+  - job counts per queue and state, with the age of the oldest waiting job;
+  - outbound call latency and errors per dependency;
+  - for AI: model calls with tokens, cost and duration per purpose.
+- **Alerts** (as code, in the repo) fire on:
+  - dead-lettered jobs;
+  - a 5xx rate above its threshold;
+  - a queue backing up;
+  - a dependency's breaker opening;
+  - billing or sync drift events;
+  - AI spend above its daily budget.
+  Every alert names the runbook step that resolves it.
+- **Health:** health endpoints check the database and the queue ([micro-use-health-checks](rules/micro-use-health-checks.md)).
+- **The local stack runs:** a failed job is visible on the dashboard, and opens its trace from its id.
+
+Reference: [devops-use-logging](rules/devops-use-logging.md), [rel-timeouts-everywhere](rules/rel-timeouts-everywhere.md)
 
 ---
 

@@ -5,7 +5,7 @@ description: NestJS best practices and architecture patterns for building produc
 
 # NestJS Best Practices
 
-Comprehensive best practices guide for NestJS applications. Contains 40 rules across 10 categories, prioritized by impact to guide automated refactoring and code generation.
+Comprehensive best practices guide for NestJS applications. Contains 46 rules across 12 categories, prioritized by impact to guide automated refactoring and code generation.
 
 ## When to Apply
 
@@ -23,15 +23,17 @@ Reference these guidelines when:
 | Priority | Category | Impact | Prefix |
 |----------|----------|--------|--------|
 | 1 | Architecture | CRITICAL | `arch-` |
-| 2 | Dependency Injection | CRITICAL | `di-` |
-| 3 | Error Handling | HIGH | `error-` |
-| 4 | Security | HIGH | `security-` |
-| 5 | Performance | HIGH | `perf-` |
-| 6 | Testing | MEDIUM-HIGH | `test-` |
-| 7 | Database & ORM | MEDIUM-HIGH | `db-` |
-| 8 | API Design | MEDIUM | `api-` |
-| 9 | Microservices | MEDIUM | `micro-` |
-| 10 | DevOps & Deployment | LOW-MEDIUM | `devops-` |
+| 2 | Reliability & Async Flows | CRITICAL | `rel-` |
+| 3 | Dependency Injection | CRITICAL | `di-` |
+| 4 | Error Handling | HIGH | `error-` |
+| 5 | Security | HIGH | `security-` |
+| 6 | Observability | HIGH | `obs-` |
+| 7 | Performance | HIGH | `perf-` |
+| 8 | Testing | MEDIUM-HIGH | `test-` |
+| 9 | Database & ORM | MEDIUM-HIGH | `db-` |
+| 10 | API Design | MEDIUM | `api-` |
+| 11 | Microservices | MEDIUM | `micro-` |
+| 12 | DevOps & Deployment | LOW-MEDIUM | `devops-` |
 
 ## Quick Reference
 
@@ -43,6 +45,20 @@ Reference these guidelines when:
 - `arch-single-responsibility` - Focused services over "god services"
 - `arch-use-repository-pattern` - Abstract database logic for testability
 - `arch-use-events` - Event-driven architecture for decoupling
+
+### Reliability & Async Flows (CRITICAL)
+
+A reviewer blocks a change that breaks one of these, even if every test passes.
+
+- `rel-no-long-work-in-requests` - Requests accept, enqueue and answer; model calls, file processing and other slow work run in workers
+- `rel-timeouts-everywhere` - Every outbound call, DB query and server socket has an explicit timeout; retries back off; breakers on hot paths
+- `rel-no-network-in-transactions` - Only DB work inside a transaction; effects after commit, last step last
+- `rel-transactional-outbox` - Cross-system effects enqueued in the same transaction; idempotent handlers; dead letters alert
+- `rel-durable-background-work` - No fire-and-forget promises, setTimeout/setInterval schedulers or in-memory dedupe
+
+### Observability (HIGH)
+
+- `obs-traces-metrics-alerts` - OpenTelemetry traces and metrics, request ids into jobs, AI cost metrics, alerts as code
 
 ### 2. Dependency Injection (CRITICAL)
 
@@ -97,7 +113,7 @@ Reference these guidelines when:
 
 - `micro-use-patterns` - Message and event patterns
 - `micro-use-health-checks` - Health checks for orchestration
-- `micro-use-queues` - Background job processing
+- `micro-use-queues` - Background job processing (see also the `rel-` rules, which are CRITICAL)
 
 ### 10. DevOps & Deployment (LOW-MEDIUM)
 
