@@ -18,7 +18,7 @@ What is here (read the part your task is about, not everything):
    copied or linked: agents, skills, the agents' rules (`.claude/factory/settings.json`, passed when the factory starts an agent, #258), templates. It has no symlinks: the forwarders
    from the move (#112) were removed (#176); do not add new ones.
 3. `tools/`: `run_tests.ts`, `check_skills.ts`, `build_release.ts` (the release archive).
-4. `nestjs-best-practices/`, `nestjs-clean-code-ddd-hexagonal/`, `study-notes/`: separate skills.
+4. `nestjs-best-practices/`, `nestjs-clean-code-ddd-hexagonal/`, `study-notes/`, `saas-launch-playbook/`: separate skills.
 
 ## Test and check
 
