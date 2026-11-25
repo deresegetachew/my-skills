@@ -12,6 +12,7 @@ My reusable skills for Claude Code, kept in one place so every project can use t
 | **nestjs-clean-code-ddd-hexagonal** | The backend architecture: hexagonal layers, a pure domain, strictly one class per file. Comes with a CI checker. |
 | **nestjs-best-practices** | 40 NestJS rules in 10 categories, each with a wrong and a right example. |
 | **study-notes** | Builds and fills an Astro site for study notes. |
+| **saas-launch-playbook** | What worked taking a SaaS to staging and toward its first payment: hosting, Cloudflare, Terraform, secrets, email, Stripe and tax, CI, costs. |
 | **design** | The design process from idea to done: settle the business first, brief, wide round, reviews by buyer panels that skim, then iterate with the owner's page comments to a target score. |
 
 <br>
