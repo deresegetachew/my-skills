@@ -961,7 +961,7 @@ exit 1
       t.binDir,
       `echo '{"conversation_id":"conv-spaces-1","result":"Status: DONE\\nResumed ok."}'`,
     );
-    const rewrittenCmd = nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS);
+    const rewrittenCmd = nextCmd.replace("bun claude-agent-crew/runner/crew.ts", `bun ${CREW_TS}`);
     const resumed = Bun.spawnSync(["bash", "-c", rewrittenCmd], {
       cwd: t.repo,
       env: t.env,
@@ -1655,7 +1655,7 @@ bash -c "$rewritten"
       t.binDir,
       `printf '%s\n' "$@" > "${argsLog}"\necho '{"conversation_id":"remote-attn-1","result":"Status: DONE\\nResumed ok."}'`,
     );
-    const resumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS)], {
+    const resumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("bun claude-agent-crew/runner/crew.ts", `bun ${CREW_TS}`)], {
       cwd: t.repo,
       env: t.env,
       stdout: "pipe",
@@ -2125,7 +2125,7 @@ bash -c "$rewritten"
     expect(nextCmd).toContain(nestedRemote);
 
     installFakeAgy(t.binDir, `echo '{"conversation_id":"nested-attn-1","result":"Status: DONE\\nNested resumed."}'`);
-    const nResumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS)], {
+    const nResumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("bun claude-agent-crew/runner/crew.ts", `bun ${CREW_TS}`)], {
       cwd: t.repo,
       env: t.env,
       stdout: "pipe",
@@ -2561,5 +2561,54 @@ fi
     expect(r.exitCode).toBe(1);
     expect(errorCode(r.stderr)).toBe("INVALID_TIMEOUT");
     expect(existsSync(join(t.repo, ".crew", "jobs")) ? readdirSync(join(t.repo, ".crew", "jobs")) : []).toEqual([]);
+  });
+
+  test("a project without the runner in its repo uses the installed skill, locally and over ssh", () => {
+    const t = setupRepo();
+    // The skill installed for the remote user: ~/.claude/skills/claude-agent-crew -> this checkout.
+    mkdirSync(join(t.home, ".claude", "skills"), { recursive: true });
+    symlinkSync(resolve(import.meta.dir, ".."), join(t.home, ".claude", "skills", "claude-agent-crew"));
+    const remoteRepo = join(t.root, "remote-repo");
+    mkdirSync(join(remoteRepo, ".claude"), { recursive: true });
+    const rGit = (args: string[]): void => {
+      const r = Bun.spawnSync(["git", ...args], { cwd: remoteRepo, env: t.env, stdout: "pipe", stderr: "pipe" });
+      if (r.exitCode !== 0) throw new Error(`remote git ${args.join(" ")} failed: ${r.stderr.toString()}`);
+    };
+    const config = {
+      roles: { remote: { worker: "agy", model: "gemini-3.8-flash-medium", machine: "dev-pc" } },
+      machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+      paths: { "dev-pc": remoteRepo },
+    };
+    rGit(["init", "-b", "main"]);
+    rGit(["config", "user.email", "test@example.com"]);
+    rGit(["config", "user.name", "Test User"]);
+    rGit(["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(remoteRepo, "brief.md"), "Remote brief.\n", "utf8");
+    writeFileSync(join(remoteRepo, ".claude", "crew.json"), JSON.stringify(config), "utf8");
+    rGit(["add", "brief.md", ".claude/crew.json"]);
+    rGit(["commit", "-m", "remote init"]);
+    writeFileSync(join(t.repo, ".claude", "crew.json"), JSON.stringify(config), "utf8");
+    writeFileSync(join(t.repo, "brief.md"), "Remote brief.\n", "utf8");
+
+    // A fake ssh that runs the remote command as given: no rewriting of the runner path.
+    const sshBin = join(t.binDir, "ssh");
+    writeFileSync(sshBin, `#!/usr/bin/env bash\nset -euo pipefail\nbash -c "\${@: -1}"\n`, "utf8");
+    chmodSync(sshBin, 0o755);
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c-installed","result":"Status: DONE\\nok"}'`);
+
+    const start = runCrew(t, ["start", "--role", "remote", "--brief", join(t.repo, "brief.md")]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+    // The printed next step names this runner by its absolute path and works as printed.
+    const nextLine = start.stdout.split("\n").find((l) => l.startsWith("Next: ")) ?? "";
+    expect(nextLine).toContain(CREW_TS);
+    const wait = Bun.spawnSync(["bash", "-c", `${nextLine.slice("Next: ".length)} --timeout 10s`], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(wait.exitCode).toBe(0);
+    expect(runCrew(t, ["result", jobId]).stdout).toContain("ok");
   });
 });

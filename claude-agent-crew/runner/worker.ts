@@ -193,8 +193,10 @@ export function buildSshCrewCommand(opts: {
     );
   }
 
-  const crewArgs = ["bun", "claude-agent-crew/runner/crew.ts", ...opts.crewArgs];
-  const remoteCmd = `cd ${shellQuote(opts.remotePath)} && ${crewArgs.map(shellQuote).join(" ")}`;
+  // The runner inside the repo (my-skills itself), else the skill installed for that user.
+  const runner =
+    'R=claude-agent-crew/runner/crew.ts && { [ -f "$R" ] || R="$HOME/.claude/skills/claude-agent-crew/runner/crew.ts"; }';
+  const remoteCmd = `cd ${shellQuote(opts.remotePath)} && ${runner} && bun "$R" ${opts.crewArgs.map(shellQuote).join(" ")}`;
   return [...sshParts, remoteCmd];
 }
 

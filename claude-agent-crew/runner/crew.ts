@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   type CleanResult,
   cleanFinishedWorktrees,
@@ -47,7 +47,12 @@ import {
   workerTimeoutMs,
 } from "./worker.ts";
 
-const RUNNER_CMD = "bun claude-agent-crew/runner/crew.ts";
+// How to call this runner again: relative inside the repo that holds it (my-skills), else its absolute path
+// (a project using the installed skill).
+const RUNNER_REL = relative(process.cwd(), import.meta.path);
+const RUNNER_CMD = `bun ${
+  RUNNER_REL && !RUNNER_REL.startsWith("..") && !isAbsolute(RUNNER_REL) ? RUNNER_REL : shellQuote(import.meta.path)
+}`;
 
 interface ProcEntry {
   pid: number;

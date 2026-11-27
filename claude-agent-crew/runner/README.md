@@ -1,6 +1,9 @@
 # Crew Job Runner
 
-Headless job runner for `claude-agent-crew`: `bun claude-agent-crew/runner/crew.ts <command>`.
+Headless job runner for `claude-agent-crew`. In a project, run it from the project's repo as
+`bun ~/.claude/skills/claude-agent-crew/runner/crew.ts <command>` (the skill linked as in `machines.md`); inside
+my-skills, `bun claude-agent-crew/runner/crew.ts <command>`. Over ssh the remote side uses the runner in its repo if
+there is one, else the remote user's installed skill.
 Bun and TypeScript only, no npm packages.
 
 The job-lifecycle design (`start`, `wait`, `status`, `result`, `cancel`, `list`, `clean`) is adapted from
