@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ./scripts/guard.ts",
+            "command": "PATH=\"$HOME/.bun/bin:$PATH\" bun ./scripts/guard.ts",
             "timeout": 10
           }
         ]
