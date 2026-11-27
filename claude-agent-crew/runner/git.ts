@@ -111,22 +111,19 @@ export function isWorktreeDirty(worktreePath: string): boolean {
 
 function canonicalizePath(p: string): string {
   const abs = resolve(p);
-  if (existsSync(abs)) {
-    try {
-      return realpathSync(abs);
-    } catch {
-      return abs;
-    }
+  const trailing: string[] = [];
+  let cur = abs;
+  while (!existsSync(cur)) {
+    const parent = dirname(cur);
+    if (parent === cur) return abs;
+    trailing.unshift(basename(cur));
+    cur = parent;
   }
-  const parent = dirname(abs);
-  if (parent !== abs && existsSync(parent)) {
-    try {
-      return join(realpathSync(parent), basename(abs));
-    } catch {
-      return abs;
-    }
+  try {
+    return trailing.length === 0 ? realpathSync(cur) : join(realpathSync(cur), ...trailing);
+  } catch {
+    return abs;
   }
-  return abs;
 }
 
 function isSubpath(base: string, target: string): boolean {
@@ -136,8 +133,9 @@ function isSubpath(base: string, target: string): boolean {
 
 export function isUnderWorktreesDir(repoRoot: string, wtPath: string): boolean {
   const canonRepo = canonicalizePath(repoRoot);
-  const canonBase = resolve(canonRepo, ".crew", "worktrees");
+  const canonBase = canonicalizePath(worktreesDir(repoRoot));
   const canonTarget = canonicalizePath(wtPath);
+  if (!isSubpath(canonRepo, canonBase)) return false;
   if (!isSubpath(canonBase, canonTarget)) return false;
   return isSubpath(resolve(worktreesDir(repoRoot)), resolve(wtPath));
 }
@@ -176,6 +174,7 @@ export function prepareWorktree(
     runningJobs?: JobRecord[];
   },
 ): WorktreeAssignment {
+  const readOnly = isReadOnlyRole(opts.role);
   if (opts.continueJob) {
     const prevWt = opts.continueJob.worktree;
     if (existsSync(prevWt)) {
@@ -187,21 +186,35 @@ export function prepareWorktree(
         );
       }
       const canonPrev = canonicalizePath(prevWt);
-      const holder = opts.runningJobs?.find(
-        (j) => j.remotePath === null && canonicalizePath(j.worktree) === canonPrev,
-      );
-      if (holder) {
-        throw new CrewCliError(
-          "WORKTREE_IN_USE",
-          `Worktree at ${prevWt} is already in use by running job "${holder.id}".`,
-          `Wait for job "${holder.id}" (\`bun claude-agent-crew/runner/crew.ts wait ${holder.id}\`) before continuing.`,
+      const isRegistered = listWorktrees(repoRoot).some((w) => canonicalizePath(w.path) === canonPrev);
+      if (isRegistered) {
+        if (!readOnly && opts.continueJob.branch) {
+          const external = listWorktrees(repoRoot).find(
+            (w) => w.branch === opts.continueJob?.branch && !isUnderWorktreesDir(repoRoot, w.path),
+          );
+          if (external) {
+            throw new CrewCliError(
+              "BRANCH_CHECKED_OUT_ELSEWHERE",
+              `Branch "${opts.continueJob.branch}" is already checked out outside .crew/worktrees/ at ${external.path}.`,
+              `Switch ${external.path} to another branch or start a fresh job with a different --branch.`,
+            );
+          }
+        }
+        const holder = opts.runningJobs?.find(
+          (j) => j.remotePath === null && canonicalizePath(j.worktree) === canonPrev,
         );
+        if (holder) {
+          throw new CrewCliError(
+            "WORKTREE_IN_USE",
+            `Worktree at ${prevWt} is already in use by running job "${holder.id}".`,
+            `Wait for job "${holder.id}" (\`bun claude-agent-crew/runner/crew.ts wait ${holder.id}\`) before continuing.`,
+          );
+        }
+        return { worktree: prevWt, branch: opts.continueJob.branch, reused: true };
       }
-      return { worktree: prevWt, branch: opts.continueJob.branch, reused: true };
     }
   }
 
-  const readOnly = isReadOnlyRole(opts.role);
   if (readOnly) {
     const targetRef = opts.branch ?? "HEAD";
     const wtPath = join(worktreesDir(repoRoot), opts.jobId);

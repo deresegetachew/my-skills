@@ -1038,4 +1038,128 @@ echo '"ok"'
     expect(fbRes.exitCode).toBe(0);
     expect(fbRes.stdout).toContain("Found object.");
   });
+
+  test("COLUMNS=80 does not truncate ps args and cancel kills orphaned PGID children after _exec death", async () => {
+    const t = setupRepo();
+    const childPidFile = join(t.root, "orphan-child.pid");
+    installFakeAgy(
+      t.binDir,
+      `
+sleep 60 &
+echo "$!" > "${childPidFile}"
+wait
+`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    const narrowEnv: TestEnv = {
+      ...t,
+      env: { ...t.env, COLUMNS: "80" },
+    };
+
+    const start = runCrew(narrowEnv, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/col80"]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+
+    // status under COLUMNS=80 must still see the live job as running (not WORKER_CRASHED)
+    const status = runCrew(narrowEnv, ["status", jobId]);
+    expect(status.exitCode).toBe(0);
+    expect(status.stdout).toContain("Status: running");
+
+    // Wait for child PID to appear, then SIGKILL _exec so only PGID children remain
+    const deadline = Date.now() + 3000;
+    let childPid = 0;
+    while (Date.now() < deadline) {
+      if (existsSync(childPidFile)) {
+        const raw = readFileSync(childPidFile, "utf8").trim();
+        if (raw && Number(raw) > 0) {
+          childPid = Number(raw);
+          break;
+        }
+      }
+      await Bun.sleep(25);
+    }
+    expect(childPid).toBeGreaterThan(0);
+
+    const jobRecord = JSON.parse(
+      readFileSync(join(t.repo, ".crew", "jobs", `${jobId}.json`), "utf8"),
+    ) as { pid: number };
+    process.kill(jobRecord.pid, "SIGKILL");
+    // Give PID 1 / kernel a moment to transition _exec out
+    await Bun.sleep(50);
+
+    // cancel must still find and kill the surviving PGID child under COLUMNS=80
+    const cancel = runCrew(narrowEnv, ["cancel", jobId]);
+    expect(cancel.exitCode).toBe(0);
+    expect(cancel.stdout).toContain(`Canceled job ${jobId}`);
+
+    let childAlive = true;
+    try {
+      process.kill(childPid, 0);
+    } catch {
+      childAlive = false;
+    }
+    expect(childAlive).toBe(false);
+  });
+
+  test("worktree safety rejects symlinked .crew/worktrees pointing outside repoRoot", () => {
+    const t = setupRepo();
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c1","result":"Status: DONE\\nok"}'`);
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    const outsideDir = join(t.root, "outside-worktrees");
+    mkdirSync(outsideDir, { recursive: true });
+    mkdirSync(join(t.repo, ".crew"), { recursive: true });
+    symlinkSync(outsideDir, join(t.repo, ".crew", "worktrees"));
+
+    // Create a fake job record pointing through the symlinked .crew/worktrees
+    const escapedWt = join(outsideDir, "escaped-wt");
+    const addWt = Bun.spawnSync(["git", "worktree", "add", "-b", "feat/sym", escapedWt, "HEAD"], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(addWt.exitCode).toBe(0);
+
+    mkdirSync(join(t.repo, ".crew", "jobs"), { recursive: true });
+    writeFileSync(
+      join(t.repo, ".crew", "jobs", "sym-job-1.json"),
+      JSON.stringify(
+        {
+          id: "sym-job-1",
+          role: "builder",
+          worker: "agy",
+          model: null,
+          machine: "local",
+          machineTarget: "local",
+          remotePath: null,
+          branch: "feat/sym",
+          worktree: join(t.repo, ".crew", "worktrees", "escaped-wt"),
+          briefFile: briefPath,
+          pid: null,
+          start: new Date().toISOString(),
+          end: new Date().toISOString(),
+          exit: 0,
+          status: "done",
+          conversationId: null,
+          continuedFrom: null,
+          logFile: "",
+          stdoutFile: "",
+          resultText: "ok",
+          error: null,
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const clean = runCrew(t, ["clean"]);
+    expect(clean.exitCode).toBe(0);
+    expect(existsSync(escapedWt)).toBe(true);
+    expect(clean.stdout).toContain("outside .crew/worktrees/");
+  });
 });

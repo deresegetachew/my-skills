@@ -46,7 +46,7 @@ interface ProcEntry {
 }
 
 function listProcesses(): ProcEntry[] | null {
-  const res = Bun.spawnSync(["ps", "-eo", "pid=,pgid=,stat=,args="], {
+  const res = Bun.spawnSync(["ps", "-ww", "-eo", "pid=,pgid=,stat=,args="], {
     stdout: "pipe",
     stderr: "ignore",
   });
@@ -75,7 +75,7 @@ function isPidAlive(pid: number): boolean {
 }
 
 function isJobProcessAlive(pid: number, jobId: string): boolean {
-  const res = Bun.spawnSync(["ps", "-p", String(pid), "-o", "stat=,args="], {
+  const res = Bun.spawnSync(["ps", "-ww", "-p", String(pid), "-o", "stat=,args="], {
     stdout: "pipe",
     stderr: "ignore",
   });
@@ -845,9 +845,16 @@ async function cmdWait(repoRoot: string, args: string[]): Promise<number> {
       crewArgs: ["wait", job.id, "--timeout", timeoutRaw],
     });
     const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
+    if (res.exitCode === null) {
+      throw new CrewCliError(
+        "SSH_EXEC_FAILED",
+        `Failed to run ssh (${job.machineTarget}) while waiting for job "${job.id}".`,
+        `Verify that \`ssh\` is installed on PATH and ${job.machineTarget} is reachable.`,
+      );
+    }
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
-    const code = res.exitCode ?? 1;
+    const code = res.exitCode;
     syncRemoteJobStatus(repoRoot, job, code);
     return code;
   }
@@ -916,9 +923,16 @@ function cmdStatus(repoRoot: string, args: string[]): number {
       crewArgs: ["status", raw.id],
     });
     const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
+    if (res.exitCode === null) {
+      throw new CrewCliError(
+        "SSH_EXEC_FAILED",
+        `Failed to run ssh (${raw.machineTarget}) while checking status for job "${raw.id}".`,
+        `Verify that \`ssh\` is installed on PATH and ${raw.machineTarget} is reachable.`,
+      );
+    }
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
-    const code = res.exitCode ?? 1;
+    const code = res.exitCode;
     if (code === 0) {
       const out = res.stdout.toString();
       const statusMatch = /^Status:\s*(\S+)/m.exec(out);
@@ -997,9 +1011,16 @@ function cmdResult(repoRoot: string, args: string[]): number {
       crewArgs: ["result", raw.id],
     });
     const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
+    if (res.exitCode === null) {
+      throw new CrewCliError(
+        "SSH_EXEC_FAILED",
+        `Failed to run ssh (${raw.machineTarget}) while reading result for job "${raw.id}".`,
+        `Verify that \`ssh\` is installed on PATH and ${raw.machineTarget} is reachable.`,
+      );
+    }
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
-    const code = res.exitCode ?? 1;
+    const code = res.exitCode;
     syncRemoteJobStatus(repoRoot, raw, code);
     return code;
   }
@@ -1076,9 +1097,16 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
       crewArgs: ["cancel", raw.id],
     });
     const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
+    if (res.exitCode === null) {
+      throw new CrewCliError(
+        "SSH_EXEC_FAILED",
+        `Failed to run ssh (${raw.machineTarget}) while canceling job "${raw.id}".`,
+        `Verify that \`ssh\` is installed on PATH and ${raw.machineTarget} is reachable.`,
+      );
+    }
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
-    const code = res.exitCode ?? 1;
+    const code = res.exitCode;
     if (code === 0) {
       writeJob(repoRoot, {
         ...raw,
@@ -1101,8 +1129,8 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
     }
   }
 
-  const job = syncJobLiveness(repoRoot, raw);
-  if (job.status !== "running" || job.pid === null) {
+  if (raw.status !== "running" || raw.pid === null) {
+    const job = syncJobLiveness(repoRoot, raw);
     throw new CrewCliError(
       "JOB_NOT_RUNNING",
       `Job "${job.id}" is not running (status: ${job.status}).`,
@@ -1110,30 +1138,31 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
     );
   }
 
-  const pgidState = inspectJobPgid(job.pid, job.id);
+  const pgidState = inspectJobPgid(raw.pid, raw.id);
   if (pgidState === "mismatch") {
     throw new CrewCliError(
       "PROCESS_MISMATCH",
-      `Refusing to kill pid ${job.pid}: process command line does not match job "${job.id}".`,
-      `Inspect \`ps -p ${job.pid} -o args=\` manually.`,
+      `Refusing to kill pid ${raw.pid}: process command line does not match job "${raw.id}".`,
+      `Inspect \`ps -ww -p ${raw.pid} -o args=\` manually.`,
     );
   }
   if (pgidState === "exited") {
-    const fresh = readJob(repoRoot, job.id);
+    const fresh = readJob(repoRoot, raw.id);
     if (fresh && fresh.status !== "running") {
       throw new CrewCliError(
         "JOB_NOT_RUNNING",
-        `Job "${job.id}" is not running (status: ${fresh.status}).`,
-        `Run \`${RUNNER_CMD} status ${job.id}\` to inspect it.`,
+        `Job "${raw.id}" is not running (status: ${fresh.status}).`,
+        `Run \`${RUNNER_CMD} status ${raw.id}\` to inspect it.`,
       );
     }
-    const synced = syncJobLiveness(repoRoot, fresh ?? job);
+    const synced = syncJobLiveness(repoRoot, fresh ?? raw);
     throw new CrewCliError(
       "JOB_NOT_RUNNING",
-      `Job "${job.id}" is not running (status: ${synced.status}).`,
-      `Run \`${RUNNER_CMD} status ${job.id}\` to inspect it.`,
+      `Job "${raw.id}" is not running (status: ${synced.status}).`,
+      `Run \`${RUNNER_CMD} status ${raw.id}\` to inspect it.`,
     );
   }
+  const job = raw;
 
   try {
     process.kill(-job.pid, "SIGTERM");
