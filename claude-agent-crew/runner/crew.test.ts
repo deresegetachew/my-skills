@@ -2460,9 +2460,12 @@ echo "Started job remote-20260101-000000-abcd"`);
 printf '%s\\0' "$@" > "${argsLog}"
 cat > "${stdinLog}"
 printf '%s' "$CREW_ROOT" > "${envLog}"
+printf '%s' "\${CLAUDE_CODE_OAUTH_TOKEN:-}" > "${envLog}.token"
 echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: PASS\\nNo findings.","session_id":"sess-from-claude","total_cost_usd":0.42,"usage":{"input_tokens":300,"output_tokens":20,"cache_read_input_tokens":1000}}'
 `,
     );
+    mkdirSync(join(t.home, ".config", "crew"), { recursive: true });
+    writeFileSync(join(t.home, ".config", "crew", "claude-oauth-token"), "sk-ant-oat01-test-token\n", { mode: 0o600 });
     const briefPath = join(t.repo, "brief.md");
     writeFileSync(briefPath, "--not-a-flag: audit the repo.\n", "utf8");
 
@@ -2492,6 +2495,9 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: P
     expect(argAfter("--session-id")).toMatch(/^[0-9a-f-]{36}$/);
     expect(argLines).not.toContain("--resume");
     expect(existsSync(join(readFileSync(envLog, "utf8"), "workers", "claude", "hook.ts"))).toBe(true);
+    // The token saved by `claude setup-token` reaches the job (trimmed), and nothing prints it.
+    expect(readFileSync(`${envLog}.token`, "utf8")).toBe("sk-ant-oat01-test-token");
+    expect(start.stdout + start.stderr).not.toContain("sk-ant-oat01-test-token");
 
     const job = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${jobId}.json`), "utf8")) as {
       worker: string;

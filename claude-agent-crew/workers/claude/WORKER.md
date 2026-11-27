@@ -49,6 +49,12 @@ a crew OS user without sudo (see `project-setup.md` and `machines.md`).
   - `bun test claude-agent-crew/workers/claude/hook.test.ts`;
   - the `claude worker` tests in `runner/crew.test.ts` (fake `claude` on `PATH`).
 
+## Signing in on a crew machine
+
+Run `claude setup-token` once as the crew user and save the `sk-ant-…` token it prints to
+`~/.config/crew/claude-oauth-token` (mode 600, the human pastes it; nobody else sees it). The runner passes it to each
+claude job as `CLAUDE_CODE_OAUTH_TOKEN`; it never prints or logs it. A normal `claude auth login` also works but expires.
+
 ## Known limits
 
 - `claude` must be installed and signed in on the machine that runs the job. On 27 Nov it was on the Mac, not the
