@@ -1208,4 +1208,111 @@ wait
     expect(existsSync(agyMarker)).toBe(false);
     expect(readdirSync(join(t.repo, ".crew", "jobs"))).toEqual([]);
   });
+
+  test("dangling .crew/worktrees symlink, symlinked .crew, internal worktrees symlink, and empty --branch are refused cleanly", () => {
+    const t = setupRepo();
+    const agyMarker = join(t.root, "agy-ran-dangling.txt");
+    installFakeAgy(
+      t.binDir,
+      `touch "${agyMarker}"\necho '{"conversation_id":"c1","result":"Status: DONE\\nok"}'`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    // 1. Empty --branch "" is rejected with INVALID_BRANCH
+    const emptyBranch = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", ""]);
+    expect(emptyBranch.exitCode).toBe(1);
+    expect((JSON.parse(emptyBranch.stderr) as { code: string }).code).toBe("INVALID_BRANCH");
+    expect(existsSync(agyMarker)).toBe(false);
+
+    // 2. Dangling .crew/worktrees symlink refuses with WORKTREE_OUTSIDE_CREW (not EEXIST INTERNAL_ERROR)
+    mkdirSync(join(t.repo, ".crew"), { recursive: true });
+    symlinkSync(join(t.root, "nonexistent-outside"), join(t.repo, ".crew", "worktrees"));
+    const danglingBuilder = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      briefPath,
+      "--branch",
+      "feat/dangling",
+    ]);
+    expect(danglingBuilder.exitCode).toBe(1);
+    expect((JSON.parse(danglingBuilder.stderr) as { code: string }).code).toBe("WORKTREE_OUTSIDE_CREW");
+    const danglingReviewer = runCrew(t, [
+      "start",
+      "--role",
+      "reviewer",
+      "--brief",
+      briefPath,
+      "--branch",
+      "main",
+    ]);
+    expect(danglingReviewer.exitCode).toBe(1);
+    expect((JSON.parse(danglingReviewer.stderr) as { code: string }).code).toBe("WORKTREE_OUTSIDE_CREW");
+    expect(existsSync(agyMarker)).toBe(false);
+
+    // 3. .crew/worktrees symlinked to another directory inside repoRoot is also refused
+    rmSync(join(t.repo, ".crew", "worktrees"));
+    const insideOther = join(t.repo, "other-dir");
+    mkdirSync(insideOther, { recursive: true });
+    symlinkSync(insideOther, join(t.repo, ".crew", "worktrees"));
+    const insideLink = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      briefPath,
+      "--branch",
+      "feat/inside-sym",
+    ]);
+    expect(insideLink.exitCode).toBe(1);
+    expect((JSON.parse(insideLink.stderr) as { code: string }).code).toBe("WORKTREE_OUTSIDE_CREW");
+    expect(readdirSync(insideOther)).toEqual([]);
+
+    // 4. .crew itself symlinked outside repoRoot writes nothing (no jobs/, logs/, worktrees/, start.lock)
+    rmSync(join(t.repo, ".crew"), { recursive: true, force: true });
+    const outsideCrew = join(t.root, "outside-crew");
+    mkdirSync(outsideCrew, { recursive: true });
+    symlinkSync(outsideCrew, join(t.repo, ".crew"));
+    const crewSym = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      briefPath,
+      "--branch",
+      "feat/crew-sym",
+    ]);
+    expect(crewSym.exitCode).toBe(1);
+    expect((JSON.parse(crewSym.stderr) as { code: string }).code).toBe("WORKTREE_OUTSIDE_CREW");
+    expect(readdirSync(outsideCrew)).toEqual([]);
+    expect(existsSync(agyMarker)).toBe(false);
+
+    // 5. clean deduplicates kept worktrees when multiple finished jobs share the same worktree
+    rmSync(join(t.repo, ".crew"), { recursive: true, force: true });
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c-dup","result":"Status: DONE\\nok"}'`);
+    const s1 = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/dup-keep"]);
+    expect(s1.exitCode).toBe(0);
+    const id1 = extractJobId(s1.stdout);
+    expect(runCrew(t, ["wait", id1, "--timeout", "10s"]).exitCode).toBe(0);
+    const s2 = runCrew(t, ["start", "--role", "builder", "--brief", briefPath, "--branch", "feat/dup-keep"]);
+    expect(s2.exitCode).toBe(0);
+    const id2 = extractJobId(s2.stdout);
+    expect(runCrew(t, ["wait", id2, "--timeout", "10s"]).exitCode).toBe(0);
+
+    const job1 = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${id1}.json`), "utf8")) as {
+      worktree: string;
+    };
+    writeFileSync(join(job1.worktree, "keep-dirty.txt"), "dirty\n", "utf8");
+    const cleanDup = runCrew(t, ["clean"]);
+    expect(cleanDup.exitCode).toBe(0);
+    expect(cleanDup.stdout).toContain("Removed 0 worktree(s); kept 1.");
+
+    // 6. clean keeps and does not follow a dangling .crew/worktrees symlink
+    rmSync(join(t.repo, ".crew", "worktrees"), { recursive: true, force: true });
+    symlinkSync(join(t.root, "nonexistent-clean-target"), join(t.repo, ".crew", "worktrees"));
+    const cleanDangling = runCrew(t, ["clean"]);
+    expect(cleanDangling.exitCode).toBe(0);
+  });
 });

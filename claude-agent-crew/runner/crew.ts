@@ -355,6 +355,13 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       `Run: ${RUNNER_CMD} start --role ${role} --brief <file>`,
     );
   }
+  if (branch !== undefined && !branch.trim()) {
+    throw new CrewCliError(
+      "INVALID_BRANCH",
+      'Flag "--branch" cannot be empty.',
+      "Pass a non-empty branch name or omit --branch.",
+    );
+  }
 
   const briefPath = resolve(process.cwd(), briefArg);
   if (!existsSync(briefPath)) {

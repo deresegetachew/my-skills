@@ -1,6 +1,7 @@
 import {
   appendFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -32,10 +33,30 @@ export function usageFile(repoRoot: string): string {
   return join(crewDir(repoRoot), "usage.jsonl");
 }
 
+function assertSafeCrewDirPath(dirPath: string): void {
+  let st;
+  try {
+    st = lstatSync(dirPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return;
+    throw err;
+  }
+  if (st.isSymbolicLink() || !st.isDirectory()) {
+    throw new CrewCliError(
+      "WORKTREE_OUTSIDE_CREW",
+      `Refusing to use non-directory or symlinked crew path: ${dirPath}`,
+      "Ensure .crew/ and .crew/worktrees/ are real directories inside the repository, not symlinks.",
+    );
+  }
+}
+
 export function ensureCrewDirs(repoRoot: string): void {
-  mkdirSync(jobsDir(repoRoot), { recursive: true });
-  mkdirSync(logsDir(repoRoot), { recursive: true });
-  mkdirSync(worktreesDir(repoRoot), { recursive: true });
+  assertSafeCrewDirPath(crewDir(repoRoot));
+  for (const dir of [jobsDir(repoRoot), logsDir(repoRoot), worktreesDir(repoRoot)]) {
+    assertSafeCrewDirPath(dir);
+    mkdirSync(dir, { recursive: true });
+  }
 }
 
 export function jobFilePath(repoRoot: string, jobId: string): string {

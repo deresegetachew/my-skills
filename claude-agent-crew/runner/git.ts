@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { JobRecord } from "./types.ts";
 import { CrewCliError } from "./types.ts";
@@ -109,11 +117,21 @@ export function isWorktreeDirty(worktreePath: string): boolean {
   return res.stdout.trim().length > 0;
 }
 
-function canonicalizePath(p: string): string {
+function pathEntryExists(p: string): boolean {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function canonicalizePath(p: string, depth = 0): string {
   const abs = resolve(p);
+  if (depth > 40) return abs;
   const trailing: string[] = [];
   let cur = abs;
-  while (!existsSync(cur)) {
+  while (!pathEntryExists(cur)) {
     const parent = dirname(cur);
     if (parent === cur) return abs;
     trailing.unshift(basename(cur));
@@ -122,6 +140,16 @@ function canonicalizePath(p: string): string {
   try {
     return trailing.length === 0 ? realpathSync(cur) : join(realpathSync(cur), ...trailing);
   } catch {
+    try {
+      const st = lstatSync(cur);
+      if (st.isSymbolicLink()) {
+        const target = resolve(dirname(cur), readlinkSync(cur));
+        const next = trailing.length === 0 ? target : join(target, ...trailing);
+        return canonicalizePath(next, depth + 1);
+      }
+    } catch {
+      // fall through
+    }
     return abs;
   }
 }
@@ -362,7 +390,7 @@ export function cleanFinishedWorktrees(
     trackedMap.set(canonicalizePath(w.path), w);
   }
 
-  const removedSet = new Set<string>();
+  const seenWorktrees = new Set<string>();
   const removed: string[] = [];
   const kept: Array<{ worktree: string; reason: string }> = [];
 
@@ -371,8 +399,9 @@ export function cleanFinishedWorktrees(
     const wt = resolve(job.worktree);
     const canonWt = canonicalizePath(wt);
     if (canonWt === canonicalizePath(repoRoot)) continue;
-    if (removedSet.has(canonWt)) continue;
+    if (seenWorktrees.has(canonWt)) continue;
     if (!existsSync(wt) && !trackedMap.has(canonWt)) continue;
+    seenWorktrees.add(canonWt);
 
     if (!isUnderWorktreesDir(repoRoot, wt)) {
       kept.push({ worktree: wt, reason: "outside .crew/worktrees/" });
@@ -392,7 +421,6 @@ export function cleanFinishedWorktrees(
     if (!existsSync(wt)) {
       runGit(repoRoot, ["worktree", "prune"]);
       if (!listWorktrees(repoRoot).some((w) => canonicalizePath(w.path) === canonWt)) {
-        removedSet.add(canonWt);
         removed.push(wt);
       } else {
         kept.push({ worktree: wt, reason: "worktree prune did not remove entry" });
@@ -403,7 +431,6 @@ export function cleanFinishedWorktrees(
     if (isReadOnlyRole(job.role)) {
       const rm = runGit(repoRoot, ["worktree", "remove", wt]);
       if (rm.exitCode === 0) {
-        removedSet.add(canonWt);
         removed.push(wt);
       } else {
         kept.push({ worktree: wt, reason: rm.stderr || "worktree remove failed" });
@@ -438,7 +465,6 @@ export function cleanFinishedWorktrees(
     // Never force-remove a builder worktree
     const rm = runGit(repoRoot, ["worktree", "remove", wt]);
     if (rm.exitCode === 0) {
-      removedSet.add(canonWt);
       removed.push(wt);
     } else {
       kept.push({ worktree: wt, reason: rm.stderr || "worktree remove failed" });
