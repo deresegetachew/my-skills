@@ -645,6 +645,7 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       id: remoteJobId,
       role,
       worker: roleConfig.worker,
+      agent: roleConfig.agent ?? role,
       model: roleConfig.model ?? null,
       machine: machineName,
       machineTarget,
@@ -722,6 +723,7 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       id,
       role,
       worker: roleConfig.worker,
+      agent: roleConfig.agent ?? role,
       model: roleConfig.model ?? null,
       machine: machineName,
       machineTarget,
@@ -933,7 +935,7 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
         })
       : buildAgyArgs({
           briefText,
-          role: job.role,
+          role: job.agent ?? job.role,
           model: job.model,
           printTimeout,
           worktree: job.worktree,

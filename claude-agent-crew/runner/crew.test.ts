@@ -2642,4 +2642,33 @@ fi
     expect(errorCode(missing.stderr)).toBe("BRIEF_NOT_FOUND");
     expect(existsSync(sshLog)).toBe(false);
   });
+
+  test("a role can name the agent definition it uses (agent defaults to the role name)", () => {
+    const t = setupRepo({
+      roles: {
+        "builder-strong": { worker: "agy", model: "claude-sonnet-5-5-medium", machine: "local", agent: "builder" },
+        builder: { worker: "agy", model: "gemini-3.8-flash-medium", machine: "local" },
+      },
+      machines: { local: "local" },
+    });
+    const argsLog = join(t.root, "agy-args.txt");
+    installFakeAgy(
+      t.binDir,
+      `printf '%s\\n' "$@" >> "${argsLog}"; printf -- '--\\n' >> "${argsLog}"
+echo '{"conversation_id":"c-agent","result":"Status: DONE\\nok"}'`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Build.\n", "utf8");
+
+    for (const [role, branch] of [["builder-strong", "feat/strong"], ["builder", "feat/plain"]] as const) {
+      const start = runCrew(t, ["start", "--role", role, "--brief", briefPath, "--branch", branch]);
+      expect(start.exitCode).toBe(0);
+      expect(runCrew(t, ["wait", extractJobId(start.stdout), "--timeout", "10s"]).exitCode).toBe(0);
+    }
+    const [strong, plain] = readFileSync(argsLog, "utf8").split("--\n").map((b) => b.split("\n"));
+    expect(strong?.[(strong?.indexOf("--agent") ?? -2) + 1]).toBe("builder");
+    expect(strong?.[(strong?.indexOf("--model") ?? -2) + 1]).toBe("claude-sonnet-5-5-medium");
+    expect(plain?.[(plain?.indexOf("--agent") ?? -2) + 1]).toBe("builder");
+    expect(plain?.[(plain?.indexOf("--model") ?? -2) + 1]).toBe("gemini-3.8-flash-medium");
+  });
 });
