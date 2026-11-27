@@ -53,19 +53,24 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
    | exit 2 | Still running: wait again on the same job |
    | exit 3 | Read `crew result <id>`. A quota or usage limit: note the reset time and continue the job after it. Anything else: fix the cause, then continue or restart |
    | exit 4 | Canceled: account for partial edits (`git status`) before anything else |
-   | exit 5 | Timed out but resumable: ask the human whether to continue with a longer timeout |
+   | exit 5 | Timed out: the work so far is in the worktree. Start a fresh job on the same branch (see below) |
    | exit 1 | Your command was wrong: fix the named problem |
 
-   Continue a job with `crew start --continue <job-id> --brief <follow-up>`; it keeps the worker's conversation.
-   Never retry or continue automatically after a timeout.
+   **Never use `--continue`.** It resumes the worker's whole conversation, and every step re-reads all of it. In the
+   remanual pilot, a three-item fix on `--continue` cost 1.3M tokens, twice the original build; the same kind of fix
+   from a fresh builder cost 325k. Follow-ups, review fixes, timeouts and runs stopped by a quota all get a **fresh
+   job on the same branch** with a short brief: what to do, the commit or `git diff` to start from ("an earlier run
+   left uncommitted work: read `git diff`, keep what is right, finish the rest"), and what is already decided. The
+   branch carries the work; the brief carries the context. Never retry automatically after a timeout.
 5. **Assess cheaply.** Read the result's `Status:` line and any `Conflicts with the brief` first, then
    `git diff --stat`. Acceptance costs a fraction of the work: check interface choices, departures from the brief
    and figures reported as verified; don't redo the work. A small defect you understand: fix it yourself. A real
-   gap: a focused follow-up (`--continue` when the context helps).
+   gap: a fresh job on the same branch with a short, focused brief.
 6. **Review** every change with a fresh session (`reviewer`, plus `security-reviewer` or `architecture-reviewer`
    when the change touches their area). A session never reviews its own work. Reviewers post their verdict on the PR
    as `crew-reviewer`. Clean means no open critical or high finding. Medium, low and nit findings become issues,
-   not more review rounds. Fixes go back to the builder (continue its job). After fixes, a cheap model rechecks only
+   not more review rounds. Fixes go to a fresh builder on the same branch, with a brief listing only the findings to
+   fix. After fixes, a cheap model rechecks only
    the high findings; it is not a full new review.
 7. **Audit** changes to safety rules, gates, money and data that must never change: the `auditor` tries to break
    them; check each break is real; each real break becomes a failing test plus a fix task; audit again until
@@ -89,15 +94,21 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
 - Nothing runs as the human's GitHub account: workers and you use the crew apps' tokens (see `project-setup.md`).
 - Releases, production, secrets and spending stay the human's.
 - Cost: every run names its model (`crew.json`); cheap models by default; read status lines and diff stats, not
-  full reports; give small review fixes to a fresh builder with a short brief: continuing a long conversation re-sends all of it
-  (in the remanual pilot, a three-item fix cost 1.3M tokens on --continue, twice the original build). `.crew/usage.jsonl`
-  shows spend per role and model; look at it before changing models.
+  full reports; never `--continue` (see step 4). `.crew/usage.jsonl` shows spend per role and model; check it after
+  each job and before changing models.
+- Long runs are what drain the quota, not expensive models: an agy builder re-reads its context on every step, so a
+  big task in a big repo costs millions of cached tokens even on Flash (the pilot's main build read 27M). Small
+  tasks keep runs short. Don't debug the crew itself on a real repo task; use a tiny throwaway repo.
 - Keep a task to one PR of about 300 changed lines. A big diff makes every review expensive, and each fix round
   adds code for the next review to find.
 - A guard that parses shell commands is never airtight. Don't chase its bypasses round after round: record what is
   left as residual risk and rely on the hard guarantees.
 - Give reviewers the changed file paths in the brief; a reviewer without them may read nothing.
-- If a run stops on a quota or usage limit, its work is saved: continue it when the limit resets; don't restart.
+- If a run stops on a quota or usage limit, its work is saved in the worktree: when the limit resets, start a fresh
+  job on the same branch whose brief says to read `git diff` and finish. Check the quota (`agy -p /usage`) before
+  starting big jobs.
+- Your own session follows the same rule: when it gets long, write the handoff note (`handoff.md`) and continue in
+  a new session that reads it first.
 
 ## Files
 

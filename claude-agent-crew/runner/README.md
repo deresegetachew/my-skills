@@ -68,6 +68,8 @@ never removed under it.
 - A job stuck in `running` with no pid after 30 s (`CREW_PID_GRACE_MS`) counts as failed (`EXEC_START_FAILED`);
   `cancel` can end a pid-less job.
 - A `timed out` line on stderr only means timeout when the worker exited non-zero.
+- `--continue` exists, but the crew skill does not use it: resuming a long conversation re-reads all of it on every
+  step. Start a fresh job on the same branch instead.
 - `--continue` refuses a worktree whose branch was switched (`CONTINUE_BRANCH_CHANGED`) or that is outside
   `.crew/worktrees/`.
 - Remote roles (`machine` with an ssh target): a brief inside the repository is passed by its path, so it must
