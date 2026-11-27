@@ -12,7 +12,7 @@ The crew plugin for `agy`.
 
 ## Safety layers
 
-The `PreToolUse` guard (`scripts/guard.ts`) and `settings.worker.json` are only the first layer: they block known dangerous commands and refuse shell constructs the guard cannot fully read. The hard guarantees are the git `pre-push` hook, branch protection rules on `main`, and GitHub tokens without merge or admin rights.
+The `PreToolUse` guard (`scripts/guard.ts`) and `settings.worker.json` are only the first layer: they block known dangerous commands and refuse shell constructs the guard cannot fully read. They do not catch everything: shell variables, scripts written and then run, some wrappers, `gh api` calls and git config tricks can get past them (listed in https://github.com/deresegetachew/my-skills/issues/684). The hard guarantees are elsewhere: the rule on `main` (PR required, approval from another identity, CI green, no bypass), each job holding only its own role's short-lived token, crew jobs running as an OS user without sudo, and the git `pre-push` hook.
 
 ## Install and use
 
