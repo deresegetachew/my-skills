@@ -2,7 +2,7 @@
 
 A crew member run as a headless `claude -p` session. Set `"worker": "claude"` for a role in `.claude/crew.json`;
 the job runner (`runner/crew.ts`) starts it the same way as an agy job, so `start`, `wait`, `result`, `cancel`
-and `--continue` all work unchanged.
+and `--continue` all work unchanged (the crew skill says not to use `--continue`; see `SKILL.md` step 4).
 
 ## How the runner starts it
 
@@ -16,7 +16,8 @@ claude -p --output-format json --settings <settings.worker.json> --append-system
   prompt.
 - **Read-only roles** (`reviewer`, `*-reviewer`, `*-check`, `auditor`, `researcher`) cannot edit or write files.
 - **Session id:** the runner picks it and records it before the run starts. A run stopped by `--timeout` therefore
-  ends as `attention` (exit 5) and can be continued with `--continue <job>`, which passes `--resume`.
+  ends as `attention` (exit 5). `--continue <job>` would pass `--resume`, but the crew starts a fresh job on the
+  same branch instead, which is cheaper.
 - **Timeout:** claude has no print timeout of its own. The runner stops the worker and every process under it when
   `--timeout` (default `30m`, `0` for none) runs out.
 - **Usage:** the result's `usage` and `total_cost_usd` go to `.crew/usage.jsonl`.
