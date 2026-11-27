@@ -17,7 +17,7 @@ claude -p --output-format json --settings <settings.worker.json> --append-system
 - **Read-only roles** (`reviewer`, `*-reviewer`, `*-check`, `auditor`, `researcher`) cannot edit or write files.
 - **Session id:** the runner picks it and records it before the run starts. A run stopped by `--timeout` therefore
   ends as `attention` (exit 5) and can be continued with `--continue <job>`, which passes `--resume`.
-- **Timeout:** claude has no print timeout of its own. The runner stops the worker and its child processes when
+- **Timeout:** claude has no print timeout of its own. The runner stops the worker and every process under it when
   `--timeout` (default `30m`, `0` for none) runs out.
 - **Usage:** the result's `usage` and `total_cost_usd` go to `.crew/usage.jsonl`.
 
@@ -29,7 +29,8 @@ claude -p --output-format json --settings <settings.worker.json> --append-system
   - `defaultMode: dontAsk`: anything not allowed is refused, and no one is asked.
   - Bypass mode is disabled.
   - Deny rules for `sudo`, force-pushes, pushes to main/master, `gh pr merge` and `gh repo delete`.
-- **PreToolUse hook on Bash:** `hook.ts` runs the agy guard's own `checkCommand`, so both workers refuse the same
+- **PreToolUse hook on Bash:** run with the runner's own bun (`CREW_BUN`), so a missing `bun` on `PATH` cannot
+  skip it. `hook.ts` runs the agy guard's own `checkCommand`, so both workers refuse the same
   commands. A refusal is Claude's `permissionDecision: "deny"` with the reason. An allowed command prints nothing,
   so the deny rules above still apply. A tool call the hook cannot read is refused.
 

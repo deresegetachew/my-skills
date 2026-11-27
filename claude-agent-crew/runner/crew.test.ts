@@ -2478,6 +2478,7 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: P
     expect(settings.permissions.deny).toContain("Bash(sudo:*)");
     expect(settings.hooks.PreToolUse[0]?.matcher).toBe("Bash");
     expect(settings.hooks.PreToolUse[0]?.hooks[0]?.command).toContain("workers/claude/hook.ts");
+    expect(settings.hooks.PreToolUse[0]?.hooks[0]?.command).toContain("CREW_BUN");
     expect(argAfter("--session-id")).toMatch(/^[0-9a-f-]{36}$/);
     expect(argLines).not.toContain("--resume");
     expect(existsSync(join(readFileSync(envLog, "utf8"), "workers", "claude", "hook.ts"))).toBe(true);
@@ -2500,12 +2501,13 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: P
     expect(usage.usage.total_cost_usd).toBe(0.42);
   });
 
-  test("claude worker: read-only roles cannot edit; a timed-out run needs attention and --continue resumes it", () => {
+  test("claude worker: read-only roles cannot edit; a timed-out run needs attention and --continue resumes it", async () => {
     const t = setupRepo({
       roles: { reviewer: { worker: "claude", model: "claude-sonnet-5-5", machine: "local" } },
       machines: { local: "local" },
     });
     const argsLog = join(t.root, "claude-args.txt");
+    const sleepPid = join(t.root, "sleep.pid");
     installFakeClaude(
       t.binDir,
       `
@@ -2515,7 +2517,7 @@ cat > /dev/null
 if printf '%s\\n' "$@" | grep -qx -- '--resume'; then
   echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: PASS","session_id":"ignored"}'
 else
-  sleep 30
+  bash -c 'sleep 30 & echo $! > "${sleepPid}"; wait'
 fi
 `,
     );
@@ -2531,7 +2533,9 @@ fi
     const sessionId = first[first.indexOf("--session-id") + 1] ?? "";
     expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
     expect(first).toContain("--disallowedTools");
-    expect(first).toContain("Edit");
+    expect(first).toEqual(expect.arrayContaining(["Edit", "Write", "NotebookEdit"]));
+    // The grandchild (a tool command's child) was stopped too.
+    expect(await waitUntilGone(Number(readFileSync(sleepPid, "utf8").trim()))).toBe(true);
     expect(first[first.indexOf("--model") + 1]).toBe("claude-sonnet-5-5");
     const stuck = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${jobId}.json`), "utf8")) as {
       status: string;

@@ -13,8 +13,11 @@ function bash(command: string): string {
 }
 
 function decision(stdout: string): string | undefined {
-  const out = JSON.parse(stdout) as { hookSpecificOutput?: { hookEventName: string; permissionDecision: string } };
+  const out = JSON.parse(stdout) as {
+    hookSpecificOutput?: { hookEventName: string; permissionDecision: string; permissionDecisionReason: string };
+  };
   expect(out.hookSpecificOutput?.hookEventName).toBe("PreToolUse");
+  expect(out.hookSpecificOutput?.permissionDecisionReason.length ?? 0).toBeGreaterThan(0);
   return out.hookSpecificOutput?.permissionDecision;
 }
 

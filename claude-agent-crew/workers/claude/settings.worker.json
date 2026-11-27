@@ -17,7 +17,7 @@
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "bun \"$CREW_ROOT/workers/claude/hook.ts\"", "timeout": 10 }]
+        "hooks": [{ "type": "command", "command": "\"${CREW_BUN:-bun}\" \"$CREW_ROOT/workers/claude/hook.ts\"", "timeout": 10 }]
       }
     ]
   }

@@ -789,6 +789,20 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
   return 0;
 }
 
+/** Signals a process and every descendant, deepest first (pgrep -P walks the tree). */
+function killProcessTree(pid: number, signal: NodeJS.Signals): void {
+  const found = Bun.spawnSync(["pgrep", "-P", String(pid)], { stdout: "pipe", stderr: "ignore" });
+  for (const line of found.stdout.toString().split("\n")) {
+    const child = Number(line.trim());
+    if (Number.isInteger(child) && child > 0) killProcessTree(child, signal);
+  }
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // already gone
+  }
+}
+
 async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
   const { positionals, flags, help } = parseFlags(args, {
     valueFlags: ["timeout"],
@@ -916,7 +930,7 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       stdin: isClaude ? new Blob([briefText]) : "ignore",
       stdout: "pipe",
       stderr: "pipe",
-      env: isClaude ? { ...process.env, CREW_ROOT: crewRootForWorkers() } : process.env,
+      env: isClaude ? { ...process.env, CREW_ROOT: crewRootForWorkers(), CREW_BUN: process.execPath } : process.env,
     });
     activeProc = proc;
 
@@ -926,13 +940,9 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
         ? null
         : setTimeout(() => {
             workerTimedOut = true;
-            // Children (tool commands) would keep the output pipes open, so stop them first.
-            Bun.spawnSync(["pkill", "-TERM", "-P", String(proc.pid)], { stdout: "ignore", stderr: "ignore" });
-            proc.kill("SIGTERM");
-            setTimeout(() => {
-              Bun.spawnSync(["pkill", "-KILL", "-P", String(proc.pid)], { stdout: "ignore", stderr: "ignore" });
-              proc.kill("SIGKILL");
-            }, 2000).unref();
+            // Tool commands (and their children) would keep the output pipes open, so stop the whole tree.
+            killProcessTree(proc.pid, "SIGTERM");
+            setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 2000).unref();
           }, timeoutMs);
 
     const stdoutPromise = new Response(proc.stdout).text();
