@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   type CleanResult,
   cleanFinishedWorktrees,
@@ -47,7 +47,19 @@ import {
   workerTimeoutMs,
 } from "./worker.ts";
 
-const RUNNER_CMD = "bun claude-agent-crew/runner/crew.ts";
+// How to call this runner again: relative inside the repo that holds it (my-skills), else its absolute path
+// (a project using the installed skill).
+const RUNNER_REL = relative(process.cwd(), import.meta.path);
+const RUNNER_CMD = `bun ${
+  RUNNER_REL && !RUNNER_REL.startsWith("..") && !isAbsolute(RUNNER_REL) && /^[A-Za-z0-9_./-]+$/.test(RUNNER_REL)
+    ? RUNNER_REL
+    : shellQuote(import.meta.path)
+}`;
+
+/** A remote runner prints its own path in "Next:" lines; the orchestrator must see this machine's runner. */
+function localizeNext(remoteOut: string): string {
+  return remoteOut.replace(/^Next: bun (?:'(?:[^']|'\\'')*'|\S+) /gm, `Next: ${RUNNER_CMD} `);
+}
 
 interface ProcEntry {
   pid: number;
@@ -372,13 +384,19 @@ interface SshResult {
 function runSsh(
   cmd: string[],
   failure: { code: string; what: string; target: string },
-  opts: { extraMs?: number; maxMs?: number } = {},
+  opts: { extraMs?: number; maxMs?: number; stdin?: Buffer } = {},
 ): SshResult {
   const base = envMs("CREW_SSH_TIMEOUT_MS", 60_000);
   const timeoutMs = Math.min(base, opts.maxMs ?? base) + (opts.extraMs ?? 0);
   let res: ReturnType<typeof Bun.spawnSync>;
   try {
-    res = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
+    res = Bun.spawnSync(cmd, {
+      stdin: opts.stdin ?? "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new CrewCliError(
@@ -549,6 +567,13 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
   }
 
   if (!forceLocal && machineTarget !== "local") {
+    if (!existsSync(briefPath)) {
+      throw new CrewCliError(
+        "BRIEF_NOT_FOUND",
+        `Brief file not found: ${briefPath}`,
+        "Write the brief file first, then retry.",
+      );
+    }
     const remotePath = config.paths?.[machineName];
     if (!remotePath) {
       throw new CrewCliError(
@@ -557,13 +582,25 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
         `Add "paths": { "${machineName}": "/path/to/repo" } in .claude/crew.json.`,
       );
     }
-    const remoteBrief = toRemoteBriefPath(repoRoot, briefPath, remotePath);
+    let remoteBrief = toRemoteBriefPath(repoRoot, briefPath, remotePath);
     if (isAbsolute(remoteBrief)) {
-      throw new CrewCliError(
-        "REMOTE_BRIEF_OUTSIDE_REPO",
-        `Brief ${briefPath} is not inside this repo or ${remotePath}, so it would not exist on "${machineName}".`,
-        `Move the brief into the repository, commit and push it so ${remotePath} on ${machineName} has it, then retry.`,
+      // A brief outside the repo (the usual case: the orchestrator's scratch folder) is copied to the remote.
+      remoteBrief = `.crew/briefs/brief-${Date.now()}-${randomBytes(3).toString("hex")}.md`;
+      const copy = runSsh(
+        [
+          ...machineTarget.trim().split(/\s+/).filter(Boolean),
+          `cd ${shellQuote(remotePath)} && mkdir -p .crew/briefs && cat > ${shellQuote(remoteBrief)}`,
+        ],
+        { code: "SSH_START_FAILED", what: "copying the brief", target: machineTarget },
+        { stdin: readFileSync(briefPath) },
       );
+      if (copy.exitCode !== 0) {
+        throw new CrewCliError(
+          "SSH_START_FAILED",
+          `Could not copy brief ${briefPath} to ${remotePath} on "${machineName}": ${copy.stderr.toString().trim()}`,
+          `Verify SSH connectivity (${machineTarget}) and that ${remotePath} exists on ${machineName}.`,
+        );
+      }
     }
     const sshCmd = buildSshStartCommand({
       sshCommand: machineTarget,
@@ -629,7 +666,7 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
     };
     writeJob(repoRoot, remoteJobRecord);
 
-    console.log(`Started remote job on ${machineName} (${remotePath}):\n${out}`);
+    console.log(`Started remote job on ${machineName} (${remotePath}):\n${localizeNext(out)}`);
     return 0;
   }
 
@@ -1136,7 +1173,7 @@ async function cmdWait(repoRoot: string, args: string[]): Promise<number> {
       { code: "SSH_EXEC_FAILED", what: `waiting for job "${job.id}"`, target: job.machineTarget },
       { extraMs: timeoutMs },
     );
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     syncRemoteJobStatus(repoRoot, job, code);
@@ -1211,7 +1248,7 @@ function cmdStatus(repoRoot: string, args: string[]): number {
       what: `checking status for job "${raw.id}"`,
       target: raw.machineTarget,
     });
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     if (code === 0) applyRemoteStatusOutput(repoRoot, raw, res.stdout.toString());
@@ -1277,7 +1314,7 @@ function cmdResult(repoRoot: string, args: string[]): number {
       what: `reading result for job "${raw.id}"`,
       target: raw.machineTarget,
     });
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     syncRemoteJobStatus(repoRoot, raw, code);
@@ -1360,7 +1397,7 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
       what: `canceling job "${raw.id}"`,
       target: raw.machineTarget,
     });
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     if (code === 0) {

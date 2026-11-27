@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -961,7 +962,7 @@ exit 1
       t.binDir,
       `echo '{"conversation_id":"conv-spaces-1","result":"Status: DONE\\nResumed ok."}'`,
     );
-    const rewrittenCmd = nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS);
+    const rewrittenCmd = nextCmd.replace("bun claude-agent-crew/runner/crew.ts", `bun ${CREW_TS}`);
     const resumed = Bun.spawnSync(["bash", "-c", rewrittenCmd], {
       cwd: t.repo,
       env: t.env,
@@ -1655,7 +1656,7 @@ bash -c "$rewritten"
       t.binDir,
       `printf '%s\n' "$@" > "${argsLog}"\necho '{"conversation_id":"remote-attn-1","result":"Status: DONE\\nResumed ok."}'`,
     );
-    const resumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS)], {
+    const resumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("bun claude-agent-crew/runner/crew.ts", `bun ${CREW_TS}`)], {
       cwd: t.repo,
       env: t.env,
       stdout: "pipe",
@@ -2125,7 +2126,7 @@ bash -c "$rewritten"
     expect(nextCmd).toContain(nestedRemote);
 
     installFakeAgy(t.binDir, `echo '{"conversation_id":"nested-attn-1","result":"Status: DONE\\nNested resumed."}'`);
-    const nResumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("claude-agent-crew/runner/crew.ts", CREW_TS)], {
+    const nResumed = Bun.spawnSync(["bash", "-c", nextCmd.replace("bun claude-agent-crew/runner/crew.ts", `bun ${CREW_TS}`)], {
       cwd: t.repo,
       env: t.env,
       stdout: "pipe",
@@ -2368,7 +2369,7 @@ bash -c "$rewritten"
     expect(existsSync(marker)).toBe(false);
   }, 60_000);
 
-  test("remote start: brief outside the repo is refused, invalid remote job id is rejected, hung ssh times out, list refreshes remote status", () => {
+  test("remote start: brief outside the repo is copied over, invalid remote job id is rejected, hung ssh times out, list refreshes remote status", () => {
     const t = setupRepo();
     const sshLog = join(t.root, "ssh-calls.log");
     const sshBin = join(t.binDir, "ssh");
@@ -2379,14 +2380,23 @@ bash -c "$rewritten"
     const briefPath = join(t.repo, "brief.md");
     writeFileSync(briefPath, "Task.\n", "utf8");
 
-    // 1. Brief outside both repos: refused before any ssh call
-    writeSsh(`echo "Started job remote-20260101-000000-abcd"`);
+    // 1. Brief outside both repos: its contents are copied to .crew/briefs on the remote, then started from there
+    const copied = join(t.root, "copied-brief.md");
+    writeSsh(`if [[ "$remote_cmd" == *"cat > "* ]]; then cat > "${copied}"; exit 0; fi
+echo "Started job remote-20260101-000000-abcd"`);
     const outsideBrief = join(t.root, "outside-brief.md");
-    writeFileSync(outsideBrief, "Task.\n", "utf8");
+    writeFileSync(outsideBrief, "Outside task.\n", "utf8");
     const outside = runCrew(t, ["start", "--role", "remote", "--brief", outsideBrief]);
-    expect(outside.exitCode).toBe(1);
-    expect(errorCode(outside.stderr)).toBe("REMOTE_BRIEF_OUTSIDE_REPO");
-    expect(existsSync(sshLog)).toBe(false);
+    expect(outside.exitCode).toBe(0);
+    expect(readFileSync(copied, "utf8")).toBe("Outside task.\n");
+    const calls = readFileSync(sshLog, "utf8").trim().split("\n");
+    const copyPath = /cat > '?(\.crew\/briefs\/brief-[0-9a-f-]+\.md)/.exec(calls[0] ?? "")?.[1];
+    expect(copyPath).toBeDefined();
+    expect(calls[1]).toContain(`'--brief' '${copyPath}'`);
+    // ssh shells are non-interactive: the remote command puts bun's and agy's default folders on PATH itself.
+    expect(calls[1]).toContain('export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"');
+    rmSync(sshLog);
+    rmSync(join(t.repo, ".crew", "jobs"), { recursive: true, force: true });
 
     // 2. A remote returning a path-like job id must not make the runner write outside .crew/jobs
     writeSsh(`echo "Started job ../../escape"`);
@@ -2561,5 +2571,75 @@ fi
     expect(r.exitCode).toBe(1);
     expect(errorCode(r.stderr)).toBe("INVALID_TIMEOUT");
     expect(existsSync(join(t.repo, ".crew", "jobs")) ? readdirSync(join(t.repo, ".crew", "jobs")) : []).toEqual([]);
+  });
+
+  test("a project without the runner in its repo uses the installed skill, locally and over ssh", () => {
+    const t = setupRepo();
+    // The remote user has its own HOME with its own copy of the skill, at a different path from this runner.
+    const remoteHome = join(t.root, "remote-home");
+    const remoteSkill = join(remoteHome, ".claude", "skills", "claude-agent-crew");
+    mkdirSync(join(remoteSkill, "workers"), { recursive: true });
+    cpSync(resolve(import.meta.dir), join(remoteSkill, "runner"), { recursive: true });
+    cpSync(resolve(import.meta.dir, "..", "workers", "agy"), join(remoteSkill, "workers", "agy"), { recursive: true });
+    const remoteRepo = join(t.root, "remote-repo");
+    mkdirSync(join(remoteRepo, ".claude"), { recursive: true });
+    const rGit = (args: string[]): void => {
+      const r = Bun.spawnSync(["git", ...args], { cwd: remoteRepo, env: t.env, stdout: "pipe", stderr: "pipe" });
+      if (r.exitCode !== 0) throw new Error(`remote git ${args.join(" ")} failed: ${r.stderr.toString()}`);
+    };
+    const config = {
+      roles: { remote: { worker: "agy", model: "gemini-3.8-flash-medium", machine: "dev-pc" } },
+      machines: { local: "local", "dev-pc": "ssh factory@dev-pc" },
+      paths: { "dev-pc": remoteRepo },
+    };
+    rGit(["init", "-b", "main"]);
+    rGit(["config", "user.email", "test@example.com"]);
+    rGit(["config", "user.name", "Test User"]);
+    rGit(["config", "commit.gpgsign", "false"]);
+    writeFileSync(join(remoteRepo, "brief.md"), "Remote brief.\n", "utf8");
+    writeFileSync(join(remoteRepo, ".claude", "crew.json"), JSON.stringify(config), "utf8");
+    rGit(["add", "brief.md", ".claude/crew.json"]);
+    rGit(["commit", "-m", "remote init"]);
+    writeFileSync(join(t.repo, ".claude", "crew.json"), JSON.stringify(config), "utf8");
+    writeFileSync(join(t.repo, "brief.md"), "Remote brief.\n", "utf8");
+
+    // A fake ssh that runs the remote command as given: no rewriting of the runner path.
+    const sshBin = join(t.binDir, "ssh");
+    const sshLog = join(t.root, "ssh.log");
+    writeFileSync(
+      sshBin,
+      `#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' "\${@: -1}" >> "${sshLog}"\nHOME="${remoteHome}" bash -c "\${@: -1}"\n`,
+      "utf8",
+    );
+    chmodSync(sshBin, 0o755);
+    installFakeAgy(t.binDir, `echo '{"conversation_id":"c-installed","result":"Status: DONE\\nok"}'`);
+
+    const start = runCrew(t, ["start", "--role", "remote", "--brief", join(t.repo, "brief.md")]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+    // The remote ran its own installed copy...
+    expect(readFileSync(sshLog, "utf8")).toContain("$HOME/.claude/skills/claude-agent-crew/runner/crew.ts");
+    expect(existsSync(join(remoteRepo, ".crew", "jobs", `${jobId}.json`))).toBe(true);
+    // ...but the printed next step names this machine's runner, not the remote path, and works as printed.
+    const nextLine = start.stdout.split("\n").find((l) => l.startsWith("Next: ")) ?? "";
+    expect(nextLine).toContain(CREW_TS);
+    expect(nextLine).not.toContain(remoteHome);
+    const wait = Bun.spawnSync(["bash", "-c", `${nextLine.slice("Next: ".length)} --timeout 10s`], {
+      cwd: t.repo,
+      env: t.env,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(wait.exitCode).toBe(0);
+    const result = runCrew(t, ["result", jobId]);
+    expect(result.stdout).toContain("ok");
+    expect(result.stdout).not.toContain(remoteHome);
+
+    // A missing brief for a remote role is refused plainly, before any ssh call.
+    rmSync(sshLog);
+    const missing = runCrew(t, ["start", "--role", "remote", "--brief", join(t.root, "nope.md")]);
+    expect(missing.exitCode).toBe(1);
+    expect(errorCode(missing.stderr)).toBe("BRIEF_NOT_FOUND");
+    expect(existsSync(sshLog)).toBe(false);
   });
 });

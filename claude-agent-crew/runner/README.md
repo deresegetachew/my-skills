@@ -1,6 +1,9 @@
 # Crew Job Runner
 
-Headless job runner for `claude-agent-crew`: `bun claude-agent-crew/runner/crew.ts <command>`.
+Headless job runner for `claude-agent-crew`. In a project, run it from the project's repo as
+`bun ~/.claude/skills/claude-agent-crew/runner/crew.ts <command>` (the skill linked as in `machines.md`); inside
+my-skills, `bun claude-agent-crew/runner/crew.ts <command>`. Over ssh the remote side uses the runner in its repo if
+there is one, else the remote user's installed skill.
 Bun and TypeScript only, no npm packages.
 
 The job-lifecycle design (`start`, `wait`, `status`, `result`, `cancel`, `list`, `clean`) is adapted from
@@ -67,8 +70,9 @@ never removed under it.
 - A `timed out` line on stderr only means timeout when the worker exited non-zero.
 - `--continue` refuses a worktree whose branch was switched (`CONTINUE_BRANCH_CHANGED`) or that is outside
   `.crew/worktrees/`.
-- Remote roles (`machine` with an ssh target): the brief must be a file **inside the repository** and already
-  present on the remote (commit and push it); a brief elsewhere is refused (`REMOTE_BRIEF_OUTSIDE_REPO`).
+- Remote roles (`machine` with an ssh target): a brief inside the repository is passed by its path, so it must
+  already be on the remote. A brief anywhere else (such as the orchestrator's scratch folder) is copied over ssh to
+  `.crew/briefs/` in the remote repo first.
   Every ssh call has a timeout (`CREW_SSH_TIMEOUT_MS`, default 60 s; `wait` adds its own `--timeout`).
 - Environment knobs, mainly for tests: `CREW_LOCK_WAIT_MS` (default 5000), `CREW_PID_GRACE_MS`,
   `CREW_SSH_TIMEOUT_MS`.

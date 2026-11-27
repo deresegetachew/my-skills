@@ -100,6 +100,8 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
 - `roles/`: brief templates per crew role.
 - `handoff.md`, `project-setup.md`, `machines.md`.
 - `workers/<name>/WORKER.md`: how to run each worker CLI; `workers/agy/plugin/` is the agy plugin.
-- `runner/` (task T4, in progress): the job runner (`crew start | wait | status | result | cancel | list | clean`).
+- `runner/`: the job runner (`crew start | wait | status | result | cancel | list | clean`). `crew` in this file
+  means `bun ~/.claude/skills/claude-agent-crew/runner/crew.ts`, run from the project's repo; each job's
+  `Next:` line prints the exact command.
 
 Credits: the job lifecycle, status line and review contract follow agy-staff (github.com/keli-wen/agy-staff, MIT).
