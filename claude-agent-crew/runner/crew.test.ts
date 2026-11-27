@@ -2392,8 +2392,8 @@ echo "Started job remote-20260101-000000-abcd"`);
     const copyPath = /cat > '?(\.crew\/briefs\/brief-[0-9a-f-]+\.md)/.exec(calls[0] ?? "")?.[1];
     expect(copyPath).toBeDefined();
     expect(calls[1]).toContain(`'--brief' '${copyPath}'`);
-    // ssh shells are non-interactive: the remote command puts bun's default folder on PATH itself.
-    expect(calls[1]).toContain('export PATH="$HOME/.bun/bin:$PATH"');
+    // ssh shells are non-interactive: the remote command puts bun's and agy's default folders on PATH itself.
+    expect(calls[1]).toContain('export PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH"');
     rmSync(sshLog);
     rmSync(join(t.repo, ".crew", "jobs"), { recursive: true, force: true });
 
