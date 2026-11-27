@@ -90,6 +90,8 @@ describe("guard allowed commands", () => {
     ["printf %s piped to agy", 'printf "fix %s\\n" "bug" | agy'],
     ["agy -p normal prompt containing cmdsub", 'agy -p "fix $(date)"'],
     ["single-quoted literal binary name", "'$(echo sudo)' id"],
+    ["git -c literal user.name", 'git -c user.name="Alice" commit -m "msg"'],
+    ["git filter-branch after -- on feature branch", "git filter-branch -- --branches=feature/x"],
   ];
 
   for (const [label, cmd] of allowedCases) {
@@ -269,6 +271,15 @@ describe("guard denied commands", () => {
     ["printf octal escape /boost piped to agy", 'printf "\\057boost" | agy'],
     ["echo -e hex escape /boost piped to agy", 'echo -e "\\x2fboost" | agy'],
     ["echo command sub piped to agy", 'echo "$(cat /tmp/x)" | agy'],
+    ["git -c command substitution alias", 'git -c "$(echo alias.go)=push origin main" go'],
+    ["git -c command substitution remote.origin.push", 'git -c "$(echo remote.origin.push)=HEAD:main" push origin'],
+    ["git attached -c command substitution", 'git -c"$(echo alias.go)=push origin main" go'],
+    ["git --config-env command substitution", 'git --config-env "$(echo alias.go)=GIT_VAL" go'],
+    ["git --config-env= command substitution", 'git --config-env="$(echo remote.origin.push)=GIT_VAL" push origin'],
+    ["git filter-branch after -- with --branches=main", "git filter-branch -- --branches=main"],
+    ["git filter-branch after -- with --branches=*", "git filter-branch -- --branches=*"],
+    ["git filter-branch after -- with empty --branches=", "git filter-branch -- --branches="],
+    ["git filter-branch after -- with glob --branches=ma?n", "git filter-branch -- --branches=ma?n"],
   ];
 
   for (const [label, cmd] of deniedCases) {

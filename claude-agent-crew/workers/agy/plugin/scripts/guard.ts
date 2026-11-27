@@ -1396,8 +1396,14 @@ function isMainOrRemoteMainRef(ref: string): boolean {
   return /^(origin|upstream)\/(main|master)$/.test(baseRef);
 }
 
-function checkGitConfigEntry(entry: string | undefined): GuardDecision | null {
+function checkGitConfigEntry(
+  entry: string | undefined,
+  hasCmdSub = false
+): GuardDecision | null {
   if (entry === undefined) return null;
+  if (hasCmdSub) {
+    return deny("command substitution in git -c/--config-env entry is not allowed");
+  }
   const eqIdx = entry.indexOf("=");
   const key = (eqIdx === -1 ? entry : entry.slice(0, eqIdx)).trim();
   if (/^alias\./i.test(key)) {
@@ -1923,15 +1929,8 @@ function checkGitFilterBranch(
         if (nested.decision === "deny") return nested;
         continue;
       }
-      if (arg.startsWith("--branches=")) {
-        const pattern = arg.slice("--branches=".length);
-        if (hasCmdSub || pattern.includes("*") || isProtectedBranch(pattern)) {
-          return deny("rewriting protected branch main/master with git filter-branch is not allowed");
-        }
-        continue;
-      }
       if (arg.startsWith("-")) {
-        if (arg === "--all" || arg === "--branches") {
+        if (arg === "--all" || arg === "--branches" || arg.startsWith("--branches=")) {
           revs.push({ value: arg, hasCmdSub });
         }
         continue;
@@ -1943,6 +1942,13 @@ function checkGitFilterBranch(
   for (const { value: rev, hasCmdSub } of revs) {
     if (hasCmdSub) {
       return deny("command substitution in git filter-branch revision is not allowed");
+    }
+    if (rev.startsWith("--branches=")) {
+      const pattern = rev.slice("--branches=".length);
+      if (pattern === "" || /[*?[]/.test(pattern) || isProtectedBranch(pattern)) {
+        return deny("rewriting protected branch main/master with git filter-branch is not allowed");
+      }
+      continue;
     }
     if (
       rev === "--all" ||
@@ -2029,25 +2035,28 @@ function checkGit(
       break;
     }
     if (arg === "-c") {
-      const verdict = checkGitConfigEntry(args[i + 1]);
+      const verdict = checkGitConfigEntry(args[i + 1], cmdSub[i + 1] ?? false);
       if (verdict !== null) return verdict;
       i += 2;
       continue;
     }
     if (arg.startsWith("-c") && arg.length > 2) {
-      const verdict = checkGitConfigEntry(arg.slice(2));
+      const verdict = checkGitConfigEntry(arg.slice(2), cmdSub[i] ?? false);
       if (verdict !== null) return verdict;
       i++;
       continue;
     }
     if (arg === "--config-env") {
-      const verdict = checkGitConfigEntry(args[i + 1]);
+      const verdict = checkGitConfigEntry(args[i + 1], cmdSub[i + 1] ?? false);
       if (verdict !== null) return verdict;
       i += 2;
       continue;
     }
     if (arg.startsWith("--config-env=")) {
-      const verdict = checkGitConfigEntry(arg.slice("--config-env=".length));
+      const verdict = checkGitConfigEntry(
+        arg.slice("--config-env=".length),
+        cmdSub[i] ?? false
+      );
       if (verdict !== null) return verdict;
       i++;
       continue;
