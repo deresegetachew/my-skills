@@ -70,12 +70,16 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
 7. **Audit** changes to safety rules, gates, money and data that must never change: the `auditor` tries to break
    them; check each break is real; each real break becomes a failing test plus a fix task; audit again until
    nothing breaks.
-8. **Merge** when review is clean, audits find nothing and CI is green, through the rule on main; you are the only
+8. **Look at UI changes yourself** before merging: phone and desktop screenshots beside the design (the builder's
+   own design-check script can be rerun). A builder's "visuals match" and a test that reads CSS text are not proof;
+   in the pilot both passed while the phone page lost its status chip. Ask for checks in a real browser
+   (`isVisible()` at each width).
+9. **Merge** when review is clean, audits find nothing and CI is green, through the rule on main; you are the only
    one who merges. Rerun an unrelated flaky test once; a second failure is a task. If CI stays red for a reason
    outside the change (runner, quota, infrastructure), tell the human; never merge red.
-9. **Check as a user** where the project has users: on staging, a `journey-tester` walks the numbered journeys;
+10. **Check as a user** where the project has users: on staging, a `journey-tester` walks the numbered journeys;
    for a UI, look at real screens at desktop and phone widths, not page text. File what fails as issues.
-10. **Report** to the human in a few lines: what merged, what you found, what needs them. Then `crew clean`.
+11. **Report** to the human in a few lines: what merged, what you found, what needs them. Then `crew clean`.
 
 ## Rules that do not bend
 
@@ -85,7 +89,8 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
 - Nothing runs as the human's GitHub account: workers and you use the crew apps' tokens (see `project-setup.md`).
 - Releases, production, secrets and spending stay the human's.
 - Cost: every run names its model (`crew.json`); cheap models by default; read status lines and diff stats, not
-  full reports; continue a builder's conversation for review fixes instead of starting over. `.crew/usage.jsonl`
+  full reports; give small review fixes to a fresh builder with a short brief: continuing a long conversation re-sends all of it
+  (in the remanual pilot, a three-item fix cost 1.3M tokens on --continue, twice the original build). `.crew/usage.jsonl`
   shows spend per role and model; look at it before changing models.
 - Keep a task to one PR of about 300 changed lines. A big diff makes every review expensive, and each fix round
   adds code for the next review to find.
