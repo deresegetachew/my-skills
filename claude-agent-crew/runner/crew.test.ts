@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -2574,9 +2575,12 @@ fi
 
   test("a project without the runner in its repo uses the installed skill, locally and over ssh", () => {
     const t = setupRepo();
-    // The skill installed for the remote user: ~/.claude/skills/claude-agent-crew -> this checkout.
-    mkdirSync(join(t.home, ".claude", "skills"), { recursive: true });
-    symlinkSync(resolve(import.meta.dir, ".."), join(t.home, ".claude", "skills", "claude-agent-crew"));
+    // The remote user has its own HOME with its own copy of the skill, at a different path from this runner.
+    const remoteHome = join(t.root, "remote-home");
+    const remoteSkill = join(remoteHome, ".claude", "skills", "claude-agent-crew");
+    mkdirSync(join(remoteSkill, "workers"), { recursive: true });
+    cpSync(resolve(import.meta.dir), join(remoteSkill, "runner"), { recursive: true });
+    cpSync(resolve(import.meta.dir, "..", "workers", "agy"), join(remoteSkill, "workers", "agy"), { recursive: true });
     const remoteRepo = join(t.root, "remote-repo");
     mkdirSync(join(remoteRepo, ".claude"), { recursive: true });
     const rGit = (args: string[]): void => {
@@ -2601,16 +2605,25 @@ fi
 
     // A fake ssh that runs the remote command as given: no rewriting of the runner path.
     const sshBin = join(t.binDir, "ssh");
-    writeFileSync(sshBin, `#!/usr/bin/env bash\nset -euo pipefail\nbash -c "\${@: -1}"\n`, "utf8");
+    const sshLog = join(t.root, "ssh.log");
+    writeFileSync(
+      sshBin,
+      `#!/usr/bin/env bash\nset -euo pipefail\nprintf '%s\\n' "\${@: -1}" >> "${sshLog}"\nHOME="${remoteHome}" bash -c "\${@: -1}"\n`,
+      "utf8",
+    );
     chmodSync(sshBin, 0o755);
     installFakeAgy(t.binDir, `echo '{"conversation_id":"c-installed","result":"Status: DONE\\nok"}'`);
 
     const start = runCrew(t, ["start", "--role", "remote", "--brief", join(t.repo, "brief.md")]);
     expect(start.exitCode).toBe(0);
     const jobId = extractJobId(start.stdout);
-    // The printed next step names this runner by its absolute path and works as printed.
+    // The remote ran its own installed copy...
+    expect(readFileSync(sshLog, "utf8")).toContain("$HOME/.claude/skills/claude-agent-crew/runner/crew.ts");
+    expect(existsSync(join(remoteRepo, ".crew", "jobs", `${jobId}.json`))).toBe(true);
+    // ...but the printed next step names this machine's runner, not the remote path, and works as printed.
     const nextLine = start.stdout.split("\n").find((l) => l.startsWith("Next: ")) ?? "";
     expect(nextLine).toContain(CREW_TS);
+    expect(nextLine).not.toContain(remoteHome);
     const wait = Bun.spawnSync(["bash", "-c", `${nextLine.slice("Next: ".length)} --timeout 10s`], {
       cwd: t.repo,
       env: t.env,
@@ -2618,6 +2631,15 @@ fi
       stderr: "pipe",
     });
     expect(wait.exitCode).toBe(0);
-    expect(runCrew(t, ["result", jobId]).stdout).toContain("ok");
+    const result = runCrew(t, ["result", jobId]);
+    expect(result.stdout).toContain("ok");
+    expect(result.stdout).not.toContain(remoteHome);
+
+    // A missing brief for a remote role is refused plainly, before any ssh call.
+    rmSync(sshLog);
+    const missing = runCrew(t, ["start", "--role", "remote", "--brief", join(t.root, "nope.md")]);
+    expect(missing.exitCode).toBe(1);
+    expect(errorCode(missing.stderr)).toBe("BRIEF_NOT_FOUND");
+    expect(existsSync(sshLog)).toBe(false);
   });
 });

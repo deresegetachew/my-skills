@@ -51,8 +51,15 @@ import {
 // (a project using the installed skill).
 const RUNNER_REL = relative(process.cwd(), import.meta.path);
 const RUNNER_CMD = `bun ${
-  RUNNER_REL && !RUNNER_REL.startsWith("..") && !isAbsolute(RUNNER_REL) ? RUNNER_REL : shellQuote(import.meta.path)
+  RUNNER_REL && !RUNNER_REL.startsWith("..") && !isAbsolute(RUNNER_REL) && /^[A-Za-z0-9_./-]+$/.test(RUNNER_REL)
+    ? RUNNER_REL
+    : shellQuote(import.meta.path)
 }`;
+
+/** A remote runner prints its own path in "Next:" lines; the orchestrator must see this machine's runner. */
+function localizeNext(remoteOut: string): string {
+  return remoteOut.replace(/^Next: bun (?:'(?:[^']|'\\'')*'|\S+) /gm, `Next: ${RUNNER_CMD} `);
+}
 
 interface ProcEntry {
   pid: number;
@@ -560,6 +567,13 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
   }
 
   if (!forceLocal && machineTarget !== "local") {
+    if (!existsSync(briefPath)) {
+      throw new CrewCliError(
+        "BRIEF_NOT_FOUND",
+        `Brief file not found: ${briefPath}`,
+        "Write the brief file first, then retry.",
+      );
+    }
     const remotePath = config.paths?.[machineName];
     if (!remotePath) {
       throw new CrewCliError(
@@ -652,7 +666,7 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
     };
     writeJob(repoRoot, remoteJobRecord);
 
-    console.log(`Started remote job on ${machineName} (${remotePath}):\n${out}`);
+    console.log(`Started remote job on ${machineName} (${remotePath}):\n${localizeNext(out)}`);
     return 0;
   }
 
@@ -1159,7 +1173,7 @@ async function cmdWait(repoRoot: string, args: string[]): Promise<number> {
       { code: "SSH_EXEC_FAILED", what: `waiting for job "${job.id}"`, target: job.machineTarget },
       { extraMs: timeoutMs },
     );
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     syncRemoteJobStatus(repoRoot, job, code);
@@ -1234,7 +1248,7 @@ function cmdStatus(repoRoot: string, args: string[]): number {
       what: `checking status for job "${raw.id}"`,
       target: raw.machineTarget,
     });
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     if (code === 0) applyRemoteStatusOutput(repoRoot, raw, res.stdout.toString());
@@ -1300,7 +1314,7 @@ function cmdResult(repoRoot: string, args: string[]): number {
       what: `reading result for job "${raw.id}"`,
       target: raw.machineTarget,
     });
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     syncRemoteJobStatus(repoRoot, raw, code);
@@ -1383,7 +1397,7 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
       what: `canceling job "${raw.id}"`,
       target: raw.machineTarget,
     });
-    process.stdout.write(res.stdout);
+    process.stdout.write(localizeNext(res.stdout.toString()));
     process.stderr.write(res.stderr);
     const code = res.exitCode;
     if (code === 0) {
