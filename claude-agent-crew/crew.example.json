@@ -5,7 +5,7 @@
     "reviewer":              { "worker": "agy",    "model": "gemini-4-hydrogen-high",   "machine": "mac" },
     "security-reviewer":     { "worker": "agy",    "model": "gemini-4-hydrogen-high",   "machine": "mac" },
     "architecture-reviewer": { "worker": "agy",    "model": "gemini-4-hydrogen-high",   "machine": "mac" },
-    "auditor":               { "worker": "claude",                                       "machine": "mac" },
+    "auditor":               { "worker": "claude", "model": "sonnet",                    "machine": "mac" },
     "journey-tester":        { "worker": "agy",    "model": "gemini-4-hydrogen-high",   "machine": "dev-pc" },
     "designer":              { "worker": "agy",    "model": "gemini-4-carbon-medium",   "machine": "mac" },
     "design-check":          { "worker": "agy",    "model": "gemini-3.8-flash-medium",  "machine": "mac" },

@@ -7,4 +7,4 @@
 none exists.
 Post the verdict on the PR as `crew-reviewer` when your tools allow it; otherwise return it.
 **Report:** `Status:` line; `Conflicts with the brief` if any; `Verdict:` safe / safe with changes / unsafe; each break as a concrete, reproducible case (input and
-what goes wrong); the fix you would want; what the existing tests already cover.
+what goes wrong); the fix you would want; what the existing tests already cover.; `What I could not verify`.
