@@ -60,11 +60,15 @@ export function buildClaudeArgs(opts: {
   readOnly: boolean;
   sessionId: string;
   resume: boolean;
+  maxTurns?: number;
+  maxBudgetUsd?: number;
 }): string[] {
   const args = ["-p", "--output-format", "json", "--settings", opts.settingsJson];
   if (opts.model) args.push("--model", opts.model);
   if (opts.rulesText) args.push("--append-system-prompt", opts.rulesText);
   if (opts.readOnly) args.push("--disallowedTools", "Edit", "Write", "NotebookEdit");
+  if (opts.maxTurns !== undefined) args.push("--max-turns", String(opts.maxTurns));
+  if (opts.maxBudgetUsd !== undefined) args.push("--max-budget-usd", String(opts.maxBudgetUsd));
   if (opts.resume) {
     args.push("--resume", opts.sessionId);
   } else {

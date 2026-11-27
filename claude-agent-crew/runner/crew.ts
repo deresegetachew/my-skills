@@ -647,6 +647,8 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       role,
       worker: roleConfig.worker,
       agent: roleConfig.agent ?? role,
+      maxTurns: roleConfig.maxTurns,
+      maxBudgetUsd: roleConfig.maxBudgetUsd,
       model: roleConfig.model ?? null,
       machine: machineName,
       machineTarget,
@@ -725,6 +727,8 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       role,
       worker: roleConfig.worker,
       agent: roleConfig.agent ?? role,
+      maxTurns: roleConfig.maxTurns,
+      maxBudgetUsd: roleConfig.maxBudgetUsd,
       model: roleConfig.model ?? null,
       machine: machineName,
       machineTarget,
@@ -933,6 +937,8 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
           readOnly: isReadOnlyRole(job.role),
           sessionId,
           resume,
+          maxTurns: job.maxTurns,
+          maxBudgetUsd: job.maxBudgetUsd,
         })
       : buildAgyArgs({
           briefText,
