@@ -135,6 +135,7 @@ export function isUnderWorktreesDir(repoRoot: string, wtPath: string): boolean {
   const canonRepo = canonicalizePath(repoRoot);
   const canonBase = canonicalizePath(worktreesDir(repoRoot));
   const canonTarget = canonicalizePath(wtPath);
+  if (canonBase !== join(canonRepo, ".crew", "worktrees")) return false;
   if (!isSubpath(canonRepo, canonBase)) return false;
   if (!isSubpath(canonBase, canonTarget)) return false;
   return isSubpath(resolve(worktreesDir(repoRoot)), resolve(wtPath));
@@ -218,6 +219,13 @@ export function prepareWorktree(
   if (readOnly) {
     const targetRef = opts.branch ?? "HEAD";
     const wtPath = join(worktreesDir(repoRoot), opts.jobId);
+    if (!isUnderWorktreesDir(repoRoot, wtPath)) {
+      throw new CrewCliError(
+        "WORKTREE_OUTSIDE_CREW",
+        `Refusing to create worktree outside .crew/worktrees/: ${wtPath}`,
+        "Ensure .crew/worktrees/ is a directory inside the repository, not a symlink pointing outside.",
+      );
+    }
     const addRes = runGit(repoRoot, ["worktree", "add", "--detach", wtPath, targetRef]);
     if (addRes.exitCode !== 0) {
       throw new CrewCliError(
@@ -261,6 +269,13 @@ export function prepareWorktree(
   }
 
   const wtPath = join(worktreesDir(repoRoot), sanitizeBranchSlug(branchName));
+  if (!isUnderWorktreesDir(repoRoot, wtPath)) {
+    throw new CrewCliError(
+      "WORKTREE_OUTSIDE_CREW",
+      `Refusing to create worktree outside .crew/worktrees/: ${wtPath}`,
+      "Ensure .crew/worktrees/ is a directory inside the repository, not a symlink pointing outside.",
+    );
+  }
   const holder = findWorktreeHolder(opts.runningJobs, wtPath, branchName);
   if (holder) {
     throw new CrewCliError(

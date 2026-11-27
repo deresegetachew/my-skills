@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -1161,5 +1162,50 @@ wait
     expect(clean.exitCode).toBe(0);
     expect(existsSync(escapedWt)).toBe(true);
     expect(clean.stdout).toContain("outside .crew/worktrees/");
+  });
+
+  test("crew start (builder and reviewer) refuses with WORKTREE_OUTSIDE_CREW and creates nothing when .crew/worktrees is symlinked outside repoRoot", () => {
+    const t = setupRepo();
+    const agyMarker = join(t.root, "agy-ran-symlink.txt");
+    installFakeAgy(
+      t.binDir,
+      `touch "${agyMarker}"\necho '{"conversation_id":"c1","result":"Status: DONE\\nok"}'`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Task.\n", "utf8");
+
+    const outsideDir = join(t.root, "outside-worktrees-start");
+    mkdirSync(outsideDir, { recursive: true });
+    mkdirSync(join(t.repo, ".crew"), { recursive: true });
+    symlinkSync(outsideDir, join(t.repo, ".crew", "worktrees"));
+
+    const builderStart = runCrew(t, [
+      "start",
+      "--role",
+      "builder",
+      "--brief",
+      briefPath,
+      "--branch",
+      "feat/sym-builder",
+    ]);
+    expect(builderStart.exitCode).toBe(1);
+    expect((JSON.parse(builderStart.stderr) as { code: string }).code).toBe("WORKTREE_OUTSIDE_CREW");
+    expect(readdirSync(outsideDir)).toEqual([]);
+    expect(existsSync(agyMarker)).toBe(false);
+
+    const reviewerStart = runCrew(t, [
+      "start",
+      "--role",
+      "reviewer",
+      "--brief",
+      briefPath,
+      "--branch",
+      "main",
+    ]);
+    expect(reviewerStart.exitCode).toBe(1);
+    expect((JSON.parse(reviewerStart.stderr) as { code: string }).code).toBe("WORKTREE_OUTSIDE_CREW");
+    expect(readdirSync(outsideDir)).toEqual([]);
+    expect(existsSync(agyMarker)).toBe(false);
+    expect(readdirSync(join(t.repo, ".crew", "jobs"))).toEqual([]);
   });
 });
