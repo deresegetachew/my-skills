@@ -34,12 +34,17 @@ import { CrewCliError, type JobRecord, type JobStatus } from "./types.ts";
 import {
   assertWorkerSupported,
   buildAgyArgs,
+  buildClaudeArgs,
   buildSshCrewCommand,
   buildSshStartCommand,
+  crewRootForWorkers,
   parseAgyOutput,
+  parseClaudeOutput,
+  readCrewRules,
   readWorkerSettings,
   shellQuote,
   toRemoteBriefPath,
+  workerTimeoutMs,
 } from "./worker.ts";
 
 const RUNNER_CMD = "bun claude-agent-crew/runner/crew.ts";
@@ -389,7 +394,7 @@ function runSsh(
       `Verify that \`ssh\` is installed on PATH and ${failure.target} is reachable.`,
     );
   }
-  return { exitCode: res.exitCode, stdout: Buffer.from(res.stdout), stderr: Buffer.from(res.stderr) };
+  return { exitCode: res.exitCode, stdout: Buffer.from(res.stdout ?? ""), stderr: Buffer.from(res.stderr ?? "") };
 }
 
 const REMOTE_STATUSES: readonly JobStatus[] = ["running", "done", "error", "canceled", "attention"];
@@ -529,6 +534,7 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
   }
 
   assertWorkerSupported(roleConfig.worker, role);
+  if (roleConfig.worker === "claude") workerTimeoutMs(timeout);
 
   const machineName = roleConfig.machine ?? "local";
   const machineTarget =
@@ -783,6 +789,20 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
   return 0;
 }
 
+/** Signals a process and every descendant, deepest first (pgrep -P walks the tree). */
+function killProcessTree(pid: number, signal: NodeJS.Signals): void {
+  const found = Bun.spawnSync(["pgrep", "-P", String(pid)], { stdout: "pipe", stderr: "ignore" });
+  for (const line of found.stdout.toString().split("\n")) {
+    const child = Number(line.trim());
+    if (Number.isInteger(child) && child > 0) killProcessTree(child, signal);
+  }
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // already gone
+  }
+}
+
 async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
   const { positionals, flags, help } = parseFlags(args, {
     valueFlags: ["timeout"],
@@ -860,16 +880,34 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
   try {
     const printTimeout = stringFlag(flags, "timeout") ?? "30m";
     const briefText = readFileSync(job.briefFile, "utf8");
-    const settingsJson = readWorkerSettings(repoRoot);
-    const agyArgs = buildAgyArgs({
-      briefText,
-      role: job.role,
-      model: job.model,
-      printTimeout,
-      worktree: job.worktree,
-      settingsJson,
-      conversationId: job.continuedFrom ? job.conversationId : null,
-    });
+    const isClaude = job.worker === "claude";
+    const settingsJson = readWorkerSettings(repoRoot, job.worker);
+    const resume = Boolean(job.continuedFrom && job.conversationId);
+    const sessionId = resume && job.conversationId ? job.conversationId : crypto.randomUUID();
+    const timeoutMs = isClaude ? workerTimeoutMs(printTimeout) : null;
+    const workerArgs = isClaude
+      ? buildClaudeArgs({
+          model: job.model,
+          settingsJson,
+          rulesText: readCrewRules(),
+          readOnly: isReadOnlyRole(job.role),
+          sessionId,
+          resume,
+        })
+      : buildAgyArgs({
+          briefText,
+          role: job.role,
+          model: job.model,
+          printTimeout,
+          worktree: job.worktree,
+          settingsJson,
+          conversationId: job.continuedFrom ? job.conversationId : null,
+        });
+    if (isClaude) {
+      // Record the session id first, so a run that times out or crashes can still be continued.
+      job.conversationId = sessionId;
+      writeJob(repoRoot, job);
+    }
 
     await Bun.sleep(5);
     const latestBefore = readJob(repoRoot, job.id);
@@ -887,19 +925,34 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       return 4;
     }
 
-    const proc = Bun.spawn(["agy", ...agyArgs], {
+    const proc = Bun.spawn([isClaude ? "claude" : "agy", ...workerArgs], {
       cwd: job.worktree,
-      stdin: "ignore",
+      stdin: isClaude ? new Blob([briefText]) : "ignore",
       stdout: "pipe",
       stderr: "pipe",
+      env: isClaude ? { ...process.env, CREW_ROOT: crewRootForWorkers(), CREW_BUN: process.execPath } : process.env,
     });
     activeProc = proc;
 
-    const [stdoutText, stderrText, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
+    let workerTimedOut = false;
+    const timer =
+      timeoutMs === null
+        ? null
+        : setTimeout(() => {
+            workerTimedOut = true;
+            // Tool commands (and their children) would keep the output pipes open, so stop the whole tree.
+            killProcessTree(proc.pid, "SIGTERM");
+            setTimeout(() => killProcessTree(proc.pid, "SIGKILL"), 2000).unref();
+          }, timeoutMs);
+
+    const stdoutPromise = new Response(proc.stdout).text();
+    const stderrPromise = new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    if (timer) clearTimeout(timer);
+    const pipes = Promise.all([stdoutPromise, stderrPromise]);
+    const [stdoutText, stderrText] = workerTimedOut
+      ? await Promise.race([pipes, Bun.sleep(3000).then((): [string, string] => ["", ""])])
+      : await pipes;
 
     writeFileSync(job.stdoutFile, stdoutText, "utf8");
     writeFileSync(
@@ -925,7 +978,9 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       return exitCodeForStatus(latest.status);
     }
 
-    const parsed = parseAgyOutput(stdoutText, stderrText, exitCode);
+    const parsed = isClaude
+      ? parseClaudeOutput(stdoutText, stderrText, exitCode, workerTimedOut, sessionId)
+      : parseAgyOutput(stdoutText, stderrText, exitCode);
     const endTime = new Date().toISOString();
     const effectiveConversationId = parsed.conversationId ?? job.conversationId;
     let status: JobStatus;
@@ -1252,7 +1307,7 @@ function cmdResult(repoRoot: string, args: string[]): number {
 
   const text = (job.resultText ?? "").trim();
   const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
-  if (/^Status:\s*\S+/i.test(firstLine)) {
+  if (/^(Status|Verdict):\s*\S+/i.test(firstLine)) {
     console.log(text);
   } else {
     const label = job.status === "attention" ? "ATTENTION" : "DONE";
@@ -1403,33 +1458,41 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
     );
   }
   const job = raw;
+  const pid = job.pid;
+  if (pid === null) {
+    throw new CrewCliError(
+      "JOB_NOT_RUNNING",
+      `Job "${job.id}" has no recorded process.`,
+      `Run \`${RUNNER_CMD} status ${job.id}\` to inspect it.`,
+    );
+  }
 
   try {
-    process.kill(-job.pid, "SIGTERM");
+    process.kill(-pid, "SIGTERM");
   } catch {
     try {
-      process.kill(job.pid, "SIGTERM");
+      process.kill(pid, "SIGTERM");
     } catch {
       // already exited
     }
   }
 
   const killDeadline = Date.now() + 1500;
-  while (Date.now() < killDeadline && hasLiveProcessInPgid(job.pid)) {
+  while (Date.now() < killDeadline && hasLiveProcessInPgid(pid)) {
     await Bun.sleep(50);
   }
-  if (hasLiveProcessInPgid(job.pid)) {
+  if (hasLiveProcessInPgid(pid)) {
     try {
-      process.kill(-job.pid, "SIGKILL");
+      process.kill(-pid, "SIGKILL");
     } catch {
       try {
-        process.kill(job.pid, "SIGKILL");
+        process.kill(pid, "SIGKILL");
       } catch {
         // already exited
       }
     }
     const reapDeadline = Date.now() + 500;
-    while (Date.now() < reapDeadline && hasLiveProcessInPgid(job.pid)) {
+    while (Date.now() < reapDeadline && hasLiveProcessInPgid(pid)) {
       await Bun.sleep(25);
     }
   }

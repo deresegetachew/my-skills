@@ -2,15 +2,35 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { UsageMetrics } from "./types.ts";
 import { CrewCliError } from "./types.ts";
+import { parseDurationMs } from "./store.ts";
 
-export function readWorkerSettings(repoRoot: string): string {
-  const runnerDir = dirname(import.meta.path);
-  const crewRoot = resolve(runnerDir, "..");
+function crewRootDir(): string {
+  return resolve(dirname(import.meta.path), "..");
+}
+
+export function readWorkerSettings(repoRoot: string, worker = "agy"): string {
+  const crewRoot = crewRootDir();
+  if (worker === "claude") {
+    const candidates = [
+      join(repoRoot, ".claude", "settings.worker.claude.json"),
+      join(crewRoot, "workers", "claude", "settings.worker.json"),
+    ];
+    for (const path of candidates) {
+      if (existsSync(path)) return readFileSync(path, "utf8").trim();
+    }
+    throw new CrewCliError(
+      "WORKER_SETTINGS_MISSING",
+      "No settings file for the claude worker was found.",
+      `Restore ${join(crewRoot, "workers", "claude", "settings.worker.json")}.`,
+    );
+  }
   const candidates = [
     join(repoRoot, ".claude", "settings.worker.json"),
     join(repoRoot, "claude-agent-crew", "workers", "agy", "settings.worker.json"),
+    join(repoRoot, "claude-agent-crew", "workers", "agy", "plugin", "settings.worker.json"),
     join(repoRoot, "claude-agent-crew", "settings.worker.json"),
     join(crewRoot, "workers", "agy", "settings.worker.json"),
+    join(crewRoot, "workers", "agy", "plugin", "settings.worker.json"),
     join(crewRoot, "settings.worker.json"),
   ];
   for (const path of candidates) {
@@ -19,6 +39,102 @@ export function readWorkerSettings(repoRoot: string): string {
     }
   }
   return "{}";
+}
+
+/** The crew rules every worker gets (the agy plugin's rules file, shared with the claude worker). */
+export function readCrewRules(): string {
+  const path = join(crewRootDir(), "workers", "agy", "plugin", "rules", "AGENTS.md");
+  return existsSync(path) ? readFileSync(path, "utf8").trim() : "";
+}
+
+export function crewRootForWorkers(): string {
+  return crewRootDir();
+}
+
+/** Arguments for `claude`. The brief goes on stdin, so a brief starting with "-" is never read as a flag. */
+export function buildClaudeArgs(opts: {
+  model: string | null;
+  settingsJson: string;
+  rulesText: string;
+  readOnly: boolean;
+  sessionId: string;
+  resume: boolean;
+}): string[] {
+  const args = ["-p", "--output-format", "json", "--settings", opts.settingsJson];
+  if (opts.model) args.push("--model", opts.model);
+  if (opts.rulesText) args.push("--append-system-prompt", opts.rulesText);
+  if (opts.readOnly) args.push("--disallowedTools", "Edit", "Write", "NotebookEdit");
+  if (opts.resume) {
+    args.push("--resume", opts.sessionId);
+  } else {
+    args.push("--session-id", opts.sessionId);
+  }
+  return args;
+}
+
+/** A worker timeout such as "30m", "90s" or "2h" in milliseconds; "0" means no limit (null). */
+export function workerTimeoutMs(text: string): number | null {
+  const ms = parseDurationMs(text);
+  if (ms === null) {
+    throw new CrewCliError(
+      "INVALID_TIMEOUT",
+      `Cannot read timeout "${text}".`,
+      "Use a value like 30m, 90s, 2h, or 0 for no limit.",
+    );
+  }
+  return ms === 0 ? null : ms;
+}
+
+/** Reads `claude -p --output-format json`: one JSON object with type "result". */
+export function parseClaudeOutput(
+  stdoutText: string,
+  stderrText: string,
+  exitCode: number | null,
+  timedOut: boolean,
+  sessionId: string,
+): ParsedWorkerOutput {
+  let result: Record<string, unknown> | null = null;
+  const lines = stdoutText.trim().split("\n").reverse();
+  for (const line of [stdoutText.trim(), ...lines]) {
+    try {
+      const value: unknown = JSON.parse(line);
+      if (typeof value === "object" && value !== null && (value as Record<string, unknown>).type === "result") {
+        result = value as Record<string, unknown>;
+        break;
+      }
+    } catch {
+      // not JSON; keep looking
+    }
+  }
+  if (!result) {
+    return {
+      conversationId: sessionId,
+      resultText: timedOut ? "" : stderrText.trim().slice(-2000),
+      usage: null,
+      isError: true,
+      timedOut,
+      validJson: false,
+    };
+  }
+  const usage: UsageMetrics = {};
+  const rawUsage = result.usage;
+  if (typeof rawUsage === "object" && rawUsage !== null) {
+    for (const key of ["input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"]) {
+      const v = (rawUsage as Record<string, unknown>)[key];
+      if (typeof v === "number") usage[key] = v;
+    }
+  }
+  if (typeof result.total_cost_usd === "number") usage.total_cost_usd = result.total_cost_usd;
+  const text = typeof result.result === "string" ? result.result : "";
+  const session = typeof result.session_id === "string" && result.session_id ? result.session_id : sessionId;
+  return {
+    conversationId: session,
+    resultText: text,
+    usage: Object.keys(usage).length > 0 ? usage : null,
+    isError: result.is_error === true || (exitCode !== null && exitCode !== 0),
+    timedOut,
+    validJson: true,
+  };
 }
 
 export function buildAgyArgs(opts: {
@@ -51,18 +167,11 @@ export function buildAgyArgs(opts: {
 }
 
 export function assertWorkerSupported(worker: string, role: string): void {
-  if (worker === "agy") return;
-  if (worker === "claude") {
-    throw new CrewCliError(
-      "WORKER_NOT_SUPPORTED",
-      `Worker "claude" for role "${role}" is not yet supported (T5).`,
-      `Change role "${role}" in .claude/crew.json to use worker "agy", or wait for T5.`,
-    );
-  }
+  if (worker === "agy" || worker === "claude") return;
   throw new CrewCliError(
     "UNKNOWN_WORKER",
     `Unknown worker "${worker}" for role "${role}".`,
-    `Set "worker" to "agy" in .claude/crew.json.`,
+    `Set "worker" to "agy" or "claude" in .claude/crew.json.`,
   );
 }
 

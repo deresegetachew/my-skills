@@ -75,4 +75,4 @@ never removed under it.
 
 ## Tests
 
-`bun test claude-agent-crew/runner/crew.test.ts` (fake `agy` and `ssh` on `PATH`, real git repositories in temp dirs).
+`bun test claude-agent-crew/runner/crew.test.ts` (fake `agy`, `claude` and `ssh` on `PATH`, real git repositories in temp dirs).
