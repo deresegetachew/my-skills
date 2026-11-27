@@ -34,6 +34,10 @@ export interface RoleConfig {
   machine?: string;
   /** The worker's agent definition to use (agy `--agent`); defaults to the role's name. */
   agent?: string;
+  /** claude worker only: stop the job after this many turns (`claude --max-turns`). */
+  maxTurns?: number;
+  /** claude worker only: stop the job once it has spent this many US dollars (`claude --max-budget-usd`). */
+  maxBudgetUsd?: number;
 }
 
 export interface CrewConfig {
@@ -67,6 +71,9 @@ export interface JobRecord {
   worker: string;
   /** The agent definition the worker runs; absent on older records (then the role name). */
   agent?: string;
+  /** Caps copied from the role when the job started (claude worker only). */
+  maxTurns?: number;
+  maxBudgetUsd?: number;
   model: string | null;
   machine: string;
   machineTarget: string;

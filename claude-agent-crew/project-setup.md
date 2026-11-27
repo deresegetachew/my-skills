@@ -27,6 +27,8 @@ key back, so nobody copies secrets.
    A role may set `"agent"` to reuse another role's agent definition with a different model, for example
    `"builder-strong": { "worker": "agy", "model": "claude-sonnet-5-5-medium", "agent": "builder" }`; without it the
    agent is the role's own name.
+   A `claude` role may also set `"maxTurns"` (a whole number) and `"maxBudgetUsd"` (dollars) to cap each job, passed
+   as `claude --max-turns` and `--max-budget-usd`; a job that hits a cap stops and its result says so.
 5. `.crew/` in `.git/info/exclude`.
 
 **Once per machine:** see `machines.md`.

@@ -201,6 +201,8 @@ export function readCrewConfig(repoRoot: string): CrewConfig {
       model: typeof rawRole.model === "string" ? rawRole.model.trim() : undefined,
       machine: typeof rawRole.machine === "string" ? rawRole.machine.trim() : undefined,
       agent: typeof rawRole.agent === "string" && rawRole.agent.trim() !== "" ? rawRole.agent.trim() : undefined,
+      maxTurns: positiveNumber(rawRole.maxTurns, "maxTurns", roleName, cfgPath, true),
+      maxBudgetUsd: positiveNumber(rawRole.maxBudgetUsd, "maxBudgetUsd", roleName, cfgPath, false),
     };
   }
 
@@ -219,4 +221,24 @@ export function readCrewConfig(repoRoot: string): CrewConfig {
   }
 
   return { roles, machines, paths };
+}
+
+/** An optional positive number (a whole number when `integer`) from a role's config; anything else is refused. */
+function positiveNumber(
+  value: unknown,
+  field: string,
+  roleName: string,
+  cfgPath: string,
+  integer: boolean,
+): number | undefined {
+  if (value === undefined) return undefined;
+  const ok = typeof value === "number" && Number.isFinite(value) && value > 0 && (!integer || Number.isInteger(value));
+  if (!ok) {
+    throw new CrewCliError(
+      "CONFIG_INVALID",
+      `Role "${roleName}" in ${cfgPath} has an invalid "${field}": ${JSON.stringify(value)}.`,
+      `Set "${field}" on role "${roleName}" in ${cfgPath} to a ${integer ? "whole number" : "number"} above 0, or remove it.`,
+    );
+  }
+  return value;
 }

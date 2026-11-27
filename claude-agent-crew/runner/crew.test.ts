@@ -2515,6 +2515,54 @@ echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: P
     expect(usage.usage.input_tokens).toBe(300);
     expect(usage.usage.cache_read_input_tokens).toBe(1000);
     expect(usage.usage.total_cost_usd).toBe(0.42);
+    // No caps on the role: neither flag is passed.
+    expect(argLines).not.toContain("--max-turns");
+    expect(argLines).not.toContain("--max-budget-usd");
+  });
+
+  test("claude worker: a role's maxTurns and maxBudgetUsd cap the job; bad values are refused", () => {
+    const t = setupRepo({
+      roles: {
+        auditor: { worker: "claude", machine: "local", maxTurns: 40, maxBudgetUsd: 1.5 },
+        broken: { worker: "claude", machine: "local", maxTurns: -3 },
+      },
+      machines: { local: "local" },
+    });
+    const argsLog = join(t.root, "claude-args.txt");
+    installFakeClaude(
+      t.binDir,
+      `
+printf '%s\\0' "$@" > "${argsLog}"
+cat > /dev/null
+echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: PASS","session_id":"s1","total_cost_usd":0.01,"usage":{"input_tokens":1,"output_tokens":1}}'
+`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Audit.\n", "utf8");
+
+    const bad = runCrew(t, ["start", "--role", "auditor", "--brief", briefPath]);
+    expect(bad.exitCode).toBe(1);
+    const err = JSON.parse(bad.stderr) as { code: string; message: string; fix: string };
+    expect(err.code).toBe("CONFIG_INVALID");
+    expect(err.message).toContain("maxTurns");
+    expect(err.fix).toContain("broken");
+
+    writeFileSync(
+      join(t.repo, ".claude", "crew.json"),
+      JSON.stringify({
+        roles: { auditor: { worker: "claude", machine: "local", maxTurns: 40, maxBudgetUsd: 1.5 } },
+        machines: { local: "local" },
+      }),
+      "utf8",
+    );
+    const start = runCrew(t, ["start", "--role", "auditor", "--brief", briefPath]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+    expect(runCrew(t, ["wait", jobId, "--timeout", "10s"]).exitCode).toBe(0);
+    const argLines = readFileSync(argsLog, "utf8").split("\0");
+    const argAfter = (flag: string): string | undefined => argLines[argLines.indexOf(flag) + 1];
+    expect(argAfter("--max-turns")).toBe("40");
+    expect(argAfter("--max-budget-usd")).toBe("1.5");
   });
 
   test("claude worker: read-only roles cannot edit; a timed-out run needs attention and --continue resumes it", async () => {
