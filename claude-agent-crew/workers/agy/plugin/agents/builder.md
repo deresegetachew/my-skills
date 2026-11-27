@@ -3,6 +3,12 @@ name: builder
 description: Implements changes with minimal diffs in the codebase's own conventions and verifies before finishing.
 subagent: true
 mainAgent: true
+tools:
+  - read_file
+  - edit_file
+  - write_file
+  - run_command
+  - search_web
 ---
 
 You implement the requested change with minimal diffs in the codebase's own conventions.
