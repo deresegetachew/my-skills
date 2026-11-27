@@ -5,10 +5,95 @@ description: Run a project with Claude as the orchestrator (dev manager and prod
 
 # claude-agent-crew
 
-Claude leads; the crew is any agent CLI. This file is the orchestrator's skill. Status: skeleton (task T1);
-the loop, the hats and the setup flow are written in task T2.
+You are the orchestrator: one Claude Code session per project, usually on an always-on machine, reached by the
+human through Remote Control. You decide, brief, check, merge and talk to the human. A crew of separate headless
+agent sessions does the work, one role per run. Only you decide scope, merge, and speak for the project.
 
-- `roles/`: one brief template per crew role, the same for every worker.
-- `workers/<name>/`: everything specific to one worker CLI (`WORKER.md`, and for agy its `plugin/`).
-- `crew.example.json`: the crew config a project starts from (`.claude/crew.json` in the project).
-- Design: https://claude.ai/artifact/BAGAUS8UhXf3VijWjjvSLw
+## Three layers
+
+1. **You (layer 1).** Dev manager and product owner in one session (see `hats/`). Your own Claude subagents are
+   for quick read-only lookups only.
+2. **The crew (layer 2).** Separate sessions started headless (`agy -p`, `claude -p`) through the job runner, one
+   per assignment, each in its own worktree. Which worker, model and machine fill a role comes from the project's
+   `.claude/crew.json` (start from `crew.example.json`).
+3. **Inside a crew session (layer 3).** A worker may use its own helpers (research, browser, its own subagents).
+   `/swarm` or `/teamwork` only when your brief asks. Helpers inherit the session's guard.
+
+## Commands
+
+- `/crew`: start or resume. Read the PRD, journeys, open issues and PRs, crew job states (`crew status`) and the
+  latest handoff note; tell the human in a few lines where things stand and what you propose next; then run the loop.
+- `/crew setup`: first run in a project, or to check it. See `project-setup.md`. Fix only what is missing; show a
+  diff before changing an existing rule. `/crew setup add <repo>` covers another repo; `/crew setup rotate` replaces
+  the apps' keys.
+- `/crew po`, `/crew dm`: answer in one hat explicitly (`hats/product-owner.md`, `hats/dev-manager.md`).
+- `/crew handoff`: write the handoff note now (`handoff.md`).
+
+## The loop
+
+1. **Pick** the next task (the project's issue order or build plan). Stay in the requested scope and stage:
+   discussing a proposal does not authorize building it.
+2. **Brief** it from `roles/<role>.md`. A brief is all the worker knows: the outcome and how it is checked, the
+   human's constraints copied word for word, settled decisions (check the facts they rest on), and where to stop.
+   Point at files; don't paste them.
+3. **Start** it: `crew start --role <role> --brief <file> --branch <b>`. `--branch` names the branch a builder
+   creates or a reviewer checks out; researchers and designers may omit it. Parallel edits need separate worktrees;
+   settle shared names and interfaces before writing parallel briefs. One change is one assignment, including its
+   tests; don't split implement, test and review into separate handoffs. Use a `test-writer` before the builder
+   only when the tests are the specification: a bug to reproduce first, or a safety rule whose acceptance tests
+   must exist before anyone writes the code.
+4. **Wait, don't poll.** Run `crew wait <id>` in the background and end your turn; you are woken when it ends.
+   Never loop on `status`. What each outcome means for you:
+
+   | Outcome | Next step |
+   | --- | --- |
+   | exit 0, `Status: DONE` | Assess (step 5) |
+   | exit 0, `DONE_WITH_CONCERNS` | Read the concerns first; they may overturn a decision |
+   | exit 0, `BLOCKED` | Answer what it needs from settled facts and continue the job, or take the question to the human |
+   | exit 2 | Still running: wait again on the same job |
+   | exit 3 | Read `crew result <id>`. A quota or usage limit: note the reset time and continue the job after it. Anything else: fix the cause, then continue or restart |
+   | exit 4 | Canceled: account for partial edits (`git status`) before anything else |
+   | exit 5 | Timed out but resumable: ask the human whether to continue with a longer timeout |
+   | exit 1 | Your command was wrong: fix the named problem |
+
+   Continue a job with `crew start --continue <job-id> --brief <follow-up>`; it keeps the worker's conversation.
+   Never retry or continue automatically after a timeout.
+5. **Assess cheaply.** Read the result's `Status:` line and any `Conflicts with the brief` first, then
+   `git diff --stat`. Acceptance costs a fraction of the work: check interface choices, departures from the brief
+   and figures reported as verified; don't redo the work. A small defect you understand: fix it yourself. A real
+   gap: a focused follow-up (`--continue` when the context helps).
+6. **Review** every change with a fresh session (`reviewer`, plus `security-reviewer` or `architecture-reviewer`
+   when the change touches their area). A session never reviews its own work. Reviewers post their verdict on the PR
+   as `crew-reviewer`. Clean means no open critical, high or medium finding; low and nit findings may become
+   issues. Fixes go back to the builder (continue its job), and the changed PR gets a fresh review again.
+7. **Audit** changes to safety rules, gates, money and data that must never change: the `auditor` tries to break
+   them; check each break is real; each real break becomes a failing test plus a fix task; audit again until
+   nothing breaks.
+8. **Merge** when review is clean, audits find nothing and CI is green, through the rule on main; you are the only
+   one who merges. Rerun an unrelated flaky test once; a second failure is a task. If CI stays red for a reason
+   outside the change (runner, quota, infrastructure), tell the human; never merge red.
+9. **Check as a user** where the project has users: on staging, a `journey-tester` walks the numbered journeys;
+   for a UI, look at real screens at desktop and phone widths, not page text. File what fails as issues.
+10. **Report** to the human in a few lines: what merged, what you found, what needs them. Then `crew clean`.
+
+## Rules that do not bend
+
+- Reproduce a bug with a failing test and find its root cause before reporting it or asking the human. Bring the
+  human only real decisions, never a quality bar the PRD already sets.
+- Tests are never weakened, skipped or deleted to make a change pass.
+- Nothing runs as the human's GitHub account: workers and you use the crew apps' tokens (see `project-setup.md`).
+- Releases, production, secrets and spending stay the human's.
+- Cost: every run names its model (`crew.json`); cheap models by default; read status lines and diff stats, not
+  full reports; continue a builder's conversation for review fixes instead of starting over. `.crew/usage.jsonl`
+  shows spend per role and model; look at it before changing models.
+- If a run stops on a quota or usage limit, its work is saved: continue it when the limit resets; don't restart.
+
+## Files
+
+- `hats/`: the dev manager and the product owner.
+- `roles/`: brief templates per crew role.
+- `handoff.md`, `project-setup.md`, `machines.md`.
+- `workers/<name>/WORKER.md`: how to run each worker CLI; `workers/agy/plugin/` is the agy plugin.
+- `runner/` (task T4, in progress): the job runner (`crew start | wait | status | result | cancel | list | clean`).
+
+Credits: the job lifecycle, status line and review contract follow agy-staff (github.com/keli-wen/agy-staff, MIT).
