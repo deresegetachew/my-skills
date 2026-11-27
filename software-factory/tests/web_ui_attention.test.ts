@@ -328,7 +328,9 @@ test("Claude's usage limit: one item for the whole team with its reset time and 
     pattern: "quota-rejected", text: "You've hit your limit", by: "menelik" }));
   limit(now + 3600);
   const x = await until(ui, has("claude-limit:team"));
-  const hm = new Date((now + 3600) * 1000).toISOString().slice(11, 16);
+  // An hour from now can be tomorrow (after 23:00 UTC); then the text carries the day too.
+  const at = new Date((now + 3600) * 1000).toISOString();
+  const hm = at.slice(0, 10) === new Date(now * 1000).toISOString().slice(0, 10) ? at.slice(11, 16) : `${at.slice(0, 10)} ${at.slice(11, 16)}`;
   expect(x.filter((i) => i.kind === "claude-limit")).toEqual([{ id: "claude-limit:team", kind: "claude-limit", title: "Claude's usage limit is reached",
     reason: `Claude's 5-hour usage limit is reached: the agents wait until ${hm} (this machine's time), then carry on by themselves.`,
     task: null, agent: null, pr: null, epic: null, action: { kind: "none", label: "" } }]);
