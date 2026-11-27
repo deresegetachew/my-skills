@@ -1,0 +1,16 @@
+{
+  "claude-agent-crew-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun ./scripts/guard.ts",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

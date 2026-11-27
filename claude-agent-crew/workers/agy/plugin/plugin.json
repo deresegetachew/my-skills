@@ -1,0 +1,7 @@
+{
+  "name": "claude-agent-crew",
+  "version": "0.1.0",
+  "description": "Crew plugin for agy: repository safety rules, ten specialized role agents, worker settings, and a PreToolUse command guard.",
+  "author": "owner",
+  "license": "MIT"
+}
