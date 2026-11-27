@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { UsageMetrics } from "./types.ts";
 import { CrewCliError } from "./types.ts";
@@ -122,15 +122,25 @@ export function buildSshStartCommand(opts: {
   });
 }
 
+function canonical(path: string): string {
+  // macOS: /var is a symlink to /private/var, and git prints the real path, so compare real paths.
+  const abs = resolve(path);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
 export function toRemoteBriefPath(repoRoot: string, briefFile: string, remotePath?: string): string {
-  const abs = resolve(briefFile);
+  const abs = canonical(briefFile);
   if (remotePath) {
-    const remoteRel = relative(resolve(remotePath), abs);
+    const remoteRel = relative(canonical(remotePath), abs);
     if (remoteRel !== ".." && !remoteRel.startsWith(`..${sep}`) && !isAbsolute(remoteRel)) {
       return remoteRel || ".";
     }
   }
-  const rel = relative(resolve(repoRoot), abs);
+  const rel = relative(canonical(repoRoot), abs);
   if (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel)) {
     return rel || ".";
   }
