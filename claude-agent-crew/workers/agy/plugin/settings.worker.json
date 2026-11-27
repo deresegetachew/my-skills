@@ -1,0 +1,15 @@
+{
+  "toolPermission": "always-proceed",
+  "artifactReviewPolicy": "always-proceed",
+  "permissions": {
+    "deny": [
+      "command(sudo)",
+      "command(git push --force)",
+      "command(git push -f)",
+      "command(git push origin main)",
+      "command(git push origin master)",
+      "command(gh pr merge)",
+      "command(gh repo delete)"
+    ]
+  }
+}
