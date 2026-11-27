@@ -7,8 +7,12 @@ The crew plugin for `agy`.
 - `plugin.json` — plugin manifest (`claude-agent-crew`, MIT)
 - `rules/AGENTS.md` — always-on repository safety, workflow, and terse reporting rules
 - `agents/` — ten role agents (`test-writer`, `builder`, `reviewer`, `security-reviewer`, `architecture-reviewer`, `auditor`, `journey-tester`, `designer`, `design-check`, `researcher`), each with `mainAgent: true` and `subagent: true`
-- `hooks.json` + `scripts/guard.ts` — `PreToolUse` guard on `run_command` blocking pushes to `main`/`master`, force-pushes, branch deletes, history rewrites on `main`, `gh pr merge`, `gh repo delete`, `gh api` branch-protection/ruleset writes, and `sudo`
+- `hooks.json` + `scripts/guard.ts` — `PreToolUse` guard on `run_command` blocking pushes to `main`/`master`, force-pushes, branch deletes, history rewrites on `main`, `gh pr merge`, `gh repo delete`, `gh api` branch-protection/ruleset writes, `sudo`, `/teamwork`/`/swarm`/`/boost` invocations, and unreadable shell constructs
 - `settings.worker.json` — headless worker permissions (`always-proceed` + prefix deny rules)
+
+## Safety layers
+
+The `PreToolUse` guard (`scripts/guard.ts`) and `settings.worker.json` are only the first layer: they block known dangerous commands and refuse shell constructs the guard cannot fully read. The hard guarantees are the git `pre-push` hook, branch protection rules on `main`, and GitHub tokens without merge or admin rights.
 
 ## Install and use
 

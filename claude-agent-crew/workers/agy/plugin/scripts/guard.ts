@@ -15,6 +15,9 @@ const SHELL_KEYWORDS = new Set([
   "while",
   "until",
   "!",
+  "coproc",
+  "nocorrect",
+  "noglob",
 ]);
 
 const GIT_GLOBAL_VALUE_FLAGS = new Set([
@@ -25,7 +28,6 @@ const GIT_GLOBAL_VALUE_FLAGS = new Set([
   "--namespace",
   "--config-env",
   "--super-prefix",
-  "--exec-path",
 ]);
 
 const GIT_PUSH_VALUE_FLAGS = new Set([
@@ -59,6 +61,47 @@ const GH_API_VALUE_FLAGS = new Set([
   "--preview",
 ]);
 
+const SHELL_NO_ARG_SHORT_FLAGS = new Set([
+  "a",
+  "b",
+  "e",
+  "f",
+  "h",
+  "i",
+  "k",
+  "l",
+  "m",
+  "n",
+  "p",
+  "r",
+  "s",
+  "t",
+  "u",
+  "v",
+  "x",
+  "B",
+  "C",
+  "E",
+  "H",
+  "P",
+  "T",
+]);
+
+const SHELL_NO_ARG_LONG_FLAGS = new Set([
+  "--login",
+  "--noprofile",
+  "--norc",
+  "--posix",
+  "--restricted",
+  "--verbose",
+  "--noediting",
+  "--help",
+  "--version",
+  "--debugger",
+]);
+
+const SHELL_VALUE_LONG_FLAGS = new Set(["--rcfile", "--init-file"]);
+
 function deny(reason: string): GuardDecision {
   return { decision: "deny", reason };
 }
@@ -76,27 +119,104 @@ function isEnvAssignment(token: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*=/.test(token);
 }
 
-interface ParsedShell {
-  commands: string[][];
-  embeddedScripts: string[];
+export interface HereDocSpec {
+  body: string;
+  quoted: boolean;
 }
 
-function extractDollarParen(
+export interface ParsedCommand {
+  argv: string[];
+  pipedIn: boolean;
+  hasHereDoc: boolean;
+  hasHereString: boolean;
+  hereDocs: HereDocSpec[];
+  hereStrings: string[];
+}
+
+export interface ParsedShell {
+  commands: ParsedCommand[];
+  embeddedScripts: string[];
+  refusalReason: string | null;
+}
+
+interface PendingHereDoc {
+  targetCmd: ParsedCommand;
+  delimiter: string;
+  stripTabs: boolean;
+  quoted: boolean;
+}
+
+interface CaseFrame {
+  baseDepth: number;
+  phase: "header" | "pattern" | "body";
+  patternParen: boolean;
+}
+
+const CASE_CMD_PREFIX_KEYWORDS = new Set([
+  "if",
+  "then",
+  "elif",
+  "else",
+  "do",
+  "while",
+  "until",
+  "!",
+]);
+
+function extractBalancedParen(
   input: string,
-  startIdx: number
-): { content: string; nextIdx: number } {
-  let i = startIdx + 2;
+  contentStartIdx: number,
+  allowCaseSyntax: boolean
+): { content: string; nextIdx: number; unclosed: boolean } {
+  let i = contentStartIdx;
   let depth = 1;
   let inSingle = false;
   let inDouble = false;
+  let atCmdStart = true;
+  let currentWord = "";
+  let wordHadQuote = false;
+  let wordAtCmdStart = true;
+  const caseStack: CaseFrame[] = [];
+
+  const finishWord = () => {
+    if (currentWord.length === 0) return;
+    if (!wordHadQuote && allowCaseSyntax) {
+      const top = caseStack[caseStack.length - 1];
+      if (currentWord === "case" && wordAtCmdStart) {
+        caseStack.push({ baseDepth: depth, phase: "header", patternParen: false });
+        atCmdStart = false;
+      } else if (top && top.baseDepth === depth && top.phase === "header" && currentWord === "in") {
+        top.phase = "pattern";
+        atCmdStart = false;
+      } else if (
+        top &&
+        top.baseDepth === depth &&
+        (top.phase === "body" || top.phase === "pattern") &&
+        currentWord === "esac"
+      ) {
+        caseStack.pop();
+        atCmdStart = false;
+      } else if (wordAtCmdStart && CASE_CMD_PREFIX_KEYWORDS.has(currentWord)) {
+        atCmdStart = true;
+      } else {
+        atCmdStart = false;
+      }
+    } else {
+      atCmdStart = false;
+    }
+    currentWord = "";
+    wordHadQuote = false;
+  };
 
   while (i < input.length && depth > 0) {
     const ch = input[i];
+
     if (inSingle) {
       if (ch === "'") inSingle = false;
       i++;
       continue;
     }
+
     if (inDouble) {
       if (ch === "\\" && i + 1 < input.length) {
         i += 2;
@@ -108,8 +228,20 @@ function extractDollarParen(
         continue;
       }
       if (ch === "$" && input[i + 1] === "(") {
-        depth++;
-        i += 2;
+        if (input[i + 2] === "(") {
+          const arith = parseArithmetic(input, i);
+          if (arith.isArithmetic) {
+            i = arith.nextIdx;
+            continue;
+          }
+        }
+        const nested = extractBalancedParen(input, i + 2, true);
+        i = nested.nextIdx;
+        continue;
+      }
+      if (ch === "`") {
+        const bt = extractBacktick(input, i);
+        i = bt.nextIdx;
         continue;
       }
       i++;
@@ -117,53 +249,187 @@ function extractDollarParen(
     }
 
     if (ch === "\\" && i + 1 < input.length) {
+      if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+      wordHadQuote = true;
+      currentWord += input[i + 1];
       i += 2;
       continue;
     }
+
+    if (ch === "$" && input[i + 1] === "'") {
+      if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+      wordHadQuote = true;
+      i += 2;
+      while (i < input.length && input[i] !== "'") {
+        if (input[i] === "\\" && i + 1 < input.length) i += 2;
+        else i++;
+      }
+      if (i < input.length) i++;
+      continue;
+    }
+
+    if (ch === "$" && input[i + 1] === '"') {
+      if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+      wordHadQuote = true;
+      inDouble = true;
+      i += 2;
+      continue;
+    }
+
     if (ch === "'") {
+      if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+      wordHadQuote = true;
       inSingle = true;
       i++;
       continue;
     }
+
     if (ch === '"') {
+      if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+      wordHadQuote = true;
       inDouble = true;
       i++;
       continue;
     }
-    if (ch === "(") {
-      depth++;
+
+    if (ch === "#" && currentWord.length === 0) {
+      while (i < input.length && input[i] !== "\n") i++;
+      continue;
+    }
+
+    if (ch === "$" && input[i + 1] === "(") {
+      if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+      wordHadQuote = true;
+      if (input[i + 2] === "(") {
+        const arith = parseArithmetic(input, i);
+        if (arith.isArithmetic) {
+          i = arith.nextIdx;
+          continue;
+        }
+      }
+      const nested = extractBalancedParen(input, i + 2, true);
+      i = nested.nextIdx;
+      continue;
+    }
+
+    if (ch === "`") {
+      if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+      wordHadQuote = true;
+      const bt = extractBacktick(input, i);
+      i = bt.nextIdx;
+      continue;
+    }
+
+    if (ch === " " || ch === "\t" || ch === "\r") {
+      finishWord();
       i++;
       continue;
     }
+
+    if (ch === "\n" || ch === "|" || ch === "&" || ch === "{") {
+      finishWord();
+      atCmdStart = true;
+      i++;
+      continue;
+    }
+
+    if (ch === ";") {
+      finishWord();
+      const top = caseStack[caseStack.length - 1];
+      if (
+        top &&
+        top.baseDepth === depth &&
+        top.phase === "body" &&
+        (input[i + 1] === ";" || input[i + 1] === "&")
+      ) {
+        top.phase = "pattern";
+        top.patternParen = false;
+        i += input[i + 1] === ";" && input[i + 2] === "&" ? 3 : 2;
+        atCmdStart = true;
+        continue;
+      }
+      atCmdStart = true;
+      i++;
+      continue;
+    }
+
+    if (ch === "(") {
+      const hadWord = currentWord.length > 0;
+      finishWord();
+      const top = caseStack[caseStack.length - 1];
+      if (
+        allowCaseSyntax &&
+        top &&
+        top.baseDepth === depth &&
+        top.phase === "pattern" &&
+        !top.patternParen &&
+        !hadWord
+      ) {
+        top.patternParen = true;
+        i++;
+        continue;
+      }
+      depth++;
+      atCmdStart = true;
+      i++;
+      continue;
+    }
+
     if (ch === ")") {
+      finishWord();
+      const top = caseStack[caseStack.length - 1];
+      if (allowCaseSyntax && top && top.baseDepth === depth && top.phase === "pattern") {
+        top.phase = "body";
+        top.patternParen = false;
+        atCmdStart = true;
+        i++;
+        continue;
+      }
       depth--;
       if (depth === 0) {
         return {
-          content: input.slice(startIdx + 2, i),
+          content: input.slice(contentStartIdx, i),
           nextIdx: i + 1,
+          unclosed: false,
         };
       }
+      atCmdStart = false;
       i++;
       continue;
     }
+
+    if (currentWord.length === 0) wordAtCmdStart = atCmdStart;
+    currentWord += ch;
     i++;
   }
 
   return {
-    content: input.slice(startIdx + 2),
+    content: input.slice(contentStartIdx),
     nextIdx: input.length,
+    unclosed: depth > 0,
   };
+}
+
+function extractDollarParen(
+  input: string,
+  startIdx: number
+): { content: string; nextIdx: number; unclosed: boolean } {
+  return extractBalancedParen(input, startIdx + 2, true);
 }
 
 function extractBacktick(
   input: string,
   startIdx: number
-): { content: string; nextIdx: number } {
+): { content: string; nextIdx: number; ambiguous: boolean } {
   let i = startIdx + 1;
   let content = "";
+  let inSingle = false;
+  let inDouble = false;
+  let ambiguous = false;
 
   while (i < input.length) {
     const ch = input[i];
+
     if (ch === "\\" && i + 1 < input.length) {
       const next = input[i + 1];
       if (next === "`" || next === "\\" || next === "$") {
@@ -174,14 +440,220 @@ function extractBacktick(
       i += 2;
       continue;
     }
-    if (ch === "`") {
-      return { content, nextIdx: i + 1 };
+
+    if (inSingle) {
+      if (ch === "'") {
+        inSingle = false;
+      } else if (ch === "`") {
+        ambiguous = true;
+      }
+      content += ch;
+      i++;
+      continue;
     }
+
+    if (inDouble) {
+      if (ch === '"') {
+        inDouble = false;
+      } else if (ch === "`") {
+        ambiguous = true;
+      }
+      content += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === "`") {
+      return { content, nextIdx: i + 1, ambiguous };
+    }
+
+    if (ch === "'") {
+      inSingle = true;
+      content += ch;
+      i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      inDouble = true;
+      content += ch;
+      i++;
+      continue;
+    }
+
     content += ch;
     i++;
   }
 
-  return { content, nextIdx: input.length };
+  return { content, nextIdx: input.length, ambiguous: true };
+}
+
+type ArithmeticParseResult =
+  | { isArithmetic: true; hasCmdSub: boolean; nextIdx: number }
+  | { isArithmetic: false };
+
+function parseArithmetic(input: string, startIdx: number): ArithmeticParseResult {
+  if (!input.startsWith("$((", startIdx)) {
+    return { isArithmetic: false };
+  }
+  let k = startIdx + 3;
+  let parenDepth = 0;
+  let hasCmdSub = false;
+
+  while (k < input.length) {
+    const ch = input[k];
+    if (ch === "\\" && k + 1 < input.length) {
+      k += 2;
+      continue;
+    }
+    if (ch === "'") {
+      k++;
+      while (k < input.length && input[k] !== "'") k++;
+      if (k < input.length) k++;
+      continue;
+    }
+    if (ch === '"') {
+      k++;
+      while (k < input.length && input[k] !== '"') {
+        if (input[k] === "\\" && k + 1 < input.length) {
+          k += 2;
+          continue;
+        }
+        if (input[k] === "$" && input[k + 1] === "(") {
+          if (input[k + 2] === "(") {
+            const inner = parseArithmetic(input, k);
+            if (inner.isArithmetic) {
+              if (inner.hasCmdSub) hasCmdSub = true;
+              k = inner.nextIdx;
+              continue;
+            }
+          }
+          hasCmdSub = true;
+          const nested = extractDollarParen(input, k);
+          k = nested.nextIdx;
+          continue;
+        }
+        if (input[k] === "`") {
+          hasCmdSub = true;
+          const bt = extractBacktick(input, k);
+          k = bt.nextIdx;
+          continue;
+        }
+        k++;
+      }
+      if (k < input.length) k++;
+      continue;
+    }
+    if (ch === "$" && input[k + 1] === "(") {
+      if (input[k + 2] === "(") {
+        const inner = parseArithmetic(input, k);
+        if (inner.isArithmetic) {
+          if (inner.hasCmdSub) hasCmdSub = true;
+          k = inner.nextIdx;
+          continue;
+        }
+      }
+      hasCmdSub = true;
+      const nested = extractDollarParen(input, k);
+      k = nested.nextIdx;
+      continue;
+    }
+    if (ch === "`") {
+      hasCmdSub = true;
+      const bt = extractBacktick(input, k);
+      k = bt.nextIdx;
+      continue;
+    }
+    if (ch === "(") {
+      parenDepth++;
+      k++;
+      continue;
+    }
+    if (ch === ")") {
+      if (parenDepth > 0) {
+        parenDepth--;
+        k++;
+        continue;
+      }
+      if (input[k + 1] === ")") {
+        return { isArithmetic: true, hasCmdSub, nextIdx: k + 2 };
+      }
+      return { isArithmetic: false };
+    }
+    k++;
+  }
+
+  return { isArithmetic: false };
+}
+
+function parseLegacyBracketArithmetic(
+  input: string,
+  startIdx: number
+): { hasCmdSub: boolean; nextIdx: number } {
+  let k = startIdx + 2;
+  let depth = 1;
+  let hasCmdSub = false;
+
+  while (k < input.length && depth > 0) {
+    const ch = input[k];
+    if (ch === "\\" && k + 1 < input.length) {
+      k += 2;
+      continue;
+    }
+    if (ch === "'") {
+      k++;
+      while (k < input.length && input[k] !== "'") k++;
+      if (k < input.length) k++;
+      continue;
+    }
+    if (ch === '"') {
+      k++;
+      while (k < input.length && input[k] !== '"') {
+        if (input[k] === "\\" && k + 1 < input.length) {
+          k += 2;
+          continue;
+        }
+        if (input[k] === "$" && input[k + 1] === "(") hasCmdSub = true;
+        if (input[k] === "`") hasCmdSub = true;
+        k++;
+      }
+      if (k < input.length) k++;
+      continue;
+    }
+    if (ch === "$" && input[k + 1] === "(") {
+      if (input[k + 2] === "(") {
+        const inner = parseArithmetic(input, k);
+        if (inner.isArithmetic) {
+          if (inner.hasCmdSub) hasCmdSub = true;
+          k = inner.nextIdx;
+          continue;
+        }
+      }
+      hasCmdSub = true;
+      const nested = extractDollarParen(input, k);
+      k = nested.nextIdx;
+      continue;
+    }
+    if (ch === "`") {
+      hasCmdSub = true;
+      const bt = extractBacktick(input, k);
+      k = bt.nextIdx;
+      continue;
+    }
+    if (ch === "[") {
+      depth++;
+      k++;
+      continue;
+    }
+    if (ch === "]") {
+      depth--;
+      k++;
+      continue;
+    }
+    k++;
+  }
+
+  return { hasCmdSub, nextIdx: k };
 }
 
 function isSeparatorStart(input: string, idx: number): boolean {
@@ -196,59 +668,308 @@ function isSeparatorStart(input: string, idx: number): boolean {
     ch === "|" ||
     ch === "&" ||
     ch === "(" ||
-    ch === ")"
+    ch === ")" ||
+    ch === "<" ||
+    ch === ">"
   );
 }
 
-function skipRedirectTarget(input: string, startIdx: number): number {
+interface RedirectTargetResult {
+  nextIdx: number;
+  text: string;
+  hasCmdSub: boolean;
+  hasAnsiOrLocaleQuote: boolean;
+}
+
+function scanRedirectTarget(input: string, startIdx: number): RedirectTargetResult {
   let i = startIdx;
   while (i < input.length && (input[i] === " " || input[i] === "\t")) {
     i++;
   }
+  let text = "";
+  let hasCmdSub = false;
+  let hasAnsiOrLocaleQuote = false;
+
   while (i < input.length && !isSeparatorStart(input, i)) {
     const ch = input[i];
-    if (ch === "'") {
+    if (ch === "$" && (input[i + 1] === "'" || input[i + 1] === '"')) {
+      hasAnsiOrLocaleQuote = true;
+      const quote = input[i + 1];
+      i += 2;
+      while (i < input.length && input[i] !== quote) {
+        if (input[i] === "\\" && i + 1 < input.length) {
+          text += input[i + 1];
+          i += 2;
+        } else {
+          text += input[i];
+          i++;
+        }
+      }
+      if (i < input.length) i++;
+    } else if (ch === "'") {
       i++;
-      while (i < input.length && input[i] !== "'") i++;
+      while (i < input.length && input[i] !== "'") {
+        text += input[i];
+        i++;
+      }
       if (i < input.length) i++;
     } else if (ch === '"') {
       i++;
       while (i < input.length && input[i] !== '"') {
-        if (input[i] === "\\" && i + 1 < input.length) i += 2;
-        else i++;
+        const inner = input[i];
+        if (inner === "\\" && i + 1 < input.length) {
+          const next = input[i + 1];
+          if (next === "\n") {
+            i += 2;
+            continue;
+          }
+          if (next === '"' || next === "\\" || next === "$" || next === "`") {
+            text += next;
+            i += 2;
+            continue;
+          }
+          text += inner;
+          i++;
+          continue;
+        }
+        if (inner === "$" && input[i + 1] === "(") {
+          if (input[i + 2] === "(") {
+            const arith = parseArithmetic(input, i);
+            if (arith.isArithmetic) {
+              if (arith.hasCmdSub) hasCmdSub = true;
+              text += input.slice(i, arith.nextIdx);
+              i = arith.nextIdx;
+              continue;
+            }
+          }
+          hasCmdSub = true;
+          const nested = extractDollarParen(input, i);
+          text += input.slice(i, nested.nextIdx);
+          i = nested.nextIdx;
+          continue;
+        }
+        if (inner === "`") {
+          hasCmdSub = true;
+          const bt = extractBacktick(input, i);
+          text += input.slice(i, bt.nextIdx);
+          i = bt.nextIdx;
+          continue;
+        }
+        text += inner;
+        i++;
       }
       if (i < input.length) i++;
     } else if (ch === "\\" && i + 1 < input.length) {
+      if (input[i + 1] === "\n") {
+        i += 2;
+        continue;
+      }
+      text += input[i + 1];
       i += 2;
+    } else if (ch === "$" && input[i + 1] === "(") {
+      if (input[i + 2] === "(") {
+        const arith = parseArithmetic(input, i);
+        if (arith.isArithmetic) {
+          if (arith.hasCmdSub) hasCmdSub = true;
+          text += input.slice(i, arith.nextIdx);
+          i = arith.nextIdx;
+          continue;
+        }
+      }
+      hasCmdSub = true;
+      const nested = extractDollarParen(input, i);
+      text += input.slice(i, nested.nextIdx);
+      i = nested.nextIdx;
+    } else if (ch === "$" && input[i + 1] === "[") {
+      const bracket = parseLegacyBracketArithmetic(input, i);
+      if (bracket.hasCmdSub) hasCmdSub = true;
+      text += input.slice(i, bracket.nextIdx);
+      i = bracket.nextIdx;
+    } else if (ch === "`") {
+      hasCmdSub = true;
+      const bt = extractBacktick(input, i);
+      text += input.slice(i, bt.nextIdx);
+      i = bt.nextIdx;
     } else {
+      text += ch;
       i++;
     }
   }
-  return i;
+
+  return { nextIdx: i, text, hasCmdSub, hasAnsiOrLocaleQuote };
+}
+
+function scanHereDocDelimiter(
+  input: string,
+  startIdx: number
+): { delimiter: string; quoted: boolean; nextIdx: number } {
+  let i = startIdx;
+  while (i < input.length && (input[i] === " " || input[i] === "\t")) {
+    i++;
+  }
+  let delimiter = "";
+  let quoted = false;
+
+  while (i < input.length && !isSeparatorStart(input, i)) {
+    const ch = input[i];
+    if (ch === "'" || ch === '"') {
+      quoted = true;
+      const quote = ch;
+      i++;
+      while (i < input.length && input[i] !== quote) {
+        if (quote === '"' && input[i] === "\\" && i + 1 < input.length) {
+          const next = input[i + 1];
+          if (next === '"' || next === "\\" || next === "$" || next === "`") {
+            delimiter += next;
+            i += 2;
+            continue;
+          }
+        }
+        delimiter += input[i];
+        i++;
+      }
+      if (i < input.length) i++;
+    } else if (ch === "\\" && i + 1 < input.length) {
+      quoted = true;
+      delimiter += input[i + 1];
+      i += 2;
+    } else {
+      delimiter += ch;
+      i++;
+    }
+  }
+
+  return { delimiter, quoted, nextIdx: i };
+}
+
+function scanUnquotedHereDocBody(
+  body: string,
+  embeddedScripts: string[]
+): string | null {
+  let i = 0;
+  while (i < body.length) {
+    const ch = body[i];
+    if (ch === "\\" && i + 1 < body.length) {
+      i += 2;
+      continue;
+    }
+    if (ch === "$" && body[i + 1] === "(") {
+      if (body[i + 2] === "(") {
+        const arith = parseArithmetic(body, i);
+        if (arith.isArithmetic) {
+          if (arith.hasCmdSub) {
+            return "command substitution inside arithmetic expansion is not allowed";
+          }
+          i = arith.nextIdx;
+          continue;
+        }
+      }
+      const { content, nextIdx, unclosed } = extractDollarParen(body, i);
+      embeddedScripts.push(content);
+      if (unclosed) {
+        return UNREADABLE_REASON;
+      }
+      i = nextIdx;
+      continue;
+    }
+    if (ch === "$" && body[i + 1] === "[") {
+      const bracket = parseLegacyBracketArithmetic(body, i);
+      if (bracket.hasCmdSub) {
+        return "command substitution inside arithmetic expansion is not allowed";
+      }
+      i = bracket.nextIdx;
+      continue;
+    }
+    if (ch === "`") {
+      const { content, nextIdx, ambiguous } = extractBacktick(body, i);
+      embeddedScripts.push(content);
+      if (ambiguous) {
+        return "ambiguous backtick quoting is not allowed";
+      }
+      i = nextIdx;
+      continue;
+    }
+    i++;
+  }
+  return null;
+}
+
+function makeEmptyCommand(pipedIn: boolean): ParsedCommand {
+  return {
+    argv: [],
+    pipedIn,
+    hasHereDoc: false,
+    hasHereString: false,
+    hereDocs: [],
+    hereStrings: [],
+  };
 }
 
 export function parseShellCommands(input: string): ParsedShell {
-  const commands: string[][] = [];
+  const commands: ParsedCommand[] = [];
   const embeddedScripts: string[] = [];
+  let refusalReason: string | null = null;
 
-  let currentCmd: string[] = [];
+  const setRefusal = (reason: string) => {
+    if (refusalReason === null) {
+      refusalReason = reason;
+    }
+  };
+
+  let nextCommandPipedIn = false;
+  let currentCmd: ParsedCommand = makeEmptyCommand(false);
   let currentToken = "";
   let hasToken = false;
+  const pendingHereDocs: PendingHereDoc[] = [];
 
   const flushToken = () => {
     if (hasToken) {
-      currentCmd.push(currentToken);
+      currentCmd.argv.push(currentToken);
       currentToken = "";
       hasToken = false;
     }
   };
 
-  const flushCmd = () => {
+  const hasCmdContent = () =>
+    currentCmd.argv.length > 0 || currentCmd.hasHereDoc || currentCmd.hasHereString;
+
+  const flushCmd = (nextPipedIn: boolean) => {
     flushToken();
-    if (currentCmd.length > 0) {
+    if (hasCmdContent()) {
       commands.push(currentCmd);
-      currentCmd = [];
+      currentCmd = makeEmptyCommand(nextPipedIn);
+    } else {
+      currentCmd.pipedIn = nextPipedIn;
     }
+    nextCommandPipedIn = nextPipedIn;
+  };
+
+  const consumePendingHereDocs = (startAfterNewline: number): number => {
+    let idx = startAfterNewline;
+    for (const h of pendingHereDocs) {
+      let body = "";
+      while (idx < input.length) {
+        const nlIdx = input.indexOf("\n", idx);
+        const lineEnd = nlIdx === -1 ? input.length : nlIdx;
+        const rawLine = input.slice(idx, lineEnd);
+        const normalizedLine = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+        const comparable = h.stripTabs ? normalizedLine.replace(/^\t+/, "") : normalizedLine;
+        idx = nlIdx === -1 ? input.length : nlIdx + 1;
+        if (comparable === h.delimiter) {
+          break;
+        }
+        body += rawLine + (nlIdx === -1 ? "" : "\n");
+      }
+      h.targetCmd.hereDocs.push({ body, quoted: h.quoted });
+      if (!h.quoted) {
+        const err = scanUnquotedHereDocBody(body, embeddedScripts);
+        if (err !== null) {
+          setRefusal(err);
+        }
+      }
+    }
+    pendingHereDocs.length = 0;
+    return idx;
   };
 
   let i = 0;
@@ -266,53 +987,170 @@ export function parseShellCommands(input: string): ParsedShell {
       continue;
     }
 
-    if (ch === "\n" || ch === ";") {
-      flushCmd();
+    if (ch === "\n") {
+      const keepPipe = nextCommandPipedIn && !hasToken && !hasCmdContent();
+      flushCmd(keepPipe);
+      i++;
+      if (pendingHereDocs.length > 0) {
+        i = consumePendingHereDocs(i);
+      }
+      continue;
+    }
+
+    if (ch === ";") {
+      flushCmd(false);
       i++;
       continue;
     }
 
     if (
       (ch === "&" && input[i + 1] === "&") ||
-      (ch === "|" && input[i + 1] === "|") ||
-      (ch === "|" && input[i + 1] === "&")
+      (ch === "|" && input[i + 1] === "|")
     ) {
-      flushCmd();
+      flushCmd(false);
       i += 2;
+      continue;
+    }
+
+    if (ch === "|" && input[i + 1] === "&") {
+      flushCmd(true);
+      i += 2;
+      continue;
+    }
+
+    if (ch === "|") {
+      flushCmd(true);
+      i++;
       continue;
     }
 
     if (ch === "&" && input[i + 1] === ">") {
       flushToken();
       i += input[i + 2] === ">" ? 3 : 2;
-      i = skipRedirectTarget(input, i);
+      const redir = scanRedirectTarget(input, i);
+      if (redir.hasCmdSub) setRefusal("command substitution in redirect target is not allowed");
+      if (redir.hasAnsiOrLocaleQuote) {
+        setRefusal("ANSI-C ($'...') and locale ($\"...\") quoting are not allowed");
+      }
+      i = redir.nextIdx;
       continue;
     }
 
-    if (ch === "|" || ch === "&" || ch === "(" || ch === ")") {
-      flushCmd();
+    if (ch === "&" || ch === ")") {
+      flushCmd(false);
+      i++;
+      continue;
+    }
+
+    if (ch === "(") {
+      const keepPipe = nextCommandPipedIn && !hasToken && !hasCmdContent();
+      flushCmd(keepPipe);
       i++;
       continue;
     }
 
     if ((ch === "{" || ch === "}") && !hasToken && isSeparatorStart(input, i + 1)) {
-      flushCmd();
+      const keepPipe = ch === "{" && nextCommandPipedIn && !hasCmdContent();
+      flushCmd(keepPipe);
       i++;
       continue;
     }
 
-    if (!hasToken) {
-      const redirMatch = input.slice(i).match(/^(\d*)(>>|>&|<&|<>|>|<)/);
+    if ((ch === "<" || ch === ">") && input[i + 1] === "(") {
+      if (hasToken) {
+        flushToken();
+      }
+      hasToken = true;
+      const { content, nextIdx, unclosed } = extractBalancedParen(input, i + 2, true);
+      embeddedScripts.push(content);
+      if (unclosed) {
+        setRefusal(UNREADABLE_REASON);
+      }
+      currentToken += input.slice(i, nextIdx);
+      i = nextIdx;
+      continue;
+    }
+
+    if (ch === "<" || ch === ">" || !hasToken) {
+      const slice = input.slice(i);
+      const redirMatch = hasToken
+        ? slice.match(/^()(<<<|<<-|<<|>>|>&|<&|<>|\>\||>|<)/)
+        : slice.match(/^(\d*)(<<<|<<-|<<|>>|>&|<&|<>|\>\||>|<)/);
       if (redirMatch) {
         const op = redirMatch[2];
+        flushToken();
         i += redirMatch[0].length;
-        if (op === ">&" || op === "<&") {
-          while (i < input.length && /[0-9-]/.test(input[i])) i++;
+        if (op === "<<<") {
+          currentCmd.hasHereString = true;
+          const target = scanRedirectTarget(input, i);
+          if (target.hasCmdSub) {
+            setRefusal("command substitution in redirect target is not allowed");
+          }
+          if (target.hasAnsiOrLocaleQuote) {
+            setRefusal("ANSI-C ($'...') and locale ($\"...\") quoting are not allowed");
+          }
+          currentCmd.hereStrings.push(target.text);
+          i = target.nextIdx;
+        } else if (op === "<<" || op === "<<-") {
+          currentCmd.hasHereDoc = true;
+          const delim = scanHereDocDelimiter(input, i);
+          if (!delim.delimiter) {
+            setRefusal(UNREADABLE_REASON);
+          } else {
+            pendingHereDocs.push({
+              targetCmd: currentCmd,
+              delimiter: delim.delimiter,
+              stripTabs: op === "<<-",
+              quoted: delim.quoted,
+            });
+          }
+          i = delim.nextIdx;
         } else {
-          i = skipRedirectTarget(input, i);
+          const target = scanRedirectTarget(input, i);
+          if (target.hasCmdSub) {
+            setRefusal("command substitution in redirect target is not allowed");
+          }
+          if (target.hasAnsiOrLocaleQuote) {
+            setRefusal("ANSI-C ($'...') and locale ($\"...\") quoting are not allowed");
+          }
+          i = target.nextIdx;
         }
         continue;
       }
+    }
+
+    if (ch === "$" && input[i + 1] === "'") {
+      setRefusal("ANSI-C ($'...') quoting is not allowed");
+      hasToken = true;
+      i += 2;
+      while (i < input.length && input[i] !== "'") {
+        if (input[i] === "\\" && i + 1 < input.length) {
+          currentToken += input[i + 1];
+          i += 2;
+        } else {
+          currentToken += input[i];
+          i++;
+        }
+      }
+      if (i < input.length) i++;
+      continue;
+    }
+
+    if (ch === "$" && input[i + 1] === '"') {
+      setRefusal('locale ($"...") quoting is not allowed');
+      hasToken = true;
+      i += 2;
+      while (i < input.length && input[i] !== '"') {
+        if (input[i] === "\\" && i + 1 < input.length) {
+          currentToken += input[i + 1];
+          i += 2;
+        } else {
+          currentToken += input[i];
+          i++;
+        }
+      }
+      if (i < input.length) i++;
+      continue;
     }
 
     if (ch === "'") {
@@ -347,17 +1185,41 @@ export function parseShellCommands(input: string): ParsedShell {
           continue;
         }
         if (inner === "$" && input[i + 1] === "(") {
-          const { content, nextIdx } = extractDollarParen(input, i);
-          if (!content.startsWith("(")) {
-            embeddedScripts.push(content);
+          if (input[i + 2] === "(") {
+            const arith = parseArithmetic(input, i);
+            if (arith.isArithmetic) {
+              if (arith.hasCmdSub) {
+                setRefusal("command substitution inside arithmetic expansion is not allowed");
+              }
+              currentToken += input.slice(i, arith.nextIdx);
+              i = arith.nextIdx;
+              continue;
+            }
+          }
+          const { content, nextIdx, unclosed } = extractDollarParen(input, i);
+          embeddedScripts.push(content);
+          if (unclosed) {
+            setRefusal(UNREADABLE_REASON);
           }
           currentToken += input.slice(i, nextIdx);
           i = nextIdx;
           continue;
         }
+        if (inner === "$" && input[i + 1] === "[") {
+          const bracket = parseLegacyBracketArithmetic(input, i);
+          if (bracket.hasCmdSub) {
+            setRefusal("command substitution inside arithmetic expansion is not allowed");
+          }
+          currentToken += input.slice(i, bracket.nextIdx);
+          i = bracket.nextIdx;
+          continue;
+        }
         if (inner === "`") {
-          const { content, nextIdx } = extractBacktick(input, i);
+          const { content, nextIdx, ambiguous } = extractBacktick(input, i);
           embeddedScripts.push(content);
+          if (ambiguous) {
+            setRefusal("ambiguous backtick quoting is not allowed");
+          }
           currentToken += input.slice(i, nextIdx);
           i = nextIdx;
           continue;
@@ -382,19 +1244,45 @@ export function parseShellCommands(input: string): ParsedShell {
 
     if (ch === "$" && input[i + 1] === "(") {
       hasToken = true;
-      const { content, nextIdx } = extractDollarParen(input, i);
-      if (!content.startsWith("(")) {
-        embeddedScripts.push(content);
+      if (input[i + 2] === "(") {
+        const arith = parseArithmetic(input, i);
+        if (arith.isArithmetic) {
+          if (arith.hasCmdSub) {
+            setRefusal("command substitution inside arithmetic expansion is not allowed");
+          }
+          currentToken += input.slice(i, arith.nextIdx);
+          i = arith.nextIdx;
+          continue;
+        }
+      }
+      const { content, nextIdx, unclosed } = extractDollarParen(input, i);
+      embeddedScripts.push(content);
+      if (unclosed) {
+        setRefusal(UNREADABLE_REASON);
       }
       currentToken += input.slice(i, nextIdx);
       i = nextIdx;
       continue;
     }
 
+    if (ch === "$" && input[i + 1] === "[") {
+      hasToken = true;
+      const bracket = parseLegacyBracketArithmetic(input, i);
+      if (bracket.hasCmdSub) {
+        setRefusal("command substitution inside arithmetic expansion is not allowed");
+      }
+      currentToken += input.slice(i, bracket.nextIdx);
+      i = bracket.nextIdx;
+      continue;
+    }
+
     if (ch === "`") {
       hasToken = true;
-      const { content, nextIdx } = extractBacktick(input, i);
+      const { content, nextIdx, ambiguous } = extractBacktick(input, i);
       embeddedScripts.push(content);
+      if (ambiguous) {
+        setRefusal("ambiguous backtick quoting is not allowed");
+      }
       currentToken += input.slice(i, nextIdx);
       i = nextIdx;
       continue;
@@ -405,8 +1293,11 @@ export function parseShellCommands(input: string): ParsedShell {
     i++;
   }
 
-  flushCmd();
-  return { commands, embeddedScripts };
+  flushCmd(false);
+  if (pendingHereDocs.length > 0) {
+    consumePendingHereDocs(input.length);
+  }
+  return { commands, embeddedScripts, refusalReason };
 }
 
 function isProtectedBranch(ref: string): boolean {
@@ -415,9 +1306,26 @@ function isProtectedBranch(ref: string): boolean {
 }
 
 function isMainOrRemoteMainRef(ref: string): boolean {
-  const normalized = ref.replace(/^refs\/(heads|remotes\/[^/]+)\//, "");
+  const baseRef = ref.replace(/[~^@:].*$/, "");
+  const normalized = baseRef.replace(/^refs\/(heads|remotes\/[^/]+)\//, "");
   if (normalized === "main" || normalized === "master") return true;
-  return /^(origin|upstream)\/(main|master)$/.test(ref);
+  return /^(origin|upstream)\/(main|master)$/.test(baseRef);
+}
+
+function checkGitConfigEntry(entry: string | undefined): GuardDecision | null {
+  if (entry === undefined) return null;
+  const eqIdx = entry.indexOf("=");
+  const key = (eqIdx === -1 ? entry : entry.slice(0, eqIdx)).trim();
+  if (/^alias\./i.test(key)) {
+    return deny("configuring git aliases via -c is not allowed");
+  }
+  if (/^remote\..+\.push$/i.test(key)) {
+    return deny("configuring remote.<name>.push via -c is not allowed");
+  }
+  if (/^core\.hooksPath$/i.test(key)) {
+    return deny("overriding core.hooksPath via -c is not allowed");
+  }
+  return null;
 }
 
 function checkGitPush(pushArgs: string[]): GuardDecision | null {
@@ -444,6 +1352,10 @@ function checkGitPush(pushArgs: string[]): GuardDecision | null {
 
       if (arg === "--delete") {
         return deny("deleting remote branches via git push --delete is not allowed");
+      }
+
+      if (arg === "--all" || arg === "--branches" || arg === "--mirror") {
+        return deny(`git push ${arg} is not allowed because it targets protected branches`);
       }
 
       if (arg === "--repo" || arg.startsWith("--repo=")) {
@@ -483,6 +1395,10 @@ function checkGitPush(pushArgs: string[]): GuardDecision | null {
   for (const spec of refspecs) {
     if (spec.startsWith("+")) {
       return deny(`force-pushing with +refspec (${spec}) is not allowed`);
+    }
+
+    if (spec.includes("*")) {
+      return deny(`wildcard refspec (${spec}) in git push is not allowed`);
     }
 
     const colonIdx = spec.indexOf(":");
@@ -537,60 +1453,246 @@ function checkGitReset(resetArgs: string[]): GuardDecision | null {
   return null;
 }
 
+const GIT_BRANCH_VALUE_FLAGS = new Set([
+  "-u",
+  "--set-upstream-to",
+  "--contains",
+  "--no-contains",
+  "--merged",
+  "--no-merged",
+  "--sort",
+  "--points-at",
+  "--format",
+]);
+
 function checkGitBranch(branchArgs: string[]): GuardDecision | null {
-  let hasMutatingFlag = false;
+  let hasDelete = false;
+  let hasForce = false;
+  let hasMove = false;
+  let hasCopy = false;
   const positionals: string[] = [];
   let afterDoubleDash = false;
 
-  for (const arg of branchArgs) {
+  for (let j = 0; j < branchArgs.length; j++) {
+    const arg = branchArgs[j];
     if (!afterDoubleDash) {
       if (arg === "--") {
         afterDoubleDash = true;
         continue;
       }
-      if (arg === "--force" || arg === "--delete" || arg === "-D") {
-        hasMutatingFlag = true;
+      if (arg === "--delete") {
+        hasDelete = true;
         continue;
       }
-      if (arg.startsWith("-") && !arg.startsWith("--")) {
-        if (arg.includes("f") || arg.includes("d") || arg.includes("D")) {
-          hasMutatingFlag = true;
-        }
+      if (arg === "--force") {
+        hasForce = true;
+        continue;
+      }
+      if (arg === "--move") {
+        hasMove = true;
+        continue;
+      }
+      if (arg === "--copy") {
+        hasCopy = true;
+        continue;
+      }
+      if (GIT_BRANCH_VALUE_FLAGS.has(arg)) {
+        j++;
         continue;
       }
       if (arg.startsWith("--")) {
+        continue;
+      }
+      if (arg.startsWith("-") && arg.length > 1) {
+        const flags = arg.slice(1);
+        for (let k = 0; k < flags.length; k++) {
+          const ch = flags[k];
+          if (ch === "d" || ch === "D") hasDelete = true;
+          else if (ch === "f") hasForce = true;
+          else if (ch === "m") hasMove = true;
+          else if (ch === "M") {
+            hasMove = true;
+            hasForce = true;
+          } else if (ch === "c") hasCopy = true;
+          else if (ch === "C") {
+            hasCopy = true;
+            hasForce = true;
+          } else if (ch === "u") {
+            if (k + 1 === flags.length) j++;
+            break;
+          }
+        }
         continue;
       }
     }
     positionals.push(arg);
   }
 
-  if (hasMutatingFlag && positionals.some((ref) => isProtectedBranch(ref))) {
-    return deny("forcing or deleting protected branch main/master is not allowed");
+  if (hasDelete && positionals.some((ref) => isProtectedBranch(ref))) {
+    return deny("deleting protected branch main/master is not allowed");
+  }
+
+  if (hasMove && positionals.some((ref) => isProtectedBranch(ref))) {
+    return deny("moving or overwriting protected branch main/master is not allowed");
+  }
+
+  if (hasCopy && hasForce) {
+    const target = positionals.length >= 2 ? positionals[1] : positionals[0];
+    if (target !== undefined && isProtectedBranch(target)) {
+      return deny("overwriting protected branch main/master via git branch -C is not allowed");
+    }
+  }
+
+  if (hasForce && !hasDelete && !hasMove && !hasCopy) {
+    const target = positionals[0];
+    if (target !== undefined && isProtectedBranch(target)) {
+      return deny("force-updating protected branch main/master is not allowed");
+    }
   }
 
   return null;
 }
+
+const GIT_CHECKOUT_SWITCH_VALUE_FLAGS = new Set([
+  "-b",
+  "-c",
+  "--create",
+  "--orphan",
+  "--conflict",
+  "-U",
+  "--unified",
+  "--inter-hunk-context",
+  "--pathspec-from-file",
+]);
 
 function checkGitCheckoutOrSwitch(
   subcommand: "checkout" | "switch",
   subArgs: string[]
 ): GuardDecision | null {
   let hasForceCreate = false;
+  let forceCreateTarget: string | null = null;
+  let awaitingTarget = false;
   const positionals: string[] = [];
   let afterDoubleDash = false;
 
-  for (const arg of subArgs) {
+  for (let j = 0; j < subArgs.length; j++) {
+    const arg = subArgs[j];
+    if (awaitingTarget && arg !== "--") {
+      forceCreateTarget = arg;
+      awaitingTarget = false;
+      positionals.push(arg);
+      continue;
+    }
+
     if (!afterDoubleDash) {
       if (arg === "--") {
         afterDoubleDash = true;
         continue;
       }
-      if (
-        (subcommand === "checkout" && arg === "-B") ||
-        (subcommand === "switch" && (arg === "-C" || arg === "--force-create"))
-      ) {
+      if (subcommand === "switch" && arg === "--force-create") {
         hasForceCreate = true;
+        awaitingTarget = true;
+        continue;
+      }
+      if (subcommand === "switch" && arg.startsWith("--force-create=")) {
+        hasForceCreate = true;
+        forceCreateTarget = arg.slice("--force-create=".length);
+        continue;
+      }
+      if (GIT_CHECKOUT_SWITCH_VALUE_FLAGS.has(arg)) {
+        j++;
+        continue;
+      }
+      if (arg.startsWith("--")) {
+        continue;
+      }
+      if (arg.startsWith("-") && arg.length > 1) {
+        const forceLetter = subcommand === "checkout" ? "B" : "C";
+        const createLetter = subcommand === "checkout" ? "b" : "c";
+        const flags = arg.slice(1);
+        for (let k = 0; k < flags.length; k++) {
+          const ch = flags[k];
+          if (ch === forceLetter) {
+            hasForceCreate = true;
+            const attached = flags.slice(k + 1);
+            if (attached.length > 0) {
+              forceCreateTarget = attached;
+            } else {
+              awaitingTarget = true;
+            }
+            break;
+          }
+          if (ch === createLetter) {
+            if (k + 1 === flags.length) j++;
+            break;
+          }
+        }
+        continue;
+      }
+    }
+
+    positionals.push(arg);
+    if (awaitingTarget) {
+      forceCreateTarget = arg;
+      awaitingTarget = false;
+    }
+  }
+
+  if (hasForceCreate) {
+    const target = forceCreateTarget ?? positionals[0];
+    if (target !== undefined && isProtectedBranch(target)) {
+      return deny("force-resetting protected branch main/master is not allowed");
+    }
+  }
+
+  return null;
+}
+
+const GIT_REBASE_VALUE_FLAGS = new Set([
+  "--onto",
+  "-C",
+  "--whitespace",
+  "--empty",
+  "-x",
+  "--exec",
+  "-s",
+  "--strategy",
+  "-X",
+  "--strategy-option",
+]);
+
+function checkGitRebase(rebaseArgs: string[], depth: number): GuardDecision | null {
+  let hasRoot = false;
+  const positionals: string[] = [];
+  let afterDoubleDash = false;
+
+  for (let j = 0; j < rebaseArgs.length; j++) {
+    const arg = rebaseArgs[j];
+    if (!afterDoubleDash) {
+      if (arg === "--") {
+        afterDoubleDash = true;
+        continue;
+      }
+      if (arg === "--root") {
+        hasRoot = true;
+        continue;
+      }
+      if (arg === "-x" || arg === "--exec") {
+        const execCmd = rebaseArgs[j + 1];
+        if (execCmd !== undefined) {
+          const nested = checkCommand(execCmd, depth + 1);
+          if (nested.decision === "deny") return nested;
+        }
+        j++;
+        continue;
+      }
+      if (arg.startsWith("--exec=")) {
+        const nested = checkCommand(arg.slice("--exec=".length), depth + 1);
+        if (nested.decision === "deny") return nested;
+        continue;
+      }
+      if (GIT_REBASE_VALUE_FLAGS.has(arg)) {
+        j++;
         continue;
       }
       if (arg.startsWith("-")) {
@@ -600,14 +1702,115 @@ function checkGitCheckoutOrSwitch(
     positionals.push(arg);
   }
 
-  if (hasForceCreate && positionals.some((ref) => isProtectedBranch(ref))) {
-    return deny("force-resetting protected branch main/master is not allowed");
+  const targetBranch = hasRoot ? positionals[0] : positionals[1];
+  if (targetBranch !== undefined && isProtectedBranch(targetBranch)) {
+    return deny("rebasing protected branch main/master is not allowed");
   }
 
   return null;
 }
 
-function checkGit(args: string[]): GuardDecision | null {
+const GIT_FILTER_BRANCH_VALUE_FLAGS = new Set([
+  "--env-filter",
+  "--tree-filter",
+  "--index-filter",
+  "--parent-filter",
+  "--msg-filter",
+  "--commit-filter",
+  "--tag-name-filter",
+  "--subdirectory-filter",
+  "-d",
+  "--state-branch",
+  "--original",
+]);
+
+function checkGitFilterBranch(filterArgs: string[]): GuardDecision | null {
+  let afterDoubleDash = false;
+  const revs: string[] = [];
+
+  for (let j = 0; j < filterArgs.length; j++) {
+    const arg = filterArgs[j];
+    if (!afterDoubleDash) {
+      if (arg === "--") {
+        afterDoubleDash = true;
+        continue;
+      }
+      if (GIT_FILTER_BRANCH_VALUE_FLAGS.has(arg)) {
+        j++;
+        continue;
+      }
+      if (arg.startsWith("-")) {
+        if (arg === "--all" || arg === "--branches") {
+          revs.push(arg);
+        }
+        continue;
+      }
+    }
+    revs.push(arg);
+  }
+
+  for (const rev of revs) {
+    if (
+      rev === "--all" ||
+      rev === "--branches" ||
+      isProtectedBranch(rev) ||
+      /\.\.+(?:refs\/heads\/)?(main|master)$/.test(rev)
+    ) {
+      return deny("rewriting protected branch main/master with git filter-branch is not allowed");
+    }
+  }
+
+  return null;
+}
+
+function checkGitUpdateRef(updateArgs: string[], cmd: ParsedCommand): GuardDecision | null {
+  const positionals: string[] = [];
+  let afterDoubleDash = false;
+
+  for (let j = 0; j < updateArgs.length; j++) {
+    const arg = updateArgs[j];
+    if (!afterDoubleDash) {
+      if (arg === "--") {
+        afterDoubleDash = true;
+        continue;
+      }
+      if (arg === "--stdin") {
+        return deny("updating refs via git update-ref --stdin is not allowed");
+      }
+      if (arg === "-m") {
+        j++;
+        continue;
+      }
+      if (arg.startsWith("-")) {
+        continue;
+      }
+    }
+    positionals.push(arg);
+  }
+
+  if (cmd.pipedIn && updateArgs.length === 0) {
+    return deny("updating refs via piped git update-ref is not allowed");
+  }
+
+  const targetRef = positionals[0];
+  if (
+    targetRef !== undefined &&
+    (targetRef === "refs/heads/main" ||
+      targetRef === "refs/heads/master" ||
+      targetRef === "main" ||
+      targetRef === "master")
+  ) {
+    return deny("updating refs/heads/main or refs/heads/master directly is not allowed");
+  }
+
+  if (updateArgs.some((arg) => arg === "refs/heads/main" || arg === "refs/heads/master")) {
+    return deny("updating refs/heads/main or refs/heads/master directly is not allowed");
+  }
+
+  return null;
+}
+
+function checkGit(args: string[], cmd: ParsedCommand, depth: number): GuardDecision | null {
   let i = 0;
   let subcommand: string | null = null;
 
@@ -616,6 +1819,30 @@ function checkGit(args: string[]): GuardDecision | null {
     if (arg === "--") {
       i++;
       break;
+    }
+    if (arg === "-c") {
+      const verdict = checkGitConfigEntry(args[i + 1]);
+      if (verdict !== null) return verdict;
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith("-c") && arg.length > 2) {
+      const verdict = checkGitConfigEntry(arg.slice(2));
+      if (verdict !== null) return verdict;
+      i++;
+      continue;
+    }
+    if (arg === "--config-env") {
+      const verdict = checkGitConfigEntry(args[i + 1]);
+      if (verdict !== null) return verdict;
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith("--config-env=")) {
+      const verdict = checkGitConfigEntry(arg.slice("--config-env=".length));
+      if (verdict !== null) return verdict;
+      i++;
+      continue;
     }
     if (GIT_GLOBAL_VALUE_FLAGS.has(arg)) {
       i += 2;
@@ -637,11 +1864,9 @@ function checkGit(args: string[]): GuardDecision | null {
   if (subcommand === "checkout" || subcommand === "switch") {
     return checkGitCheckoutOrSwitch(subcommand, rest);
   }
-  if (subcommand === "update-ref") {
-    if (rest.some((arg) => arg === "refs/heads/main" || arg === "refs/heads/master")) {
-      return deny("updating refs/heads/main or refs/heads/master directly is not allowed");
-    }
-  }
+  if (subcommand === "rebase") return checkGitRebase(rest, depth);
+  if (subcommand === "filter-branch") return checkGitFilterBranch(rest);
+  if (subcommand === "update-ref") return checkGitUpdateRef(rest, cmd);
 
   return null;
 }
@@ -674,6 +1899,11 @@ function isProtectedGhApiEndpoint(endpoint: string): boolean {
     return true;
   }
   return false;
+}
+
+function isGraphqlEndpoint(endpoint: string): boolean {
+  const path = normalizeGhApiPath(endpoint);
+  return /(^|\/)graphql$/i.test(path);
 }
 
 function checkGh(args: string[]): GuardDecision | null {
@@ -714,6 +1944,8 @@ function checkGh(args: string[]): GuardDecision | null {
   if (cmd === "api") {
     const apiArgs = args.slice(i);
     let afterDoubleDash = false;
+    let hasInputFlag = false;
+    let hasAtFileQuery = false;
     const positionals: string[] = [];
     const fieldValues: string[] = [];
 
@@ -724,19 +1956,41 @@ function checkGh(args: string[]): GuardDecision | null {
           afterDoubleDash = true;
           continue;
         }
+        if (arg === "--input" || arg.startsWith("--input=")) {
+          hasInputFlag = true;
+          if (arg === "--input") j++;
+          continue;
+        }
+        if (arg.startsWith("-f") && arg.length > 2) {
+          fieldValues.push(arg.slice(2));
+          continue;
+        }
+        if (arg.startsWith("-F") && arg.length > 2) {
+          const val = arg.slice(2);
+          if (/^query=@/i.test(val)) hasAtFileQuery = true;
+          fieldValues.push(val);
+          continue;
+        }
         if (GH_API_VALUE_FLAGS.has(arg)) {
           const val = apiArgs[j + 1];
           if (
             val !== undefined &&
             (arg === "-f" || arg === "-F" || arg === "--field" || arg === "--raw-field")
           ) {
+            if ((arg === "-F" || arg === "--field") && /^query=@/i.test(val)) {
+              hasAtFileQuery = true;
+            }
             fieldValues.push(val);
           }
           j++;
           continue;
         }
         if (arg.startsWith("--field=") || arg.startsWith("--raw-field=")) {
-          fieldValues.push(arg.slice(arg.indexOf("=") + 1));
+          const val = arg.slice(arg.indexOf("=") + 1);
+          if (arg.startsWith("--field=") && /^query=@/i.test(val)) {
+            hasAtFileQuery = true;
+          }
+          fieldValues.push(val);
           continue;
         }
         if (arg.startsWith("-")) {
@@ -752,7 +2006,17 @@ function checkGh(args: string[]): GuardDecision | null {
           "calling GitHub branch protection or rulesets API endpoints is not allowed"
         );
       }
-      if (normalizeGhApiPath(endpoint).toLowerCase() === "graphql") {
+      if (isGraphqlEndpoint(endpoint)) {
+        if (hasInputFlag) {
+          return deny(
+            "passing --input to gh api graphql is not allowed because the payload cannot be inspected"
+          );
+        }
+        if (hasAtFileQuery) {
+          return deny(
+            "passing query=@file to gh api graphql is not allowed because the query cannot be inspected"
+          );
+        }
         const joined = fieldValues.join(" ");
         if (
           /\b(create|update|delete)(BranchProtectionRule|RepositoryRuleset)\b/i.test(
@@ -770,34 +2034,466 @@ function checkGh(args: string[]): GuardDecision | null {
   return null;
 }
 
-function extractShellDashCScript(args: string[]): string | null {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--") return null;
-    if (arg === "-o" || arg === "+o") {
-      i++;
-      continue;
+function hasForbiddenAgySlashCommand(text: string): boolean {
+  return /^\s*\/(teamwork|swarm|boost)(?:[\s:]|$)/i.test(text);
+}
+
+const AGY_VALUE_FLAGS = new Set([
+  "--agent",
+  "--model",
+  "--settings",
+  "--output-format",
+  "--cwd",
+  "--dir",
+  "--session",
+  "--resume",
+  "--max-turns",
+  "-a",
+  "-m",
+  "-s",
+  "-o",
+]);
+
+function extractPipedTextFromPrev(prevCmd: ParsedCommand | null): string | null {
+  if (prevCmd === null || prevCmd.argv.length === 0) return null;
+  const prevBin = basename(prevCmd.argv[0]);
+  if (prevBin === "echo") {
+    let idx = 1;
+    while (idx < prevCmd.argv.length && /^-[neE]+$/.test(prevCmd.argv[idx])) {
+      idx++;
     }
-    if (arg === "-c" || /^-[a-zA-Z]*c[a-zA-Z]*$/.test(arg)) {
-      return args[i + 1] ?? null;
+    return prevCmd.argv.slice(idx).join(" ");
+  }
+  if (prevBin === "printf") {
+    if (prevCmd.argv.length < 2) return "";
+    let out = prevCmd.argv[1];
+    let argIdx = 2;
+    out = out.replace(/%s/g, () => {
+      const replacement = prevCmd.argv[argIdx] ?? "";
+      argIdx++;
+      return replacement;
+    });
+    return out.replace(/\\n/g, "\n").replace(/\\t/g, "\t");
+  }
+  if (prevBin === "cat" && prevCmd.argv.length === 1) {
+    if (prevCmd.hereStrings.length > 0) {
+      return prevCmd.hereStrings.join("\n");
     }
-    if (!arg.startsWith("-") && !arg.startsWith("+")) {
-      return null;
+    if (prevCmd.hereDocs.length > 0) {
+      return prevCmd.hereDocs.map((h) => h.body).join("\n");
     }
   }
   return null;
 }
 
-function checkSimpleCommand(
+function checkAgy(
+  args: string[],
+  cmd: ParsedCommand,
+  prevCmd: ParsedCommand | null
+): GuardDecision | null {
+  if (cmd.hasHereString) {
+    for (const hs of cmd.hereStrings) {
+      if (hasForbiddenAgySlashCommand(hs)) {
+        return deny("starting /teamwork, /swarm, or /boost via agy is not allowed");
+      }
+    }
+  }
+  if (cmd.hasHereDoc) {
+    for (const hd of cmd.hereDocs) {
+      if (hasForbiddenAgySlashCommand(hd.body)) {
+        return deny("starting /teamwork, /swarm, or /boost via agy is not allowed");
+      }
+    }
+  }
+  if (cmd.pipedIn) {
+    const pipedText = extractPipedTextFromPrev(prevCmd);
+    if (pipedText === null) {
+      return deny("piping unreadable input into agy is not allowed");
+    }
+    if (hasForbiddenAgySlashCommand(pipedText)) {
+      return deny("starting /teamwork, /swarm, or /boost via agy is not allowed");
+    }
+  }
+
+  let afterDoubleDash = false;
+  const positionals: string[] = [];
+
+  for (let j = 0; j < args.length; j++) {
+    const arg = args[j];
+    if (!afterDoubleDash) {
+      if (arg === "--") {
+        afterDoubleDash = true;
+        continue;
+      }
+      if (arg === "-p" || arg === "--prompt") {
+        const promptVal = args[j + 1];
+        if (promptVal !== undefined && hasForbiddenAgySlashCommand(promptVal)) {
+          return deny("starting /teamwork, /swarm, or /boost via agy is not allowed");
+        }
+        j++;
+        continue;
+      }
+      if (arg.startsWith("--prompt=")) {
+        const promptVal = arg.slice("--prompt=".length);
+        if (hasForbiddenAgySlashCommand(promptVal)) {
+          return deny("starting /teamwork, /swarm, or /boost via agy is not allowed");
+        }
+        continue;
+      }
+      if (arg.startsWith("-p") && arg.length > 2) {
+        const promptVal = arg.slice(2);
+        if (hasForbiddenAgySlashCommand(promptVal)) {
+          return deny("starting /teamwork, /swarm, or /boost via agy is not allowed");
+        }
+        continue;
+      }
+      if (AGY_VALUE_FLAGS.has(arg)) {
+        j++;
+        continue;
+      }
+      if (arg.startsWith("-")) {
+        continue;
+      }
+    }
+    positionals.push(arg);
+  }
+
+  if (
+    positionals[0] !== "plugin" &&
+    positionals[0] !== "help" &&
+    positionals[0] !== "version"
+  ) {
+    for (const pos of positionals) {
+      if (hasForbiddenAgySlashCommand(pos)) {
+        return deny("starting /teamwork, /swarm, or /boost via agy is not allowed");
+      }
+    }
+  }
+
+  return null;
+}
+
+type ShellInspectResult =
+  | { kind: "unrecognized"; flag: string }
+  | { kind: "dash_c"; script: string | null }
+  | { kind: "dash_s" }
+  | { kind: "script_or_interactive" };
+
+function inspectShellInvocation(args: string[]): ShellInspectResult {
+  let hasDashC = false;
+  let hasDashS = false;
+  let i = 0;
+
+  while (i < args.length) {
+    const arg = args[i];
+    if (arg === "--") {
+      i++;
+      break;
+    }
+    if (arg === "-") {
+      i++;
+      break;
+    }
+    if (!arg.startsWith("-") && !arg.startsWith("+")) {
+      break;
+    }
+
+    if (arg === "-o" || arg === "+o" || arg === "-O" || arg === "+O") {
+      if (i + 1 >= args.length) {
+        return { kind: "unrecognized", flag: arg };
+      }
+      i += 2;
+      continue;
+    }
+
+    if (SHELL_VALUE_LONG_FLAGS.has(arg)) {
+      if (i + 1 >= args.length) {
+        return { kind: "unrecognized", flag: arg };
+      }
+      i += 2;
+      continue;
+    }
+
+    if (arg.startsWith("--rcfile=") || arg.startsWith("--init-file=")) {
+      i++;
+      continue;
+    }
+
+    if (SHELL_NO_ARG_LONG_FLAGS.has(arg)) {
+      i++;
+      continue;
+    }
+
+    if (arg.startsWith("--")) {
+      return { kind: "unrecognized", flag: arg };
+    }
+
+    const isPlus = arg.startsWith("+");
+    const flags = arg.slice(1);
+    for (const flag of flags) {
+      if (flag === "c" && !isPlus) {
+        hasDashC = true;
+      } else if (flag === "s" && !isPlus) {
+        hasDashS = true;
+      } else if (!SHELL_NO_ARG_SHORT_FLAGS.has(flag)) {
+        return { kind: "unrecognized", flag: arg };
+      }
+    }
+    i++;
+  }
+
+  if (hasDashC) {
+    return { kind: "dash_c", script: args[i] ?? null };
+  }
+  if (hasDashS) {
+    return { kind: "dash_s" };
+  }
+  return { kind: "script_or_interactive" };
+}
+
+const ENV_NO_ARG_SHORT = new Set(["i", "0", "v"]);
+const ENV_VALUE_SHORT = new Set(["u", "C", "P", "a", "L", "U"]);
+const ENV_NO_ARG_LONG = new Set([
+  "--ignore-environment",
+  "--null",
+  "--list-signal-handling",
+  "--debug",
+  "--help",
+  "--version",
+]);
+const ENV_VALUE_LONG = new Set([
+  "--unset",
+  "--chdir",
+  "--argv0",
+  "--block-signal",
+  "--default-signal",
+  "--ignore-signal",
+]);
+
+function stripEnvPrefix(
+  argv: string[],
+  depth: number
+): { nextArgv: string[]; denyDecision?: GuardDecision } {
+  let idx = 1;
+  while (idx < argv.length) {
+    const a = argv[idx];
+    if (a === "--") {
+      idx++;
+      break;
+    }
+    if (a === "-S" || a === "--split-string") {
+      const splitArg = argv[idx + 1];
+      if (splitArg === undefined) {
+        return { nextArgv: [], denyDecision: deny("env -S without command string is not allowed") };
+      }
+      return expandEnvSplitString(splitArg, argv.slice(idx + 2), depth);
+    }
+    if (a.startsWith("--split-string=")) {
+      return expandEnvSplitString(a.slice("--split-string=".length), argv.slice(idx + 1), depth);
+    }
+    if (ENV_NO_ARG_LONG.has(a)) {
+      idx++;
+      continue;
+    }
+    if (ENV_VALUE_LONG.has(a)) {
+      idx += 2;
+      continue;
+    }
+    if (
+      a.startsWith("--unset=") ||
+      a.startsWith("--chdir=") ||
+      a.startsWith("--argv0=") ||
+      a.startsWith("--block-signal=") ||
+      a.startsWith("--default-signal=") ||
+      a.startsWith("--ignore-signal=")
+    ) {
+      idx++;
+      continue;
+    }
+    if (a.startsWith("--")) {
+      return {
+        nextArgv: [],
+        denyDecision: deny(`env with unrecognized option (${a}) is not allowed`),
+      };
+    }
+    if (a.startsWith("-") && a.length > 1) {
+      const flags = a.slice(1);
+      let consumedNext = false;
+      let hitSplit: string | null = null;
+      let restAfterSplit: string[] = [];
+
+      for (let k = 0; k < flags.length; k++) {
+        const f = flags[k];
+        if (f === "S") {
+          const attached = flags.slice(k + 1);
+          if (attached.length > 0) {
+            hitSplit = attached;
+            restAfterSplit = argv.slice(idx + 1);
+          } else {
+            const nextVal = argv[idx + 1];
+            if (nextVal === undefined) {
+              return {
+                nextArgv: [],
+                denyDecision: deny("env -S without command string is not allowed"),
+              };
+            }
+            hitSplit = nextVal;
+            restAfterSplit = argv.slice(idx + 2);
+          }
+          break;
+        }
+        if (ENV_VALUE_SHORT.has(f)) {
+          if (k + 1 === flags.length) {
+            consumedNext = true;
+          }
+          break;
+        }
+        if (!ENV_NO_ARG_SHORT.has(f)) {
+          return {
+            nextArgv: [],
+            denyDecision: deny(`env with unrecognized option (${a}) is not allowed`),
+          };
+        }
+      }
+
+      if (hitSplit !== null) {
+        return expandEnvSplitString(hitSplit, restAfterSplit, depth);
+      }
+      idx += consumedNext ? 2 : 1;
+      continue;
+    }
+    break;
+  }
+  return { nextArgv: argv.slice(idx) };
+}
+
+function expandEnvSplitString(
+  splitArg: string,
+  remainingArgv: string[],
+  depth: number
+): { nextArgv: string[]; denyDecision?: GuardDecision } {
+  const parsed = parseShellCommands(splitArg);
+  if (parsed.refusalReason !== null) {
+    return { nextArgv: [], denyDecision: deny(parsed.refusalReason) };
+  }
+  for (const script of parsed.embeddedScripts) {
+    const verdict = checkCommand(script, depth + 1);
+    if (verdict.decision === "deny") {
+      return { nextArgv: [], denyDecision: verdict };
+    }
+  }
+  if (parsed.commands.length === 0) {
+    return { nextArgv: remainingArgv };
+  }
+  if (parsed.commands.length === 1) {
+    const first = parsed.commands[0];
+    if (first.hasHereDoc || first.hasHereString) {
+      const nested = checkCommand(splitArg, depth + 1);
+      if (nested.decision === "deny") {
+        return { nextArgv: [], denyDecision: nested };
+      }
+    }
+    return { nextArgv: [...first.argv, ...remainingArgv] };
+  }
+  const nested = checkCommand(splitArg, depth + 1);
+  if (nested.decision === "deny") {
+    return { nextArgv: [], denyDecision: nested };
+  }
+  return { nextArgv: remainingArgv };
+}
+
+function stripTimeoutPrefix(
+  argv: string[]
+): { nextArgv: string[]; denyDecision?: GuardDecision } {
+  let idx = 1;
+  while (idx < argv.length) {
+    const a = argv[idx];
+    if (a === "--") {
+      idx++;
+      break;
+    }
+    if (
+      a === "--preserve-status" ||
+      a === "--foreground" ||
+      a === "-v" ||
+      a === "--verbose" ||
+      a === "--help" ||
+      a === "--version"
+    ) {
+      idx++;
+      continue;
+    }
+    if (a === "-k" || a === "--kill-after" || a === "-s" || a === "--signal") {
+      idx += 2;
+      continue;
+    }
+    if (
+      a.startsWith("--kill-after=") ||
+      a.startsWith("--signal=") ||
+      ((a.startsWith("-k") || a.startsWith("-s")) && a.length > 2)
+    ) {
+      idx++;
+      continue;
+    }
+    if (a.startsWith("-")) {
+      return {
+        nextArgv: [],
+        denyDecision: deny(`timeout with unrecognized option (${a}) is not allowed`),
+      };
+    }
+    break;
+  }
+  // Skip DURATION positional
+  if (idx < argv.length) {
+    idx++;
+  }
+  return { nextArgv: argv.slice(idx) };
+}
+
+function stripNicePrefix(
+  argv: string[]
+): { nextArgv: string[]; denyDecision?: GuardDecision } {
+  let idx = 1;
+  while (idx < argv.length) {
+    const a = argv[idx];
+    if (a === "--") {
+      idx++;
+      break;
+    }
+    if (a === "--help" || a === "--version") {
+      idx++;
+      continue;
+    }
+    if (a === "-n" || a === "--adjustment") {
+      idx += 2;
+      continue;
+    }
+    if (
+      a.startsWith("--adjustment=") ||
+      (a.startsWith("-n") && a.length > 2) ||
+      /^-\d+$/.test(a)
+    ) {
+      idx++;
+      continue;
+    }
+    if (a.startsWith("-")) {
+      return {
+        nextArgv: [],
+        denyDecision: deny(`nice with unrecognized option (${a}) is not allowed`),
+      };
+    }
+    break;
+  }
+  return { nextArgv: argv.slice(idx) };
+}
+
+function unwrapPrefixChain(
   rawArgv: string[],
   depth: number
-): GuardDecision | null {
+): { argv: string[]; earlyReturn?: GuardDecision | null } {
   let argv = rawArgv.slice();
 
-  let guardCounter = 0;
-  while (argv.length > 0 && guardCounter < 16) {
-    guardCounter++;
-
+  while (argv.length > 0) {
     if (SHELL_KEYWORDS.has(argv[0]) || isEnvAssignment(argv[0])) {
       argv = argv.slice(1);
       continue;
@@ -806,6 +2502,71 @@ function checkSimpleCommand(
     const bin = basename(argv[0]);
 
     if (bin === "env") {
+      const stripped = stripEnvPrefix(argv, depth);
+      if (stripped.denyDecision !== undefined) {
+        return { argv: [], earlyReturn: stripped.denyDecision };
+      }
+      argv = stripped.nextArgv;
+      continue;
+    }
+
+    if (bin === "timeout" || bin === "gtimeout") {
+      const stripped = stripTimeoutPrefix(argv);
+      if (stripped.denyDecision !== undefined) {
+        return { argv: [], earlyReturn: stripped.denyDecision };
+      }
+      argv = stripped.nextArgv;
+      continue;
+    }
+
+    if (bin === "nice") {
+      const stripped = stripNicePrefix(argv);
+      if (stripped.denyDecision !== undefined) {
+        return { argv: [], earlyReturn: stripped.denyDecision };
+      }
+      argv = stripped.nextArgv;
+      continue;
+    }
+
+    if (bin === "command") {
+      let idx = 1;
+      let isQuery = false;
+      while (idx < argv.length) {
+        const a = argv[idx];
+        if (a === "--") {
+          idx++;
+          break;
+        }
+        if (a.startsWith("-") && a.length > 1 && !a.startsWith("--")) {
+          for (const f of a.slice(1)) {
+            if (f === "v" || f === "V") {
+              isQuery = true;
+            } else if (f !== "p") {
+              return {
+                argv: [],
+                earlyReturn: deny(`command with unrecognized option (${a}) is not allowed`),
+              };
+            }
+          }
+          idx++;
+          continue;
+        }
+        if (a.startsWith("-")) {
+          return {
+            argv: [],
+            earlyReturn: deny(`command with unrecognized option (${a}) is not allowed`),
+          };
+        }
+        break;
+      }
+      if (isQuery) {
+        return { argv: [], earlyReturn: null };
+      }
+      argv = argv.slice(idx);
+      continue;
+    }
+
+    if (bin === "exec") {
       let idx = 1;
       while (idx < argv.length) {
         const a = argv[idx];
@@ -813,39 +2574,19 @@ function checkSimpleCommand(
           idx++;
           break;
         }
-        if (a === "-S" || a === "--split-string") {
-          const splitArg = argv[idx + 1];
-          if (splitArg !== undefined) {
-            const nested = checkCommand(splitArg, depth + 1);
-            if (nested.decision === "deny") {
-              return nested;
-            }
-          }
+        if (a === "-a") {
           idx += 2;
           continue;
         }
-        if (a.startsWith("--split-string=")) {
-          const nested = checkCommand(a.slice("--split-string=".length), depth + 1);
-          if (nested.decision === "deny") {
-            return nested;
-          }
+        if ((a.startsWith("-a") && a.length > 2) || a === "-c" || a === "-l") {
           idx++;
-          continue;
-        }
-        if (
-          a === "-u" ||
-          a === "--unset" ||
-          a === "-C" ||
-          a === "--chdir" ||
-          a === "-P" ||
-          a === "-a"
-        ) {
-          idx += 2;
           continue;
         }
         if (a.startsWith("-")) {
-          idx++;
-          continue;
+          return {
+            argv: [],
+            earlyReturn: deny(`exec with unrecognized option (${a}) is not allowed`),
+          };
         }
         break;
       }
@@ -853,7 +2594,7 @@ function checkSimpleCommand(
       continue;
     }
 
-    if (bin === "command" || bin === "exec" || bin === "nohup" || bin === "time") {
+    if (bin === "nohup" || bin === "builtin") {
       let idx = 1;
       while (idx < argv.length) {
         const a = argv[idx];
@@ -861,13 +2602,122 @@ function checkSimpleCommand(
           idx++;
           break;
         }
-        if (bin === "exec" && a === "-a") {
+        if (bin === "nohup" && (a === "--help" || a === "--version")) {
+          idx++;
+          continue;
+        }
+        if (a.startsWith("-")) {
+          return {
+            argv: [],
+            earlyReturn: deny(`${bin} with unrecognized option (${a}) is not allowed`),
+          };
+        }
+        break;
+      }
+      argv = argv.slice(idx);
+      continue;
+    }
+
+    if (bin === "time") {
+      let idx = 1;
+      while (idx < argv.length) {
+        const a = argv[idx];
+        if (a === "--") {
+          idx++;
+          break;
+        }
+        if (
+          a === "-p" ||
+          a === "-v" ||
+          a === "--verbose" ||
+          a === "-a" ||
+          a === "--append" ||
+          a === "-q" ||
+          a === "--quiet" ||
+          a === "--portability" ||
+          a.startsWith("--format=") ||
+          a.startsWith("--output=")
+        ) {
+          idx++;
+          continue;
+        }
+        if (a === "-f" || a === "--format" || a === "-o" || a === "--output") {
           idx += 2;
           continue;
         }
         if (a.startsWith("-")) {
+          return {
+            argv: [],
+            earlyReturn: deny(`time with unrecognized option (${a}) is not allowed`),
+          };
+        }
+        break;
+      }
+      argv = argv.slice(idx);
+      continue;
+    }
+
+    if (bin === "setsid") {
+      let idx = 1;
+      while (idx < argv.length) {
+        const a = argv[idx];
+        if (a === "--") {
+          idx++;
+          break;
+        }
+        if (
+          a === "-c" ||
+          a === "--ctty" ||
+          a === "-f" ||
+          a === "--fork" ||
+          a === "-w" ||
+          a === "--wait" ||
+          a === "--help" ||
+          a === "--version"
+        ) {
           idx++;
           continue;
+        }
+        if (a.startsWith("-")) {
+          return {
+            argv: [],
+            earlyReturn: deny(`setsid with unrecognized option (${a}) is not allowed`),
+          };
+        }
+        break;
+      }
+      argv = argv.slice(idx);
+      continue;
+    }
+
+    if (bin === "stdbuf") {
+      let idx = 1;
+      while (idx < argv.length) {
+        const a = argv[idx];
+        if (a === "--") {
+          idx++;
+          break;
+        }
+        if (a === "-i" || a === "--input" || a === "-o" || a === "--output" || a === "-e" || a === "--error") {
+          idx += 2;
+          continue;
+        }
+        if (
+          a.startsWith("--input=") ||
+          a.startsWith("--output=") ||
+          a.startsWith("--error=") ||
+          ((a.startsWith("-i") || a.startsWith("-o") || a.startsWith("-e")) && a.length > 2) ||
+          a === "--help" ||
+          a === "--version"
+        ) {
+          idx++;
+          continue;
+        }
+        if (a.startsWith("-")) {
+          return {
+            argv: [],
+            earlyReturn: deny(`stdbuf with unrecognized option (${a}) is not allowed`),
+          };
         }
         break;
       }
@@ -878,6 +2728,273 @@ function checkSimpleCommand(
     break;
   }
 
+  return { argv };
+}
+
+function isDisallowedBatchTarget(bin: string): boolean {
+  return (
+    bin === "git" ||
+    bin === "gh" ||
+    bin === "sudo" ||
+    bin === "eval" ||
+    bin === "agy" ||
+    SHELL_BINARIES.has(bin)
+  );
+}
+
+const XARGS_NO_ARG_SHORT = new Set(["0", "p", "r", "t", "x", "o", "h"]);
+const XARGS_VALUE_SHORT = new Set(["a", "d", "E", "I", "L", "n", "P", "s"]);
+const XARGS_OPT_ATTACHED_SHORT = new Set(["e", "i", "l"]);
+const XARGS_NO_ARG_LONG = new Set([
+  "--null",
+  "--interactive",
+  "--no-run-if-empty",
+  "--verbose",
+  "--exit",
+  "--open-tty",
+  "--show-limits",
+  "--help",
+  "--version",
+]);
+const XARGS_VALUE_LONG = new Set([
+  "--arg-file",
+  "--delimiter",
+  "--eof",
+  "--replace",
+  "--max-lines",
+  "--max-args",
+  "--max-procs",
+  "--max-chars",
+  "--process-slot-var",
+]);
+
+function checkXargs(rest: string[], depth: number): GuardDecision | null {
+  let idx = 0;
+  while (idx < rest.length) {
+    const a = rest[idx];
+    if (a === "--") {
+      idx++;
+      break;
+    }
+    if (XARGS_NO_ARG_LONG.has(a)) {
+      idx++;
+      continue;
+    }
+    if (XARGS_VALUE_LONG.has(a)) {
+      idx += 2;
+      continue;
+    }
+    if (
+      a.startsWith("--arg-file=") ||
+      a.startsWith("--delimiter=") ||
+      a.startsWith("--eof=") ||
+      a.startsWith("--replace=") ||
+      a.startsWith("--max-lines=") ||
+      a.startsWith("--max-args=") ||
+      a.startsWith("--max-procs=") ||
+      a.startsWith("--max-chars=") ||
+      a.startsWith("--process-slot-var=")
+    ) {
+      idx++;
+      continue;
+    }
+    if (a.startsWith("--")) {
+      return deny(`xargs with unrecognized option (${a}) is not allowed`);
+    }
+    if (a.startsWith("-") && a.length > 1) {
+      const flags = a.slice(1);
+      let consumedNext = false;
+      for (let k = 0; k < flags.length; k++) {
+        const f = flags[k];
+        if (XARGS_VALUE_SHORT.has(f)) {
+          if (k + 1 === flags.length) consumedNext = true;
+          break;
+        }
+        if (XARGS_OPT_ATTACHED_SHORT.has(f)) {
+          break;
+        }
+        if (!XARGS_NO_ARG_SHORT.has(f)) {
+          return deny(`xargs with unrecognized option (${a}) is not allowed`);
+        }
+      }
+      idx += consumedNext ? 2 : 1;
+      continue;
+    }
+    break;
+  }
+
+  const targetArgv = rest.slice(idx);
+  if (targetArgv.length === 0) return null;
+
+  const unwrapped = unwrapPrefixChain(targetArgv, depth);
+  if (unwrapped.earlyReturn !== undefined) {
+    return unwrapped.earlyReturn;
+  }
+  if (unwrapped.argv.length === 0) return null;
+
+  const targetBin = basename(unwrapped.argv[0]);
+  if (isDisallowedBatchTarget(targetBin)) {
+    return deny(`running ${targetBin} via xargs is not allowed`);
+  }
+  return null;
+}
+
+const PARALLEL_NO_ARG_FLAGS = new Set([
+  "-k",
+  "--keep-order",
+  "--tag",
+  "-t",
+  "--bar",
+  "--eta",
+  "--progress",
+  "--dry-run",
+  "-v",
+  "--verbose",
+  "-q",
+  "--quote",
+  "--no-notice",
+  "--will-cite",
+  "-0",
+  "--null",
+  "--pipe",
+  "--pipepart",
+  "--xargs",
+  "-X",
+  "-m",
+  "--plus",
+  "--shellquote",
+  "--ungroup",
+  "-u",
+  "--group",
+  "-h",
+  "--help",
+  "--version",
+  "--citation",
+  "--bibtex",
+  "-i",
+]);
+
+const PARALLEL_VALUE_FLAGS = new Set([
+  "-j",
+  "--jobs",
+  "-P",
+  "--max-procs",
+  "-I",
+  "--replace",
+  "-n",
+  "-N",
+  "-L",
+  "-l",
+  "--max-lines",
+  "-a",
+  "--arg-file",
+  "-d",
+  "--delimiter",
+  "--colsep",
+  "-C",
+  "-S",
+  "--sshlogin",
+  "--sshloginfile",
+  "--workdir",
+  "--wd",
+  "--results",
+  "--res",
+  "--tagstring",
+  "--halt",
+  "--timeout",
+  "--retries",
+  "--delay",
+  "--memfree",
+  "--load",
+  "--noswap",
+  "--rpl",
+  "--slf",
+  "--tmpdir",
+  "--joblog",
+]);
+
+function checkParallel(rest: string[], depth: number): GuardDecision | null {
+  let idx = 0;
+  while (idx < rest.length) {
+    const a = rest[idx];
+    if (a === "--") {
+      idx++;
+      break;
+    }
+    if (a === ":::" || a === "::::") {
+      return deny("running commands via parallel without an explicit safe command is not allowed");
+    }
+    if (PARALLEL_NO_ARG_FLAGS.has(a)) {
+      idx++;
+      continue;
+    }
+    if (PARALLEL_VALUE_FLAGS.has(a)) {
+      idx += 2;
+      continue;
+    }
+    if (
+      /^--[a-z-]+=/i.test(a) ||
+      /^-[jPInNLladCS].+/.test(a)
+    ) {
+      idx++;
+      continue;
+    }
+    if (a.startsWith("-")) {
+      return deny(`parallel with unrecognized option (${a}) is not allowed`);
+    }
+    break;
+  }
+
+  const sepIdx = rest.findIndex((t, pos) => pos >= idx && (t === ":::" || t === "::::"));
+  const cmdTokens = sepIdx === -1 ? rest.slice(idx) : rest.slice(idx, sepIdx);
+  if (cmdTokens.length === 0) {
+    return deny("running commands via parallel without an explicit safe command is not allowed");
+  }
+
+  const unwrapped = unwrapPrefixChain(cmdTokens, depth);
+  if (unwrapped.earlyReturn !== undefined) {
+    return unwrapped.earlyReturn;
+  }
+  if (unwrapped.argv.length > 0) {
+    const targetBin = basename(unwrapped.argv[0]);
+    if (isDisallowedBatchTarget(targetBin)) {
+      return deny(`running ${targetBin} via parallel is not allowed`);
+    }
+  }
+
+  if (/[\s;|&$`<>()]/.test(cmdTokens[0])) {
+    const parsedInner = parseShellCommands(cmdTokens[0]);
+    if (parsedInner.refusalReason !== null) {
+      return deny(parsedInner.refusalReason);
+    }
+    for (const innerCmd of parsedInner.commands) {
+      const innerUnwrapped = unwrapPrefixChain(innerCmd.argv, depth + 1);
+      if (innerUnwrapped.earlyReturn !== undefined) {
+        return innerUnwrapped.earlyReturn;
+      }
+      if (innerUnwrapped.argv.length > 0) {
+        const innerBin = basename(innerUnwrapped.argv[0]);
+        if (isDisallowedBatchTarget(innerBin)) {
+          return deny(`running ${innerBin} via parallel is not allowed`);
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function checkSimpleCommand(
+  cmd: ParsedCommand,
+  prevCmd: ParsedCommand | null,
+  depth: number
+): GuardDecision | null {
+  const unwrapped = unwrapPrefixChain(cmd.argv, depth);
+  if (unwrapped.earlyReturn !== undefined) {
+    return unwrapped.earlyReturn;
+  }
+
+  const argv = unwrapped.argv;
   if (argv.length === 0) {
     return null;
   }
@@ -889,10 +3006,57 @@ function checkSimpleCommand(
     return deny("running commands with sudo is not allowed");
   }
 
+  if (bin === "eval") {
+    return deny("using eval is not allowed");
+  }
+
+  if (bin === "alias") {
+    if (rest.some((arg) => arg.includes("="))) {
+      return deny("defining shell aliases is not allowed");
+    }
+    return null;
+  }
+
+  if (bin === "source" || bin === ".") {
+    if (cmd.hasHereDoc || cmd.hasHereString) {
+      return deny("sourcing from here-doc or here-string is not allowed");
+    }
+    if (cmd.pipedIn) {
+      return deny("sourcing from piped input is not allowed");
+    }
+    if (rest.some((arg) => arg.includes("<(") || arg.includes(">("))) {
+      return deny("sourcing process substitution is not allowed");
+    }
+    return null;
+  }
+
+  if (bin === "xargs") {
+    return checkXargs(rest, depth);
+  }
+
+  if (bin === "parallel") {
+    return checkParallel(rest, depth);
+  }
+
   if (SHELL_BINARIES.has(bin)) {
-    const script = extractShellDashCScript(rest);
-    if (script !== null) {
-      const nested = checkCommand(script, depth + 1);
+    if (cmd.pipedIn) {
+      return deny("piping input into a shell is not allowed");
+    }
+    if (cmd.hasHereDoc || cmd.hasHereString) {
+      return deny("feeding here-docs or here-strings to a shell is not allowed");
+    }
+    const inspected = inspectShellInvocation(rest);
+    if (inspected.kind === "unrecognized") {
+      return deny(`shell invocation with unrecognized option (${inspected.flag}) is not allowed`);
+    }
+    if (inspected.kind === "dash_s") {
+      return deny("reading shell commands from stdin (-s) is not allowed");
+    }
+    if (inspected.kind === "dash_c") {
+      if (inspected.script === null) {
+        return deny("shell -c without a readable script argument is not allowed");
+      }
+      const nested = checkCommand(inspected.script, depth + 1);
       if (nested.decision === "deny") {
         return nested;
       }
@@ -901,11 +3065,15 @@ function checkSimpleCommand(
   }
 
   if (bin === "git") {
-    return checkGit(rest);
+    return checkGit(rest, cmd, depth);
   }
 
   if (bin === "gh") {
     return checkGh(rest);
+  }
+
+  if (bin === "agy") {
+    return checkAgy(rest, cmd, prevCmd);
   }
 
   return null;
@@ -916,10 +3084,16 @@ export function checkCommand(commandLine: string, depth = 0): GuardDecision {
     return deny("command nesting exceeded guard recursion limit");
   }
 
-  const { commands, embeddedScripts } = parseShellCommands(commandLine);
+  const { commands, embeddedScripts, refusalReason } = parseShellCommands(commandLine);
 
-  for (const argv of commands) {
-    const verdict = checkSimpleCommand(argv, depth);
+  if (refusalReason !== null) {
+    return deny(refusalReason);
+  }
+
+  for (let i = 0; i < commands.length; i++) {
+    const cmd = commands[i];
+    const prevCmd = cmd.pipedIn && i > 0 ? commands[i - 1] : null;
+    const verdict = checkSimpleCommand(cmd, prevCmd, depth);
     if (verdict !== null) {
       return verdict;
     }
