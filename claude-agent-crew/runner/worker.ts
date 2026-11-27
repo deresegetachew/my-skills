@@ -196,7 +196,9 @@ export function buildSshCrewCommand(opts: {
   // The runner inside the repo (my-skills itself), else the skill installed for that user.
   const runner =
     'R=claude-agent-crew/runner/crew.ts && { [ -f "$R" ] || R="$HOME/.claude/skills/claude-agent-crew/runner/crew.ts"; }';
-  const remoteCmd = `cd ${shellQuote(opts.remotePath)} && ${runner} && bun "$R" ${opts.crewArgs.map(shellQuote).join(" ")}`;
+  // ssh runs a non-interactive shell, which often lacks bun's default install folder on PATH.
+  const path = 'export PATH="$HOME/.bun/bin:$PATH"';
+  const remoteCmd = `${path} && cd ${shellQuote(opts.remotePath)} && ${runner} && bun "$R" ${opts.crewArgs.map(shellQuote).join(" ")}`;
   return [...sshParts, remoteCmd];
 }
 
