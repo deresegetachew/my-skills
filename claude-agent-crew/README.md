@@ -18,7 +18,9 @@ claude-agent-crew/
     │   ├── WORKER.md     # how to run agy headless, read its result, its limits
     │   └── plugin/       # installed on each machine with: agy plugin install <path>
     └── claude/
-        └── WORKER.md     # how to run claude -p headless with its own permissions
+        ├── WORKER.md     # how to run claude -p headless with its own permissions
+        ├── hook.ts       # PreToolUse guard (reuses the agy guard)
+        └── settings.worker.json
 ```
 
 The full design, with diagrams, is at https://claude.ai/artifact/BAGAUS8UhXf3VijWjjvSLw.

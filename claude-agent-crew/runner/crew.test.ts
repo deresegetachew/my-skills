@@ -99,6 +99,12 @@ function installFakeAgy(binDir: string, scriptBody: string): void {
   chmodSync(agyPath, 0o755);
 }
 
+function installFakeClaude(binDir: string, scriptBody: string): void {
+  const path = join(binDir, "claude");
+  writeFileSync(path, `#!/usr/bin/env bash\nset -euo pipefail\n${scriptBody}\n`, "utf8");
+  chmodSync(path, 0o755);
+}
+
 function runCrew(
   t: TestEnv,
   args: string[],
@@ -276,8 +282,8 @@ JSON
     expect(usageRec.usage.output_tokens).toBe(45);
   });
 
-  test("exit code 1 for invalid commands and claude worker not yet supported (T5)", () => {
-    const t = setupRepo();
+  test("exit code 1 for invalid commands and an unknown worker", () => {
+    const t = setupRepo({ roles: { auditor: { worker: "nope", machine: "local" } }, machines: { local: "local" } });
     const briefPath = join(t.repo, "brief.md");
     writeFileSync(briefPath, "Audit repo.\n", "utf8");
 
@@ -289,8 +295,8 @@ JSON
     const claudeCmd = runCrew(t, ["start", "--role", "auditor", "--brief", briefPath]);
     expect(claudeCmd.exitCode).toBe(1);
     const claudeErr = JSON.parse(claudeCmd.stderr) as { code: string; message: string; fix: string };
-    expect(claudeErr.code).toBe("WORKER_NOT_SUPPORTED");
-    expect(claudeErr.message).toContain("not yet supported (T5)");
+    expect(claudeErr.code).toBe("UNKNOWN_WORKER");
+    expect(claudeErr.message).toContain('"nope"');
     expect(claudeErr.fix.length).toBeGreaterThan(0);
   });
 
@@ -2432,4 +2438,124 @@ bash -c "$rewritten"
     expect(errorCode(cont.stderr)).toBe("INVALID_JOB_ID");
   }, 60_000);
 
+
+  test("claude worker: brief on stdin, crew rules and guard settings passed, result and usage recorded", () => {
+    const t = setupRepo();
+    const argsLog = join(t.root, "claude-args.txt");
+    const stdinLog = join(t.root, "claude-stdin.txt");
+    const envLog = join(t.root, "claude-env.txt");
+    installFakeClaude(
+      t.binDir,
+      `
+printf '%s\\0' "$@" > "${argsLog}"
+cat > "${stdinLog}"
+printf '%s' "$CREW_ROOT" > "${envLog}"
+echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: PASS\\nNo findings.","session_id":"sess-from-claude","total_cost_usd":0.42,"usage":{"input_tokens":300,"output_tokens":20,"cache_read_input_tokens":1000}}'
+`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "--not-a-flag: audit the repo.\n", "utf8");
+
+    const start = runCrew(t, ["start", "--role", "auditor", "--brief", briefPath]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+    expect(runCrew(t, ["wait", jobId, "--timeout", "10s"]).exitCode).toBe(0);
+
+    const res = runCrew(t, ["result", jobId]);
+    expect(res.stdout.split("\n")[0]).toBe("Verdict: PASS");
+
+    expect(readFileSync(stdinLog, "utf8")).toBe("--not-a-flag: audit the repo.\n");
+    const argLines = readFileSync(argsLog, "utf8").split("\0");
+    const argAfter = (flag: string): string | undefined => argLines[argLines.indexOf(flag) + 1];
+    expect(argLines[0]).toBe("-p");
+    expect(argLines).not.toContain("--not-a-flag: audit the repo.");
+    expect(argAfter("--output-format")).toBe("json");
+    expect(argAfter("--append-system-prompt")).toContain("Never push directly to `main`");
+    const settings = JSON.parse(argAfter("--settings") ?? "{}") as {
+      permissions: { deny: string[] };
+      hooks: { PreToolUse: { matcher: string; hooks: { command: string }[] }[] };
+    };
+    expect(settings.permissions.deny).toContain("Bash(sudo:*)");
+    expect(settings.hooks.PreToolUse[0]?.matcher).toBe("Bash");
+    expect(settings.hooks.PreToolUse[0]?.hooks[0]?.command).toContain("workers/claude/hook.ts");
+    expect(argAfter("--session-id")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(argLines).not.toContain("--resume");
+    expect(existsSync(join(readFileSync(envLog, "utf8"), "workers", "claude", "hook.ts"))).toBe(true);
+
+    const job = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${jobId}.json`), "utf8")) as {
+      worker: string;
+      conversationId: string;
+      status: string;
+    };
+    expect(job.worker).toBe("claude");
+    expect(job.status).toBe("done");
+    expect(job.conversationId).toBe("sess-from-claude");
+    const usage = JSON.parse(readFileSync(join(t.repo, ".crew", "usage.jsonl"), "utf8").trim()) as {
+      worker: string;
+      usage: { input_tokens: number; total_cost_usd: number; cache_read_input_tokens: number };
+    };
+    expect(usage.worker).toBe("claude");
+    expect(usage.usage.input_tokens).toBe(300);
+    expect(usage.usage.cache_read_input_tokens).toBe(1000);
+    expect(usage.usage.total_cost_usd).toBe(0.42);
+  });
+
+  test("claude worker: read-only roles cannot edit; a timed-out run needs attention and --continue resumes it", () => {
+    const t = setupRepo({
+      roles: { reviewer: { worker: "claude", model: "claude-sonnet-5-5", machine: "local" } },
+      machines: { local: "local" },
+    });
+    const argsLog = join(t.root, "claude-args.txt");
+    installFakeClaude(
+      t.binDir,
+      `
+printf '%s\\n' "$@" >> "${argsLog}"
+printf -- '--\\n' >> "${argsLog}"
+cat > /dev/null
+if printf '%s\\n' "$@" | grep -qx -- '--resume'; then
+  echo '{"type":"result","subtype":"success","is_error":false,"result":"Verdict: PASS","session_id":"ignored"}'
+else
+  sleep 30
+fi
+`,
+    );
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Review.\n", "utf8");
+
+    const start = runCrew(t, ["start", "--role", "reviewer", "--brief", briefPath, "--timeout", "1s"]);
+    expect(start.exitCode).toBe(0);
+    const jobId = extractJobId(start.stdout);
+    expect(runCrew(t, ["wait", jobId, "--timeout", "15s"]).exitCode).toBe(5);
+
+    const first = readFileSync(argsLog, "utf8").split("--\n")[0]?.split("\n") ?? [];
+    const sessionId = first[first.indexOf("--session-id") + 1] ?? "";
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(first).toContain("--disallowedTools");
+    expect(first).toContain("Edit");
+    expect(first[first.indexOf("--model") + 1]).toBe("claude-sonnet-5-5");
+    const stuck = JSON.parse(readFileSync(join(t.repo, ".crew", "jobs", `${jobId}.json`), "utf8")) as {
+      status: string;
+      conversationId: string;
+    };
+    expect(stuck.status).toBe("attention");
+    expect(stuck.conversationId).toBe(sessionId);
+
+    const again = runCrew(t, ["start", "--role", "reviewer", "--brief", briefPath, "--continue", jobId]);
+    expect(again.exitCode).toBe(0);
+    const nextId = extractJobId(again.stdout);
+    expect(runCrew(t, ["wait", nextId, "--timeout", "10s"]).exitCode).toBe(0);
+    const second = readFileSync(argsLog, "utf8").split("--\n")[1]?.split("\n") ?? [];
+    expect(second[second.indexOf("--resume") + 1]).toBe(sessionId);
+    expect(second).not.toContain("--session-id");
+   }, 60_000);
+
+  test("claude worker: a bad --timeout is refused before anything starts", () => {
+    const t = setupRepo();
+    const briefPath = join(t.repo, "brief.md");
+    writeFileSync(briefPath, "Audit.\n", "utf8");
+    const r = runCrew(t, ["start", "--role", "auditor", "--brief", briefPath, "--timeout", "soon"]);
+    expect(r.exitCode).toBe(1);
+    expect(errorCode(r.stderr)).toBe("INVALID_TIMEOUT");
+    expect(existsSync(join(t.repo, ".crew", "jobs")) ? readdirSync(join(t.repo, ".crew", "jobs")) : []).toEqual([]);
+  });
 });

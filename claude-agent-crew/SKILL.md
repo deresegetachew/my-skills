@@ -64,8 +64,9 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
    gap: a focused follow-up (`--continue` when the context helps).
 6. **Review** every change with a fresh session (`reviewer`, plus `security-reviewer` or `architecture-reviewer`
    when the change touches their area). A session never reviews its own work. Reviewers post their verdict on the PR
-   as `crew-reviewer`. Clean means no open critical, high or medium finding; low and nit findings may become
-   issues. Fixes go back to the builder (continue its job), and the changed PR gets a fresh review again.
+   as `crew-reviewer`. Clean means no open critical or high finding. Medium, low and nit findings become issues,
+   not more review rounds. Fixes go back to the builder (continue its job). After fixes, a cheap model rechecks only
+   the high findings; it is not a full new review.
 7. **Audit** changes to safety rules, gates, money and data that must never change: the `auditor` tries to break
    them; check each break is real; each real break becomes a failing test plus a fix task; audit again until
    nothing breaks.
@@ -86,6 +87,11 @@ agent sessions does the work, one role per run. Only you decide scope, merge, an
 - Cost: every run names its model (`crew.json`); cheap models by default; read status lines and diff stats, not
   full reports; continue a builder's conversation for review fixes instead of starting over. `.crew/usage.jsonl`
   shows spend per role and model; look at it before changing models.
+- Keep a task to one PR of about 300 changed lines. A big diff makes every review expensive, and each fix round
+  adds code for the next review to find.
+- A guard that parses shell commands is never airtight. Don't chase its bypasses round after round: record what is
+  left as residual risk and rely on the hard guarantees.
+- Give reviewers the changed file paths in the brief; a reviewer without them may read nothing.
 - If a run stops on a quota or usage limit, its work is saved: continue it when the limit resets; don't restart.
 
 ## Files
