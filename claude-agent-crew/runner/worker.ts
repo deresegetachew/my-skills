@@ -245,16 +245,24 @@ function extractLastJsonObject(text: string): Record<string, unknown> | null {
   return lastPayload ?? lastAny;
 }
 
-export function parseAgyOutput(stdoutText: string, stderrText = ""): ParsedWorkerOutput {
+const STDERR_TIMEOUT_PATTERN = /timed?\s*out/i;
+
+export function parseAgyOutput(
+  stdoutText: string,
+  stderrText = "",
+  exitCode: number | null = null,
+): ParsedWorkerOutput {
+  // A "timed out" line on stderr only counts when the worker also failed: a successful run
+  // can log "request timed out, retrying" and still finish its job.
+  const stderrTimedOut = exitCode !== null && exitCode !== 0 && STDERR_TIMEOUT_PATTERN.test(stderrText);
   const trimmed = stdoutText.trim();
   if (!trimmed) {
-    const timedOut = /timed?\s*out/i.test(stderrText);
     return {
       conversationId: null,
       resultText: "",
       usage: null,
       isError: false,
-      timedOut,
+      timedOut: stderrTimedOut,
       validJson: false,
     };
   }
@@ -273,7 +281,7 @@ export function parseAgyOutput(stdoutText: string, stderrText = ""): ParsedWorke
       resultText: trimmed,
       usage: null,
       isError: false,
-      timedOut: /timed?\s*out/i.test(stderrText),
+      timedOut: stderrTimedOut,
       validJson: false,
     };
   }

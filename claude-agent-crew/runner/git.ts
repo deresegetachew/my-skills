@@ -118,6 +118,42 @@ export function isWorktreeDirty(worktreePath: string): boolean {
   return res.stdout.trim().length > 0;
 }
 
+/** True when the worktree holds ignored files (.env, build output, ...) that `git worktree remove` would delete. */
+export function hasIgnoredFiles(worktreePath: string): boolean {
+  if (!existsSync(worktreePath)) return false;
+  const res = runGit(worktreePath, ["status", "--porcelain", "--ignored"]);
+  if (res.exitCode !== 0) return true;
+  return res.stdout.trim().length > 0;
+}
+
+/**
+ * Safety rule for `clean`: the worktree HEAD must be reachable from some ref (branch, remote-tracking
+ * branch or tag), otherwise removing the worktree would delete the only copy of its commits.
+ * Returns null when HEAD is preserved, or a reason string when it is not (or cannot be proven).
+ */
+export function unpreservedHeadReason(repoRoot: string, worktreePath: string): string | null {
+  const head = runGit(worktreePath, ["rev-parse", "--verify", "--quiet", "HEAD^{commit}"]);
+  if (head.exitCode !== 0 || !head.stdout.trim()) {
+    return "could not read worktree HEAD; keeping it to be safe";
+  }
+  const refs = runGit(repoRoot, [
+    "for-each-ref",
+    "--contains",
+    head.stdout.trim(),
+    "--format=%(refname)",
+    "refs/heads",
+    "refs/remotes",
+    "refs/tags",
+  ]);
+  if (refs.exitCode !== 0) {
+    return "could not check whether HEAD is contained in another ref; keeping it to be safe";
+  }
+  if (refs.stdout.trim().length === 0) {
+    return "HEAD holds commits that no branch or tag contains; keeping it so they are not lost";
+  }
+  return null;
+}
+
 function pathEntryExists(p: string): boolean {
   try {
     lstatSync(p);
@@ -215,7 +251,9 @@ function findWorktreeHolder(
   return runningJobs.find(
     (j) =>
       j.remotePath === null &&
-      (canonicalizePath(j.worktree) === canonTarget || (j.branch !== null && j.branch === branchName)),
+      (canonicalizePath(j.worktree) === canonTarget ||
+        // read-only jobs record the branch they inspect but use their own detached worktree
+        (!isReadOnlyRole(j.role) && j.branch !== null && j.branch === branchName)),
   );
 }
 
@@ -259,6 +297,14 @@ export function prepareWorktree(
       const isRegistered = listWorktrees(repoRoot).some((w) => canonicalizePath(w.path) === canonPrev);
       if (isRegistered) {
         if (!readOnly && opts.continueJob.branch) {
+          const checkedOut = listWorktrees(repoRoot).find((w) => canonicalizePath(w.path) === canonPrev);
+          if (checkedOut && checkedOut.branch !== opts.continueJob.branch) {
+            throw new CrewCliError(
+              "CONTINUE_BRANCH_CHANGED",
+              `Worktree ${prevWt} has ${checkedOut.branch ? `branch "${checkedOut.branch}"` : "a detached HEAD"} checked out, not "${opts.continueJob.branch}" recorded for job "${opts.continueJob.id}".`,
+              `Run \`git -C ${prevWt} switch ${opts.continueJob.branch}\` and retry, or start a fresh job without --continue.`,
+            );
+          }
           const external = listWorktrees(repoRoot).find(
             (w) => w.branch === opts.continueJob?.branch && !isUnderWorktreesDir(repoRoot, w.path),
           );
@@ -468,6 +514,20 @@ export function cleanFinishedWorktrees(
       } else {
         kept.push({ worktree: wt, reason: "worktree prune did not remove entry" });
       }
+      continue;
+    }
+
+    const wtHead = trackedMap.get(canonWt);
+    if (!wtHead || wtHead.detached || wtHead.branch === null) {
+      const unsafe = unpreservedHeadReason(repoRoot, wt);
+      if (unsafe) {
+        kept.push({ worktree: wt, reason: unsafe });
+        continue;
+      }
+    }
+
+    if (hasIgnoredFiles(wt)) {
+      kept.push({ worktree: wt, reason: "worktree contains ignored or untracked files that removal would delete" });
       continue;
     }
 

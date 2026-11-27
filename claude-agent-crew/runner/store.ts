@@ -59,7 +59,24 @@ export function ensureCrewDirs(repoRoot: string): void {
   }
 }
 
+const JOB_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+export function isValidJobId(jobId: string): boolean {
+  return JOB_ID_PATTERN.test(jobId);
+}
+
+export function assertValidJobId(jobId: string): void {
+  if (!isValidJobId(jobId)) {
+    throw new CrewCliError(
+      "INVALID_JOB_ID",
+      `Invalid job id "${jobId}".`,
+      "Job ids contain only letters, digits, '_' and '-'. Run `list` to see recorded jobs.",
+    );
+  }
+}
+
 export function jobFilePath(repoRoot: string, jobId: string): string {
+  assertValidJobId(jobId);
   return join(jobsDir(repoRoot), `${jobId}.json`);
 }
 
@@ -91,6 +108,7 @@ export function listJobs(repoRoot: string): JobRecord[] {
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".json") || name.includes(".tmp.")) continue;
     const id = name.slice(0, -".json".length);
+    if (!isValidJobId(id)) continue;
     const job = readJob(repoRoot, id);
     if (job) jobs.push(job);
   }

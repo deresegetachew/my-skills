@@ -5,9 +5,10 @@
 
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import {
+  type CleanResult,
   cleanFinishedWorktrees,
   ensureCrewExcluded,
   getRepoRoot,
@@ -20,6 +21,8 @@ import {
   crewDir,
   ensureCrewDirs,
   generateJobId,
+  isValidJobId,
+  jobFilePath,
   listJobs,
   logsDir,
   parseDurationMs,
@@ -72,8 +75,8 @@ function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "EPERM";
   }
 }
 
@@ -106,7 +109,37 @@ function inspectJobPgid(pid: number, jobId: string): "alive" | "mismatch" | "exi
   return liveInGroup ? "alive" : "exited";
 }
 
+function envMs(name: string, fallback: number): number {
+  const raw = process.env[name];
+  const n = raw === undefined ? NaN : Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+/** How long a `running` job may go without `_exec` recording its pid before it counts as never started. */
+function pidGraceMs(): number {
+  return envMs("CREW_PID_GRACE_MS", 30_000);
+}
+
 function syncJobLiveness(repoRoot: string, job: JobRecord): JobRecord {
+  if (job.status === "running" && job.pid === null && job.remotePath === null) {
+    const age = Date.now() - Date.parse(job.start);
+    if (!(age > pidGraceMs())) return job;
+    const fresh = readJob(repoRoot, job.id);
+    if (fresh && (fresh.status !== "running" || fresh.pid !== null)) return syncJobLiveness(repoRoot, fresh);
+    const stuck: JobRecord = {
+      ...(fresh ?? job),
+      status: "error",
+      end: new Date().toISOString(),
+      exit: 1,
+      error: {
+        code: "EXEC_START_FAILED",
+        message: `Job "${job.id}" never recorded a pid: its supervisor did not start (start was interrupted).`,
+        fix: `Run \`${RUNNER_CMD} start\` again; \`${RUNNER_CMD} clean\` can then release its worktree.`,
+      },
+    };
+    writeJob(repoRoot, stuck);
+    return stuck;
+  }
   if (job.status !== "running" || job.pid === null || job.remotePath !== null) return job;
   if (inspectJobPgid(job.pid, job.id) === "alive") return job;
   const fresh = readJob(repoRoot, job.id);
@@ -222,78 +255,174 @@ function formatContinueCmd(job: JobRecord): string {
   return `${RUNNER_CMD} start --role ${safeArg(job.role)} --brief ${shellQuote(job.briefFile)} --continue ${safeArg(job.id)}`;
 }
 
+/**
+ * Lock owner file content is "<pid>-<token>". A lock is stale when its owner pid is dead, or, for a lock
+ * with no owner file at all (written by an older runner), when its directory is older than 10 s.
+ * A live owner is never stolen, however long `git worktree add` takes.
+ */
+function readLockOwner(lockDir: string): string | null {
+  try {
+    return readFileSync(join(lockDir, "owner"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+function isLockStale(lockDir: string): boolean {
+  const owner = readLockOwner(lockDir);
+  if (owner !== null && owner.trim() !== "") {
+    const pid = Number(owner.split("-", 1)[0]);
+    return !(Number.isInteger(pid) && pid > 0 && isPidAlive(pid));
+  }
+  try {
+    return Date.now() - statSync(lockDir).mtimeMs > 10_000;
+  } catch {
+    return false;
+  }
+}
+
+function reclaimStaleLock(lockDir: string, reclaimLock: string): boolean {
+  if (!isLockStale(lockDir)) return false;
+  const seen = readLockOwner(lockDir);
+  let held = false;
+  try {
+    mkdirSync(reclaimLock);
+    held = true;
+    if (isLockStale(lockDir) && readLockOwner(lockDir) === seen) {
+      rmSync(lockDir, { recursive: true, force: true });
+      return true;
+    }
+    return false;
+  } catch {
+    try {
+      if (Date.now() - statSync(reclaimLock).mtimeMs > 10_000) {
+        rmSync(reclaimLock, { recursive: true, force: true });
+      }
+    } catch {
+      // reclaim lock already released
+    }
+    return false;
+  } finally {
+    if (held) rmSync(reclaimLock, { recursive: true, force: true });
+  }
+}
+
 function withStartLock<T>(repoRoot: string, fn: () => T): T {
   ensureCrewDirs(repoRoot);
   const lockDir = join(crewDir(repoRoot), "start.lock");
   const reclaimLock = `${lockDir}.reclaim`;
-  const ownerFile = join(lockDir, "owner");
   const ownerToken = `${process.pid}-${randomBytes(4).toString("hex")}`;
-  const deadline = Date.now() + 5000;
+  // The lock directory appears atomically with its owner file already inside (rename of a
+  // non-empty directory fails when the target exists), so there is no ownerless window.
+  const staging = `${lockDir}.${ownerToken}`;
+  mkdirSync(staging);
+  writeFileSync(join(staging, "owner"), ownerToken, "utf8");
+  const deadline = Date.now() + envMs("CREW_LOCK_WAIT_MS", 5000);
   const waitBuf = new Int32Array(new SharedArrayBuffer(4));
+  let acquired = false;
 
-  while (true) {
-    try {
-      mkdirSync(lockDir);
+  try {
+    while (!acquired) {
       try {
-        writeFileSync(ownerFile, ownerToken, "utf8");
+        renameSync(staging, lockDir);
+        acquired = true;
+        break;
       } catch {
-        // Ignore if lock was concurrently removed
+        // lock is held
       }
-      break;
-    } catch {
-      let didDelete = false;
-      try {
-        const st = statSync(lockDir);
-        if (Date.now() - st.mtimeMs > 10_000) {
-          let reclaimed = false;
-          try {
-            mkdirSync(reclaimLock);
-            reclaimed = true;
-            const recheck = statSync(lockDir);
-            if (Date.now() - recheck.mtimeMs > 10_000) {
-              rmSync(lockDir, { recursive: true, force: true });
-              didDelete = true;
-            }
-          } catch {
-            try {
-              const rst = statSync(reclaimLock);
-              if (Date.now() - rst.mtimeMs > 10_000) {
-                rmSync(reclaimLock, { recursive: true, force: true });
-              }
-            } catch {
-              // reclaimLock already released
-            }
-          } finally {
-            if (reclaimed) {
-              rmSync(reclaimLock, { recursive: true, force: true });
-            }
-          }
-        }
-      } catch {
-        // Lock was released between mkdir and stat
-      }
-      if (didDelete) continue;
+      if (reclaimStaleLock(lockDir, reclaimLock)) continue;
       if (Date.now() >= deadline) {
         throw new CrewCliError(
           "LOCK_TIMEOUT",
-          "Timed out waiting for concurrent crew start lock.",
+          "Timed out waiting for the crew start lock held by a concurrent start or clean.",
           "Wait a moment and retry.",
         );
       }
       Atomics.wait(waitBuf, 0, 0, 15);
     }
+  } finally {
+    if (!acquired) rmSync(staging, { recursive: true, force: true });
   }
 
   try {
     return fn();
   } finally {
     try {
-      if (readFileSync(ownerFile, "utf8") === ownerToken) {
+      if (readLockOwner(lockDir) === ownerToken) {
         rmSync(lockDir, { recursive: true, force: true });
       }
     } catch {
       // Lock already removed or reclaimed
     }
+  }
+}
+
+interface SshResult {
+  exitCode: number;
+  stdout: Buffer;
+  stderr: Buffer;
+}
+
+/** Runs an ssh command with a hard timeout (CREW_SSH_TIMEOUT_MS, default 60 s, plus `extraMs`). */
+function runSsh(
+  cmd: string[],
+  failure: { code: string; what: string; target: string },
+  opts: { extraMs?: number; maxMs?: number } = {},
+): SshResult {
+  const base = envMs("CREW_SSH_TIMEOUT_MS", 60_000);
+  const timeoutMs = Math.min(base, opts.maxMs ?? base) + (opts.extraMs ?? 0);
+  let res: ReturnType<typeof Bun.spawnSync>;
+  try {
+    res = Bun.spawnSync(cmd, { stdout: "pipe", stderr: "pipe", timeout: timeoutMs, killSignal: "SIGKILL" });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new CrewCliError(
+      failure.code,
+      `Failed to run ssh (${failure.target}) while ${failure.what}: ${msg}`,
+      `Verify that \`ssh\` is installed on PATH and ${failure.target} is reachable.`,
+    );
+  }
+  if (res.exitCode === null || res.exitedDueToTimeout === true) {
+    throw new CrewCliError(
+      failure.code,
+      `Failed to run ssh (${failure.target}) while ${failure.what}${res.exitedDueToTimeout === true ? ` (timed out after ${Math.round(timeoutMs / 1000)}s)` : ""}.`,
+      `Verify that \`ssh\` is installed on PATH and ${failure.target} is reachable.`,
+    );
+  }
+  return { exitCode: res.exitCode, stdout: Buffer.from(res.stdout), stderr: Buffer.from(res.stderr) };
+}
+
+const REMOTE_STATUSES: readonly JobStatus[] = ["running", "done", "error", "canceled", "attention"];
+
+/** Applies the output of a remote `status <id>` to the local record. Returns the updated record, or null. */
+function applyRemoteStatusOutput(repoRoot: string, raw: JobRecord, out: string): JobRecord | null {
+  const statusVal = /^Status:\s*(\S+)/m.exec(out)?.[1];
+  const status = REMOTE_STATUSES.find((s) => s === statusVal);
+  if (!status) return null;
+  const convMatch = /^Conversation:\s*(\S+)/m.exec(out);
+  const updated: JobRecord = {
+    ...raw,
+    status,
+    conversationId: convMatch?.[1] ?? raw.conversationId,
+    end: status === "running" ? null : (raw.end ?? new Date().toISOString()),
+  };
+  writeJob(repoRoot, updated);
+  return updated;
+}
+
+/** Best-effort refresh of a running remote job for `list`: never throws, leaves the record alone on failure. */
+function refreshRemoteJob(repoRoot: string, job: JobRecord): JobRecord {
+  if (job.remotePath === null || job.status !== "running") return job;
+  try {
+    const res = runSsh(
+      buildSshCrewCommand({ sshCommand: job.machineTarget, remotePath: job.remotePath, crewArgs: ["status", job.id] }),
+      { code: "SSH_EXEC_FAILED", what: `refreshing job "${job.id}"`, target: job.machineTarget },
+      { maxMs: 15_000 },
+    );
+    if (res.exitCode !== 0) return job;
+    return applyRemoteStatusOutput(repoRoot, job, res.stdout.toString()) ?? job;
+  } catch {
+    return job;
   }
 }
 
@@ -422,16 +551,24 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
         `Add "paths": { "${machineName}": "/path/to/repo" } in .claude/crew.json.`,
       );
     }
+    const remoteBrief = toRemoteBriefPath(repoRoot, briefPath, remotePath);
+    if (isAbsolute(remoteBrief)) {
+      throw new CrewCliError(
+        "REMOTE_BRIEF_OUTSIDE_REPO",
+        `Brief ${briefPath} is not inside this repo or ${remotePath}, so it would not exist on "${machineName}".`,
+        `Move the brief into the repository, commit and push it so ${remotePath} on ${machineName} has it, then retry.`,
+      );
+    }
     const sshCmd = buildSshStartCommand({
       sshCommand: machineTarget,
       remotePath,
       role,
-      briefArg: toRemoteBriefPath(repoRoot, briefPath, remotePath),
+      briefArg: remoteBrief,
       branch,
       continueJobId: continueId,
       timeout,
     });
-    const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
+    const res = runSsh(sshCmd, { code: "SSH_START_FAILED", what: `starting a ${role} job`, target: machineTarget });
     if (res.exitCode !== 0) {
       throw new CrewCliError(
         "SSH_START_FAILED",
@@ -449,6 +586,13 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       );
     }
     const remoteJobId = idMatch[1];
+    if (!isValidJobId(remoteJobId)) {
+      throw new CrewCliError(
+        "SSH_START_FAILED",
+        `Remote start on "${machineName}" returned an invalid job id "${remoteJobId}".`,
+        `Verify that ${remotePath} on ${machineName} runs the crew job runner.`,
+      );
+    }
     const branchMatch = /, branch: ([^)\r\n]+)/.exec(out);
     const remoteBranch = branchMatch?.[1]?.trim() ?? branch ?? null;
 
@@ -518,7 +662,8 @@ async function cmdStart(repoRoot: string, args: string[]): Promise<number> {
       .map((j) => syncJobLiveness(repoRoot, j))
       .filter((j) => j.status === "running");
 
-    const id = generateJobId(role);
+    let id = generateJobId(role);
+    for (let n = 0; n < 20 && existsSync(jobFilePath(repoRoot, id)); n++) id = generateJobId(role);
     const wtAssignment = prepareWorktree(repoRoot, {
       jobId: id,
       role,
@@ -679,6 +824,9 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
   };
   process.on("SIGTERM", () => onSignal("SIGTERM"));
   process.on("SIGINT", () => onSignal("SIGINT"));
+  // JS signal handlers only run when the event loop turns: yield here and again right before
+  // spawning agy, so a cancel that arrived earlier is seen by the guards below.
+  await Bun.sleep(1);
 
   const job = readJob(repoRoot, jobId);
   if (!job) {
@@ -723,6 +871,7 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       conversationId: job.continuedFrom ? job.conversationId : null,
     });
 
+    await Bun.sleep(5);
     const latestBefore = readJob(repoRoot, job.id);
     if (latestBefore && latestBefore.status !== "running") {
       return exitCodeForStatus(latestBefore.status);
@@ -776,7 +925,7 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       return exitCodeForStatus(latest.status);
     }
 
-    const parsed = parseAgyOutput(stdoutText, stderrText);
+    const parsed = parseAgyOutput(stdoutText, stderrText, exitCode);
     const endTime = new Date().toISOString();
     const effectiveConversationId = parsed.conversationId ?? job.conversationId;
     let status: JobStatus;
@@ -814,8 +963,14 @@ async function cmdExec(repoRoot: string, args: string[]): Promise<number> {
       status = "done";
     }
 
+    // Re-read right before the final write so a cancel that landed meanwhile is not overwritten.
+    const beforeFinish = readJob(repoRoot, job.id);
+    if (beforeFinish && beforeFinish.status !== "running") {
+      return exitCodeForStatus(beforeFinish.status);
+    }
+
     const finished: JobRecord = {
-      ...(latest ?? job),
+      ...(beforeFinish ?? latest ?? job),
       pid: process.pid,
       end: endTime,
       exit: exitCode,
@@ -921,14 +1076,11 @@ async function cmdWait(repoRoot: string, args: string[]): Promise<number> {
       remotePath: job.remotePath,
       crewArgs: ["wait", job.id, "--timeout", timeoutRaw],
     });
-    const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
-    if (res.exitCode === null) {
-      throw new CrewCliError(
-        "SSH_EXEC_FAILED",
-        `Failed to run ssh (${job.machineTarget}) while waiting for job "${job.id}".`,
-        `Verify that \`ssh\` is installed on PATH and ${job.machineTarget} is reachable.`,
-      );
-    }
+    const res = runSsh(
+      sshCmd,
+      { code: "SSH_EXEC_FAILED", what: `waiting for job "${job.id}"`, target: job.machineTarget },
+      { extraMs: timeoutMs },
+    );
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
     const code = res.exitCode;
@@ -999,37 +1151,15 @@ function cmdStatus(repoRoot: string, args: string[]): number {
       remotePath: raw.remotePath,
       crewArgs: ["status", raw.id],
     });
-    const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
-    if (res.exitCode === null) {
-      throw new CrewCliError(
-        "SSH_EXEC_FAILED",
-        `Failed to run ssh (${raw.machineTarget}) while checking status for job "${raw.id}".`,
-        `Verify that \`ssh\` is installed on PATH and ${raw.machineTarget} is reachable.`,
-      );
-    }
+    const res = runSsh(sshCmd, {
+      code: "SSH_EXEC_FAILED",
+      what: `checking status for job "${raw.id}"`,
+      target: raw.machineTarget,
+    });
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
     const code = res.exitCode;
-    if (code === 0) {
-      const out = res.stdout.toString();
-      const statusMatch = /^Status:\s*(\S+)/m.exec(out);
-      const statusVal = statusMatch?.[1];
-      if (
-        statusVal === "running" ||
-        statusVal === "done" ||
-        statusVal === "error" ||
-        statusVal === "canceled" ||
-        statusVal === "attention"
-      ) {
-        const convMatch = /^Conversation:\s*(\S+)/m.exec(out);
-        writeJob(repoRoot, {
-          ...raw,
-          status: statusVal,
-          conversationId: convMatch?.[1] ?? raw.conversationId,
-          end: statusVal === "running" ? null : (raw.end ?? new Date().toISOString()),
-        });
-      }
-    }
+    if (code === 0) applyRemoteStatusOutput(repoRoot, raw, res.stdout.toString());
     return code;
   }
 
@@ -1087,14 +1217,11 @@ function cmdResult(repoRoot: string, args: string[]): number {
       remotePath: raw.remotePath,
       crewArgs: ["result", raw.id],
     });
-    const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
-    if (res.exitCode === null) {
-      throw new CrewCliError(
-        "SSH_EXEC_FAILED",
-        `Failed to run ssh (${raw.machineTarget}) while reading result for job "${raw.id}".`,
-        `Verify that \`ssh\` is installed on PATH and ${raw.machineTarget} is reachable.`,
-      );
-    }
+    const res = runSsh(sshCmd, {
+      code: "SSH_EXEC_FAILED",
+      what: `reading result for job "${raw.id}"`,
+      target: raw.machineTarget,
+    });
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
     const code = res.exitCode;
@@ -1173,14 +1300,11 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
       remotePath: raw.remotePath,
       crewArgs: ["cancel", raw.id],
     });
-    const res = Bun.spawnSync(sshCmd, { stdout: "pipe", stderr: "pipe" });
-    if (res.exitCode === null) {
-      throw new CrewCliError(
-        "SSH_EXEC_FAILED",
-        `Failed to run ssh (${raw.machineTarget}) while canceling job "${raw.id}".`,
-        `Verify that \`ssh\` is installed on PATH and ${raw.machineTarget} is reachable.`,
-      );
-    }
+    const res = runSsh(sshCmd, {
+      code: "SSH_EXEC_FAILED",
+      what: `canceling job "${raw.id}"`,
+      target: raw.machineTarget,
+    });
     process.stdout.write(res.stdout);
     process.stderr.write(res.stderr);
     const code = res.exitCode;
@@ -1232,6 +1356,17 @@ async function cmdCancel(repoRoot: string, args: string[]): Promise<number> {
       raw = refreshed;
       if (raw.status !== "running" || raw.pid !== null) break;
     }
+  }
+
+  if (raw.status === "running" && raw.pid === null) {
+    // The supervisor never recorded a pid (start was interrupted): nothing to kill, so mark it canceled.
+    const latestRaw = readJob(repoRoot, raw.id);
+    if (latestRaw && latestRaw.status === "running" && latestRaw.pid === null) {
+      writeJob(repoRoot, { ...latestRaw, status: "canceled", end: new Date().toISOString(), exit: 143 });
+      console.log(`Canceled job ${raw.id} (it had not started yet).`);
+      return 0;
+    }
+    raw = latestRaw ?? raw;
   }
 
   if (raw.status !== "running" || raw.pid === null) {
@@ -1333,7 +1468,9 @@ function cmdList(repoRoot: string, args: string[]): number {
     return 0;
   }
 
-  const jobs = listJobs(repoRoot).map((j) => syncJobLiveness(repoRoot, j));
+  const jobs = listJobs(repoRoot).map((j) =>
+    j.remotePath !== null ? refreshRemoteJob(repoRoot, j) : syncJobLiveness(repoRoot, j),
+  );
   if (jobs.length === 0) {
     console.log("No crew jobs recorded.");
     return 0;
@@ -1355,12 +1492,24 @@ function cmdClean(repoRoot: string, args: string[]): number {
     return 0;
   }
 
-  const jobs = listJobs(repoRoot).map((j) => syncJobLiveness(repoRoot, j));
-  const result = cleanFinishedWorktrees(
-    repoRoot,
-    jobs,
-    (job) => job.status === "running",
-  );
+  // Same lock as `start`: a worktree that start just handed out must not be removed under its new job,
+  // and job statuses are read inside the lock so liveness is current when clean decides.
+  const runClean = (): CleanResult =>
+    cleanFinishedWorktrees(
+      repoRoot,
+      listJobs(repoRoot).map((j) => syncJobLiveness(repoRoot, j)),
+      (job) => job.status === "running",
+    );
+  let crewDirsSafe = true;
+  try {
+    ensureCrewDirs(repoRoot);
+  } catch (err) {
+    // A symlinked .crew or .crew/worktrees cannot be locked safely, but clean still has to run so it can
+    // report that it keeps everything (nothing outside the real .crew/worktrees is ever removed).
+    if (!(err instanceof CrewCliError && err.code === "WORKTREE_OUTSIDE_CREW")) throw err;
+    crewDirsSafe = false;
+  }
+  const result = crewDirsSafe ? withStartLock(repoRoot, runClean) : runClean();
   console.log(`Removed ${result.removed.length} worktree(s); kept ${result.kept.length}.`);
   for (const wt of result.removed) {
     console.log(`- removed: ${wt}`);
